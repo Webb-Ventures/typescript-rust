@@ -102,17 +102,7 @@ of the latest release, and is updated by each release pull request.
 ### Latest release
 
 <!-- bench:release:start -->
-Release **v0.1.0-alpha.1**:
-
-| Benchmark | ts-r | Fastest other tool | ts-r is |
-|---|---:|---:|---:|
-| `version-startup` | `ts-r` 1.17 ms | `esbuild` 2.82 ms | **2.4× faster** |
-| `check-trpc` | `ts-r-check` 329 ms | `tsc-7` 821 ms | **2.5× faster** |
-| `check-date-fns` | `ts-r-check` 698 ms | `tsc-7` 1.52 s | **2.2× faster** |
-| `check-rxjs` | `ts-r-check` 791 ms | `tsc-7` 5.53 s | **7.0× faster** |
-| `build-three-x10` | `ts-r-build` 1.08 s | `esbuild` 1.02 s | 1.1× slower |
-
-Medians on linux-x86_64 (four dedicated cores), measured 2026-10-20. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
+No release yet.
 <!-- bench:release:end -->
 
 ## How it works
