@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+export function f<T>(t: T) {
+    type NewType<V> = V | T;
+
+    function g<V>(v: NewType<V>): void {}
+    g(t);
+}

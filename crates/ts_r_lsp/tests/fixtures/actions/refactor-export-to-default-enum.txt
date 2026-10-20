@@ -1,0 +1,7 @@
+// @action: refactor Convert export/Convert named export to default export
+// @file: src/types.ts
+export enum /*|*/Color { Red, Green }
+// @file: src/main.ts
+import { Color } from "./types";
+
+export const c = Color.Red;

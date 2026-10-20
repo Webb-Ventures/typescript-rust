@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.js
+export class C {
+  run(n) {
+    return this.newMethod(n) + 1;
+  }
+
+  newMethod(n) {
+    return n * 2;
+  }
+}

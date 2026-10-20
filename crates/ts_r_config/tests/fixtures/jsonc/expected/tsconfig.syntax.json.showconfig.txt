@@ -1,0 +1,20 @@
+{
+    "compilerOptions": {
+        "lib": [
+            "es2020",
+            "dom"
+        ],
+        "noEmit": true,
+        "strict": false,
+        "types": [
+            "a",
+            "b"
+        ]
+    },
+    "files": [
+        "./src/a.ts"
+    ],
+    "include": [
+        "src"
+    ]
+}

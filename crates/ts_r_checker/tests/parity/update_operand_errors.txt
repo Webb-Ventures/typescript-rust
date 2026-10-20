@@ -1,0 +1,15 @@
+a.ts(2,1): error TS2588: Cannot assign to 'c' because it is a constant.
+a.ts(3,1): error TS2588: Cannot assign to 'c' because it is a constant.
+a.ts(4,1): error TS2588: Cannot assign to 'c' because it is a constant.
+a.ts(6,1): error TS2630: Cannot assign to 'f' because it is a function.
+a.ts(7,1): error TS2630: Cannot assign to 'f' because it is a function.
+a.ts(8,1): error TS2630: Cannot assign to 'f' because it is a function.
+a.ts(10,1): error TS2629: Cannot assign to 'K' because it is a class.
+a.ts(11,1): error TS2629: Cannot assign to 'K' because it is a class.
+a.ts(13,1): error TS2628: Cannot assign to 'E' because it is an enum.
+a.ts(14,1): error TS2628: Cannot assign to 'E' because it is an enum.
+a.ts(16,1): error TS2631: Cannot assign to 'N' because it is a namespace.
+a.ts(17,3): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(18,3): error TS2357: The operand of an increment or decrement operator must be a variable or a property access.
+a.ts(20,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(21,3): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.

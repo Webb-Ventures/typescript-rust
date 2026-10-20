@@ -1,0 +1,10 @@
+a.ts(19,9): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(21,9): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(23,7): error TS2339: Property 'foo' does not exist on type '({ a: 1; } & any[]) | ({ b: 1; } & any[])'.
+  Property 'foo' does not exist on type '{ a: 1; } & any[]'.
+a.ts(26,7): error TS2339: Property 'foo' does not exist on type '({ a: 1; } & any[]) | ({ b: 1; } & any[])'.
+  Property 'foo' does not exist on type '{ a: 1; } & any[]'.
+a.ts(30,8): error TS2339: Property 'foo' does not exist on type '({ a: 1; } & any[]) | ({ b: 1; } & any[])'.
+  Property 'foo' does not exist on type '{ a: 1; } & any[]'.
+a.ts(45,9): error TS2322: Type '{ a: 1; } | { b: 1; }' is not assignable to type 'number'.
+  Type '{ a: 1; }' is not assignable to type 'number'.

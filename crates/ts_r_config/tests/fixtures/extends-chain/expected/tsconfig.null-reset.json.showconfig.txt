@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "declaration": true,
+        "declarationDir": "./configs/decl",
+        "rootDir": "./src",
+        "typeRoots": [
+            "./configs/base/types"
+        ]
+    },
+    "files": [
+        "./app/extra.ts"
+    ],
+    "exclude": [
+        "configs/base/zzz"
+    ]
+}

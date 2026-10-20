@@ -1,0 +1,7 @@
+a.ts(6,9): error TS2322: Type 'A1<E>' is not assignable to type 'never'.
+  Type '{ a: 1; }' is not assignable to type 'never'.
+a.ts(7,9): error TS2322: Type 'Awaited<E>' is not assignable to type 'never'.
+  Type '{ a: 1; }' is not assignable to type 'never'.
+a.ts(21,9): error TS2322: Type 'Promise<never>' is not assignable to type 'number'.
+a.ts(26,9): error TS2322: Type 'Promise<1>' is not assignable to type 'number'.
+a.ts(32,14): error TS2322: Type '(x: boolean) => "a" | 1' is not assignable to type 'string'.

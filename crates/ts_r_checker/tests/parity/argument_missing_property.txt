@@ -1,0 +1,8 @@
+a.ts(9,3): error TS2739: Type 'B' is missing the following properties from type 'A': a, c
+a.ts(10,3): error TS2741: Property 'b' is missing in type 'C' but required in type 'A'.
+a.ts(12,5): error TS2739: Type 'B' is missing the following properties from type 'A': a, c
+a.ts(13,29): error TS2345: Argument of type 'B' is not assignable to parameter of type 'A | PromiseLike<A>'.
+  Type 'B' is missing the following properties from type 'A': a, c
+a.ts(15,3): error TS2739: Type 'B' is missing the following properties from type 'A': a, c
+a.ts(17,3): error TS2345: Argument of type 'B' is not assignable to parameter of type 'number | A'.
+  Type 'B' is missing the following properties from type 'A': a, c

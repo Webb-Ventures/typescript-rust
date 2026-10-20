@@ -1,0 +1,7 @@
+// @action: fix 2304 Add import from "./logger"
+// @file: src/main.ts
+export function run() {
+  /*|*/logger("hi");
+}
+// @file: src/logger.ts
+export default function logger(msg: string) { console.log(msg); }

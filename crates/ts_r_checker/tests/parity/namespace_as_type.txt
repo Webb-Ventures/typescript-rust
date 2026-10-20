@@ -1,0 +1,7 @@
+a.ts(5,8): error TS2709: Cannot use namespace 'Values' as a type.
+a.ts(6,8): error TS2709: Cannot use namespace 'Types' as a type.
+a.ts(7,8): error TS2709: Cannot use namespace 'Ambient' as a type.
+a.ts(8,20): error TS2709: Cannot use namespace 'Types' as a type.
+a.ts(9,15): error TS2709: Cannot use namespace 'Values' as a type.
+a.ts(9,24): error TS2709: Cannot use namespace 'Ambient' as a type.
+a.ts(11,11): error TS2304: Cannot find name 'Missing'.

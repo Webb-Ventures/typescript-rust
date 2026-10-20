@@ -1,0 +1,10 @@
+// @action: refactor Extract Symbol/function_scope_0
+// @differs: tsserver 6.0.3 moves this into a function declaration, where it is undefined; ts-r does not offer it
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export class C {
+  x = 1;
+  m() {
+    /*[*/console.log(this.x);/*]*/
+  }
+}

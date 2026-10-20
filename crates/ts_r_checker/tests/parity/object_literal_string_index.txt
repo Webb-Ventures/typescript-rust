@@ -1,0 +1,14 @@
+a.ts(6,7): error TS2322: Type 'string | number | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(8,11): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ a: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ a: number; }'.
+a.ts(10,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+a.ts(12,11): error TS2339: Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(13,11): error TS7053: Element implicitly has an 'any' type because expression of type '`x${string}`' can't be used to index type '{ a: number; }'.
+a.ts(15,11): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type 'K'.
+  No index signature with a parameter of type 'string' was found on type 'K'.
+a.ts(16,11): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ a: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ a: number; }'.
+a.ts(18,1): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ q: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ q: number; }'.

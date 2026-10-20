@@ -1,0 +1,5 @@
+a.ts(15,1): error TS2365: Operator '<' cannot be applied to types 'string' and 'number'.
+a.ts(16,1): error TS2365: Operator '<' cannot be applied to types 'boolean' and 'number'.
+a.ts(32,5): error TS2322: Type '"foo"' is not assignable to type 'WithComputed'.
+a.ts(33,5): error TS2322: Type 'WithComputed' is not assignable to type 'boolean'.
+a.ts(51,16): error TS2339: Property 'a' does not exist on type 'undefined'.

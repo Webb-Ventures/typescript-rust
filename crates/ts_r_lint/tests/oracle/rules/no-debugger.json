@@ -1,0 +1,2 @@
+{"rule":"no-debugger","source":"eslint","skipped":{},"cases":[{"code":"var test = { debugger: 1 }; test.debugger;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"if (foo) debugger","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-debugger","messageId":"unexpected","message":"Unexpected 'debugger' statement.","line":1,"column":10,"endLine":1,"endColumn":18}],"output":null}]}

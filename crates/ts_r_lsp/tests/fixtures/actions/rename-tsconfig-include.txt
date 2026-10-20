@@ -1,0 +1,14 @@
+// @action: rename src/legacy src/old
+// @file: tsconfig.json
+{
+  // Sources.
+  "compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true},
+  "include": ["src/main.ts", "src/legacy", "src/legacy/**/*.ts", "./src/legacy/*"],
+  "exclude": ["src/legacy/skip.ts"]
+}
+// @file: src/main.ts
+import { helper } from "./legacy/util";
+
+export const n = helper(1);
+// @file: src/legacy/util.ts
+export function helper(x: number): number { return x; }

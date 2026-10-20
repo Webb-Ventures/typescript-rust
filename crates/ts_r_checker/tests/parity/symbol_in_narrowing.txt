@@ -1,0 +1,2 @@
+a.ts(8,11): error TS2322: Type 'HI' is not assignable to type 'number'.
+a.ts(10,11): error TS2322: Type 'Record<string, string | undefined>' is not assignable to type 'number'.

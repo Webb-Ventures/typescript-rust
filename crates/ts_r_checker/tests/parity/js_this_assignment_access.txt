@@ -1,0 +1,11 @@
+a.js(22,42): error TS2532: Object is possibly 'undefined'.
+a.js(26,21): error TS2341: Property 'priv' is private and only accessible within class 'C'.
+a.js(26,51): error TS2532: Object is possibly 'undefined'.
+a.js(26,56): error TS2341: Property 'late' is private and only accessible within class 'C'.
+a.js(30,3): error TS2341: Property 'priv' is private and only accessible within class 'C'.
+a.js(30,12): error TS2445: Property 'prot' is protected and only accessible within class 'C' and its subclasses.
+a.js(30,37): error TS18048: 'c.late' is possibly 'undefined'.
+a.js(30,39): error TS2341: Property 'late' is private and only accessible within class 'C'.
+a.js(31,9): error TS2445: Property 'prot' is protected and only accessible within class 'C' and its subclasses.
+b.js(13,28): error TS2532: Object is possibly 'undefined'.
+b.js(27,1): error TS2532: Object is possibly 'undefined'.

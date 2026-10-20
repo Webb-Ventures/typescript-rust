@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/main.ts
+import alpha from "./util";
+
+console.log(alpha(1));
+// @file: src/util.ts
+export default (n: number) => n + 1;

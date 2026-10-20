@@ -1,0 +1,1 @@
+error TS18003: No inputs were found in config file '${FIXTURE}/tsconfig.tsfield.json'. Specified 'include' paths were '["node_modules/tsfield/./inc/*"]' and 'exclude' paths were '[]'.

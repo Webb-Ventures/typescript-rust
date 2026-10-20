@@ -1,0 +1,17 @@
+a.ts(7,7): error TS2322: Type 'X' is not assignable to type 'string'.
+a.ts(8,7): error TS2322: Type 'number[]' is not assignable to type '[number, number, number]'.
+  Target requires 3 element(s) but source may have fewer.
+a.ts(9,7): error TS2322: Type 'number[]' is not assignable to type '[number, ...string[]]'.
+  Source provides no match for required element at position 0 in target.
+a.ts(12,7): error TS2322: Type 'Y' is not assignable to type 'string'.
+a.ts(14,7): error TS2322: Type 'number[]' is not assignable to type 'string'.
+a.ts(16,7): error TS2322: Type 'readonly number[]' is not assignable to type 'string'.
+a.ts(18,7): error TS2322: Type 'number[]' is not assignable to type 'string'.
+a.ts(22,5): error TS2322: Type '[number, number, number]' is not assignable to type 'fixed1'.
+  Type '[number, number, number]' is not assignable to type '{ length: 2; }'.
+    Types of property 'length' are incompatible.
+      Type '3' is not assignable to type '2'.
+a.ts(25,5): error TS2322: Type '[]' is not assignable to type 'fixed2'.
+  Type '[]' is not assignable to type '{ length: 1 | 2; }'.
+    Types of property 'length' are incompatible.
+      Type '0' is not assignable to type '1 | 2'.

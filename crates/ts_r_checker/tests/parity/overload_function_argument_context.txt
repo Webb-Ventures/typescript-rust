@@ -1,0 +1,56 @@
+a.ts(5,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '(x: number) => string' is not assignable to parameter of type '(x: string) => string'.
+      Types of parameters 'x' and 'x' are incompatible.
+        Type 'string' is not assignable to type 'number'.
+a.ts(17,14): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(20,15): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(23,5): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(26,5): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(33,5): error TS7006: Parameter 'value' implicitly has an 'any' type.
+a.ts(36,23): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(39,5): error TS7006: Parameter 'value' implicitly has an 'any' type.
+a.ts(42,23): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(45,14): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+a.ts(56,36): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '(shared: Obs<number>) => Obs<number>' is not assignable to parameter of type 'string'.
+a.ts(59,23): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '(shared: number) => number' is not assignable to parameter of type 'string'.
+a.ts(64,14): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+a.ts(64,27): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string'.
+a.ts(68,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string'.
+a.ts(68,28): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(71,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string'.
+a.ts(71,36): error TS18046: 'x' is of type 'unknown'.
+a.ts(74,4): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'number'.
+a.ts(74,39): error TS2339: Property 'foo' does not exist on type 'string'.
+a.ts(77,4): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'number'.
+a.ts(77,39): error TS2339: Property 'foo' does not exist on type 'string'.
+a.ts(80,4): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'number'.
+a.ts(80,39): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(83,3): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(83,19): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(85,4): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(85,20): error TS2339: Property 'foo' does not exist on type 'string'.
+a.ts(91,14): error TS2322: Type 'number[]' is not assignable to type 'boolean'.
+a.ts(91,31): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string'.
+a.ts(91,45): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(94,14): error TS2322: Type '[unknown, unknown]' is not assignable to type 'string'.
+a.ts(94,74): error TS2322: Type '[unknown, unknown]' is not assignable to type 'string'.
+a.ts(94,91): error TS2345: Argument of type 'boolean' is not assignable to parameter of type 'number'.

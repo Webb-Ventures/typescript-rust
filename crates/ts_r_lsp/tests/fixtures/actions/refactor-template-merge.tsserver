@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to template string
+// @file: src/main.ts
+export function path(root: string, id: number, ok: boolean) {
+  return `${root}/items/${id}/${'v' + id}${ok ? '?ok' : ''}\$`;
+}

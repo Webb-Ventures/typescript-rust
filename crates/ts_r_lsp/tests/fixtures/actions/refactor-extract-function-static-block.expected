@@ -1,0 +1,12 @@
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+class C {
+  static v: number;
+  static {
+    C.v = C.newMethod();
+  }
+
+  private static newMethod(): number {
+    return Math.max(1, 2);
+  }
+}

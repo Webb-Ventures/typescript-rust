@@ -1,0 +1,487 @@
+name: Release
+
+# Builds every target, attaches archives, SHA256SUMS and an SBOM to a GitHub release, and
+# publishes the npm packages (npm/README.md) with npm trusted publishing (OIDC) and provenance.
+#
+# Publishes only from a release branch named release/vX.Y.Z or release/vX.Y.Z-<label>
+# (release/v0.1.0, release/v0.1.0-alpha.1, release/v1.0.0-launch); pushes to any other branch or
+# tag never publish, and the npm job checks the ref again. The published version is
+# [workspace.package] version in Cargo.toml: its X.Y.Z must match the branch, and if it has a
+# pre-release part (0.1.0-alpha.1) the branch label must start with it. A push publishes once:
+# the workflow creates tag vVERSION on the pushed commit, and fails if that tag already exists
+# (bump the version to release again). The GitHub release's notes are generated from the pull
+# requests merged since the last release (.github/release.yml groups them), and a pull request
+# into main adds them to CHANGELOG.md and copies the README's main benchmark table, as
+# released, into its latest-release table (secret RELEASE_BOT_TOKEN, when set, opens it so CI
+# runs on it; a GITHUB_TOKEN pull request starts no workflows). To rehearse, run the workflow by hand on the release
+# branch with dry_run on: everything builds, and `npm publish --dry-run` runs instead of a real
+# publish. No tag or GitHub release is created.
+#
+# npm auth: trusted publishing (OIDC), no long-lived token. The npm job runs on a GitHub-hosted
+# runner (ubuntu-latest) because npm trusted publishing does not accept self-hosted runners.
+# npm only lets you add a trusted publisher to a package
+# that already exists, so a new package's first publish needs a token: if secret NPM_TOKEN is
+# set, the run uses it (npm still prefers OIDC for a package that has a trusted publisher);
+# otherwise the run uses OIDC alone. The publish step logs which one it used.
+#
+# A person must set up, once:
+#   - environment `release`: deployment branches limited to `release/v*`, and required
+#     reviewers to gate publishing.
+#   - for each of the 64 packages listed in npm/README.md (`ts-r`, `@ts-r.dev/typescript`, the six
+#     tool packages `@ts-r.dev/{run,dev,build,check,lint,lsp}` and the 56 platform packages
+#     `@ts-r.dev/{cli,run,dev,build,check,lint,lsp}-<platform>`), all owned by the `ts-r.dev` npm
+#     org except unscoped `ts-r`:
+#     1. Publish it once: run this workflow with secret NPM_TOKEN set to a granular access token
+#        (packages and scopes: read and write, all packages; bypass 2FA; a short expiry), or
+#        publish it locally with 2FA. Already-published versions are skipped, so a rerun only
+#        publishes what is missing.
+#     2. On npmjs.com, package Settings > Trusted publishing: add a trusted publisher, GitHub
+#        Actions, organization or user `Webb-Ventures`, repository `typescript-rust`, workflow
+#        `release.yml`, environment `release`.
+#     3. Same page, Publishing access: "Require two-factor authentication and disallow tokens".
+#   Then delete secret NPM_TOKEN and revoke the token.
+#
+# Binaries:
+#   macOS arm64/x64, Linux x64/arm64, Windows x64: PGO (`cargo xtask pgo --profile dist`),
+#     trained on the runner: repo fixtures, TypeScript's compiler test cases, up to 60
+#     ecosystem packages and (not on Windows) two small public bench repos, date-fns and
+#     three.js x10 (a local run trains on every fetched bench repo).
+#   Linux: trained on the native glibc build, then rebuilt with cargo-zigbuild against glibc
+#     2.17 and musl (same architecture, same profile).
+#   Windows arm64: cross-built on x64 without PGO (the profile can't be trained there).
+# If PGO fails on a runner, the job warns and ships the plain `dist` build instead.
+
+on:
+  push:
+    branches: ["release/v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build everything and run npm publish --dry-run (no GitHub release)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  PACKAGES: -p ts_r_cli -p ts_r_run -p ts_r_dev -p ts_r_build -p ts_r_check -p ts_r_lint_cli -p ts_r_lsp
+  BINARIES: ts-r ts-r-run ts-r-dev ts-r-build ts-r-check ts-r-lint ts-r-lsp
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      dry_run: ${{ steps.v.outputs.dry_run }}
+      npm_tag: ${{ steps.v.outputs.npm_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          # Publishing only ever happens from release/vX.Y.Z or release/vX.Y.Z-<label>.
+          if [ "$REF_TYPE" != branch ] || ! [[ "$REF_NAME" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
+            echo "::error::release runs only on a release/vX.Y.Z or release/vX.Y.Z-<label> branch (got $REF_TYPE $REF_NAME)"
+            exit 1
+          fi
+          core="${BASH_REMATCH[1]}" label="${BASH_REMATCH[3]}"
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "${version%%-*}" != "$core" ]; then
+            echo "::error::branch $REF_NAME is for $core but [workspace.package] version is $version"
+            exit 1
+          fi
+          if [ "$version" != "$core" ] && { [ -z "$label" ] || [ "${label#"${version#*-}"}" = "$label" ]; }; then
+            echo "::error::[workspace.package] version $version is a pre-release; the branch must be release/v$version or release/v$version-<label>"
+            exit 1
+          fi
+          dry_run=false
+          if [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then dry_run=true; fi
+          if [ "$dry_run" != true ] && git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already released (tag v$version exists); bump [workspace.package] version to release again"
+            exit 1
+          fi
+          npm_tag=latest
+          case "$version" in *-*) npm_tag=next ;; esac
+          {
+            echo "version=$version"
+            echo "dry_run=$dry_run"
+            echo "npm_tag=$npm_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "ts-r $version (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-15
+            targets: aarch64-apple-darwin
+            builder: cargo
+            pgo: true
+          # Cross-compiled on Apple silicon, so no PGO (training would run the instrumented x64
+          # build).
+          - name: macos-x64
+            os: macos-15
+            targets: x86_64-apple-darwin
+            builder: cargo
+            pgo: false
+          - name: linux-x64
+            os: ubuntu-24.04
+            targets: x86_64-unknown-linux-gnu.2.17 x86_64-unknown-linux-musl
+            builder: zigbuild
+            pgo: true
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            targets: aarch64-unknown-linux-gnu.2.17 aarch64-unknown-linux-musl
+            builder: zigbuild
+            pgo: true
+          - name: windows-x64
+            os: windows-2025
+            targets: x86_64-pc-windows-msvc
+            builder: cargo
+            pgo: true
+          - name: windows-arm64
+            os: windows-2025
+            targets: aarch64-pc-windows-msvc
+            builder: cargo
+            pgo: false
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TARGETS: ${{ matrix.targets }}
+      BUILDER: ${{ matrix.builder }}
+      PGO: ${{ matrix.pgo }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain and targets
+        run: |
+          rustup toolchain install
+          for t in $TARGETS; do rustup target add "${t%%.2.*}"; done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - if: matrix.builder == 'zigbuild'
+        uses: mlugg/setup-zig@v2
+      - if: matrix.builder == 'zigbuild'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: TypeScript lib files (shipped next to ts-r-check and ts-r-lsp)
+        run: cargo xtask upstream sync --minimal
+      - name: TypeScript compiler test cases (PGO training input)
+        if: matrix.pgo
+        run: git -C target/upstream/typescript sparse-checkout add /tests/cases/compiler/
+      - name: Ecosystem samples (PGO training input)
+        if: matrix.pgo && runner.os != 'Windows'
+        continue-on-error: true
+        run: scripts/limit.sh --time-s 1200 -- cargo xtask ecosystem --top 60 --stages parse --no-status
+      - name: Bench repo package cache (PGO training input)
+        if: matrix.pgo && runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ts-r/bench
+          key: bench-pkgs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bench/repos.toml') }}
+          restore-keys: bench-pkgs-${{ runner.os }}-${{ runner.arch }}-
+      - name: Public bench repos (PGO training input)
+        if: matrix.pgo && runner.os != 'Windows'
+        continue-on-error: true
+        run: |
+          corepack enable
+          cargo xtask bench --fetch-repos --repos date-fns,three-x10
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          pgo_ok=false
+          if [ "$PGO" = true ]; then
+            # Instrumented build of the runner's own target, training, merge.
+            if cargo xtask pgo --profile dist --no-rebuild; then
+              pgo_ok=true
+            else
+              echo "::warning::PGO training failed on ${RUNNER_OS}; shipping the plain dist build"
+            fi
+          fi
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          for t in $TARGETS; do
+            triple="${t%%.2.*}"
+            if [ "$pgo_ok" = true ]; then
+              cargo xtask pgo --profile dist --use-profile target/pgo/merged.profdata \
+                --builder "$BUILDER" --target "$t"
+              src="target/pgo/optimized/$triple/dist"
+            else
+              if [ "$BUILDER" = zigbuild ]; then sub=zigbuild; else sub=build; fi
+              # shellcheck disable=SC2086
+              cargo "$sub" --profile dist --target "$t" $PACKAGES --bins
+              src="target/$triple/dist"
+            fi
+            name="ts-r-$VERSION-$triple"
+            mkdir -p "dist/$name/bin"
+            for b in $BINARIES; do cp "$src/$b$exe" "dist/$name/bin/"; done
+            # ts-r-check and ts-r-lsp find TypeScript's lib files in <exe>/../lib.
+            mkdir -p "dist/$name/lib"
+            up=target/upstream/typescript
+            cp "$up"/tsc/internal/bundled/libs/*.d.ts "dist/$name/lib/"
+            cp "$up/LICENSE.txt" "dist/$name/lib/TypeScript-LICENSE.txt"
+            cp "$up/ThirdPartyNoticeText.txt" "dist/$name/lib/TypeScript-ThirdPartyNoticeText.txt"
+            cp README.md "dist/$name/"
+            echo "$triple: $([ "$pgo_ok" = true ] && echo PGO || echo dist)" >> "$GITHUB_STEP_SUMMARY"
+          done
+          rm -rf target/pgo/profiles
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          for t in $TARGETS; do
+            triple="${t%%.2.*}"
+            case "$triple" in aarch64-pc-windows-msvc) continue ;; esac
+            # The x64 macOS build is cross-compiled on Apple silicon: run it only under Rosetta.
+            if [ "$triple" = x86_64-apple-darwin ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+              echo "::notice::No Rosetta on this runner; the x86_64-apple-darwin smoke test is skipped"
+              continue
+            fi
+            bin="dist/ts-r-$VERSION-$triple/bin"
+            "$bin/ts-r" --version
+            "$bin/ts-r-build" --version
+            "$bin/ts-r-run" --version
+            # A run, and a check that finds the archive's lib/ files.
+            smoke="$RUNNER_TEMP/smoke-$triple"
+            mkdir -p "$smoke"
+            printf 'const n: number = 1;\nconsole.log(n);\n' > "$smoke/index.ts"
+            printf '{ "compilerOptions": { "strict": true, "noEmit": true, "types": [] } }\n' > "$smoke/tsconfig.json"
+            "$bin/ts-r-run" "$smoke/index.ts"
+            "$bin/ts-r-check" -p "$smoke/tsconfig.json" --noEmit
+          done
+
+      - name: Archive
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd dist
+          for d in */; do
+            d="${d%/}"
+            case "$d" in
+              *windows*) 7z a -bd "../out/$d.zip" "$d" >/dev/null ;;
+              *) tar -czf "../out/$d.tar.gz" "$d" ;;
+            esac
+          done
+          ls -l ../out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub release (checksums, SBOM)
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: out
+          merge-multiple: true
+      - name: SBOM (Cargo.lock, SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          file: Cargo.lock
+          format: spdx-json
+          output-file: out/ts-r-${{ needs.version.outputs.version }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Checksums
+        working-directory: out
+        run: |
+          sha256sum -- * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: out/*
+          retention-days: 14
+      - name: Create the GitHub release
+        if: needs.version.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          # Tags vVERSION on the release branch's commit.
+          # shellcheck disable=SC2086
+          gh release create "v$VERSION" out/* --target "$GITHUB_SHA" --generate-notes --title "ts-r $VERSION" $prerelease
+
+  npm:
+    name: npm publish
+    needs: [version, build, release]
+    # The version job already refuses any other ref; this keeps the publish job itself from
+    # running anywhere but a release branch.
+    if: github.ref_type == 'branch' && startsWith(github.ref_name, 'release/v')
+    # GitHub-hosted on purpose: npm trusted publishing rejects self-hosted runners.
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC) and provenance
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      NPM_TAG: ${{ needs.version.outputs.npm_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - name: TypeScript lib files for @ts-r.dev/check and @ts-r.dev/lsp
+        run: cargo xtask upstream sync --minimal
+      # No registry-url: setup-node would write an .npmrc with a placeholder NODE_AUTH_TOKEN. The
+      # publish step writes its own .npmrc only when it uses secret NPM_TOKEN.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: npm CLI 11.5.1 or newer (trusted publishing)
+        run: |
+          set -euo pipefail
+          npm install -g "npm@^11.5.1"
+          v=$(npm --version)
+          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map((n) => parseInt(n, 10)); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$v"; then
+            echo "::error::npm $v is older than 11.5.1, which trusted publishing needs"
+            exit 1
+          fi
+          echo "npm $v"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: archives
+          merge-multiple: true
+      - name: Unpack binaries into artifacts/<triple>/
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p unpacked artifacts
+          for f in archives/*.tar.gz; do tar -xzf "$f" -C unpacked; done
+          for f in archives/*.zip; do unzip -q "$f" -d unpacked; done
+          for d in unpacked/*/; do
+            d="${d%/}"
+            triple="${d#unpacked/ts-r-"$VERSION"-}"
+            mv "$d/bin" "artifacts/$triple"
+          done
+          ls artifacts
+      - name: Build the npm packages
+        run: |
+          set -euo pipefail
+          args=()
+          for d in artifacts/*/; do d="${d%/}"; args+=(--target "${d#artifacts/}"); done
+          node npm/scripts/build-packages.mjs --artifacts artifacts "${args[@]}" \
+            --version "$VERSION" --out npm-dist
+          count=$(node -p 'require("./npm-dist/packages.json").targets.length')
+          if [ "$count" != 8 ]; then echo "::error::expected 8 targets, got $count"; exit 1; fi
+      - name: npm publish (trusted publishing, or NPM_TOKEN for a first publish)
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # OIDC by default. Secret NPM_TOKEN, when set, is only for publishing a package for the
+          # first time (npm can't attach a trusted publisher to a package that doesn't exist yet).
+          if [ -n "$NPM_TOKEN" ]; then
+            npmrc="$RUNNER_TEMP/npmrc"
+            # npm expands ${NPM_TOKEN} from the environment; the token never lands in the file.
+            # shellcheck disable=SC2016
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > "$npmrc"
+            export NPM_CONFIG_USERCONFIG="$npmrc"
+            auth="token (secret NPM_TOKEN; npm still uses OIDC for packages with a trusted publisher)"
+          else
+            auth="OIDC trusted publishing (no token)"
+          fi
+          echo "npm auth: $auth"
+          echo "npm auth: $auth" >> "$GITHUB_STEP_SUMMARY"
+          # Provenance is automatic with trusted publishing; --provenance also covers the token path.
+          flags=(--provenance --access public --tag "$NPM_TAG")
+          if [ "$DRY_RUN" = true ]; then flags+=(--dry-run); fi
+          # Publish order from packages.json: platform packages, then fronts, ts-r, @ts-r.dev/typescript.
+          node -e 'for (const p of require("./npm-dist/packages.json").packages) console.log([p.name, p.version, p.dir].join(" "))' |
+            while read -r name version dir; do
+              if [ "$DRY_RUN" != true ] && npm view "$name@$version" version >/dev/null 2>&1; then
+                echo "$name@$version is already published; skipping"
+                continue
+              fi
+              npm publish "./npm-dist/$dir" "${flags[@]}"
+            done
+
+  # CHANGELOG.md and the README's latest-release benchmark table, through a pull request into
+  # main (main is protected; the sync-back workflow carries it to the development repo).
+  changelog:
+    name: changelog and README
+    needs: [version, release, npm]
+    if: needs.version.outputs.dry_run != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.RELEASE_BOT_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Update CHANGELOG.md and the README
+        run: |
+          set -euo pipefail
+          git fetch -q origin "$GITHUB_SHA"
+          git show "$GITHUB_SHA:README.md" > "$RUNNER_TEMP/released-README.md"
+          gh release view "v$VERSION" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          node - "$VERSION" "$(date -u +%Y-%m-%d)" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/notes.md" <<'JS'
+          const fs = require('fs');
+          const [version, date, repo, notesPath] = process.argv.slice(2);
+          const notes = fs.readFileSync(notesPath, 'utf8').trim();
+          const mark = '<!-- releases -->';
+          const log = fs.existsSync('CHANGELOG.md') ? fs.readFileSync('CHANGELOG.md', 'utf8') : `# Changelog\n\n${mark}\n`;
+          if (log.includes(`## [v${version}]`)) process.exit(0);
+          const entry = `${mark}\n\n## [v${version}](https://github.com/${repo}/releases/tag/v${version}) - ${date}\n\n${notes}\n`;
+          fs.writeFileSync('CHANGELOG.md', log.includes(mark) ? log.replace(mark, entry) : `${log.trimEnd()}\n\n${entry}`);
+          JS
+          node scripts/readme-bench.mjs release README.md "$RUNNER_TEMP/released-README.md" "v$VERSION" ||
+            echo "::warning::The released README has no benchmark table; the README's release table is unchanged"
+      - name: Open the pull request
+        run: |
+          set -euo pipefail
+          git add CHANGELOG.md README.md
+          if git diff --cached --quiet; then echo "Nothing to update."; exit 0; fi
+          branch="changelog/v$VERSION"
+          git switch -c "$branch"
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -qm "Changelog and README for v$VERSION"
+          git push -q -f origin "$branch"
+          gh label create changelog:skip --color ededed --description "Left out of release notes" 2>/dev/null || true
+          gh pr create --base main --head "$branch" --title "Changelog and README for v$VERSION" --label changelog:skip \
+            --body "Adds the v$VERSION release notes to CHANGELOG.md and its benchmark table to the README. Opened by the release workflow."

@@ -1,0 +1,8 @@
+// @action: fix 6133 Remove unused declaration for: 'tmp'
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "noUnusedLocals": true, "noUnusedParameters": true}}
+// @file: src/main.ts
+export function f() {
+  const /*|*/tmp = 1;
+  const keep = 2;
+  return keep;
+}

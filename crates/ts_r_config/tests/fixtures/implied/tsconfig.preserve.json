@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "preserve",
+    "jsx": "React-JSX",
+    "moduleDetection": "Legacy",
+    "newLine": "CRLF"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

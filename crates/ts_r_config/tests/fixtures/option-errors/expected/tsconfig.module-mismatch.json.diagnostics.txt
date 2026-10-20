@@ -1,0 +1,1 @@
+tsconfig.module-mismatch.json(3,15): error TS5110: Option 'module' must be set to 'NodeNext' when option 'moduleResolution' is set to 'NodeNext'.

@@ -1,0 +1,7 @@
+b.js(6,16): error TS8033: A JSDoc '@typedef' comment may not contain multiple '@type' tags.
+b.js(11,18): error TS8033: A JSDoc '@typedef' comment may not contain multiple '@type' tags.
+b.js(12,19): error TS8033: A JSDoc '@typedef' comment may not contain multiple '@type' tags.
+b.js(20,33): error TS8033: A JSDoc '@typedef' comment may not contain multiple '@type' tags.
+b.js(24,32): error TS8033: A JSDoc '@typedef' comment may not contain multiple '@type' tags.
+b.js(27,14): error TS2322: Type 'number' is not assignable to type 'string'.
+b.js(29,14): error TS2322: Type 'number' is not assignable to type 'string'.

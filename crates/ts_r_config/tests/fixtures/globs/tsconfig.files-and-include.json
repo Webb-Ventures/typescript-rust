@@ -1,0 +1,11 @@
+{
+  "files": [
+    "src/a.ts",
+    "src/nope.ts",
+    "./lib//l.ts"
+  ],
+  "include": [
+    "src/*.ts",
+    "src/a.ts"
+  ]
+}

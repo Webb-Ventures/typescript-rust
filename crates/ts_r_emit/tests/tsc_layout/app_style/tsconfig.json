@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "jsx": "preserve",
+    "verbatimModuleSyntax": true,
+    "strict": false,
+    "types": [],
+    "outDir": "out"
+  },
+  "files": ["lib.ts", "app.tsx"]
+}

@@ -1,0 +1,4 @@
+a.ts(5,8): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '"third"' is not assignable to parameter of type '"first" | "second"'.
+a.ts(6,7): error TS2322: Type '{ <Value extends "first" | "second">(value: Value): void; <Value extends "first" | "second">(value: Value): void; }' is not assignable to type 'number'.

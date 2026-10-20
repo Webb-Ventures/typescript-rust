@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to inner function in arrow function
+// @file: src/main.ts
+export const g = (b: number) => {
+  newFunction();
+  return b;
+
+  function newFunction() {
+    console.log(b * 2);
+  }
+};

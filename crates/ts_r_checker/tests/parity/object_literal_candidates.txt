@@ -1,0 +1,10 @@
+a.ts(12,14): error TS2322: Type 'User' is not assignable to type 'number'.
+a.ts(12,36): error TS2739: Type '{ name: string; }' is missing the following properties from type 'User': id, hasId
+a.ts(14,14): error TS2322: Type 'User' is not assignable to type 'number'.
+a.ts(16,14): error TS2322: Type 'User' is not assignable to type 'number'.
+a.ts(18,14): error TS2322: Type '{ name?: undefined; } | { name: string; }' is not assignable to type 'number'.
+  Type '{ name?: undefined; }' is not assignable to type 'number'.
+a.ts(20,14): error TS2322: Type '{ name?: undefined; } | { name: string; }' is not assignable to type 'number'.
+  Type '{ name?: undefined; }' is not assignable to type 'number'.
+a.ts(22,14): error TS2322: Type 'User' is not assignable to type 'number'.
+a.ts(23,14): error TS2322: Type 'User' is not assignable to type 'number'.

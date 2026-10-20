@@ -1,0 +1,6 @@
+// @action: refactor Convert to optional chain expression/Convert to optional chain expression
+// @file: src/main.ts
+interface Api { client?: { send?: (m: string) => boolean } }
+export function send(api: Api) {
+  return /*[*/api.client && api.client.send && api.client.send('hi')/*]*/;
+}

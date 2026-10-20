@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/index.ts
+export { Shape as S, other } from "./util2";
+export { default as Shape } from "./util";
+export * from "./util";
+// @file: src/util.ts
+export default class Shape {}

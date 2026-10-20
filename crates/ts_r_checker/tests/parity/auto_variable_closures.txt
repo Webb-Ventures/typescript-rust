@@ -1,0 +1,7 @@
+a.ts(15,12): error TS18048: 'err' is possibly 'undefined'.
+a.ts(19,7): error TS7034: Variable 'recent' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(24,14): error TS7005: Variable 'recent' implicitly has an 'any' type.
+a.ts(26,12): error TS18048: 'recent' is possibly 'undefined'.
+a.ts(27,13): error TS7005: Variable 'recent' implicitly has an 'any' type.
+a.ts(31,7): error TS7034: Variable 'sink' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(36,5): error TS7005: Variable 'sink' implicitly has an 'any' type.

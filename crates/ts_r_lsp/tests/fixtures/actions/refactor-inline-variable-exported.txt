@@ -1,0 +1,6 @@
+// @action: refactor Inline variable/Inline variable
+// @file: src/main.ts
+export const limit = 10;
+export function f() {
+  return /*|*/limit;
+}

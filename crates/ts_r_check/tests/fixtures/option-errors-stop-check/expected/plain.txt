@@ -1,0 +1,5 @@
+tsconfig.json(3,5): error TS5052: Option 'emitDecoratorMetadata' cannot be specified without specifying option 'experimentalDecorators'.
+tsconfig.json(4,5): error TS5102: Option 'baseUrl' has been removed. Please remove it from your configuration.
+  Use '"paths": {"*": ["./*"]}' instead.
+tsconfig.json(5,5): error TS5051: Option 'inlineSources can only be used when either option '--inlineSourceMap' or option '--sourceMap' is provided.
+tsconfig.json(6,5): error TS5052: Option 'strictPropertyInitialization' cannot be specified without specifying option 'strictNullChecks'.

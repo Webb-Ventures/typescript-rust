@@ -1,0 +1,5 @@
+[91merror[0m[90m TS6304: [0mComposite projects may not disable declaration emit.
+[91merror[0m[90m TS6379: [0mComposite projects may not disable incremental compilation.
+
+Found 2 errors.
+

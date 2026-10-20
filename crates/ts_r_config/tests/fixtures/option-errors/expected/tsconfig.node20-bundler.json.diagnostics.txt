@@ -1,0 +1,3 @@
+tsconfig.node20-bundler.json(4,25): error TS5095: Option 'bundler' can only be used when 'module' is set to 'preserve', 'commonjs', or 'es2015' or later.
+
+tsconfig.node20-bundler.json(4,25): error TS5109: Option 'moduleResolution' must be set to 'Node16' (or left unspecified) when option 'module' is set to 'Node20'.

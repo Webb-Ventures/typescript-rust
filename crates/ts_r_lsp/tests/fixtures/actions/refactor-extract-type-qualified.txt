@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+namespace N { export type X<A> = A[]; }
+export let q: /*[*/N.X<  string >/*]*/ = [];

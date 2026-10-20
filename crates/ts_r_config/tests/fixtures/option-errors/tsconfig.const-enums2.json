@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "preserveConstEnums": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "files": [
+    "a.ts"
+  ]
+}

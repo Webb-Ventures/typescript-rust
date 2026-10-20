@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert namespace import to named imports
+// @file: src/main.ts
+import { Kind, make as make_1 } from "./lib";
+
+const make = 1;
+export const k: Kind = make_1() + make;

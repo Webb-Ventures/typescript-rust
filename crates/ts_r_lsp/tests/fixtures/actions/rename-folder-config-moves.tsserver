@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// @deleted: pkg/a.ts
+// @deleted: pkg/tsconfig.json
+// @file: deep/pkg/a.ts
+import { s } from "../../shared/s";
+
+export const n = s + 1;
+// @file: deep/pkg/tsconfig.json
+{"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "composite": true, "rootDir": ".."}, "files": ["../deep/pkg/a.ts"], "include": ["../shared"]}

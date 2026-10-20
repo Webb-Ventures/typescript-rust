@@ -1,0 +1,20 @@
+[package]
+name = "ts_r_minify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "JavaScript minifier for ts-r: scope analysis, constant folding, dead-branch removal, compression and identifier mangling"
+
+[lints]
+workspace = true
+
+[dependencies]
+ts_r_span = { path = "../ts_r_span" }
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_parser = { path = "../ts_r_parser" }
+ts_r_codegen = { path = "../ts_r_codegen" }
+rustc-hash = "2"
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

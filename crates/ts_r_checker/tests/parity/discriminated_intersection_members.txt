@@ -1,0 +1,4 @@
+a.ts(15,5): error TS2345: Argument of type '{ name: "check" | "fill"; selector: string; }' is not assignable to parameter of type 'Action'.
+  Type '{ name: "check" | "fill"; selector: string; }' is not assignable to type 'Check | Fill'.
+    Type '{ name: "check" | "fill"; selector: string; }' is not assignable to type 'Fill'.
+      Property 'text' is missing in type '{ name: "check" | "fill"; selector: string; }' but required in type '{ name: "fill"; text: string; }'.

@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Add braces to arrow function
+// @file: src/main.tsx
+export const C = () => {
+  return (
+    <div>
+      <span>hi</span>
+    </div>
+  );
+};

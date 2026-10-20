@@ -1,0 +1,7 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+const /*|*/g = async <T>(a: T, b = 2): Promise<number> => {
+  await null;
+  return b;
+};

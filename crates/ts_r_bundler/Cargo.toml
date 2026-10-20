@@ -1,0 +1,35 @@
+[package]
+name = "ts_r_bundler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "JavaScript/TypeScript bundler for ts-r: module graph, linking, tree shaking, scope hoisting, code splitting, source maps and incremental rebuilds"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# The dev server's `DepBundler` adapter (pre-bundling node_modules for ts-r-dev).
+hmr = ["dep:ts_r_hmr"]
+
+[dependencies]
+ts_r_span = { path = "../ts_r_span" }
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_parser = { path = "../ts_r_parser" }
+ts_r_transform = { path = "../ts_r_transform" }
+ts_r_codegen = { path = "../ts_r_codegen" }
+ts_r_config = { path = "../ts_r_config" }
+ts_r_resolver = { path = "../ts_r_resolver" }
+ts_r_cache = { path = "../ts_r_cache" }
+ts_r_minify = { path = "../ts_r_minify" }
+ts_r_diagnostics = { path = "../ts_r_diagnostics" }
+ts_r_hmr = { path = "../ts_r_hmr", optional = true }
+rustc-hash = "2"
+blake3 = "1.8"
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }
+# Enables `hmr` for this crate's own tests, so `cargo test --workspace` covers the adapter.
+ts_r_bundler = { path = ".", features = ["hmr"] }

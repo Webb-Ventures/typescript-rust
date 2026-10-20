@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function nc({ a, b }: { a: number; b: number; }) { return a + b; }
+nc({ a: 1, b: 2 });
+nc(
+  { a: 3, b: 4 },
+);

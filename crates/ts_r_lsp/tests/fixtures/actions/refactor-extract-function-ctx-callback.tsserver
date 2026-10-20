@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+export function f(xs: string[]) {
+  return xs.map((x) => newFunction(x));
+}
+
+function newFunction(x: string): string | null {
+  return x.length > 2 ? x : null;
+}

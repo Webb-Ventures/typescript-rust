@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+const NewType = 1;
+type NewType_1 = Map<string, number>;
+
+export const x: NewType_1 = new Map();
+console.log(NewType);

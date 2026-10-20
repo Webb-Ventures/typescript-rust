@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+function id<T>(t: T) { return t; }
+export const v = id</*[*/Record<string, number>/*]*/>({});

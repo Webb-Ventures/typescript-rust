@@ -1,0 +1,44 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "isolatedModules": true,
+        "incremental": true,
+        "jsx": "preserve",
+        "lib": [
+            "dom",
+            "dom.iterable",
+            "esnext"
+        ],
+        "module": "esnext",
+        "moduleResolution": "bundler",
+        "noEmit": true,
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ]
+        },
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "target": "es2017",
+        "esModuleInterop": true,
+        "preserveConstEnums": true,
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./next-env.d.ts",
+        "./src/lib/util.ts",
+        "./src/app/layout.tsx",
+        "./src/app/page.tsx",
+        "./.next/types/app/page.ts"
+    ],
+    "include": [
+        "next-env.d.ts",
+        "**/*.ts",
+        "**/*.tsx",
+        ".next/types/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules"
+    ]
+}

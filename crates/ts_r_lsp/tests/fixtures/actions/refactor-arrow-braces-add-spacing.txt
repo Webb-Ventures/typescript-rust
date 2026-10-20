@@ -1,0 +1,4 @@
+// @action: refactor Add or remove braces in an arrow function/Add braces to arrow function
+// @differs: tsserver reformats the moved code (`a+b` to `a + b`); ts-r keeps it as written
+// @file: src/main.ts
+const h = (a: number,b: number) /*|*/=> a+b;

@@ -1,0 +1,15 @@
+// tsserver 6.0.3
+// @deleted: src/legacy/util.ts
+// @file: src/main.ts
+import { helper } from "./old/util";
+
+export const n = helper(1);
+// @file: src/old/util.ts
+export function helper(x: number): number { return x; }
+// @file: tsconfig.json
+{
+  // Sources.
+  "compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true},
+  "include": ["src/main.ts", "src/old", "src/old/**/*.ts", "src/old/*"],
+  "exclude": ["src/old/skip.ts"]
+}

@@ -1,0 +1,15 @@
+types	${FIXTURE}/src/a.ts	require	thing/sub	${FIXTURE}/node_modules/@types/thing/sub.d.ts	@types/thing/sub.d.ts@5.0.0	false
+module	${FIXTURE}/src/a.ts	import	peerful	${FIXTURE}/node_modules/peerful/index.d.ts	peerful/index.d.ts@1.0.0+alpha@3.0.0+zeta@2.0.0
+module	${FIXTURE}/src/a.ts	import	./b/	${FIXTURE}/src/b/index.ts	
+module	${FIXTURE}/src/a.ts	import	./b/..	${FIXTURE}/src/index.ts	
+types	${FIXTURE}/node_modules/peerful/index.d.ts	require	./ref	${FIXTURE}/node_modules/peerful/ref.d.ts	peerful/ref.d.ts@1.0.0+alpha@3.0.0+zeta@2.0.0	false
+module	${FIXTURE}/node_modules/peerful/index.d.ts	import	./util	${FIXTURE}/node_modules/peerful/util.d.ts	peerful/util.d.ts@1.0.0+alpha@3.0.0+zeta@2.0.0
+module	${FIXTURE}/node_modules/peerful/index.d.ts	import	./sub	${FIXTURE}/node_modules/peerful/sub/index.d.ts	
+module	${FIXTURE}/node_modules/peerful/index.d.ts	import	./sub/	${FIXTURE}/node_modules/peerful/sub/index.d.ts	
+module	${FIXTURE}/node_modules/peerful/index.d.ts	import	./dist/x	${FIXTURE}/node_modules/peerful/dist/x.d.ts	peerful/dist/x.d.ts@1.0.0+alpha@3.0.0+zeta@2.0.0
+module	${FIXTURE}/node_modules/peerful/index.d.ts	import	./dist	${FIXTURE}/node_modules/peerful/dist/index.d.ts	
+module	${FIXTURE}/node_modules/peerful/index.d.ts	import	./util.js	${FIXTURE}/node_modules/peerful/util.d.ts	peerful/util.d.ts@1.0.0+alpha@3.0.0+zeta@2.0.0
+module	${FIXTURE}/node_modules/peerful/sub/index.d.ts	import	..	${FIXTURE}/node_modules/peerful/index.d.ts	
+module	${FIXTURE}/node_modules/peerful/sub/index.d.ts	import	../util	${FIXTURE}/node_modules/peerful/util.d.ts	peerful/util.d.ts@1.0.0+alpha@3.0.0+zeta@2.0.0
+types	${FIXTURE}/__inferred type names__.ts	require	thing/sub	${FIXTURE}/node_modules/@types/thing/sub.d.ts	@types/thing/sub.d.ts@5.0.0	false
+types	${FIXTURE}/__inferred type names__.ts	require	thing	${FIXTURE}/node_modules/@types/thing/index.d.ts		true

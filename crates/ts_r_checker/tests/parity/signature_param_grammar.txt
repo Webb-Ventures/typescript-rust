@@ -1,0 +1,17 @@
+a.ts(4,10): error TS1354: 'readonly' type modifier is only permitted on array and tuple literal types.
+a.ts(5,10): error TS1354: 'readonly' type modifier is only permitted on array and tuple literal types.
+a.ts(8,15): error TS1187: A parameter property may not be declared using a binding pattern.
+a.ts(8,44): error TS1187: A parameter property may not be declared using a binding pattern.
+a.ts(10,10): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(11,14): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(12,10): error TS2369: A parameter property is only allowed in a constructor implementation.
+a.ts(12,10): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(13,10): error TS7019: Rest parameter 'xs' implicitly has an 'any[]' type.
+a.ts(14,10): error TS7006: Parameter 'this' implicitly has an 'any' type.
+a.ts(15,17): error TS7006: Parameter 'a' implicitly has an 'any' type.
+a.ts(15,28): error TS7006: Parameter 'b' implicitly has an 'any' type.
+a.ts(15,43): error TS7006: Parameter 'c' implicitly has an 'any' type.
+a.ts(15,54): error TS7006: Parameter 'd' implicitly has an 'any' type.
+a.ts(16,14): error TS7006: Parameter 'e' implicitly has an 'any' type.
+a.ts(17,21): error TS7006: Parameter 'g' implicitly has an 'any' type.
+a.ts(18,33): error TS7006: Parameter 'i' implicitly has an 'any' type.

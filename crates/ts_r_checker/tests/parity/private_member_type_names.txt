@@ -1,0 +1,6 @@
+a.ts(10,7): error TS2420: Class 'Bar' incorrectly implements interface 'I'.
+  Property 'x' is private in type 'I' but not in type 'Bar'.
+a.ts(14,7): error TS2420: Class 'Baz' incorrectly implements interface 'J'.
+  Property 'x' is private in type 'Foo' but not in type 'Baz'.
+a.ts(21,7): error TS2415: Class 'C' incorrectly extends base class 'B'.
+  Property 'm' is private in type 'A' but not in type 'C'.

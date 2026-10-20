@@ -1,0 +1,4 @@
+a.ts(26,19): error TS18048: 'x' is possibly 'undefined'.
+a.ts(32,25): error TS18048: 'x' is possibly 'undefined'.
+a.ts(42,24): error TS18048: 'x' is possibly 'undefined'.
+a.ts(49,16): error TS18048: 'x' is possibly 'undefined'.

@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxFactory": "h",
+    "reactNamespace": "R",
+    "jsxFragmentFactory": "F"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

@@ -1,0 +1,91 @@
+Program 0..585
+  stmts[0]: Module 0..122 modifiers=[declare] kind=Module
+    name: StringLit 15..32 value="virtual:icons/*" `'virtual:icons/*'`
+    body: ModuleBlock 33..122
+      stmts[0]: VarDecl 37..92 kind=Const
+        decls[0]: VarDeclarator 43..91
+          name: Ident 43..52 name="component" `component`
+          type_ann: FunctionType 54..91
+            params[0]: Param 55..79
+              pattern: Ident 55..60 name="props" `props`
+              type_ann: TypeLiteral 62..79
+                members[0]: PropertySignature 64..77 optional
+                  key: Ident 64..68 name="size" `size`
+                  type_ann: KeywordType 71..77 kind=Number `number`
+            return_type: KeywordType 84..91 kind=Unknown `unknown`
+      stmts[1]: ExportDefaultExpr 95..120
+        expr: Ident 110..119 name="component" `component`
+  stmts[1]: Module 123..150 modifiers=[declare] kind=Module
+    name: StringLit 138..149 value="shorthand" `'shorthand'`
+  stmts[2]: FunctionDecl 151..203 modifiers=[export declare]
+    name: Ident 175..183 name="overload" `overload`
+    params[0]: Param 184..193
+      pattern: Ident 184..185 name="x" `x`
+      type_ann: KeywordType 187..193 kind=String `string`
+    return_type: KeywordType 196..202 kind=String `string`
+  stmts[3]: FunctionDecl 204..256 modifiers=[export declare]
+    name: Ident 228..236 name="overload" `overload`
+    params[0]: Param 237..246
+      pattern: Ident 237..238 name="x" `x`
+      type_ann: KeywordType 240..246 kind=Number `number`
+    return_type: KeywordType 249..255 kind=Number `number`
+  stmts[4]: ClassDecl 257..467 modifiers=[export declare]
+    name: Ident 278..285 name="Emitter" `Emitter`
+    type_params: TypeParams 285..327
+      params[0]: TypeParam 286..326
+        name: Ident 286..292 name="Events" `Events`
+        constraint: TypeRef 301..326
+          name: Ident 301..307 name="Record" `Record`
+          type_args: TypeArgs 307..326
+            args[0]: KeywordType 308..314 kind=String `string`
+            args[1]: ArrayType 316..325
+              elem: KeywordType 316..323 kind=Unknown `unknown`
+    members[0]: PropertyDef 332..350 modifiers=[private]
+      key: Ident 340..349 name="listeners" `listeners`
+    members[1]: MethodDef 353..430
+      key: Ident 353..355 name="on" `on`
+      value: FunctionExpr 355..430
+        type_params: TypeParams 355..379
+          params[0]: TypeParam 356..378
+            name: Ident 356..357 name="E" `E`
+            constraint: TypeOperator 366..378
+              ty: TypeRef 372..378
+                name: Ident 372..378 name="Events" `Events`
+        params[0]: Param 380..388
+          pattern: Ident 380..385 name="event" `event`
+          type_ann: TypeRef 387..388
+            name: Ident 387..388 name="E" `E`
+        params[1]: Param 390..422
+          pattern: Ident 390..392 name="fn" `fn`
+          type_ann: FunctionType 394..422
+            params[0]: Param 395..413 rest
+              pattern: Ident 398..402 name="args" `args`
+              type_ann: IndexedAccessType 404..413
+                obj: TypeRef 404..410
+                  name: Ident 404..410 name="Events" `Events`
+                index: TypeRef 411..412
+                  name: Ident 411..412 name="E" `E`
+            return_type: KeywordType 418..422 kind=Void `void`
+        return_type: ThisType 425..429 `this`
+    members[2]: PropertyDef 433..465 modifiers=[readonly static]
+      key: Ident 449..456 name="VERSION" `VERSION`
+      type_ann: KeywordType 458..464 kind=String `string`
+  stmts[5]: ExportNamed 468..503 type_only
+    specifiers[0]: ExportSpecifier 482..500
+      local: Ident 482..489 name="Emitter" `Emitter`
+      exported: Ident 493..500 name="default" `default`
+  stmts[6]: VarDecl 504..559 modifiers=[declare] kind=Const
+    decls[0]: VarDeclarator 518..558
+      name: Ident 518..525 name="VERSION" `VERSION`
+      type_ann: TemplateLitType 527..558
+        parts[0]: TemplateElement 528..528 cooked=""
+        parts[1]: KeywordType 530..536 kind=Number `number`
+        parts[2]: TemplateElement 537..538 cooked="." `.`
+        parts[3]: KeywordType 540..546 kind=Number `number`
+        parts[4]: TemplateElement 547..548 cooked="." `.`
+        parts[5]: KeywordType 550..556 kind=Number `number`
+        parts[6]: TemplateElement 557..557 cooked=""
+  stmts[7]: NamespaceExport 560..584
+    name: Ident 580..583 name="Lib" `Lib`
+---- comments ----
+---- diagnostics ----

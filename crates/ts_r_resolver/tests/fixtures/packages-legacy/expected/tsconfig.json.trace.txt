@@ -1,0 +1,35 @@
+module	${FIXTURE}/src/a.ts	require	types-field	${FIXTURE}/node_modules/types-field/lib/types.d.ts	types-field/lib/types.d.ts@1.0.0
+module	${FIXTURE}/src/a.ts	require	typings-field	${FIXTURE}/node_modules/typings-field/lib/t.d.ts	
+module	${FIXTURE}/src/a.ts	require	main-only	${FIXTURE}/node_modules/main-only/lib/main.d.ts	
+module	${FIXTURE}/src/a.ts	require	main-noext	${FIXTURE}/node_modules/main-noext/lib/main.d.ts	
+module	${FIXTURE}/src/a.ts	require	main-dir	${FIXTURE}/node_modules/main-dir/lib/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	index-only	${FIXTURE}/node_modules/index-only/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	no-pkg-json	${FIXTURE}/node_modules/no-pkg-json/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	no-pkg-json/sub	${FIXTURE}/node_modules/no-pkg-json/sub.d.ts	
+module	${FIXTURE}/src/a.ts	require	subpaths/a	${FIXTURE}/node_modules/subpaths/a.d.ts	subpaths/a.d.ts@1.2.3
+module	${FIXTURE}/src/a.ts	require	subpaths/a.js	${FIXTURE}/node_modules/subpaths/a.d.ts	subpaths/a.d.ts@1.2.3
+module	${FIXTURE}/src/a.ts	require	subpaths/dir	${FIXTURE}/node_modules/subpaths/dir/index.d.ts	subpaths/dir/index.d.ts@1.2.3
+module	${FIXTURE}/src/a.ts	require	subpaths/pdir	${FIXTURE}/node_modules/subpaths/pdir/t.d.ts	
+module	${FIXTURE}/src/a.ts	require	subpaths/js	${FIXTURE}/node_modules/subpaths/js.js	subpaths/js.js@1.2.3
+module	${FIXTURE}/src/a.ts	require	subpaths	${FIXTURE}/node_modules/subpaths/index.d.ts	subpaths/index.d.ts@1.2.3
+module	${FIXTURE}/src/a.ts	require	subpaths/missing	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	require	untyped	${FIXTURE}/node_modules/@types/untyped/index.d.ts	@types/untyped/index.d.ts@1.0.1
+module	${FIXTURE}/src/a.ts	require	only-js	${FIXTURE}/node_modules/only-js/index.js	
+module	${FIXTURE}/src/a.ts	require	@sc/lib	${FIXTURE}/node_modules/@types/sc__lib/index.d.ts	@types/sc__lib/index.d.ts@2.0.0
+module	${FIXTURE}/src/a.ts	require	only-types	${FIXTURE}/node_modules/@types/only-types/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	only-types/sub	${FIXTURE}/node_modules/@types/only-types/sub.d.ts	
+module	${FIXTURE}/src/a.ts	require	tv	${FIXTURE}/node_modules/tv/ts4/main.d.ts	tv/ts4/main.d.ts@1.0.0
+module	${FIXTURE}/src/a.ts	require	tv/sub	${FIXTURE}/node_modules/tv/ts4/sub.d.ts	tv/ts4/sub.d.ts@1.0.0
+module	${FIXTURE}/src/a.ts	require	tv-star	${FIXTURE}/node_modules/tv-star/types/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	tv-star/x	${FIXTURE}/node_modules/tv-star/types/x.d.ts	
+module	${FIXTURE}/src/a.ts	require	both	${FIXTURE}/node_modules/both/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	nested-parent	${FIXTURE}/node_modules/nested-parent/index.d.ts	
+module	${FIXTURE}/src/a.ts	require	bad-types	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	require	not-installed	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	require	@sc/missing	NOT RESOLVED	
+module	${FIXTURE}/node_modules/nested-parent/index.d.ts	require	inner	${FIXTURE}/node_modules/nested-parent/node_modules/inner/inner.d.ts	inner/inner.d.ts@9.9.9
+module	${FIXTURE}/node_modules/nested-parent/index.d.ts	require	types-field	${FIXTURE}/node_modules/types-field/lib/types.d.ts	types-field/lib/types.d.ts@1.0.0
+module	${FIXTURE}/src/nested/c.ts	require	local-pkg	${FIXTURE}/src/node_modules/local-pkg/x.d.ts	
+module	${FIXTURE}/src/nested/c.ts	require	types-field	${FIXTURE}/node_modules/types-field/lib/types.d.ts	types-field/lib/types.d.ts@1.0.0
+module	${FIXTURE}/src/nested/deeper/b.ts	require	types-field	${FIXTURE}/node_modules/types-field/lib/types.d.ts	types-field/lib/types.d.ts@1.0.0
+module	${FIXTURE}/src/nested/deeper/b.ts	require	../../a	${FIXTURE}/src/a.ts	

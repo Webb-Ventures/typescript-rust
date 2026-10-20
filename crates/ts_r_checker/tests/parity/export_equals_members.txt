@@ -1,0 +1,2 @@
+a.ts(5,10): error TS2305: Module '"./ns"' has no exported member 'Missing'.
+a.ts(12,8): error TS2503: Cannot find namespace 'v'.

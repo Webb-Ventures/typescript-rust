@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Generate 'get' and 'set' accessors
+// @file: src/main.ts
+export class Store {
+  private _items: string[] = [];
+  public set items(value: string[]) {
+    this._items = value;
+  }
+  public get items(): string[] {
+    return this._items;
+  }
+  value = 1;
+}

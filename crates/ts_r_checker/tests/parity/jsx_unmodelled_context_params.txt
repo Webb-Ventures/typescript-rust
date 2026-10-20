@@ -1,0 +1,1 @@
+a.tsx(17,18): error TS7006: Parameter 'v' implicitly has an 'any' type.

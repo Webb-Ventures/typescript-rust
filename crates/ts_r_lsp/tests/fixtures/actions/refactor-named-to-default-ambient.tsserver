@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert named imports to default import
+// @file: src/main.ts
+import ambPkg from "amb-pkg";
+
+console.log(ambPkg.a);

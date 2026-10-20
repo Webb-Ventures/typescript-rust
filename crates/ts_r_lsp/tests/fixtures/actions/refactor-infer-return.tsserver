@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Infer function return type
+// @file: src/main.ts
+export function f(x: number): { a: number; b: number[]; } {
+  return { a: x, b: [x] };
+}

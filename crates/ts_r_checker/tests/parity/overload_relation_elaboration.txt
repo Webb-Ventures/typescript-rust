@@ -1,0 +1,12 @@
+a.ts(7,7): error TS2322: Type 'SA' is not assignable to type 'TA'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(12,7): error TS2322: Type 'SB' is not assignable to type 'TB'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Type 'boolean' is not assignable to type 'number'.
+a.ts(17,7): error TS2322: Type 'SC' is not assignable to type 'TC'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(22,7): error TS2322: Type 'SD' is not assignable to type 'TD'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Type 'string' is not assignable to type 'number'.

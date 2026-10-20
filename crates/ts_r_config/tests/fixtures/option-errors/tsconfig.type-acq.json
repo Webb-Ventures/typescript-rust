@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {},
+  "typeAcquisition": {
+    "enable": true,
+    "bogus": 1
+  },
+  "watchOptions": {
+    "watchFile": "x",
+    "bar": 1
+  },
+  "files": [
+    "a.ts"
+  ]
+}

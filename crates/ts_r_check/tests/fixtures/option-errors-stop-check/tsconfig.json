@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "emitDecoratorMetadata": true,
+    "baseUrl": ".",
+    "inlineSources": true,
+    "strictPropertyInitialization": true,
+    "strict": false,
+    "noEmit": true,
+    "types": []
+  },
+  "files": [
+    "a.ts"
+  ]
+}

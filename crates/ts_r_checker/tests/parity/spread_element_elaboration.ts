@@ -1,0 +1,30 @@
+// Array literals with spreads elaborate per position of their tuple type (not when that is
+// an array); tuple relations name source ranges landing in a target rest.
+export {};
+declare const syms: symbol[];
+declare const nums: number[];
+declare const tup: [symbol, string];
+declare const it: Iterable<symbol>;
+const a1: number[] = [0, ...syms];
+const a2: number[] = [...syms, "x"];
+const a3: number[] = [...nums, "x"];
+const a4: number[] = [0, ...tup];
+const a5: number[] = [0, ...it];
+const a6: [number, ...number[]] = [0, ...syms];
+const a7: (number | string)[] = [0, ...syms, ...tup];
+const a8: { x: number }[] = [{ x: 1 }, ...[{ x: "s" }]];
+const a9: number[] = [...syms, 1];
+const a10: [number, number] = [0, ...syms];
+const a11: number[] = [...syms, { y: 1 }];
+const a12: [number, string] = [...tup];
+declare const s1: [string, number, string];
+declare const s2: [string, string];
+declare const s3: [string, number, string, number];
+declare const s4: [string, number, ...string[]];
+declare const s5: [string, ...number[], string];
+const w1: [string, ...number[]] = s1;
+const w2: [string, ...number[]] = s2;
+const w3: [...number[], number] = s3;
+const w4: [string, ...number[]] = s4;
+const w5: [string, ...number[]] = s5;
+const w6: number[] = s1;

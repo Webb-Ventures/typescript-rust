@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+export const b = () => { url: 'x' };

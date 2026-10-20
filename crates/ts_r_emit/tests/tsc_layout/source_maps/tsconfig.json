@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "strict": false,
+    "types": [],
+    "sourceMap": true,
+    "outDir": "out"
+  },
+  "files": ["simple.ts", "stmts.ts", "mods.ts"]
+}

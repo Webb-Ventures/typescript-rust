@@ -1,0 +1,10 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { a } from "./a";
+import { b } from "./b";
+
+export const x = 1;
+// @file: src/a.ts
+export const a = 1;
+// @file: src/b.ts
+export const b = 1;

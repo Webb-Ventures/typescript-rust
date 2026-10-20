@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+declare function takes(n: number | boolean): void;
+export function f(a: number) {
+  takes(newFunction(a));
+}
+
+function newFunction(a: number): number | boolean {
+  return a * 2;
+}

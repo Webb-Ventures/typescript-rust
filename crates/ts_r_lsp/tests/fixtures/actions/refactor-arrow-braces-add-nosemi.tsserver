@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Add braces to arrow function
+// @file: src/main.ts
+const a = 1
+export const f = (x: number) => {
+    return x + a
+}

@@ -1,0 +1,6 @@
+a.d.ts(1,32): error TS7016: Could not find a declaration file for module 'untyped'. '/p/node_modules/untyped/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/untyped` if it exists or add a new declaration (.d.ts) file containing `declare module 'untyped';`
+a.d.ts(2,32): error TS7016: Could not find a declaration file for module 'untyped'. '/p/node_modules/untyped/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/untyped` if it exists or add a new declaration (.d.ts) file containing `declare module 'untyped';`
+a.d.ts(2,54): error TS7016: Could not find a declaration file for module 'untyped'. '/p/node_modules/untyped/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/untyped` if it exists or add a new declaration (.d.ts) file containing `declare module 'untyped';`

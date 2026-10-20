@@ -1,0 +1,14 @@
+// tsserver 6.0.3
+// title: Move to a new file
+// @file: src/main.ts
+export import { scale } from "./scale";
+
+const factor = 3;
+
+export const value = scale(2);
+// @file: src/scale.ts
+import { factor } from "./main";
+
+export function scale(n: number): number {
+  return n * factor;
+}

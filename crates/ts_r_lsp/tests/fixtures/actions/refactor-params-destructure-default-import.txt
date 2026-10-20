@@ -1,0 +1,6 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+export default function /*|*/add(a: number, b: number) { return a + b; }
+// @file: src/use.ts
+import plus from './main';
+plus(1, 2);

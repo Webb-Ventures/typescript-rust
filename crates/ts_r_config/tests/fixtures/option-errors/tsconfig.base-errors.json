@@ -1,0 +1,6 @@
+{
+  "extends": "./bad-base.json",
+  "files": [
+    "a.ts"
+  ]
+}

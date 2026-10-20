@@ -1,0 +1,8 @@
+a.ts(10,14): error TS2322: Type '{ a: 1; } | { b: 2; }' is not assignable to type 'string'.
+  Type '{ a: 1; }' is not assignable to type 'string'.
+a.ts(13,14): error TS2322: Type 'string | number | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+a.ts(15,14): error TS2322: Type 'string | number | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+a.ts(17,14): error TS2322: Type 'number | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.

@@ -1,0 +1,3 @@
+a.mts(4,19): error TS2307: Cannot find module 'pd' or its corresponding type declarations.
+a.mts(5,19): error TS2307: Cannot find module 'pe/sub' or its corresponding type declarations.
+a.mts(6,20): error TS2307: Cannot find module 'pe/sub2' or its corresponding type declarations.

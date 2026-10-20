@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { a, b } from "./a";
+import { c } from "./c";
+
+export const x = [a, b, c];

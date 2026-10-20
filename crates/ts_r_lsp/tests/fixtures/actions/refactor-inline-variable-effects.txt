@@ -1,0 +1,7 @@
+// @action: refactor Inline variable/Inline variable
+// @file: src/main.ts
+declare function load(): Promise<{ kind: string }>;
+export async function f() {
+  const /*|*/media = await load();
+  return media.kind;
+}

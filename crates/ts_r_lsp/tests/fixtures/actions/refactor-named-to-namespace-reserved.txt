@@ -1,0 +1,7 @@
+// @action: refactor Convert import/Convert named imports to namespace import
+// @file: src/main.ts
+import { /*|*/foo } from "./class";
+
+foo();
+// @file: src/class.ts
+export function foo(): void {}

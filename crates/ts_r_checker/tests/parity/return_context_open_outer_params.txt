@@ -1,0 +1,9 @@
+a.ts(24,7): error TS2322: Type '{ a: 1; }' is not assignable to type 'null'.
+a.ts(28,13): error TS2322: Type '{ a: 1; }' is not assignable to type 'null'.
+a.ts(31,13): error TS2322: Type 'Error' is not assignable to type 'null'.
+a.ts(35,7): error TS2322: Type 'Ob<{ a: 1; }, Error>' is not assignable to type 'null'.
+a.ts(37,7): error TS2322: Type 'Ob<{ a: 1; }, Error>' is not assignable to type 'null'.
+a.ts(40,9): error TS2322: Type 'Ob<T, Error>' is not assignable to type 'null'.
+a.ts(43,9): error TS2322: Type 'T' is not assignable to type 'null'.
+a.ts(48,7): error TS2322: Type 'D' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.

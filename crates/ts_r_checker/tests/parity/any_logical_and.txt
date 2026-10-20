@@ -1,0 +1,1 @@
+a.ts(11,1): error TS18046: 'r2' is of type 'unknown'.

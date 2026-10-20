@@ -1,0 +1,3 @@
+// @action: refactor Infer function return type/Infer function return type
+// @file: src/main.ts
+export const g = /*|*/(s: string) => (s.length > 2 ? s : null);

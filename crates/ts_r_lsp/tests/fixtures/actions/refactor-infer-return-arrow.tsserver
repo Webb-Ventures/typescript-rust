@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Infer function return type
+// @file: src/main.ts
+export const g = (s: string): string | null => (s.length > 2 ? s : null);

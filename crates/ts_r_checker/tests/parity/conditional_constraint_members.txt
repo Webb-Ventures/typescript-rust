@@ -1,0 +1,3 @@
+a.ts(16,12): error TS2339: Property 'b' does not exist on type '{ a: string; } | { a: number; b: 1; }'.
+  Property 'b' does not exist on type '{ a: string; }'.
+a.ts(25,5): error TS2339: Property 'open' does not exist on type 'InstanceType<TConfig["EventSource"]>'.

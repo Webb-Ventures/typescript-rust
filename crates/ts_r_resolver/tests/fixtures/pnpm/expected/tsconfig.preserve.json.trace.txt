@@ -1,0 +1,8 @@
+module	${FIXTURE}/src/a.ts	import	lib-a	${FIXTURE}/node_modules/lib-a/index.d.ts	lib-a/index.d.ts@1.0.0
+module	${FIXTURE}/src/a.ts	import	lib-b	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	import	ws-pkg	${FIXTURE}/node_modules/ws-pkg/src/index.ts	ws-pkg/src/index.ts@0.0.1
+module	${FIXTURE}/node_modules/lib-a/index.d.ts	import	lib-b	NOT RESOLVED	
+module	${FIXTURE}/node_modules/lib-a/index.d.ts	import	lib-b/x	NOT RESOLVED	
+module	${FIXTURE}/node_modules/ws-pkg/src/index.ts	import	lib-a	${FIXTURE}/node_modules/ws-pkg/node_modules/lib-a/index.d.ts	lib-a/index.d.ts@1.0.0
+module	${FIXTURE}/node_modules/ws-pkg/node_modules/lib-a/index.d.ts	import	lib-b	NOT RESOLVED	
+module	${FIXTURE}/node_modules/ws-pkg/node_modules/lib-a/index.d.ts	import	lib-b/x	NOT RESOLVED	

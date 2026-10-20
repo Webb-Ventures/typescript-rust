@@ -1,0 +1,13 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+function /*|*/ml(
+  first: number,
+  second: string,
+) {
+  return first + second;
+}
+ml(
+  1,
+  'two',
+);

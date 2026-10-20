@@ -1,0 +1,14 @@
+a.ts(6,7): error TS2322: Type '<T extends Array<string>>(x: T) => T' is not assignable to type 'number'.
+a.ts(8,7): error TS2322: Type '<T extends ReadonlyArray<string>>(x: T) => T' is not assignable to type 'number'.
+a.ts(10,7): error TS2322: Type '<T extends { a: string; }>(x: T) => T' is not assignable to type 'number'.
+a.ts(13,7): error TS2322: Type '<T extends Al>(x: T) => T' is not assignable to type 'number'.
+a.ts(15,7): error TS2322: Type '<T extends Array<string> | number>(x: T) => T' is not assignable to type 'number'.
+a.ts(17,7): error TS2322: Type '<T extends Array<string>>(x: T[]) => T[]' is not assignable to type 'number'.
+a.ts(19,7): error TS2322: Type '<T extends Array<number>>(x: T) => T' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type '<T extends Array<string>>(x: number) => T' is not assignable to type 'number'.
+a.ts(23,7): error TS2322: Type '<T extends NS.Q>(x: T) => T' is not assignable to type 'number'.
+a.ts(26,4): error TS2339: Property 'foo' does not exist on type '((x: number) => void) | ((x: Object) => void)'.
+  Property 'foo' does not exist on type '(x: number) => void'.
+a.ts(28,4): error TS2339: Property 'foo' does not exist on type '(x: number) => void'.
+a.ts(32,5): error TS2339: Property 'foo' does not exist on type '(((x: Object) => void) | ((x: number) => void))[]'.
+a.ts(36,7): error TS2322: Type '(x: string) => void' is not assignable to type 'number'.

@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+export function f(a: number, b: number) {
+  newFunction(a, b);
+  return a;
+}
+
+function newFunction(a: number, b: number) {
+  const sum = a + b;
+  console.log(sum);
+}

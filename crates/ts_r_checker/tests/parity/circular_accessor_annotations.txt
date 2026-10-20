@@ -1,0 +1,4 @@
+a.ts(3,9): error TS2502: 'foo' is referenced directly or indirectly in its own type annotation.
+a.ts(7,9): error TS2502: 'foo' is referenced directly or indirectly in its own type annotation.
+a.ts(16,9): error TS2502: 'foo' is referenced directly or indirectly in its own type annotation.
+a.ts(20,9): error TS2502: 'foo' is referenced directly or indirectly in its own type annotation.

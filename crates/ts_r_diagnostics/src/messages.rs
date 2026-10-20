@@ -1,0 +1,238 @@
+//! Message catalogue. Codes and texts match tsc's for the same condition where one exists.
+//! Codes in the 1xxx range are syntax errors.
+
+use crate::{Category, DiagnosticMessage};
+
+macro_rules! messages {
+    ($($name:ident = $code:literal $cat:ident $text:literal;)*) => {
+        $(
+            pub const $name: DiagnosticMessage =
+                DiagnosticMessage { code: $code, category: Category::$cat, text: $text };
+        )*
+        /// Every message in the catalogue, for lookups by code.
+        pub const ALL: &[DiagnosticMessage] = &[$($name),*];
+    };
+}
+
+messages! {
+    UNTERMINATED_STRING_LITERAL = 1002 Error "Unterminated string literal.";
+    IDENTIFIER_EXPECTED = 1003 Error "Identifier expected.";
+    EXPECTED = 1005 Error "'{0}' expected.";
+    TRAILING_COMMA_NOT_ALLOWED = 1009 Error "Trailing comma not allowed.";
+    ASTERISK_SLASH_EXPECTED = 1010 Error "'*/' expected.";
+    ELEMENT_ACCESS_NEEDS_ARGUMENT = 1011 Error "An element access expression should take an argument.";
+    UNEXPECTED_TOKEN = 1012 Error "Unexpected token.";
+    REST_TRAILING_COMMA = 1013 Error "A rest parameter or binding pattern may not have a trailing comma.";
+    REST_PARAMETER_MUST_BE_LAST = 1014 Error "A rest parameter must be last in a parameter list.";
+    QUESTION_MARK_AND_INITIALIZER = 1015 Error "Parameter cannot have question mark and initializer.";
+    REQUIRED_AFTER_OPTIONAL = 1016 Error "A required parameter cannot follow an optional parameter.";
+    INDEX_SIGNATURE_REST = 1017 Error "An index signature cannot have a rest parameter.";
+    INDEX_SIGNATURE_ACCESSIBILITY = 1018 Error "An index signature parameter cannot have an accessibility modifier.";
+    INDEX_SIGNATURE_QUESTION = 1019 Error "An index signature parameter cannot have a question mark.";
+    INDEX_SIGNATURE_INITIALIZER = 1020 Error "An index signature parameter cannot have an initializer.";
+    INDEX_SIGNATURE_TYPE_ANNOTATION = 1021 Error "An index signature must have a type annotation.";
+    INDEX_SIGNATURE_ONE_PARAMETER = 1096 Error "An index signature must have exactly one parameter.";
+    INDEX_SIGNATURE_KEY_TYPE = 1268 Error "An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.";
+    REST_PARAMETER_OPTIONAL = 1047 Error "A rest parameter cannot be optional.";
+    REST_PARAMETER_INITIALIZER = 1048 Error "A rest parameter cannot have an initializer.";
+    DECLARATION_ONLY_IN_BLOCK = 1156 Error "'{0}' declarations can only be declared inside a block.";
+    COMPUTED_NAME_IN_ENUM = 1164 Error "Computed property names are not allowed in enums.";
+    EXTENDS_CLAUSE_ALREADY_SEEN = 1172 Error "'extends' clause already seen.";
+    INDEX_SIGNATURE_TRAILING_COMMA = 1025 Error "An index signature cannot have a trailing comma.";
+    FOR_AWAIT_NOT_ASYNC = 1103 Error "'for await' loops are only allowed within async functions and at the top levels of modules.";
+    GENERATOR_OVERLOAD = 1222 Error "An overload signature cannot be declared as a generator.";
+    DEFINITE_NOT_PERMITTED = 1255 Error "A definite assignment assertion '!' is not permitted in this context.";
+    DEFINITE_WITH_INITIALIZER = 1263 Error "Declarations with initializers cannot also have definite assignment assertions.";
+    DEFINITE_WITHOUT_TYPE = 1264 Error "Declarations with definite assignment assertions must also have type annotations.";
+    EMPTY_IF_BODY = 1313 Error "The body of an 'if' statement cannot be the empty statement.";
+    ABSTRACT_ACCESSOR_BODY = 1318 Error "An abstract accessor cannot have an implementation.";
+    MODULE_KEYWORD_FOR_NAMESPACE = 1540 Error "A 'namespace' declaration should not be declared using the 'module' keyword. Please use the 'namespace' keyword instead.";
+    EXPORT_ASSIGNMENT_NOT_TOP_LEVEL = 1231 Error "An export assignment must be at the top level of a file or module declaration.";
+    IMPORT_NOT_TOP_LEVEL = 1232 Error "An import declaration can only be used at the top level of a namespace or module.";
+    EXPORT_NOT_TOP_LEVEL = 1233 Error "An export declaration can only be used at the top level of a namespace or module.";
+    AMBIENT_MODULE_NOT_TOP_LEVEL = 1234 Error "An ambient module declaration is only allowed at the top level in a file.";
+    DEFAULT_EXPORT_NOT_TOP_LEVEL = 1258 Error "A default export must be at the top level of a file or module declaration.";
+    FOR_AWAIT_IN_STATIC_BLOCK = 18038 Error "'for await' loops cannot be used inside a class static block.";
+    JS_IMPORT_NOT_TOP_LEVEL = 1473 Error "An import declaration can only be used at the top level of a module.";
+    JS_EXPORT_NOT_TOP_LEVEL = 1474 Error "An export declaration can only be used at the top level of a module.";
+    IMPORT_SPREAD_ARGUMENT = 1325 Error "Argument of dynamic import cannot be spread element.";
+    QUOTED_MODULE_NOT_AMBIENT = 1035 Error "Only ambient modules can use quoted names.";
+    EXPORT_ASSIGNMENT_MODIFIERS = 1120 Error "An export assignment cannot have modifiers.";
+    IMPORT_MODULE_IN_NAMESPACE = 1147 Error "Import declarations in a namespace cannot reference a module.";
+    EXPORT_IN_NAMESPACE = 1194 Error "Export declarations are not permitted in a namespace.";
+    NAMESPACE_NOT_TOP_LEVEL = 1235 Error "A namespace declaration is only allowed at the top level of a namespace or module.";
+    DEFAULT_EXPORT_IN_NAMESPACE = 1319 Error "A default export can only be used in an ECMAScript-style module.";
+    EXTENDS_AFTER_IMPLEMENTS = 1173 Error "'extends' clause must precede 'implements' clause.";
+    SINGLE_BASE_CLASS = 1174 Error "Classes can only extend a single class.";
+    IMPLEMENTS_CLAUSE_ALREADY_SEEN = 1175 Error "'implements' clause already seen.";
+    REST_PARAMETER_PROPERTY = 1317 Error "A parameter property cannot be declared using a rest parameter.";
+    LIST_CANNOT_BE_EMPTY = 1097 Error "'{0}' list cannot be empty.";
+    INTERFACE_IMPLEMENTS_CLAUSE = 1176 Error "Interface declaration cannot have 'implements' clause.";
+    INTERFACE_PROPERTY_INITIALIZER = 1246 Error "An interface property cannot have an initializer.";
+    TYPE_LITERAL_PROPERTY_INITIALIZER = 1247 Error "A type literal property cannot have an initializer.";
+    MODIFIER_MUST_PRECEDE = 1029 Error "'{0}' modifier must precede '{1}' modifier.";
+    PRIVATE_NAME_OUTSIDE_CLASS = 18016 Error "Private identifiers are not allowed outside class bodies.";
+    RETURN_OUTSIDE_FUNCTION = 1108 Error "A 'return' statement can only be used within a function body.";
+    CONTINUE_OUTSIDE_LOOP = 1104 Error "A 'continue' statement can only be used within an enclosing iteration statement.";
+    BREAK_OUTSIDE_LOOP_OR_SWITCH = 1105 Error "A 'break' statement can only be used within an enclosing iteration or switch statement.";
+    JUMP_TARGET_CROSSES_FUNCTION = 1107 Error "Jump target cannot cross function boundary.";
+    CONTINUE_TARGET_NOT_LOOP_LABEL = 1115 Error "A 'continue' statement can only jump to a label of an enclosing iteration statement.";
+    BREAK_TARGET_NOT_ENCLOSING_LABEL = 1116 Error "A 'break' statement can only jump to a label of an enclosing statement.";
+    STATEMENTS_IN_AMBIENT_CONTEXT = 1036 Error "Statements are not allowed in ambient contexts.";
+    LABEL_NOT_ALLOWED_HERE = 1344 Error "A label is not allowed here.";
+    DECLARATIONS_MUST_BE_INITIALIZED = 1155 Error "'{0}' declarations must be initialized.";
+    DESTRUCTURING_DECLARATION_NEEDS_INITIALIZER = 1182 Error "A destructuring declaration must have an initializer.";
+    FOR_IN_SINGLE_DECLARATION = 1091 Error "Only a single variable declaration is allowed in a 'for...in' statement.";
+    FOR_OF_SINGLE_DECLARATION = 1188 Error "Only a single variable declaration is allowed in a 'for...of' statement.";
+    FOR_IN_DECLARATION_INITIALIZER = 1189 Error "The variable declaration of a 'for...in' statement cannot have an initializer.";
+    FOR_OF_DECLARATION_INITIALIZER = 1190 Error "The variable declaration of a 'for...of' statement cannot have an initializer.";
+    AMBIENT_INITIALIZER = 1039 Error "Initializers are not allowed in ambient contexts.";
+    AMBIENT_IMPLEMENTATION = 1183 Error "An implementation cannot be declared in ambient contexts.";
+    AMBIENT_GENERATOR = 1221 Error "Generators are not allowed in an ambient context.";
+    AMBIENT_CONST_INITIALIZER = 1254 Error "A 'const' initializer in an ambient context must be a string or numeric literal or literal enum reference.";
+    CATCH_CLAUSE_VARIABLE_INITIALIZER = 1197 Error "Catch clause variable cannot have an initializer.";
+    ARRAY_ELEMENT_DESTRUCTURING_PATTERN_EXPECTED = 1181 Error "Array element destructuring pattern expected.";
+    LINE_TERMINATOR_BEFORE_ARROW = 1200 Error "Line terminator not permitted before arrow.";
+    INVALID_UNICODE_ESCAPE = 1199 Error "Unterminated Unicode escape sequence.";
+    EXTENDED_UNICODE_ESCAPE_RANGE = 1198 Error "An extended Unicode escape value must be between 0x0 and 0x10FFFF inclusive.";
+    EXPRESSION_EXPECTED = 1109 Error "Expression expected.";
+    TYPE_EXPECTED = 1110 Error "Type expected.";
+    OCTAL_LITERALS_NOT_ALLOWED = 1121 Error "Octal literals are not allowed. Use the syntax '{0}'.";
+    DIGIT_EXPECTED = 1124 Error "Digit expected.";
+    HEXADECIMAL_DIGIT_EXPECTED = 1125 Error "Hexadecimal digit expected.";
+    UNEXPECTED_END_OF_TEXT = 1126 Error "Unexpected end of text.";
+    INVALID_CHARACTER = 1127 Error "Invalid character.";
+    DECLARATION_OR_STATEMENT_EXPECTED = 1128 Error "Declaration or statement expected.";
+    PROPERTY_OR_SIGNATURE_EXPECTED = 1131 Error "Property or signature expected.";
+    ENUM_MEMBER_EXPECTED = 1132 Error "Enum member expected.";
+    VARIABLE_DECLARATION_EXPECTED = 1134 Error "Variable declaration expected.";
+    ARGUMENT_EXPRESSION_EXPECTED = 1135 Error "Argument expression expected.";
+    PROPERTY_ASSIGNMENT_EXPECTED = 1136 Error "Property assignment expected.";
+    EXPRESSION_OR_COMMA_EXPECTED = 1137 Error "Expression or comma expected.";
+    PARAMETER_DECLARATION_EXPECTED = 1138 Error "Parameter declaration expected.";
+    TYPE_PARAMETER_DECLARATION_EXPECTED = 1139 Error "Type parameter declaration expected.";
+    TYPE_ARGUMENT_EXPECTED = 1140 Error "Type argument expected.";
+    STRING_LITERAL_EXPECTED = 1141 Error "String literal expected.";
+    LINE_BREAK_NOT_PERMITTED_HERE = 1142 Error "Line break not permitted here.";
+    LBRACE_OR_SEMICOLON_EXPECTED = 1144 Error "'{' or ';' expected.";
+    DECLARATION_EXPECTED = 1146 Error "Declaration expected.";
+    UNTERMINATED_TEMPLATE_LITERAL = 1160 Error "Unterminated template literal.";
+    UNTERMINATED_REGEX_LITERAL = 1161 Error "Unterminated regular expression literal.";
+    AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL = 1162 Error "An object member cannot be declared optional.";
+    UNEXPECTED_TOKEN_CLASS_MEMBER = 1068 Error "Unexpected token. A constructor, method, accessor, or property was expected.";
+    UNEXPECTED_TOKEN_TYPE_PARAMETER_NAME_WITHOUT_BRACES = 1069 Error "Unexpected token. A type parameter name was expected without curly braces.";
+    OPTIONAL_CHAIN_PRIVATE_NAME = 18030 Error "An optional chain cannot contain private identifiers.";
+    ACCESSIBILITY_ON_PRIVATE_NAME = 18010 Error "An accessibility modifier cannot be used with a private identifier.";
+    TYPEDEF_MULTIPLE_TYPE_TAGS = 8033 Error "A JSDoc '@typedef' comment may not contain multiple '@type' tags.";
+    INVALID_HASHBANG = 18026 Error "'#!' can only be used at the start of a file.";
+    NUMERIC_SEPARATORS_NOT_ALLOWED_HERE = 6188 Error "Numeric separators are not allowed here.";
+    MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS = 6189 Error "Multiple consecutive numeric separators are not permitted.";
+    STRING_LITERAL_WITH_DOUBLE_QUOTES_EXPECTED = 1327 Error "String literal with double quotes expected.";
+    JSON_PROPERTY_VALUE = 1328 Error "Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.";
+    IDENTIFIER_AFTER_NUMERIC_LITERAL = 1351 Error "An identifier or keyword cannot immediately follow a numeric literal.";
+    UNEXPECTED_TOKEN_RBRACE_IN_JSX = 1381 Error "Unexpected token. Did you mean `{'}'}` or `&rbrace;`?";
+    UNEXPECTED_TOKEN_GT_IN_JSX = 1382 Error "Unexpected token. Did you mean `{'>'}` or `&gt;`?";
+    RESERVED_WORD_CANNOT_BE_USED_HERE = 1359 Error "Identifier expected. '{0}' is a reserved word that cannot be used here.";
+    UNEXPECTED_KEYWORD_OR_IDENTIFIER = 1434 Error "Unexpected keyword or identifier.";
+    CATCH_OR_FINALLY_EXPECTED = 1472 Error "'catch' or 'finally' expected.";
+    INSTANTIATION_EXPRESSION_PROPERTY_ACCESS = 1477 Error "An instantiation expression cannot be followed by a property access.";
+    DECIMALS_WITH_LEADING_ZEROS = 1489 Error "Decimals with leading zeros are not allowed.";
+    UNKNOWN_REGEX_FLAG = 1499 Error "Unknown regular expression flag.";
+    DUPLICATE_REGEX_FLAG = 1500 Error "Duplicate regular expression flag.";
+    REGEX_UNICODE_AND_SETS_FLAGS = 1502 Error "The Unicode (u) flag and the Unicode Sets (v) flag cannot be set simultaneously.";
+    INVALID_ESCAPE_SEQUENCE = 1488 Error "Escape sequence '{0}' is not allowed.";
+    ONLY_ONE_DEFAULT_CLAUSE = 1113 Error "A 'default' clause cannot appear more than once in a 'switch' statement.";
+    MIXED_COALESCE = 5076 Error "'{0}' and '{1}' operations cannot be mixed without parentheses.";
+    FOR_OF_ASYNC = 1106 Error "The left-hand side of a 'for...of' statement may not be 'async'.";
+    INVALID_OPTIONAL_CHAIN_FROM_NEW = 1209 Error "Invalid optional chain from new expression. Did you mean to call '{0}()'?";
+    DECORATOR_NEEDS_PARENTHESES = 1497 Error "Expression must be enclosed in parentheses to be used as a decorator.";
+    UNARY_LEFT_OF_EXPONENTIATION = 17006 Error "An unary expression with the '{0}' operator is not allowed in the left-hand side of an exponentiation expression. Consider enclosing the expression in parentheses.";
+    TYPE_ASSERTION_LEFT_OF_EXPONENTIATION = 17007 Error "A type assertion expression is not allowed in the left-hand side of an exponentiation expression. Consider enclosing the expression in parentheses.";
+    JSX_COMMA_EXPRESSION = 18007 Error "JSX expressions may not use the comma operator. Did you mean to write an array?";
+    JSX_NO_CLOSING_TAG = 17008 Error "JSX element '{0}' has no corresponding closing tag.";
+    JSX_EXPECTED_CLOSING_TAG = 17002 Error "Expected corresponding JSX closing tag for '{0}'.";
+    JSX_FRAGMENT_NO_CLOSING = 17014 Error "JSX fragment has no corresponding closing tag.";
+    JSX_EXPECTED_CLOSING_FRAGMENT = 17015 Error "Expected corresponding closing tag for JSX fragment.";
+    ARROW_THIS_PARAMETER = 2730 Error "An arrow function cannot have a 'this' parameter.";
+    JSX_ONE_PARENT = 2657 Error "JSX expressions must have one parent element.";
+    THE_PARSER_EXPECTED_TO_FIND_A_1_TO_MATCH_THE_0_TOKEN_HERE = 1007 Error "The parser expected to find a '{1}' to match the '{0}' token here.";
+    // List recovery (ts_r_parser `lists.rs`) and missing-semicolon errors.
+    STATEMENT_EXPECTED = 1129 Error "Statement expected.";
+    CASE_OR_DEFAULT_EXPECTED = 1130 Error "'case' or 'default' expected.";
+    PROPERTY_DESTRUCTURING_PATTERN_EXPECTED = 1180 Error "Property destructuring pattern expected.";
+    NOT_ALLOWED_AS_VARIABLE_NAME = 1389 Error "'{0}' is not allowed as a variable declaration name.";
+    NOT_ALLOWED_AS_PARAMETER_NAME = 1390 Error "'{0}' is not allowed as a parameter name.";
+    UNKNOWN_KEYWORD_OR_IDENTIFIER_DID_YOU_MEAN = 1435 Error "Unknown keyword or identifier. Did you mean '{0}'?";
+    NAMESPACE_MUST_BE_GIVEN_A_NAME = 1437 Error "Namespace must be given a name.";
+    INTERFACE_MUST_BE_GIVEN_A_NAME = 1438 Error "Interface must be given a name.";
+    VARIABLE_DECLARATION_NOT_ALLOWED_HERE = 1440 Error "Variable declaration not allowed at this location.";
+    FUNCTION_CALL_IN_TYPE_ANNOTATION = 1441 Error "Cannot start a function call in a type annotation.";
+    EXPECTED_EQUALS_FOR_PROPERTY_INITIALIZER = 1442 Error "Expected '=' for property initializer.";
+    IDENTIFIER_OR_STRING_LITERAL_EXPECTED = 1478 Error "Identifier or string literal expected.";
+    // Grammar errors tsc's checker reports only in a file without syntax errors (the parser
+    // defers them: ts_r_parser `deferred_grammar_error_at`).
+    VARIABLE_DECLARATION_LIST_CANNOT_BE_EMPTY = 1123 Error "Variable declaration list cannot be empty.";
+    CLASS_DECLARATION_WITHOUT_NAME = 1211 Error "A class declaration without the 'default' modifier must have a name.";
+    CLASS_MEMBER_CANNOT_HAVE_KEYWORD = 1248 Error "A class member cannot have the '{0}' keyword.";
+    PRIVATE_IDENTIFIER_IN_VARIABLE_DECLARATION = 18029 Error "Private identifiers are not allowed in variable declarations.";
+    SET_ACCESSOR_ONE_PARAMETER = 1049 Error "A 'set' accessor must have exactly one parameter.";
+    SET_ACCESSOR_OPTIONAL_PARAMETER = 1051 Error "A 'set' accessor cannot have an optional parameter.";
+    SET_ACCESSOR_PARAMETER_INITIALIZER = 1052 Error "A 'set' accessor parameter cannot have an initializer.";
+    SET_ACCESSOR_REST_PARAMETER = 1053 Error "A 'set' accessor cannot have rest parameter.";
+    GET_ACCESSOR_PARAMETERS = 1054 Error "A 'get' accessor cannot have parameters.";
+    READONLY_ONLY_ON_PROPERTY = 1024 Error "'readonly' modifier can only appear on a property declaration or index signature.";
+    CONSTRUCTOR_TYPE_PARAMETERS = 1092 Error "Type parameters cannot appear on a constructor declaration.";
+    CONSTRUCTOR_TYPE_ANNOTATION = 1093 Error "Type annotation cannot appear on a constructor declaration.";
+    ACCESSOR_TYPE_PARAMETERS = 1094 Error "An accessor cannot have type parameters.";
+    SET_ACCESSOR_RETURN_TYPE = 1095 Error "A 'set' accessor cannot have a return type annotation.";
+    TYPE_PARAMETER_LIST_EMPTY = 1098 Error "Type parameter list cannot be empty.";
+    TYPE_ARGUMENT_LIST_EMPTY = 1099 Error "Type argument list cannot be empty.";
+    INTERFACE_NAME_CANNOT_BE = 2427 Error "Interface name cannot be '{0}'.";
+    TYPE_ALIAS_NAME_CANNOT_BE = 2457 Error "Type alias name cannot be '{0}'.";
+    NAMESPACE_NAME_CANNOT_BE = 2819 Error "Namespace name cannot be '{0}'.";
+    DECORATORS_MUST_PRECEDE_NAME_AND_KEYWORDS = 1436 Error "Decorators must precede the name and all keywords of property declarations.";
+    USING_BINDING_PATTERN = 1492 Error "'{0}' declarations may not have binding patterns.";
+    // TypeScript syntax in a JavaScript file (`ts_r_parser::TsInJs::Report`).
+    JS_IMPORT_EQUALS = 8002 Error "'import ... =' can only be used in TypeScript files.";
+    JS_EXPORT_ASSIGNMENT = 8003 Error "'export =' can only be used in TypeScript files.";
+    JS_TYPE_PARAMETERS = 8004 Error "Type parameter declarations can only be used in TypeScript files.";
+    JS_IMPLEMENTS = 8005 Error "'implements' clauses can only be used in TypeScript files.";
+    JS_DECLARATION = 8006 Error "'{0}' declarations can only be used in TypeScript files.";
+    JS_TYPE_ALIAS = 8008 Error "Type aliases can only be used in TypeScript files.";
+    JS_MODIFIER = 8009 Error "The '{0}' modifier can only be used in TypeScript files.";
+    JS_TYPE_ANNOTATION = 8010 Error "Type annotations can only be used in TypeScript files.";
+    JS_TYPE_ARGUMENTS = 8011 Error "Type arguments can only be used in TypeScript files.";
+    JS_PARAMETER_MODIFIERS = 8012 Error "Parameter modifiers can only be used in TypeScript files.";
+    JS_NON_NULL = 8013 Error "Non-null assertions can only be used in TypeScript files.";
+    JS_TYPE_ASSERTION = 8016 Error "Type assertion expressions can only be used in TypeScript files.";
+    JS_SIGNATURE = 8017 Error "Signature declarations can only be used in TypeScript files.";
+    JS_SATISFIES = 8037 Error "Type satisfaction expressions can only be used in TypeScript files.";
+    // JSDoc `@param` names (`ts_r_parser::attach_jsdoc`; checked JavaScript files only).
+    JSDOC_EXTENDS_MISMATCH = 8023 Error "JSDoc '@{0} {1}' does not match the 'extends {2}' clause.";
+    JSDOC_PARAM_NO_MATCH = 8024 Error "JSDoc '@param' tag has name '{0}', but there is no parameter with that name.";
+    JSDOC_PARAM_NOT_ARRAY = 8029 Error "JSDoc '@param' tag has name '{0}', but there is no parameter with that name. It would match 'arguments' if it had an array type.";
+    JSDOC_QUALIFIED_PARAM = 8032 Error "Qualified name '{0}' is not allowed without a leading '@param {object} {1}'.";
+    MAXIMUM_NESTING_DEPTH = 99001 Error "Maximum nesting depth exceeded; the rest of this construct was skipped.";
+    FILE_TOO_LARGE = 99002 Error "File is too large to parse (over 4 GiB).";
+    PARSER_NO_PROGRESS = 99003 Error "The parser stopped making progress; the rest of this file was skipped.";
+}
+
+/// Finds a message by code.
+pub fn by_code(code: u32) -> Option<DiagnosticMessage> {
+    ALL.iter().copied().find(|m| m.code == code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_are_unique() {
+        let mut codes: Vec<u32> = ALL.iter().map(|m| m.code).collect();
+        codes.sort_unstable();
+        let len = codes.len();
+        codes.dedup();
+        assert_eq!(codes.len(), len);
+        assert_eq!(by_code(1005), Some(EXPECTED));
+    }
+}

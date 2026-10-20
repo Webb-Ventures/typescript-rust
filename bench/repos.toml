@@ -1,0 +1,407 @@
+# Pinned public repositories for `cargo xtask bench` and the editor-memory runs.
+# See bench/README.md. Each entry is a commit on the repo's default branch, taken with
+# `git ls-remote <url> HEAD` on `date`. Re-pin by hand (update commit and date together) and
+# re-run the smoke runs in bench/README.md.
+#
+# Fields: name (checkout dir under target/bench-repos/ and the --repos key), repo (GitHub
+# owner/name), branch, commit, date, group (large-app | monorepo | ts7 | bundler | app), size
+# (small | medium | large; large repos need a dedicated machine and --large), sparse
+# (sparse-checkout patterns, empty = whole tree), install (shell command run under
+# scripts/limit.sh in install_dir), mem_mb (cap for the install and each benchmarked command,
+# at most 8192 here), install_time_s, projects (tsconfigs the check scenarios use), linter (the
+# repo's own linter, the lint reference), prepare (derived input), scenarios (check, lint,
+# build, editor-memory), [repo.editor] files (opened in the editor runs; the first is the
+# latency file) and src_dirs (walked by --open-all), notes.
+#
+# Installs always pass --ignore-scripts (or yarn's equivalent): no lifecycle scripts from
+# these repos run on the bench machine. They are offline-first against one shared cache:
+# `{cache}` is ~/.cache/ts-r/bench (or $TS_R_BENCH_CACHE), npm and pnpm pass --prefer-offline
+# and Yarn 1 --prefer-offline --cache-folder; Yarn berry (--immutable) gets its global cache
+# from the environment. A repeat --fetch-repos skips an install whose stamp (commit, commands,
+# lockfile hashes, Node version) is unchanged (bench/README.md, "Caches").
+
+# ---------------------------------------------------------------- large apps
+
+[[repo]]
+name = "vscode"
+repo = "microsoft/vscode"
+branch = "main"
+commit = "640a33ebdea00ea726190677c98d5ee7b725243e"
+date = "2026-10-15"
+group = "large-app"
+size = "large"
+install = "npm ci --prefer-offline --cache {cache}/npm --ignore-scripts --no-audit --no-fund"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["src/tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Its own check is `tsc -p src/tsconfig.json --noEmit --skipLibCheck` (TypeScript 6 as @typescript/typescript6). ESLint runs local TS plugins from .eslint-plugin-local."
+
+  [repo.editor]
+  files = [
+    "src/vs/editor/common/model/textModel.ts",
+    "src/vs/workbench/browser/workbench.ts",
+    "src/vs/platform/instantiation/common/instantiation.ts",
+    "src/vs/base/common/lifecycle.ts",
+    "src/vs/workbench/contrib/files/browser/views/explorerView.ts",
+  ]
+  src_dirs = ["src/vs"]
+
+[[repo]]
+name = "sentry"
+repo = "getsentry/sentry"
+branch = "master"
+commit = "2c72ecdf192b07dc3abb7e18868f5478c1564497"
+date = "2026-10-15"
+group = "large-app"
+size = "large"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["tsconfig.json"]
+linter = "oxlint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Frontend only (static/). Its own check is `tsc --build tsconfig.json ...`; it lints with oxlint (oxlint.config.ts, scripts/custom-oxlint.ts)."
+
+  [repo.editor]
+  files = [
+    "static/app/views/issueDetails/groupDetails.tsx",
+    "static/app/main.tsx",
+    "static/app/utils/discover/fields.tsx",
+  ]
+  src_dirs = ["static/app"]
+
+[[repo]]
+name = "grafana"
+repo = "grafana/grafana"
+branch = "main"
+commit = "872635d5545ff3cd50f88952027c59e7012ccc5c"
+date = "2026-10-15"
+group = "large-app"
+size = "large"
+install = "corepack yarn install --immutable --mode=skip-build"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Frontend only (public/app, packages/*). Yarn 4 through corepack. tsconfig.json sets incremental: the tsc commands pass --incremental false."
+
+  [repo.editor]
+  files = [
+    "public/app/features/dashboard-scene/scene/DashboardScene.tsx",
+    "public/app/app.ts",
+    "public/app/features/explore/Explore.tsx",
+    "packages/grafana-data/src/index.ts",
+    "public/app/core/services/backend_srv.ts",
+  ]
+  src_dirs = ["public/app", "packages"]
+
+[[repo]]
+name = "supabase"
+repo = "supabase/supabase"
+branch = "master"
+commit = "c8c12a87b46af32bace1727d6487ae62935e9ade"
+date = "2026-10-15"
+group = "large-app"
+size = "large"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts --filter studio..."
+mem_mb = 8192
+install_time_s = 1800
+projects = ["apps/studio/tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "The Studio app (apps/studio, Next.js) and the workspace packages it uses."
+
+  [repo.editor]
+  files = [
+    "apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx",
+    "apps/studio/pages/_app.tsx",
+    "apps/studio/data/query-client.ts",
+    "packages/ui/index.tsx",
+  ]
+  src_dirs = ["apps/studio", "packages"]
+
+# ---------------------------------------------------------------- monorepos
+
+[[repo]]
+name = "backstage"
+repo = "backstage/backstage"
+branch = "master"
+commit = "50407b790c6f668e0c00e1dcec336409eb5e55a8"
+date = "2026-10-15"
+group = "monorepo"
+size = "large"
+install = "corepack yarn install --immutable --mode=skip-build"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "One tsconfig over every packages/*/src and plugins/*/src (its own `yarn tsc` sets --max-old-space-size=8192). Lints with legacy .eslintrc.js (ESLint 8), which ts-r-lint does not read."
+
+  [repo.editor]
+  files = [
+    "plugins/catalog/src/index.ts",
+    "packages/core-plugin-api/src/index.ts",
+    "packages/backend-defaults/src/index.ts",
+    "plugins/catalog-backend/src/index.ts",
+    "packages/app/src/App.tsx",
+  ]
+  src_dirs = ["packages", "plugins"]
+
+[[repo]]
+name = "n8n"
+repo = "n8n-io/n8n"
+branch = "master"
+commit = "ed2500ffb2cb3b31af6335f88894ca51ef1c6948"
+date = "2026-10-15"
+group = "monorepo"
+size = "large"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["packages/cli/tsconfig.json", "packages/workflow/tsconfig.json", "packages/core/tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Backend packages only (the Vue editor needs vue-tsc). Workspace packages resolve to their sources or built dist: a check may need `pnpm build` of the dependencies first."
+
+  [repo.editor]
+  files = [
+    "packages/cli/src/workflow-runner.ts",
+    "packages/cli/src/server.ts",
+    "packages/workflow/src/workflow.ts",
+    "packages/core/src/execution-engine/workflow-execute.ts",
+  ]
+  src_dirs = ["packages/cli/src", "packages/workflow/src", "packages/core/src"]
+
+[[repo]]
+name = "cal-com"
+repo = "calcom/cal.com"
+branch = "main"
+commit = "54343aa685ae8f33159d2f485ec4a57bad5c574a"
+date = "2026-10-15"
+group = "monorepo"
+size = "large"
+install = "corepack yarn install --immutable --mode=skip-build"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["apps/web/tsconfig.json"]
+linter = "biome"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Lints with Biome (biome.json); ts-r-lint reads Biome configs."
+
+  [repo.editor]
+  files = [
+    "packages/trpc/server/routers/_app.ts",
+    "apps/web/pages/_app.tsx",
+    "apps/web/app/layout.tsx",
+  ]
+  src_dirs = ["apps/web", "packages"]
+
+[[repo]]
+name = "next-js"
+repo = "vercel/next.js"
+branch = "canary"
+commit = "6dda4371effebcb038671273d342c60fcd7472ed"
+date = "2026-10-15"
+group = "monorepo"
+size = "large"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["packages/next/tsconfig.json"]
+linter = "eslint"
+sparse = ["/*", "!/test/", "!/turbopack/", "/turbopack/crates/*/js/", "!/crates/", "/crates/*/js/", "!/docs/", "!/examples/"]
+scenarios = ["check", "lint", "editor-memory"]
+notes = "The next package. Sparse checkout skips test/, docs/, examples/ and the Rust crates (Turbopack), keeping the workspace's JS packages."
+
+  [repo.editor]
+  files = [
+    "packages/next/src/server/base-server.ts",
+    "packages/next/src/server/next-server.ts",
+    "packages/next/src/build/index.ts",
+    "packages/next/src/client/components/app-router.tsx",
+  ]
+  src_dirs = ["packages/next/src"]
+
+[[repo]]
+name = "react"
+repo = "facebook/react"
+branch = "main"
+commit = "098d2e87a1f7142947418d15f63f975b58c4685b"
+date = "2026-10-15"
+group = "monorepo"
+size = "large"
+install = "corepack yarn@1.22.22 install --frozen-lockfile --prefer-offline --cache-folder {cache}/yarn --ignore-scripts"
+install_dir = "compiler"
+mem_mb = 8192
+install_time_s = 1800
+projects = ["compiler/packages/babel-plugin-react-compiler/tsconfig.json"]
+scenarios = ["check", "editor-memory"]
+notes = "React itself is Flow; the TypeScript part is the React Compiler (compiler/, its own yarn workspace). No lint scenario: it uses legacy .eslintrc.js. Large because the repo and both workspaces are big, not because the compiler is."
+
+  [repo.editor]
+  files = [
+    "compiler/packages/babel-plugin-react-compiler/src/Inference/InferMutationAliasingEffects.ts",
+    "compiler/packages/babel-plugin-react-compiler/src/HIR/HIR.ts",
+    "compiler/packages/babel-plugin-react-compiler/src/Entrypoint/Pipeline.ts",
+  ]
+  src_dirs = ["compiler/packages/babel-plugin-react-compiler/src"]
+
+# ---------------------------------------------------------------- TypeScript 7's set
+
+[[repo]]
+name = "playwright"
+repo = "microsoft/playwright"
+branch = "main"
+commit = "a038fe7e0eb955ef41db53d40a859ce487889b6d"
+date = "2026-10-15"
+group = "ts7"
+size = "medium"
+install = "npm ci --prefer-offline --cache {cache}/npm --ignore-scripts --no-audit --no-fund"
+mem_mb = 4096
+install_time_s = 900
+projects = ["tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Its own check is `tsc -p .` (TypeScript 6.0.3). No browsers are downloaded (--ignore-scripts)."
+
+  [repo.editor]
+  files = [
+    "packages/playwright-core/src/server/page.ts",
+    "packages/playwright-core/src/client/page.ts",
+    "packages/playwright/src/index.ts",
+    "packages/playwright/src/runner/testRunner.ts",
+  ]
+  src_dirs = ["packages/playwright-core/src", "packages/playwright/src"]
+
+[[repo]]
+name = "trpc"
+repo = "trpc/trpc"
+branch = "main"
+commit = "10e2ef98f7842b94eb3026e4f9bcfe62cc39b088"
+date = "2026-10-15"
+group = "ts7"
+size = "medium"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts --filter root --filter './packages/*'"
+mem_mb = 4096
+install_time_s = 900
+projects = ["packages/server/tsconfig.json"]
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+
+  [repo.editor]
+  files = [
+    "packages/server/src/unstable-core-do-not-import/router.ts",
+    "packages/server/src/unstable-core-do-not-import/procedureBuilder.ts",
+    "packages/client/src/createTRPCClient.ts",
+  ]
+  src_dirs = ["packages/server/src", "packages/client/src"]
+
+[[repo]]
+name = "date-fns"
+repo = "date-fns/date-fns"
+branch = "main"
+commit = "717ce0a807ea4c6b540d015b5c408723175b2838"
+date = "2026-10-15"
+group = "ts7"
+size = "small"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts"
+mem_mb = 4096
+install_time_s = 600
+projects = ["pkgs/core/tsconfig.json"]
+check_options = { declaration = true }
+linter = "oxlint"
+scenarios = ["check", "lint", "editor-memory"]
+notes = "Lints with oxlint (.oxlintrc.json); ts-r-lint reads oxlint configs."
+
+  [repo.editor]
+  files = [
+    "pkgs/core/src/format/index.ts",
+    "pkgs/core/src/parse/index.ts",
+    "pkgs/core/src/index.ts",
+  ]
+  src_dirs = ["pkgs/core/src"]
+
+[[repo]]
+name = "rxjs"
+repo = "ReactiveX/rxjs"
+branch = "master"
+commit = "54796b38a57e6309f9861e174737479bb3f63f61"
+date = "2026-10-15"
+group = "ts7"
+size = "medium"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts --filter rxjs..."
+post_install = "pnpm --filter @rxjs/observable-polyfill run build"
+mem_mb = 4096
+install_time_s = 900
+projects = ["packages/rxjs/tsconfig.json"]
+scenarios = ["check", "editor-memory"]
+notes = "No lint scenario: it uses legacy .eslintrc.json (ESLint 8)."
+
+  [repo.editor]
+  files = [
+    "packages/rxjs/src/merge-map.ts",
+    "packages/rxjs/src/share.ts",
+    "packages/rxjs/src/index.ts",
+  ]
+  src_dirs = ["packages/rxjs/src"]
+
+[[repo]]
+name = "typeorm"
+repo = "typeorm/typeorm"
+branch = "master"
+commit = "fe92394287516feeada6e9c308ebe22deca2458e"
+date = "2026-10-15"
+group = "ts7"
+size = "medium"
+install = "pnpm install --frozen-lockfile --prefer-offline --store-dir {cache}/pnpm-store --ignore-scripts --filter typeorm... --filter typeorm-monorepo"
+mem_mb = 4096
+install_time_s = 900
+projects = ["packages/typeorm/tsconfig.json"]
+check_options = { module = "preserve", moduleResolution = "bundler" }
+notes = "TypeScript 7 removed moduleResolution node10 (TS5108), so the check wrapper uses module preserve + bundler resolution (node16 would turn every ESM-only import into TS1479). Its own tsc is TypeScript 5/6 with node10."
+linter = "eslint"
+scenarios = ["check", "lint", "editor-memory"]
+
+  [repo.editor]
+  files = [
+    "packages/typeorm/src/entity-manager/EntityManager.ts",
+    "packages/typeorm/src/query-builder/SelectQueryBuilder.ts",
+    "packages/typeorm/src/index.ts",
+  ]
+  src_dirs = ["packages/typeorm/src"]
+
+# ---------------------------------------------------------------- bundler
+
+[[repo]]
+name = "three-x10"
+repo = "mrdoob/three.js"
+branch = "dev"
+commit = "8d159b79b3f2773230ba5515f5e32698ee69ab8d"
+date = "2026-10-15"
+group = "bundler"
+size = "small"
+sparse = ["/src/", "/LICENSE", "/package.json"]
+prepare = "three-x10"
+scenarios = ["build"]
+notes = "Only src/ is checked out. bench/copy1..copy10 are copies of it and bench/entry.js imports all ten (see bench/README.md)."
+
+# ---------------------------------------------------------------- app: dev server and app bundle
+
+[[repo]]
+name = "excalidraw"
+repo = "excalidraw/excalidraw"
+branch = "master"
+commit = "4c37956ba5f04ec342a9d9d5891a38f22c5b7b4e"
+date = "2026-10-15"
+group = "app"
+size = "medium"
+install = "corepack yarn@1.22.22 install --frozen-lockfile --prefer-offline --cache-folder {cache}/yarn --ignore-scripts --network-timeout 600000"
+mem_mb = 4096
+install_time_s = 1200
+prepare = "dev-harness"
+scenarios = ["build", "rebuild", "dev"]
+notes = "A Vite + React + TypeScript app (yarn 1 workspaces; excalidraw-app plus its packages as source). The harness in bench/dev/ copies an entry, index.html and a Vite config into ts-r-bench-dev/ in the checkout; the dev server, build-excalidraw and rebuild-excalidraw all start from it (bench/README.md)."

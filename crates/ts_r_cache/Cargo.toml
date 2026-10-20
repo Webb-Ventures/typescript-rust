@@ -1,0 +1,17 @@
+[package]
+name = "ts_r_cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Content-addressed, versioned, memory-mapped on-disk cache shared by every ts-r tool"
+
+[lints]
+workspace = true
+
+[dependencies]
+blake3 = "1.8"
+memmap2 = "0.9"
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

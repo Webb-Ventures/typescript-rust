@@ -1,0 +1,10 @@
+{
+  "extends": [
+    "./configs/second.json",
+    5,
+    ""
+  ],
+  "files": [
+    "app/extra.ts"
+  ]
+}

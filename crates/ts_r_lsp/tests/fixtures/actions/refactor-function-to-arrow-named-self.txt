@@ -1,0 +1,3 @@
+// @action: refactor Convert arrow function or function expression/Convert to arrow function
+// @file: src/main.ts
+const a9 = /*|*/function a9(): number { return a9(); };

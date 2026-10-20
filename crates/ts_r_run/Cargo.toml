@@ -1,0 +1,32 @@
+[package]
+name = "ts_r_run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ts-r-run: run TypeScript files on Node (replaces tsx, ts-node)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ts-r-run"
+path = "src/main.rs"
+
+[dependencies]
+ts_r_span = { path = "../ts_r_span" }
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_parser = { path = "../ts_r_parser" }
+ts_r_diagnostics = { path = "../ts_r_diagnostics" }
+ts_r_codegen = { path = "../ts_r_codegen" }
+ts_r_transform = { path = "../ts_r_transform" }
+ts_r_config = { path = "../ts_r_config" }
+ts_r_resolver = { path = "../ts_r_resolver" }
+ts_r_cache = { path = "../ts_r_cache" }
+ts_r_guard = { path = "../ts_r_guard" }
+ts_r_sound = { path = "../ts_r_sound" }
+rustc-hash = "2"
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

@@ -1,0 +1,5 @@
+a.tsx(3,24): error TS2322: Type 'string' is not assignable to type 'number'.
+a.tsx(5,20): error TS2741: Property 'label' is missing in type '{ children: string; }' but required in type '{ label: string; }'.
+b.tsx(2,19): error TS2875: This JSX tag requires the module path 'missing/jsx-runtime' to exist, but none could be found. Make sure you have types for the appropriate package installed.
+b.tsx(2,19): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.
+b.tsx(3,19): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.

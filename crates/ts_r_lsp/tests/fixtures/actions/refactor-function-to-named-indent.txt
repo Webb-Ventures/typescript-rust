@@ -1,0 +1,8 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export function outer() {
+  const /*|*/inner = (x: number) =>
+    x * 2;
+  return inner(1);
+}

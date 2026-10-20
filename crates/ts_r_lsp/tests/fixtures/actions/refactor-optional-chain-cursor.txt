@@ -1,0 +1,9 @@
+// @action: refactor Convert to optional chain expression/Convert to optional chain expression
+// @file: src/main.ts
+interface User { profile?: { name: string; tags: string[]; greet(): string } }
+export function name(u: User | undefined) {
+  if (u && /*|*/u.profile && u.profile.greet()) {
+    return u && u.profile && u.profile.tags[0];
+  }
+  return '';
+}

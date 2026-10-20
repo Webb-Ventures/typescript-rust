@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function pc({ a, b }: { a: number /* first */; b: number; }) { return a + b; }
+pc({ a: 1, b: 2 });

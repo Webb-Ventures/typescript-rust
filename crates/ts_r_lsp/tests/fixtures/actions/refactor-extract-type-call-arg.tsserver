@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+function id<T>(t: T) { return t; }
+type NewType = Record<string, number>;
+
+export const v = id<NewType>({});

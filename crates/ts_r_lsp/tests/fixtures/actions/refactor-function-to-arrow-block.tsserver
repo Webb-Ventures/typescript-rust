@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Convert to arrow function
+// @file: src/main.ts
+declare function a(): void;
+const k = (x: number): number => {
+  a();
+  return x;
+};

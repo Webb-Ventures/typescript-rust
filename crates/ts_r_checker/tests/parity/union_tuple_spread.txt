@@ -1,0 +1,9 @@
+a.ts(5,106): error TS2345: Argument of type '"main" | "staging"' is not assignable to parameter of type 'Stack'.
+  Type '"main"' is not assignable to type 'Stack'.
+a.ts(8,14): error TS2322: Type '"a" | "c" | "e"' is not assignable to type '"a" | "c"'.
+  Type '"e"' is not assignable to type '"a" | "c"'.
+a.ts(9,14): error TS2322: Type '"b" | "d" | undefined' is not assignable to type '"b"'.
+  Type 'undefined' is not assignable to type '"b"'.
+a.ts(15,4): error TS2554: Expected 1 arguments, but got 2.
+a.ts(16,4): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

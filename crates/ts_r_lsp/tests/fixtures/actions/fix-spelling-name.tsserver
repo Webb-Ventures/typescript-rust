@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+const counter = 1;
+export const n = counter + 1;

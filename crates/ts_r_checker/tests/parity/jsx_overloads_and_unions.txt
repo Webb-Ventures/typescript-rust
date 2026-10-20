@@ -1,0 +1,4 @@
+a.tsx(14,31): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'string' is not assignable to type 'number'.
+a.tsx(26,33): error TS2322: Type 'string' is not assignable to type 'number'.

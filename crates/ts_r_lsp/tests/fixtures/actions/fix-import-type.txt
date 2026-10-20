@@ -1,0 +1,9 @@
+// @action: fix 2304 Add import from "./types"
+// @file: src/main.ts
+"use strict";
+
+export function f(u: /*|*/User): string {
+  return u.name;
+}
+// @file: src/types.ts
+export interface User { name: string }

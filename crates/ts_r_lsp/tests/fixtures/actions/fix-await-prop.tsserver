@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+declare function load(): Promise<{ data: string }>;
+export async function f() {
+  const r = load();
+  return (await r).data;
+}

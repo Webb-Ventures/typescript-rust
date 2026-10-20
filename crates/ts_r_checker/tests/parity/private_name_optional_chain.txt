@@ -1,0 +1,4 @@
+b.js(6,15): error TS18030: An optional chain cannot contain private identifiers.
+c.ts(6,15): error TS18030: An optional chain cannot contain private identifiers.
+c.ts(7,18): error TS18030: An optional chain cannot contain private identifiers.
+c.ts(8,21): error TS18030: An optional chain cannot contain private identifiers.

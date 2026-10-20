@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+export function outer() {
+  function inner(x: number) {
+    return x * 2;
+  }
+  return inner(1);
+}

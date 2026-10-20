@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "strictt": true,
+    "sourcemap": true,
+    "ALLOWJS": true,
+    "noImplicitAnyy": true,
+    "out": "x.js",
+    "charset": "utf8",
+    "importsNotUsedAsValues": "remove",
+    "watch": true,
+    "locale": "en",
+    "build": true,
+    "checkers": 2,
+    "version": true
+  },
+  "files": [
+    "a.ts"
+  ],
+  "unknownTopLevel": 1
+}

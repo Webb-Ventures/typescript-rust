@@ -1,0 +1,7 @@
+a.ts(11,9): error TS2322: Type '(ObjectLiteral | null)[]' is not assignable to type 'Post[]'.
+  Type 'ObjectLiteral | null' is not assignable to type 'Post'.
+    Type 'null' is not assignable to type 'Post'.
+a.ts(12,13): error TS2352: Conversion of type '[ObjectLiteral | null, ObjectLiteral | null]' to type 'number' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+a.ts(13,13): error TS2352: Conversion of type '[ObjectLiteral | null, ObjectLiteral | null]' to type 'Post[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'ObjectLiteral | null' is not comparable to type 'Post'.
+    Type 'ObjectLiteral' is missing the following properties from type 'Post': id, title

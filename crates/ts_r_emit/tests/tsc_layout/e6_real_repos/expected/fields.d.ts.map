@@ -1,0 +1,1 @@
+{"version":3,"file":"fields.d.ts","sourceRoot":"","sources":["../fields.ts"],"names":[],"mappings":"AAAA,qBAAa,CAAC;IAOS,CAAC,EAAE,MAAM;IAL5B,CAAC,SAAK;IACN,YAAY;IACZ,CAAC,EAAE,MAAM,CAAO;IAChB,MAAM,CAAC,CAAC,SAAK;IACb,MAAM,CAAC,QAAQ,CAAC,CAAC,KAAK;IACtB,YAAmB,CAAC,EAAE,MAAM,EAE3B;CACJ"}

@@ -1,0 +1,11 @@
+// @action: rename src/util.ts src/lib/util.ts
+// @file: src/main.ts
+import { helper } from "./util";
+
+export const n = helper(1);
+// @file: src/util.ts
+import { other } from "./other";
+
+export function helper(x: number): number { return x + other; }
+// @file: src/other.ts
+export const other = 1;

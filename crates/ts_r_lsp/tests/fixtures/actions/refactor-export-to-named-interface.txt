@@ -1,0 +1,10 @@
+// @action: refactor Convert export/Convert default export to named export
+// @file: src/types.ts
+/** A point. */
+export default interface /*|*/Point {
+    x: number;
+}
+// @file: src/main.ts
+import type Pt from "./types";
+
+export const p: Pt = { x: 1 };

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": [
+      "thing/sub",
+      "thing"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}

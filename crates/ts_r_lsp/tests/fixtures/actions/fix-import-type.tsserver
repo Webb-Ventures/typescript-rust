@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+"use strict";
+
+import { User } from "./types";
+
+export function f(u: User): string {
+  return u.name;
+}

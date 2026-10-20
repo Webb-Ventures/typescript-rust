@@ -1,0 +1,9 @@
+// @action: fix 2304 Add import from "./util"
+// @file: src/main.ts
+import { other } from "./other";
+
+export const n = /*|*/helper(other);
+// @file: src/util.ts
+export function helper(x: number): number { return x; }
+// @file: src/other.ts
+export const other = 1;

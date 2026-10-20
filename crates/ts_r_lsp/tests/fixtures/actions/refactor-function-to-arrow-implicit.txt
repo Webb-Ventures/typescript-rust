@@ -1,0 +1,4 @@
+// @action: refactor Convert arrow function or function expression/Convert to arrow function
+// @trigger: implicit
+// @file: src/main.ts
+const h = /*|*/function (x: number) { return x * 2; };

@@ -1,0 +1,17 @@
+a.ts(1,32): error TS2481: Cannot initialize outer scoped variable 'a' in the same scope as block scoped declaration 'a'.
+a.ts(2,32): error TS2481: Cannot initialize outer scoped variable 'b' in the same scope as block scoped declaration 'b'.
+a.ts(3,38): error TS2481: Cannot initialize outer scoped variable 'c' in the same scope as block scoped declaration 'c'.
+a.ts(4,33): error TS2481: Cannot initialize outer scoped variable 'd' in the same scope as block scoped declaration 'd'.
+a.ts(5,34): error TS2481: Cannot initialize outer scoped variable 'e' in the same scope as block scoped declaration 'e'.
+a.ts(7,37): error TS2481: Cannot initialize outer scoped variable 'h' in the same scope as block scoped declaration 'h'.
+a.ts(8,37): error TS2481: Cannot initialize outer scoped variable 'i' in the same scope as block scoped declaration 'i'.
+a.ts(9,21): error TS2451: Cannot redeclare block-scoped variable 'j'.
+a.ts(9,30): error TS2451: Cannot redeclare block-scoped variable 'j'.
+a.ts(13,36): error TS2481: Cannot initialize outer scoped variable 'n' in the same scope as block scoped declaration 'n'.
+a.ts(14,38): error TS2481: Cannot initialize outer scoped variable 'o' in the same scope as block scoped declaration 'o'.
+a.ts(15,42): error TS2481: Cannot initialize outer scoped variable 'q' in the same scope as block scoped declaration 'q'.
+a.ts(16,31): error TS2481: Cannot initialize outer scoped variable 'r' in the same scope as block scoped declaration 'r'.
+a.ts(17,16): error TS2481: Cannot initialize outer scoped variable 's' in the same scope as block scoped declaration 's'.
+a.ts(18,21): error TS2481: Cannot initialize outer scoped variable 't' in the same scope as block scoped declaration 't'.
+a.ts(19,22): error TS2481: Cannot initialize outer scoped variable 'u' in the same scope as block scoped declaration 'u'.
+a.ts(20,22): error TS2481: Cannot initialize outer scoped variable 'w' in the same scope as block scoped declaration 'w'.

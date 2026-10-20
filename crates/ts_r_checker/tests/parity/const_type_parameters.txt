@@ -1,0 +1,15 @@
+a.ts(12,7): error TS2322: Type 'readonly ["left", "right"]' is not assignable to type 'number'.
+a.ts(14,7): error TS2322: Type 'readonly ["left", "right"]' is not assignable to type 'number'.
+a.ts(15,7): error TS2322: Type 'readonly ["left", "right"]' is not assignable to type 'number'.
+a.ts(16,7): error TS2322: Type 'readonly ["left", "right"]' is not assignable to type 'number'.
+a.ts(17,7): error TS2741: Property 'x' is missing in type '{ readonly a: "left"; readonly b: readonly [1, true]; readonly c: { readonly d: "x"; }; }' but required in type '{ x: number; }'.
+a.ts(18,7): error TS2322: Type '["left", "right"]' is not assignable to type 'number'.
+a.ts(19,7): error TS2322: Type 'readonly ["x", 1]' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type 'readonly ["a", 1, readonly ["b"]]' is not assignable to type 'number'.
+a.ts(21,7): error TS2322: Type 'readonly ["a"]' is not assignable to type 'number'.
+a.ts(22,7): error TS2322: Type '{ readonly a: readonly ["a"]; }' is not assignable to type 'number'.
+a.ts(24,7): error TS2322: Type 'readonly [string, number]' is not assignable to type 'number'.
+a.ts(26,7): error TS2322: Type 'readonly [1, "x"] | readonly [2, "y"]' is not assignable to type 'number'.
+  Type 'readonly [1, "x"]' is not assignable to type 'number'.
+a.ts(27,14): error TS1277: 'const' modifier can only appear on a type parameter of a function, method or class
+a.ts(28,9): error TS1277: 'const' modifier can only appear on a type parameter of a function, method or class

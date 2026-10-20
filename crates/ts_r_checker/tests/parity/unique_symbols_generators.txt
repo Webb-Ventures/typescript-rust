@@ -1,0 +1,5 @@
+a.ts(4,7): error TS2322: Type 'typeof A' is not assignable to type 'number'.
+a.ts(6,7): error TS2322: Type 'symbol' is not assignable to type 'number'.
+a.ts(24,7): error TS2741: Property '[A]' is missing in type '{}' but required in type 'HasA'.
+a.ts(39,7): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(49,18): error TS2322: Type 'number' is not assignable to type 'string'.

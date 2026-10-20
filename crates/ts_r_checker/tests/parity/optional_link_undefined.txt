@@ -1,0 +1,24 @@
+a.ts(11,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(12,7): error TS2322: Type 'number | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(13,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(14,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(15,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(16,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(17,7): error TS2322: Type '{ m: string; } | null | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(18,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(19,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(20,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(22,52): error TS2322: Type 'number | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(23,40): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(24,38): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(25,20): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(26,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

@@ -1,0 +1,2 @@
+{"rule":"no-with","source":"eslint","skipped":{},"cases":[{"code":"foo.bar()","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":5,"sourceType":"script"},"messages":[],"output":null},
+{"code":"with(foo) { bar() }","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":5,"sourceType":"script"},"messages":[{"ruleId":"no-with","messageId":"unexpectedWith","message":"Unexpected use of 'with' statement.","line":1,"column":1,"endLine":1,"endColumn":5}],"output":null}]}

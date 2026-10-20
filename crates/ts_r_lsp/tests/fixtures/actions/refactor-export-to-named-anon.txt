@@ -1,0 +1,3 @@
+// @action: refactor Convert export/Convert default export to named export
+// @file: src/util.ts
+export default class /*|*/{}

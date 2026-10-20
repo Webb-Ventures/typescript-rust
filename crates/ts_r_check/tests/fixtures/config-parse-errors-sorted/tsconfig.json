@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "bogusOpt": true,
+    "noEmit": true,
+    "types": []
+  },
+  "files": [
+    "z.ts",
+    "a.ts"
+  ]
+}

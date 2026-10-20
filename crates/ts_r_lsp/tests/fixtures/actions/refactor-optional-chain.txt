@@ -1,0 +1,6 @@
+// @action: refactor Convert to optional chain expression/Convert to optional chain expression
+// @file: src/main.ts
+interface User { profile?: { address?: { city: string } } }
+export function city(u: User | undefined) {
+  return /*[*/u && u.profile && u.profile.address && u.profile.address.city/*]*/;
+}

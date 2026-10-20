@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert named imports to namespace import
+// @file: src/main.ts
+import * as libA from "./lib-a";
+
+const k: libA.Kind = libA.make();
+export const o = { make: libA.make, k };

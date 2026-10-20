@@ -1,0 +1,9 @@
+// @action: refactor Convert import/Convert namespace import to named imports
+// @file: src/main.ts
+import * as /*|*/lib from "./lib";
+
+const make = 1;
+export const k: lib.Kind = lib.make() + make;
+// @file: src/lib.ts
+export type Kind = number;
+export function make(): Kind { return 1; }

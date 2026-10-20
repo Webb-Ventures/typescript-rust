@@ -1,0 +1,12 @@
+[package]
+name = "ts_r_ast"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ts_r_span = { path = "../ts_r_span" }

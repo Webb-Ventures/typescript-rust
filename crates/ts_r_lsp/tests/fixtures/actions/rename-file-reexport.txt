@@ -1,0 +1,11 @@
+// @action: rename src/a/thing.ts src/b/thing.ts
+// @file: src/main.ts
+import { thing } from "./a/thing";
+import type { Kind } from "./a/thing";
+
+export const n: Kind = thing;
+// @file: src/a/thing.ts
+export type Kind = number;
+export const thing: Kind = 1;
+// @file: src/a/user.ts
+export { thing } from "./thing";

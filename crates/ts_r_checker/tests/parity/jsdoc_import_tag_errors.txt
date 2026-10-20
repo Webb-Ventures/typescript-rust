@@ -1,0 +1,21 @@
+a.js(3,11): error TS1109: Expression expected.
+a.js(5,15): error TS1109: Expression expected.
+a.js(5,16): error TS1005: 'from' expected.
+a.js(6,20): error TS1109: Expression expected.
+a.js(8,18): error TS1109: Expression expected.
+a.js(9,2): error TS1005: 'from' expected.
+b.js(1,16): error TS1005: 'from' expected.
+b.js(1,16): error TS1141: String literal expected.
+b.js(2,16): error TS1005: 'from' expected.
+b.js(2,16): error TS1141: String literal expected.
+c.js(2,36): error TS1464: Type import attributes should have exactly one key - 'resolution-mode' - with value 'import' or 'require'.
+c.js(2,36): error TS2823: Import attributes are only supported when the '--module' option is set to 'esnext', 'node18', 'node20', 'nodenext', or 'preserve'.
+c.js(3,36): error TS1464: Type import attributes should have exactly one key - 'resolution-mode' - with value 'import' or 'require'.
+c.js(3,36): error TS2823: Import attributes are only supported when the '--module' option is set to 'esnext', 'node18', 'node20', 'nodenext', or 'preserve'.
+c.js(3,41): error TS1005: '{' expected.
+c.js(4,26): error TS2306: File '/p/script.js' is not a module.
+c.js(5,21): error TS2306: File '/p/script.js' is not a module.
+e.js(1,21): error TS2306: File '/p/d.js' is not a module.
+f.ts(1,36): error TS1464: Type import attributes should have exactly one key - 'resolution-mode' - with value 'import' or 'require'.
+f.ts(1,36): error TS2823: Import attributes are only supported when the '--module' option is set to 'esnext', 'node18', 'node20', 'nodenext', or 'preserve'.
+f.ts(2,21): error TS2306: File '/p/script.js' is not a module.

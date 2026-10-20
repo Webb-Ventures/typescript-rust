@@ -1,0 +1,20 @@
+a.ts(3,5): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(4,19): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(5,24): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(6,28): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(7,25): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(8,20): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(9,23): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(10,12): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(11,28): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(12,32): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(13,25): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(15,29): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(17,9): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(21,24): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(22,19): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(23,23): error TS1194: Export declarations are not permitted in a namespace.
+a.ts(26,24): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(29,23): error TS1194: Export declarations are not permitted in a namespace.
+b.d.ts(3,28): error TS1147: Import declarations in a namespace cannot reference a module.
+b.d.ts(7,24): error TS1147: Import declarations in a namespace cannot reference a module.

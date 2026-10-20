@@ -1,0 +1,3 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export type Box<T = /*[*/{ v: number }/*]*/> = { t: T };

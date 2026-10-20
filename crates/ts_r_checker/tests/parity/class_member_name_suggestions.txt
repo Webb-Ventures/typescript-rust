@@ -1,0 +1,19 @@
+a.ts(10,9): error TS2663: Cannot find name 'v'. Did you mean the instance member 'this.v'?
+a.ts(11,9): error TS2662: Cannot find name 's'. Did you mean the static member 'D.s'?
+a.ts(12,9): error TS2663: Cannot find name 'w'. Did you mean the instance member 'this.w'?
+a.ts(13,9): error TS2663: Cannot find name 'p'. Did you mean the instance member 'this.p'?
+a.ts(14,9): error TS2662: Cannot find name 't'. Did you mean the static member 'D.t'?
+a.ts(15,25): error TS2663: Cannot find name 'w'. Did you mean the instance member 'this.w'?
+a.ts(16,31): error TS2304: Cannot find name 'w'.
+a.ts(17,9): error TS2662: Cannot find name 'prototype'. Did you mean the static member 'D.prototype'?
+a.ts(18,9): error TS2662: Cannot find name 'length'. Did you mean the static member 'D.length'?
+a.ts(19,9): error TS2662: Cannot find name 'bind'. Did you mean the static member 'D.bind'?
+a.ts(20,9): error TS2662: Cannot find name 'toString'. Did you mean the static member 'D.toString'?
+a.ts(21,9): error TS2662: Cannot find name 'hasOwnProperty'. Did you mean the static member 'D.hasOwnProperty'?
+a.ts(24,9): error TS2304: Cannot find name 'w'.
+a.ts(25,9): error TS2662: Cannot find name 't'. Did you mean the static member 'D.t'?
+a.ts(27,15): error TS2662: Cannot find name 't'. Did you mean the static member 'D.t'?
+a.ts(28,14): error TS2304: Cannot find name 'w'.
+a.ts(30,39): error TS2662: Cannot find name 'z'. Did you mean the static member 'K.z'?
+a.ts(31,45): error TS2662: Cannot find name 'z'. Did you mean the static member 'Named.z'?
+a.ts(32,44): error TS2662: Cannot find name 'z'. Did you mean the static member 'default.z'?

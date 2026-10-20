@@ -1,0 +1,28 @@
+[package]
+name = "ts_r_transform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "TypeScript/JSX to JavaScript transforms: type stripping, enums, namespaces, decorators, JSX, module formats"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# `ts_r_hmr::Transform` implementation for the dev server.
+hmr = ["dep:ts_r_hmr"]
+
+[dependencies]
+ts_r_span = { path = "../ts_r_span" }
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_parser = { path = "../ts_r_parser" }
+ts_r_diagnostics = { path = "../ts_r_diagnostics" }
+ts_r_codegen = { path = "../ts_r_codegen" }
+ts_r_config = { path = "../ts_r_config" }
+ts_r_hmr = { path = "../ts_r_hmr", optional = true }
+rustc-hash = "2"
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

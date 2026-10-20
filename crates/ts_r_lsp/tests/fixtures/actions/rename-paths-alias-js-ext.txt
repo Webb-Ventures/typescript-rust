@@ -1,0 +1,13 @@
+// @action: rename src/lib/util.ts src/lib/helpers/util.ts
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "noEmit": true, "paths": {"#lib/*": ["./src/lib/*"]}}}
+// @file: package.json
+{"type": "module"}
+// @file: src/main.ts
+import { helper } from "#lib/util.js";
+import { other } from "./lib/other.js";
+
+export const n = helper(1) + other;
+// @file: src/lib/util.ts
+export function helper(x: number): number { return x; }
+// @file: src/lib/other.ts
+export const other = 1;

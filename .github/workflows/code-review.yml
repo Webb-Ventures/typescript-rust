@@ -1,0 +1,123 @@
+name: Code review
+
+# Hands code-review work to the review box on the tailnet and exits; the box does the work in
+# fresh Docker containers (Codex gpt-6.1-sol on our ChatGPT subscription, the ts-r-review skill
+# in .agents/plugins/code-review) and posts as the "ts-r review" GitHub App. This job only
+# joins the tailnet and makes one request, so it takes seconds; progress shows in the PR's
+# summary comment (queued, running, results). The box re-checks every request against this
+# run's record on GitHub, so what the request claims is never trusted on its own.
+#
+# What gets dispatched (trusted users: the CODE_REVIEW_USERS repo variable, a JSON array of
+# logins, default ["riley-wv"]; the box keeps its own copy in /srv/ts-r-review/config.env):
+#   - review: once per PR, when a non-draft PR from this repo whose author is trusted is
+#     opened or marked ready by a trusted user (not the public mirror's sync/ PRs, reviewed
+#     where they were written), whatever its base (each PR in a stack is
+#     reviewed against the PR below it); pushes do not trigger one. Any later
+#     review, on any PR, takes a trusted user commenting @autoreview, or a manual run with a PR
+#     number
+#   - fix: a trusted user ticking the summary's "Fix and resolve all findings" checkbox, or
+#     commenting /fix-all: Codex fixes the open findings, pushes a commit to the PR branch,
+#     replies on each thread with the change and resolves it. In a stack, the commit is then
+#     merged into each PR above it in turn (a merge commit pushed to each branch); a
+#     conflict stops there, with a comment on that PR
+#   - resolve: /resolve-all (without fixing) or /unresolve-all from a trusted user, or
+#     unticking the checkbox
+#   - approve: /approve from a trusted user: the bot approves the PR at its head, whatever its
+#     findings; open findings then stop requesting changes until the next completed review
+#     or /unresolve-all
+#   - refresh: a review or thread reply on a PR, or a trusted user's PR comment carrying
+#     <!-- ts-r-review:refresh --> (the action-review skill's summary does), so findings resolved
+#     one by one show in the summary (GitHub does not send thread resolutions to Actions). The
+#     box waits ~20 s for related events to settle and runs one refresh per burst
+#
+# Every completed review counts as a GitHub review: REQUEST_CHANGES while any finding is open
+# (any severity), APPROVE when none is. After a fix, a bulk resolve or reopen, or a refresh, the
+# verdict follows the findings: approve once every finding is resolved (once; not again for a
+# new head), request changes again if one reopens after an approval. Pushes are not re-reviewed
+# and approvals stay unless the repo dismisses stale approvals. Threads resolved by someone
+# without write access do not count towards the approval.
+#
+# CODE_REVIEW_BOX: the box's tailnet name, a secret in a public repo (its logs are public, and
+# secrets are masked in them) or a variable. Secrets: TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET (Tailscale OAuth client allowed to create
+# ephemeral nodes tagged CODE_REVIEW_TS_TAG, default tag:ci) and CODE_REVIEW_DISPATCH_TOKEN
+# (/srv/ts-r-review/secrets/dispatch-token on the box). Box setup: the plugin README.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to review
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: >-
+      (github.event_name == 'pull_request' &&
+       !github.event.pull_request.draft &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !startsWith(github.event.pull_request.head.ref, 'sync/') &&
+       contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.event.pull_request.user.login) &&
+       contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.actor)) ||
+      (github.event_name == 'workflow_dispatch' &&
+       contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.actor)) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.actor) &&
+       ((github.event.action == 'created' &&
+         (startsWith(github.event.comment.body, '@autoreview') ||
+          startsWith(github.event.comment.body, '/fix-all') ||
+          startsWith(github.event.comment.body, '/resolve-all') || startsWith(github.event.comment.body, '/unresolve-all') ||
+          startsWith(github.event.comment.body, '/approve') ||
+          contains(github.event.comment.body, '<!-- ts-r-review:refresh -->'))) ||
+        (github.event.action == 'edited' && contains(github.event.comment.body, '<!-- ts-r-review:summary -->')))) ||
+      ((github.event_name == 'pull_request_review' || github.event_name == 'pull_request_review_comment') &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !endsWith(github.actor, '[bot]'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
+      - name: Hand the job to the review box
+        env:
+          BOX: ${{ secrets.CODE_REVIEW_BOX || vars.CODE_REVIEW_BOX }}
+          PRIVATE_REPO: ${{ github.event.repository.private }}
+          TAG: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
+          DISPATCH_TOKEN: ${{ secrets.CODE_REVIEW_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+          COMMENT_ID: ${{ github.event_name == 'issue_comment' && github.event.comment.id || '' }}
+        run: |
+          if [ -z "$BOX" ]; then echo "::error::Set CODE_REVIEW_BOX (the review box's tailnet name): a secret in a public repo, so logs mask it, or a variable."; exit 1; fi
+          jq -nc --argjson run "$GITHUB_RUN_ID" --arg pr "$PR" --arg comment "$COMMENT_ID" --arg repo "$GITHUB_REPOSITORY" \
+            '{run_id: $run, pr: ($pr | tonumber), comment_id: (if $comment == "" then null else ($comment | tonumber) end), repo: $repo}' \
+            > request.json
+          cat request.json
+          # Find the box through Tailscale itself rather than the runner's DNS, which may not
+          # have MagicDNS yet. If it never shows up, this node is not allowed to see it.
+          for _ in $(seq 30); do
+            ip=$(tailscale ip -4 "$BOX" 2>/dev/null) && break
+            sleep 1
+          done
+          if [ -z "${ip:-}" ]; then
+            # The tailnet's device list helps debugging, but a public repo's logs are public.
+            if [ "$PRIVATE_REPO" = true ]; then tailscale status || true; fi
+            echo "::error::$BOX is not visible from this node. The tailnet policy must let ${TAG} reach it on port 443."
+            exit 1
+          fi
+          curl -sS --fail-with-body --retry 5 --retry-all-errors --retry-delay 3 --max-time 30 \
+            --resolve "$BOX:443:$ip" \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @request.json "https://$BOX/code-review/jobs"

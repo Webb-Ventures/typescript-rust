@@ -1,0 +1,12 @@
+a.ts(3,20): error TS2302: Static members cannot reference class type parameters.
+a.ts(4,15): error TS2302: Static members cannot reference class type parameters.
+a.ts(5,15): error TS2302: Static members cannot reference class type parameters.
+a.ts(6,18): error TS2302: Static members cannot reference class type parameters.
+a.ts(6,24): error TS2302: Static members cannot reference class type parameters.
+a.ts(7,21): error TS2302: Static members cannot reference class type parameters.
+a.ts(10,16): error TS2302: Static members cannot reference class type parameters.
+a.ts(14,18): error TS2302: Static members cannot reference class type parameters.
+a.ts(16,23): error TS2302: Static members cannot reference class type parameters.
+a.ts(23,38): error TS2302: Static members cannot reference class type parameters.
+a.ts(26,15): error TS2302: Static members cannot reference class type parameters.
+a.ts(30,17): error TS2302: Static members cannot reference class type parameters.

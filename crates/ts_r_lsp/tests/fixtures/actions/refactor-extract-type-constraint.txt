@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export function pick<T, K extends keyof T>(t: T, k: K): /*[*/T[K]/*]*/ {
+    return t[k];
+}

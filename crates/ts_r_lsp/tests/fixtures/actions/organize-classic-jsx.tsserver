@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// @file: src/main.tsx
+import React from "react";
+
+export const App = () => <div />;

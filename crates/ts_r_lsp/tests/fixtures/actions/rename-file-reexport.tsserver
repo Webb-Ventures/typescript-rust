@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// @deleted: src/a/thing.ts
+// @file: src/a/user.ts
+export { thing } from "../b/thing";
+// @file: src/b/thing.ts
+export type Kind = number;
+export const thing: Kind = 1;
+// @file: src/main.ts
+import { thing } from "./b/thing";
+import type { Kind } from "./b/thing";
+
+export const n: Kind = thing;

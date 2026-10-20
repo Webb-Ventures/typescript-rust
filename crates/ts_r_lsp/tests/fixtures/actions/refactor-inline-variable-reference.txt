@@ -1,0 +1,8 @@
+// @action: refactor Inline variable/Inline variable
+// @file: src/main.ts
+export function area(w: number, h: number) {
+  // the sum
+  const size = w - h; // trailing
+  console.log(-size, typeof size, `${size}`);
+  return /*|*/size;
+}

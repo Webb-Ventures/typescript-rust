@@ -1,0 +1,8 @@
+// @action: fix 2741 Add missing properties
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+interface Point { x: number; y: number }
+
+export const /*|*/p: Point = {
+  x: 1,
+};

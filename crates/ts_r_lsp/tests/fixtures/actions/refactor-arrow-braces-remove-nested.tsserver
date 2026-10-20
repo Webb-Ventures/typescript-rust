@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Remove braces from arrow function
+// @file: src/main.ts
+class K {
+  run() {
+    const g = (x: number) => x * 2;
+    return g;
+  }
+}

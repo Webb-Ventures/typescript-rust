@@ -1,0 +1,11 @@
+import x96973 = require("./b");
+import x52913 = require("./b.js");
+import x59419 = require("./dir");
+import x11173 = require("./pkgdir");
+import x33621 = require("./m.mjs");
+import x67500 = require("./data.json");
+import x13746 = require("./dts-only");
+export {};
+void import("./b");
+void import("./dir");
+export {};

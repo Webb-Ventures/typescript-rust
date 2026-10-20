@@ -1,0 +1,8 @@
+a.js(5,9): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.js(7,9): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.js(9,9): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.js(17,9): error TS1092: Type parameters cannot appear on a constructor declaration.
+a.js(23,18): error TS1093: Type annotation cannot appear on a constructor declaration.
+a.js(28,18): error TS1093: Type annotation cannot appear on a constructor declaration.
+a.js(30,16): error TS8030: A JSDoc '@type' tag on a function must have a signature with the correct number of arguments.
+a.js(34,16): error TS8030: A JSDoc '@type' tag on a function must have a signature with the correct number of arguments.

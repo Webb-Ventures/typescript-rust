@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function sp({ a, b }: { a: number; b: number; }) { return a + b; }
+declare const args: [number, number];
+sp({ a: ...args });

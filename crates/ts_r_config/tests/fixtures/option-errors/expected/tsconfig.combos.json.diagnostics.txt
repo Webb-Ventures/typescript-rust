@@ -1,0 +1,19 @@
+tsconfig.combos.json(10,5): error TS5053: Option 'lib' cannot be specified with option 'noLib'.
+
+tsconfig.combos.json(14,5): error TS5052: Option 'emitDecoratorMetadata' cannot be specified without specifying option 'experimentalDecorators'.
+
+tsconfig.combos.json(15,5): error TS5053: Option 'reactNamespace' cannot be specified with option 'jsxFactory'.
+
+tsconfig.combos.json(18,5): error TS5089: Option 'jsxImportSource' cannot be specified when option 'jsx' is 'react'.
+
+tsconfig.combos.json(19,5): error TS5069: Option 'declarationDir' cannot be specified without specifying option 'declaration' or option 'composite'.
+
+tsconfig.combos.json(3,5): error TS5053: Option 'allowJs' cannot be specified with option 'isolatedDeclarations'.
+
+tsconfig.combos.json(4,5): error TS5069: Option 'isolatedDeclarations' cannot be specified without specifying option 'declaration' or option 'composite'.
+
+tsconfig.combos.json(5,5): error TS5052: Option 'exactOptionalPropertyTypes' cannot be specified without specifying option 'strictNullChecks'.
+
+tsconfig.combos.json(7,5): error TS5053: Option 'mapRoot' cannot be specified with option 'inlineSourceMap'.
+
+tsconfig.combos.json(7,5): error TS5053: Option 'sourceMap' cannot be specified with option 'inlineSourceMap'.

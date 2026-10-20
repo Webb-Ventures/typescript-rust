@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to constant in enclosing scope
+// @file: src/main.ts
+export function f(a: number) {
+  const newLocal = 3;
+  if (a > 1) {
+    const newLocal_1 = a * newLocal;
+    return newLocal_1;
+  }
+  return 0;
+}

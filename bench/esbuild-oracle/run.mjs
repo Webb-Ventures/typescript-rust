@@ -1,0 +1,448 @@
+// esbuild oracle for ts-r-build.
+//
+// Reads esbuild's end-to-end bundler tests (internal/bundler_tests/*.go at the pinned commit,
+// used as data only: file maps, entry points and options), turns each case whose options map
+// to CLI flags into a temporary project, builds it with esbuild 0.28.2 (bench/node_modules)
+// and with ts-r-build using the same flags, runs every entry output under Node, and compares
+// what the two bundles do: build success or failure, stdout, and the thrown error.
+//
+// Usage (from the repo root, always under limit.sh):
+//   scripts/limit.sh --mem-mb 4096 --time-s 1800 -- node bench/esbuild-oracle/run.mjs \
+//     [--filter REGEX] [--jobs 4] [--tsr target/release/ts-r-build] [--out FILE] [--show N] [--keep]
+
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const args = process.argv.slice(2);
+const opt = (name, def) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args[i + 1] : def;
+};
+const filter = opt('filter') ? new RegExp(opt('filter')) : null;
+const jobs = Number(opt('jobs', '4'));
+const tsr = path.resolve(root, opt('tsr', 'target/release/ts-r-build'));
+const esbuild = path.resolve(root, opt('esbuild', 'bench/node_modules/.bin/esbuild'));
+const outFile = path.resolve(root, opt('out', 'target/esbuild-oracle/results.json'));
+const show = Number(opt('show', '0'));
+const keep = args.includes('--keep'); // leave case directories in the temp dir
+const testsDir = path.join(root, 'target/upstream/esbuild/internal/bundler_tests');
+
+// ---------------------------------------------------------------------------------------
+// A small parser for the Go composite literals the test cases are written in.
+
+function tokenize(src) {
+  const toks = [];
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (src.startsWith('//', i)) { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (src.startsWith('/*', i)) { i = src.indexOf('*/', i + 2) + 2; continue; }
+    if (c === '`') {
+      const j = src.indexOf('`', i + 1);
+      toks.push({ t: 'str', v: src.slice(i + 1, j) });
+      i = j + 1;
+      continue;
+    }
+    if (c === '"') {
+      let j = i + 1;
+      let s = '';
+      while (src[j] !== '"') {
+        if (src[j] === '\\') {
+          const n = src[j + 1];
+          const simple = { n: '\n', t: '\t', r: '\r', '"': '"', '\\': '\\', "'": "'", '0': '\0' };
+          if (n in simple) { s += simple[n]; j += 2; continue; }
+          if (n === 'x') { s += String.fromCharCode(parseInt(src.slice(j + 2, j + 4), 16)); j += 4; continue; }
+          if (n === 'u') { s += String.fromCharCode(parseInt(src.slice(j + 2, j + 6), 16)); j += 6; continue; }
+          if (n === 'U') { s += String.fromCodePoint(parseInt(src.slice(j + 2, j + 10), 16)); j += 10; continue; }
+          s += n; j += 2; continue;
+        }
+        s += src[j++];
+      }
+      toks.push({ t: 'str', v: s });
+      i = j + 1;
+      continue;
+    }
+    if (c === "'") {
+      const j = src.indexOf("'", i + 2);
+      toks.push({ t: 'rune', v: src.slice(i + 1, j) });
+      i = j + 1;
+      continue;
+    }
+    const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(src.slice(i, i + 200));
+    if (m) { toks.push({ t: 'id', v: m[0] }); i += m[0].length; continue; }
+    const n = /^[0-9][0-9a-fA-Fx_.]*/.exec(src.slice(i, i + 50));
+    if (n) { toks.push({ t: 'num', v: n[0] }); i += n[0].length; continue; }
+    toks.push({ t: 'p', v: c });
+    i++;
+  }
+  return toks;
+}
+
+class Parser {
+  constructor(toks, pos) { this.toks = toks; this.pos = pos; }
+  peek(o = 0) { return this.toks[this.pos + o]; }
+  next() { return this.toks[this.pos++]; }
+  is(v, o = 0) { const t = this.peek(o); return t && t.t === 'p' && t.v === v; }
+  expect(v) { const t = this.next(); if (!t || t.v !== v) throw new Error(`expected ${v}, got ${t && t.v}`); }
+
+  // value := operand ('+' operand)*
+  value() {
+    let v = this.operand();
+    while (this.is('+') && typeof v === 'string') { this.next(); v += this.operand(); }
+    return v;
+  }
+
+  operand() {
+    const t = this.peek();
+    if (t.t === 'str') { this.next(); return t.v; }
+    if (t.t === 'num') { this.next(); return Number(t.v); }
+    if (t.t === 'rune') { this.next(); return { rune: t.v }; }
+    if (this.is('{')) return this.composite(null);
+    if (this.is('-') && this.peek(1)?.t === 'num') { this.next(); return -Number(this.next().v); }
+    // A type or an identifier path, possibly followed by `{...}` or `(...)`.
+    let text = '';
+    for (;;) {
+      const p = this.peek();
+      if (!p) break;
+      if (p.t === 'id') { text += p.v; this.next(); continue; }
+      if (p.t === 'p' && (p.v === '.' || p.v === '*' || p.v === '&')) { text += p.v; this.next(); continue; }
+      if (p.t === 'p' && p.v === '[') {
+        // `[]T`, `map[K]V`, `[N]T`
+        this.next(); text += '[';
+        while (!this.is(']')) text += this.next().v;
+        this.next(); text += ']';
+        continue;
+      }
+      break;
+    }
+    if (this.is('{')) return this.composite(text);
+    if (this.is('(')) {
+      // Function call: keep the text, skip the arguments.
+      let depth = 0;
+      do {
+        const p = this.next();
+        if (p.t === 'p' && (p.v === '(' || p.v === '{' || p.v === '[')) depth++;
+        if (p.t === 'p' && (p.v === ')' || p.v === '}' || p.v === ']')) depth--;
+      } while (depth > 0);
+      return { call: text };
+    }
+    if (text === '') throw new Error(`unexpected token ${JSON.stringify(this.peek())}`);
+    if (text === 'true') return true;
+    if (text === 'false') return false;
+    if (text === 'nil') return null;
+    return { ident: text };
+  }
+
+  composite(type) {
+    this.expect('{');
+    const items = [];
+    while (!this.is('}')) {
+      const v = this.value();
+      if (this.is(':')) {
+        this.next();
+        const val = this.value();
+        items.push({ key: v, value: val });
+      } else {
+        items.push({ value: v });
+      }
+      if (this.is(',')) this.next();
+    }
+    this.expect('}');
+    return { type, items };
+  }
+}
+
+function asObject(c) {
+  const o = {};
+  for (const it of c.items) {
+    const k = typeof it.key === 'string' ? it.key : it.key && it.key.ident;
+    o[k] = it.value;
+  }
+  return o;
+}
+const asList = (c) => c.items.map((it) => it.value);
+
+function loadCases() {
+  const cases = [];
+  for (const f of fs.readdirSync(testsDir).filter((f) => f.endsWith('_test.go')).sort()) {
+    const src = fs.readFileSync(path.join(testsDir, f), 'utf8');
+    const toks = tokenize(src);
+    for (let i = 0; i < toks.length; i++) {
+      if (toks[i].t === 'id' && toks[i].v === 'func' && toks[i + 1]?.t === 'id' && toks[i + 1].v.startsWith('Test')) {
+        const name = toks[i + 1].v.slice(4);
+        // Find `expectBundled...(t, bundled{` inside this function.
+        let j = i + 2;
+        let depth = 0;
+        let started = false;
+        for (; j < toks.length; j++) {
+          const t = toks[j];
+          if (t.t === 'p' && t.v === '{') { depth++; started = true; }
+          if (t.t === 'p' && t.v === '}') { depth--; if (started && depth === 0) break; }
+          if (t.t === 'id' && t.v.startsWith('expectBundled') && toks[j + 1]?.v === '(') {
+            let k = j + 2;
+            while (!(toks[k].t === 'id' && toks[k].v === 'bundled' && toks[k + 1]?.v === '{')) k++;
+            try {
+              const p = new Parser(toks, k + 1);
+              const lit = p.composite('bundled');
+              cases.push({ file: f, name, kind: t.v, spec: asObject(lit) });
+            } catch (e) {
+              cases.push({ file: f, name, error: `parse: ${e.message}` });
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+  return cases;
+}
+
+// ---------------------------------------------------------------------------------------
+// Options -> esbuild CLI flags (also accepted by ts-r-build).
+
+const IGNORED_OPTIONS = new Set(['OmitRuntimeForTests', 'NeedsMetafile', 'ASCIIOnly', 'LegalComments', 'ProfilerNames', 'LineLimit', 'SourceMap', 'AbsOutputBase']);
+
+function flagsFor(c) {
+  const s = c.spec;
+  const why = [];
+  for (const k of Object.keys(s)) {
+    if (!['files', 'entryPaths', 'options', 'expectedScanLog', 'expectedCompileLog', 'debugLogs', 'absWorkingDir'].includes(k)) why.push(`bundled.${k}`);
+  }
+  if (c.kind !== 'expectBundled' && c.kind !== 'expectBundledUnix') why.push(c.kind);
+  const o = s.options ? asObject(s.options) : {};
+  const flags = [];
+  const out = {};
+  let format = null;
+  let bundle = false;
+  for (const [k, v] of Object.entries(o)) {
+    if (IGNORED_OPTIONS.has(k)) continue;
+    switch (k) {
+      case 'Mode':
+        if (v.ident === 'config.ModeBundle') { flags.push('--bundle'); bundle = true; }
+        else if (v.ident === 'config.ModePassThrough' || v.ident === 'config.ModeConvertFormat') {}
+        else why.push(`Mode=${v.ident}`);
+        break;
+      case 'AbsOutputFile': out.file = v; break;
+      case 'AbsOutputDir': out.dir = v; break;
+      case 'OutputFormat': {
+        const m = { 'config.FormatESModule': 'esm', 'config.FormatCommonJS': 'cjs', 'config.FormatIIFE': 'iife' }[v.ident];
+        if (!m) why.push(`OutputFormat=${v.ident}`); else { format = m; flags.push(`--format=${m}`); }
+        break;
+      }
+      case 'Platform': {
+        const m = { 'config.PlatformNode': 'node', 'config.PlatformNeutral': 'neutral', 'config.PlatformBrowser': 'browser' }[v.ident];
+        if (!m) why.push(`Platform=${v.ident}`); else flags.push(`--platform=${m}`);
+        break;
+      }
+      case 'CodeSplitting': if (v === true) flags.push('--splitting'); break;
+      case 'MinifySyntax': if (v === true) flags.push('--minify-syntax'); break;
+      case 'MinifyIdentifiers': if (v === true) flags.push('--minify-identifiers'); break;
+      case 'MinifyWhitespace': if (v === true) flags.push('--minify-whitespace'); break;
+      case 'TreeShaking': flags.push(`--tree-shaking=${v === true}`); break;
+      case 'IgnoreDCEAnnotations': if (v === true) flags.push('--ignore-annotations'); break;
+      case 'ExternalPackages': if (v === true) flags.push('--packages=external'); break;
+      case 'GlobalName': flags.push(`--global-name=${asList(v).join('.')}`); break;
+      case 'MainFields': flags.push(`--main-fields=${asList(v).join(',')}`); break;
+      case 'Conditions': flags.push(`--conditions=${asList(v).join(',')}`); break;
+      case 'ExtensionOrder': flags.push(`--resolve-extensions=${asList(v).join(',')}`); break;
+      case 'PublicPath': flags.push(`--public-path=${v}`); break;
+      case 'ExtensionToLoader':
+        for (const it of v.items) {
+          const l = it.value.ident?.replace('config.Loader', '').toLowerCase();
+          const map = { js: 'js', jsx: 'jsx', ts: 'ts', tsx: 'tsx', json: 'json', text: 'text', file: 'file', css: 'css', empty: 'empty', base64: 'base64', dataurl: 'dataurl', binary: 'binary', copy: null, default: null, localcss: null, globalcss: null, none: null };
+          if (!map[l]) { why.push(`Loader=${l}`); continue; }
+          flags.push(`--loader:${it.key}=${map[l]}`);
+        }
+        break;
+      case 'ExternalSettings': {
+        const es = asObject(v);
+        for (const [phase, m] of Object.entries(es)) {
+          if (phase !== 'PreResolve') { why.push(`External.${phase}`); continue; }
+          const mm = asObject(m);
+          for (const [kind, val] of Object.entries(mm)) {
+            if (kind === 'Exact') for (const it of val.items) flags.push(`--external:${it.key}`);
+            else if (kind === 'Patterns') {
+              for (const it of val.items) {
+                const p = asObject(it.value);
+                flags.push(`--external:${p.Prefix ?? ''}*${p.Suffix ?? ''}`);
+              }
+            } else why.push(`External.${kind}`);
+          }
+        }
+        break;
+      }
+      case 'JSBanner': flags.push(`--banner:js=${v}`); break;
+      default: why.push(k);
+    }
+  }
+  if (!out.file && !out.dir) why.push('no output path');
+  if (!s.entryPaths) why.push('no entryPaths');
+  return { flags, out, format, bundle, why };
+}
+
+// ---------------------------------------------------------------------------------------
+
+function run(cmd, argv, cwd, timeoutMs) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, argv, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TS_R_THREADS: '1', NODE_OPTIONS: '' } });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { if (stdout.length < 1e5) stdout += d; });
+    child.stderr.on('data', (d) => { if (stderr.length < 1e5) stderr += d; });
+    const timer = setTimeout(() => { child.kill('SIGKILL'); }, timeoutMs);
+    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code, signal, stdout, stderr }); });
+    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, stdout: '', stderr: String(e) }); });
+  });
+}
+
+// Content hashes in file names are implementation-defined.
+const normalizeHashes = (s) => s.replace(/-[A-Z2-7]{8}\b/g, '-HASH');
+
+function errorLine(stderr, dirs) {
+  let line = stderr.split('\n').find((l) => /^\w*(Error|Exception)\b|^Error \[/.test(l) || /^Uncaught/.test(l)) ?? '';
+  for (const d of dirs) line = line.split(d).join('<dir>');
+  // Node's "imported from <file>" names the importing output, which differs by tool.
+  // Generated names differ between bundlers (`fn` vs `fn2`): drop numeric suffixes.
+  return normalizeHashes(line.replace(/ imported from .*$/, '').replace(/'<dir>[^']*'/g, "'<path>'"))
+    .replace(/\b([A-Za-z_$][A-Za-z_$]*?)\d+\b/g, '$1')
+    .trim();
+}
+
+async function buildAndRun(tool, bin, c, plan, caseDir) {
+  const inRoot = path.join(caseDir, 'in');
+  const outRoot = path.join(caseDir, tool);
+  const cwd = path.join(inRoot, c.spec.absWorkingDir ?? '/');
+  const entries = asList(c.spec.entryPaths).map((e) => (e.startsWith('/') ? path.join(inRoot, e) : e));
+  const outFlag = plan.out.file ? `--outfile=${path.join(outRoot, plan.out.file)}` : `--outdir=${path.join(outRoot, plan.out.dir)}`;
+  const meta = path.join(caseDir, `${tool}-meta.json`);
+  const extra = tool === 'tsr' ? ['--no-cache'] : [];
+  const b = await run(bin, [...entries, ...plan.flags, outFlag, `--metafile=${meta}`, '--log-level=error', ...extra], cwd, 30000);
+  if (b.code !== 0) return { built: false, log: (b.stderr || '').slice(0, 2000), signal: b.signal };
+  // Entry outputs, in entry order.
+  let outputs = [];
+  try {
+    const m = JSON.parse(fs.readFileSync(meta, 'utf8'));
+    const byEntry = new Map();
+    for (const [o, info] of Object.entries(m.outputs)) {
+      if (info.entryPoint && /\.(c|m)?js$/.test(o)) byEntry.set(path.resolve(cwd, info.entryPoint), path.resolve(cwd, o));
+    }
+    outputs = entries.map((e) => byEntry.get(path.resolve(cwd, e))).filter(Boolean);
+  } catch {
+    if (plan.out.file && fs.existsSync(path.join(outRoot, plan.out.file))) outputs = [path.join(outRoot, plan.out.file)];
+  }
+  const runs = [];
+  for (const o of outputs) {
+    const r = await run(process.execPath, [o], path.dirname(o), 10000);
+    runs.push({
+      file: path.relative(outRoot, o),
+      stdout: normalizeHashes(r.stdout.split(outRoot).join('<out>').split(inRoot).join('<in>')),
+      error: r.code === 0 ? '' : errorLine(r.stderr, [outRoot, inRoot]) || `exit ${r.code}${r.signal ? ` ${r.signal}` : ''}`,
+    });
+  }
+  return { built: true, runs };
+}
+
+async function runCase(c, tmp) {
+  if (c.error) return { status: 'skip', why: [c.error] };
+  if (!c.spec.files?.items || !c.spec.entryPaths?.items) return { status: 'skip', why: ['shared Go variable'] };
+  const plan = flagsFor(c);
+  if (plan.why.length) return { status: 'skip', why: plan.why };
+  const files = asObject(c.spec.files);
+  if (Object.values(files).some((v) => typeof v !== 'string')) return { status: 'skip', why: ['non-string file'] };
+  if (Object.values(files).some((v) => v.includes('Math.random'))) return { status: 'skip', why: ['nondeterministic (Math.random)'] };
+  const entries = asList(c.spec.entryPaths);
+  if (entries.every((e) => /\.css$/.test(e))) return { status: 'skip', why: ['css entry (CSS bundling)'] };
+  const caseDir = path.join(tmp, c.name);
+  fs.rmSync(caseDir, { recursive: true, force: true });
+  for (const [p, content] of Object.entries(files)) {
+    const full = path.join(caseDir, 'in', p);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+  fs.mkdirSync(path.join(caseDir, 'in', c.spec.absWorkingDir ?? '/'), { recursive: true });
+  const ref = await buildAndRun('esbuild', esbuild, c, plan, caseDir);
+  const ours = await buildAndRun('tsr', tsr, c, plan, caseDir);
+  if (keep) console.log(`kept ${caseDir}`); else fs.rmSync(caseDir, { recursive: true, force: true });
+  let status;
+  let detail = '';
+  if (!ref.built) {
+    status = ours.built ? 'fail' : 'pass';
+    detail = ours.built ? `esbuild failed to build:\n${ref.log}` : '';
+  } else if (!ours.built) {
+    status = 'fail';
+    detail = `ts-r-build failed:\n${ours.log}`;
+  } else {
+    const a = JSON.stringify(ref.runs.map((r) => [r.stdout, r.error]));
+    const b = JSON.stringify(ours.runs.map((r) => [r.stdout, r.error]));
+    status = a === b ? 'pass' : 'fail';
+    if (status === 'fail') detail = `esbuild: ${a}\nts-r:    ${b}`;
+  }
+  return { status, detail, flags: plan.flags, refBuilt: ref.built, ranOutput: ref.built && ref.runs.some((r) => r.stdout || r.error) };
+}
+
+async function main() {
+  for (const p of [tsr, esbuild, testsDir]) {
+    if (!fs.existsSync(p)) {
+      console.error(`missing ${p} (build ts-r-build --release, npm ci in bench/, cargo xtask upstream sync)`);
+      process.exit(2);
+    }
+  }
+  let cases = loadCases();
+  if (filter) cases = cases.filter((c) => filter.test(`${c.file}:${c.name}`));
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tsr-esbuild-oracle-')));
+  const results = new Array(cases.length);
+  let next = 0;
+  let done = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= cases.length) return;
+      try {
+        results[i] = { file: cases[i].file, name: cases[i].name, ...(await runCase(cases[i], tmp)) };
+      } catch (e) {
+        results[i] = { file: cases[i].file, name: cases[i].name, status: 'fail', detail: `harness: ${e.stack}` };
+      }
+      done++;
+      if (done % 100 === 0) process.stderr.write(`${done}/${cases.length}\n`);
+    }
+  }
+  await Promise.all(Array.from({ length: jobs }, worker));
+  if (!keep) fs.rmSync(tmp, { recursive: true, force: true });
+
+  const by = (s) => results.filter((r) => r.status === s);
+  const pass = by('pass');
+  const fail = by('fail');
+  const skip = by('skip');
+  const perFile = {};
+  for (const r of results) {
+    const f = (perFile[r.file] ??= { pass: 0, fail: 0, skip: 0 });
+    f[r.status]++;
+  }
+  const skipReasons = {};
+  for (const r of skip) for (const w of r.why) skipReasons[w] = (skipReasons[w] ?? 0) + 1;
+  const summary = {
+    esbuild: '0.28.2',
+    commit: '609683d892977362a0f99026cb74b96263d728a9',
+    total: results.length,
+    run: pass.length + fail.length,
+    pass: pass.length,
+    fail: fail.length,
+    skip: skip.length,
+    passRate: pass.length / Math.max(1, pass.length + fail.length),
+    withRuntimeOutput: results.filter((r) => r.ranOutput).length,
+    perFile,
+    skipReasons: Object.fromEntries(Object.entries(skipReasons).sort((a, b) => b[1] - a[1])),
+  };
+  fs.mkdirSync(path.dirname(outFile), { recursive: true });
+  fs.writeFileSync(outFile, JSON.stringify({ summary, results }, null, 2));
+  for (const r of fail.slice(0, show)) console.log(`\n=== FAIL ${r.file}:${r.name} ${(r.flags ?? []).join(' ')}\n${r.detail}`);
+  console.log(JSON.stringify({ ...summary, skipReasons: undefined, perFile: undefined }, null, 2));
+  console.log(Object.entries(perFile).map(([f, v]) => `${f}: ${v.pass} pass, ${v.fail} fail, ${v.skip} skip`).join('\n'));
+}
+
+main();

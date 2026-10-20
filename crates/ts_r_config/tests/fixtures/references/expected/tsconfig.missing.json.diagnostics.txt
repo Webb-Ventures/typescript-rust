@@ -1,0 +1,3 @@
+tsconfig.missing.json(3,5): error TS6053: File '${FIXTURE}/nope' not found.
+
+tsconfig.missing.json(6,5): error TS6053: File '${FIXTURE}/src' not found.

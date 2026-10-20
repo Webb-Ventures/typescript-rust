@@ -1,0 +1,5 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @differs: tsserver turns a variable that is assigned again into a function declaration (the assignment then fails); ts-r does not offer it
+// @file: src/main.ts
+let /*|*/f = (x: number) => x + 1;
+f = (x) => x;

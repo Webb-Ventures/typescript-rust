@@ -1,0 +1,24 @@
+[96mtsconfig.json[0m:[93m3[0m:[93m5[0m - [91merror[0m[90m TS5052: [0mOption 'emitDecoratorMetadata' cannot be specified without specifying option 'experimentalDecorators'.
+
+[7m3[0m     "emitDecoratorMetadata": true,
+[7m [0m [91m    ~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+[96mtsconfig.json[0m:[93m4[0m:[93m5[0m - [91merror[0m[90m TS5102: [0mOption 'baseUrl' has been removed. Please remove it from your configuration.
+  Use '"paths": {"*": ["./*"]}' instead.
+
+[7m4[0m     "baseUrl": ".",
+[7m [0m [91m    ~~~~~~~~~[0m
+
+[96mtsconfig.json[0m:[93m5[0m:[93m5[0m - [91merror[0m[90m TS5051: [0mOption 'inlineSources can only be used when either option '--inlineSourceMap' or option '--sourceMap' is provided.
+
+[7m5[0m     "inlineSources": true,
+[7m [0m [91m    ~~~~~~~~~~~~~~~[0m
+
+[96mtsconfig.json[0m:[93m6[0m:[93m5[0m - [91merror[0m[90m TS5052: [0mOption 'strictPropertyInitialization' cannot be specified without specifying option 'strictNullChecks'.
+
+[7m6[0m     "strictPropertyInitialization": true,
+[7m [0m [91m    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+Found 4 errors in the same file, starting at: tsconfig.json[90m:3[0m
+

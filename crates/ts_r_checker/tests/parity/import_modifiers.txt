@@ -1,0 +1,6 @@
+a.ts(4,1): error TS1191: An import declaration cannot have modifiers.
+a.ts(5,8): error TS1079: A 'declare' modifier cannot be used with an import declaration.
+a.ts(6,9): error TS1029: 'export' modifier must precede 'declare' modifier.
+a.ts(7,8): error TS1042: 'async' modifier cannot be used here.
+a.ts(8,1): error TS1079: A 'declare' modifier cannot be used with an import declaration.
+a.ts(9,8): error TS1079: A 'declare' modifier cannot be used with an import declaration.

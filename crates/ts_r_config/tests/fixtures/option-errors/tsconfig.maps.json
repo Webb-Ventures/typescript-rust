@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "inlineSources": true,
+    "allowImportingTsExtensions": true,
+    "strictPropertyInitialization": true,
+    "strict": false
+  },
+  "files": [
+    "a.ts"
+  ]
+}

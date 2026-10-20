@@ -1,0 +1,7 @@
+a.ts(6,5): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+a.ts(7,12): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+a.ts(8,9): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+a.ts(12,5): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+a.ts(20,6): error TS2465: 'this' cannot be referenced in a computed property name.
+a.ts(21,6): error TS2466: 'super' cannot be referenced in a computed property name.
+a.ts(31,20): error TS2466: 'super' cannot be referenced in a computed property name.

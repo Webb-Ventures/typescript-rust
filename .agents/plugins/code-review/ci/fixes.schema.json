@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "commit_message", "results"],
+  "properties": {
+    "summary": { "type": "string", "description": "One or two sentences on what was changed overall." },
+    "commit_message": { "type": "string", "description": "Conventional commit subject (72 characters or fewer), a blank line, then a short body." },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "explanation", "files"],
+        "properties": {
+          "id": { "type": "string", "description": "The finding's id, exactly as given." },
+          "status": { "type": "string", "enum": ["fixed", "not_fixed"] },
+          "explanation": { "type": "string", "description": "Posted on the finding's thread: what changed and why, or why it was not fixed." },
+          "files": { "type": "array", "items": { "type": "string" }, "description": "Repository paths changed for this finding; empty when not fixed." }
+        }
+      }
+    }
+  }
+}

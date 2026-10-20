@@ -1,0 +1,4 @@
+a.ts(20,5): error TS2304: Cannot find name 'Value'.
+a.ts(21,5): error TS2708: Cannot use namespace 'Nested' as a value.
+b.ts(7,5): error TS2304: Cannot find name 'Value'.
+b.ts(8,5): error TS2708: Cannot use namespace 'Nested' as a value.

@@ -1,0 +1,19 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { z, b } from "./b";
+import { a } from "./a";
+import { c } from "./b";
+import * as ns from "./ns";
+import def from "./def";
+import { d } from "./def";
+
+console.log(a, b, c, z, ns, def, d);
+// @file: src/a.ts
+export const a = 1;
+// @file: src/b.ts
+export const b = 1, c = 2, z = 3;
+// @file: src/ns.ts
+export const n = 1;
+// @file: src/def.ts
+export default 1;
+export const d = 2;

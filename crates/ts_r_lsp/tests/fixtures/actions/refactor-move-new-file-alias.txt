@@ -1,0 +1,11 @@
+// @action: refactor Move to a new file/Move to a new file
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "paths": {"@api": ["./src/service.ts"]}}}
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/service.ts
+/*[*/export const moved = 1;/*]*/
+export const kept = 2;
+// @file: src/user.ts
+import { moved, kept } from "@api";
+
+export const sum = moved + kept;

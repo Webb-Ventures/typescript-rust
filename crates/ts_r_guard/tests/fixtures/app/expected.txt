@@ -1,0 +1,48 @@
+parse User valid: ok {"id":1,"email":"a@b.c","name":"Ann","role":"admin","createdAt":"2026-10-15"}
+parse User invalid: ParseError type=User issues=[{"path":["id"],"expected":"number","received":"string"},{"path":["email"],"expected":"string","received":"number"},{"path":["role"],"expected":"\"admin\" | \"member\" | \"guest\"","received":"string"}] message="Invalid User: $.id: expected number, received string (+2 more)" isError=true
+parse User missing: ParseError type=User issues=[{"path":["email"],"expected":"string","received":"missing"},{"path":["name"],"expected":"string","received":"missing"},{"path":["role"],"expected":"\"admin\" | \"member\" | \"guest\"","received":"missing"},{"path":["createdAt"],"expected":"string","received":"missing"}] message="Invalid User: $.email: expected string, received missing (+3 more)" isError=true
+parse User optional undefined: ParseError type=User issues=[{"path":["avatarUrl"],"expected":"string","received":"undefined"}] message="Invalid User: $.avatarUrl: expected string, received undefined" isError=true
+parse User not object: ParseError type=User issues=[{"path":[],"expected":"object","received":"array"}] message="Invalid User: $: expected object, received array" isError=true
+parse User same object: ok true
+safeParse Order valid: ok true
+safeParse Order invalid: ok {"type":"Order","issues":[{"path":["items",0,"quantity"],"expected":"number","received":"string"},{"path":["status"],"expected":"\"pending\" | \"paid\" | \"shipped\" | \"cancelled\"","received":"string"}],"isParseError":true}
+is Product: ok [true,false]
+assert Address: ParseError type=Address issues=[{"path":["country"],"expected":"\"AU\" | \"NZ\" | \"US\"","received":"string"}] message="Invalid Address: $.country: expected \"AU\" | \"NZ\" | \"US\", received string" isError=true
+parseJson Page<User>: ok 1
+parseJson Page<User> invalid: ParseError type=Page<User> issues=[{"path":["items",0,"email"],"expected":"string","received":"missing"},{"path":["items",0,"name"],"expected":"string","received":"missing"},{"path":["items",0,"role"],"expected":"\"admin\" | \"member\" | \"guest\"","received":"missing"},{"path":["items",0,"createdAt"],"expected":"string","received":"missing"},{"path":["next"],"expected":"string | null","received":"number"}] message="Invalid Page<User>: $.items[0].email: expected string, received missing (+4 more)" isError=true
+parseJson syntax: SyntaxError Expected property name or '}' in JSON at position 1 (line 1 column 2)
+guard Event: ok [true,true,false]
+guard Event invalid: ParseError type=Event issues=[{"path":["order","total"],"expected":"object","received":"null"}] message="Invalid Event: $.order.total: expected object, received null" isError=true
+map parse<OrderItem>: ok 2
+map parse<OrderItem> invalid: ParseError type=OrderItem issues=[{"path":["productId"],"expected":"string","received":"number"},{"path":["quantity"],"expected":"number","received":"missing"},{"path":["unitPrice"],"expected":"Money","received":"missing"}] message="Invalid OrderItem: $.productId: expected string, received number (+2 more)" isError=true
+namespace parse: ParseError type=Money issues=[{"path":["amount"],"expected":"number","received":"string"},{"path":["currency"],"expected":"\"AUD\" | \"USD\"","received":"string"}] message="Invalid Money: $.amount: expected number, received string (+1 more)" isError=true
+namespace ParseError: ok true
+filter is<Money>: ok 2
+env: ok {"GUARD_PORT":8080,"GUARD_DEBUG":true,"GUARD_MODE":"dev"}
+env invalid: ParseError type={ GUARD_PORT: number; GUARD_MISSING: string } issues=[{"path":["GUARD_MISSING"],"expected":"string","received":"missing"}] message="Invalid { GUARD_PORT: number; GUARD_MISSING: string }: $.GUARD_MISSING: expected string, received missing" isError=true
+body: ok {"amount":1,"currency":"AUD"}
+body invalid: ParseError type=Money issues=[{"path":[],"expected":"object","received":"string"}] message="Invalid Money: $: expected object, received string" isError=true
+query parsed: ok {"q":"shoes","page":2,"tags":["a","b"],"sort":"asc"}
+query url: ok {"q":"hat","tags":["x"],"sort":"desc"}
+query invalid: ParseError type=Search issues=[{"path":["page"],"expected":"number","received":"string"},{"path":["tags"],"expected":"array","received":"missing"},{"path":["sort"],"expected":"\"asc\" | \"desc\"","received":"string"}] message="Invalid Search: $.page: expected number, received string (+2 more)" isError=true
+args: ok {"port":8080,"verbose":true,"dryRun":true,"include":["a","b"],"_":["build","--x"]}
+args invalid: ParseError type=Cli issues=[{"path":["port"],"expected":"number","received":"string"},{"path":["include"],"expected":"array","received":"missing"}] message="Invalid Cli: $.port: expected number, received string (+1 more)" isError=true
+expect: ok 2
+expect fails: ExpectError no item above 5
+panic: PanicError boom
+deep: ok ["Chain",1,513,"a value nested too deeply"]
+chain ok: ok true
+class Point: ok 1
+class Point invalid: ParseError type=Point issues=[{"path":[],"expected":"Point","received":"object"}] message="Invalid Point: $: expected Point, received object" isError=true
+refined Email: ok "ann@example.com"
+refined Email invalid: ParseError type=Email issues=[{"path":[],"expected":"Email","received":"string"}] message="Invalid Email: $: expected Email, received string" isError=true
+refined Email not a string: ParseError type=Email issues=[{"path":[],"expected":"string","received":"number"}] message="Invalid Email: $: expected string, received number" isError=true
+refined query: ok {"port":3000}
+refined query invalid: ParseError type={ port: Port } issues=[{"path":["port"],"expected":"Port","received":"number"}] message="Invalid { port: Port }: $.port: expected Port, received number" isError=true
+refined alias: ok {"x":1}
+refined alias invalid: ParseError type=Positive issues=[{"path":[],"expected":"Positive","received":"object"}] message="Invalid Positive: $: expected Positive, received object" isError=true
+placed: ok true
+placed invalid: ParseError type=Placed issues=[{"path":["at"],"expected":"Point","received":"object"},{"path":["owner"],"expected":"Email","received":"string"}] message="Invalid Placed: $.at: expected Point, received object (+1 more)" isError=true
+parse inside a getter: ParseError type={ a: number; b: string } issues=[{"path":["a"],"expected":"number","received":"string"},{"path":["b"],"expected":"string","received":"number"}] message="Invalid { a: number; b: string }: $.a: expected number, received string (+1 more)" isError=true
+query recursive array: ok ["{ X: Nest }",1,513,"a value nested too deeply"]
+args boolean alias: ok {"verbose":true,"_":["file.ts"]}

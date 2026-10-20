@@ -1,0 +1,9 @@
+a.js(4,14): error TS1277: 'const' modifier can only appear on a type parameter of a function, method or class
+a.js(14,14): error TS1273: 'private' modifier cannot appear on a type parameter
+a.js(23,14): error TS1274: 'in' modifier can only appear on a type parameter of a class, interface or type alias
+b.ts(1,17): error TS1273: 'public' modifier cannot appear on a type parameter
+b.ts(2,20): error TS1274: 'in' modifier can only appear on a type parameter of a class, interface or type alias
+b.ts(3,20): error TS1274: 'out' modifier can only appear on a type parameter of a class, interface or type alias
+b.ts(4,30): error TS1274: 'in' modifier can only appear on a type parameter of a class, interface or type alias
+b.ts(5,20): error TS1277: 'const' modifier can only appear on a type parameter of a function, method or class
+b.ts(7,17): error TS1273: 'readonly' modifier cannot appear on a type parameter

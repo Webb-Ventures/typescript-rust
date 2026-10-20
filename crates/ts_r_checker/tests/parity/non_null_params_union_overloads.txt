@@ -1,0 +1,20 @@
+a.ts(13,17): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+a.ts(22,34): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(23,33): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(24,33): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(25,28): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(26,39): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(35,7): error TS2322: Type 'string' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(36,7): error TS2322: Type 'string' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(40,7): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+a.ts(47,7): error TS2322: Type '([x, y]?: [number, (number | undefined)?]) => void' is not assignable to type 'string'.
+a.ts(52,39): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+a.ts(56,11): error TS2430: Interface 'ExtendsAny' incorrectly extends interface 'WithAny'.
+  'number' index signatures are incompatible.
+    Type '"y"' is not assignable to type '"x"'.
+a.ts(58,7): error TS2322: Type '"x" | undefined' is not assignable to type '"z"'.
+  Type 'undefined' is not assignable to type '"z"'.
+a.ts(59,26): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.

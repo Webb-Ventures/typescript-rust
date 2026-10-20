@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+export class C {
+  static make(a: number) {
+    return C.newMethod(a);
+  }
+
+  private static newMethod(a: number) {
+    return a * 2 + 1;
+  }
+}

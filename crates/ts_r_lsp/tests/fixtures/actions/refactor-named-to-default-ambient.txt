@@ -1,0 +1,10 @@
+// @action: refactor Convert import/Convert named imports to default import
+// @file: src/main.ts
+import { /*|*/a } from "amb-pkg";
+
+console.log(a);
+// @file: src/amb.d.ts
+declare module "amb-pkg" {
+    const m: { a: number };
+    export = m;
+}

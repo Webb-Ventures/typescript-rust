@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "isolatedDeclarations": true,
+    "exactOptionalPropertyTypes": true,
+    "strictNullChecks": false,
+    "inlineSourceMap": true,
+    "sourceMap": true,
+    "mapRoot": "m",
+    "noLib": true,
+    "lib": [
+      "es2020"
+    ],
+    "emitDecoratorMetadata": true,
+    "reactNamespace": "R",
+    "jsxFactory": "h",
+    "jsx": "react",
+    "jsxImportSource": "preact",
+    "declarationDir": "d",
+    "sourceRoot": "s"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

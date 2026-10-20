@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert to optional chain expression
+// @file: src/main.ts
+interface A { b?: { c?: { d: number } } }
+export function d(a: A | undefined) {
+  return a?.b && a.b.c && a.b.c.d;
+}

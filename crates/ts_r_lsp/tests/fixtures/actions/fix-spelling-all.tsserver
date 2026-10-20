@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// fix all: Fix all detected spelling errors
+// @file: src/main.ts
+export function f(xs: string[], o: { value: number }) {
+  return xs.length + o.value + xs.length;
+}

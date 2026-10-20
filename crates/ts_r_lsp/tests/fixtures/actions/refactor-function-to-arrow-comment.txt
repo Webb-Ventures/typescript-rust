@@ -1,0 +1,7 @@
+// @action: refactor Convert arrow function or function expression/Convert to arrow function
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+const k = /*|*/function () {
+  // one
+  return 1;
+};

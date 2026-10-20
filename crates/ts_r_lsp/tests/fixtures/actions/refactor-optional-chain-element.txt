@@ -1,0 +1,5 @@
+// @action: refactor Convert to optional chain expression/Convert to optional chain expression
+// @file: src/main.ts
+export function first(rows: Record<string, number[]> | undefined, key: string) {
+  return /*[*/rows && rows[key] && rows[key][0]/*]*/;
+}

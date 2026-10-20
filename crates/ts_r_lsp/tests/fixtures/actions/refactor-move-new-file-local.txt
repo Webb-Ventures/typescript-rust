@@ -1,0 +1,12 @@
+// @action: refactor Move to a new file/Move to a new file
+// @differs: tsserver inserts the new import and the `export` it adds to `factor` at the same offset (`export import { scale } ...`, invalid); ts-r exports the declaration
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/main.ts
+const factor = 3;
+
+/*[*/function scale(n: number): number {
+  return n * factor;
+}/*]*/
+
+export const value = scale(2);

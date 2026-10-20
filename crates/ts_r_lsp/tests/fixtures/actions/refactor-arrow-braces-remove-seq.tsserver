@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Remove braces from arrow function
+// @file: src/main.ts
+let a = 0;
+const g = () => (a++, a);

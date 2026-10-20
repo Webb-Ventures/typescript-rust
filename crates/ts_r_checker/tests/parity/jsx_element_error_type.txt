@@ -1,0 +1,6 @@
+a.tsx(4,12): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.
+a.tsx(4,12): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+a.tsx(6,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.tsx(7,7): error TS2322: Type 'boolean' is not assignable to type 'string | number | symbol'.
+a.tsx(9,10): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+a.tsx(12,7): error TS2322: Type 'number' is not assignable to type 'string'.

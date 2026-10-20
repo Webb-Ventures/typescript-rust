@@ -1,0 +1,2 @@
+a.ts(2,14): error TS2322: Type 'IteratorResult<number, any>' is not assignable to type 'string'.
+  Type 'IteratorReturnResult<any>' is not assignable to type 'string'.

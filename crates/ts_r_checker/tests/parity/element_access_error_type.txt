@@ -1,0 +1,14 @@
+a.ts(6,1): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a: number; }'.
+a.ts(8,1): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(10,1): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+a.ts(11,1): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(12,1): error TS7053: Element implicitly has an 'any' type because expression of type '"zz"' can't be used to index type '{ a: number; }'.
+  Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(13,1): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ a: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ a: number; }'.
+a.ts(17,20): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a: number; }'.
+a.ts(18,20): error TS7053: Element implicitly has an 'any' type because expression of type '"zz"' can't be used to index type '{ a: number; }'.
+  Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(19,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a: number; }'.
+a.ts(20,16): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.

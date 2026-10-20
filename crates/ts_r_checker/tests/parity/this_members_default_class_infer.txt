@@ -1,0 +1,6 @@
+a.ts(13,15): error TS2322: Type 'this | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(31,60): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type '{ a?: (T extends (infer U)[] ? U : never) | undefined; }'.
+a.ts(32,75): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type '{ a?: (T extends (infer V extends string)[] ? V : never) | undefined; }'.
+a.ts(33,80): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type '{ a?: (T extends { a: infer W extends string; } ? W[] : never) | undefined; }'.
+c.ts(6,11): error TS2339: Property 'w' does not exist on type 'typeof C'.

@@ -1,0 +1,6 @@
+a.js(5,20): error TS1003: Identifier expected.
+a.js(9,28): error TS1003: Identifier expected.
+a.js(14,3): error TS1003: Identifier expected.
+b.js(3,15): error TS1003: Identifier expected.
+b.js(5,20): error TS1003: Identifier expected.
+b.js(7,22): error TS1003: Identifier expected.

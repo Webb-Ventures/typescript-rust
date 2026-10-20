@@ -1,0 +1,11 @@
+a.ts(7,5): error TS2322: Type '"nope"' is not assignable to type 'keyof A'.
+a.ts(8,5): error TS2322: Type '"nope"' is not assignable to type 'keyof I'.
+a.ts(9,5): error TS2322: Type '"nope"' is not assignable to type 'keyof O'.
+a.ts(10,5): error TS2322: Type '"nope"' is not assignable to type '"p" | "q"'.
+a.ts(11,5): error TS2322: Type '"nope"' is not assignable to type 'keyof I | undefined'.
+a.ts(13,5): error TS2322: Type 'keyof I' is not assignable to type '"x"'.
+  Type '"y"' is not assignable to type '"x"'.
+a.ts(14,7): error TS2741: Property 'y' is missing in type '{ x: number; }' but required in type 'Record<keyof I, number>'.
+a.ts(16,26): error TS2322: Type 'number' is not assignable to type 'boolean'.
+a.ts(17,53): error TS2322: Type '"y"' is not assignable to type '"q"'.
+a.ts(18,25): error TS2322: Type '"z"' is not assignable to type 'keyof I'.

@@ -1,0 +1,7 @@
+// @action: fix 6133 Remove unused declaration for: 'b'
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "noUnusedLocals": true, "noUnusedParameters": true}}
+// @file: src/main.ts
+export function f(o: { a: number; b: number }) {
+  const { a, /*|*/b } = o;
+  return a;
+}

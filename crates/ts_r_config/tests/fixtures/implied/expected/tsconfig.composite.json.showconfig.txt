@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "checkJs": true,
+        "composite": true,
+        "rewriteRelativeImportExtensions": true,
+        "verbatimModuleSyntax": true,
+        "isolatedModules": true,
+        "preserveConstEnums": true,
+        "declaration": true,
+        "incremental": true,
+        "allowJs": true,
+        "allowImportingTsExtensions": true
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

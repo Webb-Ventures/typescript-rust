@@ -1,0 +1,12 @@
+a.ts(1,11): error TS2428: All declarations of 'A' must have identical type parameters.
+a.ts(2,11): error TS2428: All declarations of 'A' must have identical type parameters.
+a.ts(3,11): error TS2428: All declarations of 'B' must have identical type parameters.
+a.ts(4,11): error TS2428: All declarations of 'B' must have identical type parameters.
+a.ts(5,11): error TS2428: All declarations of 'C' must have identical type parameters.
+a.ts(6,11): error TS2428: All declarations of 'C' must have identical type parameters.
+a.ts(14,11): error TS2428: All declarations of 'G' must have identical type parameters.
+a.ts(15,11): error TS2428: All declarations of 'G' must have identical type parameters.
+a.ts(16,7): error TS2428: All declarations of 'H' must have identical type parameters.
+a.ts(17,11): error TS2428: All declarations of 'H' must have identical type parameters.
+a.ts(20,11): error TS2428: All declarations of 'K' must have identical type parameters.
+a.ts(21,11): error TS2428: All declarations of 'K' must have identical type parameters.

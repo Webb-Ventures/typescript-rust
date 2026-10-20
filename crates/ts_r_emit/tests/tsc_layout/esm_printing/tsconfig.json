@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "jsx": "react",
+    "strict": false,
+    "types": [],
+    "outDir": "out"
+  },
+  "files": ["printing.tsx", "refs.ts"]
+}

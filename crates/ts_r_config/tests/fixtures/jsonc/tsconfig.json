@@ -1,0 +1,10 @@
+﻿// leading comment
+{
+  /* block */ "compilerOptions": {
+    "strict": false, // trailing comment
+    "lib": ["ES2022", "DOM",],
+    "jsxFactory": "h\u0041",
+    "maxNodeModuleJsDepth": 0x2,
+  },
+  "include": ["src",],
+}

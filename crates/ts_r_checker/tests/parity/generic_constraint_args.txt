@@ -1,0 +1,2 @@
+a.ts(37,49): error TS2344: Type '"zz" | K' does not satisfy the constraint 'keyof O'.
+  Type 'string' is not assignable to type 'keyof O'.

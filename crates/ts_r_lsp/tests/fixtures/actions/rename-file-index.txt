@@ -1,0 +1,11 @@
+// @action: rename src/lib src/core
+// @file: src/main.ts
+import { helper } from "./lib";
+import { other } from "./lib/other";
+
+export const n = helper(other);
+// @file: src/lib/index.ts
+export { other } from "./other";
+export function helper(x: number): number { return x; }
+// @file: src/lib/other.ts
+export const other = 1;

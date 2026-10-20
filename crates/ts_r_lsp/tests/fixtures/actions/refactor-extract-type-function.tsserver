@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType = (x: number, y?: string, ...r: any[]) => void;
+
+export let cb: NewType;
+export let ctor: abstract new () => object;

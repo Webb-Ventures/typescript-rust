@@ -1,0 +1,25 @@
+a.ts(7,14): error TS2322: Type '{ text: null; }' is not assignable to type 'W3[] | W3 | undefined'.
+  Type '{ text: null; }' is not assignable to type 'W3'.
+    Types of property 'text' are incompatible.
+      Type 'null' is not assignable to type 'string | Op<string> | undefined'.
+a.ts(8,14): error TS2322: Type '{ text: null; }' is not assignable to type 'W3[] | W3'.
+  Type '{ text: null; }' is not assignable to type 'W3'.
+    Types of property 'text' are incompatible.
+      Type 'null' is not assignable to type 'string | Op<string> | undefined'.
+a.ts(9,14): error TS2322: Type '{ text: null; }' is not assignable to type 'W3 | W4 | undefined'.
+  Type '{ text: null; }' is not assignable to type 'W3'.
+    Types of property 'text' are incompatible.
+      Type 'null' is not assignable to type 'string | Op<string> | undefined'.
+a.ts(10,14): error TS2322: Type '{ text: null; }' is not assignable to type 'W3'.
+  Types of property 'text' are incompatible.
+    Type 'null' is not assignable to type 'string | Op<string> | undefined'.
+a.ts(11,14): error TS2322: Type '{ text: null; }' is not assignable to type 'W3[] | W3 | W4 | undefined'.
+  Type '{ text: null; }' is not assignable to type 'W3'.
+    Types of property 'text' are incompatible.
+      Type 'null' is not assignable to type 'string | Op<string> | undefined'.
+a.ts(13,6): error TS2322: Type '{ text: null; }' is not assignable to type 'W3[] | W3 | undefined'.
+  Types of property 'text' are incompatible.
+    Type 'null' is not assignable to type 'string | Op<string> | undefined'.
+a.ts(15,6): error TS2322: Type '{ text: null; }' is not assignable to type 'W3[] | W3 | null'.
+  Types of property 'text' are incompatible.
+    Type 'null' is not assignable to type 'string | Op<string> | undefined'.

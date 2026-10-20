@@ -1,0 +1,4 @@
+tsconfig.removed2.json(3,25): error TS5108: Option 'moduleResolution=node10' has been removed. Please remove it from your configuration.
+
+tsconfig.removed2.json(4,5): error TS5102: Option 'baseUrl' has been removed. Please remove it from your configuration.
+  Use '"paths": {"*": ["./*"]}' instead.

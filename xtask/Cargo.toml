@@ -1,0 +1,22 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Why each dependency is here: see xtask/AGENTS.md.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
+ts_r_parser = { path = "../crates/ts_r_parser" }
+ts_r_checker = { path = "../crates/ts_r_checker" }
+ts_r_codegen = { path = "../crates/ts_r_codegen" }
+ts_r_config = { path = "../crates/ts_r_config" }
+ts_r_testing = { path = "../crates/ts_r_testing" }
+ts_r_transform = { path = "../crates/ts_r_transform" }

@@ -1,0 +1,81 @@
+{
+  "compilerOptions": {
+    "allowArbitraryExtensions": true,
+    "allowUmdGlobalAccess": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "customConditions": [
+      "dev"
+    ],
+    "emitBOM": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "declarationMap": true,
+    "declaration": true,
+    "deduplicatePackages": false,
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "importHelpers": true,
+    "inlineSources": true,
+    "sourceMap": true,
+    "isolatedDeclarations": true,
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
+    "libReplacement": true,
+    "mapRoot": "./maps/",
+    "moduleSuffixes": [
+      ".ios",
+      ""
+    ],
+    "noCheck": true,
+    "noEmitHelpers": true,
+    "noEmitOnError": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noResolve": true,
+    "noUncheckedSideEffectImports": false,
+    "preserveSymlinks": true,
+    "removeComments": true,
+    "resolvePackageJsonExports": false,
+    "resolvePackageJsonImports": false,
+    "rootDirs": [
+      "./a",
+      "b"
+    ],
+    "sourceRoot": "./s/",
+    "stableTypeOrdering": false,
+    "strictBuiltinIteratorReturn": false,
+    "stripInternal": true,
+    "skipDefaultLibCheck": true,
+    "traceResolution": false,
+    "tsBuildInfoFile": "./.tsbuildinfo",
+    "useDefineForClassFields": false,
+    "maxNodeModuleJsDepth": 2,
+    "diagnostics": false,
+    "extendedDiagnostics": false,
+    "listFiles": false,
+    "explainFiles": false,
+    "generateCpuProfile": "prof",
+    "pretty": false,
+    "noErrorTruncation": true,
+    "listEmittedFiles": true,
+    "preserveWatchOutput": true,
+    "plugins": [
+      {
+        "name": "x"
+      }
+    ],
+    "assumeChangesOnlyAffectDirectDependencies": true,
+    "disableSizeLimit": true,
+    "disableSolutionSearching": true,
+    "disableReferencedProjectLoad": true,
+    "disableSourceOfProjectReferenceRedirect": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

@@ -1,0 +1,4 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @trigger: implicit
+// @file: src/main.ts
+export const /*|*/f = (x: number) => x + 1;

@@ -1,0 +1,2 @@
+a.js(5,16): error TS7053: Element implicitly has an 'any' type because expression of type '"missing"' can't be used to index type 'Box'.
+  Property 'missing' does not exist on type 'Box'.

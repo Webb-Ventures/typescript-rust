@@ -1,0 +1,18 @@
+a.ts(7,50): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ a: number; b: number; }'.
+a.ts(11,38): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ a: number; b: number; }'.
+a.ts(12,58): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type '{ a: number; b: number; }'.
+a.ts(14,56): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type '{ a: number; b: number; }'.
+a.ts(20,35): error TS2353: Object literal may only specify known properties, and 'jj' does not exist in type 'Style'.
+a.ts(21,44): error TS2353: Object literal may only specify known properties, and 'jj' does not exist in type 'StyleBase'.
+a.ts(22,38): error TS2353: Object literal may only specify known properties, and 'jj' does not exist in type 'Style'.
+a.ts(25,28): error TS2820: Type '"hdpvd"' is not assignable to type '"bluray" | "hddvd"'. Did you mean '"hddvd"'?
+a.ts(29,7): error TS2820: Type '"strong"' is not assignable to type 'T1'. Did you mean '"string"'?
+a.ts(30,7): error TS2322: Type '"strong"' is not assignable to type '"boolean" | "number"'.
+a.ts(31,7): error TS2820: Type '"strong"' is not assignable to type '"boolean" | "string"'. Did you mean '"string"'?
+a.ts(33,3): error TS2345: Argument of type '"strong"' is not assignable to parameter of type 'T1'.
+a.ts(34,24): error TS2820: Type '"strong"' is not assignable to type 'T1'. Did you mean '"string"'?
+a.ts(35,7): error TS2322: Type '"strong"' is not assignable to type '"string"'.
+a.ts(36,7): error TS2820: Type '"strong"' is not assignable to type 'number | T1'. Did you mean '"string"'?
+a.ts(38,7): error TS2820: Type '"strong"' is not assignable to type 'T1'. Did you mean '"string"'?
+a.ts(39,7): error TS2820: Type '"Number"' is not assignable to type 'T1'. Did you mean '"number"'?
+a.ts(43,32): error TS2353: Object literal may only specify known properties, and 'w' does not exist in type 'DU'.

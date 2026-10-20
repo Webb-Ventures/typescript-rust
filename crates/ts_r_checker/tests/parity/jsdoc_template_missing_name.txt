@@ -1,0 +1,5 @@
+a.js(2,18): error TS1069: Unexpected token. A type parameter name was expected without curly braces.
+a.js(4,17): error TS1069: Unexpected token. A type parameter name was expected without curly braces.
+a.js(7,22): error TS1069: Unexpected token. A type parameter name was expected without curly braces.
+a.js(12,2): error TS1069: Unexpected token. A type parameter name was expected without curly braces.
+a.js(16,16): error TS2304: Cannot find name 'T'.

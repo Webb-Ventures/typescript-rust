@@ -1,0 +1,16 @@
+/target
+node_modules/
+*.profraw
+.DS_Store
+
+# cargo xtask bench output
+/bench/results/
+# Test fixtures need their own node_modules trees.
+!crates/**/tests/fixtures/**/node_modules/
+# Agent worktrees (one per isolated agent)
+/.claude/worktrees/
+
+# Built website (older builds wrote _site/; the site now builds to landing/out/)
+/_site/
+ci-pass-marker/
+_site/

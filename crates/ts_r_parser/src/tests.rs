@@ -1,0 +1,2339 @@
+//! Unit tests per construct. Each `ok_*` test asserts the snippet parses without diagnostics;
+//! structure checks look for fragments of the dump.
+
+// Real-world or generated input: abort instead of exhausting the machine's memory.
+ts_r_testing::cap_memory!();
+
+use ts_r_ast::{Modifiers, NodeKind, SourceKind};
+
+use crate::parse;
+
+#[track_caller]
+fn ok_kind(src: &str, kind: SourceKind) -> String {
+    let r = parse(src, kind);
+    assert!(
+        r.diagnostics.is_empty(),
+        "unexpected diagnostics for {src:?}:\n{:#?}\n{}",
+        r.diagnostics,
+        r.ast.dump()
+    );
+    r.ast.dump()
+}
+
+#[track_caller]
+fn ok(src: &str) -> String {
+    ok_kind(src, SourceKind::Ts)
+}
+
+#[track_caller]
+fn ok_tsx(src: &str) -> String {
+    ok_kind(src, SourceKind::Tsx)
+}
+
+#[track_caller]
+fn ok_js(src: &str) -> String {
+    ok_kind(src, SourceKind::Js)
+}
+
+#[track_caller]
+fn err_codes(src: &str, kind: SourceKind) -> Vec<u32> {
+    parse(src, kind)
+        .diagnostics
+        .iter()
+        .map(|d| d.code)
+        .collect()
+}
+
+#[track_caller]
+fn has(dump: &str, fragment: &str) {
+    assert!(dump.contains(fragment), "missing {fragment:?} in:\n{dump}");
+}
+
+/// Kinds of the top-level statements.
+fn stmt_kinds(src: &str, kind: SourceKind) -> Vec<NodeKind> {
+    let r = parse(src, kind);
+    let ts_r_ast::Node::Program { stmts } = *r.ast.node(r.ast.root) else {
+        panic!()
+    };
+    r.ast.list(stmts).iter().map(|&s| r.ast.kind(s)).collect()
+}
+
+// ---- Statements ----
+
+#[test]
+fn statements() {
+    ok("if (a) b(); else if (c) d; else {}");
+    ok("for (;;) {} for (let i = 0; i < n; i++) {} for (x in y); for (const [a, b] of c) {}");
+    ok("async function f() { for await (const x of y) {} }");
+    ok("while (x) x--; do x++; while (x < 10) foo();");
+    ok("switch (x) { case 1: case 2: f(); break; default: g() }");
+    ok("try { a() } catch { } try {} catch (e) {} finally {} try {} catch ({ message }) {}");
+    ok("try {} catch (e: unknown) {}");
+    ok("label: for (;;) { continue label; break label; }");
+    ok("with (obj) {} debugger; ;;");
+    ok("throw new Error('x');");
+    ok("function f() { return; } function g() { return 1 }");
+    let d = ok("'use strict'; \"use client\"\nfoo();");
+    has(&d, "stmts[0]: Directive 0..13 value=\"use strict\"");
+    has(&d, "stmts[1]: Directive");
+    let d = ok("'not directive'.length;");
+    has(&d, "ExprStmt");
+    // A newline doesn't end the string's expression when the next token continues it.
+    for src in [
+        "'hello'\n.toUpperCase();",
+        "'hello'\n[0];",
+        "function f() { 'a'\n('b') }",
+        "'a'\n+ 1",
+        "'a'\n`t`",
+    ] {
+        let d = ok(src);
+        assert!(!d.contains("Directive"), "{src:?}:\n{d}");
+    }
+    let d = ok("function f() { 'use strict'\n'x'\nreturn }");
+    assert_eq!(d.matches("Directive").count(), 2, "{d}");
+}
+
+#[test]
+fn asi() {
+    let d = ok("a\n++b");
+    has(&d, "Update 2..5 prefix");
+    let d = ok("function f() { return\n1 }");
+    has(&d, "Return 15..21");
+    ok("let a = 1\nlet b = 2\nconst c = a\n(b)");
+    ok("x\n/re/g.test(y)");
+    ok("do {} while (false) foo()");
+    ok("throw err\n");
+    ok("var x = y\n[1, 2].forEach(f)");
+    // A lone name before a same-line token is TS1434 at the name (commonMissingSemicolons);
+    // anything else is `';' expected` at the token.
+    assert_eq!(err_codes("a b", SourceKind::Ts), [1434]);
+    assert_eq!(err_codes("a.b c", SourceKind::Ts), [1005]);
+}
+
+#[test]
+fn variables() {
+    ok("var a; let b = 1, c; const d = 2;");
+    ok("let { a, b: { c }, d = 1, ...rest } = o; let [x, , y = 2, ...z] = arr;");
+    ok("let x!: number; let y: string = 'a';");
+    ok("using res = open(); { await using r2 = open(); }");
+    ok("let = 1; let.x; var let;");
+    ok("for (using x of y) {} for (await using x of y) {}");
+    let d = ok("using x = f();");
+    has(&d, "VarDecl 0..14 kind=Using");
+    ok("using\nx = 1;");
+    let k = stmt_kinds("let\nx = 1", SourceKind::Ts);
+    assert_eq!(k, [NodeKind::VarDecl]);
+}
+
+#[test]
+fn functions() {
+    ok("function f<T>(a: T, b?: number, ...rest: string[]): T { return a }");
+    ok("function f(this: Window, { a, b }: Opts = {}, [c]: [number]) {}");
+    ok("function* g() { yield; yield 1; yield* other(); const x = yield; }");
+    ok("async function f() { await x; await (async () => {})(); }");
+    ok("function f(a: string): void; function f(a: any) {}");
+    ok("export default function () {} ");
+    ok("export default async function* named() {}");
+    let d = ok("function f(): asserts x is string {} function g(x): x is number { return true }");
+    has(&d, "TypePredicate");
+    has(&d, "asserts");
+    ok("function f(): asserts this {} function g(): this is Foo { return true }");
+}
+
+#[test]
+fn arrows() {
+    ok("const a = () => {}; const b = x => x * 2; const c = async x => await x;");
+    ok("const d = async (a, b) => a + b; const e = (a: number, b = 2, ...c: any[]): number => a;");
+    ok("const f = ({ a, b }) => a; const g = ([a]) => a; const h = () => ({ a: 1 });");
+    ok("const i = <T>(x: T) => x; const j = async <T>(x: T): Promise<T> => x;");
+    ok("const k = (x): x is string => typeof x === 'string';");
+    // A parameter named `async` (arrowFunctionWithParameterNameAsync_es6).
+    ok("const l = async => async;");
+    // An optional call after an instantiation is no property access
+    // (optionalChainWithInstantiationExpression2).
+    ok("a?.<b>();\na<b>?.();");
+    ok("f(() => 1, (a) => a, async () => {});");
+    let d = ok("x = a ? (b) : c => d;");
+    has(&d, "cons: Paren");
+    has(&d, "alt: Arrow");
+    let d = ok("x = a ? (b): c => d : e;");
+    has(&d, "cons: Arrow");
+    has(&d, "return_type: TypeRef");
+    ok("x = a ? b => c : d => e;");
+    ok("x = (a, b);");
+    ok("x = (a = 1);");
+    ok("x = ((a));");
+    ok("x = (a) + (b);");
+    ok("x = async;");
+    ok("x = async(1, 2);");
+    ok("x = (a?: number) => a;");
+}
+
+#[test]
+fn deeply_nested_parens_are_linear() {
+    let mut src = String::from("x = ");
+    for _ in 0..300 {
+        src.push_str("(a = ");
+    }
+    src.push('1');
+    for _ in 0..300 {
+        src.push(')');
+    }
+    let t = std::time::Instant::now();
+    ok(&src);
+    assert!(t.elapsed().as_secs() < 5);
+}
+
+#[test]
+fn classes() {
+    let src = r#"
+@Component({ selector: 'x' })
+export class A<T> extends Base<T> implements I, J<T> {
+    static #count = 0;
+    #priv: string;
+    declare readonly d: number;
+    public static override x?: number = 1;
+    protected abstract y: string;
+    accessor z = 1;
+    static accessor w: number;
+    [key: string]: any;
+    static [k: number]: string;
+    constructor(private readonly a: string, @Inject(TOKEN) public b?: number) { super(); }
+    get value(): T { return this.v }
+    set value(v: T) {}
+    static async *gen() {}
+    async method<U>(this: A<T>, u: U): Promise<void> {}
+    optional?(): void;
+    definite!: string;
+    ['computed']() {}
+    'quoted'() {}
+    42() {}
+    #privMethod() { return #priv in this; }
+    static { init(); }
+    get() {}
+    set() {}
+    static() {}
+    async() {}
+    get get() { return 1 }
+    declare: number;
+    readonly;
+    abstract;
+    overload(a: string): void;
+    overload(a: any) {}
+}
+"#;
+    let d = ok(src);
+    has(&d, "StaticBlock");
+    has(&d, "kind=Constructor");
+    has(&d, "modifiers=[private readonly]");
+    has(&d, "modifiers=[accessor]");
+    has(&d, "IndexSignature");
+    ok("abstract class A { abstract m(): void; protected abstract p: string; }");
+    ok("export default class {} ");
+    ok("export default abstract class X {}");
+    ok("const C = class Named<T> extends (foo as any) {};");
+    ok("class A extends mixin(B, C) {}");
+    ok("class A { m() {} ; ; n() {} }");
+    ok("class A { 'constructor'() {} }");
+    ok("class A<in out T, const U> {}");
+}
+
+/// Modifiers where none is allowed parse as modifiers, without syntax errors: the checker's
+/// grammar pass reports them (TS1044, TS1090, TS1042, ...), as in tsc 7.
+#[test]
+fn misplaced_modifiers() {
+    has(
+        &ok("namespace Y { public class A {} }"),
+        "ClassDecl 14..31 modifiers=[public]",
+    );
+    has(
+        &ok("function g(static x) {}"),
+        "Param 11..19 modifiers=[static]",
+    );
+    has(&ok_js("function g(public x) {}"), "modifiers=[public]");
+    has(
+        &ok("const o = { static m() {} };"),
+        "MethodDef 12..25 modifiers=[static]",
+    );
+    has(
+        &ok("const o = { public a: 1, readonly b, async c: 2 };"),
+        "Property 12..23 modifiers=[public]",
+    );
+    has(
+        &ok("const o = { public a: 1, readonly b, async c: 2 };"),
+        "ShorthandProp 25..35 modifiers=[readonly]",
+    );
+    has(
+        &ok("export static var v = 1;"),
+        "VarDecl 0..24 modifiers=[export static]",
+    );
+    has(
+        &ok("interface I { public m(): void; static x: number }"),
+        "MethodSignature 14..31 modifiers=[public]",
+    );
+    has(
+        &ok("public declare abstract class A {}"),
+        "modifiers=[declare abstract public]",
+    );
+    for src in [
+        "static var v = 1;",
+        "static\nvar v = 1;",
+        "export public class A {}",
+        "async class A {}",
+        "readonly interface I {}",
+        "accessor var x;",
+        "public import x = require('y');",
+        "public export var x;",
+        "public type T = 1;",
+        "public namespace N {}",
+        "function f() { public var x; }",
+        "const enum E {} public const enum F {}",
+        "class C { in y; out z; export w; async p = 1; }",
+        "class C { async constructor() {} }",
+        "class C { public static {} readonly private static {} async static {} }",
+        "type T = { export x: 1; private m(): void };",
+        "function f<public T, const U>() {}",
+        "let f = (static x) => x; type F = (public x: number) => void;",
+        // `export` on a parameter (request R7; tsc 7: TS1090 from the checker only).
+        "function f(export e) {}",
+        "function f(export\ne) {}",
+        "function f(export public e, export ...r) {}",
+        "function f(export [a], export async) {}",
+        "class C { constructor(export e) {} }",
+        "let a = (export e) => e; type F = (export e) => void;",
+    ] {
+        ok(src);
+    }
+    has(
+        &ok("function f(export e) {}"),
+        "Param 11..19 modifiers=[export]",
+    );
+    // `const` on a class member: TS1248 at the name, a grammar error tsc reports only in a
+    // file without syntax errors (constInClassExpression).
+    assert_eq!(
+        err_codes("class C { const x = 1; }", SourceKind::Ts),
+        [1248]
+    );
+    assert_eq!(
+        err_codes("class C { const x = 1; } )", SourceKind::Ts),
+        [1128]
+    );
+    // `export` before `{`, `as`, `default` or a lone `type` is a reserved word (TS1359), not
+    // a modifier; the parameter list goes on.
+    assert_eq!(
+        err_codes("function f(export, b) {}", SourceKind::Ts),
+        [1359]
+    );
+    assert_eq!(
+        err_codes("function f(a, export {x}) {}", SourceKind::Ts),
+        [1359, 1005]
+    );
+    assert_eq!(
+        err_codes("function f(export as x) {}", SourceKind::Ts),
+        [1359, 1005, 1005]
+    );
+    assert_eq!(
+        err_codes("function f(export type) {}", SourceKind::Ts),
+        [1359, 1005]
+    );
+    // `static static foo()` declares a property named `static`.
+    has(
+        &parse("class C { static static foo() {} }", SourceKind::Ts)
+            .ast
+            .dump(),
+        "PropertyDef 10..23 modifiers=[static]",
+    );
+    // A modifier keyword followed by a line break, or by something that cannot follow a
+    // modifier, is an identifier.
+    assert_eq!(
+        err_codes("public;\npublic.x;\nstatic [x];", SourceKind::Ts),
+        [] as [u32; 0]
+    );
+    assert_eq!(
+        stmt_kinds("public\nclass A {}", SourceKind::Ts),
+        [NodeKind::ExprStmt, NodeKind::ClassDecl]
+    );
+}
+
+/// Every keyword parsed as a modifier is recorded with its span; `export` and `default` only
+/// when they modify a declaration.
+#[test]
+fn modifier_tokens() {
+    fn tokens(src: &str) -> Vec<&str> {
+        let r = parse(src, SourceKind::Ts);
+        r.ast
+            .modifier_tokens
+            .iter()
+            .map(|t| &src[t.span.start as usize..t.span.end as usize])
+            .collect()
+    }
+    assert_eq!(
+        tokens("export default async function f() {} export declare const enum E {}"),
+        ["export", "default", "async", "export", "declare", "const"]
+    );
+    assert_eq!(
+        tokens("export default x; export = y; export * from 'z'; export { a };"),
+        [] as [&str; 0]
+    );
+    assert_eq!(
+        tokens("class C { constructor(private readonly a) {} static async m() {} }"),
+        ["private", "readonly", "static", "async"]
+    );
+    assert_eq!(
+        tokens("let f = async () => 1, g = async x => x;"),
+        ["async", "async"]
+    );
+    // Speculative arrow parses that fail leave no tokens behind.
+    assert_eq!(tokens("let v = async(a, b);"), [] as [&str; 0]);
+
+    let src = "@dec export abstract class A { @d public static m() {} }";
+    let r = parse(src, SourceKind::Ts);
+    let ts_r_ast::Node::Program { stmts } = *r.ast.node(r.ast.root) else {
+        panic!()
+    };
+    let class = r.ast.list(stmts)[0];
+    let flags: Vec<_> = r
+        .ast
+        .modifier_tokens_of(class)
+        .iter()
+        .map(|t| t.flag)
+        .collect();
+    assert_eq!(flags, [Modifiers::EXPORT, Modifiers::ABSTRACT]);
+}
+
+/// Misplaced modifiers that do not lead to a declaration: tsc reports TS1128 at the keyword
+/// and skips it, or TS1146 where a declaration was required.
+#[test]
+fn stray_modifiers() {
+    let cases: &[(&str, u32, u32)] = &[
+        ("public x = 1;", 1128, 1),
+        ("let x; public x;", 1128, 8),
+        ("public declare\nvar x;", 1128, 1),
+        ("static test;", 1128, 1),
+        ("export foo;", 1128, 1),
+        ("static static var x;", 1146, 7),
+        ("@dec foo;", 1146, 5),
+    ];
+    for &(src, code, col) in cases {
+        let r = parse(src, SourceKind::Ts);
+        let d = r
+            .diagnostics
+            .first()
+            .unwrap_or_else(|| panic!("no diagnostics for {src:?}"));
+        assert_eq!(
+            (d.code, d.span.start + 1, r.diagnostics.len()),
+            (code, col, 1),
+            "for {src:?}: {:?}",
+            r.diagnostics
+        );
+    }
+}
+
+#[test]
+fn decorators() {
+    ok("@a @b.c @d() @e.f<T>() @(g) class A {}");
+    ok("export @dec class A {} ");
+    ok("@dec export class B {}");
+    ok("@dec export default class {}");
+    ok("class A { @dec() @other m(@param() p) {} @dec prop; @dec\n['computed'] = 1; }");
+    ok("const x = @dec class {};");
+}
+
+#[test]
+fn expressions() {
+    ok("a = b ? c : d; a ||= b; a &&= b; a ??= b; a **= 2; a >>>= 1; a >>= 1; a <<= 1;");
+    ok("x = a ?? b; y = (a || b) ?? c; z = a?.b?.[c]?.(d);");
+    ok("x = a ** b ** c; y = (-a) ** b;");
+    ok("x = typeof a === 'string' && !b || void 0; delete a.b; ~a;");
+    ok("x = new A; y = new A.B(); z = new (f())(); w = new new A()();");
+    ok(
+        "x = new.target; y = import.meta.url; z = import('x'); w = import('x', { with: { type: 'json' } });",
+    );
+    ok("x = `a${b}c${`d${e}`}`; y = tag`x${y}`; z = String.raw`\\unicode`;");
+    ok("x = /re/g.test(s) ? /[/]/ : a / b / c;");
+    ok(
+        "x = [1, , 2, ...rest]; y = {a, b: 1, [c]: 2, ...d, get e() { return 1 }, set e(v) {}, async f() {}, *g() {}, async *h() {}};",
+    );
+    ok("x = { get: 1, set: 2, async: 3, get() {}, set() {}, async() {}, new: 1, class: 2 };");
+    ok("({ a, b } = c); [a, b] = [b, a]; ({ a = 1 } = {});");
+    ok("x = a as any as T; y = a satisfies T; z = <T>a; w = a!; v = a!.b!; u = obj as const;");
+    ok("x = 1_000_000n + 0x1Fn; y = .5 + 5. + 0b1010 + 0o17 + 1e-3;");
+    ok("x = a in b; y = a instanceof B; for (const k in o) {}");
+    ok("x = #a in this;");
+    ok("a\n?.b");
+    ok("x = a < b; y = a > b; z = a <= b; w = a >= b; v = a << b;");
+    ok("if (a < b && c > d) {}");
+    ok("x = f<T>(a); y = f<T, U>(a); z = new C<T>(); w = f<T>`t`;");
+    ok("x = a < b > c;");
+    ok("const v = obj?.a!.b;");
+    ok("x = super.y;");
+    ok("label: { break label; }");
+}
+
+#[test]
+fn generic_call_disambiguation() {
+    let d = ok("a < b > c;");
+    has(&d, "op=Gt");
+    let d = ok("f<T>(x);");
+    has(&d, "type_args: TypeArgs");
+    let d = ok("const g = f<string>;");
+    has(&d, "Instantiation");
+    let d = ok("x = a < b >> c;");
+    has(&d, "op=Shr");
+    let d = ok("if (a < b || c > (d)) {}");
+    assert!(!d.contains("TypeArgs"));
+}
+
+#[test]
+fn failed_type_arguments_restore_jsdoc_syntax() {
+    let r = parse("let a=1,b=2; a < b!;", SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:#?}", r.diagnostics);
+    assert!(r.ast.jsdoc_syntax.is_empty());
+
+    let src = "type T = number!; let a=1,b=2; a < b!;";
+    let r = parse(src, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:#?}", r.diagnostics);
+    assert_eq!(r.ast.jsdoc_syntax.len(), 1);
+    let syntax = r.ast.jsdoc_syntax[0];
+    assert_eq!(
+        &src[syntax.span.start as usize..syntax.span.end as usize],
+        "number!"
+    );
+}
+
+/// R4: `extends A<T>` with a line break before `{` gives the heritage type the type
+/// arguments, as on one line (tsc 7), instead of an instantiation expression.
+#[test]
+fn heritage_type_args_across_newline() {
+    let one_line = ok("class A<T> {}\nclass B<T> extends A<T> {\n}\n");
+    // Same length as `one_line`, so the dumps (spans included) are identical.
+    assert_eq!(
+        ok("class A<T> {}\nclass B<T> extends A<T>\n{\n}\n"),
+        one_line
+    );
+    for src in [
+        "class A<T> {}\nclass B<T> extends A<T>\r\n{\n}\n",
+        "class A<T> {}\nclass B<T> extends A<T> // c\n{\n}\n",
+    ] {
+        let d = ok(src);
+        assert!(!d.contains("Instantiation"), "{src:?}:\n{d}");
+        has(&d, "ExprWithTypeArgs 33..37\n        expr: Ident 33..34");
+        has(&d, "type_args: TypeArgs 34..37");
+    }
+    let d = ok("interface I<T> {}\ninterface J extends I<number>\n{}\n");
+    assert!(!d.contains("Instantiation"), "{d}");
+    let d = ok("class A<T> {}\nclass D implements A<number>,\n  A<string>\n{}\n");
+    assert!(!d.contains("Instantiation"), "{d}");
+    let d = ok("class A<T> {}\nconst X = class extends A<number>\n{};\n");
+    assert!(!d.contains("Instantiation"), "{d}");
+    // A call or tagged template after the line break still belongs to the expression.
+    let d = ok("declare function A<T>(x: number): any;\nclass E<T> extends A<T>\n(1) {}\n");
+    has(&d, "expr: Call");
+    // Member access after an instantiation is TS1477 at the type arguments (tsc 7).
+    let r = parse(
+        "class A<T> {}\nclass C<T> extends A<T>\n.foo {}\n",
+        SourceKind::Ts,
+    );
+    let codes: Vec<_> = r
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, d.span.start))
+        .collect();
+    assert_eq!(codes, [(1477, 34)]);
+    // A second `<...>` after the unwrapped arguments is `',' expected` (tsc 7).
+    let r = parse(
+        "class A<T> {}\nclass F<T> extends A<T>\n<T> {}\n",
+        SourceKind::Ts,
+    );
+    let codes: Vec<_> = r
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, d.span.start))
+        .collect();
+    assert_eq!(codes, [(1005, 38)]);
+    // No node is left orphaned: every node but the root has a parent.
+    let r = parse(
+        "class A<T> {}\nclass B<T> extends A<T>\n{}\n",
+        SourceKind::Ts,
+    );
+    let parents = ts_r_ast::ParentMap::build(&r.ast);
+    for i in 1..r.ast.node_count() {
+        let id = ts_r_ast::NodeId::from_raw(i as u32).unwrap();
+        assert!(
+            id == r.ast.root || parents.parent(id).is_some(),
+            "orphan {i}"
+        );
+    }
+}
+
+/// Heritage lists recover like tsc's: `',' expected`, then the list goes on.
+#[test]
+fn heritage_list_recovery() {
+    let cases: &[(&str, &[(u32, u32)])] = &[
+        ("class A {}\nclass B extends A x {}\n", &[(1005, 29)]),
+        (
+            "interface I {}\ninterface J extends I x {}\n",
+            &[(1005, 37)],
+        ),
+        ("class A {}\nclass B implements A x {}\n", &[(1005, 32)]),
+        (
+            "class A {}\nclass B extends A ; {}\nlet z = 1;\n",
+            &[(1005, 29)],
+        ),
+        (
+            "class A {}\nfunction f() { class B extends A }\nlet z = 1;\n",
+            &[(1005, 44)],
+        ),
+        (
+            "declare function foo(): void;\nclass A {}\nclass B extends A\nfoo();\n",
+            &[(1005, 59), (1005, 64), (1005, 66)],
+        ),
+    ];
+    for &(src, want) in cases {
+        let r = parse(src, SourceKind::Ts);
+        let got: Vec<_> = r
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect();
+        assert_eq!(got, want, "for {src:?}");
+    }
+}
+
+/// R5: invalid syntax that tsc 7 rejects, with tsc's codes and positions (byte offsets).
+/// TS1209, TS17006/7, TS1005 and TS1109 are syntax errors in tsc; TS5076, TS1106, TS1497
+/// and TS18007 come from its grammar check, but are reported here too.
+#[test]
+fn invalid_syntax_reported_like_tsc() {
+    type Case = (&'static str, SourceKind, &'static [(u32, u32)]);
+    let cases: &[Case] = &[
+        ("a ?? b || c;", SourceKind::Ts, &[(5076, 0)]),
+        ("a || b ?? c;", SourceKind::Ts, &[(5076, 0)]),
+        ("a ?? b && c;", SourceKind::Ts, &[(5076, 5)]),
+        ("a && b ?? c;", SourceKind::Ts, &[(5076, 0)]),
+        ("for (async of x) {}", SourceKind::Ts, &[(1106, 5)]),
+        ("for (\\u0061sync of x) {}", SourceKind::Js, &[(1106, 5)]),
+        ("new a?.b();", SourceKind::Ts, &[(1209, 5)]),
+        ("new a.b?.c;", SourceKind::Ts, &[(1209, 7)]),
+        ("@a?.b class C {}", SourceKind::Ts, &[(1497, 1)]),
+        ("@a.b?.() class C {}", SourceKind::Ts, &[(1497, 1)]),
+        ("@a()() class C {}", SourceKind::Ts, &[(1497, 1)]),
+        ("@a().b class C {}", SourceKind::Ts, &[(1497, 1)]),
+        ("@(a).b class C {}", SourceKind::Ts, &[(1497, 1)]),
+        ("@a`x` class C {}", SourceKind::Ts, &[(1497, 1)]),
+        ("class K { @this.x m() {} }", SourceKind::Ts, &[(1497, 11)]),
+        (
+            "await using [a] = null; export {};",
+            SourceKind::Ts,
+            &[(1005, 16)],
+        ),
+        ("++(a as any)++;", SourceKind::Ts, &[(1005, 12), (1109, 14)]),
+        ("++a++;", SourceKind::Ts, &[(1005, 3), (1109, 5)]),
+        ("--a.b--;", SourceKind::Ts, &[(1005, 5), (1109, 7)]),
+        ("++-a;", SourceKind::Ts, &[(1109, 2)]),
+        ("++++a;", SourceKind::Ts, &[(1109, 2)]),
+        (
+            "async function f() { ++await 42; }",
+            SourceKind::Ts,
+            &[(1109, 23)],
+        ),
+        ("await x = 1; export {};", SourceKind::Ts, &[(1005, 8)]),
+        ("-x = 1;", SourceKind::Ts, &[(1005, 3)]),
+        ("typeof x = 1;", SourceKind::Ts, &[(1005, 9)]),
+        ("x++ = 1;", SourceKind::Ts, &[(1005, 4)]),
+        ("a + b = c;", SourceKind::Ts, &[(1005, 6)]),
+        ("a || b = c;", SourceKind::Ts, &[(1005, 7)]),
+        ("<any>x = 1;", SourceKind::Ts, &[(1005, 7)]),
+        ("x as any = 1;", SourceKind::Ts, &[(1005, 9)]),
+        ("x satisfies any += 1;", SourceKind::Ts, &[(1005, 16)]),
+        (
+            "class C { #x = 1; m(v) { #x in v = 10; } }",
+            SourceKind::Ts,
+            &[(1005, 33)],
+        ),
+        ("-a ** 2;", SourceKind::Ts, &[(17006, 0)]),
+        ("x = 1 + typeof a ** 2;", SourceKind::Ts, &[(17006, 8)]),
+        ("<number>a ** 2;", SourceKind::Ts, &[(17007, 0)]),
+        (
+            "async function f() { await a ** 2; }",
+            SourceKind::Ts,
+            &[(17006, 21)],
+        ),
+        (
+            "const e = <div className={a, b}/>;",
+            SourceKind::Tsx,
+            &[(18007, 26)],
+        ),
+        (
+            "const e = <div>{a, b}</div>;",
+            SourceKind::Tsx,
+            &[(18007, 16)],
+        ),
+    ];
+    for &(src, kind, want) in cases {
+        let r = parse(src, kind);
+        let got: Vec<_> = r
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect();
+        assert_eq!(got, want, "for {src:?}: {:#?}", r.diagnostics);
+    }
+    // Messages carry tsc's arguments.
+    let msg = |src: &str| parse(src, SourceKind::Ts).diagnostics[0].message.clone();
+    assert_eq!(
+        msg("a || b ?? c;"),
+        "'||' and '??' operations cannot be mixed without parentheses."
+    );
+    assert_eq!(
+        msg("a ?? b && c;"),
+        "'??' and '&&' operations cannot be mixed without parentheses."
+    );
+    assert_eq!(
+        msg("new a.b?.c();"),
+        "Invalid optional chain from new expression. Did you mean to call 'a.b()'?"
+    );
+    assert!(msg("void a ** 2;").contains("with the 'void' operator"));
+
+    // The tree stays tsc's: `??` binds like `||`, left to right.
+    let d = ok("x = (a ?? b) || c; y = a ?? (b && c); z = a ?? b ?? c;");
+    has(&d, "op=LogicalOr\n        left: Paren");
+    let d = dump_of("a ?? b || c;");
+    has(
+        &d,
+        "Binary 0..11 op=LogicalOr\n      left: Binary 0..6 op=Coalesce",
+    );
+    let d = dump_of("a ?? b && c;");
+    has(&d, "Binary 0..11 op=Coalesce\n      left: Ident");
+    // `new a?.b()` is `(new a)?.b()`; `++a++` is `++a` then `++` with a missing operand.
+    let d = dump_of("new a?.b();");
+    has(&d, "callee: Member 0..8 optional\n        obj: New 0..5");
+    let d = dump_of("++a++;");
+    has(&d, "Update 0..3 prefix\n      arg: Ident");
+    // `new tag<T> `x` (args)`: the type arguments belong to the tagged template (tsc 7).
+    let d = ok("new tag<number> `a${1}`(100);");
+    has(&d, "New 0..28 has_args\n      callee: TaggedTemplate 4..23");
+    let d = ok("new tag `a`<string>(1);");
+    has(&d, "callee: TaggedTemplate 4..11");
+
+    // Valid neighbours stay valid.
+    ok("for ((async) of x) {} for (async in x) {} for (async.x of x) {}");
+    ok("async function f() { for await (async of x) {} }");
+    ok("new a()?.b();");
+    ok("@a.b.c() class C {} @(a?.b) class D {} @a.b<number>() class E {} @a!.b class F {}");
+    ok("class K { @a! m1() {} @a.b!() m2() {} @a!() m3() {} @a.b.c!.d() m4() {} }");
+    ok("x! = 1; (x as any) = 1; a ? b : c = 1; [a] = b; ({ a } = b); a.b = 1; a[0] += 1;");
+    ok("(-a) ** 2; -(a ** 2); ++a ** 2; a++ ** 2; 2 ** -a; (<number>a) ** 2;");
+    ok("-a++; typeof a++; ++a.b; ++a[0]; ++(a); ++this.x; ++new A().x;");
+    ok("++a\n++a;");
+    ok("async function f() { await x++; await -x; }");
+    ok_tsx("const e = <div className={(a, b)}>{[a, b]}</div>;");
+}
+
+/// R6: the generated `map_children` agrees with `for_each_child` on every node of every
+/// fixture, and a deep clone through it dumps the same tree.
+#[test]
+fn map_children_matches_for_each_child() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut entries: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    let mut kinds = std::collections::BTreeSet::new();
+    for e in entries {
+        let path = e.path();
+        let src = std::fs::read_to_string(&path).unwrap();
+        let mut ast = crate::parse_path(path.to_str().unwrap(), &src).ast;
+        let lists = ast.list_ranges.len();
+        for i in 1..=ast.node_count() {
+            let id = ts_r_ast::NodeId::from_raw(i as u32).unwrap();
+            let node = *ast.node(id);
+            kinds.insert(node.kind());
+            let mut seen = Vec::new();
+            let mapped = ast.map_children(id, &mut |_, c| {
+                seen.push(c);
+                c
+            });
+            assert_eq!(mapped, node);
+            assert_eq!(seen, ast.children(id), "{:?} in {path:?}", node.kind());
+        }
+        assert_eq!(ast.list_ranges.len(), lists);
+        fn deep_clone(ast: &mut ts_r_ast::Ast, id: ts_r_ast::NodeId) -> ts_r_ast::NodeId {
+            let node = ast.map_children(id, &mut deep_clone);
+            let span = ast.span(id);
+            ast.add(node, span)
+        }
+        let before = ast.dump();
+        let root = ast.root;
+        ast.root = deep_clone(&mut ast, root);
+        assert_eq!(ast.dump(), before, "{path:?}");
+    }
+    assert!(kinds.len() > 100, "fixtures cover {} kinds", kinds.len());
+}
+
+fn dump_of(src: &str) -> String {
+    parse(src, SourceKind::Ts).ast.dump()
+}
+
+/// `.json` files parse as one JSON value (an object literal, not a block).
+#[test]
+fn json_values() {
+    for src in [
+        "{\"a\": 1, \"b\": [true, null, \"x\"], \"c\": {}}",
+        "[1, 2]",
+        "\"s\"",
+        "",
+        "  \n",
+    ] {
+        let r = crate::parse_json(src);
+        assert!(r.diagnostics.is_empty(), "{src:?}: {:?}", r.diagnostics);
+    }
+    let d = crate::parse_json("{\"a\": 1}").ast.dump();
+    assert!(d.contains("ObjectLit"), "{d}");
+    assert!(!crate::parse_json("{\"a\": 1} }").diagnostics.is_empty());
+}
+
+/// tsc's JSON checks (`convertToJson`): (code, byte offset) of each diagnostic, checked
+/// against tsc 7 with `resolveJsonModule`.
+#[test]
+fn json_rejects_non_json_values() {
+    let cases: &[(&str, &[(u32, u32)])] = &[
+        ("{\"a\": undefined}", &[(1328, 6)]),
+        ("{a: 1, 'b': 2, 3: 4}", &[(1327, 1), (1327, 7), (1327, 15)]),
+        (
+            "{\"a\": 'x', \"b\": -1, \"c\": -x, \"d\": (1)}",
+            &[(1327, 6), (1328, 25), (1328, 34)],
+        ),
+        (
+            "[1, foo, `t`, 1n, , ...a]",
+            &[(1328, 4), (1328, 9), (1328, 14), (1328, 18), (1328, 20)],
+        ),
+        ("{...x, \"a\"() {}, b}", &[(1136, 1), (1136, 7), (1136, 17)]),
+        ("{\"a\": {\"b\": [1, {\"c\": d}]}}", &[(1328, 22)]),
+    ];
+    for (src, want) in cases {
+        let got: Vec<(u32, u32)> = crate::parse_json(src)
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect();
+        assert_eq!(got, *want, "{src}");
+    }
+}
+
+/// `readonly` after `(` in a type: a parenthesized type operator, or a parameter modifier
+/// (tsc 7 parses both; the parameter property is the checker's TS2369). typeorm's
+/// `ForeignKey.ts` hit the first.
+#[test]
+fn parenthesized_readonly_type_operator() {
+    let d = ok("type A = (readonly string[]); type B = (readonly [number, string]) | number;");
+    assert!(!d.contains("FunctionType"), "{d}");
+    ok("type H = (readonly x);");
+    for src in [
+        "type C = (readonly x: string) => void;",
+        "type D = (readonly [a, b]: [number, number]) => void;",
+        "type E = (readonly { a }: { a: 1 }) => void;",
+        "type G = (readonly x) => void;",
+        "type I = (readonly) => void;",
+        "type J = (readonly?: number) => void;",
+        "type K = (readonly ...r: number[]) => void;",
+    ] {
+        let d = ok(src);
+        assert!(d.contains("FunctionType"), "{src}: {d}");
+    }
+}
+
+#[test]
+fn types() {
+    ok(
+        "type A = string | number | boolean | null | undefined | void | never | unknown | any | object | symbol | bigint;",
+    );
+    ok(
+        "type B = { a: string; b?: number; readonly c: boolean, [k: string]: any; (x: number): string; new (x: string): B; m<T>(a: T): void; get p(): number; set p(v: number) }",
+    );
+    ok(
+        "type C = (a: string, b?: number) => void; type D = new (...args: any[]) => object; type E = abstract new () => object;",
+    );
+    ok("type F<T> = T extends string ? 'str' : T extends number ? 'num' : never;");
+    ok(
+        "type G<T> = T extends [infer H, ...infer R] ? H : never; type H<T> = T extends Array<infer U extends string> ? U : never;",
+    );
+    ok(
+        "type I<T> = { [K in keyof T]?: T[K] }; type J<T> = { readonly [K in keyof T]-?: T[K] }; type K<T> = { -readonly [P in keyof T as `get${Capitalize<P & string>}`]+?: () => T[P] };",
+    );
+    ok(
+        "type L = `prefix-${string}-suffix`; type M = typeof import('./x'); type N = import('./y').Z<number>;",
+    );
+    ok(
+        "type O = [a: string, b?: number, ...rest: boolean[]]; type P = [string, number?, ...boolean[]];",
+    );
+    ok(
+        "type Q = keyof T; type R = unique symbol; type S = readonly string[]; type T2 = T[number]['a'];",
+    );
+    ok("type U = typeof x.y.z; type V = typeof x<number>; type W = A.B.C<D>;");
+    ok(
+        "type X = (() => void) | null; type Y = Array<Array<number>>; type Z = Map<string, Array<Set<number>>>;",
+    );
+    ok("type AA = | 'a' | 'b'; type BB = & A & B;");
+    ok("type CC = -1 | 1n | -1n | true | false | 'x' | `y`;");
+    ok("type DD = this; type EE = { [K in 'a' | 'b']: K };");
+    ok("let a: Array<number>= []; let f: <T>(x: T) => T;");
+    ok("type FF = import('x', { with: { 'resolution-mode': 'import' } }).Y;");
+    ok("type GG<T> = T extends (infer U)[] ? U : never;");
+    ok(
+        "type HH = (<T>() => T extends L ? 1 : 2) extends <T>() => T extends R ? 1 : 2 ? true : false;",
+    );
+    ok("function f<const T extends readonly unknown[]>(x: T): T { return x }");
+    ok("type II = intrinsic; type Up<S extends string> = intrinsic;");
+    ok("type JJ = A extends B\n? C : D;");
+    ok("let x: typeof globalThis; let y: typeof this.z;");
+    ok("type KK<in out T> = T; interface LL<out T> {}");
+    ok("type MM = asserts;");
+    assert_eq!(
+        err_codes(
+            "type T = A extends B ? C : D extends infer U extends string ? 1 : 2;",
+            SourceKind::Ts
+        ),
+        Vec::<u32>::new()
+    );
+    assert_eq!(
+        err_codes(
+            "type A<T> = T extends (...args: any[]) => infer R extends string ? R : never;",
+            SourceKind::Ts
+        ),
+        [1005]
+    );
+}
+
+#[test]
+fn declarations() {
+    ok("interface A<T> extends B, C<T> { a: T; b(): void }");
+    ok(
+        "enum E { A, B = 2, 'c' = 3, D = A | B, } const enum F { X } declare enum G {} declare const enum H {}",
+    );
+    ok(
+        "namespace N { export const x = 1; } namespace A.B.C { } declare module 'm' { export = x; } declare module 'short';",
+    );
+    // `module M {}` parses as a namespace, with tsc's TS1540 for the keyword.
+    assert_eq!(err_codes("module M {}", SourceKind::Ts), [1540]);
+    ok(
+        "declare global { interface Window { x: number } } declare namespace NS { function f(): void; let v: number; }",
+    );
+    ok(
+        "declare function f(): void; declare const c: number; declare class D { m(): void; } declare let l: string; declare var v: any;",
+    );
+    ok(
+        "export declare function f(): void; export declare abstract class X {} export abstract class Y {}",
+    );
+    ok("type T<A = string, B extends A = A> = [A, B];");
+    ok(
+        "export type { A, B as C } from './x'; export type * from './y'; export type * as ns from './z';",
+    );
+    let k = stmt_kinds("type\nFoo = 1", SourceKind::Ts);
+    assert_eq!(k, [NodeKind::ExprStmt, NodeKind::ExprStmt]);
+    let k = stmt_kinds("declare\nfunction f() {}", SourceKind::Ts);
+    assert_eq!(k, [NodeKind::ExprStmt, NodeKind::FunctionDecl]);
+    let k = stmt_kinds("namespace\nfoo", SourceKind::Ts);
+    assert_eq!(k, [NodeKind::ExprStmt, NodeKind::ExprStmt]);
+    let k = stmt_kinds("abstract class A {}", SourceKind::Ts);
+    assert_eq!(k, [NodeKind::ClassDecl]);
+    ok("interface A { get x(): number; set x(v: number); readonly [k: string]: unknown; }");
+}
+
+#[test]
+fn modules() {
+    let src = r#"
+import a from 'a';
+import * as b from 'b';
+import { c, d as e, type f, type g as h, 'string name' as i, default as j } from 'c';
+import k, { l } from 'k';
+import m, * as n from 'm';
+import type T from 't';
+import type { U } from 'u';
+import type * as V from 'v';
+import 'side-effect';
+import json from './x.json' with { type: 'json' };
+import legacy from './y.json' assert { type: 'json' };
+import fs = require('fs');
+import type P = require('p');
+import Q = A.B.C;
+export import R = S.T;
+import defer * as deferred from 'd';
+import source wasm from './x.wasm';
+import type from 'type';
+import { type } from 'x';
+import { type as } from 'x';
+import { type as as } from 'x';
+import { type as as as } from 'x';
+export { a, b as c2, type T as T2, 'x' as 'y' };
+export { z } from 'z';
+export * from 'all';
+export * as ns from 'ns';
+export const x1 = 1, x2 = 2;
+export function fn() {}
+export class Cls {}
+export enum En {}
+export interface If {}
+export type Ty = string;
+export namespace Na {}
+export default 1 + 2;
+export = foo;
+export as namespace MyLib;
+"#;
+    let d = ok(src);
+    has(&d, "ImportEquals");
+    has(&d, "ExternalModuleRef");
+    has(&d, "ImportAttributes");
+    has(&d, "phase=Defer");
+    has(&d, "phase=Source");
+    has(&d, "NamespaceExport");
+    has(&d, "ExportAssignment");
+    let d = ok("import 'x';");
+    assert!(!d.contains("has_clause"));
+    let d = ok("import {} from 'x';");
+    has(&d, "has_clause");
+    let d = ok("import { type as } from 'x';");
+    has(&d, "ImportSpecifier 9..16 type_only");
+    let d = ok("import { type as x } from 'x';");
+    assert!(!d.contains("type_only"), "{d}");
+    let d = ok("import type from 'x';");
+    assert!(!d.contains("type_only"), "{d}");
+}
+
+#[test]
+fn jsx() {
+    let d = ok_tsx(
+        r#"const x = <div className="a" {...props} data-id={1} aria-label='l' disabled>text {expr} <Child /> &nbsp; {/* comment */}</div>;"#,
+    );
+    has(&d, "JsxElement");
+    has(&d, "JsxSpreadAttr");
+    has(&d, "JsxText");
+    has(&d, "JsxExprContainer");
+    ok_tsx("const f = <></>; const g = <><a /><b /></>;");
+    ok_tsx(
+        "const h = <Foo<string> bar={1} />; const i = <a.b.c />; const j = <ns:tag ns:attr='x' />; const k = <this.Comp />;",
+    );
+    ok_tsx("const l = <div attr=<span /> />;");
+    ok_tsx("const m = <T,>(x: T) => x; const n = <T extends unknown>(x: T) => x;");
+    ok_tsx("const o = cond ? <a /> : <b>{list.map(i => <li key={i}>{i}</li>)}</b>;");
+    ok_tsx("const p = <div>\n  multi\n  line\n</div>;");
+    ok_tsx("function C() { return (<div>{...children}</div>); }");
+    ok_tsx("const q = <input value=\"a\\b\" />;");
+    ok_tsx("const r = <a>{'}'}{'>'}</a>;");
+    ok_js("const s = <div className='x'>{a}</div>;");
+    ok_kind("const t = <div />;", SourceKind::Jsx);
+    assert!(!err_codes("<a></b>", SourceKind::Tsx).is_empty());
+    for (src, msg) in [
+        (
+            "<a.b></c>",
+            "Expected corresponding JSX closing tag for 'a.b'.",
+        ),
+        ("<d>", "JSX element 'd' has no corresponding closing tag."),
+    ] {
+        let r = parse(src, SourceKind::Tsx);
+        assert!(
+            r.diagnostics.iter().any(|d| d.message == msg),
+            "{src}: {:?}",
+            r.diagnostics
+        );
+    }
+    assert!(!err_codes("<a>", SourceKind::Tsx).is_empty());
+    assert!(!err_codes("<a>}</a>", SourceKind::Tsx).is_empty());
+}
+
+#[test]
+fn js_files_disable_ts_syntax() {
+    let d = ok_js("x = a < b > (c);");
+    assert!(!d.contains("TypeArgs"));
+    ok_js("let async = 1; async = 2;");
+    ok_js("var yield = 1, await = 2;");
+    ok_js("function f() { var await; }");
+}
+
+#[test]
+fn dts_files() {
+    ok_kind(
+        "declare module 'x' { export function f(): void; export default class C { private x; } }\nexport declare const y: number;\nexport {};",
+        SourceKind::Dts,
+    );
+    ok_kind(
+        "export declare type A = string; declare function g<T>(x: T): T;",
+        SourceKind::Dts,
+    );
+}
+
+#[test]
+fn await_and_yield_contexts() {
+    ok("const x = await fetch(url);");
+    ok("function f() { const await = 1; return await; }");
+    ok("function* g() { yield\n1; }");
+    ok("async function f() { await\nx; }");
+    ok("const yieldValue = yield_ + 1;");
+}
+
+/// Outside a generator, `yield` followed on its line by a name, keyword, private name or
+/// literal is a yield expression (the checker reports TS1163), as in tsc 7; otherwise it is
+/// an identifier.
+#[test]
+fn yield_outside_generator() {
+    for src in [
+        "\"use strict\";\nfunction f() { yield 1; }",
+        "function f() { yield 1; }",
+        "class C { constructor() { yield foo } }",
+        "class C { x = yield 1; static { yield 'a' } }",
+        "function* g() { function f() { yield this } }",
+        "function f() { x = yield 1n; g(yield null, yield #x in o); }",
+        "function f() { yield of; yield async; yield class {}; }",
+    ] {
+        let d = ok(src);
+        has(&d, "Yield ");
+        assert!(!d.contains("name=\"yield\""), "{src:?}:\n{d}");
+    }
+    has(&ok_js("function f() { yield 1; }"), "Yield ");
+    for src in [
+        "yield;",
+        "var x = yield;",
+        "yield++;",
+        "yield * 2;",
+        "yield(x);",
+        "yield[0];",
+        "yield `t`;",
+        "var f = yield => 1;",
+        "yield\n1;",
+        "yield: 1;",
+        "a.yield; var o = { yield: 1, yield };",
+        "function f() { return typeof yield; }",
+        "var x = 1 + yield;",
+    ] {
+        assert!(
+            !ok(src).contains("Yield "),
+            "{src:?} should not parse a yield expression"
+        );
+    }
+    // `yield in o`: the argument is parsed anyway, with a missing left operand.
+    assert_eq!(
+        err_codes("function f() { yield in o; }", SourceKind::Ts),
+        [1109]
+    );
+}
+
+#[test]
+fn comments_are_collected() {
+    let r = parse(
+        "#!/usr/bin/env node\n// a\nlet x = /* b */ 1; /** doc */ function f() {}",
+        SourceKind::Ts,
+    );
+    assert!(r.diagnostics.is_empty());
+    assert_eq!(r.ast.comments.len(), 4);
+    let span = r.ast.span(r.ast.root);
+    assert_eq!(r.ast.comments_in(span).len(), 4);
+}
+
+/// Where tsc's recovery invents a declaration with a missing name, so do we (the binder
+/// declares it as `(Missing)`, and two of them in one scope are duplicates).
+#[test]
+fn recovery_keeps_missing_names() {
+    fn missing_count(src: &str) -> usize {
+        parse(src, SourceKind::Ts)
+            .ast
+            .dump()
+            .matches("Missing")
+            .count()
+    }
+    // Object binding pattern: a keyword or literal key without `:` has a missing target, and
+    // the list goes on (`{ return 'thing'; }` is two elements; the `;` is skipped).
+    let src = "export default function getThing( { return 'thing'; }";
+    let d = parse(src, SourceKind::Ts).ast.dump();
+    assert_eq!(d.matches("BindingProperty").count(), 2, "{d}");
+    assert_eq!(missing_count(src), 2);
+    assert_eq!(err_codes(src, SourceKind::Ts), [1005, 1005, 1005]);
+    assert_eq!(missing_count("var {while, return} = o;"), 2);
+    // Parameters: a token that starts a type but not a binding is a parameter with a missing
+    // name, and is skipped; `:` `;` `.` `=>` `}` are skipped with TS1138.
+    let params = |src: &str| {
+        let r = parse(src, SourceKind::Ts);
+        let ts_r_ast::Node::Program { stmts } = *r.ast.node(r.ast.root) else {
+            panic!()
+        };
+        let ts_r_ast::Node::FunctionDecl { params, .. } = *r.ast.node(r.ast.list(stmts)[0]) else {
+            panic!()
+        };
+        r.ast.list(params).len()
+    };
+    assert_eq!(params("function f(a!: B) {}"), 3);
+    assert_eq!(params("function f(a!, b) {}"), 3);
+    assert_eq!(params("function f(a ! ! b) {}"), 4);
+    assert_eq!(params("function f(a<b) {}"), 3);
+    assert_eq!(params("function f(a 1) {}"), 2);
+    assert_eq!(params("function f(a ; b) {}"), 2);
+    assert_eq!(params("function f(a => b) {}"), 2);
+    assert_eq!(params("function f(a - b) {}"), 1);
+    assert_eq!(params("function f(a (b)) {}"), 1);
+    assert_eq!(params("function f(null, b) {}"), 2);
+    assert_eq!(params("function f(enum) {}"), 0);
+    assert_eq!(missing_count("function f(a!: B) {}"), 1);
+    assert_eq!(
+        err_codes("function f(a!: B) {}", SourceKind::Ts),
+        [1005, 1138]
+    );
+    assert_eq!(err_codes("function f(! b) {}", SourceKind::Ts), [1003]);
+    assert_eq!(missing_count("function f(null) {}"), 1);
+    // `yield` as a generator's parameter name stays an identifier (the binder reports it).
+    assert_eq!(missing_count("function* g(yield) {}"), 0);
+    // Declarations named with a reserved word: the name is missing and the word starts the
+    // next statement.
+    assert_eq!(
+        stmt_kinds("enum void {}", SourceKind::Ts),
+        [NodeKind::Enum, NodeKind::ExprStmt]
+    );
+    assert_eq!(missing_count("enum void {}"), 1);
+    assert_eq!(
+        stmt_kinds("function f1(enum) {}", SourceKind::Ts),
+        [NodeKind::FunctionDecl, NodeKind::Enum, NodeKind::Block]
+    );
+    assert_eq!(
+        stmt_kinds("function throw() {}", SourceKind::Ts)[0],
+        NodeKind::FunctionDecl
+    );
+    assert_eq!(missing_count("function () {}"), 1);
+    assert_eq!(missing_count("export default function () {}"), 0);
+    // `export import { a } from "m"` is an import declaration with a misplaced modifier.
+    assert_eq!(
+        stmt_kinds("export import { a } from 'm';", SourceKind::Ts),
+        [NodeKind::ImportDecl]
+    );
+    assert_eq!(
+        stmt_kinds("export import a = require('m');", SourceKind::Ts),
+        [NodeKind::ImportEquals]
+    );
+    // An arrow after a line break still parses (TS1200).
+    assert_eq!(
+        stmt_kinds("var f = ()\n=> 1, g = x\n=> x;", SourceKind::Ts),
+        [NodeKind::VarDecl]
+    );
+    assert_eq!(
+        err_codes("var f = ()\n=> 1, g = x\n=> x;", SourceKind::Ts),
+        [1200, 1200]
+    );
+}
+
+#[test]
+fn errors_produce_tree() {
+    for (src, code) in [
+        ("let x = ;", 1109),
+        ("f(1;", 1005),
+        ("if (x { }", 1005),
+        // A grammar error tsc reports in a clean file (exportClassWithoutName).
+        ("class { }", 1211),
+        ("type T = ;", 1110),
+        ("}", 1128),
+        ("try {}", 1472),
+        ("x = 'abc", 1002),
+        ("/* open", 1010),
+        ("let a = 08;", 1489),
+        ("let a = 017;", 1121),
+        ("for (;;", 1109),
+    ] {
+        let r = parse(src, SourceKind::Ts);
+        assert!(
+            r.diagnostics.iter().any(|d| d.code == code),
+            "{src}: {:?}",
+            r.diagnostics
+        );
+        assert_eq!(r.ast.kind(r.ast.root), NodeKind::Program);
+    }
+}
+
+#[test]
+fn never_panics_on_garbage() {
+    let samples = [
+        "",
+        "(",
+        ")",
+        "{",
+        "}",
+        "[",
+        "]",
+        "<",
+        ">",
+        "=>",
+        "...",
+        "@",
+        "#",
+        "`",
+        "${",
+        "/",
+        "\\",
+        "class",
+        "class A {",
+        "class A extends",
+        "function",
+        "function (",
+        "import",
+        "import {",
+        "export",
+        "export {",
+        "enum",
+        "enum E {",
+        "interface",
+        "type",
+        "type X<",
+        "let x: {",
+        "a ? b",
+        "a ? b :",
+        "new",
+        "new.",
+        "import.",
+        "async",
+        "async (",
+        "<div",
+        "<div>",
+        "</div>",
+        "x = <a b=",
+        "x = <a b={",
+        "for (",
+        "for (let",
+        "switch (",
+        "switch (x) {",
+        "try",
+        "catch",
+        "if (",
+        "do",
+        "while",
+        "@dec",
+        "abstract",
+        "declare",
+        "namespace",
+        "module",
+        "global",
+        "let [",
+        "let {",
+        "f<",
+        "f<T",
+        "a!.",
+        "a?.",
+        "`${a",
+        "`${a}",
+        "x as",
+        "x satisfies",
+        "(a, b) =>",
+        "(a: ) =>",
+        "<T>(",
+        "type A = { [K in",
+        "type A = [",
+        "type A = (",
+        "\u{0}",
+        "\u{FEFF}",
+        "'\\u{",
+        "0x",
+        "1e",
+        "#!/x\n#!",
+        "a\u{2028}b",
+        "😀",
+        // Found by mutation fuzzing: a lone `#` after an element used to loop forever.
+        "[\"\"#",
+        "f(\"\" #",
+    ];
+    for s in samples {
+        for kind in [
+            SourceKind::Ts,
+            SourceKind::Tsx,
+            SourceKind::Js,
+            SourceKind::Dts,
+        ] {
+            let r = parse(s, kind);
+            assert_eq!(r.ast.kind(r.ast.root), NodeKind::Program);
+            // Every child id is in range and walks terminate.
+            let pm = ts_r_ast::ParentMap::build(&r.ast);
+            let _ = pm;
+        }
+    }
+    // Truncations of a realistic file.
+    let src = include_str!("../tests/fixtures/kitchen_sink.ts");
+    for cut in (0..src.len()).step_by(7) {
+        if src.is_char_boundary(cut) {
+            let _ = parse(&src[..cut], SourceKind::Ts);
+            let _ = parse(&src[..cut], SourceKind::Tsx);
+        }
+    }
+}
+
+#[test]
+fn deep_nesting_is_bounded() {
+    let src = "(".repeat(100_000);
+    let r = parse(&src, SourceKind::Ts);
+    assert!(!r.diagnostics.is_empty());
+    let src = "[".repeat(50_000) + &"]".repeat(50_000);
+    let _ = parse(&src, SourceKind::Ts);
+    let src = "a".to_owned() + &" + a".repeat(200_000);
+    let r = parse(&src, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty());
+    let src = "type T = ".to_owned() + &"Array<".repeat(5000) + "x" + &">".repeat(5000);
+    let _ = parse(&src, SourceKind::Ts);
+    let src = "x = ".to_owned() + &"{a:".repeat(5000);
+    let _ = parse(&src, SourceKind::Ts);
+    let src = "<a>".repeat(5000);
+    let _ = parse(&src, SourceKind::Tsx);
+    // Deep nesting reports TS99001 instead of overflowing the stack.
+    let r = parse(&"(".repeat(100_000), SourceKind::Ts);
+    assert!(r.diagnostics.iter().any(|d| d.code == 99001));
+}
+
+#[test]
+fn long_private_member_chain_is_linear() {
+    let src = format!(
+        "class C {{ #x = this; f() {{ return this{}; }} }}",
+        ".#x".repeat(100_000)
+    );
+    let start = std::time::Instant::now();
+    let r = parse(&src, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:#?}", r.diagnostics);
+    assert!(start.elapsed().as_secs() < 10, "slow private member chain");
+}
+
+#[test]
+fn private_member_optional_chain_membership() {
+    for (expr, in_chain) in [
+        ("this.#x.#x", false),
+        ("this?.#x", true),
+        ("this?.a.#x", true),
+        ("this?.a().#x", true),
+        ("this?.[0].#x", true),
+        ("this?.().#x", true),
+        ("this?.a!.#x", true),
+        ("(this?.a).#x", false),
+        ("(this?.a)!.#x", false),
+    ] {
+        let src = format!("class C {{ #x = this; f() {{ return {expr}; }} }}");
+        let r = parse(&src, SourceKind::Ts);
+        let codes: Vec<_> = r.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(codes, if in_chain { vec![18030] } else { vec![] }, "{expr}");
+    }
+}
+
+#[test]
+fn deep_binding_patterns_report_nesting_depth() {
+    let n = 100_000;
+    for src in [
+        format!("let {}x{} = y;", "[".repeat(n), "]".repeat(n)),
+        format!("let {}x{} = y;", "{a:".repeat(n), "}".repeat(n)),
+        format!("function f({}x{}) {{}}", "[...".repeat(n), "]".repeat(n)),
+        format!("try {{}} catch ({}x{}) {{}}", "[".repeat(n), "]".repeat(n)),
+    ] {
+        let r = parse(&src, SourceKind::Ts);
+        assert!(
+            r.diagnostics.iter().any(|d| d.code == 99001),
+            "{}",
+            &src[..20]
+        );
+    }
+}
+
+/// Repetitive garbage, lone `#`, and unterminated constructs at scale: each parse must
+/// finish quickly with diagnostics and stay within the node budget (no runaway loop).
+#[test]
+fn pathological_inputs_terminate() {
+    let units: &[&str] = &[
+        "#",
+        "@",
+        "#!",
+        "[\"\"#",
+        "f(\"\" #",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        "<",
+        ">",
+        "`${",
+        "${",
+        "/*",
+        "*/",
+        "'",
+        "\"",
+        "`",
+        "=>",
+        "?.",
+        "...",
+        ",",
+        ";",
+        "a<",
+        "<a ",
+        "</",
+        "class {",
+        "enum {",
+        "import {",
+        "export {",
+        "type T<",
+        "x as ",
+        "@d ",
+        "async ",
+        "abstract ",
+        "declare ",
+        "{a:",
+        "[a,",
+        "f(a,",
+        "<T,>",
+        "\\u",
+        "0x",
+        "1e",
+        "#a",
+        "new ",
+        "case ",
+        "class C extends A ",
+        "class C extends A<T>\n",
+        "interface I extends ; ",
+    ];
+    for unit in units {
+        for kind in [
+            SourceKind::Ts,
+            SourceKind::Tsx,
+            SourceKind::Js,
+            SourceKind::Dts,
+        ] {
+            let src = unit.repeat(20_000 / unit.len().max(1));
+            let start = std::time::Instant::now();
+            let r = parse(&src, kind);
+            assert!(
+                start.elapsed().as_secs() < 10,
+                "slow on {unit:?} x N ({kind:?})"
+            );
+            assert!(
+                r.ast.node_count() <= src.len() * 4 + 1024,
+                "node blow-up on {unit:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn spans_nest() {
+    let src = include_str!("../tests/fixtures/kitchen_sink.ts");
+    let r = parse(src, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:#?}", r.diagnostics);
+    let ast = &r.ast;
+    for i in 1..ast.nodes.len() {
+        let id = ts_r_ast::NodeId::from_raw(i as u32).unwrap();
+        let span = ast.span(id);
+        assert!(span.start <= span.end && span.end as usize <= src.len());
+        if ast.kind(id) == NodeKind::Missing {
+            continue;
+        }
+        let mut prev_end = span.start;
+        ast.for_each_child(id, |c| {
+            let cs = ast.span(c);
+            assert!(
+                span.contains_span(cs),
+                "{:?} {:?} not in {:?} {:?}",
+                ast.kind(c),
+                cs,
+                ast.kind(id),
+                span
+            );
+            assert!(
+                cs.start >= prev_end,
+                "children out of order in {:?}",
+                ast.kind(id)
+            );
+            prev_end = cs.end;
+        });
+    }
+}
+
+/// First diagnostic (code, 1-based column) for one-line inputs, checked against tsc 7.
+#[test]
+fn first_error_matches_tsc() {
+    let cases: &[(&str, u32, u32)] = &[
+        ("let x = 1 +;", 1109, 12),
+        ("import { a as } from \"x\";", 1003, 15),
+        ("let r = a ? b;", 1005, 14),
+        ("for (let i = 0; i < 3) {}", 1005, 22),
+        ("let a = 1 let b = 2;", 1005, 11),
+        ("switch (x) { case: break; }", 1109, 18),
+        ("let x: Array<number = [];", 1005, 21),
+        ("let y = a?.b?.;", 1003, 15),
+        ("const obj = { a: 1, , b: 2 };", 1136, 21),
+        ("type U = | ;", 1110, 12),
+        ("type V = keyof;", 1110, 15),
+        ("import x, from \"y\";", 1005, 11),
+        ("class K extends {}", 1097, 16),
+        ("let u = 0x;", 1125, 11),
+        ("var v = 08;", 1489, 9),
+        ("let n = 1.e;", 1124, 12),
+        ("let m = \"unterminated", 1002, 22),
+        (r#"let s = "ab\u12";"#, 1125, 16),
+        (r#"let t = `\x4`;"#, 1125, 13),
+        ("class C { get x(): number; }", 1005, 26),
+        ("function f(...a,) {}", 1013, 16),
+        ("let {...a,} = b;", 1013, 10),
+        ("let [...a,] = b;", 1013, 10),
+        ("let f = (...a,) => a;", 1013, 14),
+        ("let a = /a/gx;", 1499, 13),
+        ("let a = /a/gg;", 1500, 13),
+        ("let a = /a/uv;", 1502, 13),
+        ("function f() { yield in o; }", 1109, 22),
+        ("function* f() { <number> yield 0; }", 1109, 26),
+        ("function* f() { var x = 1 + yield 2; }", 1109, 29),
+        ("function* f() { typeof yield; }", 1109, 24),
+        ("var [debugger, if] = [1, 2];", 1181, 6),
+        ("var f = ()\n=> 1;", 1200, 12),
+        ("function f(! b) {}", 1003, 12),
+        ("const x = A<T>.foo;", 1477, 12),
+        ("class B extends A x {}", 1005, 19),
+        ("function f(null) {}", 1359, 12),
+        ("function f(export) {}", 1359, 12),
+        ("function f(a, export {x}) {}", 1359, 15),
+    ];
+    for &(src, code, col) in cases {
+        let r = parse(src, SourceKind::Ts);
+        let d = r
+            .diagnostics
+            .first()
+            .unwrap_or_else(|| panic!("no diagnostics for {src:?}"));
+        assert_eq!(
+            (d.code, d.span.start + 1),
+            (code, col),
+            "for {src:?}: {:?}",
+            r.diagnostics
+        );
+    }
+    // Accessors without bodies are fine when ambient or abstract; tagged templates allow
+    // invalid escapes.
+    ok("abstract class A { abstract get x(): number; }");
+    ok("declare class B { get x(): number; set x(v); }");
+    ok(r"let u = tag`\x4`;");
+    ok("class K extends {} {}");
+    ok("let q = { readonly: 1 }; type T = [readonly: string];");
+}
+
+/// TypeScript syntax in `.js` files (`TsInJs::Report`): every diagnostic as
+/// (code, line, column), checked against tsc 7.0.2 `--allowJs --checkJs` (one per position;
+/// where tsc reports two at one position, the first).
+#[test]
+fn ts_in_js_matches_tsc() {
+    use crate::{ParseOptions, TsInJs, parse_with};
+    type Row = (&'static str, &'static [(u32, u32, u32)]);
+    let cases: &[Row] = &[
+        ("new Array<Foo>(1, 2, 3);", &[]),
+        ("Array<Foo>(1, 2, 3);", &[]),
+        ("const x = <div/> as any;", &[(8016, 1, 21)]),
+        (
+            "declare const foo: number | undefined;\nfoo as any;",
+            &[(8009, 1, 1), (8010, 1, 20), (8016, 2, 8)],
+        ),
+        ("let x: number = 1;", &[(8010, 1, 8)]),
+        (
+            "function f<T>(a: T): T { return a; }",
+            &[(8004, 1, 12), (8010, 1, 18), (8010, 1, 22)],
+        ),
+        (
+            "interface I { a: number }\ntype T = string;",
+            &[(8006, 1, 11), (8008, 2, 6)],
+        ),
+        ("enum E { A }", &[(8006, 1, 6)]),
+        (
+            "class C { private x = 1; constructor(public y) {} }",
+            &[(8009, 1, 11), (8012, 1, 38)],
+        ),
+        (
+            "let y = x!;\nlet z = x satisfies any;",
+            &[(8013, 1, 9), (8037, 2, 21)],
+        ),
+        (
+            "import type { A } from \"./a\";\nexport type { B };",
+            &[(8006, 1, 1), (8006, 2, 1)],
+        ),
+        (
+            "namespace N {}\nmodule M {}",
+            &[(8006, 1, 11), (8006, 2, 8)],
+        ),
+        (
+            "class D implements I {}\nabstract class E {}",
+            &[(8005, 1, 9), (8009, 2, 1)],
+        ),
+        (
+            "function g(a?) {}\nlet h = (a: number): void => {};",
+            &[(8009, 1, 13), (8010, 2, 13), (8010, 2, 22)],
+        ),
+        (
+            "import x = require(\"x\");\nexport = x;",
+            &[(8002, 1, 1), (8003, 2, 1)],
+        ),
+        (
+            "class F { x!: number; declare y; readonly z = 1; m?() {} }",
+            &[(8010, 1, 15), (8009, 1, 23), (8009, 1, 34), (8009, 1, 51)],
+        ),
+        (
+            "function k(this: any) {}\nlet o = f<string>;",
+            &[(8010, 1, 18), (1109, 2, 18)],
+        ),
+        ("class A extends B<T> {}", &[(8011, 1, 19)]),
+        ("tag<T>`x`;\na?.b<T>();", &[(1109, 2, 9)]),
+        ("class C<T> { m<U>() {} }", &[(8004, 1, 9), (8004, 1, 16)]),
+        ("function f(): void;\nfunction f() {}", &[(8017, 1, 1)]),
+        ("class D { [key: string]: any; }", &[(8017, 1, 11)]),
+        ("const enum E { A }", &[(8006, 1, 12)]),
+        ("declare global { var x; }\ndeclare module \"m\" {}", &[]),
+        (
+            "import x, { type A } from \"a\";\nexport { type B } from \"b\";",
+            &[(8006, 1, 13), (8006, 2, 10)],
+        ),
+        ("export type * from \"a\";", &[(8006, 1, 1)]),
+        (
+            "let o = { m(): void {} };\ntry {} catch (e: unknown) {}",
+            &[(8010, 1, 16), (8010, 2, 18)],
+        ),
+        (
+            "let x!: number;\nclass F { y!; override m() {} }",
+            &[(8010, 1, 9), (8009, 2, 15)],
+        ),
+        (
+            "abstract class G { abstract m(); protected n() {} public static s = 1; }",
+            &[(8009, 1, 1), (8009, 1, 20), (8009, 1, 34), (8009, 1, 51)],
+        ),
+        (
+            "function h(x): x is string { return true; }\nfunction j(x): asserts x {}",
+            &[(8010, 1, 16), (8010, 2, 16)],
+        ),
+        (
+            "export declare const q = 1;\nexport abstract class K {}\nexport default interface L {}",
+            &[(8009, 1, 8), (8009, 2, 8), (8006, 3, 26)],
+        ),
+        ("const f2 = async <T,>(x) => x;", &[(8004, 1, 19)]),
+        (
+            "class M { constructor(private readonly a, b?) {} }",
+            &[(8012, 1, 23), (8009, 1, 44)],
+        ),
+        (
+            "function o(a?: number = 1) {}\nfor (let i: number = 0;;) {}",
+            &[(8009, 1, 13), (8010, 1, 16), (8010, 2, 13)],
+        ),
+        (
+            "class N { get a(): number { return 1 } set a(v: number) {} }",
+            &[(8010, 1, 20), (8010, 1, 49)],
+        ),
+        (
+            "export import Z = N.Z;\nimport type D from \"d\";",
+            &[(8002, 1, 1), (8006, 2, 1)],
+        ),
+        (
+            "let fn = function <T>(a) {};\nlet ar = (a?) => a;",
+            &[(8004, 1, 20), (8009, 2, 12)],
+        ),
+        (
+            "let u: unique symbol;\nlet r = (a): a is number => true;",
+            &[(8010, 1, 8), (8010, 2, 14)],
+        ),
+        (
+            "class S { declare readonly x: number; accessor y = 1; }",
+            &[(8009, 1, 11), (8009, 1, 19), (8010, 1, 31)],
+        ),
+        (
+            "namespace A.B.C {}",
+            &[(8006, 1, 11), (8006, 1, 13), (8006, 1, 15)],
+        ),
+        ("type X<T> = T;", &[(8008, 1, 6)]),
+        (
+            "namespace N { let x: number; function f<T>() {} }",
+            &[(8006, 1, 11), (8010, 1, 22), (8004, 1, 41)],
+        ),
+        (
+            "declare function f(): void;\ndeclare class C { m(): void }",
+            &[(8009, 1, 1), (8009, 2, 1), (8017, 2, 19)],
+        ),
+        (
+            "declare namespace Q { let y: number; }",
+            &[(8006, 1, 19), (8010, 1, 30)],
+        ),
+        (
+            "export declare function k(a: number): void;",
+            &[(8017, 1, 1), (8009, 1, 8), (8010, 1, 30)],
+        ),
+        (
+            "function f(this: any, a: number) {}",
+            &[(8010, 1, 18), (8010, 1, 26)],
+        ),
+        (
+            "declare enum E { A }\ndeclare interface I {}",
+            &[(8006, 1, 14), (8006, 2, 19)],
+        ),
+        (
+            "declare function f<T>(a: T): void;",
+            &[(8009, 1, 1), (8004, 1, 20), (8010, 1, 26)],
+        ),
+        (
+            "declare namespace N { function g(a: number): void; }",
+            &[(8006, 1, 19), (8017, 1, 23), (8010, 1, 37)],
+        ),
+        (
+            "class C { constructor(a: number); constructor(a) {} }",
+            &[(8017, 1, 11), (8010, 1, 26)],
+        ),
+        ("export default abstract class {}", &[(8009, 1, 16)]),
+        (
+            "class D { abstract x: number; private static readonly y; }",
+            &[(8009, 1, 11), (8010, 1, 23), (8009, 1, 31), (8009, 1, 46)],
+        ),
+        (
+            "declare module M { let x: number; }",
+            &[(8006, 1, 16), (8010, 1, 27)],
+        ),
+        ("const f = <T,>(x) => x;", &[(8004, 1, 12)]),
+        ("const g = <T extends U>(x) => x;", &[(8004, 1, 12)]),
+        ("new Foo<T>();", &[(1109, 1, 12)]),
+        (
+            "let x = y as unknown as T;",
+            &[(8016, 1, 14), (8016, 1, 25)],
+        ),
+        (
+            "class E { m?(): void; n<T>(): void; }",
+            &[(8017, 1, 11), (8009, 1, 12), (8017, 1, 23), (8004, 1, 25)],
+        ),
+        (
+            "export declare namespace Z {}\nexport declare enum Y {}",
+            &[(8006, 1, 26), (8006, 2, 21)],
+        ),
+        ("function f(a /* c */ ?) {}", &[(8009, 1, 22)]),
+        ("class F<in out T> {}", &[(8004, 1, 9)]),
+        (
+            "let o = { a: 1 }!;\nlet p = (a)!.b;",
+            &[(8013, 1, 9), (8013, 2, 9)],
+        ),
+        (
+            "export type T = 1;\nexport interface J {}",
+            &[(8008, 1, 13), (8006, 2, 18)],
+        ),
+        (
+            "import type * as ns from \"x\";\nexport type { default } from \"y\";",
+            &[(8006, 1, 1), (8006, 2, 1)],
+        ),
+        // JavaScript has no namespaces: the module-level codes (importDeclarationInModuleDeclaration2).
+        (
+            "function f() {\n    import \"fs\";\n    export { x };\n}",
+            &[(1473, 2, 5), (1474, 3, 5)],
+        ),
+    ];
+    let report = ParseOptions {
+        ts_in_js: TsInJs::Report,
+    };
+    let allow = ParseOptions {
+        ts_in_js: TsInJs::Allow,
+    };
+    for &(src, want) in cases {
+        let r = parse_with(src, SourceKind::Js, report);
+        let got: Vec<(u32, u32, u32)> = r
+            .diagnostics
+            .iter()
+            .map(|d| {
+                let before = &src[..d.span.start as usize];
+                let line = before.matches('\n').count() as u32 + 1;
+                let col = (before.len() - before.rfind('\n').map_or(0, |i| i + 1)) as u32 + 1;
+                (d.code, line, col)
+            })
+            .collect();
+        assert_eq!(got, want, "for {src:?}");
+        // `Allow` parses the same tree without the TS8xxx errors.
+        let a = parse_with(src, SourceKind::Js, allow);
+        assert_eq!(a.ast.dump(), r.ast.dump(), "for {src:?}");
+        assert!(
+            a.diagnostics
+                .iter()
+                .all(|d| !(8000..9000).contains(&d.code)),
+            "for {src:?}"
+        );
+        // TypeScript kinds ignore the option.
+        assert_eq!(
+            parse(src, SourceKind::Tsx).diagnostics,
+            parse_with(src, SourceKind::Tsx, report).diagnostics
+        );
+    }
+    // Expressions take no type arguments: `new Array<Foo>(1)` is `(new Array < Foo) > (1)`.
+    let d = parse_with("new Array<Foo>(1, 2, 3);", SourceKind::Js, allow)
+        .ast
+        .dump();
+    has(&d, "expr: Binary");
+    has(&d, "left: Binary");
+    has(&d, "left: New");
+    let d = parse_with("<div/> as any;", SourceKind::Js, allow)
+        .ast
+        .dump();
+    has(&d, "expr: As");
+    has(&d, "expr: JsxElement");
+    // Without the option a `.js` file stays JavaScript-only.
+    assert!(!err_codes("let x: number = 1;", SourceKind::Js).is_empty());
+}
+
+/// Every syntax diagnostic as (code, line, column), as tsc 7 reports them (from the upstream
+/// conformance baselines named in the comments). Pins recovery: where each error lands and
+/// which follow-on errors appear.
+#[test]
+fn recovery_matches_tsc() {
+    type Row = (&'static str, &'static [(u32, u32, u32)]);
+    let cases: &[Row] = &[
+        // parserSkippedTokens*: the scanner's TS1127 wins over the parser's error at the
+        // same position; the bad character is skipped.
+        ("\\", &[(1127, 1, 1)]),
+        ("\\  /regexp/;", &[(1127, 1, 1)]),
+        ("/regexp/ \\ ;", &[(1127, 1, 10)]),
+        (";\n/*foo*/ \\ /*bar*/", &[(1127, 2, 9)]),
+        // List recovery: a token an enclosing list can use ends the inner list (class2,
+        // parserErrorRecovery_ClassElement2); a stray `catch`/`finally` starts a `try`
+        // (invalidTryStatements).
+        (
+            "class foo { constructor() { static f = 3; } }",
+            &[(1128, 1, 29), (1128, 1, 45)],
+        ),
+        (
+            "namespace M {\n  class C {\n\n  enum E {\n  }\n}",
+            &[(1068, 4, 3)],
+        ),
+        (
+            "function fn() {\n    catch(x) { }\n\n    finally { }\n\n    try { };\n}",
+            &[(1005, 2, 5), (1472, 6, 12)],
+        ),
+        (
+            "function f() {\n    finally { }\n    catch (x) { }\n}",
+            &[(1005, 2, 5), (1005, 3, 5)],
+        ),
+        // A missing `;` after a lone name (commonMissingSemicolons, anonymousModules,
+        // staticModifierAlreadySeen) or a typed property
+        // (derivedClassSuperCallsInNonConstructorMembers, privateInstanceMemberAccessibility).
+        ("clasd MyClass2 {}", &[(1435, 1, 1), (1434, 1, 7)]),
+        ("interface { }", &[(1438, 1, 11)]),
+        ("module {\n}", &[(1437, 1, 8)]),
+        ("declare constd x: 1;", &[(1435, 1, 9)]),
+        ("class C {\n  static static Foo;\n}", &[(1434, 2, 10)]),
+        (
+            "class C {\n    a: super();\n}",
+            &[(1441, 2, 13), (1068, 2, 14)],
+        ),
+        ("class C {\n    a: this.foo;\n}", &[(1442, 2, 12)]),
+        // A missing `,` in an argument list goes on with the list (staticsInAFunction).
+        (
+            "function boo() {\n   test(name:string)\n}",
+            &[(1005, 2, 13)],
+        ),
+        // Variable declaration lists (parserVariableDeclaration*, ClassDeclaration26,
+        // parserInvalidIdentifiersInVariableStatements1): TS1123/TS1009 only in a clean file.
+        ("var;", &[(1123, 1, 4)]),
+        ("var a,;", &[(1009, 1, 6)]),
+        ("for (var of X) {}", &[(1123, 1, 9)]),
+        ("var a,; )", &[(1128, 1, 9)]),
+        (
+            "var export;\nvar class;",
+            &[(1389, 1, 5), (1389, 2, 5), (1005, 2, 10)],
+        ),
+        ("var typeof = 10;", &[(1389, 1, 5), (1109, 1, 12)]),
+        // `import` that is not a call or `import.meta` is left for the import declaration
+        // after it (importCallExpressionIncorrect2); a bad specifier ends the named import
+        // list (es6ImportNamedImportParsingError).
+        ("var x = import { foo } from \"m\";", &[(1109, 1, 9)]),
+        (
+            "import { * } from \"m\";",
+            &[(1003, 1, 10), (1128, 1, 12), (1434, 1, 14)],
+        ),
+        ("var y = x:number => x*x;", &[(1005, 1, 10), (1005, 1, 18)]),
+        ("class A { static const H = 1; }", &[(1248, 1, 24)]),
+        (
+            "class C {\n    public const var export foo = 10;\n\n    var constructor() { }\n}",
+            &[
+                (1440, 2, 18),
+                (1068, 4, 5),
+                (1005, 4, 20),
+                (1005, 4, 23),
+                (1128, 5, 1),
+            ],
+        ),
+        // Arrows and bodies (arrowFunctionsMissingTokens, parserErrantEqualsGreaterThan*,
+        // parseErrorIncorrectReturnToken, asyncArrowFunction5_es6).
+        ("var a = () { };", &[(1005, 1, 12)]),
+        ("var b = (): void;", &[(1005, 1, 17)]),
+        ("var c = (x);", &[]),
+        (
+            "namespace N {\n    var a = () => var k = 10;};\n}",
+            &[(1005, 2, 19)],
+        ),
+        ("function f(p: A) => p;", &[(1144, 1, 18)]),
+        (
+            "type F1 = {\n    (n: number) => string;\n}",
+            &[(1005, 2, 17)],
+        ),
+        (
+            "var foo = async (await): Promise<void> => {\n}",
+            &[(1359, 1, 18)],
+        ),
+        (
+            "let o = {\n    m(n: number) => string {\n        return n.toString();\n    }\n};",
+            &[(1005, 2, 18), (1434, 2, 21), (1128, 5, 1)],
+        ),
+        // Object and array literals (parserErrorRecovery_ObjectLiteral*,
+        // missingCloseBraceInObjectLiteral, templateStringInPropertyName2).
+        (
+            "var v = { a: \nreturn;",
+            &[(1109, 2, 1), (1005, 2, 7), (1005, 2, 8)],
+        ),
+        (
+            "var v = { a\nreturn;",
+            &[(1005, 2, 1), (1005, 2, 7), (1005, 2, 8)],
+        ),
+        ("var foo = {\n    a: 'a'\n\n", &[(1005, 4, 1)]),
+        ("var a = [\"1\",\"2\"", &[(1005, 1, 17)]),
+        (
+            "var x = {\n    `abc${ 123 }def`: 321\n}",
+            &[(1136, 2, 5), (1005, 2, 21), (1134, 2, 23), (1128, 3, 1)],
+        ),
+        // Accessor and constructor grammar, kept only in files without syntax errors
+        // (accessorWithoutBody1, abstractPropertyNegative, parserConstructorDeclaration12,
+        // accessorWithRestParam, optionalSetterParam, computedPropertyNames49).
+        ("var v = { get foo() }", &[(1005, 1, 19)]),
+        ("class C { get x(): string; }", &[(1005, 1, 26)]),
+        ("var v = { get foo() } +", &[(1109, 1, 24)]),
+        ("class C<> {}", &[(1098, 1, 8)]),
+        ("foo<>();", &[(1099, 1, 4)]),
+        (
+            "class C { constructor<>() { } }",
+            &[(1098, 1, 22), (1092, 1, 23)],
+        ),
+        ("class C { constructor(): number { } }", &[(1093, 1, 26)]),
+        ("class C { set foo<T>(v) { } }", &[(1094, 1, 15)]),
+        ("class C { get foo(a) { return 1; } }", &[(1054, 1, 15)]),
+        ("class C { set [1 + 1]() { } }", &[(1049, 1, 15)]),
+        ("class C { set X(v): number { } }", &[(1095, 1, 15)]),
+        ("class C { set X(...v) { } }", &[(1053, 1, 17)]),
+        ("class C { set X(v?: any) { } }", &[(1051, 1, 18)]),
+        ("class C { set X(v = 0) { } }", &[(1052, 1, 15)]),
+        (
+            "class C { set X(this: C, v) { } get g(this: C) { return 1; } }",
+            &[],
+        ),
+        ("declare class D { get x(): number; set x(v); }", &[]),
+        // A declaration keyword before a token that is no name (interfacesWithPredefinedTypesAsNames,
+        // reservedNamesInAliases, parseInvalidNames, ambientModuleDeclarationWith...DottedPath).
+        ("interface void {}", &[(2427, 1, 11)]),
+        ("type void = I;", &[(2457, 1, 6), (1109, 1, 11)]),
+        ("namespace 100 {}", &[(2819, 1, 11), (1005, 1, 15)]),
+        (
+            "declare namespace debugger {}",
+            &[(2819, 1, 19), (1005, 1, 28)],
+        ),
+        // `using` with a pattern (usingDeclarations.5/6, usingDeclarationsInForOf.3).
+        ("{ using {a} = null; }", &[(1492, 1, 9)]),
+        ("for (using {} of []) {}", &[(1492, 1, 12)]),
+        ("{ using a = null, [b] = null; }", &[(1492, 1, 19)]),
+        // Unicode escapes (unicodeExtendedEscapesInStrings*, invalidUnicodeEscapeSequance*):
+        // every bad escape of a string is reported, at the digits or just after them.
+        ("var x = \"\\u{110000}\";", &[(1198, 1, 13)]),
+        ("var x = \"\\u{}\";", &[(1125, 1, 13)]),
+        ("var x = \"\\u{67\";", &[(1199, 1, 15)]),
+        ("var x = \"\\u{00000000000067", &[(1199, 1, 27)]),
+        (
+            "var x = \"\\u{r}\\u{n}\\u{t}\";",
+            &[(1125, 1, 13), (1125, 1, 18), (1125, 1, 23)],
+        ),
+        ("var arg\\u003", &[(1127, 1, 8)]),
+        ("a\\u", &[(1127, 1, 2)]),
+        // A reserved word as a name is TS1359 (parserEnumDeclaration4,
+        // objectBindingPatternKeywordIdentifiers02); after `class` it is '{' expected
+        // (classWithPredefinedTypesAsNames2).
+        ("enum void {}", &[(1359, 1, 6)]),
+        ("class void {}", &[(1005, 1, 7)]),
+        ("function function() { }", &[(1359, 1, 10), (1003, 1, 18)]),
+        (
+            "var { while: while } = { while: 1 }",
+            &[(1359, 1, 14), (1005, 1, 20)],
+        ),
+        // Decorators after modifiers or after a property (decoratorOnClassMethod3/17).
+        (
+            "class C {\n    public @dec method() {}\n}",
+            &[(1436, 2, 12)],
+        ),
+        ("class C {\n    public @dec prop;\n}", &[(1436, 2, 12)]),
+        (
+            "class C {\n    private prop @dec\n    foo() { return 0; }\n}",
+            &[(1436, 2, 18)],
+        ),
+        // A missing name after `.` at the end of the file or before a declaration on the
+        // next line is TS1003 just after the `.` (enumMemberResolution).
+        ("var x = A. // e\nvar y = 1;", &[(1003, 1, 11)]),
+        ("var p2 = window. ", &[(1003, 1, 17)]),
+        ("var x: M.\nnamespace N {\n}", &[(1003, 1, 10)]),
+        ("a.\n  b(c);", &[]),
+        // `public {};` (classMemberWithMissingIdentifier).
+        (
+            "class C {\n    public {};\n}",
+            &[(1146, 2, 11), (1005, 2, 12), (1128, 3, 1)],
+        ),
+        ("function sum (...) {}", &[(1003, 1, 18)]),
+        ("(...) => 105;", &[(1003, 1, 5)]),
+        ("(readonly as number);", &[]),
+        ("(async bar => bar);", &[]),
+        ("interface I implements A {\n}", &[(1176, 1, 13)]),
+        ("default function () {\n}", &[(1005, 1, 1), (1003, 1, 18)]),
+        ("default abstract class C {}", &[(1005, 1, 1)]),
+        // Checker grammar errors, kept in clean files.
+        ("class D extends C, {\n}", &[(1009, 1, 18)]),
+        ("@dec\ndefault class {}", &[(1029, 2, 1)]),
+        ("interface F {\n    bar: number = 5;\n}", &[(1246, 2, 19)]),
+        ("var F: {\n    bar: number = 5;\n};", &[(1247, 2, 19)]),
+        ("try {\n}\ncatch (e = 1) {\n}", &[(1197, 3, 12)]),
+        (
+            "switch (x) {\n  default:\n  default:\n  default:\n}",
+            &[(1113, 3, 3)],
+        ),
+        // Private names as keys outside a class: TS18016, deferred; member access is the
+        // checker's (privateNameBadDeclaration, privateNameAccessorsAccess).
+        ("const o = {\n    #foo: 1\n};", &[(18016, 2, 5)]),
+        (
+            "o = { #m() {}, get #p() { return 1 } };",
+            &[(18016, 1, 7), (18016, 1, 20)],
+        ),
+        ("interface A {\n    #foo: string;\n}", &[(18016, 2, 5)]),
+        ("new A().#x;", &[]),
+        ("class C { #x = 1; m() { return { y: this.#x }; } }", &[]),
+        // A private name in an optional chain: TS18030 (privateIdentifierChain.1).
+        (
+            "class C { #x; m() { this?.#x; this?.a!.#x; this?.f().#x; (this?.a).#x; } }",
+            &[(18030, 1, 27), (18030, 1, 40), (18030, 1, 54)],
+        ),
+        // `await` is a type name in an async function (asyncArrowFunction10_es2017).
+        ("async function f() { var v: await; }", &[]),
+        // Jump targets and `return` (grammar.rs; invalidDoWhileBreakStatements,
+        // classStaticBlock8, invalidContinueInDownlevelAsync, parserWithStatement2).
+        ("break;", &[(1105, 1, 1)]),
+        ("continue;", &[(1104, 1, 1)]),
+        ("switch (1) { case 1: continue; }", &[(1104, 1, 22)]),
+        ("ONE:\ndo break TWO; while (true)", &[(1116, 2, 4)]),
+        ("L: if (1) { continue L; }", &[(1115, 1, 13)]),
+        (
+            "T: do { var x = () => { break T; } } while (1)",
+            &[(1107, 1, 25)],
+        ),
+        (
+            "async function f() { if (1) { continue; } }",
+            &[(1107, 1, 31)],
+        ),
+        (
+            "while (1) { class C { static { break; } } }",
+            &[(1107, 1, 32)],
+        ),
+        (
+            "outer: break outer;\nl: while (1) { if (1) break l; continue l; }\nswitch (1) { default: break; }",
+            &[],
+        ),
+        ("a: b: while (1) { continue a; }", &[]),
+        ("return;", &[(1108, 1, 1)]),
+        (
+            "function f() { return 1; }\nclass C { static { return; } }",
+            &[],
+        ),
+        ("with (1)\n  return;", &[]),
+        // Ambient blocks and labelled declarations (ambientWithStatements, letDeclarations-scopes).
+        (
+            "declare namespace M {\n    break;\n    continue;\n    debugger;\n    L: var y;\n}",
+            &[(1036, 2, 5), (1104, 3, 5), (1344, 5, 5)],
+        ),
+        (
+            "declare module \"x\" {\n  export interface i1 { };\n  namespace N { x = 1; }\n}",
+            &[(1036, 2, 26), (1036, 3, 17)],
+        ),
+        ("namespace Q { var x = 1; ; }", &[]),
+        ("label2: label3: label4: const c9 = 0;", &[(1344, 1, 17)]),
+        // In a file with a syntax error none of these are reported.
+        ("break; (", &[(1109, 1, 9)]),
+        // Declarator initializers (constDeclarations-errors, declarationWithNoInitializer,
+        // parserForInStatement3/4, parserForOfStatement3/4, usingDeclarations.8).
+        (
+            "const c3, c4 = 1, c5: string;",
+            &[(1155, 1, 7), (1155, 1, 19)],
+        ),
+        ("for (const c9; c9 < 1;) { }", &[(1155, 1, 12)]),
+        ("declare const x: number;\nfor (const a of [1]) {}", &[]),
+        (
+            "var [a, b];\nvar {c}: { c: any }, d: any;",
+            &[(1182, 1, 5), (1182, 2, 5)],
+        ),
+        ("{ using x; }", &[(1155, 1, 9)]),
+        ("for (var a, b of X) { }", &[(1188, 1, 13)]),
+        ("for (var a = 1, b = 2 in X) { }", &[(1091, 1, 17)]),
+        ("for (var a = 1 of X) { }", &[(1190, 1, 10)]),
+        ("for (var a = 1 in X) { }", &[(1189, 1, 10)]),
+        // Rest parameters (restParameterNotLast).
+        ("function f(...x, y) { }", &[(1014, 1, 12)]),
+        (
+            "type F = (...a: any[], ...b: any[]) => void;",
+            &[(1014, 1, 11)],
+        ),
+        // Ambient contexts (ambientErrors, ambientGetters, constDeclarations-ambient-errors,
+        // generatorInAmbientContext*, accessorBodyInTypeContext,
+        // esDecorators-classDeclaration-fields-staticAmbient).
+        (
+            "declare var x = 4;\ndeclare const c1: boolean = true;\ndeclare const c3 = null, ok = true, ok2 = -1, ok3 = E.A;",
+            &[(1039, 1, 17), (1039, 2, 29), (1254, 3, 20)],
+        ),
+        (
+            "declare class C {\n    get X() { return 1; }\n    *g(): any;\n    static readonly r = \"a\";\n    x = 1;\n}",
+            &[(1183, 2, 13), (1221, 3, 5), (1039, 5, 9)],
+        ),
+        (
+            "declare function *g(): any;\ndeclare function f() { }",
+            &[(1221, 1, 18), (1183, 2, 22)],
+        ),
+        (
+            "type A = {\n    get foo() { return 0 }\n};",
+            &[(1183, 2, 15)],
+        ),
+        ("class D { declare foo = 1; }", &[(1039, 1, 25)]),
+        ("class D { @dec static declare foo = 1; }", &[]),
+        // Parameter lists, one error each (optionalArgsWithDefaultValues,
+        // fatarrowfunctionsOptionalArgsErrors1, restParamAsOptional, restParamModifier2).
+        (
+            "function foo(x: number, y?:boolean=false, z?=0) {}",
+            &[(1015, 1, 25)],
+        ),
+        ("(arg1?, arg2) => 101;", &[(1016, 1, 9)]),
+        ("(arg1 = 1, arg2) => 1;", &[]),
+        ("(...arg?) => 102;", &[(1047, 1, 8)]),
+        ("function f2(...x = []) { }", &[(1048, 1, 16)]),
+        (
+            "class C {\n    constructor(public ...rest: string[]) {}\n}",
+            &[(1317, 2, 17)],
+        ),
+        // Index signatures (indexSignatureTypeCheck, parserIndexSignature6/9/11,
+        // indexSignatureWithInitializer1, arraySigChecking).
+        (
+            "interface I {\n    [p2?: string];\n    [...p3: any[]];\n    [p4: string, p5?: string];\n    []: number;\n    [p1: string];\n    [a:boolean]\n    [x: number = 1]: number;\n}",
+            &[
+                (1019, 2, 8),
+                (1017, 3, 6),
+                (1096, 4, 6),
+                (1096, 5, 5),
+                (1021, 6, 5),
+                (1268, 7, 6),
+                (1020, 8, 6),
+            ],
+        ),
+        ("var foo: { [index: T]; };", &[]),
+        // Heritage clauses (extendsClauseAlreadySeen2, parserClassDeclaration4,
+        // implementClausePrecedingExtends, classExtendsMultipleBaseClasses).
+        (
+            "class D<T> extends C<number> extends C<string> { }",
+            &[(1172, 1, 30)],
+        ),
+        (
+            "class C extends A implements B extends C { }",
+            &[(1172, 1, 32)],
+        ),
+        ("class D implements C extends C { }", &[(1173, 1, 22)]),
+        ("class C extends A,B { }", &[(1174, 1, 19)]),
+        ("class C implements A implements B { }", &[(1175, 1, 22)]),
+        // Declarations as substatements (constDeclarations-invalidContexts,
+        // typeInterfaceDeclarationsInBlockStatements1, usingDeclarations.10).
+        (
+            "if (true)\n    const c1 = 0;\nwhile (false)\n    l: const c9 = 0;\nif (x) type s = string;\n{ l2: const c = 0; }\nwith (o)\n    let y = 0;",
+            &[
+                (1156, 2, 5),
+                (1344, 4, 5),
+                (1156, 4, 8),
+                (1156, 5, 13),
+                (1344, 6, 3),
+            ],
+        ),
+        ("if (true)\nexport const c = 1;", &[]),
+        // Enum computed names: reported next to syntax errors (parserComputedPropertyName30).
+        (
+            "enum E {\n  [e] = 1, [\"4\"] = 4, [2] = 2\n}",
+            &[(1164, 2, 3)],
+        ),
+        // Import types (importTypeGeneric, importTypeNonString).
+        (
+            "type A = import(T).Foo;\ntype B = import(\"./a\").X;",
+            &[(1141, 1, 17)],
+        ),
+        // Module elements in the wrong place (moduleElementsInWrongContext,
+        // labeledStatementWithLabel, quotedModuleNameMustBeAmbient,
+        // exportDefaultClassInNamespace, es6ModuleInternalNamedImports2,
+        // exportDeclarationsInAmbientNamespaces2, importInsideModule).
+        (
+            "{\n    export namespace N { }\n    declare module \"a\" { }\n    export = M;\n    export { foo };\n    export default v;\n    import I = M;\n}\nlabel: namespace L { }",
+            &[
+                (1235, 2, 5),
+                (1234, 3, 5),
+                (1231, 4, 5),
+                (1233, 5, 5),
+                (1258, 6, 5),
+                (1232, 7, 5),
+                (1235, 9, 8),
+            ],
+        ),
+        ("module 'M' {}\ndeclare module 'M2' {}", &[(1035, 1, 8)]),
+        // A misplaced `module N` is not TS1540 too; `declare global` is an ambient module, and
+        // a namespace's re-export is reported at its specifier (misplaced_module_elements,
+        // namespace_module_statements parity fixtures).
+        (
+            "{\n    module C { }\n    declare global { }\n}\nnamespace N {\n    export { v } from \"m\";\n}",
+            &[(1235, 2, 5), (1234, 3, 5), (1194, 6, 23)],
+        ),
+        (
+            "namespace A {\n    export default class {}\n    export { x };\n    import f = require(\"f\");\n    import g = B.C;\n}\ndeclare namespace D {\n    export { y };\n    export { y } from \"m\";\n}\ndeclare module \"m\" { export { z } from \"n\"; }",
+            &[(1319, 2, 12), (1194, 3, 5), (1147, 4, 24), (1194, 9, 23)],
+        ),
+        ("var x;\nexport export = x;", &[(1120, 2, 1)]),
+        ("module not.ok { }", &[(1540, 1, 8), (1540, 1, 12)]),
+        // Statements (emptyThenWarning, awaitInNonAsyncFunction, classStaticBlock23,
+        // dynamicImportTrailingComma).
+        ("if (1);\nif (2); else {}", &[(1313, 1, 7), (1313, 2, 7)]),
+        (
+            "function f() { for await (const x of []); }\nclass C { static { for await (const x of []); } }\nasync function g() { for await (const x of []); }",
+            &[(1103, 1, 20), (18038, 2, 24)],
+        ),
+        ("import(p,);\nimport(p, {},);", &[(1009, 1, 9)]),
+        // Import calls take an argument list (importAssertion1, importCallExpressionSpread).
+        (
+            "import(...a);\nimport();\nimport('./0', {}, {});",
+            &[(1325, 1, 8)],
+        ),
+        // Members (generatorOverloads1/3, definiteAssignmentAssertions, classAbstractAccessor,
+        // indexSignatureWithTrailingComma).
+        (
+            "function* f(): any;\nclass C {\n    *m(): any;\n    a! = 1;\n    static c!: number;\n    d!;\n    e!: number;\n}\nlet v!;\ndeclare let w!: number;",
+            &[
+                (1222, 1, 9),
+                (1222, 3, 5),
+                (1263, 4, 6),
+                (1255, 5, 13),
+                (1264, 6, 6),
+                (1264, 9, 6),
+                (1255, 10, 14),
+            ],
+        ),
+        (
+            "abstract class A {\n    abstract get a();\n    abstract get b() { return 1; }\n}",
+            &[(1318, 3, 18)],
+        ),
+        ("type A = { [key: string,]: string };", &[(1025, 1, 24)]),
+    ];
+    for &(src, want) in cases {
+        let r = parse(src, SourceKind::Ts);
+        let got: Vec<(u32, u32, u32)> = r
+            .diagnostics
+            .iter()
+            .map(|d| {
+                let before = &src[..d.span.start as usize];
+                let line = before.matches('\n').count() as u32 + 1;
+                let col = (before.len() - before.rfind('\n').map_or(0, |i| i + 1)) as u32 + 1;
+                (d.code, line, col)
+            })
+            .collect();
+        assert_eq!(got, want, "for {src:?}");
+    }
+}
+
+/// `?` followed by `|` or `&` starts a conditional type's branch, not a JSDoc postfix `T?`
+/// (`@types/node` 26 writes `S extends T ? | A | B : never`).
+#[test]
+fn conditional_branch_with_leading_bar() {
+    let dump = ok("type A<S> = S extends string ? | string | number : & { a: 1 };\n");
+    has(&dump, "ConditionalType");
+    let dump = ok("type B<S> = S extends\n  Array<infer I> ?\n    | string\n    | I\n  : never;\n");
+    has(&dump, "ConditionalType");
+}

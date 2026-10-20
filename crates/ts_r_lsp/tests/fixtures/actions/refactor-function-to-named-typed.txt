@@ -1,0 +1,4 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @differs: tsserver drops the variable's type (the parameter becomes implicitly any); ts-r does not offer it
+// @file: src/main.ts
+const /*|*/t: (x: number) => number = (x) => x;

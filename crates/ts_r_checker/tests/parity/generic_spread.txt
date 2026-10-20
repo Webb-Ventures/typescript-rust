@@ -1,0 +1,8 @@
+a.ts(3,9): error TS2322: Type 'T' is not assignable to type 'number'.
+  Type '{ lastmod: Date; }' is not assignable to type 'number'.
+a.ts(4,9): error TS2322: Type 'T & { lastmod: number; }' is not assignable to type 'number'.
+a.ts(5,9): error TS2322: Type '{ x: number; } & T' is not assignable to type 'number'.
+a.ts(8,9): error TS2322: Type 'T' is not assignable to type 'number'.
+a.ts(9,9): error TS2322: Type 'T & { lastmod: number; }' is not assignable to type 'number'.
+a.ts(10,9): error TS2322: Type 'T' is not assignable to type 'number'.
+a.ts(14,7): error TS2322: Type '<T extends { lastmod: Date; }>(rows: T[]) => (T & { lastmod: string; })[]' is not assignable to type 'number'.

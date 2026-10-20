@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to readonly field in class 'C'
+// @file: src/main.ts
+export class C {
+  x = 1;
+  private readonly newProperty = this.x + 1;
+
+  m() {
+    return this.newProperty;
+  }
+}

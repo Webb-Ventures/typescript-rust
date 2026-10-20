@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "types": []
+  },
+  "files": [
+    "a.js",
+    "b.ts"
+  ]
+}

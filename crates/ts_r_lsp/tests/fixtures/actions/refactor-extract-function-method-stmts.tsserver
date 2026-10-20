@@ -1,0 +1,15 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+export class C {
+  private items: string[] = [];
+  add(item: string) {
+    this.newMethod(item);
+    return this.items.length;
+  }
+
+  private newMethod(item: string) {
+    const trimmed = item.trim();
+    this.items.push(trimmed);
+  }
+}

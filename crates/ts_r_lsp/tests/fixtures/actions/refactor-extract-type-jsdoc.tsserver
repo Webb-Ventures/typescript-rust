@@ -1,0 +1,15 @@
+// tsserver 6.0.3
+// title: Extract to interface
+// @file: src/main.ts
+interface NewType {
+    a: string;
+    b: Array<{
+        c: 1;
+        d: 'x';
+    }>;
+}
+
+/**
+ * The options.
+ */
+export const opts: NewType = { a: "", b: [] };

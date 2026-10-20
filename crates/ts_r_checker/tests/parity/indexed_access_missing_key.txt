@@ -1,0 +1,4 @@
+a.ts(10,58): error TS2344: Type '"/x/[id]"' does not satisfy the constraint '"/"'.
+a.ts(11,11): error TS2339: Property 'id' does not exist on type 'unknown'.
+a.ts(12,13): error TS2571: Object is of type 'unknown'.
+a.ts(13,3): error TS18046: 'direct' is of type 'unknown'.

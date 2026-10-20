@@ -1,0 +1,8 @@
+a.ts(10,14): error TS2322: Type '(readonly string[])[]' is not assignable to type 'number'.
+a.ts(11,14): error TS2322: Type '(readonly [1, 2])[]' is not assignable to type 'number'.
+a.ts(12,14): error TS2322: Type '[(readonly string[] | undefined)?]' is not assignable to type 'number'.
+a.ts(13,14): error TS2322: Type 'readonly string[] & { x: 1; }' is not assignable to type 'number'.
+a.ts(14,14): error TS2322: Type 'readonly (readonly number[])[]' is not assignable to type 'number'.
+a.ts(15,14): error TS2322: Type '(readonly number[])[]' is not assignable to type 'number'.
+a.ts(16,14): error TS2322: Type 'keyof readonly string[]' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.

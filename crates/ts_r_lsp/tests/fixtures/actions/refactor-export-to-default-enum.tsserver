@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/main.ts
+import Color from "./types";
+
+export const c = Color.Red;
+// @file: src/types.ts
+enum Color { Red, Green }
+export default Color;

@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export const a = 1;
+
+
+export const b = 2;

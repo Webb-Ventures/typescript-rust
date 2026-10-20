@@ -1,0 +1,6 @@
+// @action: refactor Convert to template string/Convert to template string
+// @file: src/main.ts
+export function label(n: number, unit: string) {
+  const text = 1 + n /*|*/+ ' ' + unit + ': ' + (n + 1) + ' / ' + n * 2 + '.';
+  return text;
+}

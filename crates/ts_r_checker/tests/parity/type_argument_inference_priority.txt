@@ -1,0 +1,15 @@
+a.ts(23,4): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(24,4): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(25,4): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(26,8): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(27,4): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(28,8): error TS2345: Argument of type '{ v: number; }' is not assignable to parameter of type '{ v: string; }'.
+  Types of property 'v' are incompatible.
+    Type 'number' is not assignable to type 'string'.
+a.ts(29,8): error TS2345: Argument of type 'Sub' is not assignable to parameter of type 'Box<string>'.
+  Types of property 'v' are incompatible.
+    Type 'number' is not assignable to type 'string'.
+a.ts(31,7): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+a.ts(33,7): error TS2322: Type 'boolean' is not assignable to type 'string'.
+a.ts(37,6): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.

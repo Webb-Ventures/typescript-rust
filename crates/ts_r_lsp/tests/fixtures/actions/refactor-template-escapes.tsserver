@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Convert to template string
+// @file: src/main.ts
+export const message = `It's \`ready\` at \${price} é\x41\n \\ done`;

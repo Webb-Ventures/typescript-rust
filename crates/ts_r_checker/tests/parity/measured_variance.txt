@@ -1,0 +1,39 @@
+a.ts(12,7): error TS2322: Type 'Box<number>' is not assignable to type 'Box<unknown>'.
+  Types of property 'g' are incompatible.
+    Type '{ <K>(key: (value: number) => K): K; <K>(key: (value: number) => K, options: Opts<number>): K; }' is not assignable to type '{ <K>(key: (value: unknown) => K): K; <K>(key: (value: unknown) => K, options: Opts<unknown>): K; }'.
+      Types of parameters 'options' and 'options' are incompatible.
+        Type 'Opts<unknown>' is not assignable to type 'Opts<number>'.
+          Types of property 'element' are incompatible.
+            Type '((value: unknown) => unknown) | undefined' is not assignable to type '((value: number) => number) | undefined'.
+              Type '(value: unknown) => unknown' is not assignable to type '(value: number) => number'.
+                Type 'unknown' is not assignable to type 'number'.
+a.ts(19,7): error TS2322: Type 'Pair<number>' is not assignable to type 'Pair<unknown>'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type 'number'.
+a.ts(23,7): error TS2322: Type 'One<number>' is not assignable to type 'One<unknown>'.
+  Types of parameters 'o' and 'o' are incompatible.
+    Type 'Opts<unknown>' is not assignable to type 'Opts<number>'.
+      Types of property 'element' are incompatible.
+        Type '((value: unknown) => unknown) | undefined' is not assignable to type '((value: number) => number) | undefined'.
+          Type '(value: unknown) => unknown' is not assignable to type '(value: number) => number'.
+            Type 'unknown' is not assignable to type 'number'.
+a.ts(27,7): error TS2322: Type 'Fn<number>' is not assignable to type 'Fn<unknown>'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type 'number'.
+a.ts(28,7): error TS2322: Type 'Fn<number>' is not assignable to type 'Fn<1>'.
+  Types of parameters 'y' and 'y' are incompatible.
+    Type 'Opts<1>' is not assignable to type 'Opts<number>'.
+      Types of property 'element' are incompatible.
+        Type '((value: 1) => 1) | undefined' is not assignable to type '((value: number) => number) | undefined'.
+          Type '(value: 1) => 1' is not assignable to type '(value: number) => number'.
+            Types of parameters 'value' and 'value' are incompatible.
+              Type 'number' is not assignable to type '1'.
+a.ts(32,37): error TS2322: Type 'VA<number>' is not assignable to type 'VA<string>'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(33,37): error TS2322: Type 'VB<number>' is not assignable to type 'VB<string>'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(34,37): error TS2322: Type 'VC<number>' is not assignable to type 'VC<string>'.
+  Types of property 'f' are incompatible.
+    Type '(x: number) => number' is not assignable to type '(x: string) => string'.
+      Types of parameters 'x' and 'x' are incompatible.
+        Type 'string' is not assignable to type 'number'.

@@ -1,0 +1,7 @@
+// @action: fix 2304 Add missing function declaration 'helper'
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export function f(n: number, name: string) {
+  const r: boolean = /*|*/helper(n, name, [n], { n });
+  return r;
+}

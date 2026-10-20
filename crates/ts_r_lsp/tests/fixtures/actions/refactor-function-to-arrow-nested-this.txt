@@ -1,0 +1,7 @@
+// @action: refactor Convert arrow function or function expression/Convert to arrow function
+// @differs: tsserver reprints the nested function expression as `function(`; ts-r keeps it as written
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+const k = /*|*/function () {
+  return function (this: { v: number }) { return this.v; };
+};

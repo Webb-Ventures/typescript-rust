@@ -1,0 +1,5 @@
+a.ts(7,1): error TS2365: Operator '<' cannot be applied to types '{ fn<T>(x: T): T[]; }' and '{ fn(x: number): string; }'.
+a.ts(8,1): error TS2367: This comparison appears to be unintentional because the types '{ fn<T>(x: T): T[]; }' and '{ fn(x: number): string; }' have no overlap.
+a.ts(11,1): error TS2367: This comparison appears to be unintentional because the types '<T>(x: T) => T[]' and '(x: number) => string' have no overlap.
+a.ts(12,1): error TS2367: This comparison appears to be unintentional because the types '(x: number) => string' and '<T>(x: T) => T[]' have no overlap.
+a.ts(15,1): error TS2367: This comparison appears to be unintentional because the types '<T>() => { a: T; }' and '() => { b: 1; }' have no overlap.

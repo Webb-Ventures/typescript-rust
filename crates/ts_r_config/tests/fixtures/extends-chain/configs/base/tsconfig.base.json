@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "outDir": "./out",
+    "rootDir": "${configDir}/src",
+    "strict": false,
+    "types": [
+      "a"
+    ],
+    "lib": [
+      "es2020"
+    ],
+    "typeRoots": [
+      "./types"
+    ],
+    "paths": {
+      "@x/*": [
+        "./lib/*"
+      ]
+    },
+    "declaration": true
+  },
+  "include": [
+    "../../app/src/**/*"
+  ],
+  "exclude": [
+    "zzz"
+  ],
+  "files": [
+    "../../app/extra.ts"
+  ]
+}

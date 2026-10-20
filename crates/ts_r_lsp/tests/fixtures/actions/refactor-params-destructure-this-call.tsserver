@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+class K {
+  m({ x, y }: { x: number; y: number; }) { return x + y; }
+  run() { return this.m({ x: 1, y: 2 }); }
+}

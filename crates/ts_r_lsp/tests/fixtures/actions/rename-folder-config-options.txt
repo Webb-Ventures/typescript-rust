@@ -1,0 +1,20 @@
+// @action: rename src src2
+// @file: tsconfig.json
+{
+  "extends": "./src/base.json",
+  "compilerOptions": {
+    "strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler",
+    "rootDir": "./src", "outDir": "src/out", "baseUrl": "src", "declarationDir": "src/types",
+    "tsBuildInfoFile": "src/.tsbuildinfo", "outFile": "src/out.js", "mapRoot": "src/maps", "types": ["src/types"], "lib": ["es2022"],
+    "paths": {"~/*": ["*"]}
+  },
+  "include": ["src"]
+}
+// @file: src/base.json
+{"compilerOptions": {"noEmit": true}}
+// @file: src/main.ts
+import { x } from "~/x";
+
+export const n = x;
+// @file: src/x.ts
+export const x = 1;

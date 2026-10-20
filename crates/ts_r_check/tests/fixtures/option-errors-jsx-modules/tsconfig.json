@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxFactory": "h",
+    "module": "nodenext",
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "preserveConstEnums": false,
+    "outDir": "out",
+    "types": []
+  },
+  "files": [
+    "a.ts"
+  ]
+}

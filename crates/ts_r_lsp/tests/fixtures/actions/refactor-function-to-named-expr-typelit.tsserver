@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+function h(o: { x: number; }) {
+  return o.x;
+}

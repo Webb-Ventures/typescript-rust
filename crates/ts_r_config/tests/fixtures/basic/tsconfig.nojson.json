@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "module": "node16"
+  },
+  "include": [
+    "src/*.json",
+    "src/*.ts"
+  ]
+}

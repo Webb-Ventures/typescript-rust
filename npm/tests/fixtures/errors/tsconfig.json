@@ -1,0 +1,11 @@
+{
+  // Type errors both checkers report the same way: parity passes, ts-r-check prints them.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "types": [],
+  },
+  "include": ["src"],
+}

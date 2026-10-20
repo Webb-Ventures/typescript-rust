@@ -1,0 +1,8 @@
+// @action: refactor Convert import/Convert namespace import to named imports
+// @file: src/main.ts
+import * as /*|*/util from "./util";
+
+console.log(util.alpha, util.beta(util.alpha));
+// @file: src/util.ts
+export const alpha = 1;
+export function beta(n: number) { return n; }

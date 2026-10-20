@@ -1,0 +1,6 @@
+a.tsx(12,20): error TS2322: Type 'string' is not assignable to type 'number'.
+a.tsx(13,21): error TS2322: Type '{ title: string; }' is not assignable to type '{ id?: string | undefined; tabIndex?: number | undefined; children?: unknown; }'.
+  Property 'title' does not exist on type '{ id?: string | undefined; tabIndex?: number | undefined; children?: unknown; }'.
+a.tsx(14,18): error TS2741: Property 'src' is missing in type '{ alt: string; }' but required in type '{ src: string; alt?: string | undefined; }'.
+a.tsx(15,17): error TS2339: Property 'span' does not exist on type 'JSX.IntrinsicElements'.
+a.tsx(15,25): error TS2339: Property 'span' does not exist on type 'JSX.IntrinsicElements'.

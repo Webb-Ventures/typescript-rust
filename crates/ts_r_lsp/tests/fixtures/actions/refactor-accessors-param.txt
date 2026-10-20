@@ -1,0 +1,10 @@
+// @action: refactor Generate 'get' and 'set' accessors/Generate 'get' and 'set' accessors
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export class Point {
+  z = 0;
+  constructor(
+    public /*|*/x: number,
+    private readonly y: number,
+  ) {}
+}

@@ -1,0 +1,3 @@
+a.ts(18,14): error TS2322: Type '<T extends Box<any, number>>(x: T | Box<any, number>) => Pp<number, T>' is not assignable to type '<T extends Box<any, unknown>>(x: T | Box<any, unknown>) => Pp<Other, T>'.
+  Type 'Pp<number, Box<any, number>>' is not assignable to type 'Pp<Other, T>'.
+    Type 'number' is not assignable to type 'Other'.

@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "checkJs": true,
+        "noEmit": true,
+        "allowJs": true
+    },
+    "files": [
+        "./shared-cfg/inc/x.ts",
+        "./src/a.ts",
+        "./sub/deep/b.ts"
+    ]
+}

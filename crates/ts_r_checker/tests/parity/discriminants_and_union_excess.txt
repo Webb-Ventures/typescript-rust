@@ -1,0 +1,6 @@
+a.ts(26,36): error TS2322: Type 'boolean' is not assignable to type 'string | number | Uint8Array<ArrayBufferLike>'.
+a.ts(32,39): error TS2322: Type 'string' is not assignable to type 'IValue'.
+a.ts(33,61): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(36,21): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(42,41): error TS2353: Object literal may only specify known properties, and 'name' does not exist in type '{ prop: boolean; }'.

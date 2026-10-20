@@ -1,0 +1,19 @@
+a.ts(5,22): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(6,20): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(7,26): error TS1119: An object literal cannot have property and accessor with the same name.
+a.ts(8,22): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(11,30): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(12,25): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(13,24): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(14,23): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(14,31): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(16,24): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(17,18): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(18,27): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(19,29): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(20,27): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(21,20): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(21,30): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(22,22): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(22,28): error TS1117: An object literal cannot have multiple properties with the same name.
+a.ts(24,60): error TS1119: An object literal cannot have property and accessor with the same name.

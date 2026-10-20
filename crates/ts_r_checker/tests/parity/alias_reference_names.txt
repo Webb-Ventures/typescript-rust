@@ -1,0 +1,20 @@
+a.ts(19,7): error TS2322: Type 'StrMap' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type 'Arr' is not assignable to type 'number'.
+a.ts(21,7): error TS2322: Type 'Arr2' is not assignable to type 'number'.
+a.ts(22,7): error TS2322: Type 'Tup' is not assignable to type 'number'.
+a.ts(23,7): error TS2322: Type 'NB' is not assignable to type 'number'.
+a.ts(24,7): error TS2322: Type 'Table' is not assignable to type 'number'.
+a.ts(25,8): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(26,1): error TS2322: Type 'number' is not assignable to type 'StrMap'.
+a.ts(28,7): error TS2322: Type 'NB[]' is not assignable to type 'number'.
+a.ts(29,40): error TS2322: Type 'T' is not assignable to type 'number'.
+  Type 'Box<number>' is not assignable to type 'number'.
+a.ts(32,7): error TS2322: Type 'Rec' is not assignable to type 'number'.
+a.ts(35,7): error TS2322: Type '[boolean, false]' is not assignable to type '[...number[], boolean]'.
+  Type at position 0 in source is not compatible with type at position 0 in target.
+    Type 'boolean' is not assignable to type 'number'.
+a.ts(37,7): error TS2322: Type '[boolean, false]' is not assignable to type 'U2'.
+  Type at position 0 in source is not compatible with type at position 0 in target.
+    Type 'boolean' is not assignable to type 'string'.
+a.ts(40,7): error TS4104: The type 'RO' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
+a.ts(41,7): error TS2322: Type 'RO' is not assignable to type 'number'.

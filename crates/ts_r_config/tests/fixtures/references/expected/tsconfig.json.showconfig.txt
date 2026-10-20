@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {},
+    "references": [
+        {
+            "path": "./r1"
+        },
+        {
+            "path": "r2/custom.json",
+            "circular": true
+        },
+        {
+            "path": "./r1/tsconfig.json"
+        }
+    ]
+}

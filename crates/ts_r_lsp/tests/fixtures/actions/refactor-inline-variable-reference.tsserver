@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+export function area(w: number, h: number) {
+  // the sum
+  console.log(-(w - h), typeof (w - h), `${w - h}`);
+  return w - h;
+}

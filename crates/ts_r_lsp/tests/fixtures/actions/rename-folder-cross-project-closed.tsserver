@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @deleted: a/src/lib/util.ts
+// @file: a/src/core/util.ts
+import { n } from "../main";
+
+export function helper(x: number): number { return x + 0 * n; }
+// @file: a/src/main.ts
+import { helper } from "./core/util";
+
+export const n = helper(1);

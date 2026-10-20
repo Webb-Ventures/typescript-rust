@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import "./m";
+import type T from "./m";
+import * as ns from "./m";
+import * as ns2 from "./m";
+import { a, default as def, default as def2 } from "./m";
+
+console.log(ns, def, def2, ns2, a);
+let t: T | undefined;
+console.log(t);

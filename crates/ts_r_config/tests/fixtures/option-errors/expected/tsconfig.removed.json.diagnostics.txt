@@ -1,0 +1,18 @@
+tsconfig.removed.json(10,21): error TS5108: Option 'alwaysStrict=false' has been removed. Please remove it from your configuration.
+
+tsconfig.removed.json(2,3): error TS5095: Option 'bundler' can only be used when 'module' is set to 'preserve', 'commonjs', or 'es2015' or later.
+
+tsconfig.removed.json(3,15): error TS5108: Option 'target=ES5' has been removed. Please remove it from your configuration.
+
+tsconfig.removed.json(4,15): error TS5108: Option 'module=AMD' has been removed. Please remove it from your configuration.
+
+tsconfig.removed.json(5,5): error TS5102: Option 'baseUrl' has been removed. Please remove it from your configuration.
+  Use '"paths": {"*": ["./src/*"]}' instead.
+
+tsconfig.removed.json(6,5): error TS5102: Option 'outFile' has been removed. Please remove it from your configuration.
+
+tsconfig.removed.json(7,5): error TS5102: Option 'downlevelIteration' has been removed. Please remove it from your configuration.
+
+tsconfig.removed.json(8,24): error TS5108: Option 'esModuleInterop=false' has been removed. Please remove it from your configuration.
+
+tsconfig.removed.json(9,37): error TS5108: Option 'allowSyntheticDefaultImports=false' has been removed. Please remove it from your configuration.

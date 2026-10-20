@@ -1,0 +1,7 @@
+a.ts(11,11): error TS2348: Value of type 'typeof C' is not callable. Did you mean to include 'new'?
+a.ts(12,11): error TS2348: Value of type 'typeof A' is not callable. Did you mean to include 'new'?
+a.ts(13,11): error TS2348: Value of type 'new () => C' is not callable. Did you mean to include 'new'?
+a.ts(16,11): error TS2348: Value of type 'Function & (new () => C)' is not callable. Did you mean to include 'new'?
+a.ts(17,11): error TS2348: Value of type 'I' is not callable. Did you mean to include 'new'?
+a.ts(19,15): error TS2351: This expression is not constructable.
+  Type 'Function' has no construct signatures.

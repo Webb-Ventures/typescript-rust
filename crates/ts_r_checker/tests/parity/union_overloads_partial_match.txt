@@ -1,0 +1,32 @@
+a.ts(5,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(7,5): error TS2345: Argument of type 'string' is not assignable to parameter of type '() => void'.
+a.ts(12,5): error TS2345: Argument of type 'string' is not assignable to parameter of type '() => void'.
+a.ts(14,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(15,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(15,22): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string'.
+a.ts(17,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(18,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(18,25): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+a.ts(20,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(22,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(22,22): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '"b"' is not assignable to parameter of type '5'.
+a.ts(24,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(24,22): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '"b"' is not assignable to parameter of type '5'.
+a.ts(26,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.
+a.ts(28,7): error TS2322: Type '1 | 2' is not assignable to type 'null'.
+  Type '1' is not assignable to type 'null'.

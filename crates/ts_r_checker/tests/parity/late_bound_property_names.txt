@@ -1,0 +1,7 @@
+a.ts(11,1): error TS2322: Type 'T2' is not assignable to type 'T1'.
+  Types of property '[c0]' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(12,1): error TS2322: Type 'T1' is not assignable to type 'T3'.
+  Types of property '[k.name]' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(13,7): error TS2741: Property '[k.name]' is missing in type '{ "1": number; }' but required in type 'T1'.

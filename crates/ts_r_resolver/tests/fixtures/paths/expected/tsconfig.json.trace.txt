@@ -1,0 +1,13 @@
+module	${FIXTURE}/src/main.ts	import	@app/a	${FIXTURE}/src/app/a.ts	
+module	${FIXTURE}/src/main.ts	import	@app/b	${FIXTURE}/src/fallback/b.ts	
+module	${FIXTURE}/src/main.ts	import	@app/special	${FIXTURE}/src/special.ts	
+module	${FIXTURE}/src/main.ts	import	@app/spx	${FIXTURE}/src/sp-prefix/x.ts	
+module	${FIXTURE}/src/main.ts	import	exact	${FIXTURE}/src/exact-target.ts	
+module	${FIXTURE}/src/main.ts	import	tlib	${FIXTURE}/typings/tlib.d.ts	
+module	${FIXTURE}/src/main.ts	import	pkg-alias	NOT RESOLVED	
+module	${FIXTURE}/src/main.ts	import	@ext/e	${FIXTURE}/src/ext/e.ts	
+module	${FIXTURE}/src/main.ts	import	@dir/d1	${FIXTURE}/src/dirs/d1/index.ts	
+module	${FIXTURE}/src/main.ts	import	@missing/x	NOT RESOLVED	
+module	${FIXTURE}/src/main.ts	import	real	${FIXTURE}/node_modules/real/index.d.ts	
+module	${FIXTURE}/src/main.ts	import	@base/q	NOT RESOLVED	
+module	${FIXTURE}/src/main.ts	import	@app/none	NOT RESOLVED	

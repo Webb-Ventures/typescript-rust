@@ -1,0 +1,46 @@
+a.ts(6,7): error TS2322: Type '() => Generator<number, void, unknown>' is not assignable to type 'number'.
+a.ts(8,7): error TS2322: Type '{ m(_: number): Generator<number, void, unknown>; }' is not assignable to type 'number'.
+a.ts(10,7): error TS2322: Type '() => AsyncGenerator<number, string, unknown>' is not assignable to type 'number'.
+a.ts(11,7): error TS2322: Type '() => Generator<string, void, any>' is not assignable to type '() => Iterable<number>'.
+  Type 'Generator<string, void, any>' is not assignable to type 'Iterable<number>'.
+    The types returned by '[Symbol.iterator]().next(...)' are incompatible between these types.
+      Type 'IteratorResult<string, void>' is not assignable to type 'IteratorResult<number, any>'.
+        Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorResult<number, any>'.
+          Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorYieldResult<number>'.
+            Type 'string' is not assignable to type 'number'.
+a.ts(12,7): error TS2322: Type '() => Generator<string, void, unknown>' is not assignable to type '() => Iterable<number>'.
+  Type 'Generator<string, void, unknown>' is not assignable to type 'Iterable<number>'.
+    The types returned by '[Symbol.iterator]().next(...)' are incompatible between these types.
+      Type 'IteratorResult<string, void>' is not assignable to type 'IteratorResult<number, any>'.
+        Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorResult<number, any>'.
+          Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorYieldResult<number>'.
+            Type 'string' is not assignable to type 'number'.
+a.ts(13,7): error TS2322: Type '() => Generator<string, void, any>' is not assignable to type '() => Iterator<number, any, any>'.
+  Type 'Generator<string, void, any>' is not assignable to type 'Iterator<number, any, any>'.
+    The types returned by 'next(...)' are incompatible between these types.
+      Type 'IteratorResult<string, void>' is not assignable to type 'IteratorResult<number, any>'.
+        Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorResult<number, any>'.
+          Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorYieldResult<number>'.
+            Type 'string' is not assignable to type 'number'.
+a.ts(14,7): error TS2322: Type '() => Generator<string, void, string>' is not assignable to type '() => Iterable<number, any, string>'.
+  Type 'Generator<string, void, string>' is not assignable to type 'Iterable<number, any, string>'.
+    The types returned by '[Symbol.iterator]().next(...)' are incompatible between these types.
+      Type 'IteratorResult<string, void>' is not assignable to type 'IteratorResult<number, any>'.
+        Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorResult<number, any>'.
+          Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorYieldResult<number>'.
+            Type 'string' is not assignable to type 'number'.
+a.ts(15,7): error TS2322: Type '() => Generator<string, void, number>' is not assignable to type '() => Iterable<number>'.
+  Type 'Generator<string, void, number>' is not assignable to type 'Iterable<number>'.
+    The types returned by '[Symbol.iterator]().next(...)' are incompatible between these types.
+      Type 'IteratorResult<string, void>' is not assignable to type 'IteratorResult<number, any>'.
+        Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorResult<number, any>'.
+          Type 'IteratorYieldResult<string>' is not assignable to type 'IteratorYieldResult<number>'.
+            Type 'string' is not assignable to type 'number'.
+a.ts(17,7): error TS2322: Type '() => Generator<number, void, number>' is not assignable to type 'string'.
+a.ts(19,7): error TS2322: Type '() => Generator<1 | 2, void, never>' is not assignable to type 'string'.
+a.ts(21,7): error TS2322: Type '() => Generator<number, void, number>' is not assignable to type 'string'.
+a.ts(22,28): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(30,7): error TS2322: Type '() => Generator<never, number, unknown>' is not assignable to type 'string'.
+a.ts(32,7): error TS2322: Type 'IterableIterator<number>' is not assignable to type 'string'.
+a.ts(34,7): error TS2322: Type 'AsyncIterable<number, void>' is not assignable to type 'string'.
+a.ts(36,7): error TS2322: Type 'Iterator<number, any, any>' is not assignable to type 'string'.

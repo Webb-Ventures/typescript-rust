@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Convert to anonymous function
+// @file: src/main.ts
+export function outer() {
+  return [1].map(function(v) {
+    return v * 2;
+  });
+}

@@ -1,0 +1,29 @@
+a.ts(7,5): error TS2322: Type 'Number' is not assignable to type 'number'.
+  'number' is a primitive, but 'Number' is a wrapper object. Prefer using 'number' when possible.
+a.ts(9,5): error TS2322: Type 'Object' is not assignable to type '() => void'.
+  The 'Object' type is assignable to very few other types. Did you mean to use the 'any' type instead?
+    Type 'Object' provides no match for the signature '(): void'.
+a.ts(10,5): error TS2322: Type 'Object' is not assignable to type '{ x: number; }'.
+  The 'Object' type is assignable to very few other types. Did you mean to use the 'any' type instead?
+    Property 'x' is missing in type 'Object' but required in type '{ x: number; }'.
+a.ts(11,5): error TS2322: Type '() => void' is not assignable to type 'new () => void'.
+  Type '() => void' provides no match for the signature 'new (): void'.
+a.ts(12,37): error TS2322: Type 'T | U' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | U'.
+a.ts(14,9): error TS2322: Type 'V' is not assignable to type 'number | boolean'.
+  Type 'string' is not assignable to type 'number | boolean'.
+a.ts(18,1): error TS2322: Type 'number' is not assignable to type 'void'.
+a.ts(19,5): error TS2322: Type 'string' is not assignable to type 'Uppercase<string>'.
+a.ts(21,33): error TS2719: Type 'T' is not assignable to type 'T'. Two different types with this name exist, but they are unrelated.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T'.
+a.ts(23,23): error TS2322: Type 'undefined' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'undefined'.
+a.ts(25,5): error TS2322: Type '{ [x: number]: string; }' is not assignable to type 'I'.
+  'number' and 'string' index signatures are incompatible.
+    Type 'string' is not assignable to type 'boolean'.
+a.ts(27,11): error TS2430: Interface 'K' incorrectly extends interface 'J'.
+  Types of property '2.0' are incompatible.
+    Type 'number' is not assignable to type 'string'.
+a.ts(29,5): error TS2741: Property 'q' is missing in type 'typeof C' but required in type '{ q: number; }'.
+a.ts(31,3): error TS2339: Property 'foo' does not exist on type 'boolean'.
+a.ts(33,36): error TS2339: Property 'foo' does not exist on type 'E'.

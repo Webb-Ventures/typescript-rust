@@ -1,0 +1,11 @@
+a.ts(9,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(10,12): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(14,1): error TS2454: Variable 'a' is used before being assigned.
+a.ts(14,4): error TS2454: Variable 'b' is used before being assigned.
+a.ts(14,7): error TS2454: Variable 'c' is used before being assigned.
+a.ts(14,10): error TS2454: Variable 'd' is used before being assigned.
+a.ts(17,1): error TS2454: Variable 'f' is used before being assigned.
+a.ts(19,40): error TS2454: Variable 'g' is used before being assigned.
+a.ts(29,14): error TS2454: Variable 'w' is used before being assigned.
+a.ts(31,20): error TS2454: Variable 'x' is used before being assigned.
+a.ts(35,1): error TS2454: Variable 'y' is used before being assigned.

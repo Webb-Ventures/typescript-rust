@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "outDir": "./out",
+        "types": []
+    },
+    "files": [
+        "./a.js",
+        "./b.ts"
+    ],
+    "exclude": [
+        "${FIXTURE}/out"
+    ]
+}

@@ -1,0 +1,4 @@
+a.ts(3,13): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(7,10): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(11,12): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(15,23): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.

@@ -1,0 +1,16 @@
+// @action: refactor Convert export/Convert named export to default export
+// @file: src/util.ts
+export function /*|*/alpha(n: number) {
+    return n + 1;
+}
+
+export const beta = 2;
+// @file: src/main.ts
+import { alpha, beta } from "./util";
+
+console.log(alpha(beta));
+// @file: src/other.ts
+import { alpha as a } from "./util";
+export { alpha } from "./util";
+
+a(1);

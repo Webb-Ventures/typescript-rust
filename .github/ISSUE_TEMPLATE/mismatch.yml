@@ -1,0 +1,39 @@
+name: Different result from tsc, ESLint or esbuild
+description: ts-r reports, emits or bundles something the tool it replaces doesn't (or misses something it does).
+labels: [parity]
+body:
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      options: [ts-r-check, ts-r-lint, ts-r-build, ts-r-run, ts-r-dev, ts-r-lsp]
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Smallest input that shows it
+      description: Source files and the tsconfig.json / eslint config / build flags. The smaller the better.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: ours
+    attributes:
+      label: ts-r's output
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: theirs
+    attributes:
+      label: The other tool's output, and its version
+      description: For example tsc 7.0.2, ESLint 9.x with typescript-eslint 8.x, esbuild 0.28.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ts-r version and platform
+      placeholder: ts-r 0.1.0, macOS arm64

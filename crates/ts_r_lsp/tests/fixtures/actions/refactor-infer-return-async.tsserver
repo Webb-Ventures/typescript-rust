@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Infer function return type
+// @file: src/main.ts
+export async function load(n: number): Promise<readonly [number, string]> {
+  return [n, String(n)] as const;
+}

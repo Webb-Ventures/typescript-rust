@@ -1,0 +1,22 @@
+name: CI approval
+
+# Step one of starting CI on an outside pull request (ci.yml runs it only for trusted authors,
+# or once a trusted user approves the latest commit). A review event from a fork gets a
+# read-only token, so this run only records the approval; when it finishes, ci-rerun.yml (a
+# workflow_run, which can re-run workflows) re-runs the pull request's blocked CI. ci.yml checks
+# the approval itself, so nothing here is trusted.
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions: {}
+
+jobs:
+  approved:
+    name: approval recorded
+    if: github.event.review.state == 'approved' && !endsWith(github.event.review.user.login, '[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: echo "@${{ github.event.review.user.login }} approved ${{ github.event.pull_request.head.sha }}"

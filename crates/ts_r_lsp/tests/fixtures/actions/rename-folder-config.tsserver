@@ -1,0 +1,27 @@
+// tsserver 6.0.3
+// @deleted: src/lib/x.ts
+// @deleted: src/lib/y.ts
+// @file: src/core/x.ts
+export const x = 1;
+// @file: src/core/y.ts
+export const y = 1;
+export const z = 1;
+// @file: src/main.ts
+import { x } from "~/core/x";
+import { y } from "~/core/y";
+import { z } from "~/core/y";
+
+export const n = x + y + z;
+// @file: tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true,
+    "rootDirs": ["src/core", "src/gen"],
+    "typeRoots": ["src/core/types"],
+    "paths": {"~/*": ["./src/*"], "@lib/*": ["src/core/*"], "@x": ["src/core/x.ts"]}
+  },
+  "files": ["src/core/x.ts"],
+  "include": ["src/main.ts", "src/core/**/*", "src/library/*.ts", "src/core"],
+  "exclude": ["src/core/skip.ts"],
+  "references": [{"path": "./src/lib/types"}]
+}

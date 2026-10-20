@@ -1,0 +1,4 @@
+// @action: refactor Convert to template string/Convert to template string
+// @file: src/main.ts
+const table: Record<string, number> = {};
+export const v = table[/*|*/'key'];

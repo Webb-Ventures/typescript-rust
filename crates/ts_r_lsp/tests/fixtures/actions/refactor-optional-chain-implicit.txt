@@ -1,0 +1,7 @@
+// @action: refactor Convert to optional chain expression/Convert to optional chain expression
+// @trigger: implicit
+// @file: src/main.ts
+interface A { b?: { c: number } }
+export function c(a: A | undefined) {
+  return /*|*/a && a.b && a.b.c;
+}

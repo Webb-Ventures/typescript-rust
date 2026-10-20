@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.tsx
+type NewType = {
+    title: string;
+};
+
+export function View(props: NewType) {
+    return <div>{props.title}</div>;
+}

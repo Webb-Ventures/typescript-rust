@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType<T> = {
+    readonly [K in keyof T]?: T[K];
+};
+
+export type M<T> = NewType<T>;

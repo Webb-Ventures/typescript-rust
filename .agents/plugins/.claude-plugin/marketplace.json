@@ -1,0 +1,16 @@
+{
+  "name": "ts-r",
+  "owner": {
+    "name": "Webb Ventures",
+    "email": "riley@webbventuresgroup.com"
+  },
+  "description": "Repo plugins for ts-r, shared with Codex through ../marketplace.json",
+  "plugins": [
+    {
+      "name": "ts-r-code-review",
+      "source": "./code-review",
+      "description": "ts-r pull request review for Claude and OpenAI models",
+      "category": "development"
+    }
+  ]
+}

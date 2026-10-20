@@ -1,0 +1,9 @@
+a.tsx(15,31): error TS2322: Type 'T' is not assignable to type '{ a?: number | undefined; b?: string | undefined; }'.
+a.tsx(19,4): error TS2559: Type 'number' has no properties in common with type '{ a?: number | undefined; b?: string | undefined; }'.
+a.tsx(19,12): error TS2698: Spread types may only be created from object types.
+a.tsx(20,4): error TS2322: Type 'undefined' is not assignable to type '{ a?: number | undefined; b?: string | undefined; }'.
+a.tsx(20,12): error TS2698: Spread types may only be created from object types.
+a.tsx(22,8): error TS2783: 'a' is specified more than once, so this usage will be overwritten.
+a.tsx(23,8): error TS2783: 'a' is specified more than once, so this usage will be overwritten.
+a.tsx(23,14): error TS2783: 'b' is specified more than once, so this usage will be overwritten.
+a.tsx(33,20): error TS2604: JSX element type 'this' does not have any construct or call signatures.

@@ -1,0 +1,15 @@
+[package]
+name = "ts_r_resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ts_r_config = { path = "../ts_r_config" }
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

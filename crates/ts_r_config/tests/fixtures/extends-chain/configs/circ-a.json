@@ -1,0 +1,6 @@
+{
+  "extends": "./circ-b.json",
+  "compilerOptions": {
+    "strict": false
+  }
+}

@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// fix all: Delete all unused declarations
+// @file: src/main.ts
+import { a, b } from "./a";
+import { c } from "./c";
+
+
+export function f() {
+  return a;
+}

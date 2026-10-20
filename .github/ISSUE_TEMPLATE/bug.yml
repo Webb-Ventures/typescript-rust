@@ -1,0 +1,29 @@
+name: Bug
+description: A crash, a hang, a wrong exit code, or anything else broken.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: The command you ran and the files it needs (or a link to a public repo and commit).
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: ts-r version and platform
+      placeholder: ts-r 0.1.0, Linux x64 (glibc)
+    validations:
+      required: true

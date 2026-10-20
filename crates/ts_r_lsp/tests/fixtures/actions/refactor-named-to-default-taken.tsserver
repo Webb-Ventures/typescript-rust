@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert named imports to default import
+// @file: src/main.ts
+import cjs_1 from "./lib/cjs";
+const cjs = 1;
+
+console.log(cjs, cjs_1.a);

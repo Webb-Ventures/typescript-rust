@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// @file: src/main.tsx
+import { memo, useState } from "react";
+
+export const C = memo(() => {
+  const [n] = useState(0);
+  return <div>{n}</div>;
+});

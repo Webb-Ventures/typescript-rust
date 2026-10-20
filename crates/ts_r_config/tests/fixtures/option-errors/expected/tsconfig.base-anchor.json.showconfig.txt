@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "emitDecoratorMetadata": true,
+        "module": "system",
+        "noEmit": true,
+        "target": "es5",
+        "baseUrl": "./",
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

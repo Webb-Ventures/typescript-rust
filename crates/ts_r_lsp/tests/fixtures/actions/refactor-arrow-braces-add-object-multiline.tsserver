@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Add braces to arrow function
+// @file: src/main.ts
+export const f = () => {
+  return ({
+    a: 1,
+    b: [
+      2,
+    ],
+  });
+};

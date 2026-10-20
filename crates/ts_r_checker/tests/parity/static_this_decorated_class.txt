@@ -1,0 +1,2 @@
+a.ts(6,16): error TS2816: Cannot use 'this' in a static property initializer of a decorated class.
+a.ts(7,22): error TS2816: Cannot use 'this' in a static property initializer of a decorated class.

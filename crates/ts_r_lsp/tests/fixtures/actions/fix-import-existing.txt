@@ -1,0 +1,8 @@
+// @action: fix 2304 Update import from "./util"
+// @file: src/main.ts
+import { first } from "./util";
+
+export const n = /*|*/second(first);
+// @file: src/util.ts
+export const first = 1;
+export function second(x: number): number { return x; }

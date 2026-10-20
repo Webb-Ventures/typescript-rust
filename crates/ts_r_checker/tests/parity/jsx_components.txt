@@ -1,0 +1,8 @@
+a.tsx(24,22): error TS2322: Type 'number' is not assignable to type 'string'.
+a.tsx(25,13): error TS2322: Type '{}' is not assignable to type 'IntrinsicAttributes & { name: string; children?: string | undefined; }'.
+  Property 'name' is missing in type '{}' but required in type '{ name: string; children?: string | undefined; }'.
+a.tsx(26,31): error TS2322: Type 'number' is not assignable to type 'string'.
+a.tsx(28,21): error TS2322: Type 'string' is not assignable to type 'number'.
+a.tsx(29,13): error TS2322: Type '{}' is not assignable to type 'IntrinsicAttributes & { start: number; }'.
+  Property 'start' is missing in type '{}' but required in type '{ start: number; }'.
+a.tsx(30,14): error TS2604: JSX element type 'NotAComponent' does not have any construct or call signatures.

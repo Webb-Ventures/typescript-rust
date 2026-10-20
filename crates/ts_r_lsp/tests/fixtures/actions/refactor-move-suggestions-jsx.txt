@@ -1,0 +1,15 @@
+// @action: moveSuggestions
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @tsconfig: {"compilerOptions": {"strict": true, "module": "esnext", "moduleResolution": "bundler", "allowJs": true, "jsx": "react-jsx", "noEmit": true}}
+// @file: src/main.jsx
+/*[*/export function helper(n) {
+  return n * 2;
+}/*]*/
+// @file: src/a.ts
+export const a = 1;
+// @file: src/b.js
+export const b = 1;
+// @file: src/c.mjs
+export const c = 1;
+// @file: src/e.tsx
+export const e = 1;

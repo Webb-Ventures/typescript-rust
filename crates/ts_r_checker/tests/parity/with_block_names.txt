@@ -1,0 +1,10 @@
+a.ts(4,1): error TS1101: 'with' statements are not allowed in strict mode.
+a.ts(4,1): error TS2410: The 'with' statement is not supported. All symbols in a 'with' block will have type 'any'.
+a.ts(8,5): error TS1101: 'with' statements are not allowed in strict mode.
+a.ts(10,1): error TS1101: 'with' statements are not allowed in strict mode.
+a.ts(10,1): error TS2410: The 'with' statement is not supported. All symbols in a 'with' block will have type 'any'.
+a.ts(10,7): error TS2304: Cannot find name 'nope'.
+a.ts(11,1): error TS2304: Cannot find name 'missingAfter'.
+a.ts(13,5): error TS1101: 'with' statements are not allowed in strict mode.
+a.ts(13,5): error TS1300: 'with' statements are not allowed in an async function block.
+a.ts(13,5): error TS2410: The 'with' statement is not supported. All symbols in a 'with' block will have type 'any'.

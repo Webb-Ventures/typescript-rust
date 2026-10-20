@@ -1,0 +1,37 @@
+{
+    "compilerOptions": {
+        "declaration": true,
+        "declarationDir": "./configs/decl",
+        "lib": [
+            "dom"
+        ],
+        "module": "esnext",
+        "outDir": "./configs/base/out",
+        "paths": {
+            "@x/*": [
+                "./lib/*"
+            ]
+        },
+        "rootDir": "./src",
+        "strict": false,
+        "target": "es2017",
+        "typeRoots": [
+            "./configs/base/types"
+        ],
+        "types": [
+            "a"
+        ],
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./app/extra.ts",
+        "./app/src/a.ts",
+        "./app/src/b/c.ts"
+    ],
+    "include": [
+        "configs/base/../../app/src/**/*"
+    ],
+    "exclude": [
+        "configs/base/zzz"
+    ]
+}

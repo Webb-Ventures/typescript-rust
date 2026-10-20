@@ -1,0 +1,5 @@
+a.ts(9,18): error TS2341: Property 'x' is private and only accessible within class 'Clod'.
+a.ts(10,13): error TS2304: Cannot find name 'x'.
+a.ts(11,13): error TS2304: Cannot find name 'y'.
+a.ts(12,13): error TS2304: Cannot find name 'm'.
+a.ts(25,20): error TS2304: Cannot find name 'b'.

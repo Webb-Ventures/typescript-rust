@@ -1,0 +1,26 @@
+a.ts(9,13): error TS7031: Binding element 'a' implicitly has an 'any' type.
+a.ts(9,16): error TS7031: Binding element 'b' implicitly has an 'any' type.
+a.ts(9,34): error TS2739: Type '{ [x: string]: any; }' is missing the following properties from type 'Row': id, kind
+a.ts(10,28): error TS2739: Type '{ [x: string]: any; }' is missing the following properties from type 'Row': id, kind
+a.ts(11,15): error TS7031: Binding element 'a' implicitly has an 'any' type.
+a.ts(11,32): error TS2739: Type '{ [x: string]: any; }' is missing the following properties from type 'Row': id, kind
+a.ts(12,7): error TS2322: Type '({ a, ...r }: { [x: string]: any; a: any; }) => { [x: string]: any; }' is not assignable to type 'string'.
+a.ts(14,20): error TS7031: Binding element 'b' implicitly has an 'any' type.
+a.ts(14,45): error TS2739: Type '{ [x: string]: any; }' is missing the following properties from type 'Row': id, kind
+a.ts(14,53): error TS2739: Type '{ [x: string]: any; }' is missing the following properties from type 'Row': id, kind
+a.ts(18,7): error TS2322: Type '{ [k: string]: unknown; b: string; c?: number | undefined; d: 1; m(): void; }' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type '{ [k: string]: unknown; a: 1; b: string; c?: number | undefined; d: 1; m(): void; }' is not assignable to type 'number'.
+a.ts(23,7): error TS2322: Type '{ [k: string]: unknown; a: 1; c?: number | undefined; d: 1; m(): void; }' is not assignable to type 'number'.
+a.ts(27,7): error TS2322: Type '{}' is not assignable to type 'number'.
+a.ts(30,7): error TS2322: Type '{ b: 2; } | { c: 4; }' is not assignable to type 'number'.
+  Type '{ b: 2; }' is not assignable to type 'number'.
+a.ts(33,7): error TS2322: Type '{ b: 2; }' is not assignable to type 'number'.
+a.ts(36,7): error TS2322: Type '{ b?: 2 | undefined; }' is not assignable to type 'number'.
+a.ts(37,64): error TS2322: Type '{ b: 2; c: { d: 1; }; }' is not assignable to type 'number'.
+a.ts(43,7): error TS2322: Type 'string[]' is not assignable to type 'number'.
+a.ts(46,7): error TS2322: Type '[string, ...boolean[]]' is not assignable to type 'number'.
+a.ts(49,7): error TS2322: Type '[...string[], boolean]' is not assignable to type 'number'.
+a.ts(52,7): error TS2322: Type 'string[]' is not assignable to type 'number'.
+a.ts(55,7): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(57,7): error TS2322: Type '[string, boolean]' is not assignable to type 'number'.
+a.ts(59,7): error TS2322: Type 'number' is not assignable to type 'string'.

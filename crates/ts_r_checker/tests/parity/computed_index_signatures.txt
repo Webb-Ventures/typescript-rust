@@ -1,0 +1,13 @@
+a.ts(21,7): error TS2322: Type 'number | 1n | boolean | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(22,7): error TS2322: Type '(() => number) | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(23,7): error TS2322: Type 'string | C | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(24,7): error TS2322: Type 'number | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(25,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(26,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(43,16): error TS2722: Cannot invoke an object which is possibly 'undefined'.

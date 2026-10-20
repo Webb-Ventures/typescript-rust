@@ -1,0 +1,6 @@
+// @action: refactor Inline variable/Inline variable
+// @file: src/main.ts
+export function make(id: number) {
+  const /*|*/name = 'item-' + id, kind = 'row';
+  return { name, kind, label: name.toUpperCase() };
+}

@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.tsx
+export function View(props: /*[*/{ title: string }/*]*/) {
+    return <div>{props.title}</div>;
+}

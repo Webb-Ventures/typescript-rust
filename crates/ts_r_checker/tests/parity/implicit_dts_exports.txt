@@ -1,0 +1,13 @@
+amb.d.ts(1,37): error TS2439: Import or export declaration in an ambient module declaration cannot reference module through relative module name.
+m.ts(2,10): error TS2459: Module '"./b"' declares 'A' locally, but it is not exported.
+m.ts(3,10): error TS2460: Module '"./c"' declares 'A' locally, but it is exported as 'AA'.
+m.ts(4,10): error TS2614: Module '"./d"' has no exported member 'A'. Did you mean to use 'import A from "./d"' instead?
+m.ts(8,19): error TS2459: Module '"./p"' declares 'y' locally, but it is not exported.
+m.ts(9,10): error TS2459: Module '"amb1"' declares 'A' locally, but it is not exported.
+m.ts(11,10): error TS2459: Module '"amb5"' declares 'A' locally, but it is not exported.
+m.ts(11,20): error TS2305: Module '"amb5"' has no exported member 'Q'.
+m.ts(12,23): error TS2305: Module '"amb6"' has no exported member 'zz'.
+n.ts(1,10): error TS2459: Module '"./loc"' declares 'Abc' locally, but it is not exported.
+n.ts(1,15): error TS2724: '"./loc"' has no exported member named 'Abcdef'. Did you mean 'Abcdeg'?
+n.ts(1,23): error TS2460: Module '"./loc"' declares 'w' locally, but it is exported as 'w1'.
+n.ts(1,26): error TS2305: Module '"./loc"' has no exported member 'nope'.

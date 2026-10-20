@@ -1,0 +1,35 @@
+module	${FIXTURE}/src/cjs.cts	require	./b	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/cjs.cts	require	./b.js	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/cjs.cts	require	./dir	${FIXTURE}/src/dir/index.ts	
+module	${FIXTURE}/src/cjs.cts	require	./pkgdir	${FIXTURE}/src/pkgdir/types.d.ts	
+module	${FIXTURE}/src/cjs.cts	require	./m.mjs	${FIXTURE}/src/m.mts	
+module	${FIXTURE}/src/cjs.cts	require	./data.json	${FIXTURE}/src/data.json	
+module	${FIXTURE}/src/cjs.cts	require	./dts-only	${FIXTURE}/src/dts-only.d.ts	
+module	${FIXTURE}/src/cjs.cts	import	./b	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	import	./dir	NOT RESOLVED	
+module	${FIXTURE}/src/m.mts	import	./b.js	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/m.mts	import	./c.cjs	${FIXTURE}/src/c.cts	
+module	${FIXTURE}/src/m.mts	import	./b	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	./b	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	./b.js	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/esm.ts	import	./b.ts	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/esm.ts	import	./tsx-only.js	${FIXTURE}/src/tsx-only.tsx	
+module	${FIXTURE}/src/esm.ts	import	./tsx-only.jsx	${FIXTURE}/src/tsx-only.tsx	
+module	${FIXTURE}/src/esm.ts	import	./dts-only.js	${FIXTURE}/src/dts-only.d.ts	
+module	${FIXTURE}/src/esm.ts	import	./js-only.js	${FIXTURE}/src/js-only.js	
+module	${FIXTURE}/src/esm.ts	import	./m.mjs	${FIXTURE}/src/m.mts	
+module	${FIXTURE}/src/esm.ts	import	./c.cjs	${FIXTURE}/src/c.cts	
+module	${FIXTURE}/src/esm.ts	import	./dir	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	./dir/index.js	${FIXTURE}/src/dir/index.ts	
+module	${FIXTURE}/src/esm.ts	import	./pkgdir	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	./data.json	${FIXTURE}/src/data.json	
+module	${FIXTURE}/src/esm.ts	import	./missing.js	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	../src/b.js	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/esm.ts	import	./b.mjs	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	./dts-only	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	./sub/deep.js	${FIXTURE}/src/sub/deep.ts	
+module	${FIXTURE}/src/cjs-scope/x.ts	require	../b	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/cjs-scope/x.ts	require	../dir	${FIXTURE}/src/dir/index.ts	
+module	${FIXTURE}/src/cjs-scope/x.ts	require	../pkgdir	${FIXTURE}/src/pkgdir/types.d.ts	
+module	${FIXTURE}/src/cjs-scope/x.ts	require	./y	${FIXTURE}/src/cjs-scope/y.ts	
+module	${FIXTURE}/src/cjs-scope/x.ts	import	../b	NOT RESOLVED	

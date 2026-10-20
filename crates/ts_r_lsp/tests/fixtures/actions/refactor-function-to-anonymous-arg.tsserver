@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to anonymous function
+// @file: src/main.ts
+[1].map(function(v) {
+    return v * 2;
+});

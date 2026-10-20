@@ -1,0 +1,12 @@
+a.js(2,5): error TS2451: Cannot redeclare block-scoped variable 'a'.
+a.js(2,16): error TS2451: Cannot redeclare block-scoped variable 'a'.
+a.js(3,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.js(4,16): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.js(5,22): error TS1111: Private field '#z' must be declared in an enclosing class.
+a.js(6,1): error TS2528: A module cannot have multiple default exports.
+a.js(7,1): error TS2528: A module cannot have multiple default exports.
+b.js(2,15): error TS1100: Invalid use of 'eval' in strict mode.
+b.js(3,12): error TS1100: Invalid use of 'arguments' in strict mode.
+b.js(4,8): error TS1102: 'delete' cannot be called on an identifier in strict mode.
+b.js(5,8): error TS1114: Duplicate label 'label'.
+b.js(6,21): error TS1210: Code contained in a class is evaluated in JavaScript's strict mode which does not allow this use of 'arguments'. For more information, see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode.

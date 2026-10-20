@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { b } from "./b";
+// comment a
+import { a } from "./a"; // trailing a
+import { c } from "./c"; // trailing c
+import { d } from "./d";
+
+console.log(a, b, c, d);

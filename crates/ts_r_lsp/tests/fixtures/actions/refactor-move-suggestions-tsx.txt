@@ -1,0 +1,8 @@
+// @action: moveSuggestions
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/view.tsx
+/*[*/export const View = () => 1;/*]*/
+// @file: src/main.ts
+export const m = 1;
+// @file: src/other.tsx
+export const o = 1;

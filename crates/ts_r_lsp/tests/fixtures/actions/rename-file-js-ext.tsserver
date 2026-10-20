@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// @deleted: src/util.ts
+// @file: src/deep/util.ts
+export function helper(x: number): number { return x; }
+// @file: src/main.ts
+import { helper } from "./deep/util.js";
+
+export const n = helper(1);

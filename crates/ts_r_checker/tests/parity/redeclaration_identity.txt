@@ -1,0 +1,7 @@
+a.ts(4,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'f' must be of type '<T, U>(x: T, y: U) => T', but here has type '<T, U>(x: any, y: any) => any'.
+a.ts(6,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'g' must be of type '<T, U>(x: T, y: U) => T', but here has type '<T>(x: any, y: any) => any'.
+a.ts(8,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'h' must be of type '<T, U>(x: T, y: U) => T', but here has type '(x: any, y: any) => any'.
+a.ts(10,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type '<T extends Date>(x: T) => T', but here has type '<T extends number>(x: T) => T'.
+a.ts(11,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type '<T extends Date>(x: T) => T', but here has type '<T>(x: T) => T'.
+a.ts(13,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'w' must be of type '{ w: string; }', but here has type '{ w: number; }'.
+a.ts(17,19): error TS7006: Parameter 'n' implicitly has an 'any' type.

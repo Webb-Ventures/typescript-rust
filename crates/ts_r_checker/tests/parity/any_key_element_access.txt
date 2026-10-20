@@ -1,0 +1,11 @@
+a.ts(6,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+a.ts(9,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'unknown'.
+a.ts(12,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'I'.
+a.ts(18,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a: 1; } | { b: 2; }'.
+a.ts(21,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a: 1; } | { b: 2; }'.
+a.ts(23,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Number'.
+a.ts(25,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Symbol'.
+a.ts(27,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+a.ts(29,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'I & { b: string; }'.
+a.ts(31,12): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '() => void'.
+a.ts(33,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Number'.

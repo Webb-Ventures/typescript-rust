@@ -1,0 +1,28 @@
+a.ts(6,11): error TS2395: Individual declarations in merged declaration 'c' must be all exported or all local.
+a.ts(7,18): error TS2395: Individual declarations in merged declaration 'c' must be all exported or all local.
+a.ts(8,11): error TS2395: Individual declarations in merged declaration 'd' must be all exported or all local.
+a.ts(9,14): error TS2395: Individual declarations in merged declaration 'd' must be all exported or all local.
+a.ts(10,11): error TS2395: Individual declarations in merged declaration 'N' must be all exported or all local.
+a.ts(11,18): error TS2395: Individual declarations in merged declaration 'N' must be all exported or all local.
+a.ts(12,5): error TS2395: Individual declarations in merged declaration 'f' must be all exported or all local.
+a.ts(13,17): error TS2395: Individual declarations in merged declaration 'f' must be all exported or all local.
+a.ts(14,17): error TS2395: Individual declarations in merged declaration 'f' must be all exported or all local.
+a.ts(15,10): error TS2395: Individual declarations in merged declaration 'g' must be all exported or all local.
+a.ts(16,18): error TS2395: Individual declarations in merged declaration 'g' must be all exported or all local.
+a.ts(17,7): error TS2395: Individual declarations in merged declaration 'K' must be all exported or all local.
+a.ts(18,18): error TS2395: Individual declarations in merged declaration 'K' must be all exported or all local.
+a.ts(21,6): error TS2395: Individual declarations in merged declaration 'E' must be all exported or all local.
+a.ts(22,13): error TS2395: Individual declarations in merged declaration 'E' must be all exported or all local.
+a.ts(24,15): error TS2395: Individual declarations in merged declaration 'I' must be all exported or all local.
+a.ts(25,22): error TS2395: Individual declarations in merged declaration 'I' must be all exported or all local.
+a.ts(33,13): error TS2395: Individual declarations in merged declaration 'TA' must be all exported or all local.
+a.ts(34,6): error TS2395: Individual declarations in merged declaration 'TA' must be all exported or all local.
+a.ts(35,11): error TS2300: Duplicate identifier 'TI'.
+a.ts(36,13): error TS2300: Duplicate identifier 'TI'.
+a.ts(38,1): error TS2440: Import declaration conflicts with local declaration of 'EM'.
+a.ts(38,8): error TS2395: Individual declarations in merged declaration 'EM' must be all exported or all local.
+a.ts(39,13): error TS2395: Individual declarations in merged declaration 'EM' must be all exported or all local.
+a.ts(40,5): error TS2395: Individual declarations in merged declaration 'ov' must be all exported or all local.
+a.ts(41,17): error TS2395: Individual declarations in merged declaration 'ov' must be all exported or all local.
+a.ts(42,17): error TS2395: Individual declarations in merged declaration 'ov' must be all exported or all local.
+a.ts(44,17): error TS2383: Overload signatures must all be exported or non-exported.

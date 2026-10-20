@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import {
+  a,
+  b,
+} from "./a";
+export {
+  c,
+  d
+} from "./a";
+
+export const x: { p: number; q: number } = { p: a, q: b };

@@ -1,0 +1,13 @@
+a.ts(11,29): error TS2322: Type 'Promise<unknown>' is not assignable to type 'Promise<{ data?: number | undefined; }>'.
+  Type 'unknown' is not assignable to type '{ data?: number | undefined; }'.
+a.ts(13,30): error TS2322: Type 'Promise<unknown>' is not assignable to type 'Promise<{ data?: number | undefined; }>'.
+  Type 'unknown' is not assignable to type '{ data?: number | undefined; }'.
+a.ts(14,30): error TS2322: Type 'Promise<unknown>' is not assignable to type 'Promise<number>'.
+  Type 'unknown' is not assignable to type 'number'.
+a.ts(15,9): error TS2322: Type 'Promise<Offline | { a: 1; }>' is not assignable to type 'Promise<{ a: 1; }>'.
+  Type 'Offline | { a: 1; }' is not assignable to type '{ a: 1; }'.
+    Property 'a' is missing in type 'Offline' but required in type '{ a: 1; }'.
+a.ts(16,9): error TS2322: Type '{ data?: number | undefined; }' is not assignable to type 'string'.
+a.ts(17,9): error TS2322: Type 'unknown' is not assignable to type 'string'.
+a.ts(18,9): error TS2322: Type '{ data?: number | undefined; }' is not assignable to type 'string'.
+a.ts(19,9): error TS2322: Type 'number' is not assignable to type 'string'.

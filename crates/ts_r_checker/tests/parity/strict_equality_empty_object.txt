@@ -1,0 +1,20 @@
+a.ts(15,26): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(16,25): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(17,27): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(18,26): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(19,26): error TS2322: Type 'bigint' is not assignable to type 'string'.
+a.ts(20,26): error TS2322: Type 'symbol' is not assignable to type 'string'.
+a.ts(21,26): error TS2322: Type 'unknown' is not assignable to type 'string | undefined'.
+a.ts(24,26): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(25,27): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(26,26): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(27,26): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(28,26): error TS2322: Type '{} | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(29,25): error TS2322: Type '{}' is not assignable to type 'number'.
+a.ts(32,26): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(33,26): error TS2322: Type 'object' is not assignable to type 'string'.
+a.ts(36,24): error TS2322: Type '{}' is not assignable to type 'string'.
+a.ts(40,7): error TS2322: Type 'unknown' is not assignable to type 'string | undefined'.
+a.ts(41,7): error TS2322: Type 'unknown' is not assignable to type 'string | null'.
+a.ts(42,7): error TS2322: Type 'number' is not assignable to type 'string'.

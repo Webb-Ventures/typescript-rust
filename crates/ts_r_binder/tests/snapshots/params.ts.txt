@@ -1,0 +1,74 @@
+parse: TS1235 A namespace declaration is only allowed at the top level of a namespace or module.
+script
+symbols:
+  #0 __file VALUE_MODULE|MODULE_FILE @[1:1]
+  #1 f FUNCTION @[4:1]
+  #2 g FUNCTION @[5:1]
+  #3 h FUNCTION @[6:1]
+  #4 t FUNCTION @[7:1]
+  #5 h1 FUNCTION @[8:1]
+  #6 h2 FUNCTION @[9:1]
+  #7 h3 FUNCTION @[10:1]
+  #8 h4 FUNCTION @[11:1]
+  #9 h7 FUNCTION @[12:1]
+  #10 h8 FUNCTION @[13:1]
+  #11 n1 FUNCTION @[14:1]
+  #12 n2 FUNCTION @[15:1]
+  #13 x BLOCK_SCOPED_VARIABLE (BLOCK_SCOPED) @[3:7]
+  #14 a FUNCTION_SCOPED_VARIABLE|PARAMETER @[4:12]
+  #15 x FUNCTION_SCOPED_VARIABLE @[4:25]
+  #16 b FUNCTION_SCOPED_VARIABLE|PARAMETER @[5:12]
+  #17 y BLOCK_SCOPED_VARIABLE (BLOCK_SCOPED) @[5:25]
+  #18 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[6:12]
+  #19 k FUNCTION @[6:23]
+  #20 d FUNCTION_SCOPED_VARIABLE|PARAMETER @[7:12]
+  #21 T TYPE_ALIAS @[7:20]
+  #22 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[8:13]
+  #23 K CLASS (BLOCK_SCOPED) @[8:28]
+  #24 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[9:13]
+  #25 E REGULAR_ENUM (BLOCK_SCOPED) @[9:24]
+      exports {A=#26}
+  #26 A ENUM_MEMBER @[9:33] parent=#25
+  #27 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[10:13]
+  #28 N VALUE_MODULE|NAMESPACE_MODULE @[10:24]
+      exports {v=#29}
+  #29 v BLOCK_SCOPED_VARIABLE (EXPORTED|BLOCK_SCOPED) @[10:51] parent=#28
+  #30 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[11:13]
+  #31 I INTERFACE @[11:21]
+  #32 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[12:13]
+  #33 w FUNCTION_SCOPED_VARIABLE @[12:26]
+  #34 U TYPE_PARAMETER @[13:13]
+  #35 c FUNCTION_SCOPED_VARIABLE|PARAMETER @[13:16]
+  #36 d FUNCTION_SCOPED_VARIABLE|PARAMETER @[13:22]
+  #37 named FUNCTION @[14:17]
+  #38 a FUNCTION_SCOPED_VARIABLE|PARAMETER @[14:13]
+  #39 x FUNCTION_SCOPED_VARIABLE @[14:55]
+  #40 __function FUNCTION @[15:17]
+  #41 x FUNCTION_SCOPED_VARIABLE @[15:29]
+  #42 __function FUNCTION @[15:43]
+  #43 a FUNCTION_SCOPED_VARIABLE|PARAMETER @[15:13]
+  #44 x FUNCTION_SCOPED_VARIABLE @[15:61]
+scopes:
+  s0 File @1:1 sym=#0 {f=#1, g=#2, h=#3, h1=#5, h2=#6, h3=#7, h4=#8, h7=#9, h8=#10, n1=#11, n2=#12, t=#4, x=#13}
+  s1 Function @4:1 in s0 {a=#14, x=#15}
+  s2 Function @5:1 in s0 {b=#16, y=#17}
+  s3 Function @6:1 in s0 {c=#18, k=#19}
+  s4 Function @6:23 in s3
+  s5 Function @7:1 in s0 {T=#21, d=#20}
+  s6 Function @8:1 in s0 {K=#23, c=#22}
+  s7 Class @8:28 in s6 sym=#23
+  s8 Function @9:1 in s0 {E=#25, c=#24}
+  s9 Enum @9:24 in s8 sym=#25
+  s10 Function @10:1 in s0 {N=#28, c=#27}
+  s11 Module @10:24 in s10 sym=#28
+  s12 Function @11:1 in s0 {I=#31, c=#30}
+  s13 Function @12:1 in s0 {c=#32, w=#33}
+  s14 Function @13:1 in s0 {U=#34, c=#35, d=#36}
+  s15 Function @14:1 in s0 {a=#38, x=#39}
+  s16 ExprName @14:17 in s15 {named=#37}
+  s17 Function @14:17 in s16
+  s18 Function @15:1 in s0 {a=#43, x=#44}
+  s19 Function @15:17 in s18 {x=#41}
+  s20 Function @15:43 in s19
+refs: x=4:16#13 a=4:41#14 b=5:39#16 k=6:16#19 c=6:57#18 d=7:44#20 c=8:46#22 c=9:44#24 N=10:17#28 c=10:67#27 c=11:43#30 c=12:40#32 U=13:19#34 c=13:26#35 d=13:38#36 x=14:43#13 a=14:69#38 x=15:49#41 a=15:75#43
+free: y@5:16 T@7:15 K@8:21 E@9:17 I@11:16 w@12:17

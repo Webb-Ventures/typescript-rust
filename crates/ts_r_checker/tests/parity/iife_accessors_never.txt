@@ -1,0 +1,5 @@
+a.ts(3,7): error TS2322: Type '() => never' is not assignable to type 'number'.
+a.ts(15,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(36,1): error TS2322: Type 'boolean' is not assignable to type 'string | number'.
+a.ts(37,1): error TS2322: Type 'boolean' is not assignable to type 'string | number'.
+a.ts(38,7): error TS2322: Type 'string' is not assignable to type 'number'.

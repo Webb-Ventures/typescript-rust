@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function fact({ n, acc }: { n: number; acc: number; }): number { return n <= 1 ? acc : fact({ n: n - 1, acc: acc * n }); }
+fact({ n: 5, acc: 1 });

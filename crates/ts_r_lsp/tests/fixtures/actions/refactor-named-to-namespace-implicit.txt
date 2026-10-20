@@ -1,0 +1,8 @@
+// @action: refactor Convert import/Convert named imports to namespace import
+// @trigger: implicit
+// @file: src/main.ts
+import { /*[*/a/*]*/ } from "./esm";
+
+console.log(a);
+// @file: src/esm.ts
+export const a = 1;

@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "classic",
+    "module": "system"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

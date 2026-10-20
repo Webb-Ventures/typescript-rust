@@ -1,0 +1,3 @@
+a.ts(5,15): error TS2322: Type '"bar"' is not assignable to type '"foo"'.
+a.ts(7,10): error TS2322: Type '"bar"' is not assignable to type '"foo"'.
+a.ts(9,15): error TS2322: Type '"bar"' is not assignable to type '"foo"'.

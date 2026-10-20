@@ -1,0 +1,6 @@
+types	${FIXTURE}/src/a.ts	require	plain-types	${FIXTURE}/node_modules/plain-types/t.d.ts		false
+types	${FIXTURE}/src/a.ts	require	node	${FIXTURE}/node_modules/@types/node/index.d.ts		true
+types	${FIXTURE}/__inferred type names__.ts	require	node	${FIXTURE}/node_modules/@types/node/index.d.ts		true
+types	${FIXTURE}/__inferred type names__.ts	require	globals	${FIXTURE}/node_modules/@types/globals/index.d.ts		true
+types	${FIXTURE}/__inferred type names__.ts	require	@scoped/thing	${FIXTURE}/node_modules/@types/scoped__thing/main.d.ts		true
+types	${FIXTURE}/__inferred type names__.ts	require	missing-types	NOT RESOLVED		

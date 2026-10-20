@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "noEmit": true,
+    "types": []
+  },
+  "include": [
+    "src"
+  ]
+}

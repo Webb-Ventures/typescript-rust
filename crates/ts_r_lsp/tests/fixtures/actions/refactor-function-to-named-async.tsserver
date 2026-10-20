@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+async function g<T>(a: T, b = 2): Promise<number> {
+  await null;
+  return b;
+}

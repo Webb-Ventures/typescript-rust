@@ -1,0 +1,4 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+export function /*|*/one(a: number) { return a; }
+one(1);

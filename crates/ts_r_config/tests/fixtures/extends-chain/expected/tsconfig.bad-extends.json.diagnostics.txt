@@ -1,0 +1,3 @@
+tsconfig.bad-extends.json(4,5): error TS5024: Compiler option 'extends' requires a value of type string.
+
+tsconfig.bad-extends.json(5,5): error TS18051: Compiler option 'extends' cannot be given an empty string.

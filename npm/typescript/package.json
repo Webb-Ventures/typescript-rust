@@ -1,0 +1,91 @@
+{
+  "name": "@ts-r.dev/typescript",
+  "version": "7.0.0",
+  "description": "Drop-in for the typescript package: tsc runs ts-r-check where it gives the same results as your TypeScript, and everything else goes to your TypeScript",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Webb-Ventures/typescript-rust.git",
+    "directory": "npm/typescript"
+  },
+  "keywords": [
+    "typescript",
+    "tsc",
+    "type-checker",
+    "rust",
+    "ts-r"
+  ],
+  "type": "module",
+  "bin": {
+    "tsc": "./bin/tsc"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./lib/version.d.cts",
+      "default": "./lib/version.cjs"
+    },
+    "./package.json": "./package.json",
+    "./unstable/ast": {
+      "types": "./lib/unstable/ast.d.ts",
+      "default": "./lib/unstable/ast.js"
+    },
+    "./unstable/ast/clone": {
+      "types": "./lib/unstable/ast/clone.d.ts",
+      "default": "./lib/unstable/ast/clone.js"
+    },
+    "./unstable/ast/factory": {
+      "types": "./lib/unstable/ast/factory.d.ts",
+      "default": "./lib/unstable/ast/factory.js"
+    },
+    "./unstable/ast/is": {
+      "types": "./lib/unstable/ast/is.d.ts",
+      "default": "./lib/unstable/ast/is.js"
+    },
+    "./unstable/ast/scanner": {
+      "types": "./lib/unstable/ast/scanner.d.ts",
+      "default": "./lib/unstable/ast/scanner.js"
+    },
+    "./unstable/ast/utils": {
+      "types": "./lib/unstable/ast/utils.d.ts",
+      "default": "./lib/unstable/ast/utils.js"
+    },
+    "./unstable/ast/visitor": {
+      "types": "./lib/unstable/ast/visitor.d.ts",
+      "default": "./lib/unstable/ast/visitor.js"
+    },
+    "./unstable/async": {
+      "types": "./lib/unstable/async.d.ts",
+      "default": "./lib/unstable/async.js"
+    },
+    "./unstable/fs": {
+      "types": "./lib/unstable/fs.d.ts",
+      "default": "./lib/unstable/fs.js"
+    },
+    "./unstable/proto": {
+      "types": "./lib/unstable/proto.d.ts",
+      "default": "./lib/unstable/proto.js"
+    },
+    "./unstable/sync": {
+      "types": "./lib/unstable/sync.d.ts",
+      "default": "./lib/unstable/sync.js"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@ts-r.dev/check": "0.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.0"
+  },
+  "ts-r": {
+    "version": "0.0.0",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+a.ts(6,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(7,5): error TS2367: This comparison appears to be unintentional because the types '{ a: number; }' and 'number[]' have no overlap.
+a.ts(7,5): error TS2839: This condition will always return 'true' since JavaScript compares objects by reference, not value.
+a.ts(9,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(12,33): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(14,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(15,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(16,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(20,5): error TS2839: This condition will always return 'true' since JavaScript compares objects by reference, not value.

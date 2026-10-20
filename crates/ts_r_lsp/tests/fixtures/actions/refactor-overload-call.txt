@@ -1,0 +1,3 @@
+// @action: refactor Convert overload list to single signature/Convert overload list to single signature
+// @file: src/main.ts
+type T = { /*|*/(a: string): void; (a: number): void };

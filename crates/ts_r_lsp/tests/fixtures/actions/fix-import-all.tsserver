@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// fix all: Add all missing imports
+// @file: src/main.ts
+import { gamma } from "./c";
+import { alpha, beta } from "./a";
+import { z } from "./z";
+
+export const v = [alpha, beta, gamma, z];

@@ -1,0 +1,7 @@
+a.ts(25,9): error TS2322: Type '[string, string]' is not assignable to type '[string, number]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string' is not assignable to type 'number'.
+a.ts(26,9): error TS2322: Type '{ k: "c"; }' is not assignable to type '{ k: "a" | "b"; }'.
+  Types of property 'k' are incompatible.
+    Type '"c"' is not assignable to type '"a" | "b"'.
+a.ts(37,5): error TS2322: Type 'string' is not assignable to type '"unknown" | ProcedureType'.

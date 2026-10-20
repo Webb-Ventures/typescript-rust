@@ -1,0 +1,4 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function /*|*/gen<T>(a: T, b: T[]) { return [a, ...b]; }
+gen(1, [2]);

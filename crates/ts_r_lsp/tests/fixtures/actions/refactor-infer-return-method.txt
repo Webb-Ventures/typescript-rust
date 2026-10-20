@@ -1,0 +1,7 @@
+// @action: refactor Infer function return type/Infer function return type
+// @file: src/main.ts
+export class C {
+  /*|*/m(n: number) {
+    return n > 0;
+  }
+}

@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+export class C {
+  m<T>(a: T) {
+    this.newMethod<T>(a);
+  }
+
+  private newMethod<T>(a: T) {
+    console.log(a);
+  }
+}

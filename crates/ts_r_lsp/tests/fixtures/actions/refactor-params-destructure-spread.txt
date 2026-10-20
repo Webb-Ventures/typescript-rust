@@ -1,0 +1,6 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @differs: tsserver writes `{ a: ...args }` (a syntax error); ts-r does not offer it
+// @file: src/main.ts
+function /*|*/sp(a: number, b: number) { return a + b; }
+declare const args: [number, number];
+sp(...args);

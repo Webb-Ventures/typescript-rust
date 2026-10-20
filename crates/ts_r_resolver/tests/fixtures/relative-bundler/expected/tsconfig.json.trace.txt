@@ -1,0 +1,25 @@
+module	${FIXTURE}/src/a.ts	import	./b	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/a.ts	import	./b.js	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/a.ts	import	./b.ts	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/a.ts	import	./dir	${FIXTURE}/src/dir/index.ts	
+module	${FIXTURE}/src/a.ts	import	./dir/	${FIXTURE}/src/dir/index.ts	
+module	${FIXTURE}/src/a.ts	import	./pkgdir	${FIXTURE}/src/pkgdir/lib/t.d.ts	
+module	${FIXTURE}/src/a.ts	import	./pkgdir-main	${FIXTURE}/src/pkgdir-main/lib/main.ts	
+module	${FIXTURE}/src/a.ts	import	./data.json	${FIXTURE}/src/data.json	
+module	${FIXTURE}/src/a.ts	import	./data	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	import	./js-only	${FIXTURE}/src/js-only.js	
+module	${FIXTURE}/src/a.ts	import	./js-only.js	${FIXTURE}/src/js-only.js	
+module	${FIXTURE}/src/a.ts	import	./tsx-only	${FIXTURE}/src/tsx-only.tsx	
+module	${FIXTURE}/src/a.ts	import	./m	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	import	./m.mjs	${FIXTURE}/src/m.mts	
+module	${FIXTURE}/src/a.ts	import	./m.mts	${FIXTURE}/src/m.mts	
+module	${FIXTURE}/src/a.ts	import	./c.cjs	${FIXTURE}/src/c.cts	
+module	${FIXTURE}/src/a.ts	import	./both	${FIXTURE}/src/both.ts	
+module	${FIXTURE}/src/a.ts	import	./D	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	import	.	${FIXTURE}/src/index.ts	
+module	${FIXTURE}/src/a.ts	import	..	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	import	./dir/index	${FIXTURE}/src/dir/index.ts	
+module	${FIXTURE}/src/req.js	require	./b	${FIXTURE}/src/b.ts	
+module	${FIXTURE}/src/req.js	require	pkg	${FIXTURE}/node_modules/pkg/r.d.ts	pkg/r.d.ts@1.0.0
+module	${FIXTURE}/src/req.js	import	pkg	${FIXTURE}/node_modules/pkg/i.d.ts	pkg/i.d.ts@1.0.0
+module	${FIXTURE}/src/uses-pkg.ts	import	pkg	${FIXTURE}/node_modules/pkg/i.d.ts	pkg/i.d.ts@1.0.0

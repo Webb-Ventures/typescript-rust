@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Move to file
+// @file: src/fresh.ts
+import { a } from "./dep";
+
+
+export function helper() {
+  return a;
+}
+// @file: src/main.ts
+
+export const keep = 1;

@@ -1,0 +1,7 @@
+// @action: fix 1308 Add async modifier to containing function
+// @file: src/main.ts
+declare function load(): Promise<string>;
+export function f() {
+  const s = /*|*/await load();
+  return s;
+}

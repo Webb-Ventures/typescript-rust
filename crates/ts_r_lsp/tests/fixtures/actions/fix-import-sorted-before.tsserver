@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { a } from "./alpha";
+import { m } from "./mid";
+import { z } from "./zed";
+
+export const n = [a, m, z];

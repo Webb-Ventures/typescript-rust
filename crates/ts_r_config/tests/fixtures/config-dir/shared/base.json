@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "outDir": "${configDir}/dist",
+    "declarationDir": "${configDir}/types",
+    "declaration": true,
+    "rootDir": "${configDir}",
+    "paths": {
+      "#/*": [
+        "${configDir}/src/*"
+      ]
+    },
+    "typeRoots": [
+      "${configDir}/typings",
+      "./shared-typings"
+    ],
+    "tsBuildInfoFile": "${configDir}/.cache/tsbuildinfo"
+  },
+  "include": [
+    "${configDir}/src"
+  ],
+  "exclude": [
+    "${configDir}/src/skip"
+  ]
+}

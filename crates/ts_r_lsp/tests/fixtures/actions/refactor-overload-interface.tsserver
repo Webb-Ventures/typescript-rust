@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert overload list to single signature
+// @file: src/main.ts
+interface I {
+  m(...args: [a: string] | [a: number, b: boolean]): void;
+}

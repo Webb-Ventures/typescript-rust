@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function u({ a, b }: { a; b; }) { return a + b; }
+u({ a: 1, b: 2 });

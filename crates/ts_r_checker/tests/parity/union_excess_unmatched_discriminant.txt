@@ -1,0 +1,12 @@
+a.ts(6,25): error TS2322: Type 'null' is not assignable to type 'boolean | Category | undefined'.
+a.ts(14,3): error TS2322: Type '{ category: null; }' is not assignable to type 'Where<Post>[] | Where<Post> | undefined'.
+  Types of property 'category' are incompatible.
+    Type 'null' is not assignable to type 'boolean | Where<Category>[] | Category | Op<any> | Where<Category> | undefined'.
+a.ts(22,55): error TS2322: Type 'false' is not assignable to type '"a" | true | undefined'.
+a.ts(26,7): error TS2322: Type '{ kind: "b"; x: number; }' is not assignable to type '{ kind: "a"; } | { x: number; }'.
+  Types of property 'kind' are incompatible.
+    Type '"b"' is not assignable to type '"a"'.
+a.ts(27,45): error TS2322: Type '"b"' is not assignable to type '"a"'.
+a.ts(28,7): error TS2322: Type '{ kind: "b"; x: number; }' is not assignable to type '{ kind: "a"; } | { x: number; y: 1; }'.
+  Types of property 'kind' are incompatible.
+    Type '"b"' is not assignable to type '"a"'.

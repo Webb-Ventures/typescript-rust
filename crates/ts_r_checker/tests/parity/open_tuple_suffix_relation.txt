@@ -1,0 +1,9 @@
+a.ts(5,7): error TS2322: Type '[...string[], "b", 1]' is not assignable to type '[...string[], "a", 1]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type '"b"' is not assignable to type '"a"'.
+a.ts(6,7): error TS2322: Type '[...string[], "b", 1]' is not assignable to type '[...string[], "a", 1]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type '"b"' is not assignable to type '"a"'.
+a.ts(7,7): error TS2322: Type '[...string[], "b"]' is not assignable to type '[...string[], "a"]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type '"b"' is not assignable to type '"a"'.

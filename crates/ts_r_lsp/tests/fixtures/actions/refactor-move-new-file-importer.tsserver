@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Move to a new file
+// @file: src/alpha.ts
+export const alpha = 1;
+// @file: src/main.ts
+export const beta = 2;
+// @file: src/user.ts
+import { beta } from "./main";
+import { alpha } from "./alpha";
+
+export const sum = alpha + beta;

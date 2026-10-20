@@ -1,0 +1,15 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+export function f<T, U>(t: T, u: U) {
+  if (t) {
+    type NewType = {
+      first: T;
+      second: [U, T];
+    };
+
+    const pair: NewType = null!;
+    return pair;
+  }
+  return null;
+}

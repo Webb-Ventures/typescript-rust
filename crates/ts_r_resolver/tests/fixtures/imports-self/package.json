@@ -1,0 +1,22 @@
+{
+  "name": "@me/app",
+  "version": "1.0.0",
+  "type": "module",
+  "imports": {
+    "#internal/*": "./src/internal/*.js",
+    "#cond": {
+      "import": "./src/cond-esm.js",
+      "require": "./src/cond-cjs.cjs"
+    },
+    "#dep": "dep",
+    "#dep/*": "dep/*",
+    "#exact": "./src/exact.js",
+    "#null": null,
+    "#nested/*.js": "./src/nested/*.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./feature": "./src/feature.js",
+    "./*": "./src/star/*.js"
+  }
+}

@@ -1,0 +1,4 @@
+a.ts(20,14): error TS2322: Type 'Schema<{ k1: unknown; v: unknown; }>' is not assignable to type 'number'.
+a.ts(28,14): error TS2322: Type '{ v: unknown; }' is not assignable to type 'number'.
+a.ts(32,14): error TS2322: Type '{ v: unknown; w: unknown; }' is not assignable to type 'number'.
+a.ts(35,14): error TS2322: Type '[unknown]' is not assignable to type 'number'.

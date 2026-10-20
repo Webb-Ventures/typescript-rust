@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "outDir": "./shared-cfg/linked-out"
+    },
+    "files": [
+        "./shared-cfg/inc/x.ts"
+    ],
+    "include": [
+        "shared-cfg/./inc/*"
+    ],
+    "exclude": [
+        "${FIXTURE}/shared-cfg/linked-out"
+    ]
+}

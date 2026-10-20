@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "module": "node20",
+    "moduleResolution": "bundler"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

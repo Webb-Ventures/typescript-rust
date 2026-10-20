@@ -1,0 +1,10 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver writes `touch()` then `[n].push(1)`, which reads as `touch()[n].push(1)`; ours declines
+// @file: src/main.ts
+declare function touch(): void
+export function f(n: number) {
+  const /*|*/list = [n]
+  touch()
+  list.push(1)
+  return list
+}

@@ -1,0 +1,15 @@
+a.ts(4,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'undef' must be of type 'undefined', but here has type 'any'.
+a.ts(7,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'options' must be of type 'number | undefined', but here has type 'number'.
+a.ts(19,1): error TS2628: Cannot assign to 'One' because it is an enum.
+a.ts(20,1): error TS2630: Cannot assign to 'fn' because it is a function.
+a.ts(22,1): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(23,1): error TS2365: Operator '+=' cannot be applied to types 'boolean' and 'number'.
+a.ts(30,19): error TS2365: Operator '<' cannot be applied to types 'void' and 'number'.
+a.ts(31,15): error TS2365: Operator '+' cannot be applied to types 'void' and 'number'.
+a.ts(33,24): error TS2339: Property 'length' does not exist on type 'void | string'.
+  Property 'length' does not exist on type 'void'.
+a.ts(36,5): error TS2322: Type 'One' is not assignable to type 'boolean'.
+a.ts(38,5): error TS2322: Type 'Two.B' is not assignable to type 'Two.A'.
+a.ts(48,5): error TS2365: Operator '<' cannot be applied to types 'S' and 'number'.
+a.ts(49,5): error TS2365: Operator '<' cannot be applied to types 'T' and 'U'.
+a.ts(50,5): error TS2367: This comparison appears to be unintentional because the types 'T' and 'U' have no overlap.

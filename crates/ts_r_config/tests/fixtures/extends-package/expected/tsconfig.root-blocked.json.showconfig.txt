@@ -1,0 +1,8 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./shared-cfg/inc/x.ts",
+        "./src/a.ts",
+        "./sub/deep/b.ts"
+    ]
+}

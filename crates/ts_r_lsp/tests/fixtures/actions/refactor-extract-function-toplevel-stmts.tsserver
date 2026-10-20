@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+const x = 1 + 2;
+newFunction();
+const y = x * 3;
+export { y };
+
+  function newFunction() {
+    console.log(x);
+    console.log(x * 2);
+  }

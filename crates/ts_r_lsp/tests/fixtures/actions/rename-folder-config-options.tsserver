@@ -1,0 +1,23 @@
+// tsserver 6.0.3
+// @deleted: src/base.json
+// @deleted: src/main.ts
+// @deleted: src/x.ts
+// @file: src2/base.json
+{"compilerOptions": {"noEmit": true}}
+// @file: src2/main.ts
+import { x } from "./x";
+
+export const n = x;
+// @file: src2/x.ts
+export const x = 1;
+// @file: tsconfig.json
+{
+  "extends": "./src/base.json",
+  "compilerOptions": {
+    "strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler",
+    "rootDir": "src2", "outDir": "src2/out", "baseUrl": "src2", "declarationDir": "src2/types",
+    "tsBuildInfoFile": "src2/.tsbuildinfo", "outFile": "src2/out.js", "mapRoot": "src/maps", "types": ["src/types"], "lib": ["es2022"],
+    "paths": {"~/*": ["*"]}
+  },
+  "include": ["src2"]
+}

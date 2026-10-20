@@ -1,0 +1,4 @@
+// @action: refactor Add or remove braces in an arrow function/Remove braces from arrow function
+// @file: src/main.ts
+let a = 0;
+const g = () /*|*/=> { return a++, a; };

@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to inner function in function 'f'
+// @file: src/main.ts
+export function f<T>(a: T) {
+  newFunction();
+  return a;
+
+  function newFunction() {
+    console.log(a);
+  }
+}

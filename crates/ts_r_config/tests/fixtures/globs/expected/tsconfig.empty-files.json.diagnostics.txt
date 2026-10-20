@@ -1,0 +1,1 @@
+tsconfig.empty-files.json(2,12): error TS18002: The 'files' list in config file '${FIXTURE}/tsconfig.empty-files.json' is empty.

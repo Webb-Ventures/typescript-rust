@@ -1,0 +1,3 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @file: src/main.ts
+let /*|*/a7 = () => 1, a8 = 2;

@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+export function f<T>(a: T) {
+  newFunction<T>(a);
+  return a;
+}
+
+function newFunction<T>(a: T) {
+  console.log(a);
+}

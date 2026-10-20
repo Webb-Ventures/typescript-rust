@@ -1,0 +1,8 @@
+a.ts(5,8): error TS1192: Module '"/p/m"' has no default export.
+a.ts(7,8): error TS1192: Module '"/p/e"' has no default export.
+a.ts(9,8): error TS1192: Module '"amb2"' has no default export.
+a.ts(10,8): error TS1192: Module '"/p/node_modules/esm-pkg/index"' has no default export.
+a.ts(13,7): error TS2322: Type 'typeof import("/p/d")' is not assignable to type 'null'.
+a.ts(15,7): error TS2322: Type 'typeof import("amb")' is not assignable to type 'null'.
+a.ts(18,7): error TS2322: Type 'typeof import("/p/node_modules/cjs-pkg/index")' is not assignable to type 'null'.
+a.ts(21,9): error TS2322: Type '{ id: number; }' is not assignable to type 'null'.

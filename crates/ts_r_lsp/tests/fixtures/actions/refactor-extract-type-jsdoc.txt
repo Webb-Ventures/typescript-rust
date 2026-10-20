@@ -1,0 +1,6 @@
+// @action: refactor Extract type/Extract to interface
+// @file: src/main.ts
+/**
+ * The options.
+ */
+export const opts: /*[*/{ a: string; b: Array<{ c: 1; d: 'x' }> }/*]*/ = { a: "", b: [] };

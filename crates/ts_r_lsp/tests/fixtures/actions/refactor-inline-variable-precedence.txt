@@ -1,0 +1,7 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver parenthesises only lower precedence, so `a - x` and `a + x` with `x = b - c` become `a - b - c` and `a + b - c` (another value); ours keeps the grouping
+// @file: src/main.ts
+export function f(a: number, b: number, c: number) {
+  const /*|*/x = b - c;
+  return [a - x, x - a, a / x, x ? 1 : 2, -x, a + x];
+}

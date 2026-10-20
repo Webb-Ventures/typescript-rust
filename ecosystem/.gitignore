@@ -1,0 +1,3 @@
+# Raw run results (`cargo xtask ecosystem` writes results/<date>.json); STATUS.md is the
+# committed summary.
+/results/

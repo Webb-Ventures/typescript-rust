@@ -1,0 +1,4 @@
+a.ts(11,40): error TS2339: Property 'nope' does not exist on type 'M'.
+a.ts(12,42): error TS2339: Property 'nope2' does not exist on type 'M'.
+a.ts(14,35): error TS2339: Property 'nope3' does not exist on type 'M'.
+a.ts(15,56): error TS2339: Property 'nope4' does not exist on type 'string'.

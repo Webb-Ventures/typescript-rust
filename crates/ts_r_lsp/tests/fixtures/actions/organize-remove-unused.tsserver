@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+// leading comment
+import { a } from "./a";
+import def from "./def";
+import "./side-effect";
+import type { T } from "./types";
+
+const v: T = a;
+console.log(v, def);

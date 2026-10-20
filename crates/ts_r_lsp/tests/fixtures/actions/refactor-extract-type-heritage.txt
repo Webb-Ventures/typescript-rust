@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+interface Base<T> { t: T }
+export interface I extends Base</*[*/string[]/*]*/> {}

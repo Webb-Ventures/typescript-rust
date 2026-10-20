@@ -1,0 +1,12 @@
+// @action: refactor Move to file/Move to file
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @target: src/types.ts
+// @file: src/main.ts
+/*[*/export interface Point {
+  x: number;
+  y: number;
+}/*]*/
+
+export const origin: Point = { x: 0, y: 0 };
+// @file: src/types.ts
+export type Id = string;

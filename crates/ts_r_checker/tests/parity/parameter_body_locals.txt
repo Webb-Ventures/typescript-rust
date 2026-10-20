@@ -1,0 +1,16 @@
+a.ts(1,17): error TS2304: Cannot find name 'b'.
+a.ts(2,23): error TS2304: Cannot find name 'c'.
+a.ts(3,17): error TS2373: Parameter 'a' cannot reference identifier 'g' declared after it.
+a.ts(4,17): error TS2304: Cannot find name 'C'.
+a.ts(8,17): error TS2304: Cannot find name 'd'.
+a.ts(9,17): error TS2304: Cannot find name 'e'.
+a.ts(10,24): error TS2304: Cannot find name 'h'.
+a.ts(11,23): error TS2304: Cannot find name 'i'.
+a.ts(12,18): error TS2304: Cannot find name 'j'.
+a.ts(13,19): error TS2552: Cannot find name 'k'. Did you mean 'K'?
+a.ts(14,20): error TS2304: Cannot find name 'l'.
+a.ts(16,18): error TS2708: Cannot use namespace 'm' as a value.
+a.ts(16,23): error TS1235: A namespace declaration is only allowed at the top level of a namespace or module.
+a.ts(17,18): error TS2373: Parameter 'a' cannot reference identifier 'n' declared after it.
+a.ts(18,25): error TS2304: Cannot find name 'z'.
+a.ts(19,25): error TS2304: Cannot find name 'q'.

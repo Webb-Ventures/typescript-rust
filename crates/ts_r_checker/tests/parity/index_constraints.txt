@@ -1,0 +1,24 @@
+a.ts(10,12): error TS2411: Property 'x' of type 'number' is not assignable to 'string' index type 'string'.
+a.ts(11,12): error TS2411: Property 'foo' of type '() => void' is not assignable to 'string' index type 'string'.
+a.ts(13,7): error TS2322: Type '() => void' is not assignable to type 'number'.
+a.ts(17,5): error TS2411: Property 'foo' of type 'E' is not assignable to 'string' index type 'string'.
+a.ts(21,5): error TS2411: Property 'foo' of type 'E' is not assignable to 'string' index type 'boolean'.
+a.ts(25,9): error TS2411: Property '[1 << 6]' of type 'Foo' is not assignable to 'string' index type 'Foo2'.
+a.ts(27,5): error TS2411: Property '[""]' of type '() => Foo' is not assignable to 'string' index type 'Foo2'.
+a.ts(28,5): error TS2411: Property '["get1"]' of type 'Foo' is not assignable to 'string' index type 'Foo2'.
+a.ts(31,5): error TS2411: Property '[Symbol.iterator]' of type 'number' is not assignable to 'symbol' index type 'string'.
+a.ts(37,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(37,5): error TS2411: Property '[+s]' of type 'string' is not assignable to 'number' index type 'number'.
+a.ts(42,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(43,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(43,5): error TS2411: Property '[n + 1]' of type 'string' is not assignable to 'number' index type 'number'.
+a.ts(46,7): error TS2322: Type 'string | number | undefined' is not assignable to type 'null'.
+  Type 'undefined' is not assignable to type 'null'.
+a.ts(57,5): error TS2411: Property '["get1"]' of type 'Foo' is not assignable to 'string' index type 'Foo2'.
+a.ts(57,5): error TS2411: Property 'z' of type 'string' is not assignable to 'string' index type 'Foo2'.
+a.ts(58,9): error TS2411: Property '["set1"]' of type 'Foo' is not assignable to 'string' index type 'Foo2'.
+a.ts(62,5): error TS2393: Duplicate function implementation.
+a.ts(62,5): error TS2411: Property 'a' of type '() => Foo' is not assignable to 'string' index type '() => Foo2'.
+a.ts(63,5): error TS2393: Duplicate function implementation.
+a.ts(71,5): error TS2413: 'number' index type '1' is not assignable to 'string' index type 'boolean'.
+a.ts(77,5): error TS2413: 'number' index type 'Foo' is not assignable to 'string' index type 'Foo2'.

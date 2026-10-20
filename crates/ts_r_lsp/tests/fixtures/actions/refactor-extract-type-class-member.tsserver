@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType<T> = Array<T> | undefined;
+
+export class Box<T> {
+    items: NewType<T>;
+    get<U extends T>(u: U): U { return u; }
+}

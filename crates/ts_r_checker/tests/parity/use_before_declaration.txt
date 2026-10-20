@@ -1,0 +1,12 @@
+a.ts(5,19): error TS2448: Block-scoped variable 'a' used before its declaration.
+a.ts(5,19): error TS2454: Variable 'a' is used before being assigned.
+a.ts(7,26): error TS2448: Block-scoped variable 'c' used before its declaration.
+a.ts(7,26): error TS2454: Variable 'c' is used before being assigned.
+a.ts(8,23): error TS2448: Block-scoped variable 'd' used before its declaration.
+a.ts(8,23): error TS2454: Variable 'd' is used before being assigned.
+a.ts(11,6): error TS2449: Class 'C1' used before its declaration.
+a.ts(15,10): error TS2449: Class 'C3' used before its declaration.
+a.ts(17,10): error TS2449: Class 'C3' used before its declaration.
+a.ts(26,13): error TS2449: Class 'C4' used before its declaration.
+a.ts(27,13): error TS2449: Class 'C4' used before its declaration.
+a.ts(37,6): error TS2304: Cannot find name 'missing'.

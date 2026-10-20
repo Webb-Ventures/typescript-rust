@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to constant in method 'm'
+// @file: src/main.ts
+export class C {
+  m() {
+    const newLocal = Math.max(1, 2);
+    const g = () => {
+      return newLocal;
+    };
+    return g;
+  }
+}

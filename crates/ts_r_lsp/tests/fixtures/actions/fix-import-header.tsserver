@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+// Copyright (c) Example.
+// Licensed under MIT.
+
+import { helper } from "./util";
+
+/** The entry point. */
+export const n = helper(1);

@@ -1,0 +1,20 @@
+{
+  "$comment": "Machine-readable project state. Agents read this first. `cargo xtask upstream bump` updates `typescript`, `cargo xtask upstream sync` updates `lastSync`, and the nightly job will fill `passRates` and `openTaskGroups`.",
+  "typescript": {
+    "pinned": "7.0.2",
+    "commit": "1e4744d68260a7cb91b62b12edc3f6a2187faaf1",
+    "supported": "7.0.x",
+    "tracking": "latest 7.x RC from the day it ships; main nightlies on a non-blocking branch"
+  },
+  "lastSync": {
+    "date": "2026-10-14",
+    "commit": "1e4744d68260a7cb91b62b12edc3f6a2187faaf1"
+  },
+  "passRates": {
+    "conformance": null,
+    "compiler": null,
+    "test262": null,
+    "corpus": null
+  },
+  "openTaskGroups": []
+}

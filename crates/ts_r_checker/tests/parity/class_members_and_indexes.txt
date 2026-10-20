@@ -1,0 +1,12 @@
+a.ts(5,3): error TS2564: Property '[s]' has no initializer and is not definitely assigned in the constructor.
+a.ts(6,3): error TS2564: Property '["a"]' has no initializer and is not definitely assigned in the constructor.
+a.ts(7,3): error TS2564: Property '[Symbol.iterator]' has no initializer and is not definitely assigned in the constructor.
+a.ts(14,3): error TS2564: Property 'x' has no initializer and is not definitely assigned in the constructor.
+a.ts(15,3): error TS2564: Property 'y' has no initializer and is not definitely assigned in the constructor.
+a.ts(33,11): error TS2411: Property 'm' of type '{}' is not assignable to 'string' index type '{ a: number; }'.
+a.ts(37,11): error TS2411: Property '0' of type '{}' is not assignable to 'number' index type '{ a: number; b: number; }'.
+a.ts(37,11): error TS2411: Property '0' of type '{}' is not assignable to 'string' index type '{ a: number; }'.
+a.ts(44,3): error TS2411: Property '1' of type 'string' is not assignable to 'number' index type 'number'.
+a.ts(49,14): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(53,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 't' must be of type 'this', but here has type 'K2'.
+a.ts(55,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'p' must be of type 'this', but here has type 'K2'.

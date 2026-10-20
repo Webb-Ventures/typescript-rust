@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {},
+    "references": [
+        {
+            "path": "./nope"
+        },
+        {
+            "path": "./src"
+        }
+    ],
+    "files": [
+        "./src/a.ts"
+    ],
+    "include": [
+        "src"
+    ]
+}

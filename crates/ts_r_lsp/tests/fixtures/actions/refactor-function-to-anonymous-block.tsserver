@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to anonymous function
+// @file: src/main.ts
+export const f = async function(x: number): Promise<number> {
+  return x;
+};

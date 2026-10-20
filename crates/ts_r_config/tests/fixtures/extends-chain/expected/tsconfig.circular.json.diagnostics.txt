@@ -1,0 +1,1 @@
+error TS18000: Circularity detected while resolving configuration: {0}

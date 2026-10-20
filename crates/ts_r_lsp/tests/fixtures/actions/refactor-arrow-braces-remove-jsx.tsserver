@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Remove braces from arrow function
+// @file: src/main.tsx
+export const C = () => <div>hi</div>;

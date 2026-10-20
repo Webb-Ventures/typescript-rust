@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Generate 'get' and 'set' accessors
+// @file: src/main.ts
+export class Handler {
+  private _onDone?: (() => void) | undefined;
+  public set onDone(value: (() => void) | undefined) {
+    this._onDone = value;
+  }
+  public get onDone(): (() => void) | undefined {
+    return this._onDone;
+  }
+  name?: string | undefined;
+}

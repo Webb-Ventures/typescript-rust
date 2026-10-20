@@ -1,0 +1,9 @@
+// @action: refactor Extract Symbol/function_scope_1
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+declare function load(n: number): Promise<string>;
+export async function f(a: number) {
+  /*[*/const text = await load(a);
+  console.log(text);/*]*/
+  return a;
+}

@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to type alias
+// @trigger: implicit
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/main.ts
+export let u: string | /*|*/number = 1;

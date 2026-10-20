@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Extract to readonly field in class 'C'
+// @file: src/main.ts
+export class C {
+  private static readonly newProperty = Math.max(1, 2);
+
+  static make(a: number) {
+    return a + C.newProperty;
+  }
+}

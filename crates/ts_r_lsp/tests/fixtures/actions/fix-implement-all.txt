@@ -1,0 +1,9 @@
+// @action: fixAll 2420 Implement interface 'A'
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @differs: tsserver puts a blank line before the members of an empty class and its closing brace after the last one; we close the class on its own line. Indentation is the file's (4 here: no indented lines), tsserver's comes from formatOptions.
+// @file: src/main.ts
+interface A { a(): void }
+interface B { b: number }
+
+export class /*|*/X implements A {}
+export class Y implements B {}

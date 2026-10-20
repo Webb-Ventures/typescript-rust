@@ -1,0 +1,9 @@
+// @action: refactor Extract Symbol/constant_scope_1
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @tsconfig: {"compilerOptions": {"strict": true, "module": "esnext", "moduleResolution": "bundler", "allowJs": true, "checkJs": true, "noEmit": true}}
+// @file: src/main.js
+export class C {
+  run(n) {
+    return /*[*/[1, 2]/*]*/.length + n;
+  }
+}

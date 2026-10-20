@@ -1,0 +1,18 @@
+// @action: organizeImports
+// @file: src/main.ts
+"use strict";
+// Copyright header
+
+/** Module docs. */
+import { b } from "./b";
+import { a } from "./a";
+const x = a + b;
+import { c } from "./c";
+export { x };
+console.log(c);
+// @file: src/a.ts
+export const a = 1;
+// @file: src/b.ts
+export const b = 1;
+// @file: src/c.ts
+export const c = 1;

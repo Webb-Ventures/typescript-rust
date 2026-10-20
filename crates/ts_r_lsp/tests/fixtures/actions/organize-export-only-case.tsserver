@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export { A, b, d, type C } from "./a";
+export { B2, a2, d2, type C2 } from "./b";

@@ -1,0 +1,6 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function /*|*/opt(a: number, b?: string, c = true) { return [a, b, c]; }
+opt(1);
+opt(1, 'x');
+opt(1, undefined, false);

@@ -1,0 +1,22 @@
+a.ts(10,7): error TS2322: Type 'NB' is not assignable to type 'Box<string>'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(11,7): error TS2322: Type 'NB' is not assignable to type 'Obj'.
+  Type 'Box<number>' is missing the following properties from type 'Obj': hello, world
+a.ts(12,7): error TS2322: Type 'NB' is not assignable to type 'Obj1'.
+  Property 'hello' is missing in type 'Box<number>' but required in type 'Obj1'.
+a.ts(13,7): error TS2322: Type 'NB' is not assignable to type 'Other'.
+  Types of property 'v' are incompatible.
+    Type 'number' is not assignable to type 'string'.
+a.ts(15,7): error TS2322: Type 'Other' is not assignable to type 'NB'.
+  Types of property 'v' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(16,7): error TS2322: Type '{ v: number; }' is not assignable to type 'NB'.
+  Property 'w' is missing in type '{ v: number; }' but required in type 'Box<number>'.
+a.ts(19,7): error TS2322: Type 'Arr' is not assignable to type 'string[]'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(20,7): error TS2322: Type 'Arr' is not assignable to type 'Obj'.
+  Type 'number[]' is missing the following properties from type 'Obj': hello, world
+a.ts(23,7): error TS2322: Type 'Tup' is not assignable to type '[string, string]'.
+  Type at position 0 in source is not compatible with type at position 0 in target.
+    Type 'number' is not assignable to type 'string'.
+a.ts(24,22): error TS2322: Type 'number' is not assignable to type 'string'.

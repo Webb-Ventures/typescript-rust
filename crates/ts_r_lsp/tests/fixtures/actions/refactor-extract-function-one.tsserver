@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+export function f(items: string[]) {
+  const upper = newFunction(items);
+  return upper.join(",");
+}
+
+function newFunction(items: string[]) {
+  return items.map((s) => s.toUpperCase());
+}

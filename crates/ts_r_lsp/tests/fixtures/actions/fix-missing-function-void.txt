@@ -1,0 +1,6 @@
+// @action: fix 2304 Add missing function declaration 'log'
+// @file: src/main.ts
+export const items = [1, 2];
+/*|*/log(items.length, "done");
+
+export const x = 1;

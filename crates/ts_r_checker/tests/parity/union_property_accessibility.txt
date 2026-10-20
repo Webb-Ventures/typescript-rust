@@ -1,0 +1,6 @@
+a.ts(12,4): error TS2339: Property 'member' does not exist on type 'Default | Protected'.
+a.ts(13,4): error TS2339: Property 'member' does not exist on type 'Protected | Public'.
+a.ts(14,5): error TS2339: Property 'member' does not exist on type 'Private | Protected'.
+a.ts(18,23): error TS2339: Property 'foo' does not exist on type 'Bar | Foo'.
+a.ts(20,33): error TS2339: Property 'a' does not exist on type '{ a: 1; } | { b: 2; }'.
+a.ts(22,31): error TS2339: Property 'a' does not exist on type 'string | { a: 1; }'.

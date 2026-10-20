@@ -1,0 +1,4 @@
+// @action: refactor Convert export/Convert default export to named export
+// @trigger: implicit
+// @file: src/util.ts
+/*[*/export default class Shape {}/*]*/

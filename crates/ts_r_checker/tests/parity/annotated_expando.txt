@@ -1,0 +1,6 @@
+a.ts(16,3): error TS2741: Property 'skip' is missing in type '{ (t: string): number; only: (t: string) => number; }' but required in type 'TestFn'.
+a.ts(20,14): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(22,3): error TS2339: Property 'x' does not exist on type '() => void'.
+a.ts(23,21): error TS2339: Property 'x' does not exist on type '() => void'.
+a.ts(24,7): error TS2741: Property 'skip' is missing in type '{ (t: string): number; only: (t: string) => number; }' but required in type 'TestFn'.
+a.ts(26,14): error TS2322: Type '(t: string) => number' is not assignable to type 'string'.

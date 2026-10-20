@@ -1,0 +1,86 @@
+script
+symbols:
+  #0 __file VALUE_MODULE|MODULE_FILE @[1:1]
+  #1 f FUNCTION @[2:1]
+  #2 x FUNCTION_SCOPED_VARIABLE|PARAMETER (ASSIGNED) @[2:12]
+  #3 y FUNCTION_SCOPED_VARIABLE|PARAMETER (ASSIGNED) @[2:32]
+  #4 k BLOCK_SCOPED_VARIABLE (BLOCK_SCOPED) @[9:20]
+  #5 __function FUNCTION @[21:6]
+scopes:
+  s0 File @1:1 sym=#0 {f=#1}
+  s1 Function @2:1 in s0 {x=#2, y=#3}
+  s2 Block @3:32 in s1
+  s3 Block @5:28 in s1
+  s4 Block @8:27 in s1
+  s5 For @9:9 in s4 {k=#4}
+  s6 Block @9:33 in s5
+  s7 Switch @15:5 in s1
+  s8 Block @20:9 in s1
+  s9 Catch @20:20 in s1
+  s10 Block @20:26 in s9
+  s11 Block @20:45 in s1
+  s12 Function @21:6 in s1
+refs: x=3:16#2 x=4:9#2 x=4:13#2 y=5:16#3 x=5:21#2 x=6:16#2 x=8:19#2 k=10:17#4 k=11:17#4 x=13:9#2 x=15:13#2 x=16:17#2 x=20:11#2 x=20:28#2 y=20:47#3 y=20:52#3 x=21:14#2 x=22:12#2 y=22:17#3
+---- flow ----
+f1 Start
+f2 Start 2:1"function f(x: number | s"
+f3 BranchLabel <- [f16, f44, f60]
+f4 BranchLabel <- [f7]
+f5 BranchLabel <- [f8]
+f6 BranchLabel <- [f9, f11]
+f7 TrueCondition 3:9"typeof x === \"string\"" <- f2
+f8 FalseCondition 3:9"typeof x === \"string\"" <- f2
+f9 Assignment 4:9"x" <- f7
+f10 BranchLabel <- [f16]
+f11 BranchLabel <- [f15, f17]
+f12 BranchLabel <- [f11]
+f13 BranchLabel <- [f14]
+f14 TrueCondition 5:16"y" <- f8
+f15 FalseCondition 5:16"y" <- f8
+f16 TrueCondition 5:21"x > 1" <- f14
+f17 FalseCondition 5:21"x > 1" <- f14
+f18 BranchLabel <- [f35, f23]
+f19 LoopLabel <- [f6, f30, f37]
+f20 BranchLabel <- [f22]
+f21 BranchLabel <- [f23]
+f22 TrueCondition 8:19"x < 10" <- f19
+f23 FalseCondition 8:19"x < 10" <- f19
+f24 LoopLabel <- [f22, f36]
+f25 BranchLabel <- [f24]
+f26 Assignment 9:20"k" <- f24
+f27 BranchLabel <- [f30]
+f28 BranchLabel <- [f31]
+f29 BranchLabel <- [f31]
+f30 TrueCondition 10:17"k === 2" <- f26
+f31 FalseCondition 10:17"k === 2" <- f26
+f32 BranchLabel <- [f35]
+f33 BranchLabel <- [f36]
+f34 BranchLabel <- [f36]
+f35 TrueCondition 11:17"k === 3" <- f31
+f36 FalseCondition 11:17"k === 3" <- f31
+f37 Assignment 13:9"x" <- f24
+f38 BranchLabel <- [f43]
+f39 SwitchClause 15:5"switch (x) {         cas" <- f18 clauses 0..1
+f40 BranchLabel <- [f39]
+f41 Assignment 16:17"x" <- f39
+f42 SwitchClause 15:5"switch (x) {         cas" <- f18 clauses 1..2
+f43 BranchLabel <- [f42, f41]
+f44 SwitchClause 15:5"switch (x) {         cas" <- f18 clauses 2..3
+f45 BranchLabel <- [f44]
+f46 BranchLabel <- [f43, f48]
+f47 BranchLabel flags=2 <- [f48, f50, f49]
+f48 Assignment 20:11"x" <- f43
+f49 BranchLabel <- [f46, f50]
+f50 Assignment 20:28"x" <- f46
+f51 Assignment 20:47"y" <- f47
+f52 ReduceLabel <- f51 (f47 = [f48, f50])
+f53 Start 21:6"() => { x = 5; }" created at f52
+f54 BranchLabel <- []
+f55 Assignment 21:14"x" <- f53
+f56 BranchLabel <- [f55]
+f57 Call 21:5"(() => { x = 5; })()" <- f55
+f58 TrueCondition 22:12"x" flags=1 <- f57
+f59 FalseCondition 22:12"x" flags=1 <- f57
+f60 BranchLabel <- [f59, f58]
+fn @21:6: start f53 end f55 returns f0
+fn @2:1: start f2 end f0 returns f3

@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/main.ts
+import Shape from "./shape";
+import type S from "./shape";
+
+const s: S = new Shape();
+// @file: src/shape.ts
+export default class Shape {
+    area() { return 0; }
+}

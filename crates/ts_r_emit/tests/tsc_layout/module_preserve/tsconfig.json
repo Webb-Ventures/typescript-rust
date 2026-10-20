@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "preserve",
+    "strict": true,
+    "types": [],
+    "outDir": "out"
+  },
+  "files": [
+    "types.ts",
+    "empty.ts",
+    "value.ts",
+    "uses.ts"
+  ]
+}

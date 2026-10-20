@@ -1,0 +1,145 @@
+{
+  "name": "ts-r",
+  "displayName": "ts-r",
+  "description": "ts-r's checker for VS Code's TypeScript features where it gives the same errors as your TypeScript, one shared memory-budgeted TypeScript backend per workspace elsewhere, plus ts-r-lint diagnostics and fixes.",
+  "version": "0.1.0",
+  "publisher": "ts-r",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "extensionDependencies": [
+    "vscode.typescript-language-features"
+  ],
+  "contributes": {
+    "problemMatchers": [
+      {
+        "name": "ts-r",
+        "label": "ts-r: TS and sound-mode TSR errors",
+        "owner": "typescript",
+        "source": "ts-r",
+        "applyTo": "closedDocuments",
+        "fileLocation": [
+          "relative",
+          "${cwd}"
+        ],
+        "pattern": {
+          "regexp": "^([^\\s].*)[\\(:](\\d+)[,:](\\d+)(?:\\):\\s+|\\s+-\\s+)(error|warning|info)\\s+(TSR?\\d+)\\s*:\\s*(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "code": 5,
+          "message": 6
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "ts-r.showStatus",
+        "title": "ts-r: Show Language Server Status"
+      },
+      {
+        "command": "ts-r.showEngines",
+        "title": "ts-r: Show Which Engine Serves Each Project"
+      },
+      {
+        "command": "ts-r.reportParity",
+        "title": "ts-r: Report Parity Mismatch"
+      },
+      {
+        "command": "ts-r.restartLint",
+        "title": "ts-r: Restart Lint"
+      },
+      {
+        "command": "ts-r.stopDaemon",
+        "title": "ts-r: Stop Language Server Daemon"
+      },
+      {
+        "command": "ts-r.restoreTypeScript",
+        "title": "ts-r: Restore VS Code's Own TypeScript Server"
+      }
+    ],
+    "configuration": {
+      "title": "ts-r",
+      "properties": {
+        "ts-r.checker": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "ts-r's checker answers VS Code's TypeScript features for every project where it reports the same errors as your TypeScript (the parity check, run once per tsconfig and TypeScript version, cached). Other projects use your TypeScript, as with `off`.",
+            "ts-r's checker for every project. Where the parity check found a difference, the errors still come from your TypeScript (inside ts-r-lsp) so they stay correct.",
+            "Your TypeScript for everything (shared by every window on the workspace, memory-budgeted)."
+          ],
+          "markdownDescription": "Which engine serves VS Code's TypeScript and JavaScript features. With `auto` (default), projects that pass the parity check get diagnostics, hover, completions, go to definition, references, rename, signature help, semantic highlighting and the outline from ts-r, and your TypeScript server does not start for them; it starts on demand only for features ts-r does not have yet (quick fixes, refactorings, organize imports, inlay hints, ...) and stops again when idle. The status bar shows which engine serves each project. Switching between `auto` and `on` is instant; to or from `off` restarts the TypeScript server (not the window)."
+        },
+        "ts-r.memoryBudgetMB": {
+          "type": "number",
+          "default": 1500,
+          "minimum": 64,
+          "markdownDescription": "Memory budget for the shared backend (all its processes). When it is over budget and you have been idle for a while, the backend restarts transparently and reopens your files."
+        },
+        "ts-r.idleShutdownMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "markdownDescription": "Stop the backend after this many minutes without editor activity; the next request starts it again. `0` keeps it running."
+        },
+        "ts-r.lint.enable": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Lint with ts-r-lint unless the ESLint extension (dbaeumer.vscode-eslint) is enabled in this workspace, so problems never show twice.",
+            "Always lint with ts-r-lint. Turn the ESLint extension off for this workspace to avoid duplicate problems.",
+            "Never lint with ts-r-lint (keep using the ESLint extension)."
+          ],
+          "markdownDescription": "ts-r-lint diagnostics and quick fixes in the editor, from your project's ESLint (`eslint.config.*`), oxlint or Biome config. `auto` turns lint **off** while the ESLint extension is enabled, so you never get duplicate problems; set `on` to switch over. Rules that need type information or plugins ts-r-lint does not have are listed once in the ts-r output channel."
+        },
+        "ts-r.serverPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `ts-r-lsp` binary. Empty: the project's `@ts-r.dev/lsp-<platform>` package, then `PATH`, then `~/.cargo/bin`."
+        },
+        "ts-r.manageTypeScript": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Point VS Code's TypeScript at the ts-r stand-in (user settings `typescript.tsdk` / `js/ts.tsdk.path`, syntax server off, automatic type acquisition off). Turning this off restores your previous values."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "tsc -p jsconfig.json",
+    "test": "node --test test/*.test.js",
+    "test:vscode": "node test/vscode/run.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "~1.90.0",
+    "typescript": "^5.9.0",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

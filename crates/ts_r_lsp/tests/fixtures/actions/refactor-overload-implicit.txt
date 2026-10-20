@@ -1,0 +1,8 @@
+// @action: refactor Convert overload list to single signature/Convert overload list to single signature
+// @trigger: implicit
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+interface I {
+  m(a: string): void;
+  /*|*/m(a: number): void;
+}

@@ -1,0 +1,20 @@
+a.ts(2,25): error TS2450: Enum 'Enum' used before its declaration.
+a.ts(2,30): error TS2729: Property 'A' is used before its initialization.
+a.ts(3,31): error TS2448: Block-scoped variable 'ObjLiteral' used before its declaration.
+a.ts(3,42): error TS2729: Property 'A' is used before its initialization.
+a.ts(4,40): error TS2729: Property 'A' is used before its initialization.
+a.ts(5,33): error TS2729: Property 'f' is used before its initialization.
+a.ts(8,20): error TS2449: Class 'After' used before its declaration.
+a.ts(8,26): error TS2729: Property 'data' is used before its initialization.
+a.ts(9,26): error TS2449: Class 'After' used before its declaration.
+a.ts(10,22): error TS2449: Class 'Before' used before its declaration.
+a.ts(10,29): error TS2729: Property 'data' is used before its initialization.
+a.ts(11,31): error TS2729: Property 'Inner' is used before its initialization.
+a.ts(12,14): error TS2450: Enum 'Enum' used before its declaration.
+a.ts(12,19): error TS2729: Property 'A' is used before its initialization.
+a.ts(12,22): error TS2448: Block-scoped variable 'ObjLiteral' used before its declaration.
+a.ts(12,22): error TS2454: Variable 'ObjLiteral' is used before being assigned.
+a.ts(12,33): error TS2729: Property 'A' is used before its initialization.
+a.ts(15,13): error TS2450: Enum 'Enum' used before its declaration.
+a.ts(33,16): error TS2449: Class 'G2' used before its declaration.
+a.ts(33,19): error TS2729: Property 'x' is used before its initialization.

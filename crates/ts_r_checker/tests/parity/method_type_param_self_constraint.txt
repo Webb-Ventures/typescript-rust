@@ -1,0 +1,4 @@
+a.ts(13,5): error TS2344: Type 'string' does not satisfy the constraint '{ mismatch: string | undefined; }'.
+a.ts(14,5): error TS2344: Type 'number' does not satisfy the constraint '{ mismatch: string | undefined; }'.
+a.ts(16,5): error TS2344: Type 'number' does not satisfy the constraint '{ mismatch: string | undefined; }'.
+a.ts(19,3): error TS2344: Type 'number' does not satisfy the constraint '{ mismatch: 1; }'.

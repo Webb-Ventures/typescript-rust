@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1600px;height:900px;overflow:hidden}
+body{background:#0d0f13;color:#e6e8ec;font-family:Inter,-apple-system,"SF Pro Display",system-ui,sans-serif;
+  background-image:radial-gradient(900px 600px at 8% -10%,rgba(240,129,74,.16),transparent 70%),
+  radial-gradient(900px 600px at 100% 0%,rgba(122,162,255,.12),transparent 70%);
+  padding:56px 80px 0;display:flex;flex-direction:column}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+header{display:flex;align-items:center;gap:16px;height:44px}
+.brand{font-size:30px;font-weight:800;letter-spacing:-.02em}
+.pill{font-size:15px;font-weight:600;color:#fbbf24;border:1px solid rgba(251,191,36,.5);background:rgba(251,191,36,.1);border-radius:99px;padding:4px 12px}
+.legend{margin-left:auto;display:flex;gap:28px;font-size:20px;color:#a9b0bd}
+.legend span{display:flex;align-items:center;gap:10px}
+.sw{width:18px;height:18px;border-radius:4px}
+h1{font-size:60px;font-weight:800;letter-spacing:-.025em;line-height:1.05;margin-top:40px}
+h1 .g{background:linear-gradient(90deg,#f0814a,#ffb37a 45%,#7aa2ff);-webkit-background-clip:text;color:transparent}
+.sub{font-size:24px;color:#a9b0bd;margin-top:14px}
+main{flex:1;min-height:0}
+footer{height:64px;display:flex;align-items:center;justify-content:space-between;font-size:17px;color:#8b93a1;border-top:1px solid rgba(230,232,236,.11)}
+</style></head><body>
+<header><svg width="44" height="44" viewBox="0 0 72 72"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f0814a"/><stop offset="1" stop-color="#7aa2ff"/></linearGradient></defs><rect width="72" height="72" rx="18" fill="url(#lg)"/><path d="M24.75 22.5 L13.5 36 L24.75 49.5 M47.25 22.5 L58.5 36 L47.25 49.5 M40.5 20.25 L31.5 51.75" stroke="#0d0f13" stroke-width="5.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="brand">ts-r</span><span class="pill">pre-alpha</span></header>
+
+<h1>Fast, and <span class="g">the same answers.</span></h1>
+<p class="sub">Every tool is checked against the original tool's own test suite and output.</p>
+<main style="padding-top:30px"><div style="display:grid;grid-template-columns:520px minmax(0,1fr) 330px;align-items:center;column-gap:32px;padding:20px 0;border-top:1px solid rgba(230,232,236,.11)">
+  <div><div style="font-size:26px;font-weight:700">Lint rules give ESLint's answers</div><div style="font-size:17px;color:#8b93a1;margin-top:6px">ESLint + typescript-eslint rule tests</div></div>
+  <div style="height:30px;background:#1d2129;border-radius:4px;overflow:hidden"><div style="height:100%;width:100%;background:#d95926;border-radius:0 4px 4px 0"></div></div>
+  <div class="mono" style="text-align:right;font-size:34px;font-weight:700;white-space:nowrap">8,597 / 8,597</div>
+</div><div style="display:grid;grid-template-columns:520px minmax(0,1fr) 330px;align-items:center;column-gap:32px;padding:20px 0;border-top:1px solid rgba(230,232,236,.11)">
+  <div><div style="font-size:26px;font-weight:700">Bundles run the same as esbuild's</div><div style="font-size:17px;color:#8b93a1;margin-top:6px">top 1,000 npm packages</div></div>
+  <div style="height:30px;background:#1d2129;border-radius:4px;overflow:hidden"><div style="height:100%;width:100%;background:#d95926;border-radius:0 4px 4px 0"></div></div>
+  <div class="mono" style="text-align:right;font-size:34px;font-weight:700;white-space:nowrap">915 / 915</div>
+</div><div style="display:grid;grid-template-columns:520px minmax(0,1fr) 330px;align-items:center;column-gap:32px;padding:20px 0;border-top:1px solid rgba(230,232,236,.11)">
+  <div><div style="font-size:26px;font-weight:700">Parser round-trips tsc's test files</div><div style="font-size:17px;color:#8b93a1;margin-top:6px">parse, print, compare</div></div>
+  <div style="height:30px;background:#1d2129;border-radius:4px;overflow:hidden"><div style="height:100%;width:100%;background:#d95926;border-radius:0 4px 4px 0"></div></div>
+  <div class="mono" style="text-align:right;font-size:34px;font-weight:700;white-space:nowrap">18,260 / 18,260</div>
+</div><div style="display:grid;grid-template-columns:520px minmax(0,1fr) 330px;align-items:center;column-gap:32px;padding:20px 0;border-top:1px solid rgba(230,232,236,.11)">
+  <div><div style="font-size:26px;font-weight:700">Parses the top npm packages</div><div style="font-size:17px;color:#8b93a1;margin-top:6px">top 1,000 npm packages</div></div>
+  <div style="height:30px;background:#1d2129;border-radius:4px;overflow:hidden"><div style="height:100%;width:99.89888776541962%;background:#d95926;border-radius:0 4px 4px 0"></div></div>
+  <div class="mono" style="text-align:right;font-size:34px;font-weight:700;white-space:nowrap">99.9%</div>
+</div><div style="display:grid;grid-template-columns:520px minmax(0,1fr) 330px;align-items:center;column-gap:32px;padding:20px 0;border-top:1px solid rgba(230,232,236,.11)">
+  <div><div style="font-size:26px;font-weight:700">Type checker matches tsc exactly</div><div style="font-size:17px;color:#8b93a1;margin-top:6px">tsc's conformance suite · in progress</div></div>
+  <div style="height:30px;background:#1d2129;border-radius:4px;overflow:hidden"><div style="height:100%;width:56.665173906553214%;background:#d95926;border-radius:0 4px 4px 0"></div></div>
+  <div class="mono" style="text-align:right;font-size:34px;font-weight:700;white-space:nowrap">59.5%</div>
+</div></main>
+<footer><span>Oracles: ESLint + typescript-eslint rule tests, esbuild, tsc 7 · top 1,000 npm packages · pre-alpha, Oct 2026</span><span class="mono">ts-r · written from scratch in Rust</span></footer>
+</body></html>

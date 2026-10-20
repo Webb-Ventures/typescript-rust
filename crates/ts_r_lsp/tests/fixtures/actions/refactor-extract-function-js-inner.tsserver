@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Extract to inner function in function 'helper'
+// @file: src/main.js
+export function helper(n) {
+  const s = "x";
+  return (newFunction()) * 2;
+
+  function newFunction() {
+    return n + s.length;
+  }
+}

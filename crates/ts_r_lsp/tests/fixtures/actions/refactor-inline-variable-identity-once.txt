@@ -1,0 +1,6 @@
+// @action: refactor Inline variable/Inline variable
+// @file: src/main.ts
+export function f(xs: object[]) {
+  const /*|*/value = { id: 1 };
+  xs.push(value);
+}

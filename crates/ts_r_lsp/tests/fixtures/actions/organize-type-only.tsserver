@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import type { C } from "./a";
+import { type B, A, D } from "./a";
+
+let x: B | C | undefined;
+console.log(A, D, x);

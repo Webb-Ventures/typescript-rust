@@ -1,0 +1,4 @@
+a.ts(25,9): error TS2322: Type 'No | Yes' is not assignable to type 'No'.
+  Type 'Yes' is not assignable to type 'No'.
+    Types of property 'transformer' are incompatible.
+      Type '{ a: 1; }' is not assignable to type '"err"'.

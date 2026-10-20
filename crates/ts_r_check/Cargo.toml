@@ -1,0 +1,39 @@
+[package]
+name = "ts_r_check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ts-r-check: type-checks and emits a TypeScript project like `tsc -p tsconfig.json`"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ts-r-check"
+path = "src/main.rs"
+
+[dependencies]
+ts_r_span = { path = "../ts_r_span" }
+ts_r_config = { path = "../ts_r_config" }
+ts_r_diagnostics = { path = "../ts_r_diagnostics" }
+ts_r_checker = { path = "../ts_r_checker" }
+ts_r_history = { path = "../ts_r_history" }
+ts_r_sound = { path = "../ts_r_sound" }
+ts_r_emit = { path = "../ts_r_emit" }
+ts_r_projects = { path = "../ts_r_projects" }
+# `noCheck`: the parser's syntax diagnostics without its grammar ones (`without_grammar`).
+ts_r_parser = { path = "../ts_r_parser" }
+# `--watch`: native file events (design record 0012, E4).
+ts_r_watch = { path = "../ts_r_watch" }
+# `--explainFiles`: type reference and `/// <reference>` targets, as the program found them.
+ts_r_resolver = { path = "../ts_r_resolver" }
+# `--traceResolution`: the kind of each module request (imports before augmentations).
+ts_r_binder = { path = "../ts_r_binder" }
+
+[dev-dependencies]
+# The emit_oracle example: memory cap, the per-file transpile emitter and AST shapes.
+ts_r_testing = { path = "../ts_r_testing" }
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_codegen = { path = "../ts_r_codegen" }
+ts_r_transform = { path = "../ts_r_transform" }

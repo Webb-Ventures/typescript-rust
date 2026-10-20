@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "jsxFragmentFactory": "x-y",
+    "reactNamespace": "a.b",
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": true
+  },
+  "files": [
+    "a.ts"
+  ]
+}

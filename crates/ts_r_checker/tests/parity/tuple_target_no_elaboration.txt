@@ -1,0 +1,6 @@
+a.ts(3,14): error TS2322: Type 'IArguments' is not assignable to type '[]'.
+a.ts(4,14): error TS2322: Type 'IArguments' is not assignable to type '[number]'.
+a.ts(5,30): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type '[number]'.
+a.ts(7,14): error TS2322: Type '{ length: 1; }' is not assignable to type '[number]'.
+a.ts(8,14): error TS2322: Type '{ length: 1; }' is not assignable to type 'readonly [number]'.
+a.ts(10,3): error TS2345: Argument of type '{ length: 1; }' is not assignable to parameter of type '[number]'.

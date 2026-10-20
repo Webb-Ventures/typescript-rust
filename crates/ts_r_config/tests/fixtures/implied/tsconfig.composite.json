@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "verbatimModuleSyntax": true,
+    "checkJs": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "files": [
+    "a.ts"
+  ]
+}

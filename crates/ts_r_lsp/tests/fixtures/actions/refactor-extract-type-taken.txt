@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+const NewType = 1;
+export const x: /*[*/Map<string,number>/*]*/ = new Map();
+console.log(NewType);

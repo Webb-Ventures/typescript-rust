@@ -1,0 +1,5 @@
+a.ts(6,3): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(10,1): error TS2349: This expression is not callable.
+  No constituent of type 'string | Function' is callable.
+a.ts(34,7): error TS2322: Type 'void | 1 | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

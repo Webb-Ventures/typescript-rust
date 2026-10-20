@@ -1,0 +1,20 @@
+// @action: moveSuggestions
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export const keep = 1;
+
+/*[*/export function helper(n: number) {
+  return n * 2;
+}/*]*/
+// @file: src/z.ts
+export const z = 1;
+// @file: src/lib/a.ts
+export const a = 1;
+// @file: src/lib/deep/b.ts
+export const b = 1;
+// @file: src/types.d.ts
+declare const g: number;
+// @file: src/view.tsx
+export const v = 1;
+// @file: src/a.ts
+export const a2 = 1;

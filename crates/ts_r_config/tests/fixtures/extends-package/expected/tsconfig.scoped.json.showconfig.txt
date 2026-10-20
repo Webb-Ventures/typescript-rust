@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "noUncheckedIndexedAccess": true,
+        "strict": false
+    },
+    "files": [
+        "./shared-cfg/inc/x.ts",
+        "./src/a.ts",
+        "./sub/deep/b.ts"
+    ]
+}

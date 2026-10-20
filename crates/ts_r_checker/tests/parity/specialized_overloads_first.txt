@@ -1,0 +1,2 @@
+a.ts(10,9): error TS2322: Type '{ id: number; }' is not assignable to type 'null'.
+a.ts(17,7): error TS2322: Type 'number' is not assignable to type 'null'.

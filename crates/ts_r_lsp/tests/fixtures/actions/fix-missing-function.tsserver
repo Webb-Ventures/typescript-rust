@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export function f(n: number, name: string) {
+  const r: boolean = helper(n, name, [n], { n });
+  return r;
+}
+
+function helper(n: number, name: string, arg2: number[], arg3: { n: number; }): boolean {
+  throw new Error("Function not implemented.");
+}

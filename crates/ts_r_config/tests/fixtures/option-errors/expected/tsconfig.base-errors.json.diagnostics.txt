@@ -1,0 +1,4 @@
+bad-base.json(3,5): error TS5023: Unknown compiler option 'strictt'.
+
+error TS5102: Option 'baseUrl' has been removed. Please remove it from your configuration.
+  Use '"paths": {"*": ["./*"]}' instead.

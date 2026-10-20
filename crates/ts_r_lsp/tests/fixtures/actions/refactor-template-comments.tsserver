@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to template string
+// @file: src/main.ts
+export function f(a: string, b: string) {
+  return `x${ /* one */a /* two */}y${ /* three*/b}z`;
+}

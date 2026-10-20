@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./src/a/c2.cts",
+        "./src/t.json",
+        "./src/a/k.json"
+    ],
+    "include": [
+        "src/**/*.json",
+        "src/a/**/*"
+    ]
+}

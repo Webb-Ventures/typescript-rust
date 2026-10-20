@@ -1,0 +1,13 @@
+a.ts(5,15): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+a.ts(8,7): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+a.ts(9,9): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+a.ts(11,12): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+a.ts(11,21): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+a.ts(13,7): error TS2371: A parameter initializer is only allowed in a function or constructor implementation.
+a.ts(15,27): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(16,22): error TS2373: Parameter 'y' cannot reference identifier 'z' declared after it.
+a.ts(17,26): error TS2373: Parameter 'y' cannot reference identifier 'z' declared after it.
+a.ts(20,26): error TS2373: Parameter 'y' cannot reference identifier 'z' declared after it.
+a.ts(22,45): error TS2373: Parameter 'a' cannot reference identifier 'b' declared after it.
+a.ts(23,24): error TS2373: Parameter 'a' cannot reference identifier 'b' declared after it.
+a.ts(25,27): error TS2373: Parameter 'h' cannot reference identifier 'i' declared after it.

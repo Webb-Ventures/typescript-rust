@@ -1,0 +1,27 @@
+a.ts(1,15): error TS2374: Duplicate index signature for type 'string'.
+a.ts(2,15): error TS2374: Duplicate index signature for type 'string'.
+a.ts(5,15): error TS2374: Duplicate index signature for type '"a"'.
+a.ts(5,16): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(5,30): error TS2374: Duplicate index signature for type '"a"'.
+a.ts(5,31): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(6,15): error TS2374: Duplicate index signature for type 'Date'.
+a.ts(6,16): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(6,31): error TS2374: Duplicate index signature for type 'Date'.
+a.ts(6,32): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(8,15): error TS2374: Duplicate index signature for type 'number'.
+a.ts(8,15): error TS2374: Duplicate index signature for type 'string'.
+a.ts(8,42): error TS2374: Duplicate index signature for type 'number'.
+a.ts(8,60): error TS2374: Duplicate index signature for type 'string'.
+a.ts(9,35): error TS1096: An index signature must have exactly one parameter.
+a.ts(10,15): error TS2374: Duplicate index signature for type '`a${string}`'.
+a.ts(10,39): error TS2374: Duplicate index signature for type '`a${string}`'.
+a.ts(12,15): error TS2374: Duplicate index signature for type 'string'.
+a.ts(12,28): error TS2374: Duplicate index signature for type 'string'.
+a.ts(13,11): error TS2374: Duplicate index signature for type 'string'.
+a.ts(14,15): error TS2374: Duplicate index signature for type 'string'.
+a.ts(15,33): error TS2374: Duplicate index signature for type 'T'.
+a.ts(15,34): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(15,46): error TS2374: Duplicate index signature for type 'T'.
+a.ts(15,47): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(17,16): error TS2304: Cannot find name 'x'.
+a.ts(17,26): error TS2304: Cannot find name 'x'.

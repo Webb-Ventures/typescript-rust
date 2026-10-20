@@ -1,0 +1,1 @@
+tsconfig.resolution-only.json(2,3): error TS5110: Option 'module' must be set to 'NodeNext' when option 'moduleResolution' is set to 'NodeNext'.

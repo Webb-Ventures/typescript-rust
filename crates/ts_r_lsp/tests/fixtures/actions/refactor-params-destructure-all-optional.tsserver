@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function ao({ a, b = 'x' }: { a?: number; b?: string; } = {}) { return [a, b]; }
+ao();
+ao({ a: 1 });

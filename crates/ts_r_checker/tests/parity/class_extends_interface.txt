@@ -1,0 +1,6 @@
+a.ts(5,18): error TS2689: Cannot extend an interface 'I'. Did you mean 'implements'?
+a.ts(6,18): error TS2693: 'TA' only refers to a type, but is being used as a value here.
+a.ts(7,18): error TS2689: Cannot extend an interface 'IG'. Did you mean 'implements'?
+a.ts(8,18): error TS2689: Cannot extend an interface 'N.NI'. Did you mean 'implements'?
+a.ts(9,25): error TS2689: Cannot extend an interface 'I'. Did you mean 'implements'?
+a.ts(10,18): error TS2304: Cannot find name 'Missing'.

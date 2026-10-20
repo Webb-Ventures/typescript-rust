@@ -1,0 +1,9 @@
+// @action: refactor Convert import/Convert named imports to namespace import
+// @file: src/main.ts
+import { /*|*/Kind, make } from "./lib-a";
+
+const k: Kind = make();
+export const o = { make, k };
+// @file: src/lib-a.ts
+export type Kind = number;
+export function make(): Kind { return 1; }

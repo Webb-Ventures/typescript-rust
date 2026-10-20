@@ -1,0 +1,9 @@
+// @action: refactor Extract Symbol/function_scope_0
+// @differs: tsserver 6.0.3 indents the new module-level function by one level
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+const x = 1 + 2;
+/*[*/console.log(x);
+console.log(x * 2);/*]*/
+const y = x * 3;
+export { y };

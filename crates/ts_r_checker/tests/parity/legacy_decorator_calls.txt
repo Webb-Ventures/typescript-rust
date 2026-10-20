@@ -1,0 +1,18 @@
+a.ts(25,1): error TS1329: 'noArgs' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@noArgs()'?
+a.ts(26,2): error TS1238: Unable to resolve signature of class decorator when called as an expression.
+  This expression is not callable.
+    Type 'typeof Ctor' has no call signatures.
+a.ts(27,1): error TS1238: Unable to resolve signature of class decorator when called as an expression.
+  The runtime will invoke the decorator with 1 arguments, but the decorator expects 3.
+a.ts(29,5): error TS1329: 'Input' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@Input()'?
+a.ts(30,5): error TS1329: 'noArgs' accepts too few arguments to be used as a decorator here. Did you mean to call it first and write '@noArgs()'?
+a.ts(31,6): error TS1241: Unable to resolve signature of method decorator when called as an expression.
+  Type 'Bad' is missing the following properties from type 'Function': apply, call, bind, prototype, and 5 more.
+a.ts(32,6): error TS1241: Unable to resolve signature of method decorator when called as an expression.
+  The runtime will invoke the decorator with 3 arguments, but the decorator expects 1.
+a.ts(32,6): error TS1270: Decorator function return type 'Bad' is not assignable to type 'void | TypedPropertyDescriptor<() => void>'.
+a.ts(33,5): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  The runtime will invoke the decorator with 2 arguments, but the decorator expects 3.
+a.ts(34,6): error TS1240: Unable to resolve signature of property decorator when called as an expression.
+  The runtime will invoke the decorator with 2 arguments, but the decorator expects 1.
+a.ts(34,6): error TS1271: Decorator function return type is 'typeof Bad' but is expected to be 'void' or 'any'.

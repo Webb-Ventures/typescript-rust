@@ -1,0 +1,7 @@
+// @action: refactor Extract Symbol/function_scope_1
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+declare function takes(n: number | boolean): void;
+export function f(a: number) {
+  takes(/*[*/a * 2/*]*/);
+}

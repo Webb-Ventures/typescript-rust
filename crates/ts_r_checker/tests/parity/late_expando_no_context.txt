@@ -1,0 +1,2 @@
+a.ts(4,9): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(5,14): error TS2322: Type '(x: any) => number' is not assignable to type 'string'.

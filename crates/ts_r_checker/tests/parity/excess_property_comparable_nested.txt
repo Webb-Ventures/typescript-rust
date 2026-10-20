@@ -1,0 +1,11 @@
+a.ts(5,7): error TS2322: Type '{ a: 0; }' is not assignable to type '{ a: 0; } & { b: 0; }'.
+  Property 'b' is missing in type '{ a: 0; }' but required in type '{ b: 0; }'.
+a.ts(7,24): error TS2353: Object literal may only specify known properties, and 'c' does not exist in type '{ a: 0; } & { b: 0; }'.
+a.ts(12,20): error TS2353: Object literal may only specify known properties, and 'name' does not exist in type 'C'.
+a.ts(16,5): error TS2367: This comparison appears to be unintentional because the types 'C' and '{ id: number; name: string; }' have no overlap.
+a.ts(16,5): error TS2839: This condition will always return 'false' since JavaScript compares objects by reference, not value.
+a.ts(25,9): error TS2353: Object literal may only specify known properties, and 'jj' does not exist in type 'Style'.
+a.ts(28,35): error TS2353: Object literal may only specify known properties, and 'kk' does not exist in type 'Style'.
+a.ts(29,33): error TS2353: Object literal may only specify known properties, and 'k1' does not exist in type 'Style'.
+a.ts(30,34): error TS2353: Object literal may only specify known properties, and 'k2' does not exist in type 'Style'.
+a.ts(31,38): error TS2353: Object literal may only specify known properties, and 'k3' does not exist in type 'Style'.

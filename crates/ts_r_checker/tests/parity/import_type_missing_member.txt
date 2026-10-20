@@ -1,0 +1,6 @@
+a.ts(2,24): error TS2694: Namespace '"/p/b"' has no exported member 'FOO'.
+a.ts(3,24): error TS2694: Namespace '"/p/b"' has no exported member 'NOPE'.
+a.ts(4,26): error TS2694: Namespace '"/p/b".N' has no exported member 'v'.
+a.ts(8,18): error TS6142: Module './view' was resolved to '/p/view.jsx', but '--jsx' is not set.
+d.js(1,26): error TS2694: Namespace '"/p/c"' has no exported member 'FOO'.
+d.js(3,26): error TS2694: Namespace '"/p/c"' has no exported member 'NOPE'.

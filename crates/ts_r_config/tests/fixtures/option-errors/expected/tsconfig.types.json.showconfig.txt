@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "jsx": "react",
+        "types": [
+            "x"
+        ]
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

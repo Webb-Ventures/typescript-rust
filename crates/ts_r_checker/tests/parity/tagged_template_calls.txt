@@ -1,0 +1,14 @@
+a.ts(6,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'.
+a.ts(8,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'.
+a.ts(9,1): error TS2554: Expected 3 arguments, but got 2.
+a.ts(15,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'.
+a.ts(16,9): error TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'.
+a.ts(19,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(20,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'boolean' is not assignable to parameter of type 'string'.
+a.ts(24,7): error TS2322: Type 'number' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(26,1): error TS2349: This expression is not callable.
+  Type 'typeof CtorTag' has no call signatures.
+a.ts(28,5): error TS2796: It is likely that you are missing a comma to separate these two template expressions. They form a tagged template expression which cannot be invoked.

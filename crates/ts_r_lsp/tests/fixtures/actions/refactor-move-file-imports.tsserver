@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Move to file
+// @file: src/main.ts
+import { a } from "./dep";
+
+export const keep = a;
+// @file: src/utils.ts
+import { a, b } from "./dep";
+
+export const x = a;
+export function helper() {
+  return a + b;
+}

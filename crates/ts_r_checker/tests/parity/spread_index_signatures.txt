@@ -1,0 +1,5 @@
+a.ts(12,1): error TS7053: Element implicitly has an 'any' type because expression of type '"z"' can't be used to index type '{ extra: number; }'.
+  Property 'z' does not exist on type '{ extra: number; }'.
+a.ts(18,7): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(21,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

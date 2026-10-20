@@ -1,0 +1,10 @@
+a.ts(4,26): error TS2339: Property 'toString' does not exist on type 'T'.
+a.ts(4,40): error TS2339: Property 'hasOwnProperty' does not exist on type 'T'.
+a.ts(4,63): error TS2339: Property 'foo' does not exist on type 'T'.
+a.ts(5,42): error TS2339: Property 'toString' does not exist on type 'T'.
+a.ts(7,40): error TS2339: Property 'hasOwnProperty' does not exist on type 'T | { data: T; }'.
+  Property 'hasOwnProperty' does not exist on type 'T'.
+a.ts(8,39): error TS2339: Property 'toString' does not exist on type 'U'.
+a.ts(13,25): error TS7053: Element implicitly has an 'any' type because expression of type '"toString"' can't be used to index type 'unknown'.
+  Property 'toString' does not exist on type 'unknown'.
+a.ts(15,15): error TS2558: Expected 2 type arguments, but got 1.

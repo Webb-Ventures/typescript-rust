@@ -1,0 +1,19 @@
+tsconfig.syntax.json(10,2): error TS1012: Unexpected token.
+
+tsconfig.syntax.json(2,3): error TS1327: String literal with double quotes expected.
+
+tsconfig.syntax.json(3,5): error TS1327: String literal with double quotes expected.
+
+tsconfig.syntax.json(5,14): error TS5024: Compiler option 'target' requires a value of type enum.
+
+tsconfig.syntax.json(5,15): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.syntax.json(5,5): error TS1005: ',' expected.
+
+tsconfig.syntax.json(6,22): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.syntax.json(6,22): error TS5024: Compiler option 'lib' requires a value of type Array.
+
+tsconfig.syntax.json(7,19): error TS1005: ',' expected.
+
+tsconfig.syntax.json(8,5): error TS1136: Property assignment expected.

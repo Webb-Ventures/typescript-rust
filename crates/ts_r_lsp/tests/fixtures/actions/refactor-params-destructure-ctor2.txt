@@ -1,0 +1,9 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+class P {
+  /*|*/constructor(x: number, y: number) {}
+}
+new P(1, 2);
+class Q extends P {}
+new Q(3, 4);

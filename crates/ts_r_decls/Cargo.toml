@@ -1,0 +1,20 @@
+[package]
+name = "ts_r_decls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Per-file declaration index: explicit signatures of exported symbols and their stable hashes"
+
+[lints]
+workspace = true
+
+[dependencies]
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_binder = { path = "../ts_r_binder" }
+ts_r_cache = { path = "../ts_r_cache" }
+blake3 = "1.8"
+
+[dev-dependencies]
+ts_r_parser = { path = "../ts_r_parser" }
+ts_r_testing = { path = "../ts_r_testing" }

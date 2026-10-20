@@ -1,0 +1,14 @@
+a.ts(7,5): error TS2367: This comparison appears to be unintentional because the types '"a"' and '"b"' have no overlap.
+a.ts(8,5): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+a.ts(9,5): error TS2367: This comparison appears to be unintentional because the types 'symbol' and 'boolean' have no overlap.
+a.ts(10,5): error TS2367: This comparison appears to be unintentional because the types 'number' and 'symbol' have no overlap.
+a.ts(11,5): error TS2367: This comparison appears to be unintentional because the types 'number' and 'boolean' have no overlap.
+a.ts(12,5): error TS2367: This comparison appears to be unintentional because the types 'string' and 'number' have no overlap.
+a.ts(13,5): error TS2367: This comparison appears to be unintentional because the types 'E' and 'boolean' have no overlap.
+a.ts(14,5): error TS2367: This comparison appears to be unintentional because the types '"a" | "b"' and '"c"' have no overlap.
+a.ts(15,5): error TS2367: This comparison appears to be unintentional because the types 'string' and 'number' have no overlap.
+a.ts(16,5): error TS2367: This comparison appears to be unintentional because the types 'E' and 'string' have no overlap.
+a.ts(17,5): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+a.ts(18,5): error TS2367: This comparison appears to be unintentional because the types 'string' and 'bigint' have no overlap.
+a.ts(19,5): error TS2367: This comparison appears to be unintentional because the types 'string' and 'boolean' have no overlap.
+a.ts(21,5): error TS2367: This comparison appears to be unintentional because the types '{ a: 1; }' and 'number' have no overlap.

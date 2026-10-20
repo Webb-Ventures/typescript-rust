@@ -1,0 +1,7 @@
+a.ts(5,14): error TS2322: Type '(...paths: string[]) => string' is not assignable to type 'number'.
+a.ts(6,14): error TS2322: Type '(...paths: string[]) => string' is not assignable to type 'number'.
+a.ts(7,14): error TS2322: Type 'string' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(8,4): error TS2339: Property 'foo' does not exist on type '(...paths: string[]) => string'.
+a.ts(10,31): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.

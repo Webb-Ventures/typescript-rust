@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "jsxFactory": "hA",
+        "lib": [
+            "es2022",
+            "dom"
+        ],
+        "strict": false,
+        "maxNodeModuleJsDepth": 2
+    },
+    "files": [
+        "./src/a.ts"
+    ],
+    "include": [
+        "src"
+    ]
+}

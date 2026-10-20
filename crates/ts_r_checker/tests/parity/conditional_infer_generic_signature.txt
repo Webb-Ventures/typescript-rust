@@ -1,0 +1,3 @@
+a.ts(7,7): error TS2322: Type '{ a: string; b: unknown; }' is not assignable to type 'null'.
+a.ts(9,7): error TS2322: Type '[a: string, b: unknown]' is not assignable to type 'null'.
+a.ts(11,7): error TS2322: Type '{ x: number; }[]' is not assignable to type 'null'.

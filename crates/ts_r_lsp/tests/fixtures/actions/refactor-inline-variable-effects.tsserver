@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+declare function load(): Promise<{ kind: string }>;
+export async function f() {
+  return (await load()).kind;
+}

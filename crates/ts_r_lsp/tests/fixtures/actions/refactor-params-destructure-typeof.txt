@@ -1,0 +1,6 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @differs: tsserver offers it and then changes nothing (`typeof`); ts-r does not offer it
+// @file: src/main.ts
+function /*|*/tq(a: number, b: number) { return a + b; }
+type F = typeof tq;
+tq(1, 2);

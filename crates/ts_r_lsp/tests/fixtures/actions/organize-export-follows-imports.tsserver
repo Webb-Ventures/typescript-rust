@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { a, B, type T } from "./a";
+export { X, y, type U } from "./a";
+
+console.log(a, B, null as unknown as T);

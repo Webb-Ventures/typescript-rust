@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to interface
+// @file: src/main.ts
+export function f<T>(x: Array<T>, y: { /*|*/a: T; m(n: number): void; [k: string]: unknown }): T {
+    return y.a;
+}

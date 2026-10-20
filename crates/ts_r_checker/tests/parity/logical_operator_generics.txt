@@ -1,0 +1,17 @@
+a.ts(8,9): error TS2322: Type 'U | NonNullable<T>' is not assignable to type '{}'.
+  Type 'U' is not assignable to type '{}'.
+a.ts(9,9): error TS2322: Type 'U | NonNullable<T>' is not assignable to type 'number'.
+  Type 'U' is not assignable to type 'number'.
+a.ts(10,9): error TS2322: Type 'U' is not assignable to type 'number'.
+a.ts(11,9): error TS2322: Type 'U | NonNullable<T>' is not assignable to type 'number'.
+  Type 'U' is not assignable to type 'number'.
+a.ts(14,9): error TS2322: Type 'string | { a: string; } | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.
+a.ts(15,9): error TS2322: Type 'string | { a: string; } | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+a.ts(16,9): error TS2322: Type 'string | null' is not assignable to type 'number'.
+  Type 'null' is not assignable to type 'number'.
+a.ts(20,5): error TS2322: Type 'string | number' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+a.ts(21,5): error TS2322: Type 'string | number | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.

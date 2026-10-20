@@ -1,0 +1,7 @@
+tsconfig.jsx-automatic.json(4,5): error TS5053: Option 'reactNamespace' cannot be specified with option 'jsxFactory'.
+
+tsconfig.jsx-automatic.json(4,5): error TS5089: Option 'jsxFactory' cannot be specified when option 'jsx' is 'react-jsx'.
+
+tsconfig.jsx-automatic.json(5,5): error TS5089: Option 'reactNamespace' cannot be specified when option 'jsx' is 'react-jsx'.
+
+tsconfig.jsx-automatic.json(6,5): error TS5089: Option 'jsxFragmentFactory' cannot be specified when option 'jsx' is 'react-jsx'.

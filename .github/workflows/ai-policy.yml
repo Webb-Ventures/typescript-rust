@@ -1,0 +1,44 @@
+name: AI policy
+
+# Closes a pull request that credits an AI model outside AI_POLICY.md (anything but Anthropic's,
+# OpenAI's and Meta's Muse models) in its title, description, branch, author, commit messages,
+# commit authors or co-author trailers, with a comment saying what matched. A maintainer can
+# reopen a false match and label it ai-policy:exempt. Script: .github/scripts/ai-policy.mjs.
+#
+# pull_request_target, so it can comment on and close pull requests from forks: it checks out
+# the base branch (this file and the script as merged) and only reads the pull request through
+# the API. Never check out or run the pull request's code here.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: ai-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: AI policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node .github/scripts/ai-policy.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}

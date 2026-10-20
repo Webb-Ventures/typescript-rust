@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType<T> = T extends Array<infer E> ? E[] : never;
+
+export type C<T> = NewType<T>;

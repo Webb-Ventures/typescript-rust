@@ -1,0 +1,14 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType = {
+    (x: number): string;
+    new(y: string): object;
+    get g(): number;
+    set g(v: number);
+    m?<T>(t: T): T;
+    "q-k": 1;
+    2: 3;
+};
+
+export let f: NewType;

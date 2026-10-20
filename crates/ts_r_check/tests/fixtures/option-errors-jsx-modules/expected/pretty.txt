@@ -1,0 +1,23 @@
+[96mtsconfig.json[0m:[93m4[0m:[93m5[0m - [91merror[0m[90m TS5089: [0mOption 'jsxFactory' cannot be specified when option 'jsx' is 'react-jsx'.
+
+[7m4[0m     "jsxFactory": "h",
+[7m [0m [91m    ~~~~~~~~~~~~[0m
+
+[96mtsconfig.json[0m:[93m6[0m:[93m25[0m - [91merror[0m[90m TS5095: [0mOption 'bundler' can only be used when 'module' is set to 'preserve', 'commonjs', or 'es2015' or later.
+
+[7m6[0m     "moduleResolution": "bundler",
+[7m [0m [91m                        ~~~~~~~~~[0m
+
+[96mtsconfig.json[0m:[93m6[0m:[93m25[0m - [91merror[0m[90m TS5109: [0mOption 'moduleResolution' must be set to 'NodeNext' (or left unspecified) when option 'module' is set to 'NodeNext'.
+
+[7m6[0m     "moduleResolution": "bundler",
+[7m [0m [91m                        ~~~~~~~~~[0m
+
+[96mtsconfig.json[0m:[93m7[0m:[93m5[0m - [91merror[0m[90m TS5091: [0mOption 'preserveConstEnums' cannot be disabled when 'isolatedModules' is enabled.
+
+[7m7[0m     "isolatedModules": true,
+[7m [0m [91m    ~~~~~~~~~~~~~~~~~[0m
+
+
+Found 4 errors in the same file, starting at: tsconfig.json[90m:4[0m
+

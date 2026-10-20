@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "strict": false,
+    "target": "es2017",
+    "module": "esnext"
+  },
+  "compileOnSave": true,
+  "watchOptions": {
+    "watchFile": "useFsEvents"
+  }
+}

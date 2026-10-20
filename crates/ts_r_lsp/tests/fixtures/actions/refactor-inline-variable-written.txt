@@ -1,0 +1,7 @@
+// @action: refactor Inline variable/Inline variable
+// @file: src/main.ts
+export function f() {
+  let /*|*/n = 1;
+  n += 1;
+  return n;
+}

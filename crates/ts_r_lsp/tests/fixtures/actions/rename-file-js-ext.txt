@@ -1,0 +1,10 @@
+// @action: rename src/util.ts src/deep/util.ts
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "nodenext", "moduleResolution": "nodenext", "noEmit": true}}
+// @file: src/main.ts
+import { helper } from "./util.js";
+
+export const n = helper(1);
+// @file: src/util.ts
+export function helper(x: number): number { return x; }
+// @file: package.json
+{"type": "module"}

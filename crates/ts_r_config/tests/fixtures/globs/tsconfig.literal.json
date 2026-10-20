@@ -1,0 +1,12 @@
+{
+  "include": [
+    "src/b",
+    "src/a.ts",
+    "lib/l.ts",
+    "src/d.min.js",
+    "src/*.js"
+  ],
+  "compilerOptions": {
+    "allowJs": true
+  }
+}

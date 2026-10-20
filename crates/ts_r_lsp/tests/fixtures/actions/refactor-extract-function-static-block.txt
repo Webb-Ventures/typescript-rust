@@ -1,0 +1,10 @@
+// @action: refactor Extract Symbol/function_scope_0
+// @differs: tsserver 6.0.3 makes an instance method and calls it on the class in a static block; ts-r makes it static
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+class C {
+  static v: number;
+  static {
+    C.v = /*[*/Math.max(1, 2)/*]*/;
+  }
+}

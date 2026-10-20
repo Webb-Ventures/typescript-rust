@@ -1,0 +1,69 @@
+Program 0..272
+  stmts[0]: VarDecl 56..81
+    decls[0]: VarDeclarator 60..70
+      name: Ident 60..66 name="yield_" `yield_`
+      init: NumberLit 69..70 value=1 `1`
+    decls[1]: VarDeclarator 72..80
+      name: Ident 72..76 name="let_" `let_`
+      init: NumberLit 79..80 value=2 `2`
+  stmts[1]: FunctionDecl 82..150
+    name: Ident 91..97 name="legacy" `legacy`
+    params[0]: Param 98..99
+      pattern: Ident 98..99 name="a" `a`
+    params[1]: Param 101..102
+      pattern: Ident 101..102 name="b" `b`
+    body: Block 104..150
+      stmts[0]: VarDecl 108..132
+        decls[0]: VarDeclarator 112..131
+          name: Ident 112..117 name="await" `await`
+          init: Binary 120..131 op=Gt
+            left: Binary 120..125 op=Lt
+              left: Ident 120..121 name="a" `a`
+              right: Ident 124..125 name="b" `b`
+            right: Paren 128..131
+              expr: Ident 129..130 name="b" `b`
+      stmts[1]: Return 135..148
+        arg: Ident 142..147 name="await" `await`
+  stmts[2]: VarDecl 151..190 kind=Const
+    decls[0]: VarDeclarator 157..189
+      name: Ident 157..159 name="el" `el`
+      init: JsxElement 162..189
+        opening: JsxOpening 162..168
+          name: Ident 163..167 name="span" `span`
+        children[0]: JsxExprContainer 168..182
+          expr: Call 169..181
+            callee: Ident 169..175 name="legacy" `legacy`
+            args[0]: NumberLit 176..177 value=1 `1`
+            args[1]: NumberLit 179..180 value=2 `2`
+        closing: JsxClosing 182..189
+          name: Ident 184..188 name="span" `span`
+  stmts[3]: VarDecl 191..234 kind=Const
+    decls[0]: VarDeclarator 197..233
+      name: Ident 197..199 name="re" `re`
+      init: Conditional 202..233
+        test: Call 202..217
+          callee: Member 202..211
+            obj: RegexLit 202..206 pattern="=>" flags="" `/=>/`
+            prop: Ident 207..211 name="test" `test`
+          args[0]: StringLit 212..216 value="=>" `'=>'`
+        cons: Binary 220..229 op=Div
+          left: Binary 220..225 op=Div
+            left: Ident 220..221 name="a" `a`
+            right: Ident 224..225 name="b" `b`
+          right: Ident 228..229 name="c" `c`
+        alt: NumberLit 232..233 value=0 `0`
+  stmts[4]: ExprStmt 235..271
+    expr: Assign 235..270
+      left: Member 235..249
+        obj: Ident 235..241 name="module" `module`
+        prop: Ident 242..249 name="exports" `exports`
+      right: ObjectLit 252..270
+        props[0]: ShorthandProp 254..260
+          name: Ident 254..260 name="legacy" `legacy`
+        props[1]: ShorthandProp 262..264
+          name: Ident 262..264 name="el" `el`
+        props[2]: ShorthandProp 266..268
+          name: Ident 266..268 name="re" `re`
+---- comments ----
+Line 0..55 "// Plain JavaScript: no TypeScript syntax, JSX allowed."
+---- diagnostics ----

@@ -1,0 +1,12 @@
+a.ts(5,5): error TS2377: Constructors for derived classes must contain a 'super' call.
+a.ts(6,9): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(12,9): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(23,9): error TS17011: 'super' must be called before accessing a property of 'super' in the constructor of a derived class.
+a.ts(24,15): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(30,19): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(33,40): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(45,9): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(50,20): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(54,28): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.
+a.ts(60,19): error TS1345: An expression of type 'void' cannot be tested for truthiness.
+a.ts(74,9): error TS17009: 'super' must be called before accessing 'this' in the constructor of a derived class.

@@ -1,0 +1,203 @@
+# Real-repo emit comparison for `cargo xtask emit-repos` (design record 0012, E6).
+#
+# Each case runs tsc 7.0.2 and ts-r-check with the same command line in the same tree, one
+# after the other, and compares what they write (xtask/src/emit_repos.rs). Sources:
+# - `bench = "<name>"`: a checkout from bench/repos.toml (`cargo xtask bench --fetch-repos`);
+# - `ecosystem = "<name@version>"`: an npm package unpacked in the ecosystem cache, copied;
+# - `ecosystem_repo = "<name@version>"`: a GitHub source tarball in the ecosystem cache.
+# `deps` are ecosystem-cache packages copied into the copy's node_modules (no installs).
+# `files` are configs written into `dir` for the run and removed after it: the build configs a
+# tool such as tshy would generate, or a rootDir that tsc 7 now requires (TS5011).
+# Command-line options replace settings TypeScript 7 removed (`moduleResolution: node`,
+# `baseUrl`), so both tools build the project instead of stopping at TS5108 / TS5102.
+
+# ---------------------------------------------------------------- ESM libraries
+
+[[case]]
+name = "trpc-server"
+style = "ESM (module preserve), .d.ts + .d.ts.map"
+bench = "trpc"
+dir = "packages/server"
+args = ["-p", "tsconfig.build.json", "--rootDir", "src"]
+
+[[case]]
+name = "trpc-packages"
+style = "JSX (react), ESM, .d.ts + .d.ts.map, paths"
+bench = "trpc"
+args = ["-p", "tsconfig.e6.json"]
+
+  [case.files]
+  "tsconfig.e6.json" = '''
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "rootDir": "packages",
+    "outDir": "dist-e6",
+    "types": ["node"],
+    "paths": {
+      "@trpc/client": ["./packages/client/src"],
+      "@trpc/client/*": ["./packages/client/src/*"],
+      "@trpc/next": ["./packages/next/src"],
+      "@trpc/next/*": ["./packages/next/src/*"],
+      "@trpc/react-query": ["./packages/react-query/src"],
+      "@trpc/react-query/*": ["./packages/react-query/src/*"],
+      "@trpc/server": ["./packages/server/src"],
+      "@trpc/server/*": ["./packages/server/src/*"]
+    }
+  },
+  "include": ["packages/server/src", "packages/client/src", "packages/react-query/src", "packages/next/src"]
+}
+'''
+
+[[case]]
+name = "rxjs8-esm"
+style = "ESM (nodenext), tshy layout, .d.ts + maps, inlineSources"
+bench = "rxjs"
+dir = "packages/rxjs"
+args = ["-p", ".tshy-e6/esm.json"]
+
+  [case.files]
+  ".tshy-e6/esm.json" = '''
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../src", "outDir": "../.tshy-build/esm" },
+  "include": ["../src/**/*.ts"],
+  "exclude": ["../src/**/*.spec.ts"]
+}
+'''
+
+[[case]]
+name = "lru-cache-esm"
+style = "ESM (nodenext), tshy, .d.ts + maps"
+ecosystem_repo = "lru-cache@11.5.3"
+deps = ["@types/node@26.6.5", "undici-types@8.12.1"]
+args = ["-p", ".tshy-e6/esm.json"]
+
+  [case.files]
+  ".tshy-e6/esm.json" = '''
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../src", "outDir": "../.tshy-build/esm" },
+  "include": ["../src/**/*.ts", "../src/**/*.mts"],
+  "exclude": ["../src/**/*-cjs.cts", "../src/**/*-browser.ts", "../src/**/*-react-native.ts", "../src/**/*-node.ts", "../src/**/*-esm.mts"]
+}
+'''
+
+[[case]]
+name = "minimatch-esm"
+style = "ESM (nodenext), tshy, .d.ts + maps"
+ecosystem_repo = "minimatch@10.2.6"
+deps = ["@types/node@26.6.5", "undici-types@8.12.1", "brace-expansion@5.0.12", "balanced-match@4.0.4"]
+args = ["-p", ".tshy-e6/esm.json"]
+
+  [case.files]
+  ".tshy-e6/esm.json" = '''
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../src", "outDir": "../.tshy-build/esm" },
+  "include": ["../src/**/*.ts"]
+}
+'''
+
+# ---------------------------------------------------------------- CommonJS
+
+[[case]]
+name = "minimatch-cjs"
+style = "CommonJS (tshy: src/package.json type commonjs), .d.ts + maps"
+ecosystem_repo = "minimatch@10.2.6"
+deps = ["@types/node@26.6.5", "undici-types@8.12.1", "brace-expansion@5.0.12", "balanced-match@4.0.4"]
+args = ["-p", ".tshy-e6/commonjs.json"]
+
+  [case.files]
+  ".tshy-e6/commonjs.json" = '''
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../src", "outDir": "../.tshy-build/commonjs" },
+  "include": ["../src/**/*.ts"]
+}
+'''
+  "src/package.json" = '''
+{ "type": "commonjs" }
+'''
+
+[[case]]
+name = "brace-expansion-cjs"
+style = "CommonJS (tshy), .d.ts + maps"
+ecosystem_repo = "brace-expansion@5.0.12"
+deps = ["@types/node@26.6.5", "undici-types@8.12.1", "balanced-match@4.0.4"]
+args = ["-p", ".tshy-e6/commonjs.json"]
+
+  [case.files]
+  ".tshy-e6/commonjs.json" = '''
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../src", "outDir": "../.tshy-build/commonjs" },
+  "include": ["../src/**/*.ts"]
+}
+'''
+  "src/package.json" = '''
+{ "type": "commonjs" }
+'''
+
+[[case]]
+name = "typeorm"
+style = "CommonJS, legacy decorators + metadata, importHelpers, .d.ts, maps + inlineSources, stripInternal"
+bench = "typeorm"
+dir = "packages/typeorm"
+args = ["-p", "tsconfig.node.json", "--moduleResolution", "bundler"]
+time_s = 900
+
+# ---------------------------------------------------------------- downlevel targets
+
+[[case]]
+name = "rxjs7-esm-es2015"
+style = "ES2015 target, ESM, importHelpers (tslib), removeComments"
+ecosystem = "rxjs@7.8.2"
+remove = ["dist"]
+deps = ["tslib@2.8.1"]
+args = ["-p", "src/tsconfig.esm.json", "--moduleResolution", "bundler", "--baseUrl", "null"]
+
+[[case]]
+name = "rxjs7-cjs-es5"
+style = "target es5 (tsc 7 emits ES2015), CommonJS, downlevelIteration"
+ecosystem = "rxjs@7.8.2"
+remove = ["dist"]
+deps = ["tslib@2.8.1"]
+args = ["-p", "src/tsconfig.cjs.json", "--moduleResolution", "bundler", "--baseUrl", "null"]
+
+[[case]]
+name = "rxjs7-types"
+style = "composite .d.ts only, declarationDir, .d.ts.map, stripInternal"
+ecosystem = "rxjs@7.8.2"
+remove = ["dist"]
+deps = ["tslib@2.8.1"]
+args = ["-p", "src/tsconfig.types.json", "--moduleResolution", "bundler", "--baseUrl", "null"]
+
+# ---------------------------------------------------------------- project references
+
+[[case]]
+name = "date-fns-build"
+style = "tsc -b, 5 composite projects, .d.ts only, buildinfo, nodenext"
+bench = "date-fns"
+args = ["-b", "tsconfig.json"]
+time_s = 900
+
+[[case]]
+name = "date-fns-core-dist"
+style = ".d.ts only (emitDeclarationOnly), 1,000+ files"
+bench = "date-fns"
+dir = "pkgs/core"
+args = ["-p", "tsconfig.dist.json"]
+time_s = 900
+
+# ---------------------------------------------------------------- JSX app packages
+
+[[case]]
+name = "excalidraw"
+style = "JSX (react-jsx), .d.ts only, large app package"
+bench = "excalidraw"
+dir = "packages/excalidraw"
+args = ["-p", "tsconfig.json"]
+time_s = 900
+# tsc 7 reports errors here (exit 2), so the case is reported but not gated.
+gate = false

@@ -1,0 +1,8 @@
+a.ts(1,10): error TS2441: Duplicate identifier 'require'. Compiler reserves name 'require' in top level scope of a module.
+a.ts(2,7): error TS2441: Duplicate identifier 'exports'. Compiler reserves name 'exports' in top level scope of a module.
+a.ts(3,7): error TS2725: Class name cannot be 'Object' when targeting ES5 and above with module CommonJS.
+a.ts(4,14): error TS1216: Identifier expected. '__esModule' is reserved as an exported marker when transforming ECMAScript modules.
+b.ts(1,15): error TS2441: Duplicate identifier 'require'. Compiler reserves name 'require' in top level scope of a module.
+b.ts(3,54): error TS2725: Class name cannot be 'Object' when targeting ES5 and above with module CommonJS.
+b.ts(4,17): error TS2725: Class name cannot be 'Object' when targeting ES5 and above with module CommonJS.
+d.ts(2,7): error TS2725: Class name cannot be 'Object' when targeting ES5 and above with module CommonJS.

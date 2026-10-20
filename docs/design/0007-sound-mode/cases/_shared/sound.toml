@@ -1,0 +1,15 @@
+# The configuration the harness uses for every case, as if it were the project's ts-r.toml.
+[sound]
+level = "sound"
+include = ["**/*.ts"]
+exclude = ["_shared/legacy.ts"]
+
+[sound.packages]
+# "typed-pkg" is trusted (the default for packages with types).
+# "loose-pkg" is loose (detected: it only has a shorthand ambient declaration).
+"verify-pkg" = "verify"
+
+[sound.guard]
+# The predicate parse<Email> calls after checking 'string' (relative to this file's directory,
+# which the harness treats as the cases root).
+refinements = { Email = "./_shared/validators#isEmail" }

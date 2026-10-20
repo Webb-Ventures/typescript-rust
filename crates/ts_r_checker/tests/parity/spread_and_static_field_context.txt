@@ -1,0 +1,9 @@
+a.ts(9,1): error TS2322: Type '{ a: "b"; }' is not assignable to type 'I'.
+  Types of property 'a' are incompatible.
+    Type '"b"' is not assignable to type '"a"'.
+a.ts(16,5): error TS2322: Type 'typeof d' is not assignable to type 'S'.
+  The types of 'x.a' are incompatible between these types.
+    Type '"b"' is not assignable to type '"a"'.
+a.ts(22,5): error TS2322: Type 'typeof E' is not assignable to type 'S'.
+  The types of 'x.a' are incompatible between these types.
+    Type 'string' is not assignable to type '"a"'.

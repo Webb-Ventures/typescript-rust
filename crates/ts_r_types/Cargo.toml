@@ -1,0 +1,16 @@
+[package]
+name = "ts_r_types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Interned, thread-safe type store for the ts-r checker: type ids, lists, objects, signatures, mappers and relation caches"
+
+[lints]
+workspace = true
+
+[dependencies]
+rustc-hash = "2"
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

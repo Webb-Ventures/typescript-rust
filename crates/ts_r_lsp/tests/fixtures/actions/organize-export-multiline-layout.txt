@@ -1,0 +1,14 @@
+// @action: organizeImports
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export {
+  zeta,
+  alpha,
+  beta,
+  Gamma,
+  type T,
+  delta,
+} from "./a";
+// @file: src/a.ts
+export const zeta = 1, alpha = 2, beta = 3, Gamma = 4, delta = 5;
+export type T = number;

@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType = {
+    a: 1; /* one */
+};
+
+export let q: NewType;

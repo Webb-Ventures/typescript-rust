@@ -1,0 +1,6 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver writes `{ url: 'x' }` twice (two objects); ours declines (a fresh object is inlined only into one use outside loops and functions)
+// @file: src/main.ts
+const /*|*/base = { url: 'x' };
+export const a = base.url;
+export const b = [base];

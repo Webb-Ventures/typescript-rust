@@ -1,0 +1,3 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export let f: /*[*/{ (x: number): string; new (y: string): object; get g(): number; set g(v: number); m?<T>(t: T): T; "q-k": 1; 2: 3 }/*]*/;

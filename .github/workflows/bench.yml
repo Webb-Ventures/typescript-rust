@@ -1,0 +1,111 @@
+name: Bench
+
+# Hands the bench to the review box on the tailnet and exits, like the code review: the box runs
+# bench/scenarios.toml and the PR repo set (trpc, date-fns, rxjs, three-x10) for the PR and for its
+# base branch on four CPU cores of its own, re-measures any flagged scenario with the PR first,
+# and fails the gate only on a regression beyond max_regression and noise_sigmas in both runs.
+# Progress (queued, running and its phase, results) shows in the PR's bench comment, and the
+# result as the "Bench (review box)" commit status. The box keeps the pinned repos, package
+# stores, crates and both release builds between runs, and skips code that already passed
+# against the same base. Box setup and the trust rules: .agents/plugins/code-review/README.md.
+#
+# Runs only with a trusted user (CODE_REVIEW_USERS) behind it:
+#   - automatically for PRs from this repository by a trusted author, on the top PR of a stack
+#     only (not the public mirror's sync/ PRs: their code was benched where it was written);
+#   - when a trusted user approves a PR from this repository (an approving review on its head);
+#   - when a trusted user comments /bench on any PR, including one from a fork (review events
+#     from forks carry no secrets, so a fork's bench takes the comment);
+#   - by hand, a manual run by a trusted user.
+# The box checks each of these again against GitHub before it queues a bench.
+# CODE_REVIEW_BOX: the box's tailnet name, a secret in a public repo (its logs are public, and
+# secrets are masked in them) or a variable.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "bench/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "xtask/src/bench.rs"
+      - "xtask/src/bench_repos.rs"
+      - ".github/workflows/bench.yml"
+  pull_request_review:
+    types: [submitted]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to bench
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: bench-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  # Stacked PRs: only the top PR of a stack is benched (a PR is the top when no open PR is based
+  # on its branch). The box checks that, so this workflow needs no other job.
+  bench:
+    name: hand to the review box
+    if: >-
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !startsWith(github.event.pull_request.head.ref, 'sync/') &&
+        contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.event.pull_request.user.login)) ||
+       (github.event_name == 'pull_request_review' &&
+        github.event.review.state == 'approved' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.event.pull_request.user.login) &&
+        contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.event.review.user.login)) ||
+       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        startsWith(github.event.comment.body, '/bench') &&
+        contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.event.comment.user.login)) ||
+       (github.event_name == 'workflow_dispatch' &&
+        contains(fromJSON(vars.CODE_REVIEW_USERS || '["riley-wv"]'), github.actor)))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
+      - name: Hand the bench to the review box
+        env:
+          BOX: ${{ secrets.CODE_REVIEW_BOX || vars.CODE_REVIEW_BOX }}
+          PRIVATE_REPO: ${{ github.event.repository.private }}
+          TAG: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
+          DISPATCH_TOKEN: ${{ secrets.CODE_REVIEW_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+          COMMENT_ID: ${{ github.event_name == 'issue_comment' && github.event.comment.id || '' }}
+        run: |
+          if [ -z "$BOX" ]; then echo "::error::Set CODE_REVIEW_BOX (the review box's tailnet name): a secret in a public repo, so logs mask it, or a variable."; exit 1; fi
+          jq -nc --argjson run "$GITHUB_RUN_ID" --arg pr "$PR" --arg comment "$COMMENT_ID" --arg repo "$GITHUB_REPOSITORY" \
+            '{run_id: $run, pr: ($pr | tonumber), comment_id: (if $comment == "" then null else ($comment | tonumber) end), repo: $repo}' \
+            > request.json
+          cat request.json
+          # Find the box through Tailscale itself rather than the runner's DNS, which may not
+          # have MagicDNS yet. If it never shows up, this node is not allowed to see it.
+          for _ in $(seq 30); do
+            ip=$(tailscale ip -4 "$BOX" 2>/dev/null) && break
+            sleep 1
+          done
+          if [ -z "${ip:-}" ]; then
+            # The tailnet's device list helps debugging, but a public repo's logs are public.
+            if [ "$PRIVATE_REPO" = true ]; then tailscale status || true; fi
+            echo "::error::$BOX is not visible from this node. The tailnet policy must let ${TAG} reach it on port 443."
+            exit 1
+          fi
+          # 409 is fine: the PR moved on, is not the top of its stack, or this head is already
+          # being benchmarked.
+          code=$(curl -sS --retry 5 --retry-all-errors --retry-delay 3 --max-time 30 -o response.txt -w '%{http_code}' \
+            --resolve "$BOX:443:$ip" \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @request.json "https://$BOX/code-review/jobs")
+          echo "$code $(cat response.txt)"
+          case "$code" in 202|409) ;; *) exit 1 ;; esac

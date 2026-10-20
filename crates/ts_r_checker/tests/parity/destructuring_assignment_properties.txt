@@ -1,0 +1,15 @@
+a.ts(4,4): error TS2339: Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(5,4): error TS2339: Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(6,4): error TS2339: Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(7,11): error TS2339: Property 'b' does not exist on type '{ a: number; }'.
+a.ts(9,4): error TS2339: Property 'zz' does not exist on type '{ a: number; } | { b: number; }'.
+a.ts(11,4): error TS2339: Property 'zz' does not exist on type 'String'.
+a.ts(13,4): error TS2339: Property 'zz' does not exist on type 'unknown'.
+a.ts(21,7): error TS2339: Property 'bb' does not exist on type '[string, number]'.
+a.ts(22,19): error TS2339: Property 'bb' does not exist on type '[string, number]'.
+a.ts(24,10): error TS2322: Type 'string | number' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(24,19): error TS2339: Property 'bb' does not exist on type '(string | number)[]'.
+a.ts(25,11): error TS2339: Property 'x' does not exist on type 'Number'.
+a.ts(28,11): error TS2339: Property 'x' does not exist on type 'Number'.
+a.ts(31,11): error TS2339: Property 'x' does not exist on type 'Number'.

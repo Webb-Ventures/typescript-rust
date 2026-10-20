@@ -1,0 +1,5 @@
+// @action: refactor Infer function return type/Infer function return type
+// @file: src/main.ts
+export function /*|*/f(x: number) {
+  return { a: x, b: [x] };
+}

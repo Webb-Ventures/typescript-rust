@@ -1,0 +1,3 @@
+a.ts(4,7): error TS2322: Type '2' is not assignable to type 'null'.
+a.ts(5,7): error TS2322: Type '2' is not assignable to type 'null'.
+a.ts(7,7): error TS2322: Type '[cb: (_: void) => void]' is not assignable to type 'null'.

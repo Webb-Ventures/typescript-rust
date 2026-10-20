@@ -1,0 +1,6 @@
+module	${FIXTURE}/src/a.ts	import	./styles.css	${FIXTURE}/src/styles.d.css.ts	
+module	${FIXTURE}/src/a.ts	import	./img.png	NOT RESOLVED	
+module	${FIXTURE}/src/a.ts	import	./data.json	${FIXTURE}/src/data.json	
+module	${FIXTURE}/src/a.ts	import	./cfg.json	${FIXTURE}/src/cfg.d.json.ts	
+module	${FIXTURE}/src/a.ts	import	./mod.module.css	${FIXTURE}/src/mod.module.d.css.ts	
+module	${FIXTURE}/src/a.ts	import	./x.ts.css	NOT RESOLVED	

@@ -1,0 +1,8 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver runs `await load()` twice; ours declines (an initializer with effects is inlined only into one use in the next statement)
+// @file: src/main.ts
+declare function load(): Promise<{ kind: string; size: number }>;
+export async function f() {
+  const /*|*/media = await load();
+  return [media.kind, media.size];
+}

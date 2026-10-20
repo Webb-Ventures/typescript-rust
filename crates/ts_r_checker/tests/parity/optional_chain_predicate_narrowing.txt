@@ -1,0 +1,2 @@
+a.ts(14,5): error TS18048: 'x.y' is possibly 'undefined'.
+a.ts(17,5): error TS18048: 'x.y' is possibly 'undefined'.

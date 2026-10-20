@@ -1,0 +1,16 @@
+// tsserver 6.0.3
+// title: Generate 'get' and 'set' accessors
+// @file: src/main.ts
+export class Point {
+  public set x(value: number) {
+    this._x = value;
+  }
+  public get x(): number {
+    return this._x;
+  }
+  z = 0;
+  constructor(
+    private _x: number,
+    private readonly y: number,
+  ) {}
+}

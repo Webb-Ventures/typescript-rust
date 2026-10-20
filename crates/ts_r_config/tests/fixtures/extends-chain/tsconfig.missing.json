@@ -1,0 +1,10 @@
+{
+  "extends": [
+    "./nope.json",
+    "nope-pkg",
+    "./configs/second"
+  ],
+  "files": [
+    "app/extra.ts"
+  ]
+}

@@ -1,0 +1,39 @@
+module
+symbols:
+  #0 __file VALUE_MODULE|MODULE_FILE @[1:1]
+      exports {T=#12, bee=#9, default=#1, local=#11, nsStar=#10, renamed=#8}
+  #1 default FUNCTION (EXPORTED|DEFAULT_EXPORT) @[9:1] parent=#0
+  #2 def ALIAS @[2:8]
+      alias -> default from "./dep"
+  #3 a ALIAS @[2:15]
+      alias -> a from "./dep"
+  #4 bee ALIAS @[2:18]
+      alias -> b from "./dep"
+  #5 T ALIAS (TYPE_ONLY) @[2:28]
+      alias -> T from "./dep"
+  #6 ns ALIAS @[3:8]
+      alias -> * from "./ns"
+  #7 eq ALIAS @[4:1]
+      alias -> export= from "./eq"
+  #8 renamed ALIAS (EXPORTED|EXPORT_SPECIFIER) @[5:10] parent=#0
+      alias -> entity @5:10
+  #9 bee ALIAS (EXPORTED|EXPORT_SPECIFIER) @[5:24] parent=#0
+      alias -> entity @5:24
+  #10 nsStar ALIAS (EXPORTED|EXPORT_SPECIFIER) @[7:1] parent=#0
+      alias -> * from "./star2"
+  #11 local BLOCK_SCOPED_VARIABLE (EXPORTED|BLOCK_SCOPED) @[8:14] parent=#0
+  #12 T ALIAS (EXPORTED|TYPE_ONLY|EXPORT_SPECIFIER) @[10:15] parent=#0
+      alias -> entity @10:15
+  #13 lazy BLOCK_SCOPED_VARIABLE (BLOCK_SCOPED) @[11:7]
+scopes:
+  s0 File @1:1 sym=#0 {T=#5, a=#3, bee=#4, def=#2, eq=#7, lazy=#13, ns=#6}
+  s1 Function @9:1 in s0
+requests:
+  Import "./dep" @2:42
+  Import "./ns" @3:21
+  ImportEquals "./eq" @4:21
+  ExportFrom "./star" @6:15
+  ExportFrom "./star2" @7:25
+  DynamicImport "./lazy" @11:21
+export * request=3 container=#0
+refs: a=5:10#3 bee=5:24#4 def=8:22#2 ns=8:28#6 eq=8:35#7 T=10:15#5

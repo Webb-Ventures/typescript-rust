@@ -1,0 +1,819 @@
+//! The build driver: graph, link, plan, print (cached), assemble, write. [`BuildContext`]
+//! keeps modules and printed fragments between builds for fast rebuilds, and can use the
+//! persistent `ts_r_cache` (namespace `build`) across processes.
+
+use std::hash::Hasher;
+use std::sync::{Arc, Mutex};
+
+use rustc_hash::{FxHashMap, FxHashSet};
+use ts_r_config::{FileSystem, path};
+
+use crate::chunk::{ChunkOutput, assemble};
+use crate::graph::{GraphContext, ModuleCache, ModuleId, Target, build_graph, pretty_path};
+use crate::link::{Kind, LinkOptions, link};
+use crate::meta::RecordKind;
+use crate::options::{BuildOptions, Format, Loader};
+use crate::plan::{ModulePlan, PlanInput, plan};
+use crate::prepare::{Defines, PrepareContext, Prepared};
+use crate::print::{Fragment, print_module};
+use crate::resolve::{Resolution, ResolveKind, Resolver};
+use crate::{Message, Severity, pool};
+
+/// A file produced by a build.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputFile {
+    /// Absolute path.
+    pub path: String,
+    pub contents: Vec<u8>,
+}
+
+impl OutputFile {
+    pub fn text(&self) -> &str {
+        std::str::from_utf8(&self.contents).unwrap_or("")
+    }
+}
+
+/// Counters for one build (what was reused).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BuildStats {
+    pub modules: usize,
+    /// Modules parsed in this build.
+    pub parsed: usize,
+    pub fragments_printed: usize,
+    pub fragments_reused: usize,
+}
+
+#[derive(Debug, Default)]
+pub struct BuildResult {
+    pub outputs: Vec<OutputFile>,
+    pub messages: Vec<Message>,
+    /// esbuild-format metafile JSON (when requested).
+    pub metafile: Option<String>,
+    pub stats: BuildStats,
+    /// Absolute paths of every file the build read (modules), for watch mode. Also filled
+    /// when the build failed after the graph was built.
+    pub inputs: Vec<String>,
+}
+
+impl BuildResult {
+    pub fn has_errors(&self) -> bool {
+        self.messages.iter().any(Message::is_error)
+    }
+
+    pub fn errors(&self) -> impl Iterator<Item = &Message> {
+        self.messages.iter().filter(|m| m.is_error())
+    }
+
+    fn fail(messages: Vec<Message>) -> BuildResult {
+        BuildResult {
+            messages,
+            ..BuildResult::default()
+        }
+    }
+}
+
+/// Persistent-cache format version (bump when meta, fragments or plans change shape).
+const CACHE_VERSION: u32 = 6;
+
+/// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
+pub struct BuildContext {
+    opts: Arc<BuildOptions>,
+    prep: Arc<PrepareContext>,
+    modules: ModuleCache,
+    fragments: Mutex<FxHashMap<[u8; 32], Arc<Fragment>>>,
+    disk: Option<ts_r_cache::Cache>,
+    threads: usize,
+    fs_cache: Arc<crate::fscache::CachedFs>,
+    /// Set by [`BuildContext::invalidate`]: the files that changed since the last build.
+    /// Cached modules of every other file are reused without reading them again. `None`
+    /// (fresh context, or after a structural change) re-reads and re-hashes every file.
+    trusted: Mutex<Option<FxHashSet<String>>>,
+}
+
+impl std::fmt::Debug for BuildContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BuildContext").finish_non_exhaustive()
+    }
+}
+
+/// One-shot build on the real file system.
+pub fn build(opts: BuildOptions) -> BuildResult {
+    match BuildContext::new(opts, Arc::new(ts_r_config::RealFs::new())) {
+        Ok(ctx) => ctx.build(),
+        Err(m) => BuildResult::fail(m),
+    }
+}
+
+/// `std::hash::Hasher` over blake3 (stable across runs, unlike `DefaultHasher` seeds).
+struct Blake(blake3::Hasher);
+
+impl Hasher for Blake {
+    fn finish(&self) -> u64 {
+        let b = self.0.finalize();
+        let mut a = [0u8; 8];
+        a.copy_from_slice(&b.as_bytes()[..8]);
+        u64::from_le_bytes(a)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+}
+
+fn fragment_key(module_key: &[u8; 32], plan: &ModulePlan) -> [u8; 32] {
+    use std::hash::Hash;
+    let mut h = Blake(blake3::Hasher::new());
+    h.0.update(&CACHE_VERSION.to_le_bytes());
+    h.0.update(module_key);
+    plan.hash(&mut h);
+    *h.0.finalize().as_bytes()
+}
+
+impl BuildContext {
+    pub fn new(opts: BuildOptions, fs: Arc<dyn FileSystem>) -> Result<BuildContext, Vec<Message>> {
+        let defines = Defines::from_options(&opts)
+            .map_err(|e| vec![Message::new(Severity::Error, None, e)])?;
+        let mut opts = opts;
+        // Symlinked working directories (macOS `/var` -> `/private/var`) would otherwise give
+        // modules reached through a realpath a different prefix than the entries.
+        let real = fs.realpath(&opts.working_dir);
+        if !real.is_empty() && fs.directory_exists(&real) {
+            opts.working_dir = path::normalize(&real);
+        }
+        let opts = Arc::new(opts);
+        let fs_cache = Arc::new(crate::fscache::CachedFs::new(fs));
+        let fs: Arc<dyn FileSystem> = Arc::clone(&fs_cache) as Arc<dyn FileSystem>;
+        let resolver = Arc::new(Resolver::new(fs, &opts));
+        let prep = Arc::new(PrepareContext::new(Arc::clone(&opts), defines, resolver));
+        let disk = if opts.persistent_cache {
+            ts_r_cache::Cache::open("build", CACHE_VERSION).ok()
+        } else {
+            None
+        };
+        let threads = pool::thread_count(opts.threads);
+        Ok(BuildContext {
+            opts,
+            prep,
+            modules: ModuleCache::default(),
+            fragments: Mutex::default(),
+            disk,
+            threads,
+            fs_cache,
+            trusted: Mutex::default(),
+        })
+    }
+
+    pub fn options(&self) -> &BuildOptions {
+        &self.opts
+    }
+
+    pub fn resolver(&self) -> &Resolver {
+        &self.prep.resolver
+    }
+
+    /// Tells the context that files changed on disk (absolute paths, or relative to the
+    /// working directory). The next build re-reads only these files. Resolution caches and
+    /// the tsconfig-derived transform options are dropped when files were added or removed,
+    /// or a file that is not a module (`package.json`, a tsconfig or one it extends) changed.
+    pub fn invalidate(&self, changed: &[String]) {
+        let wd = &self.opts.working_dir;
+        let changed: Vec<String> = changed
+            .iter()
+            .map(|p| {
+                let abs = path::resolve(wd, p);
+                self.fs_cache.forget(path::directory_of(&abs));
+                // Module paths are real paths; symlinked spellings must match them.
+                let dir = path::directory_of(&abs);
+                let real_dir = self.fs_cache.realpath(dir);
+                let name = path::file_name(&abs);
+                if real_dir.is_empty() || real_dir == dir {
+                    abs
+                } else {
+                    self.fs_cache.forget(&real_dir);
+                    format!("{}/{name}", real_dir.trim_end_matches('/'))
+                }
+            })
+            .collect();
+        let known = self
+            .modules
+            .modules
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let structural = changed.iter().any(|p| {
+            p.ends_with("package.json")
+                || p.ends_with("tsconfig.json")
+                || !known.contains_key(p)
+                || !self.fs_cache.file_exists(p)
+        });
+        drop(known);
+        let mut trusted = self.trusted.lock().unwrap_or_else(|e| e.into_inner());
+        if structural {
+            self.fs_cache.clear();
+            self.prep.resolver.clear_caches();
+            // Transform options are cached per tsconfig path, and modules' preparation keys
+            // hash those options: a stale entry would keep stale modules.
+            self.prep.clear_options();
+            *trusted = None;
+        } else {
+            trusted
+                .get_or_insert_with(FxHashSet::default)
+                .extend(changed);
+        }
+    }
+
+    /// Absolute entry paths.
+    fn resolve_entries(&self) -> Result<Vec<String>, Vec<Message>> {
+        let wd = &self.opts.working_dir;
+        let mut out = Vec::new();
+        let mut errs = Vec::new();
+        for e in &self.opts.entry_points {
+            let abs = path::resolve(wd, &e.path);
+            let fs = self.prep.resolver.fs();
+            if fs.file_exists(&abs) {
+                out.push(fs.realpath(&abs));
+                continue;
+            }
+            // Like esbuild: a path that is not an existing file resolves as an import
+            // path (so `pkg` is a package and `./entry` probes extensions).
+            match self.prep.resolver.resolve(&e.path, wd, ResolveKind::Import) {
+                Resolution::File(f) => out.push(f),
+                _ => errs.push(Message::new(
+                    Severity::Error,
+                    None,
+                    format!("Could not resolve {:?}", e.path),
+                )),
+            }
+        }
+        if errs.is_empty() { Ok(out) } else { Err(errs) }
+    }
+
+    /// Runs a build.
+    pub fn build(&self) -> BuildResult {
+        let opts = &*self.opts;
+        if let Err(e) = opts.validate() {
+            return BuildResult::fail(vec![Message::new(Severity::Error, None, e)]);
+        }
+        let entries = match self.resolve_entries() {
+            Ok(e) => e,
+            Err(m) => return BuildResult::fail(m),
+        };
+        let (outdir, outfile_name) = self.output_location(&entries);
+        if !opts.bundle {
+            return self.transform_only(&entries, &outdir, outfile_name.as_deref());
+        }
+        let trusted = self
+            .trusted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let gctx = GraphContext {
+            prep: &self.prep,
+            cache: &self.modules,
+            disk: self.disk.as_ref(),
+            threads: self.threads,
+            changed: trusted.as_ref(),
+            parsed: Default::default(),
+        };
+        let mut timer = Timer::new();
+        let graph = build_graph(&gctx, &entries);
+        timer.lap("graph");
+        let inputs: Vec<String> = graph
+            .modules
+            .iter()
+            .filter(|m| path::is_rooted(&m.path))
+            .map(|m| m.path.clone())
+            .collect();
+        let fail = |m: Vec<Message>| BuildResult {
+            inputs: inputs.clone(),
+            ..BuildResult::fail(m)
+        };
+        let mut messages = graph.messages.clone();
+        let mut stats = BuildStats {
+            modules: graph.modules.len(),
+            parsed: gctx.parsed.load(std::sync::atomic::Ordering::Relaxed),
+            ..BuildStats::default()
+        };
+        if messages.iter().any(Message::is_error) {
+            return fail(sorted(messages));
+        }
+        let format = opts.effective_format();
+        let mut dynamic_entries: Vec<ModuleId> = Vec::new();
+        if opts.splitting {
+            for m in &graph.modules {
+                for (i, r) in m.meta.records.iter().enumerate() {
+                    if r.kind == RecordKind::Dynamic
+                        && let Target::Module(t) = m.targets[i]
+                        && !graph.entries.contains(&t)
+                        && !dynamic_entries.contains(&t)
+                    {
+                        dynamic_entries.push(t);
+                    }
+                }
+            }
+        }
+        timer.lap("pre-link");
+        let lk = link(
+            &graph,
+            &graph.entries,
+            &dynamic_entries,
+            LinkOptions {
+                format,
+                tree_shaking: opts.tree_shaking(),
+                splitting: opts.splitting,
+                keep_entry_exports: format != Format::Iife || opts.global_name.is_some(),
+            },
+        );
+        messages.extend(lk.messages.iter().cloned());
+        if format != Format::Esm {
+            for (i, m) in graph.modules.iter().enumerate() {
+                if lk.included[i] && m.meta.has_tla && lk.kinds[i] == Kind::Esm {
+                    messages.push(Message::new(
+                        Severity::Error,
+                        Some(m.pretty.clone()),
+                        format!(
+                            "Top-level await is currently not supported with the {:?} output format",
+                            format.as_str()
+                        ),
+                    ));
+                }
+            }
+        }
+        if messages.iter().any(Message::is_error) {
+            return fail(sorted(messages));
+        }
+        // Output names.
+        let outbase = common_dir(&entries);
+        let entry_files: Vec<String> = match &outfile_name {
+            Some(f) => vec![f.clone()],
+            None => entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    self.entry_file_name(e, &outbase, opts.entry_points[i].name.as_deref())
+                })
+                .collect(),
+        };
+        let dynamic_files: Vec<String> = dynamic_entries
+            .iter()
+            .map(|&t| self.entry_file_name(&graph.modules[t as usize].path, &outbase, None))
+            .collect();
+        timer.lap("link");
+        let pl = plan(&PlanInput {
+            graph: &graph,
+            link: &lk,
+            opts,
+            entries: &graph.entries,
+            dynamic_entries: &dynamic_entries,
+            outdir: outdir.clone(),
+            entry_files,
+            dynamic_files,
+        });
+        timer.lap("plan");
+        // Print fragments.
+        let todo: Vec<ModuleId> = (0..graph.modules.len() as ModuleId)
+            .filter(|&m| pl.plans[m as usize].is_some())
+            .collect();
+        let printed = Mutex::new(0usize);
+        let used_keys: Mutex<Vec<[u8; 32]>> = Mutex::default();
+        let frags: Vec<(ModuleId, Option<Arc<Fragment>>)> = pool::map(self.threads, todo, |m| {
+            let module = &graph.modules[m as usize];
+            let Some(mp) = &pl.plans[m as usize] else {
+                return (m, None);
+            };
+            let key = fragment_key(&module.prep_key, mp);
+            used_keys
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(key);
+            if let Some(f) = self
+                .fragments
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&key)
+            {
+                return (m, Some(Arc::clone(f)));
+            }
+            let disk_key = ts_r_cache::Key::of(&key);
+            if let Some(disk) = &self.disk
+                && let Some(blob) = disk.get(&disk_key)
+                && let Some(f) = Fragment::decode(&blob.to_vec())
+            {
+                let f = Arc::new(f);
+                self.fragments
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(key, Arc::clone(&f));
+                return (m, Some(f));
+            }
+            let prepared: Arc<Prepared> = match &module.prepared {
+                Some(p) => Arc::clone(p),
+                None => Arc::new(crate::prepare::prepare(
+                    &self.prep,
+                    &module.path,
+                    &module.pretty,
+                    Arc::clone(&module.source.js),
+                    module.loader,
+                )),
+            };
+            let nodes: Vec<u32> = module.meta.records.iter().map(|r| r.node).collect();
+            let f = Arc::new(print_module(&prepared, mp, &nodes));
+            *printed.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+            if let Some(disk) = &self.disk {
+                let _ = disk.put(&disk_key, &f.encode());
+            }
+            self.fragments
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(key, Arc::clone(&f));
+            (m, Some(f))
+        });
+        stats.fragments_printed = printed.into_inner().unwrap_or(0);
+        stats.fragments_reused = frags.len() - stats.fragments_printed;
+        {
+            let used: FxHashSet<[u8; 32]> = used_keys
+                .into_inner()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            self.fragments
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|k, _| used.contains(k));
+        }
+        let mut by_module: Vec<Option<Arc<Fragment>>> = vec![None; graph.modules.len()];
+        for (m, f) in frags {
+            by_module[m as usize] = f;
+        }
+        timer.lap("print");
+        // Assemble.
+        let chunk_outs: Vec<ChunkOutput> = (0..pl.chunks.len())
+            .map(|ci| assemble(ci, &pl, &graph, &by_module, opts))
+            .collect();
+        let mut outputs = Vec::new();
+        for (ci, co) in chunk_outs.iter().enumerate() {
+            let file = format!("{outdir}/{}", pl.chunks[ci].file);
+            // A CSS entry point produces only its stylesheet.
+            let css_entry = pl.chunks[ci]
+                .entry
+                .is_some_and(|e| lk.kinds[e as usize] == crate::link::Kind::Css);
+            if css_entry && let Some(css) = &co.css {
+                let css_file = match file.rsplit_once('.') {
+                    Some((b, _)) => format!("{b}.css"),
+                    None => format!("{file}.css"),
+                };
+                outputs.push(OutputFile {
+                    path: css_file,
+                    contents: css.as_bytes().to_vec(),
+                });
+                continue;
+            }
+            if let Some(map) = &co.map {
+                outputs.push(OutputFile {
+                    path: format!("{file}.map"),
+                    contents: map.as_bytes().to_vec(),
+                });
+            }
+            outputs.push(OutputFile {
+                path: file.clone(),
+                contents: co.code.as_bytes().to_vec(),
+            });
+            if let Some(css) = &co.css {
+                let css_file = match file.rsplit_once('.') {
+                    Some((b, _)) => format!("{b}.css"),
+                    None => format!("{file}.css"),
+                };
+                outputs.push(OutputFile {
+                    path: css_file,
+                    contents: css.as_bytes().to_vec(),
+                });
+            }
+        }
+        // Assets from the file loader.
+        let mut seen_assets = FxHashSet::default();
+        for (i, m) in graph.modules.iter().enumerate() {
+            if lk.included[i]
+                && let Some(a) = &m.source.asset
+                && seen_assets.insert(a.rel_path.clone())
+            {
+                outputs.push(OutputFile {
+                    path: format!("{outdir}/{}", a.rel_path),
+                    contents: a.bytes.to_vec(),
+                });
+            }
+        }
+        timer.lap("assemble");
+        timer.report(&stats);
+        let metafile = opts
+            .metafile
+            .then(|| crate::metafile::render(&graph, &lk, &pl, &chunk_outs, &outputs, opts));
+        if opts.write {
+            for o in &outputs {
+                if let Err(e) = write_file(&o.path, &o.contents) {
+                    messages.push(Message::new(
+                        Severity::Error,
+                        None,
+                        format!("Failed to write to output file {}: {e}", o.path),
+                    ));
+                }
+            }
+        }
+        BuildResult {
+            outputs,
+            messages: sorted(messages),
+            metafile,
+            stats,
+            inputs,
+        }
+    }
+
+    /// Output directory and, with `outfile`, the output file name.
+    fn output_location(&self, entries: &[String]) -> (String, Option<String>) {
+        let wd = &self.opts.working_dir;
+        if let Some(f) = &self.opts.outfile {
+            let abs = path::resolve(wd, f);
+            let dir = path::directory_of(&abs).to_owned();
+            return (dir, Some(path::file_name(&abs).to_owned()));
+        }
+        if let Some(d) = &self.opts.outdir {
+            return (path::resolve(wd, d), None);
+        }
+        let _ = entries;
+        (wd.clone(), None)
+    }
+
+    fn entry_file_name(&self, entry: &str, outbase: &str, name: Option<&str>) -> String {
+        let dir = path::directory_of(entry);
+        let mut rel_dir = path::relative(outbase, dir, true);
+        if rel_dir == "." {
+            rel_dir.clear();
+        }
+        let rel_dir = rel_dir.replace("../", "_.._/").replace("..", "_.._");
+        let file = path::file_name(entry);
+        let stem = name
+            .map(str::to_owned)
+            .unwrap_or_else(|| match file.rsplit_once('.') {
+                Some((s, _)) if !s.is_empty() => s.to_owned(),
+                _ => file.to_owned(),
+            });
+        let mut n = self.opts.entry_names.clone();
+        if rel_dir.is_empty() {
+            n = n.replace("[dir]/", "").replace("[dir]", "");
+        } else {
+            n = n.replace("[dir]", &rel_dir);
+        }
+        n = n.replace("[name]", &stem).replace("[hash]", "");
+        let n = n
+            .trim_start_matches("./")
+            .trim_start_matches('/')
+            .to_owned();
+        format!("{n}{}", self.opts.out_extension_js)
+    }
+
+    /// Without `--bundle`: each entry is transformed (and minified) on its own.
+    fn transform_only(
+        &self,
+        entries: &[String],
+        outdir: &str,
+        outfile: Option<&str>,
+    ) -> BuildResult {
+        let opts = &*self.opts;
+        let outbase = common_dir(entries);
+        let wd = opts.working_dir.clone();
+        let work: Vec<(usize, String)> = entries.iter().cloned().enumerate().collect();
+        let results = pool::map(self.threads, work, |(i, e)| {
+            let fs = self.prep.resolver.fs();
+            let loader = opts.loader_for(&e);
+            let source = match crate::prepare::load(fs.as_ref(), &e, loader, opts) {
+                Ok(s) => s,
+                Err(m) => return Err(vec![Message::new(Severity::Error, None, m)]),
+            };
+            let pretty = pretty_path(&wd, &e);
+            let format = opts.effective_format();
+            let module = match (opts.format, format) {
+                (Some(_), Format::Cjs | Format::Iife) => {
+                    Some(ts_r_transform::ModuleFormat::CommonJs)
+                }
+                _ => None,
+            };
+            let prepared = crate::prepare::prepare_with(
+                &self.prep,
+                &e,
+                &pretty,
+                Arc::clone(&source.js),
+                loader,
+                module,
+            );
+            if prepared.messages.iter().any(Message::is_error) {
+                return Err(prepared.messages.clone());
+            }
+            if module.is_some() && crate::scan::scan(&prepared, false).has_tla {
+                return Err(vec![Message::new(
+                    Severity::Error,
+                    Some(pretty.clone()),
+                    format!(
+                        "Top-level await is currently not supported with the \"{}\" output format",
+                        format.as_str()
+                    ),
+                )]);
+            }
+            let file = match outfile {
+                Some(f) => f.to_owned(),
+                None => self.entry_file_name(&e, &outbase, opts.entry_points[i].name.as_deref()),
+            };
+            let mut ast = prepared.ast.clone();
+            if opts.minify_syntax || opts.minify_identifiers {
+                let module = prepared.strict;
+                ts_r_minify::minify_ast(
+                    &mut ast,
+                    &prepared.src,
+                    &ts_r_minify::MinifyOptions {
+                        whitespace: opts.minify_whitespace,
+                        identifiers: opts.minify_identifiers,
+                        syntax: opts.minify_syntax,
+                        module,
+                    },
+                    module,
+                );
+            }
+            let cg = ts_r_codegen::CodegenOptions {
+                layout: if opts.minify_whitespace {
+                    ts_r_codegen::Layout::Compact
+                } else {
+                    ts_r_codegen::Layout::Readable
+                },
+                comments: !opts.minify_whitespace,
+                source_map: (opts.sourcemap != crate::options::SourceMapMode::None).then(|| {
+                    ts_r_codegen::SourceMapOptions {
+                        file: Some(path::file_name(&file).to_owned()),
+                        source: path::relative(
+                            path::directory_of(&format!("{outdir}/{file}")),
+                            &e,
+                            true,
+                        ),
+                        source_root: None,
+                        include_content: opts.sources_content,
+                    }
+                }),
+                ..ts_r_codegen::CodegenOptions::default()
+            };
+            let out = ts_r_codegen::print_with(
+                &ast,
+                &prepared.src,
+                &cg,
+                &ts_r_codegen::PrintHints {
+                    erased: &prepared.erased,
+                    prelude: &prepared.prelude,
+                    ..Default::default()
+                },
+            );
+            let mut code = out.code;
+            if opts.format == Some(Format::Iife) {
+                code = if opts.minify_whitespace {
+                    format!("(()=>{{{code}}})();\n")
+                } else {
+                    format!("(() => {{\n{code}}})();\n")
+                };
+            }
+            let mut files = Vec::new();
+            let full = format!("{outdir}/{file}");
+            if let Some(map) = out.map {
+                use crate::options::SourceMapMode::*;
+                let json = map.to_json();
+                match opts.sourcemap {
+                    Linked => code.push_str(&format!(
+                        "//# sourceMappingURL={}.map\n",
+                        path::file_name(&file)
+                    )),
+                    Inline | Both => {
+                        code.push_str(&format!("//# sourceMappingURL={}\n", map.to_data_url()))
+                    }
+                    _ => {}
+                }
+                if matches!(opts.sourcemap, Linked | External | Both) {
+                    files.push(OutputFile {
+                        path: format!("{full}.map"),
+                        contents: json.into_bytes(),
+                    });
+                }
+            }
+            let meta = (pretty.clone(), source.js.len(), full.clone(), code.len());
+            files.push(OutputFile {
+                path: full,
+                contents: code.into_bytes(),
+            });
+            Ok((files, prepared.messages.clone(), meta))
+        });
+        let mut outputs = Vec::new();
+        let mut messages = Vec::new();
+        let mut metas = Vec::new();
+        for r in results {
+            match r {
+                Ok((f, m, meta)) => {
+                    outputs.extend(f);
+                    messages.extend(m);
+                    metas.push(meta);
+                }
+                Err(m) => messages.extend(m),
+            }
+        }
+        if messages.iter().any(Message::is_error) {
+            return BuildResult::fail(sorted(messages));
+        }
+        if opts.write {
+            for o in &outputs {
+                if let Err(e) = write_file(&o.path, &o.contents) {
+                    messages.push(Message::new(
+                        Severity::Error,
+                        None,
+                        format!("Failed to write to output file {}: {e}", o.path),
+                    ));
+                }
+            }
+        }
+        BuildResult {
+            outputs,
+            messages: sorted(messages),
+            metafile: opts
+                .metafile
+                .then(|| crate::metafile::render_transform(&metas, &opts.working_dir)),
+            stats: BuildStats::default(),
+            inputs: entries.to_vec(),
+        }
+    }
+}
+
+fn sorted(mut m: Vec<Message>) -> Vec<Message> {
+    m.sort_by(|a, b| {
+        (a.severity, &a.file, a.line, a.column, &a.text)
+            .cmp(&(b.severity, &b.file, b.line, b.column, &b.text))
+    });
+    m.dedup();
+    m
+}
+
+/// Lowest common ancestor directory of the entry files.
+fn common_dir(entries: &[String]) -> String {
+    let mut it = entries.iter();
+    let Some(first) = it.next() else {
+        return "/".into();
+    };
+    let mut dir: Vec<&str> = path::directory_of(first).split('/').collect();
+    for e in it {
+        let d: Vec<&str> = path::directory_of(e).split('/').collect();
+        let n = dir.iter().zip(&d).take_while(|(a, b)| a == b).count();
+        dir.truncate(n);
+    }
+    let s = dir.join("/");
+    if s.is_empty() { "/".into() } else { s }
+}
+
+fn write_file(p: &str, contents: &[u8]) -> std::io::Result<()> {
+    let dir = path::directory_of(p);
+    if !dir.is_empty() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if std::fs::read(p).is_ok_and(|old| old == contents) {
+        return Ok(());
+    }
+    std::fs::write(p, contents)
+}
+
+/// Loader of a module (for callers that inspect the graph).
+pub fn is_js_loader(l: Loader) -> bool {
+    l.is_js()
+}
+
+/// Phase timings on stderr when `TS_R_BUILD_TIMING` is set.
+struct Timer {
+    on: bool,
+    last: std::time::Instant,
+    laps: Vec<(&'static str, std::time::Duration)>,
+}
+
+impl Timer {
+    fn new() -> Timer {
+        Timer {
+            on: std::env::var_os("TS_R_BUILD_TIMING").is_some(),
+            last: std::time::Instant::now(),
+            laps: Vec::new(),
+        }
+    }
+
+    fn lap(&mut self, name: &'static str) {
+        if self.on {
+            let now = std::time::Instant::now();
+            self.laps.push((name, now - self.last));
+            self.last = now;
+        }
+    }
+
+    fn report(&self, stats: &BuildStats) {
+        if self.on {
+            let parts: Vec<String> = self
+                .laps
+                .iter()
+                .map(|(n, d)| format!("{n} {:.1}ms", d.as_secs_f64() * 1000.0))
+                .collect();
+            eprintln!("[timing] {} | {stats:?}", parts.join(", "));
+        }
+    }
+}

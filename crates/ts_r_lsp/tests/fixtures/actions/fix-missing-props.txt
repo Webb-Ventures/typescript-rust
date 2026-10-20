@@ -1,0 +1,15 @@
+// @action: fix 2740 Add missing properties
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+interface Options {
+  name: string;
+  count: number;
+  enabled: boolean;
+  tags: string[];
+  nested: { a: number };
+  mode: "fast" | "slow";
+  cb: (x: number) => void;
+  opt?: string;
+}
+
+export const /*|*/o: Options = { name: "x" };

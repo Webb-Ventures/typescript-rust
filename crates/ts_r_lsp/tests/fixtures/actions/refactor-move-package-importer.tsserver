@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Move to a new file
+// @file: apps/web/main.ts
+import { kit } from "@app/kit/src/kit";
+
+export const n = kit;
+// @file: packages/kit/src/index.ts
+// @file: packages/kit/src/kit.ts
+export const kit = 1;

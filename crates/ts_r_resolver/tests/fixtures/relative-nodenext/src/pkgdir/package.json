@@ -1,0 +1,4 @@
+{
+  "types": "./types.d.ts",
+  "main": "./main.js"
+}

@@ -1,0 +1,9 @@
+// @action: organizeImports
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+const zeta = 1, alpha = 2, beta = 3;
+export {
+  zeta,
+  alpha,
+  beta,
+};

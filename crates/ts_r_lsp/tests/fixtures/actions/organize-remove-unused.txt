@@ -1,0 +1,23 @@
+// @action: organizeImports
+// @file: src/main.ts
+// leading comment
+import { a, unusedA } from "./a";
+import { unused } from "./b";
+import "./side-effect";
+import type { T, U } from "./types";
+import def, { x } from "./def";
+
+const v: T = a;
+console.log(v, def);
+// @file: src/a.ts
+export const a = 1, unusedA = 2;
+// @file: src/b.ts
+export const unused = 1;
+// @file: src/side-effect.ts
+console.log("hi");
+// @file: src/types.ts
+export type T = number;
+export type U = string;
+// @file: src/def.ts
+export default 1;
+export const x = 2;

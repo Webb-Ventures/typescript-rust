@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "nodenext"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

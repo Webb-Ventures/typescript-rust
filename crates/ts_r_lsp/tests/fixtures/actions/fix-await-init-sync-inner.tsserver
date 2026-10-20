@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+declare function load(): Promise<{ x: number }>;
+export function outer() {
+  const p = load();
+  async function inner() {
+    return (await p).x;
+  }
+  return inner;
+}

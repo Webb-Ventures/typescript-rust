@@ -1,0 +1,15 @@
+name: Feature request
+description: A flag, rule, option or tool behaviour ts-r doesn't have yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you would like ts-r to do
+      description: If tsc, ESLint, esbuild or Vite already does it, say which and how.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters to you

@@ -1,0 +1,7 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver writes `{} === {}` (two objects, `false`); ours declines (a fresh object is inlined only into one use outside loops and functions)
+// @file: src/main.ts
+export function f() {
+  const /*|*/value = {};
+  console.log(value === value);
+}

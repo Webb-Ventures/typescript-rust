@@ -1,0 +1,3 @@
+a.tsx(1,13): error TS6133: 'React' is declared but its value is never read.
+b.tsx(3,25): error TS6133: 'Fragment' is declared but its value is never read.
+b.tsx(4,19): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.

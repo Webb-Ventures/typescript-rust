@@ -1,0 +1,14 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { a } from "./a";
+export * from "./z";
+export { b } from "./a";
+export type { T } from "./a";
+export { a } from "./a";
+const q = a;
+export { q };
+// @file: src/a.ts
+export const a = 1, b = 2;
+export type T = number;
+// @file: src/z.ts
+export const zz = 1;

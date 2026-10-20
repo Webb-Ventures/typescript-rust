@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "findings"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two to four sentences: what the change does and the overall verdict. Markdown, no headings."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Only verified findings with confidence >= 80, most severe first. Empty when nothing survives.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "body",
+          "path",
+          "start_line",
+          "end_line",
+          "severity",
+          "category",
+          "rule",
+          "suggestion",
+          "confidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The id of a previous finding when this is the same issue, else an empty string."
+          },
+          "title": {
+            "type": "string",
+            "description": "One line, under 90 characters, no trailing period."
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown: the problem, the concrete failure scenario, and the fix. No headings."
+          },
+          "path": {
+            "type": "string",
+            "description": "Repo-relative path of the file at head."
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "First line of the range in the head version (1-based)."
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "Last line of the range in the head version; equal to start_line for one line."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "bug",
+              "from-scratch",
+              "panic-on-input",
+              "determinism",
+              "resource-limits",
+              "performance",
+              "unsafe",
+              "design-record",
+              "agents-md",
+              "workspace",
+              "cross-track",
+              "security",
+              "ci",
+              "site"
+            ]
+          },
+          "rule": {
+            "type": "string",
+            "description": "For rule findings: the file and the quoted rule text, e.g. AGENTS.md: \"Never panic on user input.\" Empty string for plain bugs."
+          },
+          "suggestion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact replacement text for lines start_line..end_line when the fix is small and certain, else null."
+          },
+          "confidence": {
+            "type": "integer",
+            "description": "0-100 from the rubric in the skill."
+          }
+        }
+      }
+    }
+  }
+}

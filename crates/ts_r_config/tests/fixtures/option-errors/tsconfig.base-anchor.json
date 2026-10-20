@@ -1,0 +1,9 @@
+{
+  "extends": "./combo-base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "files": [
+    "a.ts"
+  ]
+}

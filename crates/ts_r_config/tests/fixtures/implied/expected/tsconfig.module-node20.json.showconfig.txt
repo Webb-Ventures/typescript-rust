@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "module": "node20",
+        "target": "es2020",
+        "moduleResolution": "node16",
+        "moduleDetection": "force",
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

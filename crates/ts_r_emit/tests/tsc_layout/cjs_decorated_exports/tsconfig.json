@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "experimentalDecorators": true,
+    "strict": false,
+    "types": [],
+    "outDir": "out"
+  },
+  "files": ["defaults.ts", "named.ts"]
+}

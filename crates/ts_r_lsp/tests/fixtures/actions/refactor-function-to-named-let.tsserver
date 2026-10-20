@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+function f(x: number) {
+    return x + 1;
+}
+f = (x) => x;

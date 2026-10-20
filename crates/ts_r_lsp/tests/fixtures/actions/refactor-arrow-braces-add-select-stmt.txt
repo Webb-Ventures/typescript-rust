@@ -1,0 +1,3 @@
+// @action: refactor Add or remove braces in an arrow function/Add braces to arrow function
+// @file: src/main.ts
+/*[*/export const f = (x: number) => x + 1;/*]*/

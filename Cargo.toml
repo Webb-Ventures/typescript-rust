@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.93"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ts-r/ts-r"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "warn"
+
+# Measured in M7 (macOS arm64, all seven binaries; table in xtask/AGENTS.md under "Release
+# builds"): fat LTO is 7% smaller than thin and 2-4% faster on ts-r-check and ts-r-build, for
+# about twice the build time. codegen-units stays 1. panic stays "unwind": ts-r-lsp catches
+# checker panics per request (catch_unwind) and keeps serving; "abort" was 15% smaller but no
+# faster, and would take the editor daemon down with the first checker bug.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+debug = "line-tables-only"
+
+# What the release workflow ships (`cargo build --profile dist`, then `cargo xtask pgo
+# --profile dist`): release plus stripped debug info. Panic messages keep file:line (that comes
+# from the panic location, not debug info); backtraces keep function names.
+[profile.dist]
+inherits = "release"
+debug = false
+strip = "debuginfo"
+
+[profile.dev.package."*"]
+opt-level = 1

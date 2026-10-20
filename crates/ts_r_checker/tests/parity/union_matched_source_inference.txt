@@ -1,0 +1,11 @@
+a.ts(8,14): error TS2322: Type 'string' is not assignable to type 'boolean'.
+a.ts(9,14): error TS2322: Type 'number' is not assignable to type 'boolean'.
+a.ts(11,14): error TS2322: Type 'undefined' is not assignable to type 'boolean'.
+a.ts(13,14): error TS2322: Type 'Box<number>' is not assignable to type 'boolean'.
+a.ts(15,14): error TS2322: Type 'number' is not assignable to type 'boolean'.
+a.ts(52,14): error TS2322: Type 'E5' is not assignable to type 'E6'.
+  Types of property 'on' are incompatible.
+    Type '<K extends string>(e: "nav" | K) => void' is not assignable to type '<K extends string>(e: number | K) => void'.
+      Types of parameters 'e' and 'e' are incompatible.
+        Type 'number | K' is not assignable to type 'string'.
+          Type 'number' is not assignable to type 'string'.

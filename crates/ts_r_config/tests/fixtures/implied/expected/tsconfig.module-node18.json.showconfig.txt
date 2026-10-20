@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "module": "node18",
+        "moduleResolution": "node16",
+        "moduleDetection": "force",
+        "resolveJsonModule": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

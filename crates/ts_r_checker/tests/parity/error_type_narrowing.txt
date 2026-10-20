@@ -1,0 +1,7 @@
+a.ts(3,19): error TS2307: Cannot find module 'missing-module' or its corresponding type declarations.
+a.ts(10,5): error TS2339: Property 'nope1' does not exist on type 'R'.
+  Property 'nope1' does not exist on type '"a"'.
+a.ts(14,32): error TS2339: Property 'nope2' does not exist on type 'number'.
+a.ts(15,28): error TS2339: Property 'nope3' does not exist on type 'Date'.
+a.ts(16,17): error TS2339: Property 'nope4' does not exist on type 'R'.
+  Property 'nope4' does not exist on type '"a"'.

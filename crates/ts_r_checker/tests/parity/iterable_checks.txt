@@ -1,0 +1,24 @@
+a.ts(15,17): error TS2488: Type 'never' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(16,17): error TS18047: 'nu' is possibly 'null'.
+a.ts(17,17): error TS18046: 'z' is of type 'unknown'.
+a.ts(18,7): error TS2488: Type 'never' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(19,7): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(20,7): error TS2488: Type 'number[] | null' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(21,7): error TS2488: Type '{ 0: string; 1: boolean; }' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(23,1): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(24,16): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(26,16): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(27,6): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(28,6): error TS2488: Type 'never' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(29,17): error TS2488: Type '{ [Symbol.iterator](_: number): Generator<number, void, unknown>; }' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(31,12): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(32,12): error TS2488: Type '{ [Symbol.iterator](_: number): Generator<number, void, unknown>; }' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(35,12): error TS2504: Type 'number' must have a '[Symbol.asyncIterator]()' method that returns an async iterator.
+a.ts(38,13): error TS2488: Type 'null' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(39,13): error TS2488: Type '{}' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(41,12): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(42,6): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(43,8): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(45,7): error TS2488: Type 'string | number' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(49,11): error TS2488: Type 'U' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(55,7): error TS2488: Type 'never' must have a '[Symbol.iterator]()' method that returns an iterator.

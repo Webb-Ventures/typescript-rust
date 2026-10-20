@@ -1,0 +1,20 @@
+a.ts(5,32): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(7,32): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(7,42): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+a.ts(8,51): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(9,36): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(9,51): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+a.ts(13,37): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(14,42): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(16,48): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(17,37): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(17,54): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+a.ts(18,34): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(22,42): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(23,53): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(25,37): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(27,56): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(28,56): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?

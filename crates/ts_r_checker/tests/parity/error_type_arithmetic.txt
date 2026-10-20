@@ -1,0 +1,8 @@
+a.ts(4,21): error TS2307: Cannot find module 'missing-module' or its corresponding type declarations.
+a.ts(13,3): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(14,3): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(15,3): error TS2339: Property 'foo' does not exist on type 'string'.
+a.ts(16,3): error TS2339: Property 'foo' does not exist on type 'string'.
+a.ts(18,3): error TS2339: Property 'foo' does not exist on type 'bigint'.
+a.ts(19,3): error TS2339: Property 'foo' does not exist on type 'number'.
+a.ts(20,3): error TS2339: Property 'foo' does not exist on type 'number'.

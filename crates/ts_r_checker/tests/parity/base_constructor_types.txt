@@ -1,0 +1,10 @@
+a.ts(6,18): error TS2507: Type 'undefined' is not a constructor function type.
+a.ts(8,18): error TS2507: Type '42' is not a constructor function type.
+a.ts(9,18): error TS2454: Variable 'x' is used before being assigned.
+a.ts(9,18): error TS2507: Type '{}' is not a constructor function type.
+a.ts(10,18): error TS2507: Type '() => void' is not a constructor function type.
+a.ts(14,50): error TS2507: Type 'T' is not a constructor function type.
+a.ts(23,19): error TS2304: Cannot find name 'Missing'.
+a.ts(27,19): error TS2507: Type 'unknown' is not a constructor function type.
+a.ts(29,19): error TS2507: Type 'never' is not a constructor function type.
+a.ts(32,19): error TS2507: Type '{ A: typeof A; }' is not a constructor function type.

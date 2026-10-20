@@ -1,0 +1,3 @@
+tsconfig.unterminated.json(1,36): error TS5067: Invalid value for 'jsxFactory'. 'abc}}' is not a valid identifier or qualified-name.
+
+tsconfig.unterminated.json(1,42): error TS1002: Unterminated string literal.

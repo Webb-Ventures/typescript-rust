@@ -1,0 +1,4 @@
+a.ts(14,11): error TS2322: Type 'null' is not assignable to type 'undefined'.
+a.ts(23,11): error TS2322: Type 'string' is not assignable to type 'null'.
+a.ts(27,11): error TS2322: Type 'string' is not assignable to type 'null'.
+a.ts(31,11): error TS2322: Type 'string' is not assignable to type 'null'.

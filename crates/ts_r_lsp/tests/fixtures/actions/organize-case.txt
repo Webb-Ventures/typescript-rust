@@ -1,0 +1,22 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { Bar, bar, aaa, Abc, _x, $y } from "./m";
+import { q } from "./Z";
+import { r } from "./a";
+import { s } from "../src/c";
+import { t } from "@scope/pkg";
+import { u } from "pkg";
+
+console.log(Bar, bar, aaa, Abc, _x, $y, q, r, s, t, u);
+// @file: src/m.ts
+export const Bar = 1, bar = 2, aaa = 3, Abc = 4, _x = 5, $y = 6;
+// @file: src/Z.ts
+export const q = 1;
+// @file: src/a.ts
+export const r = 1;
+// @file: src/c.ts
+export const s = 1;
+// @file: node_modules/@scope/pkg/index.d.ts
+export declare const t: number;
+// @file: node_modules/pkg/index.d.ts
+export declare const u: number;

@@ -1,0 +1,8 @@
+// @action: refactor Extract Symbol/function_scope_1
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @tsconfig: {"compilerOptions": {"strict": true, "module": "esnext", "moduleResolution": "bundler", "allowJs": true, "checkJs": true, "noEmit": true}}
+// @file: src/main.js
+export function helper(n) {
+  const s = "x";
+  return (/*[*/n + s.length/*]*/) * 2;
+}

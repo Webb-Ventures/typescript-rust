@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// fix all: Fix all expressions possibly missing 'await'
+// @file: src/main.ts
+declare function load(): Promise<{ data: string; size: number }>;
+export async function f() {
+  const r = await load();
+  return r.data + r.size;
+}

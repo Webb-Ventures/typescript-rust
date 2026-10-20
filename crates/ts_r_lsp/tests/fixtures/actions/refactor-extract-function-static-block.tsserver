@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+class C {
+  static v: number;
+  static {
+    C.v = this.newMethod();
+  }
+
+  private newMethod(): number {
+    return Math.max(1, 2);
+  }
+}

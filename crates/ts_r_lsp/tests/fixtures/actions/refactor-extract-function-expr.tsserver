@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+export function f(a: number, b: number) {
+  return newFunction(a, b);
+}
+
+function newFunction(a: number, b: number) {
+  return a * b + 1;
+}

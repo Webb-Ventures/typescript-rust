@@ -1,0 +1,4 @@
+// @action: refactor Convert export/Convert named export to default export
+// @trigger: implicit
+// @file: src/util.ts
+/*[*/export function alpha() {}/*]*/

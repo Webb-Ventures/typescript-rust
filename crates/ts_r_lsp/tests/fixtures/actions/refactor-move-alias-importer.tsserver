@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Move to a new file
+// @file: src/app.ts
+import { keep } from "@/lib/util";
+import { helper } from "./lib/helper";
+
+export const n = helper(keep);
+// @file: src/lib/helper.ts
+export function helper(n: number) {
+  return n * 2;
+}
+// @file: src/lib/util.ts
+export const keep = 1;

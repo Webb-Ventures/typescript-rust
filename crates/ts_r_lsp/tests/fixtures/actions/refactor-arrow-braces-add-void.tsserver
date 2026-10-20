@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Add braces to arrow function
+// @file: src/main.ts
+declare function log(s: string): void;
+[1, 2].forEach((v) => {
+    return log(String(v));
+});

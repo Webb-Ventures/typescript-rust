@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "noEmit": true,
+    "types": [],
+    "customConditions": [
+      "custom"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}

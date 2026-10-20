@@ -1,0 +1,76 @@
+module	${FIXTURE}/src/cjs.cts	require	cond	${FIXTURE}/node_modules/cond/types/r.d.cts	cond/types/r.d.cts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/custom	${FIXTURE}/node_modules/cond/custom.d.ts	cond/custom.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/node	${FIXTURE}/node_modules/cond/node.d.ts	cond/node.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/browser	${FIXTURE}/node_modules/cond/default.d.ts	cond/default.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/order	${FIXTURE}/node_modules/cond/default.d.ts	cond/default.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/fallback	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	cond/array	${FIXTURE}/node_modules/cond/i.d.ts	cond/i.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/nested	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	cond/versioned	${FIXTURE}/node_modules/cond/v5.d.ts	cond/v5.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/null	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	cond/null-cond	${FIXTURE}/node_modules/cond/default.d.ts	cond/default.d.ts@1.0.0
+module	${FIXTURE}/src/cjs.cts	require	cond/missing	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	patterns/a	${FIXTURE}/node_modules/patterns/dist/a.d.ts	patterns/dist/a.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/b/c	${FIXTURE}/node_modules/patterns/dist/b/c.d.ts	patterns/dist/b/c.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/features/x	${FIXTURE}/node_modules/patterns/dist/feat/x.d.ts	patterns/dist/feat/x.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/features/private/y	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	patterns/star/mid/end	${FIXTURE}/node_modules/patterns/dist/s/mid/e.d.ts	patterns/dist/s/mid/e.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/exact	${FIXTURE}/node_modules/patterns/dist/exact.d.ts	patterns/dist/exact.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/ext/z.js	${FIXTURE}/node_modules/patterns/dist/ext/z.d.ts	patterns/dist/ext/z.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/dir/q.js	${FIXTURE}/node_modules/patterns/dist/dir/q.d.ts	patterns/dist/dir/q.d.ts@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns/package.json	${FIXTURE}/node_modules/patterns/package.json	patterns/package.json@2.0.0
+module	${FIXTURE}/src/cjs.cts	require	patterns	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	sugar	${FIXTURE}/node_modules/sugar/index.d.ts	
+module	${FIXTURE}/src/cjs.cts	require	sugar/index.js	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	sugar-cond	${FIXTURE}/node_modules/sugar-cond/cjs.d.cts	
+module	${FIXTURE}/src/cjs.cts	require	no-root	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	no-root/sub	${FIXTURE}/node_modules/no-root/sub.d.ts	
+module	${FIXTURE}/src/cjs.cts	require	no-root/other	NOT RESOLVED	
+module	${FIXTURE}/src/cjs.cts	require	js-target	${FIXTURE}/node_modules/js-target/lib/index.d.ts	
+module	${FIXTURE}/src/cjs.cts	require	js-target/mjs	${FIXTURE}/node_modules/js-target/lib/m.d.mts	
+module	${FIXTURE}/src/cjs.cts	require	js-target/cjs	${FIXTURE}/node_modules/js-target/lib/c.d.cts	
+module	${FIXTURE}/src/cjs.cts	require	js-target/direct-dts	${FIXTURE}/node_modules/js-target/lib/direct.d.ts	
+module	${FIXTURE}/src/cjs.cts	require	js-target/ts-src	${FIXTURE}/node_modules/js-target/src/index.ts	
+module	${FIXTURE}/src/cjs.cts	require	js-target/jsonfile	${FIXTURE}/node_modules/js-target/data.json	
+module	${FIXTURE}/src/cjs.cts	require	js-only	${FIXTURE}/node_modules/js-only/index.js	js-only/index.js@0.1.0
+module	${FIXTURE}/src/cjs.cts	require	@scope/pkg	${FIXTURE}/node_modules/@scope/pkg/index.d.ts	@scope/pkg/index.d.ts@3.0.0
+module	${FIXTURE}/src/cjs.cts	require	@scope/pkg/sub/x	${FIXTURE}/node_modules/@scope/pkg/sub/x.d.ts	@scope/pkg/sub/x.d.ts@3.0.0
+module	${FIXTURE}/src/cjs.cts	require	@scope/pkg/missing	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	cond	${FIXTURE}/node_modules/cond/types/i.d.mts	cond/types/i.d.mts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/custom	${FIXTURE}/node_modules/cond/custom.d.ts	cond/custom.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/node	${FIXTURE}/node_modules/cond/node.d.ts	cond/node.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/browser	${FIXTURE}/node_modules/cond/default.d.ts	cond/default.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/order	${FIXTURE}/node_modules/cond/default.d.ts	cond/default.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/fallback	${FIXTURE}/node_modules/cond/i.d.ts	cond/i.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/array	${FIXTURE}/node_modules/cond/i.d.ts	cond/i.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/nested	${FIXTURE}/node_modules/cond/nested.d.ts	cond/nested.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/versioned	${FIXTURE}/node_modules/cond/v5.d.ts	cond/v5.d.ts@1.0.0
+module	${FIXTURE}/src/esm.ts	import	cond/null	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	cond/null-cond	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	cond/missing	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	patterns/a	${FIXTURE}/node_modules/patterns/dist/a.d.ts	patterns/dist/a.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/b/c	${FIXTURE}/node_modules/patterns/dist/b/c.d.ts	patterns/dist/b/c.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/features/x	${FIXTURE}/node_modules/patterns/dist/feat/x.d.ts	patterns/dist/feat/x.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/features/private/y	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	patterns/star/mid/end	${FIXTURE}/node_modules/patterns/dist/s/mid/e.d.ts	patterns/dist/s/mid/e.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/exact	${FIXTURE}/node_modules/patterns/dist/exact.d.ts	patterns/dist/exact.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/ext/z.js	${FIXTURE}/node_modules/patterns/dist/ext/z.d.ts	patterns/dist/ext/z.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/dir/q.js	${FIXTURE}/node_modules/patterns/dist/dir/q.d.ts	patterns/dist/dir/q.d.ts@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns/package.json	${FIXTURE}/node_modules/patterns/package.json	patterns/package.json@2.0.0
+module	${FIXTURE}/src/esm.ts	import	patterns	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	sugar	${FIXTURE}/node_modules/sugar/index.d.ts	
+module	${FIXTURE}/src/esm.ts	import	sugar/index.js	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	sugar-cond	${FIXTURE}/node_modules/sugar-cond/esm.d.ts	
+module	${FIXTURE}/src/esm.ts	import	no-root	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	no-root/sub	${FIXTURE}/node_modules/no-root/sub.d.ts	
+module	${FIXTURE}/src/esm.ts	import	no-root/other	NOT RESOLVED	
+module	${FIXTURE}/src/esm.ts	import	js-target	${FIXTURE}/node_modules/js-target/lib/index.d.ts	
+module	${FIXTURE}/src/esm.ts	import	js-target/mjs	${FIXTURE}/node_modules/js-target/lib/m.d.mts	
+module	${FIXTURE}/src/esm.ts	import	js-target/cjs	${FIXTURE}/node_modules/js-target/lib/c.d.cts	
+module	${FIXTURE}/src/esm.ts	import	js-target/direct-dts	${FIXTURE}/node_modules/js-target/lib/direct.d.ts	
+module	${FIXTURE}/src/esm.ts	import	js-target/ts-src	${FIXTURE}/node_modules/js-target/src/index.ts	
+module	${FIXTURE}/src/esm.ts	import	js-target/jsonfile	${FIXTURE}/node_modules/js-target/data.json	
+module	${FIXTURE}/src/esm.ts	import	js-only	${FIXTURE}/node_modules/js-only/index.js	js-only/index.js@0.1.0
+module	${FIXTURE}/src/esm.ts	import	@scope/pkg	${FIXTURE}/node_modules/@scope/pkg/index.d.ts	@scope/pkg/index.d.ts@3.0.0
+module	${FIXTURE}/src/esm.ts	import	@scope/pkg/sub/x	${FIXTURE}/node_modules/@scope/pkg/sub/x.d.ts	@scope/pkg/sub/x.d.ts@3.0.0
+module	${FIXTURE}/src/esm.ts	import	@scope/pkg/missing	NOT RESOLVED	

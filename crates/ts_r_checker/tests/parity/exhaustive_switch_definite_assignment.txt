@@ -1,0 +1,6 @@
+a.ts(39,10): error TS2454: Variable 'r' is used before being assigned.
+a.ts(41,86): error TS2339: Property 'foo' does not exist on type 'never'.
+a.ts(42,97): error TS2339: Property 'foo' does not exist on type 'string'.
+a.ts(43,97): error TS2339: Property 'foo' does not exist on type 'never'.
+a.ts(43,104): error TS2339: Property 'foo' does not exist on type '{ k: "a" | "b"; }'.
+a.ts(44,135): error TS2339: Property 'foo' does not exist on type 'string'.

@@ -1,0 +1,11 @@
+a.ts(10,26): error TS2339: Property 'inParam' does not exist on type '{ (): void; a: string | number; b: boolean; inBlock: number[]; handler: (x: any) => any; }'.
+a.ts(11,9): error TS2339: Property 'inBody' does not exist on type '{ (): void; a: string | number; b: boolean; inBlock: number[]; handler: (x: any) => any; }'.
+a.ts(14,16): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(15,7): error TS2322: Type '{ (): void; a: string | number; b: boolean; inBlock: number[]; handler: (x: any) => any; }' is not assignable to type 'number'.
+a.ts(16,5): error TS2339: Property 'later' does not exist on type '{ (): void; a: string | number; b: boolean; inBlock: number[]; handler: (x: any) => any; }'.
+a.ts(17,5): error TS2339: Property 'inParam' does not exist on type '{ (): void; a: string | number; b: boolean; inBlock: number[]; handler: (x: any) => any; }'.
+a.ts(23,7): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(26,10): error TS2339: Property 'p' does not exist on type '() => number'.
+a.ts(31,11): error TS2322: Type '{ (): void; z: number; }' is not assignable to type 'number'.
+a.ts(39,8): error TS2540: Cannot assign to 'declared' because it is a read-only property.
+a.ts(41,7): error TS2322: Type 'string' is not assignable to type 'number'.

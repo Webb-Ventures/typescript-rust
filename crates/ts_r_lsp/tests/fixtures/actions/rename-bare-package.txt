@@ -1,0 +1,15 @@
+// @action: rename packages/kit/src/util.ts packages/kit/src/helpers/util.ts
+// @symlinks: node_modules/@app/kit -> packages/kit
+// @file: tsconfig.json
+{"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true}, "include": ["apps", "packages"]}
+// @file: apps/web/main.ts
+import { helper } from "@app/kit/src/util";
+import { kit } from "@app/kit";
+
+export const n = helper(1) + kit;
+// @file: packages/kit/package.json
+{"name": "@app/kit", "version": "1.0.0", "types": "./src/index.ts"}
+// @file: packages/kit/src/index.ts
+export const kit = 1;
+// @file: packages/kit/src/util.ts
+export function helper(x: number): number { return x; }

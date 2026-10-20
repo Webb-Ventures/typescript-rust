@@ -1,0 +1,11 @@
+a.ts(11,5): error TS2612: Property 'b' will overwrite the base property in 'Base'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(12,5): error TS2612: Property 'c' will overwrite the base property in 'Base'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(13,5): error TS2610: 'g' is defined as an accessor in class 'Base', but is overridden here in 'Derived' as an instance property.
+a.ts(30,28): error TS2564: Property 'a' has no initializer and is not definitely assigned in the constructor.
+a.ts(30,28): error TS2612: Property 'a' will overwrite the base property in 'MidB'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(32,29): error TS2564: Property 'q' has no initializer and is not definitely assigned in the constructor.
+a.ts(32,29): error TS2612: Property 'q' will overwrite the base property in 'BE'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(34,27): error TS2564: Property 'r' has no initializer and is not definitely assigned in the constructor.
+a.ts(34,27): error TS2612: Property 'r' will overwrite the base property in 'PP'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(36,29): error TS2564: Property 'v' has no initializer and is not definitely assigned in the constructor.
+a.ts(36,29): error TS2612: Property 'v' will overwrite the base property in 'G<string>'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.

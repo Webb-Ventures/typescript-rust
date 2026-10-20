@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Extract to constant in enclosing scope
+// @file: src/main.ts
+export function g(xs: number[]) {
+  const newLocal = x * 2;
+  return xs.map((x) => newLocal);
+}

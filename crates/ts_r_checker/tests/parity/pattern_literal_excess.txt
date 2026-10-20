@@ -1,0 +1,13 @@
+a.ts(5,7): error TS2339: Property 'y1' does not exist on type '{ x1: number; }'.
+a.ts(5,16): error TS2353: Object literal may only specify known properties, and 'x1' does not exist in type '{ y1: any; }'.
+a.ts(7,26): error TS2353: Object literal may only specify known properties, and 'b6' does not exist in type '{ a6: any; }'.
+a.ts(8,40): error TS2353: Object literal may only specify known properties, and 'b7' does not exist in type '{ a7: any; }'.
+a.ts(9,37): error TS2353: Object literal may only specify known properties, and 'b8' does not exist in type '{ a8: any; }'.
+a.ts(10,24): error TS2353: Object literal may only specify known properties, and 'z9' does not exist in type '{ y9: any; }'.
+a.ts(11,25): error TS2353: Object literal may only specify known properties, and 'z10' does not exist in type '{ y10: any; }'.
+a.ts(12,34): error TS2353: Object literal may only specify known properties, and 'b11' does not exist in type '{ a11: any; }'.
+a.ts(13,30): error TS2353: Object literal may only specify known properties, and 'b12' does not exist in type '{ a12: any; }'.
+a.ts(14,37): error TS2353: Object literal may only specify known properties, and 'z13' does not exist in type '{ y13?: number | undefined; }'.
+a.ts(19,8): error TS2339: Property 'prop2' does not exist on type '{ prop: string; }'.
+a.ts(19,37): error TS2353: Object literal may only specify known properties, and 'prop' does not exist in type '{ prop2: any; }'.
+a.ts(21,28): error TS2353: Object literal may only specify known properties, and '4' does not exist in type '{ 3: any; }'.

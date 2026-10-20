@@ -1,0 +1,6 @@
+a.ts(17,7): error TS2322: Type '{ [k: string]: string; }' is not assignable to type 'number'.
+a.ts(32,7): error TS2322: Type '[1, 2]' is not assignable to type 'number'.
+a.ts(33,7): error TS2322: Type '["a"]' is not assignable to type 'number'.
+a.ts(35,4): error TS2339: Property 'push' does not exist on type 'readonly [1]'.
+a.ts(48,7): error TS2322: Type '() => void' is not assignable to type '() => number'.
+  Type 'void' is not assignable to type 'number'.

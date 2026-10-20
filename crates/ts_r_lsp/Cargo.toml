@@ -1,0 +1,46 @@
+[package]
+name = "ts_r_lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ts-r-lsp: shared, memory-budgeted language server daemon (L1: your project's TypeScript as the type backend)"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ts-r-lsp"
+path = "src/main.rs"
+
+[dependencies]
+ts_r_cache = { path = "../ts_r_cache" }
+ts_r_lint = { path = "../ts_r_lint" }
+ts_r_ast = { path = "../ts_r_ast" }
+ts_r_binder = { path = "../ts_r_binder" }
+ts_r_checker = { path = "../ts_r_checker" }
+ts_r_config = { path = "../ts_r_config" }
+ts_r_decls = { path = "../ts_r_decls" }
+ts_r_diagnostics = { path = "../ts_r_diagnostics" }
+ts_r_history = { path = "../ts_r_history" }
+ts_r_sound = { path = "../ts_r_sound" }
+ts_r_guard = { path = "../ts_r_guard" }
+ts_r_resolver = { path = "../ts_r_resolver" }
+ts_r_span = { path = "../ts_r_span" }
+ts_r_types = { path = "../ts_r_types" }
+ts_r_parser = { path = "../ts_r_parser" }
+serde_json = "1"
+blake3 = "1.8"
+# The ts-r backend watches its projects' inputs (tsr/watch.rs); same version and features as
+# ts_r_hmr, ts_r_build and ts_r_run.
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+
+[target.'cfg(windows)'.dependencies]
+interprocess = "2"
+
+[dev-dependencies]
+ts_r_parser = { path = "../ts_r_parser" }
+ts_r_testing = { path = "../ts_r_testing" }

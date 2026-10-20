@@ -1,0 +1,12 @@
+a.ts(1,11): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+a.ts(2,5): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+a.ts(3,13): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+a.ts(4,10): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+a.ts(7,18): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+a.ts(8,23): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+c.cts(1,11): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+c.cts(2,18): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+d.js(1,11): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+d.js(2,18): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+e.ts(3,18): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.
+e.ts(4,18): error TS1309: The current file is a CommonJS module and cannot use 'await' at the top level.

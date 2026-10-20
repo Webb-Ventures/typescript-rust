@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to template string
+// @file: src/main.ts
+export function greet(name: string, count: number) {
+  return `Hello, ${name}! You have ${count} new messages.`;
+}

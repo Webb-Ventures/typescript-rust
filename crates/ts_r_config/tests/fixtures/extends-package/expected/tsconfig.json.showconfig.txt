@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "outDir": "./node_modules/cfgpkg/configs/out-base",
+        "target": "es2017",
+        "module": "es6",
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./shared-cfg/inc/x.ts",
+        "./src/a.ts",
+        "./sub/deep/b.ts"
+    ],
+    "exclude": [
+        "${FIXTURE}/node_modules/cfgpkg/configs/out-base"
+    ]
+}

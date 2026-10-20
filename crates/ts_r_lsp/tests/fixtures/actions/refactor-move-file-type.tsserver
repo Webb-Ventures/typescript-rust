@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Move to file
+// @file: src/main.ts
+import { Point } from "./types";
+
+export const origin: Point = { x: 0, y: 0 };
+// @file: src/types.ts
+export type Id = string;
+export interface Point {
+  x: number;
+  y: number;
+}

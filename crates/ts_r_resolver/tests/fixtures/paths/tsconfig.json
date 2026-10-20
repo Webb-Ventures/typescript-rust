@@ -1,0 +1,43 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": [],
+    "paths": {
+      "@app/*": [
+        "./src/app/*",
+        "./src/fallback/*"
+      ],
+      "@app/special": [
+        "./src/special.ts"
+      ],
+      "@app/sp*": [
+        "./src/sp-prefix/*"
+      ],
+      "exact": [
+        "./src/exact-target"
+      ],
+      "*": [
+        "./typings/*",
+        "./node_modules/*"
+      ],
+      "pkg-alias": [
+        "pkg"
+      ],
+      "@ext/*": [
+        "./src/ext/*.js"
+      ],
+      "@dir/*": [
+        "./src/dirs/*"
+      ],
+      "@missing/*": [
+        "./nowhere/*"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}

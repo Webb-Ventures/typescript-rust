@@ -1,0 +1,3 @@
+// @action: refactor Convert export/Convert named export to default export
+// @file: src/util.ts
+/*[*/export const alpha: number = 1;/*]*/

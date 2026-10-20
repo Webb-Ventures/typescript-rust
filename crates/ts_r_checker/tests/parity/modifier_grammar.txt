@@ -1,0 +1,66 @@
+a.ts(4,13): error TS1029: 'export' modifier must precede 'declare' modifier.
+a.ts(5,12): error TS1031: 'export' modifier cannot appear on class elements of this kind.
+a.ts(6,11): error TS1029: 'export' modifier must precede 'async' modifier.
+a.ts(7,12): error TS1031: 'export' modifier cannot appear on class elements of this kind.
+a.ts(8,5): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.ts(9,11): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.ts(10,11): error TS1029: 'static' modifier must precede 'async' modifier.
+a.ts(11,12): error TS1042: 'async' modifier cannot be used here.
+a.ts(12,11): error TS1040: 'async' modifier cannot be used in an ambient context.
+a.ts(13,13): error TS1040: 'async' modifier cannot be used in an ambient context.
+a.ts(14,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(15,13): error TS1089: 'async' modifier cannot appear on a constructor declaration.
+a.ts(16,11): error TS1029: 'private' modifier must precede 'async' modifier.
+a.ts(17,14): error TS1030: 'accessor' modifier already seen.
+a.ts(18,14): error TS1029: 'static' modifier must precede 'readonly' modifier.
+a.ts(19,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(20,5): error TS18010: An accessibility modifier cannot be used with a private identifier.
+a.ts(21,14): error TS1029: 'static' modifier must precede 'readonly' modifier.
+a.ts(22,5): error TS1071: 'async' modifier cannot appear on an index signature.
+a.ts(23,15): error TS1276: An 'accessor' property cannot be declared optional.
+a.ts(28,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(29,5): error TS1040: 'async' modifier cannot be used in an ambient context.
+a.ts(32,5): error TS1040: 'async' modifier cannot be used in an ambient context.
+a.ts(34,9): error TS1038: A 'declare' modifier cannot be used in an already ambient context.
+a.ts(38,5): error TS1038: A 'declare' modifier cannot be used in an already ambient context.
+a.ts(40,7): error TS1040: 'async' modifier cannot be used in an ambient context.
+a.ts(41,9): error TS1029: 'export' modifier must precede 'declare' modifier.
+a.ts(42,1): error TS1044: 'static' modifier cannot appear on a module or namespace element.
+a.ts(43,10): error TS1029: 'export' modifier must precede 'abstract' modifier.
+a.ts(44,1): error TS1042: 'async' modifier cannot be used here.
+a.ts(45,1): error TS1042: 'async' modifier cannot be used here.
+a.ts(46,1): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.ts(47,1): error TS1242: 'abstract' modifier can only appear on a class, method, or property declaration.
+a.ts(48,1): error TS1044: 'public' modifier cannot appear on a module or namespace element.
+a.ts(49,1): error TS1275: 'accessor' modifier can only appear on a property declaration.
+a.ts(51,17): error TS1090: 'static' modifier cannot appear on a parameter.
+a.ts(51,35): error TS1090: 'export' modifier cannot appear on a parameter.
+a.ts(51,62): error TS1030: 'readonly' modifier already seen.
+a.ts(51,89): error TS1028: Accessibility modifier already seen.
+a.ts(51,108): error TS1090: 'async' modifier cannot appear on a parameter.
+a.ts(51,125): error TS1242: 'abstract' modifier can only appear on a class, method, or property declaration.
+a.ts(51,145): error TS1275: 'accessor' modifier can only appear on a property declaration.
+a.ts(54,5): error TS1024: 'readonly' modifier can only appear on a property declaration or index signature.
+a.ts(55,5): error TS1070: 'accessor' modifier cannot appear on a type member.
+a.ts(56,14): error TS1030: 'readonly' modifier already seen.
+a.ts(57,5): error TS1070: 'public' modifier cannot appear on a type member.
+a.ts(60,5): error TS1071: 'static' modifier cannot appear on an index signature.
+a.ts(63,5): error TS1184: Modifiers cannot appear here.
+a.ts(64,5): error TS1184: Modifiers cannot appear here.
+a.ts(66,5): error TS1184: Modifiers cannot appear here.
+a.ts(67,5): error TS1184: Modifiers cannot appear here.
+a.ts(69,11): error TS1029: 'static' modifier must precede 'async' modifier.
+a.ts(72,5): error TS1044: 'private' modifier cannot appear on a module or namespace element.
+a.ts(76,14): error TS1243: 'async' modifier cannot be used with 'abstract' modifier.
+a.ts(77,12): error TS1243: 'static' modifier cannot be used with 'abstract' modifier.
+a.ts(78,5): error TS18019: 'abstract' modifier cannot be used with a private identifier.
+a.ts(79,14): error TS1029: 'abstract' modifier must precede 'accessor' modifier.
+a.ts(82,5): error TS1244: Abstract methods can only appear within an abstract class.
+a.ts(83,5): error TS1242: 'abstract' modifier can only appear on a class, method, or property declaration.
+a.ts(86,5): error TS1184: Modifiers cannot appear here.
+a.ts(88,18): error TS1030: 'async' modifier already seen.
+a.ts(88,32): error TS1042: 'public' modifier cannot be used here.
+a.ts(88,62): error TS1042: 'static' modifier cannot be used here.
+a.ts(88,62): error TS1184: Modifiers cannot appear here.
+a.ts(89,17): error TS1030: 'in' modifier already seen.
+a.ts(90,14): error TS1029: 'in' modifier must precede 'out' modifier.

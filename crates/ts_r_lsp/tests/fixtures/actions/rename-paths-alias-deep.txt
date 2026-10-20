@@ -1,0 +1,13 @@
+// @action: rename src/lib/util.ts src/util2.ts
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "paths": {"@lib/*": ["./src/lib/*"], "~/*": ["./src/*"]}}}
+// @file: src/main.ts
+import { helper } from "@lib/util";
+
+export const n = helper(1);
+// @file: src/a/b/c.ts
+import { helper } from "@lib/util";
+import { n } from "~/main";
+
+export const c = helper(n);
+// @file: src/lib/util.ts
+export function helper(x: number): number { return x; }

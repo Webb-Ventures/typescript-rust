@@ -1,0 +1,68 @@
+a.ts(7,43): error TS2345: Argument of type 'B' is not assignable to parameter of type 'never'.
+a.ts(7,54): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(8,47): error TS2345: Argument of type 'B' is not assignable to parameter of type 'never'.
+a.ts(8,58): error TS2345: Argument of type 'A | C' is not assignable to parameter of type 'never'.
+  Type 'A' is not assignable to type 'never'.
+a.ts(9,43): error TS2345: Argument of type 'D' is not assignable to parameter of type 'never'.
+a.ts(9,54): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(10,43): error TS2345: Argument of type 'D' is not assignable to parameter of type 'never'.
+a.ts(12,47): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(12,58): error TS2345: Argument of type 'C | I' is not assignable to parameter of type 'never'.
+  Type 'C' is not assignable to type 'never'.
+a.ts(13,43): error TS2345: Argument of type 'C & A' is not assignable to parameter of type 'never'.
+a.ts(13,54): error TS2345: Argument of type 'C' is not assignable to parameter of type 'never'.
+a.ts(14,49): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(14,60): error TS2345: Argument of type 'object' is not assignable to parameter of type 'never'.
+a.ts(15,53): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(15,64): error TS2345: Argument of type 'C | Object' is not assignable to parameter of type 'never'.
+  Type 'C' is not assignable to type 'never'.
+a.ts(16,69): error TS2345: Argument of type 'Date' is not assignable to parameter of type 'never'.
+a.ts(16,80): error TS2345: Argument of type 'string | number' is not assignable to parameter of type 'never'.
+  Type 'string' is not assignable to type 'never'.
+a.ts(17,30): error TS2358: The left-hand side of an 'instanceof' expression must be of type 'any', an object type or a type parameter.
+a.ts(17,53): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(17,64): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(18,64): error TS2345: Argument of type '{ a: 1; }' is not assignable to parameter of type 'never'.
+a.ts(18,75): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(19,60): error TS2345: Argument of type 'Date' is not assignable to parameter of type 'never'.
+a.ts(19,71): error TS2345: Argument of type 'string | object' is not assignable to parameter of type 'never'.
+  Type 'string' is not assignable to type 'never'.
+a.ts(20,52): error TS2345: Argument of type 'C' is not assignable to parameter of type 'never'.
+a.ts(20,63): error TS2345: Argument of type 'number' is not assignable to parameter of type 'never'.
+a.ts(21,66): error TS2345: Argument of type 'Function' is not assignable to parameter of type 'never'.
+a.ts(21,77): error TS2345: Argument of type 'object' is not assignable to parameter of type 'never'.
+a.ts(23,52): error TS2345: Argument of type 'A | C' is not assignable to parameter of type 'never'.
+  Type 'A' is not assignable to type 'never'.
+a.ts(23,63): error TS2345: Argument of type 'A | B | C' is not assignable to parameter of type 'never'.
+  Type 'A' is not assignable to type 'never'.
+a.ts(24,64): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(24,75): error TS2345: Argument of type 'B | C' is not assignable to parameter of type 'never'.
+  Type 'B' is not assignable to type 'never'.
+a.ts(25,52): error TS2345: Argument of type 'C | D' is not assignable to parameter of type 'never'.
+  Type 'C' is not assignable to type 'never'.
+a.ts(25,63): error TS2345: Argument of type 'B | C | D' is not assignable to parameter of type 'never'.
+  Type 'B' is not assignable to type 'never'.
+a.ts(26,46): error TS2345: Argument of type 'T & A' is not assignable to parameter of type 'never'.
+a.ts(26,57): error TS2345: Argument of type 'T' is not assignable to parameter of type 'never'.
+a.ts(27,50): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(27,61): error TS2345: Argument of type 'T' is not assignable to parameter of type 'never'.
+a.ts(28,45): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(28,56): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+a.ts(29,49): error TS2345: Argument of type 'A' is not assignable to parameter of type 'never'.
+a.ts(29,60): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'never'.
+a.ts(30,58): error TS2345: Argument of type 'A[]' is not assignable to parameter of type 'never'.
+a.ts(30,69): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(31,72): error TS2345: Argument of type 'readonly number[]' is not assignable to parameter of type 'never'.
+a.ts(31,83): error TS2345: Argument of type 'number' is not assignable to parameter of type 'never'.
+a.ts(32,71): error TS2345: Argument of type '[number, string]' is not assignable to parameter of type 'never'.
+a.ts(32,82): error TS2345: Argument of type 'number' is not assignable to parameter of type 'never'.
+a.ts(37,49): error TS2345: Argument of type 'G1' is not assignable to parameter of type 'never'.
+a.ts(37,60): error TS2345: Argument of type 'G2' is not assignable to parameter of type 'never'.
+a.ts(38,50): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+a.ts(38,83): error TS2345: Argument of type 'any' is not assignable to parameter of type 'never'.
+a.ts(40,72): error TS2345: Argument of type 'T' is not assignable to parameter of type 'never'.
+  Type 'E' is not assignable to type 'never'.
+a.ts(40,83): error TS2345: Argument of type '{ x: string; }' is not assignable to parameter of type 'never'.
+a.ts(41,65): error TS2345: Argument of type 'T' is not assignable to parameter of type 'never'.
+  Type 'A' is not assignable to type 'never'.
+a.ts(41,76): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.

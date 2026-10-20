@@ -1,0 +1,2 @@
+cjs.ts(5,1): error TS2304: Cannot find name 'fromImport'.
+esm.mts(3,1): error TS2304: Cannot find name 'otherImport'.

@@ -1,0 +1,11 @@
+// fix all: Implement all unimplemented interfaces
+// @file: src/main.ts
+interface A { a: string; shared: number }
+interface B { b: string; shared: number }
+
+export class C implements A, B {
+  shared: number;
+  b: string;
+  a: string;
+  own = 1;
+}

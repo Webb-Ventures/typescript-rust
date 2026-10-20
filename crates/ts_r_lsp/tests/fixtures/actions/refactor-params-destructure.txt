@@ -1,0 +1,4 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function /*|*/params(a: number, b: string, c: boolean) { return a + b + c; }
+params(1, 'x', true);

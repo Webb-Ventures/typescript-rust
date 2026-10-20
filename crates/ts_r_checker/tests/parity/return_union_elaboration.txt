@@ -1,0 +1,24 @@
+a.ts(10,3): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(13,3): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(16,16): error TS2322: Type '1' is not assignable to type '3'.
+a.ts(16,21): error TS2322: Type '2' is not assignable to type '3'.
+a.ts(19,41): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(21,73): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(26,5): error TS2322: Type '{ error: { code: string; }; }' is not assignable to type 'T | Offline'.
+  Types of property 'error' are incompatible.
+    Property 'issues' is missing in type '{ code: string; }' but required in type '{ code: string; issues: string[]; }'.
+a.ts(30,12): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(33,12): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(36,3): error TS2322: Type '{ a: string; }' is not assignable to type 'T | A'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(38,63): error TS2741: Property 'b' is missing in type '{ a: number; }' but required in type '{ a: number; b: number; }'.
+a.ts(41,3): error TS2322: Type '{ a: string; }' is not assignable to type 'T | A'.
+  Type '{ a: string; }' is not assignable to type 'A'.
+    Types of property 'a' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(51,3): error TS2559: Type 'MyObjA' has no properties in common with type 'ObjA'.
+a.ts(53,3): error TS2741: Property 'y' is missing in type 'MyObjA' but required in type '{ y: string; }'.
+a.ts(55,3): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+a.ts(57,4): error TS2741: Property 'y' is missing in type 'MyObjA' but required in type '{ y: string; }'.
+a.ts(60,3): error TS2741: Property 'y' is missing in type 'MyObjA' but required in type '{ y: string; }'.

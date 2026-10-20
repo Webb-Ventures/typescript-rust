@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Extract to function in global scope
+// @file: src/main.ts
+const x = newFunction();
+console.log(x);
+
+function newFunction() {
+  return 1 + 2;
+}

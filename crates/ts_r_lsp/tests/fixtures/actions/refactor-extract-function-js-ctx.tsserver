@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.js
+/** @type {(a: number) => string} */
+export const f = (a) => newFunction(a);
+
+function newFunction(a) {
+  return String(a);
+}

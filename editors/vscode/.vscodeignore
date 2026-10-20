@@ -1,0 +1,5 @@
+node_modules/**
+test/**
+jsconfig.json
+AGENTS.md
+bench/**

@@ -1,0 +1,12 @@
+// @action: fix 2304 Add import from "./lib/util.js"
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "nodenext", "noEmit": true}}
+// @file: src/main.ts
+import { other } from './other.js'
+
+export const n = /*|*/helper(other)
+// @file: src/lib/util.ts
+export function helper(x: number): number { return x; }
+// @file: src/other.ts
+export const other = 1;
+// @file: package.json
+{"type": "module"}

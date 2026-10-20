@@ -1,0 +1,4 @@
+// @action: refactor Convert overload list to single signature/Convert overload list to single signature
+// @file: src/main.ts
+declare function /*|*/d(a: string): void;
+declare function d(a: number, b?: number): string;

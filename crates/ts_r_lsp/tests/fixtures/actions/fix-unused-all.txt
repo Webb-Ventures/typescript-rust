@@ -1,0 +1,17 @@
+// @action: fixAll 6133 Remove unused declaration for: 'x'
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "noUnusedLocals": true, "noUnusedParameters": true}}
+// @file: src/main.ts
+import { a, b } from "./a";
+import { c } from "./c";
+
+function helper() {}
+
+export function f(p: number) {
+  const /*|*/x = 1;
+  let y = 2;
+  return a;
+}
+// @file: src/a.ts
+export const a = 1, b = 2;
+// @file: src/c.ts
+export const c = 1;

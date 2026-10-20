@@ -1,0 +1,9 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export function f(n: number) {
+    switch (n) {
+        case 1:
+            let x: /*[*/[number, string]/*]*/ = null!;
+            return x;
+    }
+}

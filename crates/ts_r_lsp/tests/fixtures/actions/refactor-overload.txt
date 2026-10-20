@@ -1,0 +1,5 @@
+// @action: refactor Convert overload list to single signature/Convert overload list to single signature
+// @file: src/main.ts
+export function /*|*/over(a: string): string;
+export function over(a: number): number;
+export function over(a: any) { return a; }

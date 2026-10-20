@@ -1,0 +1,6 @@
+// @action: refactor Extract Symbol/function_scope_0
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+/*[*/const a = 1;
+const b = a + 1;/*]*/
+export const c = a + b;

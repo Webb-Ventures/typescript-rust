@@ -1,0 +1,48 @@
+script
+symbols:
+  #0 __file VALUE_MODULE|MODULE_FILE @[1:1]
+  #1 A CLASS (BLOCK_SCOPED) @[2:1]
+      members {#p=#8, __constructor=#16, dupe=#12, m=#9, param=#17, x=#2, y=#4}
+      exports {prototype=#14, x=#3}
+  #2 x PROPERTY @[3:5] parent=#1
+  #3 x PROPERTY (STATIC) @[4:5] parent=#1
+  #4 y GET_ACCESSOR|SET_ACCESSOR @[5:5 6:5] parent=#1
+  #5 __function FUNCTION @[5:10]
+  #6 __function FUNCTION @[6:10]
+  #7 v FUNCTION_SCOPED_VARIABLE|PARAMETER @[6:11]
+  #8 #p PROPERTY (PRIVATE_NAME) @[7:5] parent=#1
+  #9 m METHOD @[8:5 9:5] parent=#1
+  #10 __function FUNCTION @[8:6]
+  #11 __function FUNCTION @[9:6]
+  #12 dupe PROPERTY @[10:5] parent=#1
+  #13 dupe PROPERTY (DETACHED) @[11:5] parent=#1
+  #14 prototype METHOD (STATIC) @[12:5] parent=#1
+  #15 __function FUNCTION @[12:21]
+  #16 __constructor CONSTRUCTOR @[13:5] parent=#1
+  #17 param PROPERTY (READONLY) @[13:17] parent=#1
+  #18 __function FUNCTION @[13:16]
+  #19 param FUNCTION_SCOPED_VARIABLE|PARAMETER @[13:17]
+  #20 Named CLASS (BLOCK_SCOPED) @[15:14]
+      members {self=#21}
+  #21 self PROPERTY @[15:28] parent=#20
+  #22 Expr BLOCK_SCOPED_VARIABLE (BLOCK_SCOPED) @[15:7]
+  #23 B CLASS (ABSTRACT|BLOCK_SCOPED) @[16:1]
+      members {z=#24}
+  #24 z PROPERTY (ABSTRACT) @[16:20] parent=#23
+scopes:
+  s0 File @1:1 sym=#0 {A=#1, B=#23, Expr=#22}
+  s1 Class @2:1 in s0 sym=#1
+  s2 Function @5:10 in s1
+  s3 Function @6:10 in s1 {v=#7}
+  s4 Function @8:6 in s1
+  s5 Function @9:6 in s1
+  s6 Function @12:21 in s1
+  s7 Function @13:16 in s1 {param=#19}
+  s8 ExprName @15:14 in s0 {Named=#20}
+  s9 Class @15:14 in s8 sym=#20
+  s10 Class @16:1 in s0 sym=#23
+refs: Named=15:35#20
+diagnostics:
+  10:5 TS2300: Duplicate identifier 'dupe'.
+  11:5 TS2300: Duplicate identifier 'dupe'.
+  12:12 TS2300: Duplicate identifier 'prototype'.

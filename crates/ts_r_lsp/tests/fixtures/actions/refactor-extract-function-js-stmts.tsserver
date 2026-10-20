@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.js
+export function helper(n) {
+  let x = newFunction(n);
+  return x;
+}
+
+function newFunction(n) {
+  let x = n + 1;
+  x *= 2;
+  return x;
+}

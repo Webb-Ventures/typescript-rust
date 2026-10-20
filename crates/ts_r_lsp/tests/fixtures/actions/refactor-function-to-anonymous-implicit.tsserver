@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to anonymous function
+// @file: src/main.ts
+export const f = function(x: number) {
+    return x + 1;
+};

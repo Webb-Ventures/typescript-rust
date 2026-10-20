@@ -1,0 +1,4 @@
+a.ts(8,11): error TS2322: Type '(source: Box<T>) => Box<R>' is not assignable to type 'number'.
+a.ts(13,11): error TS2322: Type '(source: string) => number' is not assignable to type 'boolean'.
+a.ts(18,11): error TS2322: Type '(source: string) => number' is not assignable to type 'boolean'.
+a.ts(24,11): error TS2322: Type '{ a: number; }' is not assignable to type 'boolean'.

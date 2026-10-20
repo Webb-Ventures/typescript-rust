@@ -1,0 +1,7 @@
+// @action: refactor Convert export/Convert named export to default export
+// @file: src/types.ts
+import { a } from "./a"
+/*|*/export type Id = typeof a
+export const b = 1
+// @file: src/a.ts
+export const a = 1

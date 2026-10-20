@@ -1,0 +1,13 @@
+{
+  "//": "Pass 1 of check-with-tsc.mjs: every case file must be clean under tsc 7 with strict: true.",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "dom"],
+    "types": []
+  },
+  "include": ["**/*.ts"]
+}

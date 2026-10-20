@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import * as ns from "./m";
+import def, { a, a as a2, b as bee, c } from "./m";
+/* block */ import { d } from "./other";
+
+console.log(ns, bee, a, def, a2, c, d);

@@ -1,0 +1,16 @@
+// @action: organizeImports
+// @file: src/main.ts
+import * as ns from "./m";
+import { b as bee, a } from "./m";
+import def from "./m";
+import { a as a2 } from "./m";
+import { a } from "./m";
+import { c } from "./m"; // trailing comment
+/* block */ import { d } from "./other";
+
+console.log(ns, bee, a, def, a2, c, d);
+// @file: src/m.ts
+export const a = 1, b = 2, c = 3;
+export default 4;
+// @file: src/other.ts
+export const d = 1;

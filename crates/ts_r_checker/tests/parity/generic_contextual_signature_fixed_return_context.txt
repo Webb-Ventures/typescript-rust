@@ -1,0 +1,2 @@
+a.ts(23,34): error TS2322: Type '(readonly [...T])[]' is not assignable to type 'R'.
+  'R' could be instantiated with an arbitrary type which could be unrelated to '(readonly [...T])[]'.

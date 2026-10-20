@@ -1,0 +1,2 @@
+a.ts(9,7): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?
+a.ts(15,7): error TS2774: This condition will always return true since this function is always defined. Did you mean to call it instead?

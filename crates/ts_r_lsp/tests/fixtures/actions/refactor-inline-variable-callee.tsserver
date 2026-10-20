@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+declare const obj: { method(): void; other: number };
+export function f() {
+  obj.method();
+}

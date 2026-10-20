@@ -1,0 +1,6 @@
+// @action: refactor Convert to template string/Convert to template string
+// @file: src/main.ts
+export function f(a: string) {
+  return 'q' + (/*|*/'x' + a) + g('in');
+}
+function g(s: string) { return s; }

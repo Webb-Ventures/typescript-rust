@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+        "module": "node20",
+        "moduleResolution": "bundler",
+        "moduleDetection": "force"
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

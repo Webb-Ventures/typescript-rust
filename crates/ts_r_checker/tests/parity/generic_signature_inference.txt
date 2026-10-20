@@ -1,0 +1,5 @@
+a.ts(13,1): error TS2322: Type '<T extends string>() => T' is not assignable to type '<T extends string>() => number | boolean'.
+  Type 'string' is not assignable to type 'number | boolean'.
+a.ts(19,1): error TS2322: Type '<S>() => S[]' is not assignable to type '<T>(x: T) => T'.
+  Type 'unknown[]' is not assignable to type 'T'.
+    'T' could be instantiated with an arbitrary type which could be unrelated to 'unknown[]'.

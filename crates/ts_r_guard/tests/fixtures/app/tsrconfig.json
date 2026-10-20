@@ -1,0 +1,12 @@
+{
+  // The ts-r configuration of the fixture (the same shape as tsconfig.json's "ts-r" key).
+  "sound": {
+    "guard": {
+      "refinements": {
+        "Email": "./validators#isEmail",
+        "Port": "./validators#isPort",
+        "Positive": "./validators#isPositive"
+      }
+    }
+  }
+}

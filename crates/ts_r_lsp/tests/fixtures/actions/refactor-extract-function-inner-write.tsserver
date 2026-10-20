@@ -1,0 +1,15 @@
+// tsserver 6.0.3
+// title: Extract to inner function in function 'f'
+// @file: src/main.ts
+export function f(xs: number[]) {
+  let count = 0;
+  for (const x of xs) {
+    newFunction(x);
+  }
+  return count;
+
+  function newFunction(x: number) {
+    count += x;
+    console.log(count);
+  }
+}

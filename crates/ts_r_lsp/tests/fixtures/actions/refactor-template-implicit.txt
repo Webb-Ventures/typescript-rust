@@ -1,0 +1,6 @@
+// @action: refactor Convert to template string/Convert to template string
+// @trigger: implicit
+// @file: src/main.ts
+export function f(a: string) {
+  return 'x' + /*|*/a + 'y';
+}

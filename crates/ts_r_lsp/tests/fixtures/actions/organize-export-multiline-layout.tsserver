@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export {
+  Gamma, alpha,
+  beta, delta, zeta, type T
+} from "./a";

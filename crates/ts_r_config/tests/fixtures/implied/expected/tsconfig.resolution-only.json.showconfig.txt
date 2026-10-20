@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "moduleResolution": "nodenext",
+        "resolveJsonModule": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

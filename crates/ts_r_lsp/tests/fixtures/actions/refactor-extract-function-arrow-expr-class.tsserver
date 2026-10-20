@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+export class C {
+  m(xs: number[]) {
+    return xs.map((x) => this.newMethod(x));
+  }
+
+  private newMethod(x: number): number {
+    return x * 2;
+  }
+}

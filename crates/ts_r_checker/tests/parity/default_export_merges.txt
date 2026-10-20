@@ -1,0 +1,10 @@
+a.ts(2,25): error TS2652: Merged declaration 'A' cannot include a default export declaration. Consider adding a separate 'export default A' declaration instead.
+a.ts(3,11): error TS2652: Merged declaration 'A' cannot include a default export declaration. Consider adding a separate 'export default A' declaration instead.
+a.ts(4,18): error TS2652: Merged declaration 'A' cannot include a default export declaration. Consider adding a separate 'export default A' declaration instead.
+a.ts(5,11): error TS2395: Individual declarations in merged declaration 'A' must be all exported or all local.
+a.ts(8,16): error TS2664: Invalid module name in augmentation, module 'm' cannot be found.
+a.ts(9,26): error TS2652: Merged declaration 'B' cannot include a default export declaration. Consider adding a separate 'export default B' declaration instead.
+a.ts(10,15): error TS2652: Merged declaration 'B' cannot include a default export declaration. Consider adding a separate 'export default B' declaration instead.
+a.ts(13,16): error TS2664: Invalid module name in augmentation, module 'n' cannot be found.
+a.ts(14,30): error TS2652: Merged declaration 'C' cannot include a default export declaration. Consider adding a separate 'export default C' declaration instead.
+a.ts(16,10): error TS2652: Merged declaration 'C' cannot include a default export declaration. Consider adding a separate 'export default C' declaration instead.

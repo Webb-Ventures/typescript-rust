@@ -1,0 +1,6 @@
+// title: Extract to constant in enclosing scope
+// @file: src/main.ts
+export const f = (a: number) => {
+  const newLocal = a * 2;
+  return newLocal + 1;
+};

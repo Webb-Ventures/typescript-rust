@@ -1,0 +1,13 @@
+a.ts(8,14): error TS2322: Type 'Box<never>' is not assignable to type 'string'.
+a.ts(14,14): error TS2322: Type 'Box<1>' is not assignable to type 'string'.
+a.ts(15,14): error TS2322: Type 'Box<number>' is not assignable to type 'string'.
+a.ts(20,14): error TS2322: Type 'Box<1>' is not assignable to type 'string'.
+a.ts(21,14): error TS2322: Type 'Box<1 | 2>' is not assignable to type 'string'.
+a.ts(22,14): error TS2322: Type 'Box<number>' is not assignable to type 'string'.
+a.ts(25,14): error TS2322: Type 'Box<1 | 2>' is not assignable to type 'string'.
+a.ts(26,14): error TS2322: Type 'Box<number>' is not assignable to type 'string'.
+a.ts(28,14): error TS2322: Type 'Box<number>' is not assignable to type 'string'.
+a.ts(31,14): error TS2322: Type 'Box<number>' is not assignable to type 'string'.
+a.ts(32,14): error TS2322: Type 'never[]' is not assignable to type 'number'.
+a.ts(33,14): error TS2322: Type 'Set<never>' is not assignable to type 'number'.
+a.ts(34,14): error TS2322: Type 'Map<unknown, unknown>' is not assignable to type 'number'.

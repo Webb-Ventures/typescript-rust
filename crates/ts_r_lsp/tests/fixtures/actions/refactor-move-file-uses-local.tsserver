@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Move to file
+// @file: src/main.ts
+export const base = 10;
+
+console.log(base);
+// @file: src/utils.ts
+import { base } from "./main";
+
+export const x = 1;
+export function helper(n: number) {
+  return n + base;
+}

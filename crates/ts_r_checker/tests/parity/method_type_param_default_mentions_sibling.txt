@@ -1,0 +1,2 @@
+a.ts(23,9): error TS2322: Type '[unknown, unknown, string, number]' is not assignable to type 'number'.
+a.ts(26,9): error TS2322: Type 'Entry<unknown, unknown>' is not assignable to type 'number'.

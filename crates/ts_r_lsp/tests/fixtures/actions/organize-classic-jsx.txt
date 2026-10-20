@@ -1,0 +1,13 @@
+// @action: organizeImports
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "jsx": "react", "noEmit": true}}
+// @file: src/main.tsx
+import { helper } from "./helper";
+import React from "react";
+
+export const App = () => <div />;
+// @file: src/helper.ts
+export const helper = 1;
+// @file: node_modules/react/index.d.ts
+declare namespace React { function createElement(...a: any[]): any; }
+declare global { namespace JSX { interface IntrinsicElements { [k: string]: any } interface Element {} } }
+export default React;

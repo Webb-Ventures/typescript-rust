@@ -1,0 +1,7 @@
+{
+  "extends": [
+    "@scope/cfg",
+    "@scope/cfg/strictest",
+    "@scope/cfg/strictest.json"
+  ]
+}

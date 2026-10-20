@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/main.ts
+import NS from "./util";
+
+console.log(NS.x);
+// @file: src/util.ts
+namespace NS {
+    export const x = 1;
+}
+
+export default NS;

@@ -1,0 +1,6 @@
+{
+  "extends": [
+    "nopkgjson",
+    "nopkgjson/sub/x"
+  ]
+}

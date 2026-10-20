@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType = {
+    a: 1;
+} & ({
+    b: 2;
+} | null)[];
+
+export let l: NewType;

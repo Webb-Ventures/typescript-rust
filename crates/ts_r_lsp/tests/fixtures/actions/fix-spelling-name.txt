@@ -1,0 +1,4 @@
+// @action: fix 2552 Change spelling to 'counter'
+// @file: src/main.ts
+const counter = 1;
+export const n = /*|*/countr + 1;

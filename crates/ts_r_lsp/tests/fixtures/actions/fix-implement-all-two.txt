@@ -1,0 +1,10 @@
+// @action: fixAll 2420 Implement interface 'A'
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @differs: tsserver adds `shared`, which both interfaces declare, twice (TS2300); we add each missing member once.
+// @file: src/main.ts
+interface A { a: string; shared: number }
+interface B { b: string; shared: number }
+
+export class /*|*/C implements A, B {
+  own = 1;
+}

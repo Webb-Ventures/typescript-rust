@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+class P {
+  constructor({ x, y }: { x: number; y: number; }) {}
+}
+class Q extends P {
+  constructor() {
+    super({ x: 1, y: 2 });
+  }
+}
+new Q();

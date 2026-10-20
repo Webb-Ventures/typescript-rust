@@ -1,0 +1,7 @@
+a.ts(9,3): error TS18048: 'x' is possibly 'undefined'.
+a.ts(14,3): error TS18048: 'x' is possibly 'undefined'.
+a.ts(19,3): error TS18048: 'x' is possibly 'undefined'.
+a.ts(21,3): error TS18048: 'y' is possibly 'undefined'.
+a.ts(33,7): error TS7034: Variable 'x' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(34,13): error TS7005: Variable 'x' implicitly has an 'any' type.
+a.ts(39,3): error TS18047: 'x' is possibly 'null'.

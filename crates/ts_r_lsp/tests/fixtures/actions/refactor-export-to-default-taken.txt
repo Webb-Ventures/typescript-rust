@@ -1,0 +1,5 @@
+// @action: refactor Convert export/Convert named export to default export
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/util.ts
+export interface /*|*/I {}
+export default function beta() {}

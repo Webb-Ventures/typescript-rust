@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to interface
+// @file: src/main.ts
+interface NewType<T> {
+    a: T;
+    m(n: number): void;
+    [k: string]: unknown;
+}
+
+export function f<T>(x: Array<T>, y: NewType<T>): T {
+    return y.a;
+}

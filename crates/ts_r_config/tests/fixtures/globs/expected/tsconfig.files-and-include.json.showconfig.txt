@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./src/a.ts",
+        "./src/nope.ts",
+        "./lib/l.ts",
+        "./src/a.test.ts",
+        "./src/a.ts"
+    ],
+    "include": [
+        "src/*.ts",
+        "src/a.ts"
+    ]
+}

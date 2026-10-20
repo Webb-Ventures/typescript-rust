@@ -1,0 +1,18 @@
+// @action: refactor Move to file/Move to file
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @target: src/utils.ts
+// @file: src/main.ts
+import { a, b } from "./dep";
+
+/*[*/export function helper() {
+  return a + b;
+}/*]*/
+
+export const keep = a;
+// @file: src/dep.ts
+export const a = 1;
+export const b = 2;
+// @file: src/utils.ts
+import { a } from "./dep";
+
+export const x = a;

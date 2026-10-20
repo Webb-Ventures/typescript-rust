@@ -1,0 +1,5 @@
+// @action: refactor Convert to template string/Convert to template string
+// @file: src/main.ts
+export interface Row {
+  /*|*/'key': number;
+}

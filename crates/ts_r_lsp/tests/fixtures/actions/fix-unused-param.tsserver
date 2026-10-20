@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export function f(_unused: number, used: number) {
+  return used;
+}

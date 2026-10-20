@@ -1,0 +1,1 @@
+error TS18003: No inputs were found in config file '${FIXTURE}/tsconfig.not-prefix.json'. Specified 'include' paths were '["./${configDir}/src","src/${configDir}"]' and 'exclude' paths were '["${FIXTURE}/x/${configDir}"]'.

@@ -1,0 +1,17 @@
+// @action: refactor Convert export/Convert default export to named export
+// @file: src/util.ts
+export default function /*|*/alpha() { return 1; }
+export const c = 1;
+// @file: src/main.ts
+import b, { c } from "./util";
+import { default as d } from "./util";
+import { default as alpha } from "./util";
+
+console.log(b, c, d, alpha);
+// @file: src/both.ts
+import alpha, * as ns from "./util";
+
+console.log(alpha, ns.default());
+// @file: src/index.ts
+export { default } from "./util";
+export { default as gamma } from "./util";

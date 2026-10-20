@@ -1,0 +1,27 @@
+a.ts(21,7): error TS2322: Type 'B' is not assignable to type 'null'.
+a.ts(22,7): error TS2322: Type 'B' is not assignable to type 'null'.
+a.ts(33,5): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+a.ts(43,3): error TS2349: This expression is not callable.
+  Each member of the union type '{ (a: string): 1; (a: number): 2; } | { (a: boolean): 3; (a: symbol): 4; }' has signatures, but none of those signatures are compatible with each other.
+a.ts(45,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '1' is not assignable to parameter of type 'never'.
+a.ts(47,1): error TS2349: This expression is not callable.
+  Not all constituents of type 'number | (() => void)' are callable.
+    Type 'number' has no call signatures.
+a.ts(49,3): error TS2349: This expression is not callable.
+  Not all constituents of type 'string | (() => void) | { x: 1; }' are callable.
+    Type 'string' has no call signatures.
+a.ts(50,1): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+a.ts(51,5): error TS2349: This expression is not callable.
+  Type 'Number' has no call signatures.
+a.ts(53,5): error TS2351: This expression is not constructable.
+  Not all constituents of type 'number | (new () => 1)' are constructable.
+    Type 'number' has no construct signatures.
+a.ts(55,5): error TS2351: This expression is not constructable.
+  Each member of the union type '{ new (a: string): 1; new (a: number): 2; } | { new (a: boolean): 3; new (a: symbol): 4; }' has construct signatures, but none of those signatures are compatible with each other.
+a.ts(56,1): error TS2349: This expression is not callable.
+  Type 'String' has no call signatures.
+a.ts(58,3): error TS2349: This expression is not callable.
+  No constituent of type 'string | number' is callable.

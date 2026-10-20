@@ -1,0 +1,17 @@
+a.ts(2,19): error TS2304: Cannot find name 'T'.
+a.ts(2,23): error TS2304: Cannot find name 'T'.
+a.ts(6,26): error TS2304: Cannot find name 'Q'.
+a.ts(6,36): error TS2304: Cannot find name 'Q'.
+a.ts(6,42): error TS2304: Cannot find name 'R'.
+a.ts(11,9): error TS1235: A namespace declaration is only allowed at the top level of a namespace or module.
+a.ts(16,14): error TS2304: Cannot find name 'M'.
+a.ts(16,18): error TS2304: Cannot find name 'M'.
+a.ts(22,35): error TS2838: All declarations of 'U' must have identical constraints.
+a.ts(22,62): error TS2838: All declarations of 'U' must have identical constraints.
+a.ts(23,57): error TS2304: Cannot find name 'U'.
+a.ts(24,41): error TS2304: Cannot find name 'U'.
+a.ts(25,53): error TS2304: Cannot find name 'H'.
+a.ts(26,50): error TS2304: Cannot find name 'U'.
+a.ts(29,14): error TS2304: Cannot find name 'y'.
+a.ts(33,15): error TS2304: Cannot find name 'C'.
+a.ts(34,26): error TS2304: Cannot find name 'B'.

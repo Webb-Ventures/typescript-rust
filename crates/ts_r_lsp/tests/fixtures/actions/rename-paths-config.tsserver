@@ -1,0 +1,22 @@
+// tsserver 6.0.3
+// @deleted: src/lib/util.ts
+// @file: src/lib/a.ts
+import { helper } from "@lib/helpers/util";
+import { helper as h2 } from "./helpers/util";
+
+export const a = helper(1) + h2(2);
+// @file: src/lib/helpers/util.ts
+export function helper(x: number): number { return x; }
+// @file: src/main.ts
+import { helper } from "./lib/helpers/util";
+import { helper as h2 } from "@lib/helpers/util";
+import { helper as h3 } from "@lib/helpers/util";
+
+export const n = helper(1) + h2(2) + h3(3);
+// @file: tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true,
+    "paths": {"@lib/*": ["./src/lib/*"], "@util": ["src/lib/helpers/util.ts"], "@u2": ["src/lib/util"]}
+  }
+}

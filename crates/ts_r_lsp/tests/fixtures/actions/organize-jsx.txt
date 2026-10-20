@@ -1,0 +1,22 @@
+// @action: organizeImports
+// @file: src/main.tsx
+import { useState } from "react";
+import React from "react";
+import { Button } from "./button";
+import { Unused } from "./button";
+
+export function App() {
+  const [n] = useState(0);
+  return <Button>{n}</Button>;
+}
+// @file: src/button.tsx
+export function Button(p: { children?: unknown }) { return null; }
+export const Unused = 1;
+// @file: node_modules/react/index.d.ts
+export declare function useState<T>(v: T): [T, (v: T) => void];
+declare const React: unknown;
+export default React;
+// @file: node_modules/react/jsx-runtime.d.ts
+export declare namespace JSX { interface IntrinsicElements { [k: string]: any } interface Element {} }
+export declare function jsx(...a: any[]): any;
+export declare function jsxs(...a: any[]): any;

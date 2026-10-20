@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { t } from "@scope/pkg";
+import { u } from "pkg";
+import { s } from "../src/c";
+import { r } from "./a";
+import { $y, _x, aaa, Abc, Bar, bar } from "./m";
+import { q } from "./Z";
+
+console.log(Bar, bar, aaa, Abc, _x, $y, q, r, s, t, u);

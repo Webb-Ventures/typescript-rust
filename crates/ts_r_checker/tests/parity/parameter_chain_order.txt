@@ -1,0 +1,8 @@
+a.ts(7,7): error TS2322: Type 'F1' is not assignable to type 'F2'.
+  Types of parameters 'y' and 'y' are incompatible.
+    Type 'P' is not assignable to type 'O'.
+      Types of property 'element' are incompatible.
+        Type '((value: 1) => 1) | undefined' is not assignable to type '((value: number) => number) | undefined'.
+          Type '(value: 1) => 1' is not assignable to type '(value: number) => number'.
+            Types of parameters 'value' and 'value' are incompatible.
+              Type 'number' is not assignable to type '1'.

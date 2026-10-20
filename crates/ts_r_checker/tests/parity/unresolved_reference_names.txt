@@ -1,0 +1,26 @@
+a.ts(4,30): error TS2307: Cannot find module 'not-installed' or its corresponding type declarations.
+a.ts(5,19): error TS2307: Cannot find module 'zod' or its corresponding type declarations.
+a.ts(6,21): error TS2307: Cannot find module 'not-installed' or its corresponding type declarations.
+a.ts(8,20): error TS2304: Cannot find name 'Missing'.
+a.ts(16,4): error TS2741: Property 'b' is missing in type '{ a: number; }' but required in type 'Pick<Problem, "a" | "b">'.
+a.ts(18,4): error TS2741: Property 'b' is missing in type '{ a: number; }' but required in type 'Pick<z.infer<Missing>, "a" | "b">'.
+a.ts(19,29): error TS2304: Cannot find name 'Foo'.
+a.ts(20,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<Foo<string, number>, "a">'.
+a.ts(22,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<z.Bar, "a">'.
+a.ts(23,31): error TS2694: Namespace 'N' has no exported member 'Q2'.
+a.ts(24,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<N.Q2, "a">'.
+a.ts(26,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<any, "a">'.
+a.ts(28,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<any, "a">'.
+a.ts(30,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<Problem, "a">'.
+a.ts(32,4): error TS2741: Property 'a' is missing in type '{}' but required in type 'Pick<Problem, "a">'.
+a.ts(34,5): error TS2345: Argument of type 'number' is not assignable to parameter of type 'Record<"x", Problem>'.
+a.ts(42,7): error TS2322: Type 'Pick<Problem, "a">' is not assignable to type 'string'.
+a.ts(43,7): error TS2322: Type '[Problem]' is not assignable to type 'string'.
+a.ts(44,7): error TS2322: Type '() => Problem' is not assignable to type 'string'.
+a.ts(45,7): error TS2322: Type 'any[]' is not assignable to type 'string'.
+a.ts(46,7): error TS2322: Type 'Problem[]' is not assignable to type 'string'.
+a.ts(47,7): error TS2322: Type '{ x: Problem; }' is not assignable to type 'string'.
+a.ts(48,7): error TS2322: Type 'Problem[]' is not assignable to type 'string'.
+a.ts(49,7): error TS2322: Type '{ x: any; }' is not assignable to type 'string'.
+a.ts(50,7): error TS2322: Type '{ x: number | Problem[]; }' is not assignable to type 'string'.
+a.ts(52,7): error TS2322: Type 'Problem[]' is not assignable to type 'string'.

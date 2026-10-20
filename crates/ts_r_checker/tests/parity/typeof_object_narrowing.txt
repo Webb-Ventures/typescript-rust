@@ -1,0 +1,38 @@
+a.ts(4,83): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(4,94): error TS2345: Argument of type '{ toString(): string; } | undefined' is not assignable to parameter of type 'never'.
+  Type 'undefined' is not assignable to type 'never'.
+a.ts(5,73): error TS2345: Argument of type '{ a: number; }' is not assignable to parameter of type 'never'.
+a.ts(6,67): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(6,78): error TS2345: Argument of type '{ length: number; }' is not assignable to parameter of type 'never'.
+a.ts(7,71): error TS2345: Argument of type 'string & { __h: true; }' is not assignable to parameter of type 'never'.
+a.ts(8,55): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(9,71): error TS2345: Argument of type 'number' is not assignable to parameter of type 'never'.
+a.ts(9,82): error TS2345: Argument of type '{ toString(): string; }' is not assignable to parameter of type 'never'.
+a.ts(10,85): error TS2345: Argument of type 'string & T' is not assignable to parameter of type 'never'.
+a.ts(11,76): error TS2345: Argument of type '{ length: number; }' is not assignable to parameter of type 'never'.
+a.ts(11,87): error TS2345: Argument of type 'number' is not assignable to parameter of type 'never'.
+a.ts(12,78): error TS2345: Argument of type 'Function' is not assignable to parameter of type 'never'.
+a.ts(12,89): error TS2345: Argument of type 'number | { length: number; }' is not assignable to parameter of type 'never'.
+  Type 'number' is not assignable to type 'never'.
+a.ts(13,81): error TS2345: Argument of type 'number & { __h: true; }' is not assignable to parameter of type 'never'.
+a.ts(13,92): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(14,80): error TS2345: Argument of type 'number' is not assignable to parameter of type 'never'.
+a.ts(14,91): error TS2345: Argument of type 'string | { toFixed(): string; }' is not assignable to parameter of type 'never'.
+  Type 'string' is not assignable to type 'never'.
+a.ts(15,72): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+a.ts(15,83): error TS2345: Argument of type '{ a: number; }' is not assignable to parameter of type 'never'.
+a.ts(16,74): error TS2345: Argument of type '(() => void) & { a: 1; }' is not assignable to parameter of type 'never'.
+a.ts(17,83): error TS2345: Argument of type '(() => void) & { a: 1; }' is not assignable to parameter of type 'never'.
+a.ts(18,81): error TS2345: Argument of type '{ a: 1; } & { b: 1; }' is not assignable to parameter of type 'never'.
+a.ts(19,75): error TS2345: Argument of type 'T & { b: 1; }' is not assignable to parameter of type 'never'.
+a.ts(20,88): error TS2345: Argument of type 'Function | (() => void)' is not assignable to parameter of type 'never'.
+  Type 'Function' is not assignable to type 'never'.
+a.ts(20,99): error TS2345: Argument of type '{ toString(): string; }' is not assignable to parameter of type 'never'.
+a.ts(21,80): error TS2345: Argument of type 'symbol' is not assignable to parameter of type 'never'.
+a.ts(21,91): error TS2345: Argument of type 'number | { toString(): string; }' is not assignable to parameter of type 'never'.
+  Type 'number' is not assignable to type 'never'.
+a.ts(22,94): error TS2345: Argument of type 'number | { toString(): string; }' is not assignable to parameter of type 'never'.
+  Type 'number' is not assignable to type 'never'.
+a.ts(23,76): error TS2345: Argument of type 'number | { length: number; }' is not assignable to parameter of type 'never'.
+  Type 'number' is not assignable to type 'never'.
+a.ts(23,87): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.

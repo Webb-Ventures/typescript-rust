@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+interface Base<T> { t: T }
+type NewType = string[];
+
+export interface I extends Base<NewType> {}

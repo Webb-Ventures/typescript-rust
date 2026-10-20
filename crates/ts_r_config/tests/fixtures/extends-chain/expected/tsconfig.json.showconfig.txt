@@ -1,0 +1,35 @@
+{
+    "compilerOptions": {
+        "declaration": true,
+        "declarationDir": "./configs/decl",
+        "lib": [
+            "dom"
+        ],
+        "noEmit": true,
+        "outDir": "./configs/base/out",
+        "paths": {
+            "@x/*": [
+                "./lib/*"
+            ]
+        },
+        "rootDir": "./src",
+        "strict": true,
+        "typeRoots": [
+            "./configs/base/types"
+        ],
+        "types": [
+            "a"
+        ]
+    },
+    "files": [
+        "./app/extra.ts",
+        "./app/src/a.ts",
+        "./app/src/b/c.ts"
+    ],
+    "include": [
+        "app/../configs/base/../../app/src/**/*"
+    ],
+    "exclude": [
+        "app/../configs/base/zzz"
+    ]
+}

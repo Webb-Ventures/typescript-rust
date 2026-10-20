@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export let cb: /*[*/(x: number, y?: string, ...r: any[]) => void/*]*/;
+export let ctor: abstract new () => object;

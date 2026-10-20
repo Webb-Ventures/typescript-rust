@@ -1,0 +1,8 @@
+{
+  "include": [
+    "src/**/*.mts",
+    "src/**/*.cts",
+    "src/b/*",
+    "src"
+  ]
+}

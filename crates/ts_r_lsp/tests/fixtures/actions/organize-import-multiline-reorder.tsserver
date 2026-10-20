@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import {
+  alpha,
+  beta,
+  Gamma,
+  zeta,
+} from "./a";
+
+export const x = [zeta, alpha, beta, Gamma];

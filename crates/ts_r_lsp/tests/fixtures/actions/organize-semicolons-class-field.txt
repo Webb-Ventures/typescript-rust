@@ -1,0 +1,14 @@
+// @action: organizeImports
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+import { b } from "./b"
+import { a } from "./a"
+class C {
+  x = a;
+  y = b;
+}
+export const c = new C()
+// @file: src/a.ts
+export const a = 1
+// @file: src/b.ts
+export const b = 1

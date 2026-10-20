@@ -1,0 +1,6 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export class Box<T> {
+    items: /*[*/Array<T> | undefined/*]*/;
+    get<U extends T>(u: U): U { return u; }
+}

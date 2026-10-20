@@ -1,0 +1,19 @@
+tsconfig.unknown.json(10,5): error TS6266: Option 'watch' can only be specified on command line.
+
+tsconfig.unknown.json(11,5): error TS6266: Option 'locale' can only be specified on command line.
+
+tsconfig.unknown.json(12,5): error TS5023: Unknown compiler option 'build'.
+
+tsconfig.unknown.json(3,5): error TS5023: Unknown compiler option 'strictt'.
+
+tsconfig.unknown.json(4,5): error TS5025: Unknown compiler option 'sourcemap'. Did you mean 'sourceMap'?
+
+tsconfig.unknown.json(5,5): error TS5025: Unknown compiler option 'ALLOWJS'. Did you mean 'allowJs'?
+
+tsconfig.unknown.json(6,5): error TS5023: Unknown compiler option 'noImplicitAnyy'.
+
+tsconfig.unknown.json(7,5): error TS5023: Unknown compiler option 'out'.
+
+tsconfig.unknown.json(8,5): error TS5023: Unknown compiler option 'charset'.
+
+tsconfig.unknown.json(9,5): error TS5023: Unknown compiler option 'importsNotUsedAsValues'.

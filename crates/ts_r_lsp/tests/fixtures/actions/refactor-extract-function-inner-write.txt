@@ -1,0 +1,11 @@
+// @action: refactor Extract Symbol/function_scope_0
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export function f(xs: number[]) {
+  let count = 0;
+  for (const x of xs) {
+    /*[*/count += x;
+    console.log(count);/*]*/
+  }
+  return count;
+}

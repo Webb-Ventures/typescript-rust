@@ -1,0 +1,6 @@
+// @action: refactor Extract type/Extract to type alias
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/main.ts
+export class A {
+    self(): /*[*/this | null/*]*/ { return this; }
+}

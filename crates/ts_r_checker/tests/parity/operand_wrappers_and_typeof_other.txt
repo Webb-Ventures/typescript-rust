@@ -1,0 +1,11 @@
+a.ts(11,1): error TS2588: Cannot assign to 'k' because it is a constant.
+a.ts(12,2): error TS2588: Cannot assign to 'k' because it is a constant.
+a.ts(13,1): error TS2588: Cannot assign to 'k' because it is a constant.
+a.ts(18,5): error TS2367: This comparison appears to be unintentional because the types '"bigint" | "boolean" | "function" | "number" | "object" | "string" | "symbol" | "undefined"' and '"Object"' have no overlap.
+a.ts(19,11): error TS2322: Type 'C | (() => void) | { a: 1; }' is not assignable to type 'number'.
+  Type 'C' is not assignable to type 'number'.
+a.ts(21,11): error TS2322: Type 'string | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+a.ts(24,5): error TS2367: This comparison appears to be unintentional because the types '"bigint" | "boolean" | "function" | "number" | "object" | "string" | "symbol" | "undefined"' and '"Object"' have no overlap.
+a.ts(24,36): error TS2322: Type 'object' is not assignable to type 'number'.
+a.ts(24,66): error TS2322: Type 'unknown' is not assignable to type 'number'.

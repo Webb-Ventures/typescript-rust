@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Move to file
+// @file: src/main.ts
+import { helper, x } from "./utils";
+
+export const y = helper(x);
+// @file: src/utils.ts
+export const x = 1;
+export function helper(n: number) {
+  return n * 2;
+}

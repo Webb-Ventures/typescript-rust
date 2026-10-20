@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+const g = async ({ a, b = 2 }: { a: string; b?: number; }): Promise<number> => { return a.length + b; };
+g({ a: 'x', b: 3 });

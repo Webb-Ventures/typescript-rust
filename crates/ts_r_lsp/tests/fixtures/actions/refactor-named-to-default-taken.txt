@@ -1,0 +1,9 @@
+// @action: refactor Convert import/Convert named imports to default import
+// @file: src/main.ts
+/*[*/import { a } from "./lib/cjs";/*]*/
+const cjs = 1;
+
+console.log(cjs, a);
+// @file: src/lib/cjs.d.ts
+declare const m: { a: number; b(n: number): number };
+export = m;

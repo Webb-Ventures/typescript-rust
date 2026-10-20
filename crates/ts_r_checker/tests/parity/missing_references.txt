@@ -1,0 +1,6 @@
+a.ts(1,22): error TS6053: File 'missing.ts' not found.
+a.ts(2,22): error TS6053: File '../other/missing.d.ts' not found.
+a.ts(3,22): error TS6504: File 'missing.js' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+a.ts(4,22): error TS6054: File 'notes.txt' has an unsupported extension. The only supported extensions are '.ts', '.tsx', '.d.ts', '.cts', '.d.cts', '.mts', '.d.mts'.
+a.ts(5,22): error TS6231: Could not resolve the path 'no/extension' with the extensions: '.ts', '.tsx', '.d.ts', '.cts', '.d.cts', '.mts', '.d.mts'.
+a.ts(6,22): error TS1006: A file cannot have a reference to itself.

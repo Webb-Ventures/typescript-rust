@@ -1,0 +1,259 @@
+name: CI
+
+# Who it runs for: pushes to main, and pull requests whose author is trusted (an owner or
+# member of the organization, or a login in the CODE_REVIEW_USERS variable). For anyone else's
+# pull request the first job fails until a trusted user approves its latest commit (an
+# approving review); ci-approval.yml then re-runs it. A new push needs a new approval.
+#
+# What runs, and what it costs:
+# - Stacked PRs: only the top PR of a stack runs CI (a PR is the top when no open PR is based on
+#   its branch).
+# - A job is skipped when this exact code already passed it, in any PR: a pass-marker artifact
+#   named after the job, OS and a hash of the tracked files minus the plan, the site, the landing
+#   page, the code-review bot (.agents/plugins: no job here builds or tests it), the other
+#   workflows and the public repo's own files (.public). Each OS's test job hashes without the other platforms' Rust modules (windows.rs,
+#   unix.rs, macos.rs, linux.rs and any .rs under a folder of that name; agents-check fails if
+#   one isn't gated to its platform), so a change only to Windows code tests only on Windows. Artifacts are repo-wide (cache entries are scoped to one PR),
+#   so a stack reshuffle that keeps the code the same doesn't rerun anything. Only markers from
+#   runs on this repository's own branches count: a fork's PR run can upload any artifact name.
+# - The "plan" job decides all of that once, so a skipped job never starts a runner. Each OS is
+#   its own job (not a matrix) for that reason: a matrix can't skip one entry.
+# - Pushes to main run clippy, test and codegen even when the code passed on its PR: that
+#   checks the merge and saves the Rust caches every PR restores (a PR can read main's
+#   caches, not another PR's). Pushes to main that only touch the plan or the site don't run.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - ".lavish/**"
+      - "landing/**"
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Line tables keep file:line in backtraces at a fraction of full debug info's compile and
+  # link time.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  plan:
+    name: top of stack?
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      hash: ${{ steps.passed.outputs.hash }}
+      hash-Linux: ${{ steps.passed.outputs.hash-Linux }}
+      hash-macOS: ${{ steps.passed.outputs.hash-macOS }}
+      hash-Windows: ${{ steps.passed.outputs.hash-Windows }}
+      fmt: ${{ steps.passed.outputs.fmt }}
+      test-linux: ${{ steps.passed.outputs.test-linux }}
+      test-macos: ${{ steps.passed.outputs.test-macos }}
+      test-windows: ${{ steps.passed.outputs.test-windows }}
+      codegen: ${{ steps.passed.outputs.codegen }}
+    steps:
+      # A fork PR can edit this file, so this step is not the security boundary: in the public
+      # repo, "require approval for all outside contributors" stops a fork's runs until a
+      # maintainer approves them (.github/public-sync/README.md). This step makes CI fail for an
+      # untrusted PR nobody has approved, so it cannot merge.
+      - name: Trusted author, or approved by a trusted user?
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRUSTED: ${{ vars.CODE_REVIEW_USERS || '["riley-wv"]' }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          trusted() { # login, author association
+            case "$2" in OWNER | MEMBER) return 0 ;; esac
+            jq -e --arg u "$1" 'index($u) != null' <<<"$TRUSTED" >/dev/null
+          }
+          if trusted "$AUTHOR" "$ASSOCIATION"; then exit 0; fi
+          # An approving review on the head commit by a trusted user (a re-run sees new reviews).
+          while read -r login association; do
+            if [ -n "$login" ] && trusted "$login" "$association"; then
+              echo "::notice::@$login approved $HEAD_SHA for CI."
+              exit 0
+            fi
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews" \
+            --jq ".[] | select(.state == \"APPROVED\" and .commit_id == \"$HEAD_SHA\") | \"\(.user.login) \(.author_association)\"")
+          echo "::error::CI runs on a pull request from @$AUTHOR once a maintainer approves its latest commit ($HEAD_SHA). Thanks for your patience."
+          exit 1
+      - id: top
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          # A fork's branch is never the base of a PR here, even when its name matches (main).
+          above=
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            above=$(gh pr list -R "$GITHUB_REPOSITORY" --base "$HEAD" --state open --json number --jq 'map("#\(.number)") | join(" ")')
+          fi
+          if [ -n "$above" ]; then
+            echo "top=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped: $above is stacked on this PR, so CI runs there."
+          else
+            echo "top=true" >> "$GITHUB_OUTPUT"
+          fi
+      # PRs: the head commit, not the merge ref (in a GitHub stack the merge ref can pull in
+      # another stack's branches).
+      - uses: actions/checkout@v4
+        if: steps.top.outputs.top == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Already passed on this code?
+        id: passed
+        if: steps.top.outputs.top == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$({ git ls-files -s -- . ':!.lavish' ':!landing' ':!site' ':!.agents/plugins' ':!.github' ':!.public'
+                    git ls-files -s -- .github/workflows/ci.yml; })
+          # hash [platform modules to leave out]: a path whose module is named for one of them.
+          hash() {
+            if [ $# -eq 0 ]; then printf '%s\n' "$files"
+            else printf '%s\n' "$files" | grep -v -E "[[:space:]](crates|xtask)/(.+/)?($(IFS='|'; echo "$*"))(\.rs|/.+\.rs)$"
+            fi | sha256sum | cut -c1-40
+          }
+          hash=$(hash)
+          {
+            echo "hash=$hash"
+            echo "hash-Linux=$(hash windows macos)"
+            echo "hash-macOS=$(hash windows linux)"
+            echo "hash-Windows=$(hash unix macos linux)"
+          } >> "$GITHUB_OUTPUT"
+          passed() { # job, OS, hash
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ci-pass-$1-$2-$3&per_page=5" \
+              --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_repository_id == .workflow_run.repository_id)] | length' || echo 0)
+            [ "$n" -gt 0 ]
+          }
+          decide() { # output, job, OS, hash, always run on main?
+            if [ "$5" = main ] && [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            elif passed "$2" "$3" "$4"; then
+              echo "::notice::Skipped: this code already passed $2 on $3."
+            else
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          decide fmt fmt Linux "$hash"
+          decide test-linux test Linux "$(hash windows macos)" main
+          decide test-macos test macOS "$(hash windows linux)" main
+          decide test-windows test Windows "$(hash unix macos linux)" main
+          decide codegen codegen Linux "$hash" main
+
+  fmt:
+    name: rustfmt
+    needs: plan
+    if: needs.plan.outputs.fmt == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Installs the toolchain pinned in rust-toolchain.toml (with rustfmt and clippy).
+      - run: rustup toolchain install
+      - run: cargo fmt --all --check
+      - &record-pass
+        name: Record the pass
+        shell: bash
+        run: mkdir -p ci-pass-marker && echo "${{ github.sha }}" > ci-pass-marker/sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-pass-fmt-${{ runner.os }}-${{ needs.plan.outputs.hash }}
+          path: ci-pass-marker
+          retention-days: 30
+
+  test-linux:
+    name: clippy + test + agents-check (linux)
+    needs: plan
+    if: needs.plan.outputs.test-linux == 'true'
+    runs-on: ubuntu-24.04
+    steps: &test-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - run: rustup toolchain install
+      # Dependencies only (workspace crates rebuild anyway: checkout resets their mtimes). Only
+      # pushes to main save it: PRs restore main's cache, and a PR-scoped copy costs a save on
+      # every run (most of a minute on Windows) for little reuse.
+      - &rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' }}
+      # The TypeScript lib files the checker tests need (they skip without them). After the
+      # Rust cache, so its post step saves target/upstream before rust-cache trims target/.
+      - &upstream-cache
+        uses: actions/cache@v4
+        with:
+          path: target/upstream/typescript
+          key: upstream-minimal-${{ runner.os }}-${{ hashFiles('upstream/UPSTREAM.json', 'xtask/src/upstream.rs') }}
+      - run: cargo xtask upstream sync --minimal
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --no-fail-fast
+      - run: cargo xtask agents-check
+      - *record-pass
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-pass-test-${{ runner.os }}-${{ needs.plan.outputs[format('hash-{0}', runner.os)] }}
+          path: ci-pass-marker
+          retention-days: 30
+
+  # GitHub has no 2 vCPU macOS runner; macos-latest (Apple silicon, 3 vCPU) is the smallest.
+  test-macos:
+    name: clippy + test + agents-check (macos)
+    needs: plan
+    if: needs.plan.outputs.test-macos == 'true'
+    runs-on: macos-latest
+    steps: *test-steps
+
+  # The slowest job: MSVC's link.exe dominates building ~140 test executables, so link with the
+  # LLVM linker that ships with the toolchain.
+  test-windows:
+    name: clippy + test + agents-check (windows)
+    needs: plan
+    if: needs.plan.outputs.test-windows == 'true'
+    runs-on: windows-2025
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+    steps: *test-steps
+
+  codegen:
+    name: codegen from upstream
+    needs: plan
+    if: needs.plan.outputs.codegen == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - run: rustup toolchain install
+      - *rust-cache
+      - *upstream-cache
+      - run: cargo xtask upstream sync --minimal
+      # Proves the generator runs on the pinned inputs. Once the diagnostics crate checks in its
+      # generated file, add: cargo xtask codegen diagnostics --check --out <that path>
+      - run: cargo xtask codegen diagnostics
+      # Checked-in generated files (ts-r-lint's TypeScript lib globals) match the pinned libs.
+      - run: cargo xtask codegen --check
+      - *record-pass
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-pass-codegen-${{ runner.os }}-${{ needs.plan.outputs.hash }}
+          path: ci-pass-marker
+          retention-days: 30

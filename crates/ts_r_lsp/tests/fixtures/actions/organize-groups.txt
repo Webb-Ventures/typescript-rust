@@ -1,0 +1,17 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { y } from "./y";
+import { x } from "./x";
+
+import { b } from "./b";
+import { a } from "./a";
+
+console.log(a, b, x, y);
+// @file: src/a.ts
+export const a = 1;
+// @file: src/b.ts
+export const b = 1;
+// @file: src/x.ts
+export const x = 1;
+// @file: src/y.ts
+export const y = 1;

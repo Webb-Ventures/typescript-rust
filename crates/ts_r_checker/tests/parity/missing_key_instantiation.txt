@@ -1,0 +1,4 @@
+a.ts(5,14): error TS2322: Type '{ t: false; u: unknown; }' is not assignable to type 'number'.
+a.ts(8,14): error TS2322: Type 'number' is not assignable to type '[unknown]'.
+a.ts(10,14): error TS2322: Type 'unknown' is not assignable to type 'number'.
+a.ts(11,14): error TS2322: Type 'unknown' is not assignable to type 'number'.

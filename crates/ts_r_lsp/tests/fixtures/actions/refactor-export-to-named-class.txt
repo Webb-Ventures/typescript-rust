@@ -1,0 +1,14 @@
+// @action: refactor Convert export/Convert default export to named export
+// @file: src/shape.ts
+/*[*/export default class Shape {
+    area() { return 0; }
+}/*]*/
+// @file: src/main.ts
+import Shape, { other } from "./shape2";
+import S from "./shape";
+
+const s = new S();
+console.log(Shape, other, s);
+// @file: src/shape2.ts
+export default 1;
+export const other = 2;

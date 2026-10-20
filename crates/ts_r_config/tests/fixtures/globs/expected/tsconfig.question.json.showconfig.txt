@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./src/a.ts",
+        "./src/c/deep/w.d.ts"
+    ],
+    "include": [
+        "src/?.ts",
+        "src/*.d.ts",
+        "src/**/?.d.ts"
+    ]
+}

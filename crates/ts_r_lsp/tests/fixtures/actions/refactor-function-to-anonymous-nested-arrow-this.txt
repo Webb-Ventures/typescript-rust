@@ -1,0 +1,6 @@
+// @action: refactor Convert arrow function or function expression/Convert to anonymous function
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+function outer(this: { v: number }) {
+  return /*|*/() => () => this.v;
+}

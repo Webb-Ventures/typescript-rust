@@ -1,0 +1,6 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export function f<T>(t: T) {
+    function g<V>(v: /*[*/V | T/*]*/): void {}
+    g(t);
+}

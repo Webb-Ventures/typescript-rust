@@ -1,0 +1,6 @@
+// @action: refactor Extract Symbol/constant_scope_0
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export function g(xs: number[]) {
+  return xs.map((x) => x * /*[*/Math.max(1, 2)/*]*/);
+}

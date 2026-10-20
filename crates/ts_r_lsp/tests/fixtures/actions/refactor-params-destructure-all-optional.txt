@@ -1,0 +1,5 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function /*|*/ao(a?: number, b = 'x') { return [a, b]; }
+ao();
+ao(1);

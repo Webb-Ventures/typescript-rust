@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "module": "esnext",
+        "strict": false,
+        "target": "es2017",
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./app/extra.ts"
+    ]
+}

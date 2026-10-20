@@ -1,0 +1,2 @@
+a.ts(7,5): error TS2322: Type 'undefined' is not assignable to type 'Foo'.
+a.ts(21,27): error TS1163: A 'yield' expression is only allowed in a generator body.

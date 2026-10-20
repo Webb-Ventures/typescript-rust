@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "es2015",
+    "module": "ES2015"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

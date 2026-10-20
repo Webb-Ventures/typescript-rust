@@ -1,0 +1,17 @@
+// @action: fix 2304 Update import from "react"
+// @file: src/main.tsx
+import { memo } from "react";
+
+export const C = memo(() => {
+  const [n] = /*|*/useState(0);
+  return <div>{n}</div>;
+});
+// @file: node_modules/react/package.json
+{"name": "react", "version": "19.0.0", "types": "index.d.ts"}
+// @file: node_modules/react/index.d.ts
+export declare function useState<T>(v: T): [T, (v: T) => void];
+export declare function memo<T>(c: T): T;
+// @file: node_modules/react/jsx-runtime.d.ts
+export declare namespace JSX { interface IntrinsicElements { [k: string]: any } interface Element {} }
+export declare function jsx(...a: any[]): any;
+export declare function jsxs(...a: any[]): any;

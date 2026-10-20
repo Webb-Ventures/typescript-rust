@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+namespace N { export type X<A> = A[]; }
+type NewType = N.X<string>;
+
+export let q: NewType = [];

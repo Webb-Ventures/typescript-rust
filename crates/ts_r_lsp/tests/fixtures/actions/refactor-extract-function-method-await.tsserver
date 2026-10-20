@@ -1,0 +1,14 @@
+// tsserver 6.0.3
+// title: Extract to method in class 'C'
+// @file: src/main.ts
+export class C {
+  async load(url: string) {
+    await this.newMethod(url);
+    return url;
+  }
+
+  private async newMethod(url: string) {
+    const r = await fetch(url);
+    console.log(r.status);
+  }
+}

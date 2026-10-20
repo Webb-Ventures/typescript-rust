@@ -1,0 +1,5 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @differs: tsserver offers it and then changes nothing (a JSX use); ts-r does not offer it
+// @file: src/main.tsx
+export function /*|*/Comp(a: { x: number }, b: number) { return <div>{a.x + b}</div>; }
+const el = <Comp x={1} />;

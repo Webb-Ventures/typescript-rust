@@ -1,0 +1,5 @@
+// @action: fixAll 2551 Change spelling to 'length'
+// @file: src/main.ts
+export function f(xs: string[], o: { value: number }) {
+  return xs./*|*/lenght + o.valeu + xs.lenght;
+}

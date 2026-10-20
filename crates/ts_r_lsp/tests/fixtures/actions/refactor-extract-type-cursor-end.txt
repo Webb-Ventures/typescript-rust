@@ -1,0 +1,3 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export function f(a: Array<{ k: 1 }>/*|*/): void {}

@@ -1,0 +1,2 @@
+a.ts(10,9): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(28,9): error TS1163: A 'yield' expression is only allowed in a generator body.

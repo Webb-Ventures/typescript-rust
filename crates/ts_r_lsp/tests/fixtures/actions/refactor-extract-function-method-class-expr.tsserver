@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to method in anonymous class expression
+// @file: src/main.ts
+export const K = class {
+  m(a: number) {
+    return this.newMethod(a);
+  }
+
+  private newMethod(a: number) {
+    return a * 3;
+  }
+};

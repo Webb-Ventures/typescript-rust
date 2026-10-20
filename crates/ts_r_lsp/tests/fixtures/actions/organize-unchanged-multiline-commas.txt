@@ -1,0 +1,15 @@
+// @action: organizeImports
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+import {
+  a,
+  b,
+} from "./a"
+export {
+  c,
+  d,
+} from "./a"
+
+export const x: { p: number; q: number } = { p: a, q: b };
+// @file: src/a.ts
+export const a = 1, b = 2, c = 3, d = 4;

@@ -1,0 +1,13 @@
+a.tsx(3,19): error TS17017: An @jsxFrag pragma is required when using an @jsx pragma with JSX fragments.
+b.tsx(4,19): error TS2874: This JSX tag requires 'Frag' to be in scope, but it could not be found.
+b.tsx(4,19): error TS2879: Using JSX fragments requires fragment factory 'Frag' to be in scope, but it could not be found.
+c.tsx(5,24): error TS2609: JSX spread child must be an array type.
+c.tsx(7,20): error TS2786: 'span' cannot be used as a JSX component.
+  Its type '"span"' is not a valid JSX element type.
+c.tsx(8,19): error TS2339: Property 'A:foo' does not exist on type 'JSX.IntrinsicElements'.
+c.tsx(8,20): error TS2639: React components cannot include JSX namespace names
+c.tsx(8,20): error TS2786: 'A:foo' cannot be used as a JSX component.
+  Its type '"A:foo"' is not a valid JSX element type.
+d.tsx(3,24): error TS2322: Type '{ onTap: (n: any) => any; }' is not assignable to type '{ onClick?: ((n: number) => void) | undefined; }'.
+  Property 'onTap' does not exist on type '{ onClick?: ((n: number) => void) | undefined; }'.
+d.tsx(3,32): error TS7006: Parameter 'n' implicitly has an 'any' type.

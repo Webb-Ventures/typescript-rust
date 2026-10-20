@@ -1,0 +1,7 @@
+a.ts(4,39): error TS2307: Cannot find module 'missing-module' or its corresponding type declarations.
+a.ts(6,41): error TS7006: Parameter 'i' implicitly has an 'any' type.
+a.ts(8,13): error TS7006: Parameter 'r' implicitly has an 'any' type.
+a.ts(10,11): error TS7006: Parameter 'x3' implicitly has an 'any' type.
+a.ts(11,11): error TS7006: Parameter 'y3' implicitly has an 'any' type.
+a.ts(13,15): error TS7006: Parameter 'x4' implicitly has an 'any' type.
+a.ts(16,9): error TS7006: Parameter 'x1' implicitly has an 'any' type.

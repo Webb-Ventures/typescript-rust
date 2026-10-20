@@ -1,0 +1,3 @@
+s.ts(5,23): error TS2339: Property 'vx' does not exist on type '{ a: number; }'.
+s.ts(6,19): error TS2693: 'Bar' only refers to a type, but is being used as a value here.
+s.ts(8,27): error TS2339: Property 'ux' does not exist on type 'PromiseConstructor'.

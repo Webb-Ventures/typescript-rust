@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+export function f(a: number) {
+  const { label, doubled } = newFunction(a);
+  return label.length + doubled;
+}
+
+function newFunction(a: number) {
+  const doubled = a * 2;
+  const label = `n=${doubled}`;
+  return { label, doubled };
+}

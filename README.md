@@ -1,0 +1,184 @@
+# ts-r
+
+[![CI](https://github.com/Webb-Ventures/typescript-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Webb-Ventures/typescript-rust/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/ts-r?label=npm&color=cb3837)](https://www.npmjs.com/package/ts-r)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+[![Sponsor](https://img.shields.io/badge/sponsor-ts--r-f0814a?logo=githubsponsors&logoColor=white)](https://ts-r.dev/donate/)
+
+**Fast TypeScript tooling, written from scratch in Rust.** ts-r type-checks, lints, bundles,
+runs and serves TypeScript with the same results as the tools you use today, and faster:
+ts-r-check type-checks the benchmark repos 2–7× faster than tsc 7 ([benchmarks](#benchmarks)). Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
+you can adopt one without the rest.
+
+```sh
+npx ts-r check           # type check, with tsc 7's diagnostics
+npx ts-r lint            # lint, with ESLint and typescript-eslint rules
+npx ts-r build           # bundle, with esbuild's CLI
+npx ts-r run server.ts   # run TypeScript (replaces tsx / ts-node)
+npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
+```
+
+> **Status: preview.** The type checker is the most mature tool. It gives tsc 7's exact output on
+> 87% of TypeScript's own conformance tests. It also matches tsc 7 exactly on typeorm,
+> playwright, tRPC, date-fns and the React compiler. Every other tool works on real projects
+> but has known gaps (below). Version numbers stay below 1.0 until that changes.
+
+## Contents
+
+- [The tools](#the-tools)
+- [Install](#install)
+- [Benchmarks](#benchmarks)
+- [How it works](#how-it-works)
+- [Build from source](#build-from-source)
+- [Contributing](#contributing)
+- [Sponsors](#sponsors)
+- [License](#license)
+
+## The tools
+
+| Tool | Replaces | Works today | Known gaps |
+|---|---|---|---|
+| `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and JSX typing; 13% of conformance tests still differ |
+| `ts-r-lint` | ESLint, oxlint | 103 rules that pass every case of ESLint's and typescript-eslint's own tests; flat config, oxlint and Biome configs | No type-aware rules; plugins other than typescript-eslint |
+| `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, no lowering below ES2022 |
+| `ts-r-run` | tsx, ts-node | Runs TypeScript on Node 22.15+ with tsc 7's JavaScript output | Only the entry's tsconfig is used |
+| `ts-r-dev` | `vite dev` | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling | No `vite.config`, no HTTPS |
+| `ts-r-lsp` | tsserver, the ESLint server | One server per workspace for lint and types; our checker or your own TypeScript as the type backend | Most projects still fall back to tsserver for diagnostics |
+| `ts-r` | | Launcher for all of the above, plus `ts-r ci` (check, lint and build in parallel) and `ts-r doctor` | |
+
+What each tool matches, and how it is measured: each crate's `AGENTS.md` and the design records
+in [docs/design/](docs/design/README.md).
+
+## Install
+
+Every tool is an npm package with a native binary for macOS (arm64, x64), Linux (arm64, x64;
+glibc and musl) and Windows (arm64, x64). Install one, or the `ts-r` launcher with all of them:
+
+```sh
+npm install --save-dev ts-r                # every tool and the ts-r launcher
+npm install --save-dev @ts-r.dev/check     # just ts-r-check (or run, dev, build, lint, lsp)
+```
+
+To type-check with ts-r wherever your scripts and tools already run `tsc`, use the drop-in
+`typescript` package. It runs ts-r-check where ts-r-check gives the same result as your own
+TypeScript on that project, and hands everything else to your TypeScript:
+
+```jsonc
+// package.json
+"devDependencies": {
+  "typescript": "npm:@ts-r.dev/typescript@^7",
+  "typescript-real": "npm:typescript@^7.0.0"
+}
+```
+
+The details are in [npm/typescript/README.md](npm/typescript/README.md). Packages and platforms
+are in [npm/ts-r/README.md](npm/ts-r/README.md).
+
+## Benchmarks
+
+Each table shows ts-r's median time per scenario next to the fastest other tool on the same
+workload. Workloads include type-checking pinned open-source repos (tRPC, date-fns, rxjs) and
+bundling three.js ten times over, among others. Every pull request is benchmarked against its
+base on dedicated cores, and a slowdown beyond the gate blocks the merge. Method and scenarios:
+[bench/README.md](bench/README.md).
+
+### Unreleased (main)
+
+<!-- bench:main:start -->
+| Benchmark | ts-r | Fastest other tool | ts-r is |
+|---|---:|---:|---:|
+| `version-startup` | `ts-r` 1.17 ms | `esbuild` 2.82 ms | **2.4× faster** |
+| `check-trpc` | `ts-r-check` 329 ms | `tsc-7` 821 ms | **2.5× faster** |
+| `check-date-fns` | `ts-r-check` 698 ms | `tsc-7` 1.52 s | **2.2× faster** |
+| `check-rxjs` | `ts-r-check` 791 ms | `tsc-7` 5.53 s | **7.0× faster** |
+| `build-three-x10` | `ts-r-build` 1.08 s | `esbuild` 1.02 s | 1.1× slower |
+
+Medians on linux-x86_64 (four dedicated cores), measured 2026-10-20. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
+<!-- bench:main:end -->
+
+The table above is updated by every sync to main. The one below is the same table at the time
+of the latest release, and is updated by the release workflow.
+
+### Latest release
+
+<!-- bench:release:start -->
+No release yet.
+<!-- bench:release:end -->
+
+## How it works
+
+Every layer is written in this repo, with no other compiler, bundler or linter underneath:
+lexer, parser, binder, type checker, transformer, code generator, minifier, module resolver,
+bundler, linter, dev server and language server. TypeScript's, esbuild's and ESLint's test suites
+and outputs are the oracles: ts-r runs them and compares, and does not copy their code.
+
+| Path | What it is |
+|---|---|
+| `crates/ts_r_lexer`, `ts_r_parser`, `ts_r_ast` | Error-recovering parser for TS, TSX and JS into a compact, index-based AST |
+| `crates/ts_r_binder`, `ts_r_checker` | Scopes and symbols; the type checker |
+| `crates/ts_r_transform`, `ts_r_codegen`, `ts_r_emit` | TypeScript to JavaScript, printing, source maps and declaration files |
+| `crates/ts_r_resolver`, `ts_r_config` | Node and TypeScript module resolution; tsconfig.json |
+| `crates/ts_r_bundler`, `ts_r_minify` | The bundler and minifier behind ts-r-build and ts-r-dev |
+| `crates/ts_r_lint` | Lint rules and config loading |
+| `crates/ts_r_lsp`, `editors/vscode` | Language server and the VS Code extension |
+| `docs/design/` | Design records: why each piece works the way it does |
+
+[AGENTS.md](AGENTS.md) has the full crate map and the rules every change follows.
+
+## Build from source
+
+You need the Rust toolchain pinned in `rust-toolchain.toml` (rustup installs it) and Node 22 or
+newer for the tests that compare against tsc and esbuild.
+
+```sh
+git clone https://github.com/Webb-Ventures/typescript-rust
+cd typescript-rust
+cargo xtask upstream sync --minimal   # TypeScript's lib files, which the checker tests need
+cargo build --release                 # binaries in target/release
+cargo test --workspace
+```
+
+`cargo xtask` also runs the oracles (`cargo xtask oracle`), the benchmarks (`cargo xtask bench`)
+and the top-npm-packages harness (`cargo xtask ecosystem`). See [xtask/AGENTS.md](xtask/AGENTS.md).
+
+## Contributing
+
+Contributions are welcome: bug reports, mismatches with tsc or ESLint, and pull requests.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to set up, the checks a change must pass, and how
+  pull requests are reviewed and merged.
+- [AI_POLICY.md](AI_POLICY.md): AI-assisted work is welcome from Anthropic's, OpenAI's and Meta's
+  Muse models only. Pull requests that credit any other model are closed automatically.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md) (report vulnerabilities
+  privately).
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release.
+
+## Sponsors
+
+ts-r is free and open source, and its development is funded by sponsors.
+
+<table>
+  <tr>
+    <td align="center" width="280">
+      <a href="https://webbventuresgroup.com"><strong>Webb Ventures</strong></a><br>
+      <sub>Founding sponsor</sub>
+    </td>
+  </tr>
+</table>
+
+**Sponsor ts-r:** if ts-r saves your team time, [support its development](https://ts-r.dev/donate/).
+Sponsors are listed here.
+
+## License
+
+ts-r is dual-licensed under either of
+
+- the MIT license ([LICENSE-MIT](LICENSE-MIT)), or
+- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)),
+
+at your option. Unless you say otherwise, any contribution you submit for inclusion in ts-r is
+dual-licensed as above, with no additional terms or conditions.
+
+TypeScript's lib files shipped with `ts-r-check` and `ts-r-lsp` are under TypeScript's own
+Apache-2.0 license, included next to them. Upstream test data fetched by
+`cargo xtask upstream sync` stays in the gitignored `target/` directory under its own license.

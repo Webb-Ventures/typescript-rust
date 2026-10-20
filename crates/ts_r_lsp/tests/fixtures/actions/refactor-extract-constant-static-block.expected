@@ -1,0 +1,10 @@
+// title: Extract to readonly field in class 'C'
+// @file: src/main.ts
+class C {
+  static v: number;
+  private static readonly newProperty = Math.max(1, 2);
+
+  static {
+    C.v = C.newProperty;
+  }
+}

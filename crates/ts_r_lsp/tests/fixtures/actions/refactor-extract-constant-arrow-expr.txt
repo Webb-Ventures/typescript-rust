@@ -1,0 +1,5 @@
+// @action: refactor Extract Symbol/constant_scope_0
+// @differs: tsserver 6.0.3 puts the constant before the statement, where the arrow's parameter is out of reach; ts-r gives the arrow a block body
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export const f = (a: number) => /*[*/a * 2/*]*/ + 1;

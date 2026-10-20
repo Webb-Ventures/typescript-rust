@@ -1,0 +1,6 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+// A helper.
+export function f<T>(x: Array<T>, y: /*[*/{ a: T; b?: number, readonly c: string[] }/*]*/): T {
+    return y.a;
+}

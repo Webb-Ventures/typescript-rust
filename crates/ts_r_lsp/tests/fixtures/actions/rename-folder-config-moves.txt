@@ -1,0 +1,12 @@
+// @action: rename pkg deep/pkg
+// @differs: tsserver rebases the moved tsconfig's strings onto its old directory ("../deep/pkg/a.ts"), which no longer names the file once the config moves
+// @file: tsconfig.json
+{"files": [], "references": [{"path": "./pkg"}]}
+// @file: pkg/tsconfig.json
+{"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "composite": true, "rootDir": ".."}, "files": ["a.ts"], "include": ["../shared"]}
+// @file: pkg/a.ts
+import { s } from "../shared/s";
+
+export const n = s + 1;
+// @file: shared/s.ts
+export const s = 1;

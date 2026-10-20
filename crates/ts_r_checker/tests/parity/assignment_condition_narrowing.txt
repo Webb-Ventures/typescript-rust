@@ -1,0 +1,6 @@
+a.ts(8,9): error TS18048: 'd' is possibly 'undefined'.
+a.ts(14,9): error TS18048: 'd' is possibly 'undefined'.
+a.ts(17,9): error TS18048: 'd' is possibly 'undefined'.
+a.ts(20,9): error TS18048: 'd' is possibly 'undefined'.
+a.ts(33,5): error TS2532: Object is possibly 'undefined'.
+a.ts(33,27): error TS2345: Argument of type '100' is not assignable to parameter of type 'never'.

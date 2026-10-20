@@ -1,0 +1,22 @@
+a.ts(12,17): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(13,17): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(14,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(15,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(18,20): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(19,36): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(20,18): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(20,21): error TS2304: Cannot find name 'NotFound'.
+a.ts(21,18): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(22,18): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(23,18): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(24,18): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(27,18): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(29,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(30,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(32,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(33,17): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(34,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.
+a.ts(35,17): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(36,17): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(38,17): error TS1337: An index signature parameter type cannot be a literal type or generic type. Consider using a mapped object type instead.
+a.ts(39,17): error TS1268: An index signature parameter type must be 'string', 'number', 'symbol', or a template literal type.

@@ -1,0 +1,2 @@
+b.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.
+e.ts(2,7): error TS2322: Type 'string' is not assignable to type 'number'.

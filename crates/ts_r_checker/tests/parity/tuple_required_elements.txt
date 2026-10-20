@@ -1,0 +1,23 @@
+a.ts(10,7): error TS2322: Type 'string[]' is not assignable to type '[string, ...string[]]'.
+  Source provides no match for required element at position 0 in target.
+a.ts(11,7): error TS2322: Type 'any[]' is not assignable to type '[any, ...any[]]'.
+  Source provides no match for required element at position 0 in target.
+a.ts(12,7): error TS2322: Type '[string, ...string[]]' is not assignable to type '[string, string, ...string[]]'.
+  Source provides no match for required element at position 1 in target.
+a.ts(13,7): error TS2322: Type '[string, (number | undefined)?, ...string[]]' is not assignable to type '[string, number, ...string[]]'.
+  Source provides no match for required element at position 1 in target.
+a.ts(14,7): error TS2322: Type 'string[]' is not assignable to type '[...string[], string]'.
+  Source provides no match for required element at position 1 in target.
+a.ts(15,7): error TS2322: Type 'string[]' is not assignable to type '[string]'.
+  Target requires 1 element(s) but source may have fewer.
+a.ts(18,7): error TS2322: Type 'readonly string[]' is not assignable to type 'readonly [string, ...string[]]'.
+  Source provides no match for required element at position 0 in target.
+a.ts(23,7): error TS2322: Type '"done"' is not assignable to type 'null'.
+a.ts(25,7): error TS2322: Type '1' is not assignable to type '2'.
+a.ts(34,7): error TS2322: Type '[string, (number | undefined)?]' is not assignable to type 'null'.
+a.ts(35,7): error TS2322: Type '[a: string, b?: number | undefined]' is not assignable to type 'null'.
+a.ts(36,7): error TS2322: Type '[string, (string | number | undefined)?]' is not assignable to type 'null'.
+a.ts(37,7): error TS2322: Type '[(string | undefined)?]' is not assignable to type 'null'.
+a.ts(38,7): error TS2322: Type '[string, any?]' is not assignable to type 'null'.
+a.ts(39,7): error TS2322: Type '(x: string, y?: boolean | undefined) => void' is not assignable to type 'null'.
+a.ts(40,7): error TS2322: Type '(x_0: number, x_1: string, ...x: boolean[]) => void' is not assignable to type 'null'.

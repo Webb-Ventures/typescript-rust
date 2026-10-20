@@ -1,0 +1,9 @@
+a.ts(4,21): error TS2307: Cannot find module 'nope' or its corresponding type declarations.
+a.ts(7,1): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(8,1): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(9,1): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(12,1): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(13,19): error TS7006: Parameter 'p' implicitly has an 'any' type.
+a.ts(13,31): error TS2347: Untyped function calls may not accept type arguments.
+a.ts(14,11): error TS7006: Parameter 'eb' implicitly has an 'any' type.
+a.ts(14,18): error TS2347: Untyped function calls may not accept type arguments.

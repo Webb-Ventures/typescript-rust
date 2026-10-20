@@ -1,0 +1,63 @@
+a.ts(3,1): error TS2322: Type '() => { x: number; }' is not assignable to type '() => { x: string; }'.
+  Type '{ x: number; }' is not assignable to type '{ x: string; }'.
+    Types of property 'x' are incompatible.
+      Type 'number' is not assignable to type 'string'.
+a.ts(6,1): error TS2322: Type '() => () => { x: number; }' is not assignable to type '() => () => { x: string; }'.
+  Type '() => { x: number; }' is not assignable to type '() => { x: string; }'.
+    Type '{ x: number; }' is not assignable to type '{ x: string; }'.
+      Types of property 'x' are incompatible.
+        Type 'number' is not assignable to type 'string'.
+a.ts(9,1): error TS2322: Type '{ f(): { x: number; }; }' is not assignable to type '{ f(): { x: string; }; }'.
+  The types returned by 'f().x' are incompatible between these types.
+    Type 'number' is not assignable to type 'string'.
+a.ts(12,1): error TS2322: Type '{ f: { g(): number; }; }' is not assignable to type '{ f: { g(): string; }; }'.
+  The types of 'f.g()' are incompatible between these types.
+    Type 'number' is not assignable to type 'string'.
+a.ts(15,1): error TS2322: Type '{ f(): () => number; }' is not assignable to type '{ f(): () => string; }'.
+  The types returned by 'f()' are incompatible between these types.
+    Type '() => number' is not assignable to type '() => string'.
+      Type 'number' is not assignable to type 'string'.
+a.ts(18,1): error TS2322: Type '() => { x: () => number; }' is not assignable to type '() => { x: () => string; }'.
+  Type '{ x: () => number; }' is not assignable to type '{ x: () => string; }'.
+    The types returned by 'x()' are incompatible between these types.
+      Type 'number' is not assignable to type 'string'.
+a.ts(21,1): error TS2322: Type '(a: number) => { x: { y: number; }; }' is not assignable to type '(a: number) => { x: { y: string; }; }'.
+  Type '{ x: { y: number; }; }' is not assignable to type '{ x: { y: string; }; }'.
+    The types of 'x.y' are incompatible between these types.
+      Type 'number' is not assignable to type 'string'.
+a.ts(24,1): error TS2322: Type '{ a: { b: number; }; }' is not assignable to type '{ a: { b: string; }; }'.
+  The types of 'a.b' are incompatible between these types.
+    Type 'number' is not assignable to type 'string'.
+a.ts(27,1): error TS2322: Type '{ a: (cb: (x: string) => void) => void; }' is not assignable to type '{ a: (cb: (x: number) => void) => void; }'.
+  Types of property 'a' are incompatible.
+    Type '(cb: (x: string) => void) => void' is not assignable to type '(cb: (x: number) => void) => void'.
+      Types of parameters 'cb' and 'cb' are incompatible.
+        Types of parameters 'x' and 'x' are incompatible.
+          Type 'string' is not assignable to type 'number'.
+a.ts(32,1): error TS2322: Type 'L1' is not assignable to type 'L2'.
+  Types of property 'forEach' are incompatible.
+    Type '(cb: (item: number) => boolean) => void' is not assignable to type '(cb: (item: number) => void) => void'.
+      Types of parameters 'cb' and 'cb' are incompatible.
+        Type 'void' is not assignable to type 'boolean'.
+a.ts(37,7): error TS2322: Type '(x: "hi", items: string[]) => typeof foo' is not assignable to type '(x: "hi", items: string[]) => number'.
+  Type '(x: "hi", items: string[]) => typeof foo' is not assignable to type 'number'.
+a.ts(40,1): error TS2322: Type 'typeof pc' is not assignable to type 'typeof P'.
+  Type 'pc' is not assignable to type 'P'.
+    Types of property 'm' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(43,7): error TS2322: Type 'typeof k' is not assignable to type 'typeof Q'.
+  Type 'k' is not assignable to type 'Q'.
+    Types of property 'm' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(47,7): error TS2322: Type 'typeof (Anonymous class)' is not assignable to type 'typeof Q'.
+  Type '(Anonymous class)' is not assignable to type 'Q'.
+    Types of property 'm' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(48,42): error TS2322: Type 'typeof (Anonymous class)' is not assignable to type 'typeof Q'.
+  Type '(Anonymous class)' is not assignable to type 'Q'.
+    Types of property 'm' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(50,7): error TS2322: Type 'typeof ["z"]' is not assignable to type 'typeof Q'.
+  Type '["z"]' is not assignable to type 'Q'.
+    Types of property 'm' are incompatible.
+      Type 'string' is not assignable to type 'number'.

@@ -1,0 +1,11 @@
+{
+  // ts-r-check and tsc 7 disagree here, so the drop-in falls back to tsc for this project.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "types": [],
+  },
+  "include": ["src"],
+}

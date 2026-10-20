@@ -1,0 +1,22 @@
+{
+  "name": "ts-r-code-review",
+  "version": "2.0.0",
+  "description": "ts-r pull request review for Claude and OpenAI models: lenses for bugs, AGENTS.md and design-record rules, resource limits, determinism and hot-path performance, with verified, confidence-scored findings",
+  "author": {
+    "name": "Riley Webb",
+    "email": "riley@webbventuresgroup.com"
+  },
+  "repository": "https://github.com/Webb-Ventures/tsc-rust",
+  "license": "Apache-2.0",
+  "keywords": ["code-review", "ts-r", "rust", "typescript"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ts-r code review",
+    "shortDescription": "Review ts-r changes against AGENTS.md and design records",
+    "longDescription": "Reviews the working tree, a branch or a pull request into main for verified bugs and breaches of ts-r's rules: the from-scratch rule, never panicking on user input, determinism, resource limits, hot-path performance and design records. The same skill drives the code-review GitHub workflow.",
+    "developerName": "Webb Ventures",
+    "category": "Coding",
+    "capabilities": ["Interactive"],
+    "defaultPrompt": ["Use ts-r-review to review my branch against main"]
+  }
+}

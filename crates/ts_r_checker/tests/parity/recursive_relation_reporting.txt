@@ -1,0 +1,9 @@
+a.ts(13,1): error TS2322: Type 'B1<string>' is not assignable to type 'A1<string>'.
+  Types of property 'tag' are incompatible.
+    Type '"B"' is not assignable to type '"A"'.
+a.ts(24,1): error TS2322: Type 'B2' is not assignable to type 'A2'.
+  Types of property 'tag' are incompatible.
+    Type '"B"' is not assignable to type '"A"'.
+a.ts(27,1): error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'Int8Array<ArrayBufferLike>'.
+  The types returned by 'filter(...)[Symbol.toStringTag]' are incompatible between these types.
+    Type '"Uint8Array"' is not assignable to type '"Int8Array"'.

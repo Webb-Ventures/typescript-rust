@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "outDir": "./x/${configDir}"
+    },
+    "include": [
+        "./${configDir}/src",
+        "src/${configDir}"
+    ],
+    "exclude": [
+        "${FIXTURE}/x/${configDir}"
+    ]
+}

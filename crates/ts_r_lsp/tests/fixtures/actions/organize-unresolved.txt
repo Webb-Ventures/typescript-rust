@@ -1,0 +1,12 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { used } from "./missing";
+import { notUsed } from "./missing2";
+import { _under } from "./a";
+import { a } from "./a";
+
+/** See {@link Linked}. */
+export function f() { return used + a; }
+import { Linked } from "./a";
+// @file: src/a.ts
+export const a = 1, _under = 2, Linked = 3;

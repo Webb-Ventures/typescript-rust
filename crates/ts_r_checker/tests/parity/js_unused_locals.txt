@@ -1,0 +1,10 @@
+a.js(2,5): error TS6192: All imports in import declaration are unused.
+a.js(3,18): error TS6133: 'T' is declared but its value is never read.
+a.js(22,27): error TS6133: 'b' is declared but its value is never read.
+a.js(24,7): error TS6133: 'local' is declared but its value is never read.
+a.js(28,5): error TS6133: 'priv' is declared but its value is never read.
+a.js(29,5): error TS6133: '#hidden' is declared but its value is never read.
+b.js(7,25): error TS6196: 'Inner' is declared but never used.
+c.js(3,3): error TS6205: All type parameters are unused.
+c.js(8,3): error TS6205: All type parameters are unused.
+c.js(13,14): error TS6196: 'T' is declared but never used.

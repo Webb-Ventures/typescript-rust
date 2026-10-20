@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType<U extends T, T> = U | T;
+
+export class Box<T> {
+    get<U extends T>(u: NewType<U, T>): U { return u as U; }
+}

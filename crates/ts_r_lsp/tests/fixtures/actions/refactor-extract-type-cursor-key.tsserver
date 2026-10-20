@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Extract to interface
+// @file: src/main.ts
+interface NewType {
+    k: 1;
+}
+
+export function f(a: Array<NewType>): void {}

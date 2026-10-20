@@ -1,0 +1,6 @@
+a.ts(4,15): error TS2322: Type 'Extract<keyof T, string>' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(6,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'k' must be of type 'Extract<keyof T, string>', but here has type 'string'.
+a.ts(10,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'k' must be of type 'string', but here has type 'number'.
+a.ts(15,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'y' must be of type 'Extract<keyof this, string>', but here has type 'string'.
+a.ts(34,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'typeof E', but here has type 'E'.

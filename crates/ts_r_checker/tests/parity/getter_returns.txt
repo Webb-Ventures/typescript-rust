@@ -1,0 +1,16 @@
+a.ts(5,9): error TS2378: A 'get' accessor must return a value.
+a.ts(9,9): error TS2378: A 'get' accessor must return a value.
+a.ts(9,14): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(10,9): error TS2378: A 'get' accessor must return a value.
+a.ts(11,9): error TS2378: A 'get' accessor must return a value.
+a.ts(12,9): error TS2378: A 'get' accessor must return a value.
+a.ts(16,9): error TS2378: A 'get' accessor must return a value.
+a.ts(16,14): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(17,9): error TS2378: A 'get' accessor must return a value.
+a.ts(19,9): error TS2378: A 'get' accessor must return a value.
+a.ts(26,9): error TS2378: A 'get' accessor must return a value.
+a.ts(30,16): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(32,16): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(33,16): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(35,10): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(38,22): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.

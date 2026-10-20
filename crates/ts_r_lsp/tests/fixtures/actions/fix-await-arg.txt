@@ -1,0 +1,7 @@
+// @action: fix 2345 Add 'await'
+// @file: src/main.ts
+declare function load(): Promise<string>;
+declare function use(s: string): void;
+export async function f() {
+  use(/*|*/load());
+}

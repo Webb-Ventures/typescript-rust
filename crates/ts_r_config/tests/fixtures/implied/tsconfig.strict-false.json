@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": true
+  },
+  "files": [
+    "a.ts"
+  ]
+}

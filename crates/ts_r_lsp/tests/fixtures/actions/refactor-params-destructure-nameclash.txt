@@ -1,0 +1,9 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+function /*|*/nc(a: number, b: number) { return a + b; }
+nc(1, 2);
+nc(
+  3, // three
+  4,
+);

@@ -1,0 +1,3 @@
+// @action: refactor Convert arrow function or function expression/Convert to anonymous function
+// @file: src/main.ts
+[1].map(/*|*/(v) => v * 2);

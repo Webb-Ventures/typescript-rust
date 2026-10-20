@@ -1,0 +1,4 @@
+a.ts(5,7): error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
+a.ts(8,7): error TS4104: The type 'RO' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
+a.ts(10,3): error TS4104: The type 'RO' is 'readonly' and cannot be assigned to the mutable type 'string[]'.
+a.ts(11,3): error TS4104: The type 'readonly string[]' is 'readonly' and cannot be assigned to the mutable type 'string[]'.

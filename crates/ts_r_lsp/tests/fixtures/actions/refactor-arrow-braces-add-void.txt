@@ -1,0 +1,4 @@
+// @action: refactor Add or remove braces in an arrow function/Add braces to arrow function
+// @file: src/main.ts
+declare function log(s: string): void;
+[1, 2].forEach((v) =>/*|*/ log(String(v)));

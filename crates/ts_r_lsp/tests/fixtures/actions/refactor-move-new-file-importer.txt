@@ -1,0 +1,10 @@
+// @action: refactor Move to a new file/Move to a new file
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/main.ts
+/*[*/export const alpha = 1;/*]*/
+export const beta = 2;
+// @file: src/user.ts
+import { alpha, beta } from "./main";
+
+export const sum = alpha + beta;

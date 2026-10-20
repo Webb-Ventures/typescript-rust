@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "module": "node16"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

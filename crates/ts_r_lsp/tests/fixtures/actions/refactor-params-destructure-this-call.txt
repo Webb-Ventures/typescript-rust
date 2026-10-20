@@ -1,0 +1,7 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+class K {
+  /*|*/m(x: number, y: number) { return x + y; }
+  run() { return this.m(1, 2); }
+}

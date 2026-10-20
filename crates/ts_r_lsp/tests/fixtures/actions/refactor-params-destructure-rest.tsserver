@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function r({ a, rest = [] }: { a: number; rest?: string[]; }) { return rest.length + a; }
+r({ a: 1, rest: ['a', 'b'] });

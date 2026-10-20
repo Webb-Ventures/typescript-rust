@@ -1,0 +1,5 @@
+tsconfig.maps.json(3,5): error TS5051: Option 'inlineSources can only be used when either option '--inlineSourceMap' or option '--sourceMap' is provided.
+
+tsconfig.maps.json(4,35): error TS5096: Option 'allowImportingTsExtensions' can only be used when one of 'noEmit', 'emitDeclarationOnly', or 'rewriteRelativeImportExtensions' is set.
+
+tsconfig.maps.json(5,5): error TS5052: Option 'strictPropertyInitialization' cannot be specified without specifying option 'strictNullChecks'.

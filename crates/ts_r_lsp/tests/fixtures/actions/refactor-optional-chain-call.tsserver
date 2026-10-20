@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert to optional chain expression
+// @file: src/main.ts
+interface Api { client?: { send?: (m: string) => boolean } }
+export function send(api: Api) {
+  return api.client?.send?.('hi');
+}

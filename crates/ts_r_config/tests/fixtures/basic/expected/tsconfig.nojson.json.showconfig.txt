@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "module": "node16",
+        "moduleResolution": "node16",
+        "moduleDetection": "force",
+        "resolveJsonModule": false
+    },
+    "files": [
+        "./src/1.ts",
+        "./src/_a.ts",
+        "./src/a.ts",
+        "./src/c.ts",
+        "./src/e.d.css.ts",
+        "./src/n.d.ts",
+        "./src/z.ts"
+    ],
+    "include": [
+        "src/*.json",
+        "src/*.ts"
+    ]
+}

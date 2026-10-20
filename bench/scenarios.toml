@@ -1,0 +1,1059 @@
+# Benchmark scenarios for `cargo xtask bench` (see .agents/skills/bench-compare/SKILL.md).
+#
+# Placeholders: {bin} = our release binaries (--bin-dir, default target/release),
+# {node_bin} = bench/node_modules/.bin (pinned reference tools from bench/package.json),
+# {input} = the scenario's input file. Commands run from the repo root.
+#
+# `ours = true` marks ts-r tools; only those are gated against the baseline: >5% slower fails
+# when the slowdown is also above `noise_sigmas` standard deviations of the two runs combined.
+# `pending = "<why>"` keeps a tool listed but not run until its binary exists.
+# `requires = [...]` skips a tool until the listed paths exist.
+# `ignore_failure = true` times a tool even though it exits non-zero (use sparingly: it hides
+# broken commands).
+# `setup = "<cmd>"` (per scenario) runs once before each tool's runs, untimed (hyperfine
+# --setup), in the same directory and under the same cap; placeholders allowed.
+
+[settings]
+warmup = 3
+runs = 10
+max_regression = 0.05
+noise_sigmas = 2.0
+
+[[scenario]]
+id = "parse-dom-dts"
+title = "Parse throughput: lib.dom (declarations, single thread)"
+measures = "MB/s, single thread (includes process start-up until we add in-process harnesses). Target: parser >= Oxc."
+input = "target/upstream/typescript/tsc/internal/bundled/libs/lib.dom.d.ts"
+input_hint = "run `cargo xtask upstream sync --minimal`"
+
+  [[scenario.tool]]
+  name = "ts-r"
+  ours = true
+  cmd = "{bin}/ts-r-check --parse-only {input}"
+  requires = ["{bin}/ts-r-check"]
+  pending = "no parse-only entry point until the parser lands (M1)"
+
+  [[scenario.tool]]
+  name = "oxc-parser"
+  cmd = "node bench/js/oxc-parse.mjs {input}"
+  requires = ["bench/node_modules/oxc-parser"]
+
+  [[scenario.tool]]
+  name = "esbuild"
+  cmd = "{node_bin}/esbuild --loader=ts --log-level=error < {input} > /dev/null"
+  requires = ["{node_bin}/esbuild"]
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc --noEmit --noLib --noResolve --skipLibCheck {input}"
+  requires = ["{node_bin}/tsc"]
+  # Exits non-zero under --noLib (missing global types); we only time parse + bind.
+  ignore_failure = true
+
+[[scenario]]
+id = "run-startup"
+title = "ts-r run: start-up of a small TypeScript script"
+measures = "Wall time to run bench/fixtures/hello.ts. Target: <= tsx."
+
+  [[scenario.tool]]
+  name = "ts-r"
+  ours = true
+  cmd = "{bin}/ts-r run bench/fixtures/hello.ts"
+  requires = ["{bin}/ts-r"]
+  pending = "ts-r-run does not exist yet"
+
+  [[scenario.tool]]
+  name = "tsx"
+  cmd = "{node_bin}/tsx bench/fixtures/hello.ts"
+  requires = ["{node_bin}/tsx"]
+
+  [[scenario.tool]]
+  name = "node-strip-types"
+  cmd = "node --experimental-strip-types --no-warnings bench/fixtures/hello.ts"
+
+[[scenario]]
+id = "version-startup"
+title = "Process start-up: --version"
+measures = "Start-up time per binary. Target: < 5 ms for every ts-r tool."
+no_shell = true
+runs = 30
+
+  [[scenario.tool]]
+  name = "ts-r"
+  ours = true
+  cmd = "{bin}/ts-r --version"
+  requires = ["{bin}/ts-r"]
+
+  [[scenario.tool]]
+  name = "esbuild"
+  cmd = "{node_bin}/esbuild --version"
+  requires = ["{node_bin}/esbuild"]
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc --version"
+  requires = ["{node_bin}/tsc"]
+
+# ---------------------------------------------------------------------------------------------
+# Pinned public repos (bench/repos.toml, bench/README.md). These run only when --repos selects
+# them, inside the checkout (target/bench-repos/<name>, `{repo}`), each tool under
+# scripts/limit.sh with the repo's memory cap. `{bin}`, `{node_bin}` and `{tmp}` are absolute
+# there. Fetch first: `cargo xtask bench --fetch-repos --repos <names>`.
+#
+# Check scenarios check `<tsconfig>.ts-r-bench.json`, a wrapper the fetch writes next to each
+# project: it extends the project with noEmit, incremental and composite off (plus the repo's
+# check_options), so every tool does the same cold, write-nothing check. `ts-r-check` runs
+# without its saved history (cold, like tsc); `ts-r-check-warm` with it. `tsc-7` is the pinned
+# TypeScript 7; `tsc-repo` the repo's own TypeScript. Projects have errors under TS 7, so every
+# tool may exit non-zero: compare diagnostics separately (bench/README.md, smoke runs).
+#
+# Lint scenarios compare ts-r-lint (type-aware rules on, and off) with the repo's own linter
+# (ESLint, oxlint or Biome).
+
+
+# ---- TypeScript 7's set (small and medium: these run on the shared machine) ----
+
+[[scenario]]
+id = "check-trpc"
+repo = "trpc"
+title = "Type-check: trpc packages/server (trpc/trpc, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/server/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/server/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p packages/server/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p packages/server/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-trpc"
+repo = "trpc"
+title = "Lint: trpc server and client sources with its ESLint config (type-aware)"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 3
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint packages/server/src packages/client/src"
+  requires = ["{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+# Like-for-like: the same config file for both tools, the same files. The setup runs
+# bench/js/eslint-same-rules.mjs with the ts-r-lint under test: it writes trpc's eslint.config.js
+# with only the rules that binary lists (--list-rules), as eslint.ts-r-same-rules.config.mjs
+# (type-aware rules included) and eslint.ts-r-same-rules-untyped.config.mjs (only rules that need
+# no types, and no TypeScript program for ESLint). The untyped pair is the comparison; the typed
+# pair runs ts-r-lint with its parity gate off (TS_R_LINT_PARITY=off: type-aware rules run on our
+# checker even where its diagnostics differ from tsc's) and with an empty cache every run.
+[[scenario]]
+id = "lint-trpc-same-rules"
+repo = "trpc"
+title = "Lint: trpc server and client sources, ESLint restricted to ts-r-lint's rules"
+measures = "Wall time of one lint run, with the same rules, options and files for both tools. Target: <= ESLint."
+setup = "node {node_bin}/../../js/eslint-same-rules.mjs {bin}/ts-r-lint eslint.config.js eslint.ts-r-same-rules"
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check -c eslint.ts-r-same-rules-untyped.config.mjs packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint", "{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-cold-config"
+  ours = true
+  cmd = "TS_R_LINT_NO_CONFIG_CACHE=1 {bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check -c eslint.ts-r-same-rules-untyped.config.mjs packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint", "{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint -c eslint.ts-r-same-rules-untyped.config.mjs packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint", "{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-typed-cold"
+  ours = true
+  cmd = "rm -rf {tmp}/lint-trpc-same-rules-cache && TS_R_CACHE_DIR={tmp}/lint-trpc-same-rules-cache TS_R_LINT_PARITY=off {bin}/ts-r-lint --no-gitignore --threads 4 -c eslint.ts-r-same-rules.config.mjs packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint", "{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint-typed"
+  cmd = "node_modules/.bin/eslint -c eslint.ts-r-same-rules.config.mjs packages/server/src packages/client/src"
+  requires = ["{bin}/ts-r-lint", "{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-date-fns"
+repo = "date-fns"
+title = "Type-check: date-fns pkgs/core (date-fns/date-fns, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p pkgs/core/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p pkgs/core/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p pkgs/core/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p pkgs/core/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-date-fns"
+repo = "date-fns"
+title = "Lint: date-fns pkgs/core/src with its oxlint config"
+measures = "Wall time of one lint run. Target: <= oxlint."
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 pkgs/core/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "oxlint"
+  cmd = "node_modules/.bin/oxlint pkgs/core/src"
+  requires = ["{repo}/node_modules/.bin/oxlint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-rxjs"
+repo = "rxjs"
+title = "Type-check: rxjs packages/rxjs (ReactiveX/rxjs, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/rxjs/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/rxjs/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p packages/rxjs/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p packages/rxjs/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-typeorm"
+repo = "typeorm"
+title = "Type-check: typeorm packages/typeorm (typeorm/typeorm, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/typeorm/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/typeorm/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p packages/typeorm/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "packages/typeorm/node_modules/.bin/tsc -p packages/typeorm/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/packages/typeorm/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-typeorm"
+repo = "typeorm"
+title = "Lint: typeorm packages/typeorm/src with its ESLint config (type-aware)"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 3
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "cd packages/typeorm && {bin}/ts-r-lint --no-gitignore --threads 4 src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "cd packages/typeorm && {bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "cd packages/typeorm && node_modules/.bin/eslint src"
+  requires = ["{repo}/packages/typeorm/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-playwright"
+repo = "playwright"
+title = "Type-check: playwright root project (microsoft/playwright, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-playwright"
+repo = "playwright"
+title = "Lint: playwright-core and playwright sources with its ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 3
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 packages/playwright-core/src packages/playwright/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check packages/playwright-core/src packages/playwright/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint packages/playwright-core/src packages/playwright/src"
+  requires = ["{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+# ---- Bundler: three.js x10 ----
+# Ten copies of three.js's src imported together from one entry (bench/README.md), bundled
+# minified with source maps into one IIFE with a global name. Outputs go to target/bench-tmp.
+
+[[scenario]]
+id = "build-three-x10"
+repo = "three-x10"
+title = "Bundle: three.js x10 (10 copies of mrdoob/three.js src), minified, source maps"
+measures = "Wall time of one bundling process. Target: <= esbuild."
+warmup = 2
+runs = 10
+
+  [[scenario.tool]]
+  name = "ts-r-build"
+  ours = true
+  cmd = "{bin}/ts-r-build bench/entry.js --bundle --minify --sourcemap --format=iife --global-name=THREE --no-cache --threads=4 --log-level=warning --outfile={tmp}/three-x10-tsr.js"
+  requires = ["{bin}/ts-r-build"]
+
+  [[scenario.tool]]
+  name = "ts-r-build-cached"
+  ours = true
+  cmd = "{bin}/ts-r-build bench/entry.js --bundle --minify --sourcemap --format=iife --global-name=THREE --threads=4 --log-level=warning --outfile={tmp}/three-x10-tsr-cached.js"
+  requires = ["{bin}/ts-r-build"]
+
+  [[scenario.tool]]
+  name = "esbuild"
+  cmd = "{node_bin}/esbuild bench/entry.js --bundle --minify --sourcemap --format=iife --global-name=THREE --log-level=warning --outfile={tmp}/three-x10-esbuild.js"
+  requires = ["{node_bin}/esbuild"]
+
+# ---- App bundle: excalidraw ----
+# The Excalidraw app (excalidraw/excalidraw, Vite + React + TypeScript), bundled from the bench
+# harness entry (bench/dev/excalidraw/main.tsx, copied to ts-r-bench-dev/ by the fetch): the
+# app and its packages as source through the root tsconfig's paths, React, Firebase and the
+# rest from node_modules. Fonts use the file loader; .scss imports are empty for both tools (no
+# Sass compiler in either). Outputs go to target/bench-tmp.
+
+[[scenario]]
+id = "build-excalidraw"
+repo = "excalidraw"
+title = "Bundle: the Excalidraw app (excalidraw/excalidraw, pinned), cold, minified"
+measures = "Wall time of one bundling process (no persistent cache), ts-r-build vs esbuild 0.28.2. Target: <= esbuild."
+warmup = 2
+runs = 10
+
+  [[scenario.tool]]
+  name = "ts-r-build"
+  ours = true
+  cmd = "{bin}/ts-r-build ts-r-bench-dev/main.tsx --bundle --minify --format=esm --jsx=automatic --loader:.woff2=file --loader:.scss=empty --no-cache --threads=4 --log-level=error --outdir={tmp}/excalidraw-tsr"
+  requires = ["{bin}/ts-r-build", "{repo}/ts-r-bench-dev/main.tsx"]
+
+  [[scenario.tool]]
+  name = "ts-r-build-cached"
+  ours = true
+  cmd = "{bin}/ts-r-build ts-r-bench-dev/main.tsx --bundle --minify --format=esm --jsx=automatic --loader:.woff2=file --loader:.scss=empty --threads=4 --log-level=error --outdir={tmp}/excalidraw-tsr-cached"
+  requires = ["{bin}/ts-r-build", "{repo}/ts-r-bench-dev/main.tsx"]
+
+  [[scenario.tool]]
+  name = "esbuild"
+  cmd = "{node_bin}/esbuild ts-r-bench-dev/main.tsx --bundle --minify --format=esm --jsx=automatic --loader:.woff2=file --loader:.scss=empty --log-level=error --outdir={tmp}/excalidraw-esbuild"
+  requires = ["{node_bin}/esbuild", "{repo}/ts-r-bench-dev/main.tsx"]
+
+[[scenario]]
+id = "rebuild-excalidraw"
+repo = "excalidraw"
+title = "Bundle: the Excalidraw app, 20 edit-and-rebuild cycles"
+measures = "Wall time of one process doing a first build and then 20 cycles of editing one component (excalidraw-app/components/AppWelcomeScreen.tsx) and rebuilding in memory (BuildContext::invalidate + build vs esbuild's context.rebuild). Each command also prints its per-rebuild median. Target: <= esbuild."
+warmup = 1
+runs = 5
+
+  [[scenario.tool]]
+  name = "ts-r-build"
+  ours = true
+  cmd = "{bin}/examples/build_loop {repo} ts-r-bench-dev/main.tsx 20 --minify --format=esm --loader:.woff2=file --loader:.scss=empty --edit excalidraw-app/components/AppWelcomeScreen.tsx"
+  requires = ["{bin}/examples/build_loop", "{repo}/ts-r-bench-dev/main.tsx"]
+
+  # bench/js/esbuild-rebuild.mjs, reached from {node_bin} (bench/node_modules/.bin), which is
+  # absolute here.
+  [[scenario.tool]]
+  name = "esbuild"
+  cmd = "node {node_bin}/../../js/esbuild-rebuild.mjs {repo} ts-r-bench-dev/main.tsx 20 excalidraw-app/components/AppWelcomeScreen.tsx --minify --format=esm --loader:.woff2=file --loader:.scss=empty"
+  requires = ["{node_bin}/esbuild", "{repo}/ts-r-bench-dev/main.tsx"]
+
+# ---- Large apps and monorepos: need a dedicated machine (--large; bench/README.md) ----
+# Wired and listed (`--list --repos all`), not yet run: commands may need adjusting on the
+# first run on a big machine.
+
+[[scenario]]
+id = "check-vscode"
+repo = "vscode"
+title = "Type-check: VS Code src (microsoft/vscode, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p src/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p src/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p src/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p src/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-vscode"
+repo = "vscode"
+title = "Lint: VS Code src/vs with its ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 1
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 src/vs"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check src/vs"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint src/vs"
+  requires = ["{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-sentry"
+repo = "sentry"
+title = "Type-check: Sentry frontend (getsentry/sentry, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-sentry"
+repo = "sentry"
+title = "Lint: Sentry static/app with its oxlint config"
+measures = "Wall time of one lint run. Target: <= oxlint."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 static/app"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "oxlint"
+  cmd = "node_modules/.bin/oxlint static/app"
+  requires = ["{repo}/node_modules/.bin/oxlint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-grafana"
+repo = "grafana"
+title = "Type-check: Grafana frontend (grafana/grafana, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-grafana"
+repo = "grafana"
+title = "Lint: Grafana public/app with its ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 1
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 public/app"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check public/app"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint public/app"
+  requires = ["{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-supabase"
+repo = "supabase"
+title = "Type-check: Supabase Studio (supabase/supabase, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p apps/studio/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p apps/studio/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p apps/studio/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p apps/studio/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-supabase"
+repo = "supabase"
+title = "Lint: Supabase Studio with its ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 1
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "cd apps/studio && {bin}/ts-r-lint --no-gitignore --threads 4 ."
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "cd apps/studio && {bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check ."
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "cd apps/studio && node_modules/.bin/eslint ."
+  requires = ["{repo}/apps/studio/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-backstage"
+repo = "backstage"
+title = "Type-check: Backstage packages and plugins (backstage/backstage, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-backstage"
+repo = "backstage"
+title = "Lint: Backstage core-plugin-api and catalog with its ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 1
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 packages/core-plugin-api/src plugins/catalog/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+  pending = "legacy .eslintrc.js configs are not read by ts-r-lint"
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check packages/core-plugin-api/src plugins/catalog/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+  pending = "legacy .eslintrc.js configs are not read by ts-r-lint"
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint packages/core-plugin-api/src plugins/catalog/src"
+  requires = ["{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-n8n"
+repo = "n8n"
+title = "Type-check: n8n cli, workflow and core packages (n8n-io/n8n, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/cli/tsconfig.ts-r-bench.json --pretty false --no-history; {bin}/ts-r-check -p packages/workflow/tsconfig.ts-r-bench.json --pretty false --no-history; {bin}/ts-r-check -p packages/core/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/cli/tsconfig.ts-r-bench.json --pretty false; {bin}/ts-r-check -p packages/workflow/tsconfig.ts-r-bench.json --pretty false; {bin}/ts-r-check -p packages/core/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p packages/cli/tsconfig.ts-r-bench.json --pretty false; {node_bin}/tsc -p packages/workflow/tsconfig.ts-r-bench.json --pretty false; {node_bin}/tsc -p packages/core/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p packages/cli/tsconfig.ts-r-bench.json --pretty false; node_modules/.bin/tsc -p packages/workflow/tsconfig.ts-r-bench.json --pretty false; node_modules/.bin/tsc -p packages/core/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-n8n"
+repo = "n8n"
+title = "Lint: n8n packages/cli/src with its ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 1
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "cd packages/cli && {bin}/ts-r-lint --no-gitignore --threads 4 src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "cd packages/cli && {bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "cd packages/cli && node_modules/.bin/eslint src"
+  requires = ["{repo}/packages/cli/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-cal-com"
+repo = "cal-com"
+title = "Type-check: Cal.com apps/web (calcom/cal.com, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p apps/web/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p apps/web/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p apps/web/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p apps/web/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-cal-com"
+repo = "cal-com"
+title = "Lint: Cal.com apps/web and packages with its Biome config"
+measures = "Wall time of one lint run. Target: <= Biome."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 apps/web packages"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "biome"
+  cmd = "node_modules/.bin/biome lint apps/web packages"
+  requires = ["{repo}/node_modules/.bin/biome"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-next-js"
+repo = "next-js"
+title = "Type-check: Next.js packages/next (vercel/next.js, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/next/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p packages/next/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p packages/next/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "node_modules/.bin/tsc -p packages/next/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/node_modules/.bin/tsc"]
+  ignore_failure = true
+
+[[scenario]]
+id = "lint-next-js"
+repo = "next-js"
+title = "Lint: Next.js packages/next/src with its CLI ESLint config"
+measures = "Wall time of one lint run. Target: <= ESLint."
+warmup = 1
+runs = 1
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-lint"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 -c eslint.cli.config.mjs packages/next/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-lint-no-types"
+  ours = true
+  cmd = "{bin}/ts-r-lint --no-gitignore --threads 4 --no-type-check -c eslint.cli.config.mjs packages/next/src"
+  requires = ["{bin}/ts-r-lint"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "eslint"
+  cmd = "node_modules/.bin/eslint --config eslint.cli.config.mjs packages/next/src"
+  requires = ["{repo}/node_modules/.bin/eslint"]
+  ignore_failure = true
+
+[[scenario]]
+id = "check-react"
+repo = "react"
+title = "Type-check: React Compiler (facebook/react compiler/, pinned)"
+measures = "Wall time of one full check, cold. Target: <= tsc 7."
+warmup = 1
+runs = 3
+time_s = 3600
+
+  [[scenario.tool]]
+  name = "ts-r-check"
+  ours = true
+  cmd = "{bin}/ts-r-check -p compiler/packages/babel-plugin-react-compiler/tsconfig.ts-r-bench.json --pretty false --no-history"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "ts-r-check-warm"
+  ours = true
+  cmd = "{bin}/ts-r-check -p compiler/packages/babel-plugin-react-compiler/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{bin}/ts-r-check"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-7"
+  cmd = "{node_bin}/tsc -p compiler/packages/babel-plugin-react-compiler/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{node_bin}/tsc"]
+  ignore_failure = true
+
+  [[scenario.tool]]
+  name = "tsc-repo"
+  cmd = "compiler/node_modules/.bin/tsc -p compiler/packages/babel-plugin-react-compiler/tsconfig.ts-r-bench.json --pretty false"
+  requires = ["{repo}/compiler/node_modules/.bin/tsc"]
+  ignore_failure = true

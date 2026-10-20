@@ -1,0 +1,8 @@
+// @action: refactor Convert overload list to single signature/Convert overload list to single signature
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+class C {
+  static /*|*/k(a: string): void;
+  static k(a: number): void;
+  static k(a: unknown) {}
+}

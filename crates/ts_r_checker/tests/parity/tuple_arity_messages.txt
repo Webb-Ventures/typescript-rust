@@ -1,0 +1,16 @@
+a.ts(10,1): error TS2322: Type 'T2' is not assignable to type 'T1'.
+  Source provides no match for required element at position 2 in target.
+a.ts(11,1): error TS2322: Type '[number, string, (boolean | undefined)?]' is not assignable to type '[number, string, boolean]'.
+  Source provides no match for required element at position 2 in target.
+a.ts(12,1): error TS2322: Type '[number, string, (boolean | undefined)?]' is not assignable to type 'T1'.
+  Source provides no match for required element at position 2 in target.
+a.ts(13,1): error TS2322: Type 'T2' is not assignable to type '[number, string, boolean]'.
+  Source provides no match for required element at position 2 in target.
+a.ts(15,7): error TS2322: Type '[]' is not assignable to type 'Funcs'.
+  Source has 0 element(s) but target requires 1.
+a.ts(16,7): error TS2322: Type '[]' is not assignable to type '[...((arg: number) => void)[], (arg: string) => void]'.
+  Source has 0 element(s) but target requires 1.
+a.ts(18,7): error TS2322: Type '[]' is not assignable to type 'F2'.
+  Source has 0 element(s) but target requires 1.
+a.ts(19,7): error TS2322: Type 'F2' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type 'Funcs' is not assignable to type 'number'.

@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to function in module scope
+// @file: src/main.ts
+declare function load(n: number): Promise<string>;
+export async function f(a: number) {
+  await newFunction(a);
+  return a;
+}
+
+async function newFunction(a: number) {
+  const text = await load(a);
+  console.log(text);
+}

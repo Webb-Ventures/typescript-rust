@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Extract to constant in module scope
+// @file: src/main.ts
+const newLocal = Math.max(1, 2);
+export const o = {
+  m(a: number) {
+    return a + newLocal;
+  },
+};

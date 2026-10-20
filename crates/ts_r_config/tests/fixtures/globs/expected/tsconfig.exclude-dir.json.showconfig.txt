@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./src/a.test.ts",
+        "./src/a.ts",
+        "./src/q.mts",
+        "./src/r.cts",
+        "./src/a/c2.cts",
+        "./test/t.ts",
+        "./test/fixtures/f.ts"
+    ],
+    "exclude": [
+        "src/b",
+        "**/deep",
+        "lib/*"
+    ]
+}

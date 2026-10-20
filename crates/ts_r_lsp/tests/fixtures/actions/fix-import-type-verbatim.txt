@@ -1,0 +1,11 @@
+// @action: fix 2304 Update import from "./types"
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "verbatimModuleSyntax": true}}
+// @file: src/main.ts
+import { make } from "./types";
+
+export function f(u: /*|*/User): string {
+  return make(u.name).name;
+}
+// @file: src/types.ts
+export interface User { name: string }
+export function make(name: string): User { return { name }; }

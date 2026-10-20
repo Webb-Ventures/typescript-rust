@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "moduleResolution": "node",
+        "baseUrl": "./"
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

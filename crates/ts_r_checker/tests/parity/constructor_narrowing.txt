@@ -1,0 +1,9 @@
+a.ts(10,7): error TS2339: Property 'p1' does not exist on type 'number | C1'.
+  Property 'p1' does not exist on type 'number'.
+a.ts(16,7): error TS2339: Property 'p1' does not exist on type 'number | C1'.
+  Property 'p1' does not exist on type 'number'.
+a.ts(23,7): error TS2339: Property 'p1' does not exist on type 'never'.
+a.ts(34,5): error TS2454: Variable 'v' is used before being assigned.
+a.ts(35,11): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(37,5): error TS2454: Variable 'v' is used before being assigned.
+a.ts(38,11): error TS2322: Type 'any[]' is not assignable to type 'number'.

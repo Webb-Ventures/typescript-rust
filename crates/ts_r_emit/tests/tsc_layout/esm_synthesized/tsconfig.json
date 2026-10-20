@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "strict": false,
+    "types": [],
+    "outDir": "out"
+  },
+  "files": ["synthesized_esm.ts"]
+}

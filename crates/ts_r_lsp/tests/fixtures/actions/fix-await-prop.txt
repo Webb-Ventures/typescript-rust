@@ -1,0 +1,7 @@
+// @action: fix 2339 Add 'await'
+// @file: src/main.ts
+declare function load(): Promise<{ data: string }>;
+export async function f() {
+  const r = load();
+  return r./*|*/data;
+}

@@ -1,0 +1,9 @@
+// @action: refactor Generate 'get' and 'set' accessors/Generate 'get' and 'set' accessors
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export class Counter {
+  public /*|*/count: number = 0;
+  increment() {
+    this.count++;
+  }
+}

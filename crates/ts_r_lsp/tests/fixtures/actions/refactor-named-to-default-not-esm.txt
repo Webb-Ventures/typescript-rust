@@ -1,0 +1,7 @@
+// @action: refactor Convert import/Convert named imports to default import
+// @file: src/main.ts
+import { /*|*/x } from "./esm";
+
+console.log(x);
+// @file: src/esm.ts
+export const x = 1;

@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

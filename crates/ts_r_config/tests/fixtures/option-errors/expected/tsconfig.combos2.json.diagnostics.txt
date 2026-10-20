@@ -1,0 +1,9 @@
+tsconfig.combos2.json(3,27): error TS18035: Invalid value for 'jsxFragmentFactory'. 'x-y' is not a valid identifier or qualified-name.
+
+tsconfig.combos2.json(3,5): error TS5052: Option 'jsxFragmentFactory' cannot be specified without specifying option 'jsxFactory'.
+
+tsconfig.combos2.json(4,23): error TS5059: Invalid value for '--reactNamespace'. 'a.b' is not a valid identifier.
+
+tsconfig.combos2.json(6,5): error TS5069: Option 'emitDeclarationOnly' cannot be specified without specifying option 'declaration' or option 'composite'.
+
+tsconfig.combos2.json(7,5): error TS5069: Option 'declarationMap' cannot be specified without specifying option 'declaration' or option 'composite'.

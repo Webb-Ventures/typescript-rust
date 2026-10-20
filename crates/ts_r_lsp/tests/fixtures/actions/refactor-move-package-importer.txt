@@ -1,0 +1,14 @@
+// @action: refactor Move to a new file/Move to a new file
+// @differs: an importer reaches the moved code through a package specifier; its new subpath needs the package's manifest, which code actions don't read, so we decline
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @symlinks: node_modules/@app/kit -> packages/kit
+// @file: packages/kit/src/index.ts
+/*[*/export const kit = 1;/*]*/
+// @file: tsconfig.json
+{"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true}, "include": ["apps", "packages"]}
+// @file: apps/web/main.ts
+import { kit } from "@app/kit";
+
+export const n = kit;
+// @file: packages/kit/package.json
+{"name": "@app/kit", "version": "1.0.0", "types": "./src/index.ts"}

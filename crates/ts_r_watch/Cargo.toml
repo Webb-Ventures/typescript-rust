@@ -1,0 +1,18 @@
+[package]
+name = "ts_r_watch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "File watching with editor-save debouncing, shared by ts-r-dev and ts-r-check --watch"
+
+[lints]
+workspace = true
+
+[dependencies]
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+
+# FSEvents (via notify) delivers ~5-15 ms after a write; kqueue on a recently edited file
+# delivers in ~0.1 ms. See src/lib.rs `fast` and AGENTS.md.
+[target.'cfg(target_os = "macos")'.dependencies]
+kqueue = "1.1"

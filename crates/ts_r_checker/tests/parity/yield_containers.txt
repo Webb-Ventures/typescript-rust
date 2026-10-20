@@ -1,0 +1,14 @@
+a.ts(3,13): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(3,13): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(4,20): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(4,20): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(5,28): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(5,28): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(6,25): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(8,33): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(9,30): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(10,44): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(12,26): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(14,16): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(18,17): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(37,23): error TS2523: 'yield' expressions cannot be used in a parameter initializer.

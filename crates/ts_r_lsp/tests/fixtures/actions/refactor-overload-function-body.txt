@@ -1,0 +1,6 @@
+// @action: refactor Convert overload list to single signature/Convert overload list to single signature
+// @differs: tsserver removes the parameter the body uses; ts-r does not offer it
+// @file: src/main.ts
+function ov(a: string): string;
+function /*|*/ov(a: number): string;
+function ov(a: any): string { return String(a); }

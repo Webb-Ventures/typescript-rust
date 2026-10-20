@@ -1,0 +1,4 @@
+types	${FIXTURE}/src/a.ts	require	plain-types	${FIXTURE}/node_modules/plain-types/t.d.ts		false
+types	${FIXTURE}/src/a.ts	require	node	${FIXTURE}/node_modules/@types/node/index.d.ts	@types/node/index.d.ts@24.0.0	false
+types	${FIXTURE}/__inferred type names__.ts	require	ct	${FIXTURE}/custom-types/ct/index.d.ts		true
+types	${FIXTURE}/__inferred type names__.ts	require	node	NOT RESOLVED		

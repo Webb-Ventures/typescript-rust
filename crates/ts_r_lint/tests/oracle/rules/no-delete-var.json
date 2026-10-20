@@ -1,0 +1,2 @@
+{"rule":"no-delete-var","source":"eslint","skipped":{},"cases":[{"code":"delete x.prop;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":5,"sourceType":"script"},"messages":[],"output":null},
+{"code":"delete x","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":5,"sourceType":"script"},"messages":[{"ruleId":"no-delete-var","messageId":"unexpected","message":"Variables should not be deleted.","line":1,"column":1,"endLine":1,"endColumn":9}],"output":null}]}

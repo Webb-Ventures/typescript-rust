@@ -1,0 +1,15 @@
+a.ts(11,7): error TS2322: Type 'G1<number, void, any>' is not assignable to type 'G1<never, unknown, unknown>'.
+  The types returned by 'next(...)' are incompatible between these types.
+    Type 'IteratorResult<number, void>' is not assignable to type 'IteratorResult<never, unknown>'.
+      Type 'IteratorYieldResult<number>' is not assignable to type 'IteratorResult<never, unknown>'.
+        Type 'IteratorYieldResult<number>' is not assignable to type 'IteratorYieldResult<never>'.
+          Type 'number' is not assignable to type 'never'.
+a.ts(13,7): error TS2322: Type 'G2<number, void, any>' is not assignable to type 'G2<never, unknown, unknown>'.
+  Type 'number' is not assignable to type 'never'.
+a.ts(15,7): error TS2322: Type 'A1<number, any>' is not assignable to type 'A1<never, unknown>'.
+  Type 'number' is not assignable to type 'never'.
+a.ts(17,7): error TS2322: Type 'A4<number, any>' is not assignable to type 'A4<never, unknown>'.
+  The types returned by 'next(...)' are incompatible between these types.
+    Type 'number' is not assignable to type 'never'.
+a.ts(20,7): error TS2322: Type 'IteratorReturnResult<State>' is not assignable to type 'IteratorReturnResult<void>'.
+  Type 'State' is not assignable to type 'void'.

@@ -1,0 +1,10 @@
+// @action: refactor Extract type/Extract to type alias
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export function f<T, U>(t: T, u: U) {
+  if (t) {
+    const pair: /*[*/{ first: T; second: [U, T] }/*]*/ = null!;
+    return pair;
+  }
+  return null;
+}

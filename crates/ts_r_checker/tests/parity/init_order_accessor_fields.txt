@@ -1,0 +1,6 @@
+a.ts(2,14): error TS2729: Property 'x' is used before its initialization.
+a.ts(5,14): error TS2564: Property 'y' has no initializer and is not definitely assigned in the constructor.
+a.ts(6,14): error TS2729: Property 'y' is used before its initialization.
+a.ts(7,17): error TS2729: Property 'z' is used before its initialization.
+a.ts(9,19): error TS2729: Property 'w' is used before its initialization.
+a.ts(11,14): error TS2729: Property 'v' is used before its initialization.

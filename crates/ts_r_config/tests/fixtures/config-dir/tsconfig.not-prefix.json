@@ -1,0 +1,9 @@
+{
+  "include": [
+    "./${configDir}/src",
+    "src/${configDir}"
+  ],
+  "compilerOptions": {
+    "outDir": "x/${configDir}"
+  }
+}

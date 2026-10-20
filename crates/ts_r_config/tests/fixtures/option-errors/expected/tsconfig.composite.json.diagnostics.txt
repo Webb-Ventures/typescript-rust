@@ -1,0 +1,3 @@
+tsconfig.composite.json(4,5): error TS6304: Composite projects may not disable declaration emit.
+
+tsconfig.composite.json(4,5): error TS6379: Composite projects may not disable incremental compilation.

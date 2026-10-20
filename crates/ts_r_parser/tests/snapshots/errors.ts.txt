@@ -1,0 +1,55 @@
+Program 0..120
+  stmts[0]: VarDecl 0..9 kind=Let
+    decls[0]: VarDeclarator 4..7
+      name: Ident 4..5 name="a" `a`
+      init: Missing 7..7
+  stmts[1]: FunctionDecl 10..45
+    name: Ident 19..20 name="f" `f`
+    params[0]: Param 21..30
+      pattern: Ident 21..22 name="x" `x`
+      type_ann: KeywordType 24..30 kind=Number `number`
+    params[1]: Param 31..45
+      pattern: ObjectPattern 31..45
+        props[0]: BindingProperty 35..43
+          key: Ident 35..41 name="return" `return`
+          value: Ident 42..43 name="x" `x`
+  stmts[2]: ClassDecl 46..74
+    name: Ident 52..53 name="C" `C`
+    members[0]: MethodDef 58..74
+      key: Ident 58..64 name="method" `method`
+      value: FunctionExpr 64..74
+        params[0]: Param 66..69
+          pattern: ObjectPattern 66..69 `{ }`
+        params[1]: Param 72..74
+          pattern: Ident 72..74 name="ok" `ok`
+        body: Block 74..74
+  stmts[3]: ExprStmt 74..79
+    expr: Arrow 74..79
+      body: Block 77..79 `{}`
+  stmts[4]: VarDecl 82..98 kind=Const
+    decls[0]: VarDeclarator 88..97
+      name: Ident 88..89 name="b" `b`
+      init: ArrayLit 92..97
+        elements[0]: NumberLit 93..94 value=1 `1`
+        elements[1]: NumberLit 96..97 value=2 `2`
+  stmts[5]: If 99..119
+    test: Ident 103..104 name="a" `a`
+    cons: Block 106..119
+      stmts[0]: VarDecl 108..119 kind=Let
+        decls[0]: VarDeclarator 112..118
+          name: Ident 112..113 name="c" `c`
+          type_ann: Missing 114..114
+          init: NumberLit 117..118 value=3 `3`
+---- comments ----
+---- diagnostics ----
+errors.ts(1,9): error TS1109: Expression expected.
+errors.ts(2,22): error TS1005: ',' expected.
+errors.ts(3,10): error TS1005: ':' expected.
+errors.ts(5,1): error TS1005: ',' expected.
+errors.ts(7,3): error TS1005: ',' expected.
+errors.ts(7,5): error TS1005: ',' expected.
+errors.ts(7,8): error TS1005: '=>' expected.
+errors.ts(8,1): error TS1128: Declaration or statement expected.
+errors.ts(9,16): error TS1005: ',' expected.
+errors.ts(11,8): error TS1110: Type expected.
+errors.ts(12,1): error TS1005: '}' expected.

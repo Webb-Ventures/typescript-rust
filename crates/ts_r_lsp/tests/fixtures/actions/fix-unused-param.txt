@@ -1,0 +1,6 @@
+// @action: fix 6133 Prefix 'unused' with an underscore
+// @tsconfig: {"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true, "noUnusedLocals": true, "noUnusedParameters": true}}
+// @file: src/main.ts
+export function f(/*|*/unused: number, used: number) {
+  return used;
+}

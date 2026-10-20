@@ -1,0 +1,6 @@
+a.ts(9,7): error TS2322: Type '(string | number)[]' is not assignable to type 'number'.
+a.ts(14,7): error TS2322: Type 'string | number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+a.ts(19,3): error TS2345: Argument of type '(v: number, w: boolean) => void' is not assignable to parameter of type '((v: string) => void) & ((v: number, w: boolean) => void)'.
+  Type '(v: number, w: boolean) => void' is not assignable to type '(v: string) => void'.
+    Target signature provides too few arguments. Expected 2 or more, but got 1.

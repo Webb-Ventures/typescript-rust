@@ -1,0 +1,4 @@
+a.ts(13,11): error TS2322: Type 'TRoot["ctx"] & ((...args: any[]) => unknown) & Record<string | number | symbol, unknown>' is not assignable to type 'null'.
+a.ts(19,11): error TS2322: Type 'T & ((...args: any[]) => unknown) & Record<string | number | symbol, unknown>' is not assignable to type 'null'.
+a.ts(24,11): error TS2322: Type 'AnyFn' is not assignable to type 'null'.
+a.ts(29,9): error TS2322: Type 'any[]' is not assignable to type 'null'.

@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert namespace import to named imports
+// @file: src/main.ts
+import { alpha, beta } from "./util";
+
+console.log(alpha, beta(alpha));

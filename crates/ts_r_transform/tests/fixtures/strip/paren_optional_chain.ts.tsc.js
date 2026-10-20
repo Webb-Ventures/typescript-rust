@@ -1,0 +1,11 @@
+export const a = p?.u ?? 't';
+export const b = (p?.u).x;
+export const c = (p?.u)();
+export const d = (p?.u) ?? 1;
+export const e = p?.u + 1;
+export const f = p?.u?.x;
+export const g = (p?.u)[0];
+export const h = (p?.u) `t`;
+export const i = q.u?.x;
+export const j = new (p?.u)();
+export const k = p?.u?.[0];

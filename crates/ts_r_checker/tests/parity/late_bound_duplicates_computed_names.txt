@@ -1,0 +1,24 @@
+a.ts(9,5): error TS2300: Duplicate identifier 'key'.
+a.ts(10,5): error TS2300: Duplicate identifier 'key'.
+a.ts(13,5): error TS2300: Duplicate identifier '[k]'.
+a.ts(14,5): error TS2300: Duplicate identifier '[k]'.
+a.ts(17,5): error TS2300: Duplicate identifier '[one]'.
+a.ts(18,5): error TS2300: Duplicate identifier '[one]'.
+a.ts(18,5): error TS2717: Subsequent property declarations must have the same type.  Property '[n]' must be of type 'number', but here has type 'string'.
+a.ts(21,5): error TS2300: Duplicate identifier '[Symbol.iterator]'.
+a.ts(22,5): error TS2300: Duplicate identifier '[Symbol.iterator]'.
+a.ts(25,5): error TS2300: Duplicate identifier '[u]'.
+a.ts(26,5): error TS2300: Duplicate identifier '[u]'.
+a.ts(26,5): error TS2717: Subsequent property declarations must have the same type.  Property '[u]' must be of type 'number', but here has type 'string'.
+a.ts(27,5): error TS2300: Duplicate identifier '[fromFor]'.
+a.ts(28,5): error TS2300: Duplicate identifier '[fromFor]'.
+a.ts(29,12): error TS2300: Duplicate identifier 'key'.
+a.ts(30,12): error TS2300: Duplicate identifier 'key'.
+a.ts(48,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(49,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(50,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(53,5): error TS1168: A computed property name in a method overload must refer to an expression whose type is a literal type or a 'unique symbol' type.
+a.ts(57,5): error TS1165: A computed property name in an ambient context must refer to an expression whose type is a literal type or a 'unique symbol' type.
+a.ts(61,5): error TS1169: A computed property name in an interface must refer to an expression whose type is a literal type or a 'unique symbol' type.
+a.ts(62,5): error TS1169: A computed property name in an interface must refer to an expression whose type is a literal type or a 'unique symbol' type.
+a.ts(65,5): error TS1170: A computed property name in a type literal must refer to an expression whose type is a literal type or a 'unique symbol' type.

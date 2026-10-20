@@ -1,0 +1,3 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export let u: string | /*[*/number = 1/*]*/;

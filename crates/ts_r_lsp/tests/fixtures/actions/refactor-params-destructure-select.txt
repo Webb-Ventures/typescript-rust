@@ -1,0 +1,4 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function sel(/*[*/a: number, b: number/*]*/) { return a + b; }
+sel(1, 2);

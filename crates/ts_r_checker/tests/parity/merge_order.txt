@@ -1,0 +1,5 @@
+a.ts(1,11): error TS2434: A namespace declaration cannot be located prior to a class or function with which it is merged.
+a.ts(5,11): error TS2434: A namespace declaration cannot be located prior to a class or function with which it is merged.
+a.ts(16,10): error TS2432: In an enum with multiple declarations, only one declaration can omit an initializer for its first enum element.
+a.ts(18,10): error TS2432: In an enum with multiple declarations, only one declaration can omit an initializer for its first enum element.
+a.ts(20,16): error TS2432: In an enum with multiple declarations, only one declaration can omit an initializer for its first enum element.

@@ -1,0 +1,12 @@
+a.ts(4,22): error TS2307: Cannot find module 'nope' or its corresponding type declarations.
+a.ts(7,28): error TS7006: Parameter 'e' implicitly has an 'any' type.
+a.ts(10,29): error TS7006: Parameter 'e' implicitly has an 'any' type.
+a.ts(12,17): error TS2591: Cannot find name 'Buffer'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.
+a.ts(13,17): error TS2552: Cannot find name 'require'. Did you mean 'Required'?
+a.ts(14,17): error TS2593: Cannot find name 'describe'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+a.ts(18,14): error TS2322: Type 'AB' is not assignable to type 'boolean'.
+  Type 'string' is not assignable to type 'boolean'.
+a.ts(20,14): error TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'boolean'.
+a.ts(21,29): error TS2840: An interface cannot extend a primitive type like 'number'. It can only extend other named object types.
+a.ts(22,28): error TS2864: A class cannot implement a primitive type like 'string'. It can only implement other named object types.
+a.ts(23,18): error TS2552: Cannot find name 'numbr'. Did you mean 'number'?

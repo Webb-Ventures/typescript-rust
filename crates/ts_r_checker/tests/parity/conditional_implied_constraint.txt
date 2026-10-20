@@ -1,0 +1,2 @@
+a.ts(11,53): error TS2344: Type 'T' does not satisfy the constraint 'string'.
+a.ts(12,26): error TS2344: Type 'T' does not satisfy the constraint 'string'.

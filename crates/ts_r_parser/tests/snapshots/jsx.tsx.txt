@@ -1,0 +1,183 @@
+Program 0..736
+  stmts[0]: ImportDecl 0..40 has_clause
+    specifiers[0]: ImportDefaultSpecifier 7..12
+      local: Ident 7..12 name="React" `React`
+    specifiers[1]: ImportSpecifier 16..24
+      local: Ident 16..24 name="useState" `useState`
+    source: StringLit 32..39 value="react" `'react'`
+  stmts[1]: TypeAlias 42..111
+    name: Ident 47..52 name="Props" `Props`
+    type_params: TypeParams 52..55
+      params[0]: TypeParam 53..54
+        name: Ident 53..54 name="T" `T`
+    ty: TypeLiteral 58..110
+      members[0]: PropertySignature 60..71
+        key: Ident 60..65 name="items" `items`
+        type_ann: ArrayType 67..70
+          elem: TypeRef 67..68
+            name: Ident 67..68 name="T" `T`
+      members[1]: PropertySignature 72..108
+        key: Ident 72..78 name="render" `render`
+        type_ann: FunctionType 80..108
+          params[0]: Param 81..88
+            pattern: Ident 81..85 name="item" `item`
+            type_ann: TypeRef 87..88
+              name: Ident 87..88 name="T" `T`
+          return_type: TypeRef 93..108
+            name: QualifiedName 93..108
+              left: Ident 93..98 name="React" `React`
+              right: Ident 99..108 name="ReactNode" `ReactNode`
+  stmts[2]: FunctionDecl 113..676 modifiers=[export]
+    name: Ident 129..133 name="List" `List`
+    type_params: TypeParams 133..137
+      params[0]: TypeParam 134..135
+        name: Ident 134..135 name="T" `T`
+    params[0]: Param 138..165
+      pattern: ObjectPattern 138..155
+        props[0]: BindingProperty 140..145
+          key: Ident 140..145 name="items" `items`
+        props[1]: BindingProperty 147..153
+          key: Ident 147..153 name="render" `render`
+      type_ann: TypeRef 157..165
+        name: Ident 157..162 name="Props" `Props`
+        type_args: TypeArgs 162..165
+          args[0]: TypeRef 163..164
+            name: Ident 163..164 name="T" `T`
+    body: Block 167..676
+      stmts[0]: VarDecl 171..220 kind=Const
+        decls[0]: VarDeclarator 177..219
+          name: ArrayPattern 177..192
+            elements[0]: Ident 178..182 name="open" `open`
+            elements[1]: Ident 184..191 name="setOpen" `setOpen`
+          init: Call 195..219
+            callee: Ident 195..203 name="useState" `useState`
+            type_args: TypeArgs 203..212
+              args[0]: KeywordType 204..211 kind=Boolean `boolean`
+            args[0]: BoolLit 213..218 `false`
+      stmts[1]: Return 223..674
+        arg: Paren 230..673
+          expr: JsxFragment 236..669
+            children[0]: JsxText 238..245
+            children[1]: JsxElement 245..377
+              opening: JsxOpening 245..335
+                name: Ident 246..252 name="button" `button`
+                attrs[0]: JsxAttr 253..271
+                  name: Ident 253..262 name="className" `className`
+                  value: StringLit 263..271 value="toggle" `"toggle"`
+                attrs[1]: JsxAttr 272..304
+                  name: Ident 272..279 name="onClick" `onClick`
+                  value: JsxExprContainer 280..304
+                    expr: Arrow 281..303 flags=[expression_body]
+                      body: Call 287..303
+                        callee: Ident 287..294 name="setOpen" `setOpen`
+                        args[0]: Arrow 295..302 flags=[expression_body]
+                          params[0]: Param 295..296
+                            pattern: Ident 295..296 name="o" `o`
+                          body: Unary 300..302 op=Not
+                            arg: Ident 301..302 name="o" `o`
+                attrs[2]: JsxAttr 305..325
+                  name: Ident 305..318 name="aria-expanded" `aria-expanded`
+                  value: JsxExprContainer 319..325
+                    expr: Ident 320..324 name="open" `open`
+                attrs[3]: JsxAttr 326..334
+                  name: Ident 326..334 name="disabled" `disabled`
+              children[0]: JsxText 335..368
+              closing: JsxClosing 368..377
+                name: Ident 370..376 name="button" `button`
+            children[2]: JsxText 377..384
+            children[3]: JsxExprContainer 384..546
+              expr: Binary 385..545 op=LogicalAnd
+                left: Ident 385..389 name="open" `open`
+                right: Paren 393..545
+                  expr: JsxElement 403..537
+                    opening: JsxOpening 403..455
+                      name: Ident 404..406 name="ul" `ul`
+                      attrs[0]: JsxAttr 407..432
+                        name: Ident 407..417 name="data-count" `data-count`
+                        value: JsxExprContainer 418..432
+                          expr: Member 419..431
+                            obj: Ident 419..424 name="items" `items`
+                            prop: Ident 425..431 name="length" `length`
+                      attrs[1]: JsxSpreadAttr 433..454
+                        arg: ObjectLit 437..453
+                          props[0]: Property 439..451
+                            key: Ident 439..443 name="role" `role`
+                            value: StringLit 445..451 value="list" `'list'`
+                    children[0]: JsxText 455..466
+                    children[1]: JsxExprContainer 466..523
+                      expr: Call 467..522
+                        callee: Member 467..476
+                          obj: Ident 467..472 name="items" `items`
+                          prop: Ident 473..476 name="map" `map`
+                        args[0]: Arrow 477..521 flags=[expression_body]
+                          params[0]: Param 478..482
+                            pattern: Ident 478..482 name="item" `item`
+                          params[1]: Param 484..485
+                            pattern: Ident 484..485 name="i" `i`
+                          body: JsxElement 490..521
+                            opening: JsxOpening 490..502
+                              name: Ident 491..493 name="li" `li`
+                              attrs[0]: JsxAttr 494..501
+                                name: Ident 494..497 name="key" `key`
+                                value: JsxExprContainer 498..501
+                                  expr: Ident 499..500 name="i" `i`
+                            children[0]: JsxExprContainer 502..516
+                              expr: Call 503..515
+                                callee: Ident 503..509 name="render" `render`
+                                args[0]: Ident 510..514 name="item" `item`
+                            closing: JsxClosing 516..521
+                              name: Ident 518..520 name="li" `li`
+                    children[2]: JsxText 523..532
+                    closing: JsxClosing 532..537
+                      name: Ident 534..536 name="ul" `ul`
+            children[4]: JsxText 546..553
+            children[5]: JsxElement 553..582
+              opening: JsxOpening 553..582 self_closing
+                name: Ident 554..561 name="Generic" `Generic`
+                type_args: TypeArgs 561..569
+                  args[0]: KeywordType 562..568 kind=String `string`
+                attrs[0]: JsxAttr 570..579
+                  name: Ident 570..575 name="value" `value`
+                  value: StringLit 576..579 value="x" `"x"`
+            children[6]: JsxText 582..589
+            children[7]: JsxElement 589..611
+              opening: JsxOpening 589..611 self_closing
+                name: JsxNamespacedName 590..596
+                  ns: Ident 590..592 name="ns" `ns`
+                  name: Ident 593..596 name="tag" `tag`
+                attrs[0]: JsxAttr 597..608
+                  name: JsxNamespacedName 597..604
+                    ns: Ident 597..599 name="ns" `ns`
+                    name: Ident 600..604 name="attr" `attr`
+                  value: StringLit 605..608 value="v" `'v'`
+            children[8]: JsxText 611..618
+            children[9]: JsxElement 618..633
+              opening: JsxOpening 618..633 self_closing
+                name: JsxMemberExpr 619..630
+                  obj: JsxMemberExpr 619..626
+                    obj: Ident 619..622 name="Foo" `Foo`
+                    prop: Ident 623..626 name="Bar" `Bar`
+                  prop: Ident 627..630 name="Baz" `Baz`
+            children[10]: JsxText 633..640
+            children[11]: JsxExprContainer 640..661 `{/* comment child */}`
+            children[12]: JsxText 661..666
+  stmts[3]: VarDecl 678..735 kind=Const
+    decls[0]: VarDeclarator 684..734
+      name: Ident 684..689 name="Arrow" `Arrow`
+      init: Arrow 692..734 flags=[expression_body]
+        type_params: TypeParams 692..710
+          params[0]: TypeParam 693..709
+            name: Ident 693..694 name="T" `T`
+            constraint: KeywordType 703..709 kind=Object `object`
+        params[0]: Param 711..715
+          pattern: Ident 711..712 name="p" `p`
+          type_ann: TypeRef 714..715
+            name: Ident 714..715 name="T" `T`
+        body: JsxElement 720..734
+          opening: JsxOpening 720..734 self_closing
+            name: Ident 721..724 name="div" `div`
+            attrs[0]: JsxSpreadAttr 725..731
+              arg: Ident 729..730 name="p" `p`
+---- comments ----
+Block 641..660 "/* comment child */"
+---- diagnostics ----

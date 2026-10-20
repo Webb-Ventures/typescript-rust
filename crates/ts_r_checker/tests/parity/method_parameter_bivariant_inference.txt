@@ -1,0 +1,2 @@
+a.ts(8,3): error TS2741: Property 'add' is missing in type '{}' but required in type 'CI'.
+a.ts(15,3): error TS2741: Property 'add' is missing in type '{}' but required in type 'CI'.

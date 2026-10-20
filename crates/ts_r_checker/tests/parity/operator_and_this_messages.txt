@@ -1,0 +1,11 @@
+a.ts(6,19): error TS2365: Operator '+' cannot be applied to types 'number' and '{}'.
+a.ts(7,19): error TS2365: Operator '+' cannot be applied to types 'number' and 'boolean'.
+a.ts(8,19): error TS2365: Operator '+' cannot be applied to types 'bigint' and '2'.
+a.ts(9,19): error TS2365: Operator '-' cannot be applied to types 'bigint' and 'number'.
+a.ts(10,1): error TS2365: Operator '+=' cannot be applied to types 'bigint' and '2'.
+a.ts(11,1): error TS2365: Operator '-=' cannot be applied to types 'bigint' and 'number'.
+a.ts(12,1): error TS2365: Operator '+=' cannot be applied to types 'number' and '1n'.
+a.ts(13,1): error TS2365: Operator '*=' cannot be applied to types 'number' and 'bigint'.
+a.ts(14,19): error TS2365: Operator '+' cannot be applied to types 'boolean' and 'number'.
+a.ts(19,17): error TS2339: Property 'missing' does not exist on type 'Box<T>'.
+a.ts(24,10): error TS2339: Property 'nope' does not exist on type 'Plain'.

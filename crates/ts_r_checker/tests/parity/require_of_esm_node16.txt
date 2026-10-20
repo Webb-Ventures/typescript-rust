@@ -1,0 +1,16 @@
+a.ts(1,19): error TS1479: The current file is a CommonJS module whose imports will produce 'require' calls; however, the referenced file is an ECMAScript module and cannot be imported with 'require'. Consider writing a dynamic 'import("./esm.mjs")' call instead.
+  To convert this file to an ECMAScript module, change its file extension to '.mts', or add the field `"type": "module"` to '/p/package.json'.
+a.ts(2,29): error TS1541: Type-only import of an ECMAScript module from a CommonJS module must have a 'resolution-mode' attribute.
+  To convert this file to an ECMAScript module, change its file extension to '.mts', or add the field `"type": "module"` to '/p/package.json'.
+a.ts(3,24): error TS1479: The current file is a CommonJS module whose imports will produce 'require' calls; however, the referenced file is an ECMAScript module and cannot be imported with 'require'. Consider writing a dynamic 'import("./esm.mjs")' call instead.
+  To convert this file to an ECMAScript module, change its file extension to '.mts', or add the field `"type": "module"` to '/p/package.json'.
+a.ts(4,20): error TS1471: Module './esm.mjs' cannot be imported using this construct. The specifier only resolves to an ES module, which cannot be imported with 'require'. Use an ECMAScript import instead.
+a.ts(10,32): error TS1542: Type import of an ECMAScript module from a CommonJS module must have a 'resolution-mode' attribute.
+  To convert this file to an ECMAScript module, change its file extension to '.mts', or add the field `"type": "module"` to '/p/package.json'.
+b.tsx(1,19): error TS1479: The current file is a CommonJS module whose imports will produce 'require' calls; however, the referenced file is an ECMAScript module and cannot be imported with 'require'. Consider writing a dynamic 'import("./esm.mjs")' call instead.
+  To convert this file to an ECMAScript module, add the field `"type": "module"` to '/p/package.json'.
+c.cts(1,19): error TS1479: The current file is a CommonJS module whose imports will produce 'require' calls; however, the referenced file is an ECMAScript module and cannot be imported with 'require'. Consider writing a dynamic 'import("./esm.mjs")' call instead.
+e.js(1,19): error TS1479: The current file is a CommonJS module whose imports will produce 'require' calls; however, the referenced file is an ECMAScript module and cannot be imported with 'require'. Consider writing a dynamic 'import("./esm.mjs")' call instead.
+  To convert this file to an ECMAScript module, change its file extension to '.mjs', or add the field `"type": "module"` to '/p/package.json'.
+sub/d.ts(1,19): error TS1479: The current file is a CommonJS module whose imports will produce 'require' calls; however, the referenced file is an ECMAScript module and cannot be imported with 'require'. Consider writing a dynamic 'import("../esm.mjs")' call instead.
+  To convert this file to an ECMAScript module, change its file extension to '.mts' or create a local package.json file with `{ "type": "module" }`.

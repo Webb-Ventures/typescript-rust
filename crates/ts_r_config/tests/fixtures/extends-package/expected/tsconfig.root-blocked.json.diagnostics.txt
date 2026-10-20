@@ -1,0 +1,1 @@
+tsconfig.root-blocked.json(2,14): error TS6053: File 'cfgpkg' not found.

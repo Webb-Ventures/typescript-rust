@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export function f(o: { a: number; b: number }) {
+  const { a } = o;
+  return a;
+}

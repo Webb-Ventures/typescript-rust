@@ -1,0 +1,15 @@
+// @action: organizeImports
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+import {
+  zeta,
+  alpha,
+  unusedOne,
+} from "./a";
+import { beta } from './b'
+
+export const x = [zeta, alpha, beta]
+// @file: src/a.ts
+export const zeta = 1, alpha = 2, unusedOne = 3;
+// @file: src/b.ts
+export const beta = 1;

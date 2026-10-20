@@ -1,0 +1,10 @@
+{
+  "//": "Pass 2 of check-with-tsc.mjs: adds the tsc flags sound mode forces. Only s04 reject files may report, on their @expect lines.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "isolatedDeclarations": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
+  }
+}

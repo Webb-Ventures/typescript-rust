@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./r1"
+    },
+    {
+      "path": "r2/custom.json",
+      "prepend": true,
+      "circular": true
+    },
+    {
+      "path": "./r1/tsconfig.json",
+      "circular": false
+    }
+  ]
+}

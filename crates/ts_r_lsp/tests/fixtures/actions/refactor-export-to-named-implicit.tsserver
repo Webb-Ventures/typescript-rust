@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Convert default export to named export
+// @file: src/util.ts
+export class Shape {}

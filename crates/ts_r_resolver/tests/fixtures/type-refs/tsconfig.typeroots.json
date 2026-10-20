@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "typeRoots": [
+      "./custom-types"
+    ],
+    "types": [
+      "ct",
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}

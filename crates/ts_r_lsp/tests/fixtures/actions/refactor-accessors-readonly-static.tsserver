@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// title: Generate 'get' and 'set' accessors
+// @file: src/main.ts
+export class Config {
+  private static readonly _limit_1 = 10;
+  protected static get limit() {
+    return Config._limit_1;
+  }
+  _limit = 1;
+}

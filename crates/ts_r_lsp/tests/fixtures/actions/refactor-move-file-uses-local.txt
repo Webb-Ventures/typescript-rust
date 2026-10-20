@@ -1,0 +1,13 @@
+// @action: refactor Move to file/Move to file
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @target: src/utils.ts
+// @file: src/main.ts
+const base = 10;
+
+/*[*/export function helper(n: number) {
+  return n + base;
+}/*]*/
+
+console.log(base);
+// @file: src/utils.ts
+export const x = 1;

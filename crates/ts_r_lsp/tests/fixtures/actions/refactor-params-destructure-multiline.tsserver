@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function ml(
+{ first, second }: { first: number; second: string; },
+) {
+  return first + second;
+}
+ml(
+  { first: 1, second: 'two' },
+);

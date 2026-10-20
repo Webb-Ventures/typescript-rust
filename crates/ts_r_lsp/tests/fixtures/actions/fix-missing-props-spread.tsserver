@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+const base = {
+  id: 42,
+};
+
+export const value: { id: number; name: string } = {
+  ...base,
+  name: ""
+};

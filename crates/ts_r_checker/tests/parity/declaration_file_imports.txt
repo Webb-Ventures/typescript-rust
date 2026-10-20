@@ -1,0 +1,9 @@
+m.ts(1,19): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?
+m.ts(3,30): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?
+m.ts(4,25): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './y.mjs' instead?
+m.ts(5,25): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './z.cjs' instead?
+m.ts(6,25): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?
+m.ts(8,15): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?
+m.ts(9,21): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?
+m.ts(12,20): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?
+n.d.ts(1,19): error TS2846: A declaration file cannot be imported without 'import type'. Did you mean to import an implementation file './x.js' instead?

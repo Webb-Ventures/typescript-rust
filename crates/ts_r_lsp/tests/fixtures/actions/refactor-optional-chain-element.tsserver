@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert to optional chain expression
+// @file: src/main.ts
+export function first(rows: Record<string, number[]> | undefined, key: string) {
+  return rows?.[key]?.[0];
+}

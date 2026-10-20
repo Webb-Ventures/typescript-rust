@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @differs: tsserver extracts a named tuple member to `type NewType = a: string;`, which does not parse; ts-r does not offer it
+// @file: src/main.ts
+export let t: [/*[*/a: string/*]*/, b?: number];

@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export type Kind =
+    /*[*/| "a"
+    | "b"/*]*/;

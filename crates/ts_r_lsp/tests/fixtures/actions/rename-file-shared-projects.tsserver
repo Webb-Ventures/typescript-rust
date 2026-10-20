@@ -1,0 +1,18 @@
+// tsserver 6.0.3
+// @deleted: shared/util.ts
+// @file: app/main.ts
+import { helper } from "../shared/lib/util";
+
+export const n = helper(1);
+// @file: shared/lib/util.ts
+import { base } from "../base";
+
+export function helper(x: number): number { return x + base; }
+// @file: shared/user.ts
+import { helper } from "./lib/util";
+
+export const u = helper(2);
+// @file: tests/util.test.ts
+import { helper } from "../shared/lib/util";
+
+export const t = helper(3);

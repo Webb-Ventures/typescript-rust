@@ -1,0 +1,7 @@
+module	${FIXTURE}/src/uses-rn.ts	import	rn	${FIXTURE}/node_modules/rn/index.ios.d.ts	
+module	${FIXTURE}/src/views/main.ts	import	./template	${FIXTURE}/generated/views/template.ts	
+module	${FIXTURE}/src/views/main.ts	import	./shared	${FIXTURE}/src/views/shared.ts	
+module	${FIXTURE}/src/views/main.ts	import	../other/thing	${FIXTURE}/generated/other/thing.ts	
+module	${FIXTURE}/src/views/main.ts	import	./button	${FIXTURE}/src/views/button.ios.ts	
+module	${FIXTURE}/src/views/main.ts	import	./plain	${FIXTURE}/src/views/plain.ts	
+module	${FIXTURE}/src/views/main.ts	import	./only-native	${FIXTURE}/src/views/only-native.native.ts	

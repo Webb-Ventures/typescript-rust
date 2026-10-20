@@ -1,0 +1,10 @@
+a.ts(2,7): error TS2322: Type 'object' is not assignable to type '{ [k: string]: unknown; }'.
+  Index signature for type 'string' is missing in type '{}'.
+a.ts(7,7): error TS2322: Type 'I' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'I'.
+a.ts(8,7): error TS2322: Type 'I' is not assignable to type '{ [k: number]: any; }'.
+  Index signature for type 'number' is missing in type 'I'.
+a.ts(9,7): error TS2322: Type 'object' is not assignable to type '{ a: string; }'.
+  Property 'a' is missing in type '{}' but required in type '{ a: string; }'.
+a.ts(10,7): error TS2322: Type 'string' is not assignable to type 'Record<string, any>'.
+a.ts(11,7): error TS2322: Type 'number' is not assignable to type 'Record<string, any>'.

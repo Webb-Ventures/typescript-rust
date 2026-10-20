@@ -1,0 +1,11 @@
+// tsserver 6.0.3
+// title: Convert default export to named export
+// @file: src/main.ts
+import type { Point as Pt } from "./types";
+
+export const p: Pt = { x: 1 };
+// @file: src/types.ts
+/** A point. */
+export interface Point {
+    x: number;
+}

@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Generate 'get' and 'set' accessors
+// @file: src/main.ts
+export const state = {
+  ready: false,
+  _count: 0,
+  set count(value) {
+    this._count = value;
+  },
+  get count() {
+    return this._count;
+  },
+};

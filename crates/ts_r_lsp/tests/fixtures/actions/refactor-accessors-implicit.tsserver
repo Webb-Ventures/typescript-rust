@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Generate 'get' and 'set' accessors
+// @file: src/main.ts
+export class Counter {
+  private _count = 0;
+  public set count(value) {
+    this._count = value;
+  }
+  public get count() {
+    return this._count;
+  }
+}

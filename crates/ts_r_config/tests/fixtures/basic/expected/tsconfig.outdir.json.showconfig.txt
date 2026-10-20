@@ -1,0 +1,27 @@
+{
+    "compilerOptions": {
+        "declaration": true,
+        "declarationDir": "./decl",
+        "outDir": "./out"
+    },
+    "files": [
+        "./root.ts",
+        "./src/1.ts",
+        "./src/_a.ts",
+        "./src/a.ts",
+        "./src/c.ts",
+        "./src/e.d.css.ts",
+        "./src/m.tsx",
+        "./src/n.d.ts",
+        "./src/q.mts",
+        "./src/r.cts",
+        "./src/s.d.mts",
+        "./src/z.ts",
+        "./src/a/y.ts",
+        "./src/b/x.ts"
+    ],
+    "exclude": [
+        "${FIXTURE}/out",
+        "${FIXTURE}/decl"
+    ]
+}

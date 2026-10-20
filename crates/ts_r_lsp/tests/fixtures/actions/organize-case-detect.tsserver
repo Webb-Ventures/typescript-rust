@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { y } from "./a";
+import { a, B, C } from "./m";
+import { bar, Bar } from "./n";
+import { Z } from "./Z";
+
+console.log(B, C, a, bar, Bar, Z, y);

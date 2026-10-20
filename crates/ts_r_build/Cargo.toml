@@ -1,0 +1,25 @@
+[package]
+name = "ts_r_build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ts-r-build: esbuild-compatible bundler and minifier CLI"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ts-r-build"
+path = "src/main.rs"
+
+[dependencies]
+ts_r_bundler = { path = "../ts_r_bundler" }
+ts_r_config = { path = "../ts_r_config" }
+ts_r_guard = { path = "../ts_r_guard" }
+ts_r_sound = { path = "../ts_r_sound" }
+rustc-hash = "2"
+notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

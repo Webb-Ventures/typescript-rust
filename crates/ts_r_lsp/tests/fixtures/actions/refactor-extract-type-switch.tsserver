@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+export function f(n: number) {
+    switch (n) {
+        case 1:
+            type NewType = [number, string];
+
+            let x: NewType = null!;
+            return x;
+    }
+}

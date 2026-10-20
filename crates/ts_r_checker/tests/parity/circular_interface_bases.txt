@@ -1,0 +1,21 @@
+a.ts(1,11): error TS2310: Type 'Foo' recursively references itself as a base type.
+a.ts(2,11): error TS2310: Type 'Foo2<T>' recursively references itself as a base type.
+a.ts(3,11): error TS2310: Type 'Foo3<T>' recursively references itself as a base type.
+a.ts(4,11): error TS2310: Type 'A' recursively references itself as a base type.
+a.ts(5,11): error TS2310: Type 'B' recursively references itself as a base type.
+a.ts(6,11): error TS2310: Type 'C' recursively references itself as a base type.
+a.ts(8,11): error TS2310: Type 'E' recursively references itself as a base type.
+a.ts(10,11): error TS2310: Type 'G<T>' recursively references itself as a base type.
+a.ts(11,11): error TS2310: Type 'H<T>' recursively references itself as a base type.
+a.ts(12,11): error TS2310: Type 'J' recursively references itself as a base type.
+a.ts(13,11): error TS2310: Type 'J' recursively references itself as a base type.
+a.ts(15,11): error TS2310: Type 'L' recursively references itself as a base type.
+a.ts(17,11): error TS2310: Type 'M2' recursively references itself as a base type.
+a.ts(22,7): error TS2506: 'P' is referenced directly or indirectly in its own base expression.
+a.ts(22,17): error TS2449: Class 'Q' used before its declaration.
+a.ts(23,7): error TS2506: 'Q' is referenced directly or indirectly in its own base expression.
+a.ts(25,17): error TS2689: Cannot extend an interface 'R2'. Did you mean 'implements'?
+a.ts(27,26): error TS2689: Cannot extend an interface 'T2'. Did you mean 'implements'?
+a.ts(29,11): error TS2310: Type 'J2' recursively references itself as a base type.
+a.ts(32,11): error TS2310: Type 'CC' recursively references itself as a base type.
+a.ts(33,33): error TS2310: Type 'Q' recursively references itself as a base type.

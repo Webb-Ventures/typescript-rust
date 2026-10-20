@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "composite": true,
+        "incremental": false,
+        "noEmit": true,
+        "declaration": true
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

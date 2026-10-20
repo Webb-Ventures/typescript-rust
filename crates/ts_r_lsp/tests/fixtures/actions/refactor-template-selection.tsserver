@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert to template string
+// @file: src/main.ts
+export function f(a: string) {
+  const s = `x${a}y`;
+  return s;
+}

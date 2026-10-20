@@ -1,0 +1,15 @@
+a.ts(5,9): error TS2322: Type '{ a: 1; }' is not assignable to type 'null'.
+a.ts(8,17): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'string | { a: 1; }'.
+a.ts(9,9): error TS2322: Type 'string | { a: 1; }' is not assignable to type 'null'.
+  Type 'string' is not assignable to type 'null'.
+a.ts(13,11): error TS2322: Type 'T' is not assignable to type 'null'.
+a.ts(17,13): error TS2322: Type 'T & object' is not assignable to type 'null'.
+a.ts(20,16): error TS18047: 'obj' is possibly 'null'.
+a.ts(25,9): error TS2322: Type '{ a: 1; }' is not assignable to type 'null'.
+a.ts(29,9): error TS2322: Type '{ a: 1; } | null | undefined' is not assignable to type 'null'.
+  Type 'undefined' is not assignable to type 'null'.
+a.ts(32,17): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'unknown'.
+a.ts(36,17): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'never'.
+a.ts(41,19): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'string | T'.
+a.ts(45,17): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'number | {}'.
+a.ts(51,17): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type 'string'.

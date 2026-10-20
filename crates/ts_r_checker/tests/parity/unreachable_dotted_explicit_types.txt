@@ -1,0 +1,6 @@
+a.ts(8,5): error TS7027: Unreachable code detected.
+a.ts(21,9): error TS7027: Unreachable code detected.
+a.ts(25,9): error TS7027: Unreachable code detected.
+a.ts(38,5): error TS7027: Unreachable code detected.
+a.ts(42,5): error TS7027: Unreachable code detected.
+a.ts(48,11): error TS2322: Type 'unknown' is not assignable to type 'string'.

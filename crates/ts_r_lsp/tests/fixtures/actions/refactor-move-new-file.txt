@@ -1,0 +1,13 @@
+// @action: refactor Move to a new file/Move to a new file
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/main.ts
+import { base } from "./base";
+
+/*[*/export function helper(n: number): number {
+  return n + base;
+}/*]*/
+
+export const value = helper(2);
+// @file: src/base.ts
+export const base = 10;

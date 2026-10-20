@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// `tsc` from @ts-r.dev/typescript: ts-r-check when the project passes the parity check, else your
+// own TypeScript. See ../README.md.
+import tsc from "../lib/tsc.cjs";
+
+tsc.cli();

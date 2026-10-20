@@ -1,0 +1,3 @@
+a.ts(14,11): error TS2322: Type 'A | B' is not assignable to type 'null'.
+  Type 'A' is not assignable to type 'null'.
+a.ts(21,11): error TS2322: Type 'string' is not assignable to type 'null'.

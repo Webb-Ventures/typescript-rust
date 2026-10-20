@@ -1,0 +1,72 @@
+{
+    "compilerOptions": {
+        "allowArbitraryExtensions": true,
+        "allowUmdGlobalAccess": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "assumeChangesOnlyAffectDirectDependencies": true,
+        "customConditions": [
+            "dev"
+        ],
+        "emitBOM": true,
+        "emitDecoratorMetadata": true,
+        "declaration": true,
+        "declarationMap": true,
+        "deduplicatePackages": false,
+        "disableSizeLimit": true,
+        "disableSourceOfProjectReferenceRedirect": true,
+        "disableSolutionSearching": true,
+        "disableReferencedProjectLoad": true,
+        "erasableSyntaxOnly": true,
+        "exactOptionalPropertyTypes": true,
+        "experimentalDecorators": true,
+        "isolatedDeclarations": true,
+        "ignoreDeprecations": "6.0",
+        "importHelpers": true,
+        "inlineSources": true,
+        "jsx": "react",
+        "jsxFactory": "h",
+        "jsxFragmentFactory": "Fragment",
+        "libReplacement": true,
+        "mapRoot": "./maps/",
+        "moduleSuffixes": [
+            ".ios",
+            ""
+        ],
+        "noCheck": true,
+        "noImplicitReturns": true,
+        "noEmitHelpers": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noEmitOnError": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noResolve": true,
+        "noUncheckedSideEffectImports": false,
+        "preserveSymlinks": true,
+        "resolvePackageJsonExports": false,
+        "resolvePackageJsonImports": false,
+        "removeComments": true,
+        "rootDirs": [
+            "./a",
+            "./b"
+        ],
+        "stableTypeOrdering": false,
+        "strictBuiltinIteratorReturn": false,
+        "stripInternal": true,
+        "skipDefaultLibCheck": true,
+        "sourceMap": true,
+        "sourceRoot": "./s/",
+        "traceResolution": false,
+        "tsBuildInfoFile": "./.tsbuildinfo",
+        "useDefineForClassFields": false,
+        "maxNodeModuleJsDepth": 2,
+        "diagnostics": false,
+        "extendedDiagnostics": false,
+        "generateCpuProfile": "./prof",
+        "listFiles": false,
+        "explainFiles": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

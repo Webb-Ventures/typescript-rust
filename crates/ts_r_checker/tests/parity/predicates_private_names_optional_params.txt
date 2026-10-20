@@ -1,0 +1,34 @@
+a.ts(7,1): error TS2322: Type '(x: any) => x is number' is not assignable to type '(x: any) => x is string'.
+  Type predicate 'x is number' is not assignable to 'x is string'.
+    Type 'number' is not assignable to type 'string'.
+a.ts(9,1): error TS2322: Type '(x: any) => x is number' is not assignable to type '(y: any) => y is string'.
+  Type predicate 'x is number' is not assignable to 'y is string'.
+    Type 'number' is not assignable to type 'string'.
+a.ts(11,1): error TS2322: Type '(x: any) => x is string' is not assignable to type '(x: any, y: any) => y is string'.
+  Type predicate 'x is string' is not assignable to 'y is string'.
+    Parameter 'x' is not in the same position as parameter 'y'.
+a.ts(16,1): error TS2322: Type '() => this is F' is not assignable to type '() => this is L'.
+  Type predicate 'this is F' is not assignable to 'this is L'.
+    Property 'lead' is missing in type 'F' but required in type 'L'.
+a.ts(18,1): error TS2322: Type '() => this is F' is not assignable to type '(x: any) => x is L'.
+  Type predicate 'this is F' is not assignable to 'x is L'.
+    A 'this'-based type guard is not compatible with a parameter-based type guard.
+a.ts(22,1): error TS2322: Type '{ isL(): this is F; }' is not assignable to type 'Box'.
+  Types of property 'isL' are incompatible.
+    Type '() => this is F' is not assignable to type '() => this is L'.
+      Type predicate 'this is F' is not assignable to 'this is L'.
+        Property 'lead' is missing in type 'F' but required in type 'L'.
+a.ts(27,7): error TS2322: Type 'B' is not assignable to type 'A2'.
+  Property '#foo' in type 'B' refers to a different member that cannot be accessed from within type 'A'.
+a.ts(30,7): error TS2322: Type 'H<string>' is not assignable to type 'G<string>'.
+  Property '#x' in type 'H' refers to a different member that cannot be accessed from within type 'G'.
+a.ts(34,1): error TS2322: Type '<U>(onFulFill?: (value: number) => U) => Promise<U>' is not assignable to type '<U>(onFulfill?: (value: string) => U) => Promise<U>'.
+  Types of parameters 'onFulFill' and 'onFulfill' are incompatible.
+    Types of parameters 'value' and 'value' are incompatible.
+      Type 'number' is not assignable to type 'string'.
+a.ts(36,7): error TS2322: Type '(x?: string | undefined, y?: number | undefined) => void' is not assignable to type 'number'.
+a.ts(38,7): error TS2322: Type '(x?: string) => void' is not assignable to type 'number'.
+a.ts(40,7): error TS2322: Type '(x?: string | undefined, y?: any) => void' is not assignable to type 'number'.
+a.ts(42,7): error TS2322: Type '(x?: string | undefined) => void' is not assignable to type 'number'.
+a.ts(44,7): error TS2322: Type '(x?: string | undefined) => void' is not assignable to type 'number'.
+a.ts(45,7): error TS2322: Type '(x?: string) => void' is not assignable to type 'number'.

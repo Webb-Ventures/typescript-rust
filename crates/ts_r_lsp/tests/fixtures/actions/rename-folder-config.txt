@@ -1,0 +1,25 @@
+// @action: rename src/lib src/core
+// @file: tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true,
+    "rootDirs": ["src/lib", "src/gen"],
+    "typeRoots": ["./src/lib/types"],
+    "paths": {"~/*": ["./src/*"], "@lib/*": ["./src/lib/*"], "@x": ["src/lib/x.ts"]}
+  },
+  "files": ["src/lib/x.ts"],
+  "include": ["src/main.ts", "src/lib/**/*", "src/library/*.ts", "src/lib"],
+  "exclude": ["./src/lib/skip.ts"],
+  "references": [{"path": "./src/lib/types"}]
+}
+// @file: src/main.ts
+import { x } from "@x";
+import { y } from "@lib/y";
+import { z } from "~/lib/y";
+
+export const n = x + y + z;
+// @file: src/lib/x.ts
+export const x = 1;
+// @file: src/lib/y.ts
+export const y = 1;
+export const z = 1;

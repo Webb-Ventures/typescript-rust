@@ -1,0 +1,57 @@
+a.ts(18,19): error TS2684: The 'this' context of type 'Stream<Stream<number>>' is not assignable to method's 'this' of type 'Stream<Source<number>>'.
+  Types of property 'w' are incompatible.
+    Type '(t: Stream<number>) => void' is not assignable to type '(t: Source<number>) => void'.
+      Types of parameters 't' and 't' are incompatible.
+        Type 'Source<number>' is not assignable to type 'Stream<number>'.
+          Type 'Iterable<number>' is missing the following properties from type 'Stream<number>': sub, v, w, flat, flat2
+a.ts(19,19): error TS2684: The 'this' context of type 'Stream<Stream<number>>' is not assignable to method's 'this' of type 'Stream<Source<number>>'.
+  Types of property 'w' are incompatible.
+    Type '(t: Stream<number>) => void' is not assignable to type '(t: Source<number>) => void'.
+      Types of parameters 't' and 't' are incompatible.
+        Type 'Source<number>' is not assignable to type 'Stream<number>'.
+          Type 'Iterable<number>' is missing the following properties from type 'Stream<number>': sub, v, w, flat, flat2
+a.ts(20,19): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    The 'this' context of type 'Stream<Stream<number>>' is not assignable to method's 'this' of type 'Stream<Source<any>>'.
+      Types of property 'w' are incompatible.
+        Type '(t: Stream<number>) => void' is not assignable to type '(t: Source<any>) => void'.
+          Types of parameters 't' and 't' are incompatible.
+            Type 'Source<any>' is not assignable to type 'Stream<number>'.
+              Type 'Iterable<any>' is missing the following properties from type 'Stream<number>': sub, v, w, flat, flat2
+a.ts(21,1): error TS2684: The 'this' context of type 'Stream<number>' is not assignable to method's 'this' of type 'Stream<Source<unknown>>'.
+  Types of property 'sub' are incompatible.
+    Type '(f: (t: number) => void) => void' is not assignable to type '(f: (t: Source<unknown>) => void) => void'.
+      Types of parameters 'f' and 'f' are incompatible.
+        Types of parameters 't' and 't' are incompatible.
+          Type 'number' is not assignable to type 'Source<unknown>'.
+a.ts(24,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type '{ a: number; }'.
+a.ts(25,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type '{ a: number; }'.
+a.ts(27,1): error TS2684: The 'this' context of type '{ a: string; f: (this: { a: number; }, x: number) => void; }' is not assignable to method's 'this' of type '{ a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(28,1): error TS2684: The 'this' context of type '{ a: string; f: (this: { a: number; }, x: number) => void; }' is not assignable to method's 'this' of type '{ a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(29,2): error TS2684: The 'this' context of type '{ a: string; f: (this: { a: number; }, x: number) => void; }' is not assignable to method's 'this' of type '{ a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(30,1): error TS2684: The 'this' context of type '{ a: string; f: (this: { a: number; }, x: number) => void; }' is not assignable to method's 'this' of type '{ a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(34,1): error TS2741: Property 'a' is missing in type '{ b: number; f: (this: { a: number; }, x: number) => void; }' but required in type '{ a: number; }'.
+a.ts(39,1): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    The 'this' context of type '{ a: boolean; g: { (this: { a: number; }, x: number): void; (this: { a: string; }, x: string): void; }; }' is not assignable to method's 'this' of type '{ a: string; }'.
+      Types of property 'a' are incompatible.
+        Type 'boolean' is not assignable to type 'string'.
+a.ts(44,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type 'A & B'.
+  Type 'void' is not assignable to type 'A'.
+a.ts(46,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type 'never'.
+a.ts(52,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type 'A & B'.
+  Type 'void' is not assignable to type 'A'.
+a.ts(62,1): error TS2322: Type '(this: D, m: number) => number' is not assignable to type '(this: C, m: number) => number'.
+  The 'this' types of each signature are incompatible.
+    Property 'd' is missing in type 'C' but required in type 'D'.
+a.ts(71,1): error TS2322: Type '(this: { y: number; }, m: number) => number' is not assignable to type '(this: void, m: number) => number'.
+  The 'this' types of each signature are incompatible.
+    Type 'void' is not assignable to type '{ y: number; }'.

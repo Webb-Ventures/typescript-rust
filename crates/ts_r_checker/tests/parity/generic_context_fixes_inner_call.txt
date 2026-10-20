@@ -1,0 +1,2 @@
+a.ts(16,11): error TS2322: Type 'Flow<D | T>' is not assignable to type 'number'.
+a.ts(17,11): error TS2322: Type 'Flow<D | T>' is not assignable to type 'number'.

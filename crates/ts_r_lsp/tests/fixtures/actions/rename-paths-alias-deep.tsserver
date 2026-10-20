@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// @deleted: src/lib/util.ts
+// @file: src/a/b/c.ts
+import { helper } from "~/util2";
+import { n } from "~/main";
+
+export const c = helper(n);
+// @file: src/main.ts
+import { helper } from "~/util2";
+
+export const n = helper(1);
+// @file: src/util2.ts
+export function helper(x: number): number { return x; }

@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to inner function in method 'm'
+// @file: src/main.ts
+export class C {
+  x = 1;
+  m() {
+    newFunction();
+
+    function newFunction() {
+      console.log(this.x);
+    }
+  }
+}

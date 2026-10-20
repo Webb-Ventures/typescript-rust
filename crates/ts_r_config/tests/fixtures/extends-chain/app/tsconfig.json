@@ -1,0 +1,6 @@
+{
+  "extends": "../configs/mid",
+  "compilerOptions": {
+    "noEmit": true
+  }
+}

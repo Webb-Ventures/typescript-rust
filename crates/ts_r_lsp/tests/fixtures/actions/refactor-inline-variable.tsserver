@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+export function area(w: number, h: number) {
+  return (w + h) * 2 + w + h;
+}

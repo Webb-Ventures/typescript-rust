@@ -1,0 +1,4 @@
+a.ts(3,11): error TS2506: 'A' is referenced directly or indirectly in its own base expression.
+a.ts(4,11): error TS2506: 'B' is referenced directly or indirectly in its own base expression.
+a.ts(5,11): error TS2506: 'C' is referenced directly or indirectly in its own base expression.
+a.ts(8,15): error TS2506: 'E' is referenced directly or indirectly in its own base expression.

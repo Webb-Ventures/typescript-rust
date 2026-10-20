@@ -1,0 +1,8 @@
+// tsserver 6.0.3
+// title: Infer function return type
+// @file: src/main.ts
+export class C {
+  m(n: number): boolean {
+    return n > 0;
+  }
+}

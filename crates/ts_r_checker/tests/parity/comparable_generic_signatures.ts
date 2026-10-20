@@ -1,0 +1,15 @@
+declare var a1: { fn<T extends string>(x: T): T };
+declare var b1: { fn(x: number): number };
+a1 < b1;
+a1 === b1;
+declare var a2: { fn<T>(x: T): T[] };
+declare var b2: { fn(x: number): string };
+a2 < b2;
+a2 === b2;
+declare var a3: <T>(x: T) => T[];
+declare var b3: (x: number) => string;
+a3 === b3;
+b3 === a3;
+declare var a4: <T>() => { a: T };
+declare var b4: () => { b: 1 };
+a4 === b4;

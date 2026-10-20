@@ -1,0 +1,6 @@
+{
+  "extends": "../configs/mid.json",
+  "include": [
+    "./src/b/*"
+  ]
+}

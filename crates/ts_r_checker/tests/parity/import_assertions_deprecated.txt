@@ -1,0 +1,5 @@
+a.ts(1,32): error TS2880: Import assertions have been replaced by import attributes. Use 'with' instead of 'assert'.
+a.ts(3,49): error TS2880: Import assertions have been replaced by import attributes. Use 'with' instead of 'assert'.
+b.ts(1,30): error TS2880: Import assertions have been replaced by import attributes. Use 'with' instead of 'assert'.
+c.d.ts(1,32): error TS2880: Import assertions have been replaced by import attributes. Use 'with' instead of 'assert'.
+c.d.ts(2,30): error TS2880: Import assertions have been replaced by import attributes. Use 'with' instead of 'assert'.

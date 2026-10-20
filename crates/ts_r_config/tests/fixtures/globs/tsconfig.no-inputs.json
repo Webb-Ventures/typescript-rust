@@ -1,0 +1,8 @@
+{
+  "include": [
+    "nothing/*"
+  ],
+  "exclude": [
+    "x"
+  ]
+}

@@ -1,0 +1,11 @@
+tsconfig.paths.json(12,9): error TS5090: Non-relative paths are not allowed. Did you forget a leading './'?
+
+tsconfig.paths.json(14,12): error TS5066: Substitutions for pattern 'h' shouldn't be an empty array.
+
+tsconfig.paths.json(4,12): error TS5063: Substitutions for pattern 'a' should be an array.
+
+tsconfig.paths.json(5,12): error TS5066: Substitutions for pattern 'c' shouldn't be an empty array.
+
+tsconfig.paths.json(8,7): error TS5061: Pattern 'd/*/*' can have at most one '*' character.
+
+tsconfig.paths.json(9,9): error TS5062: Substitution './e/*/*' in pattern 'd/*/*' can have at most one '*' character.

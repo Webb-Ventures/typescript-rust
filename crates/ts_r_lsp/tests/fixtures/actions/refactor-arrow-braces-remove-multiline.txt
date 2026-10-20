@@ -1,0 +1,8 @@
+// @action: refactor Add or remove braces in an arrow function/Remove braces from arrow function
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+const g = () /*|*/=> {
+  return {
+    a: 1,
+  };
+};

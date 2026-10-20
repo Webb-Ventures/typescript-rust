@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Extract to constant in enclosing scope
+// @file: src/main.ts
+const newLocal = Math.max(1, 2);
+export const f = (a: number) => a * newLocal;

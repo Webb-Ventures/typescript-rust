@@ -1,0 +1,17 @@
+[package]
+name = "ts_r_lint_cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ts-r-lint: the lint binary (replaces eslint / oxlint / biome lint)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ts-r-lint"
+path = "src/main.rs"
+
+[dependencies]
+ts_r_lint = { path = "../ts_r_lint" }

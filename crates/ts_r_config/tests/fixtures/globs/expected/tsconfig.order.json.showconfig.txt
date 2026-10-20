@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./src/q.mts",
+        "./src/b/m2.mts",
+        "./src/r.cts",
+        "./src/a/c2.cts",
+        "./src/b/x.ts",
+        "./src/b/y.tsx",
+        "./src/a.test.ts",
+        "./src/a.ts",
+        "./src/c/deep/w.d.ts",
+        "./src/c/deep/z.ts"
+    ],
+    "include": [
+        "src/**/*.mts",
+        "src/**/*.cts",
+        "src/b/*",
+        "src"
+    ]
+}

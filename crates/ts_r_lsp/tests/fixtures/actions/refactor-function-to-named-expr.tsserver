@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+/** Doubles. */
+function h(x: number) { return x * 2; }

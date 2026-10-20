@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import {
+  alpha,
+  zeta
+} from "./a";
+import { beta } from './b';
+
+export const x = [zeta, alpha, beta]

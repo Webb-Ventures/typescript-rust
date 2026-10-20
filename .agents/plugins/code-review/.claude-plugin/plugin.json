@@ -1,0 +1,12 @@
+{
+  "name": "ts-r-code-review",
+  "version": "2.0.0",
+  "description": "ts-r pull request review for Claude and OpenAI models: lenses for bugs, AGENTS.md and design-record rules, resource limits, determinism and hot-path performance, with verified, confidence-scored findings",
+  "author": {
+    "name": "Riley Webb",
+    "email": "riley@webbventuresgroup.com"
+  },
+  "repository": "https://github.com/Webb-Ventures/tsc-rust",
+  "license": "Apache-2.0",
+  "keywords": ["code-review", "ts-r", "rust", "typescript"]
+}

@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "allowJs": true
+    },
+    "files": [
+        "./src/b/m2.mts",
+        "./src/b/x.ts",
+        "./src/b/y.tsx",
+        "./src/a.ts",
+        "./lib/l.ts",
+        "./src/d.min.js",
+        "./src/e.js"
+    ],
+    "include": [
+        "src/b",
+        "src/a.ts",
+        "lib/l.ts",
+        "src/d.min.js",
+        "src/*.js"
+    ]
+}

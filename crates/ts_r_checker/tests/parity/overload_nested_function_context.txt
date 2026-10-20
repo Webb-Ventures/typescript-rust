@@ -1,0 +1,11 @@
+a.ts(13,3): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'duration' does not exist in type '(v: number) => unknown'.
+a.ts(18,5): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'cb' does not exist in type '(y: number) => void'.
+a.ts(22,23): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '(x: number) => string' is not assignable to type '(x: string) => string'.
+      Types of parameters 'x' and 'x' are incompatible.
+        Type 'string' is not assignable to type 'number'.

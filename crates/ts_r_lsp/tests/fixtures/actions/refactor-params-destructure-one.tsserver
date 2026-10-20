@@ -1,0 +1,5 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+export function one({ a }: { a: number; }) { return a; }
+one({ a: 1 });

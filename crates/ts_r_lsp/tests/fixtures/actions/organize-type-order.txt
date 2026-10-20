@@ -1,0 +1,14 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { D, type C, a, type b } from "./a";
+import { type Y, X } from "./x";
+
+let v: C | b | Y | undefined;
+console.log(D, a, X, v);
+// @file: src/a.ts
+export const D = 1, a = 2;
+export type C = number;
+export type b = string;
+// @file: src/x.ts
+export const X = 1;
+export type Y = string;

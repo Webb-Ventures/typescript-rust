@@ -1,0 +1,21 @@
+# Check every text file out with LF on every OS. Parser, binder and config fixtures are
+# compared byte for byte (spans are byte offsets), so a CRLF checkout on Windows would change
+# them. No fixture needs CRLF today; one that does must be marked `-text` here.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.avif binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.wasm binary
+*.gz binary
+*.tgz binary
+*.zip binary
+*.pdf binary

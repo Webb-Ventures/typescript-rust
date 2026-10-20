@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { a } from "./a"
+import { b } from "./b"
+
+export const f = (o: { a: number }) => o.a + a + b
+export const g = (o: { a: number, b: number }) => o.a + o.b

@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @differs: tsserver keeps the comment in its reprint; ts-r does not offer a type holding comments
+// @file: src/main.ts
+export let q: /*[*/{ a: 1 /* one */ }/*]*/;

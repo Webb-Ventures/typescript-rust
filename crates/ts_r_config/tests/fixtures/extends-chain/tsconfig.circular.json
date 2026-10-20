@@ -1,0 +1,6 @@
+{
+  "extends": "./configs/circ-a.json",
+  "files": [
+    "app/extra.ts"
+  ]
+}

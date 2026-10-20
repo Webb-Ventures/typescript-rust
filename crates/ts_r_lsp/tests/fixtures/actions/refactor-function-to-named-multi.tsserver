@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+let a8 = 2;
+function a7() {
+    return 1;
+}

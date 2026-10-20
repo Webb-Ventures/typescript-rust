@@ -1,0 +1,5 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @differs: tsserver offers it and then changes nothing (`t.call`); ts-r does not offer it
+// @file: src/main.ts
+function /*|*/t(this: { v: number; }, a: number, b: number) { return this.v + a + b; }
+t.call({ v: 1 }, 1, 2);

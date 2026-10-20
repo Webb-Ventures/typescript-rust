@@ -1,0 +1,17 @@
+a.ts(10,7): error TS2322: Type '{ type: "a" | "b" | "d"; x: number; }' is not assignable to type 'T'.
+  Type '{ type: "a" | "b" | "d"; x: number; }' is not assignable to type '{ type: "a"; x: number; } | { type: "b"; x: number; } | { type: "a"; x: number; y?: string | undefined; }'.
+    Type '{ type: "a" | "b" | "d"; x: number; }' is not assignable to type '{ type: "a"; x: number; y?: string | undefined; }'.
+      Types of property 'type' are incompatible.
+        Type '"a" | "b" | "d"' is not assignable to type '"a"'.
+          Type '"b"' is not assignable to type '"a"'.
+a.ts(12,7): error TS2322: Type '{ type: "a" | "b"; x: string; }' is not assignable to type 'T'.
+  Type '{ type: "a" | "b"; x: string; }' is not assignable to type '{ type: "a"; x: number; } | { type: "b"; x: number; } | { type: "a"; x: number; y?: string | undefined; }'.
+    Type '{ type: "a" | "b"; x: string; }' is not assignable to type '{ type: "a"; x: number; y?: string | undefined; }'.
+      Types of property 'type' are incompatible.
+        Type '"a" | "b"' is not assignable to type '"a"'.
+          Type '"b"' is not assignable to type '"a"'.
+a.ts(15,7): error TS2322: Type '{ k: "a" | "b"; v: string; }' is not assignable to type 'U'.
+  Type '{ k: "a" | "b"; v: string; }' is not assignable to type '{ k: "b"; v: number; }'.
+    Types of property 'k' are incompatible.
+      Type '"a" | "b"' is not assignable to type '"b"'.
+        Type '"a"' is not assignable to type '"b"'.

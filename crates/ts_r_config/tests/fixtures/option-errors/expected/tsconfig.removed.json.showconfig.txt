@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "module": "amd",
+        "target": "es5",
+        "allowSyntheticDefaultImports": false,
+        "alwaysStrict": false,
+        "baseUrl": "./src",
+        "downlevelIteration": true,
+        "esModuleInterop": false,
+        "outFile": "./o.js",
+        "useDefineForClassFields": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

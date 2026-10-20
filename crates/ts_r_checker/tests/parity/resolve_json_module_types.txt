@@ -1,0 +1,6 @@
+a.ts(6,7): error TS2322: Type '{ name: string; n: number; arr: (string | number | { k: boolean; })[]; nested: { deep: (number | null)[]; }; empty: never[]; neg: number; }' is not assignable to type 'boolean'.
+a.ts(7,7): error TS2322: Type '(string | number | { k: boolean; })[]' is not assignable to type 'boolean'.
+a.ts(8,7): error TS2322: Type '{ deep: (number | null)[]; }' is not assignable to type 'boolean'.
+a.ts(9,7): error TS2322: Type 'never[]' is not assignable to type 'boolean'.
+a.ts(10,7): error TS2322: Type 'string' is not assignable to type 'boolean'.
+a.ts(11,7): error TS2322: Type '({ id: number; tag?: undefined; } | { id: number; tag: string; })[]' is not assignable to type 'boolean'.

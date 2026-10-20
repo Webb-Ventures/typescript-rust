@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+declare function touch(): void
+export function f(n: number) {
+  touch()
+  [n].push(1)
+  return [n]
+}

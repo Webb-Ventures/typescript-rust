@@ -1,0 +1,15 @@
+a.ts(2,30): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.
+a.ts(2,56): error TS1453: `resolution-mode` should be either `require` or `import`.
+a.ts(4,36): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.
+a.ts(5,36): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.
+a.ts(6,36): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.
+a.ts(6,62): error TS1453: `resolution-mode` should be either `require` or `import`.
+a.ts(7,21): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.
+a.ts(8,60): error TS1453: `resolution-mode` should be either `require` or `import`.
+b.ts(1,30): error TS1464: Type import attributes should have exactly one key - 'resolution-mode' - with value 'import' or 'require'.
+b.ts(1,30): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.
+c.mts(1,15): error TS2305: Module '"pkg"' has no exported member 'R'.
+c.mts(1,30): error TS2857: Import attributes cannot be used with type-only imports or exports.
+c.mts(1,56): error TS1453: `resolution-mode` should be either `require` or `import`.
+c.mts(2,30): error TS1454: `resolution-mode` can only be set for type-only imports.
+d.cts(1,30): error TS2856: Import attributes are not allowed on statements that compile to CommonJS 'require' calls.

@@ -1,0 +1,4 @@
+// @action: refactor Convert arrow function or function expression/Convert to named function
+// @file: src/main.ts
+/** Doubles. */
+const /*|*/h = function named(x: number) { return x * 2; };

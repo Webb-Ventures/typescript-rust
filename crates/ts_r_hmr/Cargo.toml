@@ -1,0 +1,31 @@
+[package]
+name = "ts_r_hmr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Dev server core for ts-r-dev: unbundled ESM serving, module graph, Vite-compatible HMR"
+
+[lints]
+workspace = true
+
+[dependencies]
+ts_r_cache = { path = "../ts_r_cache" }
+# The file watcher (`watch`), shared with ts-r-check --watch.
+ts_r_watch = { path = "../ts_r_watch" }
+# `preserve_order`: `package.json` `exports` conditions match in the object's key order
+# (`{"import": …, "default": …}`), not sorted (where `default` would win).
+serde_json = { version = "1", features = ["preserve_order"] }
+sha1_smol = "1"
+# `server.proxy` keys starting with `^` and `server.cors` origin patterns are JS regexes.
+regex-lite = "0.1"
+# `server.https` and `https://`/`wss://` proxy targets (feature `tls`, on by default).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "1", optional = true }
+
+[features]
+default = ["tls"]
+tls = ["dep:rustls", "dep:webpki-roots"]
+
+[dev-dependencies]
+ts_r_testing = { path = "../ts_r_testing" }

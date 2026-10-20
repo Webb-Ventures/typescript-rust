@@ -1,0 +1,7 @@
+{
+  "exclude": [
+    "src/b",
+    "**/deep",
+    "lib/*"
+  ]
+}

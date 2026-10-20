@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// @deleted: src/lib/index.ts
+// @deleted: src/lib/other.ts
+// @file: src/core/index.ts
+export { other } from "./other";
+export function helper(x: number): number { return x; }
+// @file: src/core/other.ts
+export const other = 1;
+// @file: src/main.ts
+import { helper } from "./core";
+import { other } from "./core/other";
+
+export const n = helper(other);

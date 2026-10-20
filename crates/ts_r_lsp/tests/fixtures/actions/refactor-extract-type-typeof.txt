@@ -1,0 +1,4 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+const conf = { a: 1 };
+export let c: /*[*/typeof conf/*]*/ = conf;

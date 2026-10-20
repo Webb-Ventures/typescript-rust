@@ -1,0 +1,14 @@
+// tsserver 6.0.3
+// fix all: Implement all unimplemented interfaces
+// @file: src/main.ts
+interface A { a(): void }
+interface B { b: number }
+
+export class X implements A {
+
+  a(): void {
+    throw new Error("Method not implemented.");
+  }}
+export class Y implements B {
+
+  b: number;}

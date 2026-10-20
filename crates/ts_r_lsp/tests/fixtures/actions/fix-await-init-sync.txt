@@ -1,0 +1,11 @@
+// @action: fix 2339 Add 'await' to initializer for 'p'
+// @differs: tsserver offers `await` on the initializer in the non-async `outer` (TS1308); we only offer `(await p).x`.
+// @file: src/main.ts
+declare function load(): Promise<{ x: number }>;
+export function outer() {
+  const p = load();
+  async function inner() {
+    return p./*|*/x;
+  }
+  return inner;
+}

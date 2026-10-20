@@ -1,0 +1,12 @@
+// tsserver 6.0.3
+// @deleted: packages/kit/src/util.ts
+// @file: apps/api/main.ts
+import { helper } from "../web/util";
+
+export const m = helper(2);
+// @file: apps/web/main.ts
+import { helper } from "./util";
+
+export const n = helper(1);
+// @file: apps/web/util.ts
+export function helper(x: number): number { return x; }

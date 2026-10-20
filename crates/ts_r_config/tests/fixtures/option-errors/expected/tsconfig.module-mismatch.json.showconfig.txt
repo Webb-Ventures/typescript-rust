@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+        "module": "esnext",
+        "moduleResolution": "nodenext",
+        "resolveJsonModule": false
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

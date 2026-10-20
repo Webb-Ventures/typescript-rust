@@ -1,0 +1,11 @@
+a.ts(3,23): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(4,25): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(5,23): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(6,23): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(8,24): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(9,16): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(9,16): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(10,37): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(10,37): error TS2524: 'await' expressions cannot be used in a parameter initializer.
+a.ts(12,15): error TS1206: Decorators are not valid here.
+a.ts(15,15): error TS1206: Decorators are not valid here.

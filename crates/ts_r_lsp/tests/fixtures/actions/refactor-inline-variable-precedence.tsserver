@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+export function f(a: number, b: number, c: number) {
+  return [a - b - c, b - c - a, a / (b - c), b - c ? 1 : 2, -(b - c), a + b - c];
+}

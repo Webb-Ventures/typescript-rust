@@ -1,0 +1,17 @@
+a.ts(6,23): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type '{ x: 1; }'.
+a.ts(7,7): error TS2322: Type '{ x: 1; }' is not assignable to type 'string'.
+a.ts(9,23): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type '{ x: number; }'.
+a.ts(10,7): error TS2322: Type '{ x: number; }' is not assignable to type 'string'.
+a.ts(13,7): error TS2322: Type '{ x: number; y: string; }' is not assignable to type 'string'.
+a.ts(18,3): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ x: number; y: "y"; }'.
+a.ts(22,7): error TS2322: Type '{ x: 1; y: string; }' is not assignable to type 'boolean'.
+a.ts(24,34): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ x: number; y: "foo"; }'.
+a.ts(25,7): error TS2322: Type '{ x: number; y: "foo"; }' is not assignable to type 'boolean'.
+a.ts(27,31): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ x: { v: number; }; }'.
+a.ts(28,7): error TS2322: Type '{ x: number; }' is not assignable to type 'boolean'.
+a.ts(37,46): error TS2322: Type '"bar"' is not assignable to type '"foo"'.
+a.ts(38,64): error TS2353: Object literal may only specify known properties, and 'extra' does not exist in type '{ entry: "foo"; states: { a: { entry: "foo"; }; }; }'.
+a.ts(44,5): error TS2322: Type '{ [K in keyof T & keyof Stuff]: T[K]; }' is not assignable to type 'T'.
+  '{ [K in keyof T & keyof Stuff]: T[K]; }' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'Stuff'.
+a.ts(50,5): error TS2322: Type '{ [K in keyof T & "a"]: T[K]; }' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to '{ [K in keyof T & "a"]: T[K]; }'.

@@ -1,0 +1,11 @@
+{
+  "extends": "./configs/mid.json",
+  "compilerOptions": {
+    "outDir": null,
+    "strict": null,
+    "lib": null,
+    "types": null,
+    "paths": null
+  },
+  "include": null
+}

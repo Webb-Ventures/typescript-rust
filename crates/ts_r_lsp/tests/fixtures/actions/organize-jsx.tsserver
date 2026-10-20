@@ -1,0 +1,9 @@
+// tsserver 6.0.3
+// @file: src/main.tsx
+import { useState } from "react";
+import { Button } from "./button";
+
+export function App() {
+  const [n] = useState(0);
+  return <Button>{n}</Button>;
+}

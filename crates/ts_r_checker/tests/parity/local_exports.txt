@@ -1,0 +1,27 @@
+a.ts(1,10): error TS2661: Cannot export 'string'. Only local declarations can be exported from a module.
+a.ts(2,15): error TS2661: Cannot export 'number'. Only local declarations can be exported from a module.
+a.ts(3,10): error TS2661: Cannot export 'undefined'. Only local declarations can be exported from a module.
+a.ts(4,10): error TS2661: Cannot export 'Array'. Only local declarations can be exported from a module.
+a.ts(5,10): error TS2304: Cannot find name 'nope'.
+a.ts(6,10): error TS2661: Cannot export 'globalThis'. Only local declarations can be exported from a module.
+a.ts(7,10): error TS2661: Cannot export 'Symbol'. Only local declarations can be exported from a module.
+a.ts(12,10): error TS2661: Cannot export 'NaN'. Only local declarations can be exported from a module.
+a.ts(13,10): error TS2584: Cannot find name 'console'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+a.ts(14,10): error TS2661: Cannot export 'any'. Only local declarations can be exported from a module.
+a.ts(15,10): error TS2661: Cannot export 'boolean'. Only local declarations can be exported from a module.
+a.ts(16,10): error TS2661: Cannot export 'never'. Only local declarations can be exported from a module.
+a.ts(17,10): error TS2552: Cannot find name 'object'. Did you mean 'Object'?
+a.ts(18,10): error TS2661: Cannot export 'unknown'. Only local declarations can be exported from a module.
+a.ts(19,10): error TS2552: Cannot find name 'symbol'. Did you mean 'Symbol'?
+a.ts(20,10): error TS2552: Cannot find name 'bigint'. Did you mean 'BigInt'?
+a.ts(21,16): error TS2664: Invalid module name in augmentation, module 'm' cannot be found.
+a.ts(22,14): error TS2661: Cannot export 'Array'. Only local declarations can be exported from a module.
+a.ts(24,14): error TS2304: Cannot find name 'missing'.
+a.ts(31,5): error TS2666: Exports and export assignments are not permitted in module augmentations.
+a.ts(31,32): error TS2661: Cannot export 'Array'. Only local declarations can be exported from a module.
+a.ts(32,5): error TS2667: Imports are not permitted in module augmentations. Consider moving them to the enclosing external module.
+a.ts(32,27): error TS2307: Cannot find module './a' or its corresponding type declarations.
+a.ts(34,10): error TS2552: Cannot find name 'gv'. Did you mean 'GV'?
+a.ts(34,14): error TS2304: Cannot find name 'G'.
+a.ts(36,5): error TS2669: Augmentations for the global scope can only be directly nested in external modules or ambient module declarations.
+a.ts(36,5): error TS2670: Augmentations for the global scope should have 'declare' modifier unless they appear in already ambient context.

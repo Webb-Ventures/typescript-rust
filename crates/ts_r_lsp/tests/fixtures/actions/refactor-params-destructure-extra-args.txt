@@ -1,0 +1,5 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @differs: tsserver offers it and then changes nothing (a call has more arguments than parameters); ts-r does not offer it
+// @file: src/main.ts
+function /*|*/ex(a: number) { return a; }
+ex(1, 2);

@@ -1,0 +1,3 @@
+a.ts(4,8): error TS2542: Index signature in type 'readonly [number, number, ...number[]]' only permits reading.
+a.ts(5,8): error TS2542: Index signature in type 'readonly [number, number, ...number[]]' only permits reading.
+a.ts(7,8): error TS2542: Index signature in type '{ readonly [k: string]: number | undefined; }' only permits reading.

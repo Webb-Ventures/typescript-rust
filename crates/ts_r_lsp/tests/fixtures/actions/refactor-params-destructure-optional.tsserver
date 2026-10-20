@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function opt({ a, b, c = true }: { a: number; b?: string; c?: boolean; }) { return [a, b, c]; }
+opt({ a: 1 });
+opt({ a: 1, b: 'x' });
+opt({ a: 1, b: undefined, c: false });

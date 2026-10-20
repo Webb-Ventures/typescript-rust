@@ -1,0 +1,6 @@
+a.js(4,13): error TS18016: Private identifiers are not allowed outside class bodies.
+a.js(7,10): error TS18016: Private identifiers are not allowed outside class bodies.
+a.js(10,3): error TS2339: Property '#foo' does not exist on type 'typeof B'.
+a.js(13,9): error TS18010: An accessibility modifier cannot be used with a private identifier.
+a.js(15,9): error TS18010: An accessibility modifier cannot be used with a private identifier.
+a.js(17,9): error TS18010: An accessibility modifier cannot be used with a private identifier.

@@ -1,0 +1,26 @@
+a.ts(4,27): error TS2307: Cannot find module 'nope' or its corresponding type declarations.
+a.ts(6,24): error TS2339: Property 'className' does not exist on type 'P'.
+a.ts(11,50): error TS2339: Property 'b' does not exist on type '{ a: number; }'.
+a.ts(12,25): error TS2339: Property 'b' does not exist on type '{ a: number; }'.
+a.ts(13,16): error TS2339: Property 'zz' does not exist on type '{ a: number; }'.
+a.ts(15,17): error TS2339: Property 'foo' does not exist on type 'String'.
+a.ts(16,9): error TS2339: Property 'x1' does not exist on type '{}'.
+a.ts(17,9): error TS2339: Property 'a' does not exist on type '{ a: number; } | { b: string; }'.
+a.ts(17,16): error TS2339: Property 'b' does not exist on type '{ a: number; } | { b: string; }'.
+a.ts(18,14): error TS2339: Property 'q' does not exist on type '{ a: number; }'.
+a.ts(19,23): error TS2339: Property 'm' does not exist on type '{ n: number; }'.
+a.ts(20,9): error TS2339: Property 'x8' does not exist on type 'unknown'.
+a.ts(22,9): error TS2339: Property 'a' does not exist on type '{ a: number; } | undefined'.
+a.ts(31,35): error TS2339: Property 'nope' does not exist on type 'Number'.
+a.ts(33,4): error TS2345: Argument of type '({ data }: { data: any; }) => any' is not assignable to parameter of type '(x: unknown) => void'.
+  Types of parameters '__0' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type '{ data: any; }'.
+a.ts(34,4): error TS2345: Argument of type '([p0, p1]: [any, any]) => any' is not assignable to parameter of type '(x: unknown) => void'.
+  Types of parameters '__0' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type '[any, any]'.
+a.ts(36,8): error TS2345: Argument of type '({ data, error }: { data: any; error: any; }) => any[]' is not assignable to parameter of type '(value: unknown) => any[] | PromiseLike<any[]>'.
+  Types of parameters '__0' and 'value' are incompatible.
+    Type 'unknown' is not assignable to type '{ data: any; error: any; }'.
+a.ts(37,7): error TS2322: Type '({ data }: { data: any; }) => any' is not assignable to type '(x: unknown) => void'.
+  Types of parameters '__0' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type '{ data: any; }'.

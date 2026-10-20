@@ -1,0 +1,12 @@
+// @action: fixAll 2304 Add import from "./a"
+// @file: src/main.ts
+import { z } from "./z";
+
+export const v = [/*|*/alpha, beta, gamma, z];
+// @file: src/a.ts
+export const alpha = 1;
+export const beta = 2;
+// @file: src/c.ts
+export const gamma = 3;
+// @file: src/z.ts
+export const z = 0;

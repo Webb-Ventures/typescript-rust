@@ -1,0 +1,23 @@
+// @action: rename shared/util.ts shared/lib/util.ts
+// @file: tsconfig.json
+{"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true}, "include": ["app", "shared"]}
+// @file: tests/tsconfig.json
+{"compilerOptions": {"strict": true, "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "noEmit": true}, "include": ["../shared", "."]}
+// @file: app/main.ts
+import { helper } from "../shared/util";
+
+export const n = helper(1);
+// @file: shared/util.ts
+import { base } from "./base";
+
+export function helper(x: number): number { return x + base; }
+// @file: shared/base.ts
+export const base = 1;
+// @file: shared/user.ts
+import { helper } from "./util";
+
+export const u = helper(2);
+// @file: tests/util.test.ts
+import { helper } from "../shared/util";
+
+export const t = helper(3);

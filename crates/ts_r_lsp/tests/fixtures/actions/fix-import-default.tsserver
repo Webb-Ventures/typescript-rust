@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import logger from "./logger";
+
+export function run() {
+  logger("hi");
+}

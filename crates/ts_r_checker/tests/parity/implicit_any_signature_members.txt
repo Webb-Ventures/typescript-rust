@@ -1,0 +1,25 @@
+a.ts(2,5): error TS7008: Member 'member1' implicitly has an 'any' type.
+a.ts(3,5): error TS7008: Member 'member2' implicitly has an 'any' type.
+a.ts(4,14): error TS7008: Member 'member3' implicitly has an 'any' type.
+a.ts(5,5): error TS7008: Member '"quoted"' implicitly has an 'any' type.
+a.ts(6,5): error TS7008: Member '42' implicitly has an 'any' type.
+a.ts(8,9): error TS7033: Property 'acc' implicitly has type 'any', because its get accessor lacks a return type annotation.
+a.ts(9,9): error TS7032: Property 'acc2' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(9,14): error TS7006: Parameter 'v' implicitly has an 'any' type.
+a.ts(11,10): error TS7008: Member 'y' implicitly has an 'any' type.
+a.ts(11,13): error TS7008: Member 'z' implicitly has an 'any' type.
+a.ts(12,21): error TS7008: Member 'v' implicitly has an 'any' type.
+a.ts(12,24): error TS7008: Member 'w' implicitly has an 'any' type.
+a.ts(13,12): error TS7008: Member 'a' implicitly has an 'any' type.
+a.ts(14,19): error TS7008: Member 'p' implicitly has an 'any' type.
+a.ts(14,29): error TS7008: Member 'q' implicitly has an 'any' type.
+a.ts(15,38): error TS7008: Member 'j' implicitly has an 'any' type.
+a.ts(16,32): error TS7008: Member 'g' implicitly has an 'any' type.
+a.ts(17,17): error TS7008: Member 'b' implicitly has an 'any' type.
+a.ts(20,9): error TS7032: Property 'a' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(25,9): error TS7032: Property 'd' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(25,11): error TS7006: Parameter 'v' implicitly has an 'any' type.
+a.ts(26,9): error TS7033: Property 'e' implicitly has type 'any', because its get accessor lacks a return type annotation.
+a.ts(28,19): error TS7033: Property 'f' implicitly has type 'any', because its get accessor lacks a return type annotation.
+a.ts(28,28): error TS7032: Property 'g' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(28,30): error TS7006: Parameter 'v' implicitly has an 'any' type.

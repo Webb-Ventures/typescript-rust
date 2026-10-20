@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsxdev",
+    "jsxFragmentFactory": "F"
+  },
+  "files": [
+    "a.ts"
+  ]
+}

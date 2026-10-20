@@ -1,0 +1,4 @@
+a.tsx(8,45): error TS2304: Cannot find name 'unknownName'.
+a.tsx(9,47): error TS2304: Cannot find name 'unknownFragment'.
+a.tsx(10,45): error TS2304: Cannot find name 'unknownTyped'.
+a.tsx(11,47): error TS2304: Cannot find name 'unknownTypedFragment'.

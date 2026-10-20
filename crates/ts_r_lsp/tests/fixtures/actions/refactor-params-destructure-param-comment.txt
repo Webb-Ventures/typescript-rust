@@ -1,0 +1,4 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function /*|*/pc(a: number /* first */, b: number) { return a + b; }
+pc(1, 2);

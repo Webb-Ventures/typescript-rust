@@ -1,0 +1,6 @@
+a.ts(7,9): error TS7029: Fallthrough case in switch.
+a.ts(22,9): error TS7029: Fallthrough case in switch.
+a.ts(24,17): error TS7029: Fallthrough case in switch.
+b.js(1,19): error TS7006: Parameter 'a' implicitly has an 'any' type.
+b.js(1,22): error TS7006: Parameter 'b' implicitly has an 'any' type.
+b.js(3,9): error TS7029: Fallthrough case in switch.

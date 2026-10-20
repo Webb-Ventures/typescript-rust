@@ -1,0 +1,12 @@
+// @action: fix 2304 Add import from "./alpha"
+// @file: src/main.ts
+import { m } from "./mid";
+import { z } from "./zed";
+
+export const n = [/*|*/a, m, z];
+// @file: src/alpha.ts
+export const a = 1;
+// @file: src/mid.ts
+export const m = 1;
+// @file: src/zed.ts
+export const z = 1;

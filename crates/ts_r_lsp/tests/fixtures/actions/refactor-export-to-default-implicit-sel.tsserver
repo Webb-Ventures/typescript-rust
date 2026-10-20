@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/util.ts
+export default function alpha() {}

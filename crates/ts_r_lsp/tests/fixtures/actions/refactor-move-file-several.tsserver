@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Move to file
+// @file: src/main.ts
+import { two } from "./utils";
+
+export const three = two() + 1;
+// @file: src/utils.ts
+export const x = 1;
+export const one = 1;
+
+export function two() {
+  return one + 1;
+}

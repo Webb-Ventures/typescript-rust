@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+export const items = [1, 2];
+log(items.length, "done");
+
+export const x = 1;
+
+function log(length: number, arg1: string) {
+    throw new Error("Function not implemented.");
+}

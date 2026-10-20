@@ -1,0 +1,19 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+interface Shape {
+  readonly name: string;
+  sides?: number;
+  area(scale: number): number;
+  describe(): string;
+}
+
+export class Square implements Shape {
+  describe(): string {
+    throw new Error("Method not implemented.");
+  }
+  area(scale: number): number {
+    throw new Error("Method not implemented.");
+  }
+  sides?: number | undefined;
+  name = "square";
+}

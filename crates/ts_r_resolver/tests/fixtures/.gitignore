@@ -1,0 +1,2 @@
+# Fixture projects need their node_modules checked in.
+!node_modules/

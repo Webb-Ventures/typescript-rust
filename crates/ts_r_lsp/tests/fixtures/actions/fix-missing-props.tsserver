@@ -1,0 +1,26 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+interface Options {
+  name: string;
+  count: number;
+  enabled: boolean;
+  tags: string[];
+  nested: { a: number };
+  mode: "fast" | "slow";
+  cb: (x: number) => void;
+  opt?: string;
+}
+
+export const o: Options = {
+  name: "x",
+  count: 0,
+  enabled: false,
+  tags: [],
+  nested: {
+    a: 0
+  },
+  mode: "fast",
+  cb: function(x: number): void {
+    throw new Error("Function not implemented.");
+  }
+};

@@ -1,0 +1,27 @@
+a.ts(1,5): error TS2502: 'a' is referenced directly or indirectly in its own type annotation.
+a.ts(2,5): error TS2502: 'b' is referenced directly or indirectly in its own type annotation.
+a.ts(3,5): error TS2502: 'c' is referenced directly or indirectly in its own type annotation.
+a.ts(4,5): error TS2502: 'd' is referenced directly or indirectly in its own type annotation.
+a.ts(6,17): error TS2454: Variable 'f' is used before being assigned.
+a.ts(8,5): error TS2502: 'h' is referenced directly or indirectly in its own type annotation.
+a.ts(9,5): error TS2502: 'i' is referenced directly or indirectly in its own type annotation.
+a.ts(10,5): error TS2502: 'j' is referenced directly or indirectly in its own type annotation.
+a.ts(11,5): error TS2502: 'k' is referenced directly or indirectly in its own type annotation.
+a.ts(13,17): error TS2502: 'foo' is referenced directly or indirectly in its own type annotation.
+a.ts(14,13): error TS2502: 'p' is referenced directly or indirectly in its own type annotation.
+a.ts(15,13): error TS2502: 'p' is referenced directly or indirectly in its own type annotation.
+a.ts(15,25): error TS2502: 'q' is referenced directly or indirectly in its own type annotation.
+a.ts(16,11): error TS2502: 'p' is referenced directly or indirectly in its own type annotation.
+a.ts(16,22): error TS2502: 'q' is referenced directly or indirectly in its own type annotation.
+a.ts(16,54): error TS2502: 's' is referenced directly or indirectly in its own type annotation.
+a.ts(17,13): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+a.ts(18,20): error TS2502: 'a' is referenced directly or indirectly in its own type annotation.
+a.ts(19,7): error TS2502: 'p' is referenced directly or indirectly in its own type annotation.
+a.ts(24,5): error TS2502: 'a8' is referenced directly or indirectly in its own type annotation.
+a.ts(25,5): error TS2502: 'a9' is referenced directly or indirectly in its own type annotation.
+a.ts(30,5): error TS2502: 'a18' is referenced directly or indirectly in its own type annotation.
+a.ts(31,5): error TS2502: 'a19' is referenced directly or indirectly in its own type annotation.
+a.ts(32,5): error TS2502: 'a20' is referenced directly or indirectly in its own type annotation.
+a.ts(33,5): error TS2502: 'rc' is referenced directly or indirectly in its own type annotation.
+a.ts(35,5): error TS2502: 'rd' is referenced directly or indirectly in its own type annotation.
+a.ts(37,5): error TS2502: 're' is referenced directly or indirectly in its own type annotation.

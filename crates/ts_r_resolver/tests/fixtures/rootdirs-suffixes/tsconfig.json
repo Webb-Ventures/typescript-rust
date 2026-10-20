@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": [],
+    "rootDirs": [
+      "src",
+      "generated"
+    ],
+    "moduleSuffixes": [
+      ".ios",
+      ".native",
+      ""
+    ]
+  },
+  "include": [
+    "src",
+    "generated"
+  ]
+}

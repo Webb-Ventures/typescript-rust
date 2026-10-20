@@ -1,0 +1,12 @@
+a.ts(4,11): error TS2322: Type 'string' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'string'.
+a.ts(5,11): error TS2322: Type '"a"' is not assignable to type 'K'.
+  '"a"' is assignable to the constraint of type 'K', but 'K' could be instantiated with a different subtype of constraint '"a" | "b"'.
+a.ts(6,11): error TS2322: Type 'T' is not assignable to type 'S'.
+  'S' could be instantiated with an arbitrary type which could be unrelated to 'T'.
+a.ts(7,11): error TS2322: Type '1' is not assignable to type 'K'.
+  'K' could be instantiated with an arbitrary type which could be unrelated to '1'.
+a.ts(8,13): error TS2345: Argument of type '"b"' is not assignable to parameter of type 'K'.
+  '"b"' is assignable to the constraint of type 'K', but 'K' could be instantiated with a different subtype of constraint '"a" | "b"'.
+a.ts(17,9): error TS2322: Type 'C' is not assignable to type 'this'.
+  'C' is assignable to the constraint of type 'this', but 'this' could be instantiated with a different subtype of constraint 'C'.

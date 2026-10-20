@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { helper } from './lib/util.js'
+import { other } from './other.js'
+
+export const n = helper(other)

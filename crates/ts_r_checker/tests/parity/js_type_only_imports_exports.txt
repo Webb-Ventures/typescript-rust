@@ -1,0 +1,6 @@
+b.js(1,8): error TS18042: 'Def' is a type and cannot be imported in JavaScript files. Use 'import("./types")' in a JSDoc type annotation.
+b.js(1,15): error TS18042: 'Shape' is a type and cannot be imported in JavaScript files. Use 'import("./types").Shape' in a JSDoc type annotation.
+b.js(1,22): error TS18042: 'Kind' is a type and cannot be imported in JavaScript files. Use 'import("./types").Kind' in a JSDoc type annotation.
+b.js(6,10): error TS18043: Types cannot appear in export declarations in JavaScript files.
+b.js(7,10): error TS18043: Types cannot appear in export declarations in JavaScript files.
+b.js(10,10): error TS18043: Types cannot appear in export declarations in JavaScript files.

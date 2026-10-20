@@ -1,0 +1,6 @@
+// @action: refactor Extract type/Extract to type alias
+// @preferences: {"allowTextChangesInNewFiles": true}
+// @file: src/main.ts
+export interface G {
+    is(x: unknown): /*[*/x is string/*]*/;
+}

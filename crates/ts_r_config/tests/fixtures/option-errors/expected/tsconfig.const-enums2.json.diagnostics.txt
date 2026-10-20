@@ -1,0 +1,1 @@
+tsconfig.const-enums2.json(3,5): error TS5091: Option 'preserveConstEnums' cannot be disabled when 'verbatimModuleSyntax' is enabled.

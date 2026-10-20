@@ -1,0 +1,4 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+function /*|*/r(a: number, ...rest: string[]) { return rest.length + a; }
+r(1, 'a', 'b');

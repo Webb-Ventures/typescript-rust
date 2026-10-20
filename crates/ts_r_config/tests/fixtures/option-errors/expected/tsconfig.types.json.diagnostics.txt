@@ -1,0 +1,31 @@
+tsconfig.types.json(12,14): error TS5024: Compiler option 'paths' requires a value of type object.
+
+tsconfig.types.json(14,29): error TS5024: Compiler option 'maxNodeModuleJsDepth' requires a value of type number.
+
+tsconfig.types.json(16,7): error TS5024: Compiler option 'plugin' requires a value of type object.
+
+tsconfig.types.json(18,25): error TS5024: Compiler option 'customConditions' requires a value of type Array.
+
+tsconfig.types.json(19,17): error TS5024: Compiler option 'rootDirs' requires a value of type Array.
+
+tsconfig.types.json(20,16): error TS6046: Argument for '--newLine' option must be: 'crlf', 'lf'.
+
+tsconfig.types.json(21,15): error TS5024: Compiler option 'outDir' requires a value of type string.
+
+tsconfig.types.json(22,5): error TS5023: Unknown compiler option 'lib2'.
+
+tsconfig.types.json(27,14): error TS5024: Compiler option 'include' requires a value of type Array.
+
+tsconfig.types.json(29,5): error TS5024: Compiler option 'exclude' requires a value of type string.
+
+tsconfig.types.json(3,16): error TS5024: Compiler option 'allowJs' requires a value of type boolean.
+
+tsconfig.types.json(4,15): error TS5024: Compiler option 'target' requires a value of type enum.
+
+tsconfig.types.json(5,12): error TS5024: Compiler option 'lib' requires a value of type Array.
+
+tsconfig.types.json(6,15): error TS6046: Argument for '--module' option must be: 'commonjs', 'es6', 'es2015', 'es2020', 'es2022', 'esnext', 'node16', 'node18', 'node20', 'nodenext', 'preserve'.
+
+tsconfig.types.json(7,25): error TS6046: Argument for '--moduleResolution' option must be: 'node16', 'nodenext', 'bundler'.
+
+tsconfig.types.json(9,7): error TS5024: Compiler option 'types' requires a value of type string.

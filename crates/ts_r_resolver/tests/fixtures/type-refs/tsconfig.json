@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": [
+      "node",
+      "globals",
+      "@scoped/thing",
+      "missing-types"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}

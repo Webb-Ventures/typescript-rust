@@ -1,0 +1,4 @@
+[91merror[0m[90m TS5055: [0mCannot write file '${FIXTURE}/a.js' because it would overwrite input file.
+
+Found 1 error.
+

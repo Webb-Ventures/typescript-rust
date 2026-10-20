@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+export function add({ a, b }: { a: number; b: number; }) { return a + b; }
+// @file: src/use.ts
+import * as m from './main';
+m.add({ a: 1, b: 2 });

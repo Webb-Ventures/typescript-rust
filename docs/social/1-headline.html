@@ -1,0 +1,53 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1600px;height:900px;overflow:hidden}
+body{background:#0d0f13;color:#e6e8ec;font-family:Inter,-apple-system,"SF Pro Display",system-ui,sans-serif;
+  background-image:radial-gradient(900px 600px at 8% -10%,rgba(240,129,74,.16),transparent 70%),
+  radial-gradient(900px 600px at 100% 0%,rgba(122,162,255,.12),transparent 70%);
+  padding:56px 80px 0;display:flex;flex-direction:column}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+header{display:flex;align-items:center;gap:16px;height:44px}
+.brand{font-size:30px;font-weight:800;letter-spacing:-.02em}
+.pill{font-size:15px;font-weight:600;color:#fbbf24;border:1px solid rgba(251,191,36,.5);background:rgba(251,191,36,.1);border-radius:99px;padding:4px 12px}
+.legend{margin-left:auto;display:flex;gap:28px;font-size:20px;color:#a9b0bd}
+.legend span{display:flex;align-items:center;gap:10px}
+.sw{width:18px;height:18px;border-radius:4px}
+h1{font-size:60px;font-weight:800;letter-spacing:-.025em;line-height:1.05;margin-top:40px}
+h1 .g{background:linear-gradient(90deg,#f0814a,#ffb37a 45%,#7aa2ff);-webkit-background-clip:text;color:transparent}
+.sub{font-size:24px;color:#a9b0bd;margin-top:14px}
+main{flex:1;min-height:0}
+footer{height:64px;display:flex;align-items:center;justify-content:space-between;font-size:17px;color:#8b93a1;border-top:1px solid rgba(230,232,236,.11)}
+</style></head><body>
+<header><svg width="44" height="44" viewBox="0 0 72 72"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f0814a"/><stop offset="1" stop-color="#7aa2ff"/></linearGradient></defs><rect width="72" height="72" rx="18" fill="url(#lg)"/><path d="M24.75 22.5 L13.5 36 L24.75 49.5 M47.25 22.5 L58.5 36 L47.25 49.5 M40.5 20.25 L31.5 51.75" stroke="#0d0f13" stroke-width="5.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="brand">ts-r</span><span class="pill">pre-alpha</span></header>
+
+<h1>TypeScript tooling, <span class="g">rebuilt in Rust.</span></h1>
+<p class="sub">Dev server, bundler, linter, type checker and language server, against the tools they replace.</p>
+<main style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:20px;padding:40px 0 36px">
+<div style="background:#14171d;border:1px solid rgba(230,232,236,.11);border-radius:20px;padding:28px 32px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+  <div style="display:flex;align-items:baseline;gap:16px"><span style="font-size:88px;font-weight:800;letter-spacing:-.04em;line-height:1;color:#f0814a">10×</span><span style="font-size:26px;font-weight:700;line-height:1.15">faster hot reload</span></div>
+  <div style="font-size:21px;color:#e6e8ec;margin-top:16px" class="mono">ts-r-dev vs Vite 8</div>
+  <div style="font-size:18px;color:#8b93a1;margin-top:6px">7.7 ms vs 77.5 ms, save to screen</div>
+</div><div style="background:#14171d;border:1px solid rgba(230,232,236,.11);border-radius:20px;padding:28px 32px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+  <div style="display:flex;align-items:baseline;gap:16px"><span style="font-size:88px;font-weight:800;letter-spacing:-.04em;line-height:1;color:#f0814a">59×</span><span style="font-size:26px;font-weight:700;line-height:1.15">faster linting</span></div>
+  <div style="font-size:21px;color:#e6e8ec;margin-top:16px" class="mono">ts-r-lint vs ESLint</div>
+  <div style="font-size:18px;color:#8b93a1;margin-top:6px">0.047 s vs 2.79 s, 690 files, cached</div>
+</div><div style="background:#14171d;border:1px solid rgba(230,232,236,.11);border-radius:20px;padding:28px 32px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+  <div style="display:flex;align-items:baseline;gap:16px"><span style="font-size:88px;font-weight:800;letter-spacing:-.04em;line-height:1;color:#f0814a">5.9×</span><span style="font-size:26px;font-weight:700;line-height:1.15">faster rebuilds</span></div>
+  <div style="font-size:21px;color:#e6e8ec;margin-top:16px" class="mono">ts-r-build vs esbuild</div>
+  <div style="font-size:18px;color:#8b93a1;margin-top:6px">~10 ms vs 59 ms after a change</div>
+</div><div style="background:#14171d;border:1px solid rgba(230,232,236,.11);border-radius:20px;padding:28px 32px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+  <div style="display:flex;align-items:baseline;gap:16px"><span style="font-size:88px;font-weight:800;letter-spacing:-.04em;line-height:1;color:#f0814a">12×</span><span style="font-size:26px;font-weight:700;line-height:1.15">faster first errors</span></div>
+  <div style="font-size:21px;color:#e6e8ec;margin-top:16px" class="mono">ts-r-lsp vs tsserver</div>
+  <div style="font-size:18px;color:#8b93a1;margin-top:6px">18 ms vs 218 ms on opening a file</div>
+</div><div style="background:#14171d;border:1px solid rgba(230,232,236,.11);border-radius:20px;padding:28px 32px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+  <div style="display:flex;align-items:baseline;gap:16px"><span style="font-size:88px;font-weight:800;letter-spacing:-.04em;line-height:1;color:#f0814a">74×</span><span style="font-size:26px;font-weight:700;line-height:1.15">less editor memory</span></div>
+  <div style="font-size:21px;color:#e6e8ec;margin-top:16px" class="mono">ts-r-lint vs ESLint server</div>
+  <div style="font-size:18px;color:#8b93a1;margin-top:6px">19 MB vs 1,405 MB, 557 files open</div>
+</div><div style="background:#14171d;border:1px solid rgba(230,232,236,.11);border-radius:20px;padding:28px 32px;display:flex;flex-direction:column;justify-content:center;min-width:0">
+  <div style="display:flex;align-items:baseline;gap:16px"><span style="font-size:88px;font-weight:800;letter-spacing:-.04em;line-height:1;color:#f0814a">10×</span><span style="font-size:26px;font-weight:700;line-height:1.15">less LSP memory</span></div>
+  <div style="font-size:21px;color:#e6e8ec;margin-top:16px" class="mono">ts-r-lsp vs tsserver</div>
+  <div style="font-size:18px;color:#8b93a1;margin-top:6px">43 MB vs 442 MB, one file open</div>
+</div>
+</main>
+<footer><span>Measured on a real TypeScript monorepo (1,983 modules) · Apple Silicon, 16 cores · pre-alpha, Oct 2026</span><span class="mono">ts-r · written from scratch in Rust</span></footer>
+</body></html>

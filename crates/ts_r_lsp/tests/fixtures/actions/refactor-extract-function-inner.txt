@@ -1,0 +1,8 @@
+// @action: refactor Extract Symbol/function_scope_0
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+export function f(a: number, b: number) {
+  /*[*/const sum = a + b;
+  console.log(sum);/*]*/
+  return a;
+}

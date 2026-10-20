@@ -1,0 +1,7 @@
+// @action: refactor Inline variable/Inline variable
+// @trigger: implicit
+// @file: src/main.ts
+export function area(w: number, h: number) {
+  const size = w * h;
+  return /*|*/size;
+}

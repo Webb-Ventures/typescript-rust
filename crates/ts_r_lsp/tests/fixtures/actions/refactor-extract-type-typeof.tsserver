@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+const conf = { a: 1 };
+type NewType = typeof conf;
+
+export let c: NewType = conf;

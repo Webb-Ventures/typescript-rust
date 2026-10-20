@@ -1,0 +1,5 @@
+a.ts(8,8): error TS2749: 'A.B' refers to a value, but is being used as a type here. Did you mean 'typeof A.B'?
+a.ts(9,10): error TS2694: Namespace 'A' has no exported member 'N'.
+a.ts(10,8): error TS2749: 'A.V' refers to a value, but is being used as a type here. Did you mean 'typeof A.V'?
+a.ts(11,9): error TS2749: 'A.c' refers to a value, but is being used as a type here. Did you mean 'typeof A.c'?
+a.ts(14,9): error TS2749: 'A.V.v' refers to a value, but is being used as a type here. Did you mean 'typeof A.V.v'?

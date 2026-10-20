@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to type alias
+// @file: src/main.ts
+type NewType<T> = {
+    a: T;
+    b?: number;
+    readonly c: string[];
+};
+
+// A helper.
+export function f<T>(x: Array<T>, y: NewType<T>): T {
+    return y.a;
+}

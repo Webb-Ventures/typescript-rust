@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Move to a new file
+// @file: src/helper.ts
+import { base } from "./base";
+
+
+export function helper(n: number): number {
+  return n + base;
+}
+// @file: src/main.ts
+import { helper } from "./helper";
+
+export const value = helper(2);

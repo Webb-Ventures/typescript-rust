@@ -1,0 +1,8 @@
+a.ts(1,25): error TS2724: '"./lib.js"' has no exported member named 'plugin'. Did you mean 'Plugin'?
+a.ts(1,33): error TS2305: Module '"./lib.js"' has no exported member 'nope'.
+a.ts(2,10): error TS2724: '"./lib.js"' has no exported member named 'plugn'. Did you mean 'Plugin'?
+a.ts(3,10): error TS2614: Module '"./d.js"' has no exported member 'f'. Did you mean to use 'import f from "./d.js"' instead?
+a.ts(3,13): error TS2724: '"./d.js"' has no exported member named 'othr'. Did you mean 'other'?
+ns.ts(17,17): error TS2708: Cannot use namespace '__t' as a value.
+ns.ts(18,17): error TS2708: Cannot use namespace '__u' as a value.
+ns.ts(20,17): error TS2693: '___T' only refers to a type, but is being used as a value here.

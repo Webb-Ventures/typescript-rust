@@ -1,0 +1,16 @@
+// @action: organizeImports
+// @format: {"indentSize": 2, "tabSize": 2, "convertTabsToSpaces": true}
+// @file: src/main.ts
+import { b } from "./b"
+import { a } from "./a"
+
+interface P {
+  x: number
+  y: number
+}
+
+export const f = (o: { a: number; b: number }): P => ({ x: o.a + a, y: o.b + b })
+// @file: src/a.ts
+export const a = 1
+// @file: src/b.ts
+export const b = 1

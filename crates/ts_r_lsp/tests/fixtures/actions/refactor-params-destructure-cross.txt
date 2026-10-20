@@ -1,0 +1,7 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @file: src/main.ts
+export function /*|*/add(a: number, b: number) { return a + b; }
+// @file: src/use.ts
+import { add } from './main';
+add(1, 2);
+export const z = add(3, 4);

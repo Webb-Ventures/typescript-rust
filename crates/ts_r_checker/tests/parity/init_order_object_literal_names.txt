@@ -1,0 +1,14 @@
+a.ts(2,26): error TS2729: Property 'D' is used before its initialization.
+a.ts(3,31): error TS2729: Property 'D' is used before its initialization.
+a.ts(4,31): error TS2729: Property 'D' is used before its initialization.
+a.ts(5,22): error TS2729: Property 'D' is used before its initialization.
+a.ts(6,27): error TS2729: Property 'D' is used before its initialization.
+a.ts(10,21): error TS2729: Property 'x' is used before its initialization.
+a.ts(11,26): error TS2729: Property 'x' is used before its initialization.
+a.ts(12,22): error TS2729: Property 'x' is used before its initialization.
+a.ts(17,5): error TS2612: Property 'b' will overwrite the base property in 'Base'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(17,5): error TS7008: Member 'b' implicitly has an 'any' type.
+a.ts(18,14): error TS2729: Property 'b' is used before its initialization.
+a.ts(19,14): error TS2729: Property 'c' is used before its initialization.
+a.ts(21,14): error TS2729: Property 'a' is used before its initialization.
+a.ts(22,5): error TS2612: Property 'e' will overwrite the base property in 'Base'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.

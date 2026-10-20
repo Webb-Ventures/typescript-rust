@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Convert named export to default export
+// @file: src/types.ts
+import { a } from "./a"
+type Id = typeof a
+export default Id
+export const b = 1

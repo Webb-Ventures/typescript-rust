@@ -1,0 +1,19 @@
+a.ts(4,9): error TS2335: 'super' can only be referenced in a derived class.
+a.ts(5,9): error TS2335: 'super' can only be referenced in a derived class.
+a.ts(7,11): error TS2335: 'super' can only be referenced in a derived class.
+a.ts(8,9): error TS2335: 'super' can only be referenced in a derived class.
+a.ts(9,16): error TS2335: 'super' can only be referenced in a derived class.
+a.ts(12,21): error TS2336: 'super' cannot be referenced in constructor arguments.
+a.ts(12,21): error TS17011: 'super' must be called before accessing a property of 'super' in the constructor of a derived class.
+a.ts(12,36): error TS2336: 'super' cannot be referenced in constructor arguments.
+a.ts(14,25): error TS2337: Super calls are not permitted outside constructors or in nested functions inside constructors.
+a.ts(15,24): error TS2337: Super calls are not permitted outside constructors or in nested functions inside constructors.
+a.ts(18,11): error TS2337: Super calls are not permitted outside constructors or in nested functions inside constructors.
+a.ts(24,30): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(26,16): error TS2337: Super calls are not permitted outside constructors or in nested functions inside constructors.
+a.ts(26,25): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(27,1): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(30,29): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(31,14): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(34,15): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(38,29): error TS2335: 'super' can only be referenced in a derived class.

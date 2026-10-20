@@ -1,0 +1,9 @@
+// @action: refactor Convert export/Convert named export to default export
+// @file: src/util.ts
+export namespace /*|*/NS {
+    export const x = 1;
+}
+// @file: src/main.ts
+import { NS } from "./util";
+
+console.log(NS.x);

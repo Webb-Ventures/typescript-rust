@@ -1,0 +1,8 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver writes `obj.method()`, which calls it with `obj` as `this`; ours declines
+// @file: src/main.ts
+declare const obj: { method(): void; other: number };
+export function f() {
+  const /*|*/fn = obj.method;
+  fn();
+}

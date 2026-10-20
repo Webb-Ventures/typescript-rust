@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./src/a.ts",
+        "./src/b/x.ts",
+        "./src/c/deep/w.d.ts",
+        "./src/c/deep/z.ts",
+        "./test/t.ts"
+    ],
+    "include": [
+        "src/**/*.ts",
+        "test"
+    ],
+    "exclude": [
+        "**/*.test.ts",
+        "test/fixtures"
+    ]
+}

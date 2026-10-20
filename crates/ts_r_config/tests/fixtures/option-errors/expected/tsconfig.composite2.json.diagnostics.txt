@@ -1,0 +1,1 @@
+tsconfig.composite2.json(2,3): error TS6379: Composite projects may not disable incremental compilation.

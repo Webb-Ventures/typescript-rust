@@ -1,0 +1,4 @@
+a.js(7,5): error TS4119: This member must have a JSDoc comment with an '@override' tag because it overrides a member in the base class 'Base'.
+a.js(9,5): error TS4122: This member cannot have a JSDoc comment with an '@override' tag because it is not declared in the base class 'Base'.
+a.js(11,5): error TS4122: This member cannot have a JSDoc comment with an '@override' tag because it is not declared in the base class 'Base'.
+a.js(15,5): error TS4121: This member cannot have a JSDoc comment with an '@override' tag because its containing class 'Lone' does not extend another class.

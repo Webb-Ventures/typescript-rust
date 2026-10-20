@@ -1,0 +1,17 @@
+a.ts(7,7): error TS2322: Type '() => Promise<unknown>' is not assignable to type 'Opts'.
+  Index signature for type 'string' is missing in type '() => Promise<unknown>'.
+a.ts(8,7): error TS2322: Type '() => Promise<unknown>' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type '() => Promise<unknown>'.
+a.ts(10,7): error TS2322: Type '{ (): void; x: number; }' is not assignable to type '{ [k: string]: number; }'.
+  Index signature for type 'string' is missing in type '{ (): void; x: number; }'.
+a.ts(12,7): error TS2322: Type 'new () => void' is not assignable to type '{ [k: number]: number; }'.
+  Index signature for type 'number' is missing in type 'new () => void'.
+a.ts(14,7): error TS2322: Type '() => void' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type '() => void'.
+a.ts(16,7): error TS2322: Type '(() => Promise<unknown>) & { [x: string]: true; }' is not assignable to type 'Opts'.
+  'string' index signatures are incompatible.
+    Type 'boolean' is not assignable to type 'Opts | Router'.
+a.ts(18,7): error TS2322: Type '{ a: Router; } & { [x: string]: true; }' is not assignable to type 'Opts'.
+  'string' index signatures are incompatible.
+    Type 'boolean' is not assignable to type 'Opts | Router'.
+a.ts(28,9): error TS2322: Type 'Lazy<Router>' is not assignable to type 'null'.

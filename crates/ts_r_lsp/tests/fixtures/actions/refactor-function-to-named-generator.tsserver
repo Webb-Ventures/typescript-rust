@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Convert to named function
+// @file: src/main.ts
+function* a6() { yield 1; }

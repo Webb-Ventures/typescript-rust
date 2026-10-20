@@ -1,0 +1,9 @@
+a.ts(11,18): error TS2508: No base constructor has the specified number of type arguments.
+a.ts(13,16): error TS2351: This expression is not constructable.
+  Type 'typeof My' has no construct signatures.
+a.ts(13,22): error TS7006: Parameter 'subscriber' implicitly has an 'any' type.
+a.ts(19,17): error TS2314: Generic type 'A<T>' requires 1 type argument(s).
+a.ts(20,24): error TS2351: This expression is not constructable.
+  Type 'typeof B' has no construct signatures.
+a.ts(27,17): error TS2508: No base constructor has the specified number of type arguments.
+a.ts(32,7): error TS2322: Type 'G' is not assignable to type 'number'.

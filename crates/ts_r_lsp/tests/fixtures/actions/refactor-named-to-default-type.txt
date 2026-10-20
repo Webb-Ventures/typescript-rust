@@ -1,0 +1,11 @@
+// @action: refactor Convert import/Convert named imports to default import
+// @file: src/main.ts
+import { /*|*/type T, v } from "./cjs";
+
+export const x: T = v;
+// @file: src/cjs.d.ts
+declare namespace m {
+    type T = number;
+    const v: number;
+}
+export = m;

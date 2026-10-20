@@ -1,0 +1,31 @@
+a.ts(20,15): error TS2694: Namespace 'a' has no exported member 'zz'.
+a.ts(21,17): error TS2694: Namespace 'a.b' has no exported member 'yy'.
+a.ts(22,15): error TS2694: Namespace 'c' has no exported member 'q'.
+a.ts(23,13): error TS2503: Cannot find namespace 'nope'.
+a.ts(25,13): error TS2503: Cannot find namespace 'nope2'.
+a.ts(26,13): error TS2702: 'T1' only refers to a type, but is being used as a namespace here.
+a.ts(27,13): error TS2503: Cannot find namespace 'v1'.
+a.ts(28,14): error TS2702: 'C' only refers to a type, but is being used as a namespace here.
+a.ts(29,14): error TS2503: Cannot find namespace 'g'.
+a.ts(30,14): error TS2713: Cannot access 'C.p' because 'C' is a type, but not a namespace. Did you mean to retrieve the type of the property 'p' in 'C' with 'C["p"]'?
+a.ts(31,14): error TS2702: 'C' only refers to a type, but is being used as a namespace here.
+a.ts(32,18): error TS2713: Cannot access 'I.q' because 'I' is a type, but not a namespace. Did you mean to retrieve the type of the property 'q' in 'I' with 'I["q"]'?
+a.ts(33,18): error TS2694: Namespace 'a.b' has no exported member 'x'.
+a.ts(35,18): error TS2694: Namespace 'NI' has no exported member 'Z'.
+a.ts(37,14): error TS2749: 'Color.Red.toString' refers to a value, but is being used as a type here. Did you mean 'typeof Color.Red.toString'?
+a.ts(38,29): error TS2694: Namespace 'a' has no exported member 'missing'.
+a.ts(41,9): error TS2713: Cannot access 'T1.q' because 'T1' is a type, but not a namespace. Did you mean to retrieve the type of the property 'q' in 'T1' with 'T1["q"]'?
+a.ts(42,9): error TS2702: 'Empty' only refers to a type, but is being used as a namespace here.
+a.ts(43,9): error TS2713: Cannot access 'Empty.toString' because 'Empty' is a type, but not a namespace. Did you mean to retrieve the type of the property 'toString' in 'Empty' with 'Empty["toString"]'?
+a.ts(44,13): error TS2713: Cannot access 'I.q' because 'I' is a type, but not a namespace. Did you mean to retrieve the type of the property 'q' in 'I' with 'I["q"]'?
+a.ts(45,9): error TS2702: 'C' only refers to a type, but is being used as a namespace here.
+a.ts(46,9): error TS2713: Cannot access 'C.p' because 'C' is a type, but not a namespace. Did you mean to retrieve the type of the property 'p' in 'C' with 'C["p"]'?
+a.ts(47,9): error TS2503: Cannot find namespace 'g'.
+a.ts(48,9): error TS2503: Cannot find namespace 'v1'.
+a.ts(49,13): error TS2694: Namespace 'NI' has no exported member 'Z'.
+a.ts(50,14): error TS2713: Cannot access 'K.z' because 'K' is a type, but not a namespace. Did you mean to retrieve the type of the property 'z' in 'K' with 'K["z"]'?
+a.ts(51,14): error TS2694: Namespace 'a.b' has no exported member 'x'.
+a.ts(52,16): error TS2713: Cannot access 'A.foo' because 'A' is a type, but not a namespace. Did you mean to retrieve the type of the property 'foo' in 'A' with 'A["foo"]'?
+a.ts(53,10): error TS2749: 'Color.Red.toFixed' refers to a value, but is being used as a type here. Did you mean 'typeof Color.Red.toFixed'?
+a.ts(54,12): error TS2724: 'a' has no exported member named 'Mode'. Did you mean 'IMode'?
+a.ts(55,10): error TS2833: Cannot find namespace 'mods'. Did you mean 'Mods'?

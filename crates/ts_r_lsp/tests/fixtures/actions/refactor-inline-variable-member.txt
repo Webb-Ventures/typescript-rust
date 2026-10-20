@@ -1,0 +1,7 @@
+// @action: refactor Inline variable/Inline variable
+// @differs: tsserver writes `flag ? xs : []` twice (two arrays when `flag` is false); ours declines (a fresh object is inlined only into one use outside loops and functions)
+// @file: src/main.ts
+export function f(xs: number[], flag: boolean) {
+  let /*|*/pick = flag ? xs : [];
+  return pick.length + pick.map((x) => x * 2).length;
+}

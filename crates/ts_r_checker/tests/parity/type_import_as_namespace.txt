@@ -1,0 +1,1 @@
+a.ts(8,8): error TS2702: 'Other' only refers to a type, but is being used as a namespace here.

@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "useDefineForClassFields": false,
+    "strict": false,
+    "types": [],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "out"
+  },
+  "files": [
+    "x.ts",
+    "specifiers.ts",
+    "imports.ts",
+    "fields.ts",
+    "maps.ts"
+  ]
+}

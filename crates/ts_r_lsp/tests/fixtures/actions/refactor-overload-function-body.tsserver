@@ -1,0 +1,4 @@
+// tsserver 6.0.3
+// title: Convert overload list to single signature
+// @file: src/main.ts
+function ov(...args: [a: string] | [a: number]): string { return String(a); }

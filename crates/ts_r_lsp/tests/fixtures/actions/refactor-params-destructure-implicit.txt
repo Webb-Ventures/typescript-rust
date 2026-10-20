@@ -1,0 +1,5 @@
+// @action: refactor Convert parameters to destructured object/Convert parameters to destructured object
+// @trigger: implicit
+// @file: src/main.ts
+function params(a: number, b: string/*|*/) { return a + b; }
+params(1, 'x');

@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// title: Inline variable
+// @file: src/main.ts
+export function make(id: number) {
+  const kind = 'row';
+  return { name: 'item-' + id, kind, label: ('item-' + id).toUpperCase() };
+}

@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "allowJs": true
+    },
+    "files": [
+        "./src/1.ts",
+        "./src/_a.ts",
+        "./src/a.ts",
+        "./src/c.ts",
+        "./src/e.d.css.ts",
+        "./src/m.tsx",
+        "./src/n.d.ts",
+        "./src/o.js",
+        "./src/q.mts",
+        "./src/r.cts",
+        "./src/s.d.mts",
+        "./src/z.ts",
+        "./src/a/y.ts",
+        "./src/b/x.ts",
+        "./src/t.json"
+    ],
+    "include": [
+        "src/**/*",
+        "src/*.json"
+    ]
+}

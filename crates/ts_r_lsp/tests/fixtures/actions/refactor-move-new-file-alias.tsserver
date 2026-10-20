@@ -1,0 +1,10 @@
+// tsserver 6.0.3
+// @file: src/moved.ts
+export const moved = 1;
+// @file: src/service.ts
+export const kept = 2;
+// @file: src/user.ts
+import { kept } from "@api";
+import { moved } from "./moved";
+
+export const sum = moved + kept;

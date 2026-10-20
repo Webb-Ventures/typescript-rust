@@ -1,0 +1,10 @@
+// @action: refactor Convert export/Convert named export to default export
+// @file: src/util.ts
+export class /*|*/Shape {}
+// @file: src/index.ts
+export { Shape as S, other } from "./util2";
+export { Shape } from "./util";
+export * from "./util";
+// @file: src/util2.ts
+export class Shape {}
+export const other = 1;

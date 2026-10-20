@@ -1,0 +1,3 @@
+a.ts(9,34): error TS2344: Type 'O["s"]' does not satisfy the constraint 'string'.
+  Type 'string | undefined' is not assignable to type 'string'.
+    Type 'undefined' is not assignable to type 'string'.

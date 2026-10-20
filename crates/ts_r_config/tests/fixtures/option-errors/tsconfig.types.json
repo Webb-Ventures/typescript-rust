@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "allowJs": "yes",
+    "target": 5,
+    "lib": "es2020",
+    "module": "foo",
+    "moduleResolution": "node12",
+    "types": [
+      1,
+      "x"
+    ],
+    "paths": [],
+    "jsx": "React",
+    "maxNodeModuleJsDepth": "1",
+    "plugins": [
+      1
+    ],
+    "customConditions": "x",
+    "rootDirs": "x",
+    "newLine": "foo",
+    "outDir": 5,
+    "lib2": 1
+  },
+  "files": [
+    "a.ts"
+  ],
+  "include": "src",
+  "exclude": [
+    1
+  ]
+}

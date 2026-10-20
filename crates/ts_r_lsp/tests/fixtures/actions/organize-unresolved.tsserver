@@ -1,0 +1,7 @@
+// tsserver 6.0.3
+// @file: src/main.ts
+import { a, Linked } from "./a";
+import { used } from "./missing";
+
+/** See {@link Linked}. */
+export function f() { return used + a; }

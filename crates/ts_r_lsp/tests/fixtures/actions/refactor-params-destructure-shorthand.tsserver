@@ -1,0 +1,6 @@
+// tsserver 6.0.3
+// title: Convert parameters to destructured object
+// @file: src/main.ts
+function sh({ a, b }: { a: number; b: number; }) { return a + b; }
+const a = 1;
+sh({ a, b: 2 });

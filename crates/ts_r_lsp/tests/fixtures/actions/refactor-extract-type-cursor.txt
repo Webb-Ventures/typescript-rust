@@ -1,0 +1,5 @@
+// @action: refactor Extract type/Extract to type alias
+// @file: src/main.ts
+export function f<T>(y: { a: /*|*/T; b: number }): T {
+    return y.a;
+}

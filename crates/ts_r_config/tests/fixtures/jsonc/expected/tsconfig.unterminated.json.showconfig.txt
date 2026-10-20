@@ -1,0 +1,8 @@
+{
+    "compilerOptions": {
+        "jsxFactory": "abc}}"
+    },
+    "files": [
+        "./src/a.ts"
+    ]
+}

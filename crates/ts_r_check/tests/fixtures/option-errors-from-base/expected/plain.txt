@@ -1,0 +1,6 @@
+tsconfig.json(3,3): error TS5052: Option 'emitDecoratorMetadata' cannot be specified without specifying option 'experimentalDecorators'.
+tsconfig.json(3,3): error TS5095: Option 'bundler' can only be used when 'module' is set to 'preserve', 'commonjs', or 'es2015' or later.
+tsconfig.json(3,3): error TS5102: Option 'baseUrl' has been removed. Please remove it from your configuration.
+  Use '"paths": {"*": ["./*"]}' instead.
+tsconfig.json(3,3): error TS5108: Option 'module=System' has been removed. Please remove it from your configuration.
+tsconfig.json(3,3): error TS5108: Option 'target=ES5' has been removed. Please remove it from your configuration.

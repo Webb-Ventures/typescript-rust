@@ -1,0 +1,13 @@
+// tsserver 6.0.3
+// title: Extract to inner function in function 'f'
+// @file: src/main.ts
+export function f(a: number) {
+  const { label, doubled } = newFunction();
+  return label.length + doubled;
+
+  function newFunction() {
+    const doubled = a * 2;
+    const label = `n=${doubled}`;
+    return { label, doubled };
+  }
+}

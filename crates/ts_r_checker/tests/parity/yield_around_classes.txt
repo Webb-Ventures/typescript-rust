@@ -1,0 +1,9 @@
+a.ts(2,22): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(3,30): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(5,11): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(8,9): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(8,10): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(9,16): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(9,16): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.
+a.ts(10,16): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(10,17): error TS7057: 'yield' expression implicitly results in an 'any' type because its containing generator lacks a return-type annotation.

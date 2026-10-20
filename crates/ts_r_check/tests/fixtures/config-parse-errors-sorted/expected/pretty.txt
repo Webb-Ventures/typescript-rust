@@ -1,0 +1,23 @@
+[96ma.ts[0m:[93m1[0m:[93m14[0m - [91merror[0m[90m TS2322: [0mType 'string' is not assignable to type 'number'.
+
+[7m1[0m export const a: number = "x";
+[7m [0m [91m             ~[0m
+
+[96mtsconfig.json[0m:[93m3[0m:[93m5[0m - [91merror[0m[90m TS5023: [0mUnknown compiler option 'bogusOpt'.
+
+[7m3[0m     "bogusOpt": true,
+[7m [0m [91m    ~~~~~~~~~~[0m
+
+[96mz.ts[0m:[93m1[0m:[93m14[0m - [91merror[0m[90m TS2322: [0mType 'string' is not assignable to type 'number'.
+
+[7m1[0m export const a: number = "x";
+[7m [0m [91m             ~[0m
+
+
+Found 3 errors in 3 files.
+
+Errors  Files
+     1  a.ts[90m:1[0m
+     1  tsconfig.json[90m:3[0m
+     1  z.ts[90m:1[0m
+

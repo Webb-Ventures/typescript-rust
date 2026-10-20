@@ -1,0 +1,17 @@
+a.ts(10,8): error TS2538: Type 'any' cannot be used as an index type.
+a.ts(11,8): error TS2538: Type 'any' cannot be used as an index type.
+a.ts(12,8): error TS2537: Type '{ a: number; }' has no matching index signature for type 'string'.
+a.ts(13,8): error TS2537: Type '{ a: number; }' has no matching index signature for type 'number'.
+a.ts(14,8): error TS2537: Type '{ a: number; } | { [n: number]: string; }' has no matching index signature for type 'number'.
+a.ts(19,13): error TS2538: Type 'any' cannot be used as an index type.
+a.ts(20,15): error TS2538: Type 'any' cannot be used as an index type.
+a.ts(21,15): error TS2538: Type 'any' cannot be used as an index type.
+a.ts(22,15): error TS2537: Type '{}' has no matching index signature for type 'string'.
+a.ts(31,5): error TS2538: Type 'bigint' cannot be used as an index type.
+a.ts(32,5): error TS2538: Type 'boolean' cannot be used as an index type.
+a.ts(33,5): error TS2538: Type 'false' cannot be used as an index type.
+a.ts(33,5): error TS2538: Type 'object' cannot be used as an index type.
+a.ts(33,5): error TS2538: Type 'string[]' cannot be used as an index type.
+a.ts(33,5): error TS2538: Type 'true' cannot be used as an index type.
+a.ts(34,5): error TS2538: Type '5n' cannot be used as an index type.
+a.ts(35,3): error TS2538: Type 'bigint' cannot be used as an index type.

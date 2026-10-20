@@ -1,0 +1,14 @@
+a.ts(12,16): error TS2322: Type 'N.E' is not assignable to type 'string'.
+a.ts(17,14): error TS2322: Type 'K' is not assignable to type 'I'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(18,14): error TS2741: Property 'j' is missing in type 'C' but required in type 'J'.
+a.ts(19,14): error TS2741: Property 'a' is missing in type 'M.I' but required in type 'N.I'.
+a.ts(20,14): error TS2322: Type 'string[]' is not assignable to type '[N.I, M.I]'.
+  Target requires 2 element(s) but source may have fewer.
+a.ts(21,14): error TS2322: Type 'string' is not assignable to type 'N.I | M.I'.
+a.ts(23,3): error TS2339: Property 'zzz' does not exist on type 'E'.
+a.ts(24,14): error TS2322: Type 'N.Deep.DE' is not assignable to type 'string'.
+a.ts(25,14): error TS2322: Type 'DE.X' is not assignable to type 'DE.Y'.
+a.ts(27,3): error TS2416: Property 'c' in type 'D' is not assignable to the same property in base type 'C'.
+  Type 'string' is not assignable to type 'number'.

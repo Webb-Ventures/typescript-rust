@@ -1,0 +1,17 @@
+[package]
+name = "ts_r_cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The ts-r launcher: finds and runs the ts-r-* tool binaries (no compiler code)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ts-r"
+path = "src/main.rs"
+
+[dependencies]
+ts_r_cache = { path = "../ts_r_cache" }

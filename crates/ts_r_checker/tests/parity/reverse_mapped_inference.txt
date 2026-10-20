@@ -1,0 +1,10 @@
+a.ts(13,7): error TS2322: Type '{ a?: number; readonly b: string; }' is not assignable to type 'string'.
+a.ts(14,7): error TS2322: Type '{ a: number; b: string; }' is not assignable to type 'string'.
+a.ts(15,7): error TS2322: Type 'number[]' is not assignable to type 'string'.
+a.ts(16,7): error TS2322: Type '[number, (string | undefined)?]' is not assignable to type 'string'.
+a.ts(17,7): error TS2322: Type '{ a: number; b: "x"; }' is not assignable to type 'string'.
+a.ts(20,7): error TS2322: Type '[string, { bar: string; }]' is not assignable to type 'string'.
+a.ts(23,7): error TS2322: Type 'Sel<unknown, { a: number; }>' is not assignable to type 'string'.
+a.ts(32,7): error TS2322: Type '{ readonly ex: "someValue"; }' is not assignable to type 'number'.
+a.ts(35,7): error TS2322: Type '{ ex: string; }' is not assignable to type 'number'.
+a.ts(40,7): error TS2322: Type '{ x: number; } & { bar: number; }' is not assignable to type 'string'.

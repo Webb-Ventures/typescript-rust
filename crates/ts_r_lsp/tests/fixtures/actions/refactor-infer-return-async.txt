@@ -1,0 +1,5 @@
+// @action: refactor Infer function return type/Infer function return type
+// @file: src/main.ts
+export async function /*|*/load(n: number) {
+  return [n, String(n)] as const;
+}

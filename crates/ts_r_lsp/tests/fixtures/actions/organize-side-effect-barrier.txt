@@ -1,0 +1,16 @@
+// @action: organizeImports
+// @file: src/main.ts
+import { b } from "./b";
+import "./polyfill";
+import { a } from "./a";
+import { c } from "./c";
+
+console.log(a, b, c);
+// @file: src/a.ts
+export const a = 1;
+// @file: src/b.ts
+export const b = 1;
+// @file: src/c.ts
+export const c = 1;
+// @file: src/polyfill.ts
+console.log(1);

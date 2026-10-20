@@ -1,0 +1,20 @@
+{
+  "name": "ts-r",
+  "interface": {
+    "displayName": "ts-r"
+  },
+  "plugins": [
+    {
+      "name": "ts-r-code-review",
+      "source": {
+        "source": "local",
+        "path": "./.agents/plugins/code-review"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Coding"
+    }
+  ]
+}

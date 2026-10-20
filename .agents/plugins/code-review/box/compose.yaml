@@ -1,0 +1,45 @@
+# The review box: the dispatcher and the egress proxies (one per allowlist, see egress-proxy.mjs). Job containers are started by the
+# dispatcher from the same image. Everything lives under /srv/ts-r-review (see install.sh).
+name: ts-r-review
+
+services:
+  dispatcher:
+    image: ts-r-review:latest
+    build:
+      context: ..
+      dockerfile: box/Dockerfile
+    command: ["node", "/app/dispatcher.mjs"]
+    restart: unless-stopped
+    env_file: /srv/ts-r-review/config.env
+    # Reached only through `tailscale serve` on the tailnet.
+    ports: ["127.0.0.1:8787:8787"]
+    group_add: ["${DOCKER_GID:-986}"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/ts-r-review:/srv/ts-r-review
+
+  egress:
+    image: ts-r-review:latest
+    command: ["node", "/app/egress-proxy.mjs"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    environment: { EGRESS_PROFILE: review }
+    networks: [default, egress]
+
+  egress-deps:
+    image: ts-r-review:latest
+    command: ["node", "/app/egress-proxy.mjs"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    environment: { EGRESS_PROFILE: deps }
+    networks: [default, egress-deps]
+
+networks:
+  egress:
+    name: ts-r-review-egress
+    internal: true
+  egress-deps:
+    name: ts-r-review-egress-deps
+    internal: true

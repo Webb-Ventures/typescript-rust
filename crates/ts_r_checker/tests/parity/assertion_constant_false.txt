@@ -1,0 +1,7 @@
+a.ts(7,23): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(10,23): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(13,23): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(19,23): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(25,23): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(30,3): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(50,19): error TS2345: Argument of type '{ kind: "c"; }' is not assignable to parameter of type 'never'.
