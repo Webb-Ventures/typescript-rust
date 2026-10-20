@@ -9,6 +9,23 @@ pull requests merged since the previous release (also on the
 
 ## [v0.1.0-alpha.1](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.1) - 2026-10-20
 
+The first release of ts-r: fast TypeScript tooling, written from scratch in Rust. It is an alpha,
+published on the npm dist-tag `next` (`npm install --save-dev ts-r@next`). Every tool works on
+real projects but has known gaps; the README lists them.
+
+- `ts-r-check` (tsc): tsc 7's diagnostics, emit, project references, `--build` and `--watch`. It
+  matches tsc 7 exactly on 87% of TypeScript's conformance tests and on typeorm, playwright, tRPC,
+  date-fns and the React compiler, and type-checks them 2–7× faster.
+- `ts-r-lint` (ESLint, oxlint): 103 ESLint and typescript-eslint rules; flat, oxlint and Biome configs.
+- `ts-r-build` (esbuild, `vite build`): esbuild's CLI; ESM, CJS and IIFE; code splitting,
+  minification, source maps.
+- `ts-r-run` (tsx, ts-node): runs TypeScript on Node 22.15+.
+- `ts-r-dev` (`vite dev`): hot reload, Vite's `import.meta.hot`, React Fast Refresh.
+- `ts-r-lsp` (tsserver, the ESLint server): one server per workspace for lint and types.
+- `ts-r`: a launcher for all of them, plus `ts-r ci` and `ts-r doctor`.
+
+Native binaries for macOS, Linux (glibc and musl) and Windows, on arm64 and x64.
+
 ### From the core team
 
 - Releases are pull requests: a release skill opens them, merging one publishes
