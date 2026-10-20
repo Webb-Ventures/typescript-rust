@@ -14,6 +14,7 @@ People review every change to a skill, because a wrong step is repeated by every
 | [bench-compare](bench-compare/SKILL.md) | Run the benchmark harness against main and reference tools, apply the 5% gate, report in the PR |
 | [minimize-repro](minimize-repro/SKILL.md) | Shrink a failing input to the smallest repro and add it as a test |
 | [fix-conformance-diff](fix-conformance-diff/SKILL.md) | Fix one group of differences from tsc 7 and prove nothing else changed |
+| release | Open the release PR in the public repo (version, CHANGELOG, release benchmarks); merging it publishes. Maintainers only: not in the public mirror |
 | [add-lint-rule](add-lint-rule/SKILL.md) | Implement an ESLint / typescript-eslint rule from its docs and tests (as data), prove it with the rule oracle |
 
 ## Arriving later
@@ -25,4 +26,3 @@ Written when the work they describe starts (or once the same task has been done 
 | perf-investigation | Profile with samply, find the hot path, change it, show the benchmark result | after first perf work |
 | add-sound-rule | Turn a sound-mode rule's spec into tests, implement it, add the error code, fix and docs page | M6 |
 | error-code-page | Write the `/errors/TSRxxxx` page for a new diagnostic in the house style | M6 |
-| release | Version bump, changelog, signed binaries, npm publish with provenance, site update | first release |

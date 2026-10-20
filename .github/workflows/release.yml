@@ -3,19 +3,19 @@ name: Release
 # Builds every target, attaches archives, SHA256SUMS and an SBOM to a GitHub release, and
 # publishes the npm packages (npm/README.md) with npm trusted publishing (OIDC) and provenance.
 #
-# Publishes only from a release branch named release/vX.Y.Z or release/vX.Y.Z-<label>
-# (release/v0.1.0, release/v0.1.0-alpha.1, release/v1.0.0-launch); pushes to any other branch or
-# tag never publish, and the npm job checks the ref again. The published version is
-# [workspace.package] version in Cargo.toml: its X.Y.Z must match the branch, and if it has a
-# pre-release part (0.1.0-alpha.1) the branch label must start with it. A push publishes once:
-# the workflow creates tag vVERSION on the pushed commit, and fails if that tag already exists
-# (bump the version to release again). The GitHub release's notes are generated from the pull
-# requests merged since the last release (.github/release.yml groups them), and a pull request
-# into main adds them to CHANGELOG.md and copies the README's main benchmark table, as
-# released, into its latest-release table (secret RELEASE_BOT_TOKEN, when set, opens it so CI
-# runs on it; a GITHUB_TOKEN pull request starts no workflows). To rehearse, run the workflow by hand on the release
-# branch with dry_run on: everything builds, and `npm publish --dry-run` runs instead of a real
-# publish. No tag or GitHub release is created.
+# A release is a pull request: a branch release/vX.Y.Z or release/vX.Y.Z-<label> into main
+# (release/v0.1.0, release/v0.1.0-alpha.1), opened by the maintainers' release script with the
+# version bump, the CHANGELOG entry and the README's release benchmark table. Merging it
+# publishes: this workflow runs on every push to main, and goes past the version job only when
+# the pushed commit is the merge of such a pull request from this repository. Nothing else ever
+# publishes. The published version is [workspace.package] version in Cargo.toml: its X.Y.Z must
+# match the branch, and if it has a pre-release part (0.1.0-alpha.1) the branch label must start
+# with it. The workflow tags the merge commit vVERSION and fails if that tag already exists. The
+# GitHub release's notes are the version's CHANGELOG.md entry.
+#
+# To rehearse, run the workflow by hand on the release branch (the release script starts one when
+# it opens the pull request): everything builds and `npm publish --dry-run` runs. A run by hand is
+# always a dry run; no tag or GitHub release is created.
 #
 # npm auth: trusted publishing (OIDC), no long-lived token. The npm job runs on a GitHub-hosted
 # runner (ubuntu-latest) because npm trusted publishing does not accept self-hosted runners.
@@ -25,8 +25,8 @@ name: Release
 # otherwise the run uses OIDC alone. The publish step logs which one it used.
 #
 # A person must set up, once:
-#   - environment `release`: deployment branches limited to `release/v*`, and required
-#     reviewers to gate publishing.
+#   - environment `release`: deployment branches limited to `main` (publishing) and `release/v*`
+#     (dry runs), and optionally required reviewers to gate publishing.
 #   - for each of the 64 packages listed in npm/README.md (`ts-r`, `@ts-r.dev/typescript`, the six
 #     tool packages `@ts-r.dev/{run,dev,build,check,lint,lsp}` and the 56 platform packages
 #     `@ts-r.dev/{cli,run,dev,build,check,lint,lsp}-<platform>`), all owned by the `ts-r.dev` npm
@@ -53,19 +53,16 @@ name: Release
 
 on:
   push:
-    branches: ["release/v*"]
+    branches: [main]
+  # A dry run of a release branch.
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build everything and run npm publish --dry-run (no GitHub release)"
-        type: boolean
-        default: true
 
 permissions:
   contents: read
 
+# Per commit on main: a later push must never replace a release run that is still waiting.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -79,6 +76,7 @@ jobs:
     name: version
     runs-on: ubuntu-24.04
     outputs:
+      release: ${{ steps.v.outputs.release }}
       version: ${{ steps.v.outputs.version }}
       dry_run: ${{ steps.v.outputs.dry_run }}
       npm_tag: ${{ steps.v.outputs.npm_tag }}
@@ -86,16 +84,37 @@ jobs:
       - uses: actions/checkout@v4
       - id: v
         env:
+          GH_TOKEN: ${{ github.token }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           EVENT: ${{ github.event_name }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
         run: |
-          # Publishing only ever happens from release/vX.Y.Z or release/vX.Y.Z-<label>.
-          if [ "$REF_TYPE" != branch ] || ! [[ "$REF_NAME" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
-            echo "::error::release runs only on a release/vX.Y.Z or release/vX.Y.Z-<label> branch (got $REF_TYPE $REF_NAME)"
+          if [ "$EVENT" = push ]; then
+            # A push to main: a release only if it is the merge of a release PR from this repo.
+            branch=""
+            for _ in 1 2 3; do
+              branch=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[] | select(.merge_commit_sha == env.SHA and .base.ref == "main" and .head.repo.full_name == env.REPO and (.head.ref | startswith("release/v"))) | .head.ref' | head -1)
+              [ -n "$branch" ] && break
+              sleep 10
+            done
+            if [ -z "$branch" ]; then
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              echo "Not the merge of a release PR; nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            dry_run=false
+          else
+            branch=$REF_NAME
+            dry_run=true
+            if [ "$REF_TYPE" != branch ]; then branch=""; fi
+          fi
+          if ! [[ "$branch" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
+            echo "::error::a release comes from a release/vX.Y.Z or release/vX.Y.Z-<label> branch (got $REF_TYPE $REF_NAME)"
             exit 1
           fi
+          REF_NAME=$branch
           core="${BASH_REMATCH[1]}" label="${BASH_REMATCH[3]}"
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
           if [ "${version%%-*}" != "$core" ]; then
@@ -106,8 +125,6 @@ jobs:
             echo "::error::[workspace.package] version $version is a pre-release; the branch must be release/v$version or release/v$version-<label>"
             exit 1
           fi
-          dry_run=false
-          if [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = true ]; then dry_run=true; fi
           if [ "$dry_run" != true ] && git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
             echo "::error::v$version is already released (tag v$version exists); bump [workspace.package] version to release again"
             exit 1
@@ -115,15 +132,17 @@ jobs:
           npm_tag=latest
           case "$version" in *-*) npm_tag=next ;; esac
           {
+            echo "release=true"
             echo "version=$version"
             echo "dry_run=$dry_run"
             echo "npm_tag=$npm_tag"
           } >> "$GITHUB_OUTPUT"
-          echo "ts-r $version (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
+          echo "ts-r $version from $branch (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: build (${{ matrix.name }})
     needs: version
+    if: needs.version.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -334,16 +353,24 @@ jobs:
         run: |
           prerelease=""
           case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
-          # Tags vVERSION on the release branch's commit.
+          # The notes are the version's CHANGELOG.md entry, without its heading.
+          awk -v h="## [v$VERSION]" 'index($0, h) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::warning::CHANGELOG.md has no entry for v$VERSION; using GitHub's generated notes"
+            notes=(--generate-notes)
+          else
+            notes=(--notes-file "$RUNNER_TEMP/notes.md")
+          fi
+          # Tags vVERSION on the merge commit of the release PR.
           # shellcheck disable=SC2086
-          gh release create "v$VERSION" out/* --target "$GITHUB_SHA" --generate-notes --title "ts-r $VERSION" $prerelease
+          gh release create "v$VERSION" out/* --target "$GITHUB_SHA" "${notes[@]}" --title "ts-r $VERSION" $prerelease
 
   npm:
     name: npm publish
     needs: [version, build, release]
-    # The version job already refuses any other ref; this keeps the publish job itself from
-    # running anywhere but a release branch.
-    if: github.ref_type == 'branch' && startsWith(github.ref_name, 'release/v')
+    # The version job already decides; this keeps the publish job itself from running anywhere
+    # but main (publishing) or a release branch (dry run).
+    if: needs.version.outputs.release == 'true' && (github.ref == 'refs/heads/main' || (needs.version.outputs.dry_run == 'true' && startsWith(github.ref_name, 'release/v')))
     # GitHub-hosted on purpose: npm trusted publishing rejects self-hosted runners.
     runs-on: ubuntu-latest
     environment: release
@@ -432,56 +459,3 @@ jobs:
               fi
               npm publish "./npm-dist/$dir" "${flags[@]}"
             done
-
-  # CHANGELOG.md and the README's latest-release benchmark table, through a pull request into
-  # main (main is protected; the sync-back workflow carries it to the development repo).
-  changelog:
-    name: changelog and README
-    needs: [version, release, npm]
-    if: needs.version.outputs.dry_run != 'true'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
-    env:
-      VERSION: ${{ needs.version.outputs.version }}
-      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || github.token }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          token: ${{ secrets.RELEASE_BOT_TOKEN || github.token }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Update CHANGELOG.md and the README
-        run: |
-          set -euo pipefail
-          git fetch -q origin "$GITHUB_SHA"
-          git show "$GITHUB_SHA:README.md" > "$RUNNER_TEMP/released-README.md"
-          gh release view "v$VERSION" --json body --jq .body > "$RUNNER_TEMP/notes.md"
-          node - "$VERSION" "$(date -u +%Y-%m-%d)" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/notes.md" <<'JS'
-          const fs = require('fs');
-          const [version, date, repo, notesPath] = process.argv.slice(2);
-          const notes = fs.readFileSync(notesPath, 'utf8').trim();
-          const mark = '<!-- releases -->';
-          const log = fs.existsSync('CHANGELOG.md') ? fs.readFileSync('CHANGELOG.md', 'utf8') : `# Changelog\n\n${mark}\n`;
-          if (log.includes(`## [v${version}]`)) process.exit(0);
-          const entry = `${mark}\n\n## [v${version}](https://github.com/${repo}/releases/tag/v${version}) - ${date}\n\n${notes}\n`;
-          fs.writeFileSync('CHANGELOG.md', log.includes(mark) ? log.replace(mark, entry) : `${log.trimEnd()}\n\n${entry}`);
-          JS
-          node scripts/readme-bench.mjs release README.md "$RUNNER_TEMP/released-README.md" "v$VERSION" ||
-            echo "::warning::The released README has no benchmark table; the README's release table is unchanged"
-      - name: Open the pull request
-        run: |
-          set -euo pipefail
-          git add CHANGELOG.md README.md
-          if git diff --cached --quiet; then echo "Nothing to update."; exit 0; fi
-          branch="changelog/v$VERSION"
-          git switch -c "$branch"
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit -qm "Changelog and README for v$VERSION"
-          git push -q -f origin "$branch"
-          gh label create changelog:skip --color ededed --description "Left out of release notes" 2>/dev/null || true
-          gh pr create --base main --head "$branch" --title "Changelog and README for v$VERSION" --label changelog:skip \
-            --body "Adds the v$VERSION release notes to CHANGELOG.md and its benchmark table to the README. Opened by the release workflow."

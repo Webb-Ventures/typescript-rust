@@ -97,7 +97,7 @@ Medians on linux-x86_64 (four dedicated cores), measured 2026-10-20. Scenarios: 
 <!-- bench:main:end -->
 
 The table above is updated by every sync to main. The one below is the same table at the time
-of the latest release, and is updated by the release workflow.
+of the latest release, and is updated by each release pull request.
 
 ### Latest release
 
