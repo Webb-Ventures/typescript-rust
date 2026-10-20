@@ -57,8 +57,9 @@ Without building packages: `TS_R_BIN_DIR=target/release node npm/ts-r/bin/ts-r.j
 
 ## Publishing
 
-Done by `.github/workflows/release.yml`, only from a `release/vX.Y.Z-<label>` branch (a push, or by hand
-with `dry_run`; it tags `vVERSION` on publish): platform
+Done by the public repo's `.github/workflows/release.yml` when a release pull request (a
+`release/vX.Y.Z[-<label>]` branch into `main`) is merged; it tags the merge commit `vVERSION`. A
+run by hand on a release branch is a dry run. Order: platform
 packages first, then the tool packages, then `ts-r` and `@ts-r.dev/typescript`, each with
 `npm publish --provenance --access public --tag <latest|next>`. Versions already on npm are skipped.
 `repository.url` in every package must name the
