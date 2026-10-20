@@ -6,3 +6,9 @@ pull requests merged since the previous release (also on the
 `main`; the README's benchmarks show where it stands.
 
 <!-- releases -->
+
+## [v0.1.0-alpha.1](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.1) - 2026-10-20
+
+### From the core team
+
+- Releases are pull requests: a release skill opens them, merging one publishes
