@@ -7,6 +7,17 @@ pull requests merged since the previous release (also on the
 
 <!-- releases -->
 
+## [v0.1.0-alpha.2](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.2) - 2026-10-21
+
+### From the core team
+
+- Site: launched mode for the v0.1.0-alpha.1 release
+- CI: 4-core Linux and Windows test runners, macOS in the public repo, public Actions bench
+- Bench: a box of its own, kept builds, reference tools measured once
+- Release fixes: @ts-r.dev/cli launcher, manual publishing, faster builds, parallel npm publish and faster CI tests
+- Dev server: an error reaches a client once, never after it was cleared
+- Public sync: find the last sync through squash merges; release script fixes
+
 ## [v0.1.0-alpha.1](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.1) - 2026-10-20
 
 The first release of ts-r: fast TypeScript tooling, written from scratch in Rust. It is an alpha,
