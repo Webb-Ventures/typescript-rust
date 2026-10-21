@@ -183,7 +183,7 @@ Everything lives in `/srv/ts-r-review` on the box:
 
 | Path | What it is |
 |---|---|
-| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account) |
+| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for a separate bench box, `LANES` and `BENCH_KEEP_BUILDS` (see [Benches](#benches)) |
 | `secrets/github-app.pem` | The App's private key |
 | `secrets/dispatch-token` | Shared with the workflow as `CODE_REVIEW_DISPATCH_TOKEN` |
 | `codex-home/` | The box's Codex login (`auth.json`); Codex refreshes it in place |
@@ -196,7 +196,7 @@ Everything lives in `/srv/ts-r-review` on the box:
 ### Setup
 
 1. **Deploy.** Copy this plugin directory to the box and run the install script as `ubuntu`
-   (uid 1000, in the docker group). Re-run it after syncing a new version:
+   (uid 1000, in the docker group) or as root; `/srv/ts-r-review` is owned by uid 1000 either way. Re-run it after syncing a new version:
 
    ```bash
    rsync -a --delete .agents/plugins/code-review/ <box>:ts-r-review-src/
@@ -311,10 +311,20 @@ repo). Otherwise a trusted user starts one:
   review events, so use `/bench`): a review by a trusted user with state `APPROVED` on the PR's
   current head (the dispatcher lists the PR's reviews itself; a later push needs another approval, and
   `sync/` PRs are not benched on approval);
-- by commenting **`/bench`** on any PR, forks included (the box reacts with eyes);
+- by commenting **`/bench`** on any PR, forks included (the box reacts with eyes); in the public
+  repository a fork's PR is also benched on GitHub's runners without the box
+  (`.public/.github/workflows/bench-actions.yml`, which also runs a nightly macOS, Windows and
+  Linux bench of `main`);
 - or by running the Bench workflow from the Actions tab with the number of any PR.
 
 The box runs what the old Actions job ran, on a quieter machine:
+
+- **Its own box.** Benches can run on a second machine with the same install (`box/install.sh`,
+  the same App key and dispatch token; no Codex login): set `LANES=["bench"]` and
+  `BENCH_KEEP_BUILDS=1` in its `config.env`, `LANES=["review"]` in the review box's, and the
+  `BENCH_BOX` variable (a secret in a public repo) to its tailnet name. `bench.yml` uses
+  `BENCH_BOX`, else `CODE_REVIEW_BOX`; a box refuses a lane it does not run (421). Both boxes need
+  the same tailnet tag rule for `tag:ci`.
 
 - **Own lane, own cores.** Benches queue separately from Codex jobs, one at a time, pinned to
   four cores (`BENCH_CPUS`, default `2-5`); Codex reviews and fixes run on the other two
@@ -332,6 +342,12 @@ The box runs what the old Actions job ran, on a quieter machine:
   `bench/` between runs, so a repeat bench downloads nothing it already has. Builds, bench output
   and results are deleted when a run ends (and at startup, after a crash), so a finished bench
   takes no build space; each run builds the base and the PR in release from the cached crates.
+  With `BENCH_KEEP_BUILDS=1` (a box with the disk) both `target/` directories stay: an unchanged
+  base is a no-op build (the checkout leaves unchanged files' mtimes alone) and the PR build
+  recompiles only what changed. Below 8 GB free the builds go anyway.
+- **Reference tools once.** The base run measures only our tools (`cargo xtask bench --ours-only`);
+  tsc, ESLint, esbuild and the rest are measured in the PR's run, which is where the table's
+  "vs fastest" column comes from. The confirming re-runs are ours-only too.
   Code that already passed against the same base commit (ignoring `.lavish/`, `landing/`, `docs/`
   and the other non-code paths) is not run again. Fix runs delete their build directory when they end too.
 - **A newer push wins.** It replaces the PR's queued bench and stops its running one.

@@ -1,8 +1,9 @@
 # ts-r
 
-Fast TypeScript tooling written in Rust, with nothing to install:
+Fast TypeScript tooling written in Rust. This package is the `ts-r` launcher with every tool:
 
 ```sh
+npm install --save-dev @ts-r.dev/cli@next
 npx ts-r run server.ts   # run TypeScript (replaces tsx / ts-node)
 npx ts-r dev             # dev server with HMR
 npx ts-r build           # production bundle
@@ -19,7 +20,7 @@ tsc, ESLint and Vite. Pin a version per repo with a `.ts-r-version` file.
 
 | Package | Binary | Replaces |
 |---|---|---|
-| `ts-r` | `ts-r` launcher, plus every tool below | |
+| `@ts-r.dev/cli` | `ts-r` launcher, plus every tool below | |
 | `@ts-r.dev/run` | `ts-r-run` | tsx, ts-node |
 | `@ts-r.dev/dev` | `ts-r-dev` | vite dev |
 | `@ts-r.dev/build` | `ts-r-build` | esbuild, vite build |

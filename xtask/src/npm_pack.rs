@@ -299,9 +299,9 @@ fn print_table(packs: &[Pack]) {
         all += s;
         println!("| `{front}` | {} |", human(s));
     }
-    let launcher = size_of("ts-r") + platform("@ts-r.dev/cli-");
+    let launcher = size_of("@ts-r.dev/cli") + platform("@ts-r.dev/cli-");
     println!(
-        "| `ts-r` (launcher + every tool) | {} |",
+        "| `@ts-r.dev/cli` (the ts-r launcher + every tool) | {} |",
         human(all + launcher)
     );
     let check = size_of("@ts-r.dev/check") + platform("@ts-r.dev/check-");
@@ -483,7 +483,7 @@ fn tool_deps(
 fn smoke_all(packs: &[Pack], tgz: &BTreeMap<String, PathBuf>, temp: &Path) -> Result<usize> {
     let version = packs
         .iter()
-        .find(|p| p.name == "ts-r")
+        .find(|p| p.name == "@ts-r.dev/cli")
         .map(|p| p.version.clone())
         .unwrap_or_default();
     let mut s = Smoke { temp, failures: 0 };
@@ -581,8 +581,8 @@ fn smoke_all(packs: &[Pack], tgz: &BTreeMap<String, PathBuf>, temp: &Path) -> Re
         }
     }
 
-    // ts-r: the launcher package with every tool.
-    println!("ts-r");
+    // @ts-r.dev/cli: the launcher package with every tool.
+    println!("@ts-r.dev/cli");
     let dir = temp.join("ts-r");
     let mut deps = BTreeMap::new();
     for p in packs.iter().filter(|p| p.name != "@ts-r.dev/typescript") {

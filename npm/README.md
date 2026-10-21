@@ -26,7 +26,7 @@ is TypeScript's `major.minor` with a patch encoding the ts-r version (ts-r 0.3.1
 | Path | What |
 |---|---|
 | `ts-r/bin/ts-r.js` | The one shim, used by `ts-r` and copied into every tool package. It reads its package's `"ts-r"` key (`binary`, `platformPrefix`, `tools`, `version`) |
-| `ts-r/package.json`, `ts-r/README.md` | Template and README of the `ts-r` package |
+| `ts-r/package.json`, `ts-r/README.md` | Template and README of `@ts-r.dev/cli`, the `ts-r` launcher package |
 | `ts-r/problem-matcher.json` | The GitHub Actions problem matcher for `TS` and `TSR` errors, shipped in `ts-r` and `@ts-r.dev/check` |
 | `typescript/` | `@ts-r.dev/typescript` (see its README for the exact behaviour) |
 | `scripts/build-packages.mjs` | Builds every package from cargo output into `dist/` (or `--out`), with `packages.json` listing them in publish order |
@@ -57,11 +57,15 @@ Without building packages: `TS_R_BIN_DIR=target/release node npm/ts-r/bin/ts-r.j
 
 ## Publishing
 
-Done by the public repo's `.github/workflows/release.yml` when a release pull request (a
-`release/vX.Y.Z[-<label>]` branch into `main`) is merged; it tags the merge commit `vVERSION`. A
-run by hand on a release branch is a dry run. Order: platform
-packages first, then the tool packages, then `ts-r` and `@ts-r.dev/typescript`, each with
-`npm publish --provenance --access public --tag <latest|next>`. Versions already on npm are skipped.
+Done by the public repo's `.github/workflows/release.yml`, run by hand on `main` with `dry_run`
+off after a release pull request (a `release/vX.Y.Z[-<label>]` branch into `main`) has set the
+version; it tags `main` `vVERSION`. Nothing publishes automatically, and a run with `dry_run` on
+(the default) only rehearses. It publishes in two parallel phases
+(`.github/scripts/npm-publish.sh` there): every platform package at once, then every front package
+(the tool packages, `@ts-r.dev/cli` and `@ts-r.dev/typescript`) at once, each with
+`npm publish --provenance --access public --tag <latest|next>`. A failed platform phase stops the
+run before any front goes out. Versions already on npm are skipped, so a re-run publishes only
+what is missing.
 `repository.url` in every package must name the
 GitHub repository that runs the workflow, or npm rejects the provenance statement
 (`--repository`, default `$GITHUB_REPOSITORY`).
@@ -86,9 +90,10 @@ publish step logs which one it used. Provenance is automatic with trusted publis
 When every package has a trusted publisher, delete secret `NPM_TOKEN` and revoke the token. A
 package added later (a new tool or platform) goes through the same three steps.
 
-The scoped packages belong to the `ts-r.dev` npm org. The 64 packages:
+All 64 packages belong to the `ts-r.dev` npm org (an unscoped `ts-r` is refused: npm treats it as too
+close to the existing `tsr`):
 
-- `ts-r` (unscoped) and `@ts-r.dev/typescript`
+- `@ts-r.dev/cli` (the `ts-r` launcher) and `@ts-r.dev/typescript`
 - tool packages: `@ts-r.dev/run`, `@ts-r.dev/dev`, `@ts-r.dev/build`, `@ts-r.dev/check`,
   `@ts-r.dev/lint`, `@ts-r.dev/lsp`
 - platform packages, `@ts-r.dev/<tool>-<platform>` for the 7 tools `cli`, `run`, `dev`,

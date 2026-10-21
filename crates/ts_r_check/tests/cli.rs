@@ -452,8 +452,20 @@ fn regression_failed_emit_is_retried() {
             "export const a = 1;\n"
         );
         std::fs::remove_file(dir.join("dist/a.js")).unwrap();
-        // Force a build with existing state and an output whose bytes differ on disk.
+        // Force a build with existing state and an output whose bytes differ on disk. The edit
+        // can land in the same timestamp tick as the buildinfo just written, and an input no
+        // newer than the output is up to date (as in tsc), so date it after the buildinfo.
         std::fs::write(dir.join("a.ts"), "export const a = 1;\n// changed\n").unwrap();
+        let built = std::fs::metadata(dir.join("dist/tsconfig.tsbuildinfo"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join("a.ts"))
+            .unwrap()
+            .set_modified(built + std::time::Duration::from_secs(2))
+            .unwrap();
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

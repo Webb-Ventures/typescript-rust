@@ -1,7 +1,7 @@
 # ts-r
 
 [![CI](https://github.com/Webb-Ventures/typescript-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Webb-Ventures/typescript-rust/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/ts-r?label=npm&color=cb3837)](https://www.npmjs.com/package/ts-r)
+[![npm](https://img.shields.io/npm/v/@ts-r.dev/cli/next?label=npm&color=cb3837)](https://www.npmjs.com/package/@ts-r.dev/cli)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 [![Sponsor](https://img.shields.io/badge/sponsor-ts--r-f0814a?logo=githubsponsors&logoColor=white)](https://ts-r.dev/donate/)
 
@@ -11,6 +11,7 @@ ts-r-check type-checks the benchmark repos 2–7× faster than tsc 7 ([benchmark
 you can adopt one without the rest.
 
 ```sh
+npm install --save-dev @ts-r.dev/cli@next   # the ts-r launcher and every tool
 npx ts-r check           # type check, with tsc 7's diagnostics
 npx ts-r lint            # lint, with ESLint and typescript-eslint rules
 npx ts-r build           # bundle, with esbuild's CLI
@@ -52,11 +53,11 @@ in [docs/design/](docs/design/README.md).
 ## Install
 
 Every tool is an npm package with a native binary for macOS (arm64, x64), Linux (arm64, x64;
-glibc and musl) and Windows (arm64, x64). Install one, or the `ts-r` launcher with all of them:
+glibc and musl) and Windows (arm64, x64). Install one, or the `ts-r` launcher (`@ts-r.dev/cli`) with all of them:
 
 ```sh
-npm install --save-dev ts-r                # every tool and the ts-r launcher
-npm install --save-dev @ts-r.dev/check     # just ts-r-check (or run, dev, build, lint, lsp)
+npm install --save-dev @ts-r.dev/cli@next      # every tool and the ts-r launcher
+npm install --save-dev @ts-r.dev/check@next    # just ts-r-check (or run, dev, build, lint, lsp)
 ```
 
 To type-check with ts-r wherever your scripts and tools already run `tsc`, use the drop-in
@@ -87,13 +88,13 @@ base on dedicated cores, and a slowdown beyond the gate blocks the merge. Method
 <!-- bench:main:start -->
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
-| `version-startup` | `ts-r` 1.18 ms | `esbuild` 2.99 ms | **2.5× faster** |
-| `check-trpc` | `ts-r-check` 394 ms | `tsc-7` 830 ms | **2.1× faster** |
-| `check-date-fns` | `ts-r-check` 731 ms | `tsc-repo` 1.52 s | **2.1× faster** |
-| `check-rxjs` | `ts-r-check` 803 ms | `tsc-7` 5.56 s | **6.9× faster** |
-| `build-three-x10` | `ts-r-build` 1.09 s | `esbuild` 1.01 s | 1.1× slower |
+| `version-startup` | `ts-r` 1.66 ms | `esbuild` 4.37 ms | **2.6× faster** |
+| `check-trpc` | `ts-r-check` 388 ms | `tsc-7` 1.02 s | **2.6× faster** |
+| `check-date-fns` | `ts-r-check` 915 ms | `tsc-repo` 1.70 s | **1.9× faster** |
+| `check-rxjs` | `ts-r-check` 1.04 s | `tsc-7` 6.41 s | **6.2× faster** |
+| `build-three-x10` | `ts-r-build` 1.36 s | `esbuild` 1.26 s | 1.1× slower |
 
-Medians on linux-x86_64 (four dedicated cores), measured 2026-10-20. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
+Medians on linux-x86_64 (four dedicated cores), measured 2026-10-21. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
 <!-- bench:main:end -->
 
 The table above is updated by every sync to main. The one below is the same table at the time

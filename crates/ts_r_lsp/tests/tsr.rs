@@ -729,18 +729,22 @@ fn memory_budget_covers_the_in_process_backend() {
     env.open(&mut c, "loose.ts");
     let d = diags_for(&mut c, &u, |d| !d.is_empty()).expect("diagnostics");
     assert_eq!(codes(&d), vec![2322]);
+    // A restart clears the slot's RSS until the next sample, so wait for both.
     let deadline = Instant::now() + T;
-    let s = loop {
+    loop {
         let s = env.status();
         if let Some(s) = &s
             && s["slots"][0]["restarts"]["budget"] == 1
+            && s["slots"][0]["rssMB"].as_u64().is_some()
         {
-            break s.clone();
+            break;
         }
-        assert!(Instant::now() < deadline, "no budget restart: {s:?}");
+        assert!(
+            Instant::now() < deadline,
+            "no budget restart with a sampled RSS: {s:?}"
+        );
         std::thread::sleep(Duration::from_millis(50));
-    };
-    assert!(s["slots"][0]["rssMB"].as_u64().is_some(), "{s}");
+    }
     // The document was replayed into the new backend: an incremental edit applies to it.
     change(&mut c, &u, 2, range(0, 16, 0, 17), "\"1\"");
     assert!(diags_for(&mut c, &u, |d| d.is_empty()).is_some());

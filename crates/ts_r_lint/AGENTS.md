@@ -137,7 +137,8 @@ Files:
 
 ## Testing
 
-- `cargo test -p ts_r_lint` runs unit tests and the rule oracle.
+- `cargo test -p ts_r_lint` runs unit tests and the rule oracle. The oracle replays rule files
+  on up to 4 threads and reports in file order, so its output stays deterministic.
 - `TS_R_LINT_ORACLE_RULE=no-unused TS_R_LINT_ORACLE_VERBOSE=5 cargo test -p ts_r_lint --test
   rule_oracle -- --nocapture` shows mismatches for one rule.
 - Type-aware cases (`typed` in the data, `tests/oracle/rules/ts-*.json`) run against

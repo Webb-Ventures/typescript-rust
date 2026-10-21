@@ -502,9 +502,13 @@ cd "$BENCH_DIR/pr"
 phase 'building the PR'
 cargo build --release --workspace --locked || exit 2
 BASE_BIN="$BENCH_DIR/base/target/release"
+# The reference tools (tsc, ESLint, esbuild, ...) are the same in both runs: measure them once,
+# in the PR's run. Only our tools are gated against the base. PRs from before the flag measure all.
+OURS=''
+if grep -q '"ours-only"' xtask/src/bench.rs; then OURS=--ours-only; fi
 phase 'measuring the base'
-cargo xtask bench --bin-dir "$BASE_BIN" --save base --no-fail
-cargo xtask bench --repos "$BENCH_REPOS" --bin-dir "$BASE_BIN" --save base-repos --no-fail
+cargo xtask bench --bin-dir "$BASE_BIN" --save base --no-fail $OURS
+cargo xtask bench --repos "$BENCH_REPOS" --bin-dir "$BASE_BIN" --save base-repos --no-fail $OURS
 phase 'measuring the PR'
 cargo xtask bench --save pr --baseline bench/results/base.json --markdown bench/results/comment.md
 code=$?
@@ -515,8 +519,8 @@ confirm() { # <save> [--repos <names>]
   save=$1; shift
   phase 're-measuring the flagged scenarios, PR first'
   ids=$(tr '\n' ' ' < "bench/results/$save-regressions.txt")
-  cargo xtask bench "$@" $ids --save "$save-confirm" --no-fail > /dev/null
-  cargo xtask bench "$@" $ids --bin-dir "$BASE_BIN" --save "$save-confirm-base" --no-fail > /dev/null
+  cargo xtask bench "$@" $ids --save "$save-confirm" --no-fail $OURS > /dev/null
+  cargo xtask bench "$@" $ids --bin-dir "$BASE_BIN" --save "$save-confirm-base" --no-fail $OURS > /dev/null
   cargo xtask bench --compare "bench/results/$save-confirm.json" \
     --baseline "bench/results/$save-confirm-base.json" --markdown "bench/results/$save-confirm.md"
 }

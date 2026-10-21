@@ -14,7 +14,7 @@ People review every change to a skill, because a wrong step is repeated by every
 | [bench-compare](bench-compare/SKILL.md) | Run the benchmark harness against main and reference tools, apply the 5% gate, report in the PR |
 | [minimize-repro](minimize-repro/SKILL.md) | Shrink a failing input to the smallest repro and add it as a test |
 | [fix-conformance-diff](fix-conformance-diff/SKILL.md) | Fix one group of differences from tsc 7 and prove nothing else changed |
-| release | Open the release PR in the public repo (version, CHANGELOG, release benchmarks); merging it publishes. Maintainers only: not in the public mirror |
+| release | Open the release PR in the public repo (version, CHANGELOG, release benchmarks); publishing is a manual run of the release workflow on main. Maintainers only: not in the public mirror |
 | [add-lint-rule](add-lint-rule/SKILL.md) | Implement an ESLint / typescript-eslint rule from its docs and tests (as data), prove it with the rule oracle |
 
 ## Arriving later

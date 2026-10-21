@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The npm bin shim of every ts-r package. This file is the `ts-r` package's bin and is copied
+// The npm bin shim of every ts-r package. This file is the `@ts-r.dev/cli` package's bin and is copied
 // unchanged into each front package (`@ts-r.dev/run`, `@ts-r.dev/check`, ...) as bin/<binary>.js. What
 // it runs comes from the "ts-r" key of the package's own package.json:
 //
@@ -10,12 +10,12 @@
 // with the same arguments and inherited stdio, and exits with its exit code (or its signal).
 // No dependencies, no install scripts; Node >= 18.
 //
-// "tools" (the `ts-r` launcher package only) lists the front packages whose binaries the
+// "tools" (the launcher package, `@ts-r.dev/cli`, only) lists the front packages whose binaries the
 // launcher should find: their platform packages' bin directories go first on PATH.
 // "version": false means the binary has no --version flag, so `--version` is answered here.
 //
 // Overrides: TS_R_BIN_DIR (a directory holding the binaries, e.g. target/release) wins over
-// everything; TS_R_BINARY (a path) replaces the launcher binary in the `ts-r` package.
+// everything; TS_R_BINARY (a path) replaces the launcher binary in `@ts-r.dev/cli`.
 'use strict';
 
 const { spawnSync } = require('child_process');

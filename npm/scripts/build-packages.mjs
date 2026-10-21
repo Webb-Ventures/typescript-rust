@@ -25,7 +25,7 @@
 //                                 @ts-r.dev/lint, @ts-r.dev/lsp: a JS shim plus their platform
 //                                 packages as optionalDependencies, so each installs only its
 //                                 own binary
-//   fronts/ts-r/                  the `ts-r` launcher: @ts-r.dev/cli-<platform> plus every front
+//   fronts/ts-r/                  @ts-r.dev/cli, the `ts-r` launcher: @ts-r.dev/cli-<platform> plus every front
 //   fronts/typescript/            @ts-r.dev/typescript, the drop-in for the typescript package
 
 import { execFileSync } from 'node:child_process';
@@ -52,7 +52,7 @@ export const TARGETS = {
 
 // One entry per binary. `front` is the npm package users install.
 export const TOOLS = [
-  { id: 'cli', binary: 'ts-r', front: 'ts-r', about: 'the ts-r launcher' },
+  { id: 'cli', binary: 'ts-r', front: '@ts-r.dev/cli', about: 'the ts-r launcher' },
   { id: 'run', binary: 'ts-r-run', front: '@ts-r.dev/run', about: 'run TypeScript on your Node (replaces tsx, ts-node)' },
   { id: 'dev', binary: 'ts-r-dev', front: '@ts-r.dev/dev', about: 'dev server with HMR (replaces vite dev)' },
   { id: 'build', binary: 'ts-r-build', front: '@ts-r.dev/build', about: 'production bundler with esbuild\'s flags' },
@@ -219,7 +219,7 @@ function buildPlatformPackage(opts, tool, triple, src, version) {
   writeJson(path.join(dest, 'package.json'), pkg);
   fs.writeFileSync(
     path.join(dest, 'README.md'),
-    `# ${name}\n\nThe \`${tool.binary}\` binary for ${t.suffix} (Rust target \`${triple}\`), part of [ts-r](https://www.npmjs.com/package/ts-r).\nInstalled automatically as an optional dependency of \`${tool.front}\`; depend on that instead.\n` +
+    `# ${name}\n\nThe \`${tool.binary}\` binary for ${t.suffix} (Rust target \`${triple}\`), part of [ts-r](https://www.npmjs.com/package/@ts-r.dev/cli).\nInstalled automatically as an optional dependency of \`${tool.front}\`; depend on that instead.\n` +
       (tool.libs ? `\n\`lib/\` holds TypeScript's \`lib.*.d.ts\` files (Apache-2.0, see \`lib/TypeScript-LICENSE.txt\`).\n` : ''),
   );
   return { name, dir: dest, kind: 'platform' };
@@ -263,7 +263,7 @@ function buildToolFront(opts, tool, version) {
   writeJson(path.join(dest, 'package.json'), frontPackageJson(opts, tool, version));
   fs.writeFileSync(
     path.join(dest, 'README.md'),
-    `# ${tool.front}\n\n\`${tool.binary}\`: ${tool.about}, from [ts-r](https://www.npmjs.com/package/ts-r).\n\n` +
+    `# ${tool.front}\n\n\`${tool.binary}\`: ${tool.about}, from [ts-r](https://www.npmjs.com/package/@ts-r.dev/cli).\n\n` +
       '```sh\n' +
       `npm i -D ${tool.front}\nnpx ${tool.binary} --help\n` +
       '```\n\n' +
@@ -291,7 +291,7 @@ function buildLauncher(opts, version) {
   writeJson(path.join(dest, 'package.json'), pkg);
   fs.copyFileSync(path.join(npmDir, 'ts-r', 'README.md'), path.join(dest, 'README.md'));
   copyMatcher(dest);
-  return { name: 'ts-r', dir: dest, kind: 'front' };
+  return { name: pkg.name, dir: dest, kind: 'front' };
 }
 
 function buildDropIn(opts, version) {

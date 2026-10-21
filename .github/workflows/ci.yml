@@ -18,6 +18,7 @@ name: CI
 #   runs on this repository's own branches count: a fork's PR run can upload any artifact name.
 # - The "plan" job decides all of that once, so a skipped job never starts a runner. Each OS is
 #   its own job (not a matrix) for that reason: a matrix can't skip one entry.
+# - macOS tests run only in the public repository (free there); see test-macos.
 # - Pushes to main run clippy, test and codegen even when the code passed on its PR: that
 #   checks the merge and saves the Rust caches every PR restores (a PR can read main's
 #   caches, not another PR's). Pushes to main that only touch the plan or the site don't run.
@@ -179,11 +180,15 @@ jobs:
           path: ci-pass-marker
           retention-days: 30
 
+  # The test jobs run on 4-core larger runners in this (private) repository: on 2 cores the
+  # test binaries took 7-8 min against 3 min on macOS's 3. A 4-core minute costs twice a 2-core
+  # one and the job takes about half as long. The public repository uses the standard runners,
+  # which have 4 vCPU there for free. The org's runners: ts-r-ubuntu-4core, ts-r-windows-4core.
   test-linux:
     name: clippy + test + agents-check (linux)
     needs: plan
     if: needs.plan.outputs.test-linux == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.event.repository.private && 'ts-r-ubuntu-4core' || 'ubuntu-24.04' }}
     steps: &test-steps
       - uses: actions/checkout@v4
         with:
@@ -214,21 +219,23 @@ jobs:
           path: ci-pass-marker
           retention-days: 30
 
-  # GitHub has no 2 vCPU macOS runner; macos-latest (Apple silicon, 3 vCPU) is the smallest.
+  # Only in the public repository, where GitHub-hosted runners (macOS included) are free: macOS
+  # minutes cost ten times Linux's in a private one. Private PRs are tested on macOS where they
+  # are written (the maintainers develop on Apple silicon), and every sync PR runs this job.
   test-macos:
     name: clippy + test + agents-check (macos)
     needs: plan
-    if: needs.plan.outputs.test-macos == 'true'
+    if: needs.plan.outputs.test-macos == 'true' && !github.event.repository.private
     runs-on: macos-latest
     steps: *test-steps
 
   # The slowest job: MSVC's link.exe dominates building ~140 test executables, so link with the
-  # LLVM linker that ships with the toolchain.
+  # LLVM linker that ships with the toolchain. A 4-core larger runner here, as for Linux.
   test-windows:
     name: clippy + test + agents-check (windows)
     needs: plan
     if: needs.plan.outputs.test-windows == 'true'
-    runs-on: windows-2025
+    runs-on: ${{ github.event.repository.private && 'ts-r-windows-4core' || 'windows-2025' }}
     env:
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
     steps: *test-steps

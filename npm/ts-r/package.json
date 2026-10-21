@@ -1,5 +1,5 @@
 {
-  "name": "ts-r",
+  "name": "@ts-r.dev/cli",
   "version": "0.0.0",
   "description": "Fast TypeScript tooling written in Rust: runner, dev server, bundler, linter, type checker and language server",
   "license": "MIT OR Apache-2.0",
