@@ -10,7 +10,8 @@ name: CI
 #   its branch).
 # - A job is skipped when this exact code already passed it, in any PR: a pass-marker artifact
 #   named after the job, OS and a hash of the tracked files minus the plan, the site, the landing
-#   page, the code-review bot (.agents/plugins: no job here builds or tests it), the other
+#   page, the code-review bot (.agents/plugins: no job here builds or tests it), the skills'
+#   scripts (agents-check reads only their markdown), the other
 #   workflows and the public repo's own files (.public). Each OS's test job hashes without the other platforms' Rust modules (windows.rs,
 #   unix.rs, macos.rs, linux.rs and any .rs under a folder of that name; agents-check fails if
 #   one isn't gated to its platform), so a change only to Windows code tests only on Windows. Artifacts are repo-wide (cache entries are scoped to one PR),
@@ -123,7 +124,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files=$({ git ls-files -s -- . ':!.lavish' ':!landing' ':!site' ':!.agents/plugins' ':!.github' ':!.public'
+          files=$({ git ls-files -s -- . ':!.lavish' ':!landing' ':!site' ':!.agents/plugins' ':!.agents/skills/*/scripts/*' ':!.github' ':!.public'
                     git ls-files -s -- .github/workflows/ci.yml; })
           # hash [platform modules to leave out]: a path whose module is named for one of them.
           hash() {
