@@ -80,6 +80,11 @@ moves when a person merges a reviewed branch.
 - Commit at every milestone: when a coherent piece works and `cargo test`, `cargo clippy -D warnings`
   and `cargo xtask agents-check` pass for your crates. Small, reviewable commits beat one huge one.
   Commit messages say what works and the measured results (speed, oracle match counts).
+- A change that moves a measured number (an oracle or conformance count, a benchmark) updates the
+  line that records it (the crate's `AGENTS.md` "Current" line, or the oracle's README) and the
+  matching row in `landing/data/conformance.json` or `landing/data/bench.json` in the same PR.
+  The website quotes those lines, and its build fails when a quote goes stale
+  ([landing/AGENTS.md](landing/AGENTS.md), "The rule for numbers").
 - Commit only the paths you own. Never commit `target/`, benchmark results, caches or binaries.
   `node_modules` inside `crates/*/tests/fixtures/` is committed on purpose.
 - If you were started in your own git worktree, commit and push your branch there

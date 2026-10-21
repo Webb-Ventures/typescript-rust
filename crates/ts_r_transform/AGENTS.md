@@ -29,6 +29,14 @@ not resolve (`enums.rs` inlines it as `0 /* E.A */`).
 with the import, as tsc does. Constructs answered `Unknown` are listed in `TransformResult::unknown`; a program
 emitter must not write that file (TSR2002).
 
+`build_errors(&parsed)` picks the parse errors a build tool fails on, as esbuild does
+(`build_errors.rs`): syntax errors and the grammar errors that are ECMAScript early errors,
+not tsc-only grammar rules (`declare function f() {}`, `if (x) ;`, `a?.#x`).
+`TranspileOutput::build_errors` holds those plus the transform's errors; the dev server
+fails on them, while `diagnostics` keeps everything tsc reports. `sloppy_only_syntax` lists
+`with` statements and `delete name` with whether the file itself makes them strict code;
+`has_module_syntax` says whether `import`/`export` does (the bundler decides the error).
+
 `TransformOptions::from_json(r#"{"module":"commonjs"}"#, path)` builds options from a
 `compilerOptions` object (tests, tools). `ModuleFormat::{Esm { node_require }, CommonJs,
 Preserve}` is per file. `hmr::TsTransform` (feature `hmr`) implements `ts_r_hmr::Transform`.
@@ -49,6 +57,7 @@ Preserve}` is per file. `hmr::TsTransform` (feature `hmr`) implements `ts_r_hmr:
 | `jsx.rs`, `entities.rs` | JSX classic/automatic/dev, pragmas, text folding, HTML entities |
 | `helpers.rs` | helper texts (captured from tsc output) and their dependencies |
 | `options.rs` | `TransformOptions` from tsconfig options |
+| `build_errors.rs` | which parse errors fail a build (esbuild's rule, observed) |
 | `downlevel/` | lowering for targets below ES2022 (record 0012, E5): `lower.rs` is the one walk (function contexts, hoisted temporaries, unique names), `operators.rs` (ES2021 logical assignment and separators, ES2019 catch, ES2016 `**`), `es2020.rs` (`?.`, `??`), `es2018.rs` (async generators, `for await`, object spread), `rest.rs` (object rest), `template.rs` (tagged templates with invalid escapes: `__makeTemplateObject`), `es2017.rs` (async functions, `_super`, `arguments`), `es2022.rs` (class statics after the class, class aliases, `Reflect.get` / `Reflect.set` for static `super`, `useDefineForClassFields` defines, private member storage), `private.rs` (private name
 uses: `__classPrivateFieldGet`/`Set`/`In`, receivers captured for compound and update
 operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await using` below ESNext and a module's top-level `using` followed by exports at ESNext: `env`/`try`, hoisted declarations, regrouped exports, CommonJS `void 0` list order); `mod.rs` `unlowered` lists output syntax newer than the target (TSR2003) |
@@ -167,7 +176,7 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   (`--stored` compares against the stored files without tsc).
 - tsc's emit baselines (upstream checkout in `target/upstream/typescript`):
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE]`.
-  Last run (2026-10-19): 1,672 match, 100 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  Last run (2026-10-21): 1,674 match, 83 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
   syntax errors are skipped); `--filter esDecorators`: 113 match, 27 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with

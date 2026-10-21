@@ -152,8 +152,8 @@ texts), `dump.rs`.
   Compares the binder's codes (2300, 2451, 2567, 2528, 2397, 2435, 2664, 2669, 2671, 1100-1215 strict
   mode, 1101, 1102, 1114, 1117, 1344, 7027, 7028) per test variant with the baselines and
   writes mismatches to `target/binder-conformance.txt`.
-  Current: 12783 variants; 445 expect binder diagnostics, 399 match exactly; 1684 of 1792
-  expected diagnostics matched (108 missing, 88 extra).
+  Current (2026-10-21): 12783 variants; 445 expect binder diagnostics, 404 match exactly; 1691 of 1792
+  expected diagnostics matched (101 missing, 81 extra).
 - Corpus: `cargo build --release -j 4 -p ts_r_binder --example corpus` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- /usr/bin/time -l target/release/examples/corpus ../private-app`.
   private-app (691 project files + 5219 `node_modules` declaration files, 48 MB):
