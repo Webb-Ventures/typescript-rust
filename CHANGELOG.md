@@ -12,7 +12,6 @@ pull requests merged since the previous release (also on the
 ### From the core team
 
 - Site: launched mode for the v0.1.0-alpha.1 release
-- Releases are pull requests: a release skill opens them, merging one publishes
 - CI: 4-core Linux and Windows test runners, macOS in the public repo, public Actions bench
 - Bench: a box of its own, kept builds, reference tools measured once
 - Release fixes: @ts-r.dev/cli launcher, manual publishing, faster builds, parallel npm publish and faster CI tests
