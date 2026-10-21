@@ -935,6 +935,10 @@ fn websocket(
     writer.flush()?;
     tcp.set_write_timeout(Some(Duration::from_secs(2)))?;
     tcp.set_read_timeout(None)?;
+    // Joining the hub and replaying the last error happen under the error's lock, which
+    // `report_error` holds while it broadcasts: an error reaches this client either live or as
+    // the replay, never both, and never replayed after the update that cleared it.
+    let last_error = shared.last_error.lock().unwrap_or_else(|e| e.into_inner());
     let (id, out) = shared.hub.add(writer, tcp);
     let send = |text: &str| -> io::Result<()> {
         let frame = ws::encode_frame(ws::Opcode::Text, text.as_bytes(), None);
@@ -943,15 +947,10 @@ fn websocket(
             .write_all(&frame)
     };
     send(r#"{"type":"connected"}"#)?;
-    let replay = shared
-        .last_error
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|(_, payload)| payload.to_string());
-    if let Some(p) = replay {
-        send(&p)?;
+    if let Some((_, payload)) = last_error.as_ref() {
+        send(&payload.to_string())?;
     }
+    drop(last_error);
     let mut partial = None;
     let result = loop {
         match ws::read_message(&mut reader, &mut partial) {

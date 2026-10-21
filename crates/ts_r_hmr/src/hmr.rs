@@ -408,10 +408,11 @@ fn finish(shared: &Shared, out: Outcome, mut timing: UpdateTiming) {
             Some(p) => json!({ "type": "full-reload", "path": p }),
             None => json!({ "type": "full-reload" }),
         };
+        // Cleared first: a client joining after the reload goes out must not get the old error.
+        clear_error(shared);
         shared.hub.broadcast(&msg.to_string());
         timing.push = t.elapsed();
         timing.outcome = "full-reload".into();
-        clear_error(shared);
         let t = shared.timings.finished(timing);
         shared.log(&t.log_line());
         return;
@@ -525,8 +526,10 @@ fn invalidate(shared: &Shared, url: &str, message: Option<&str>) {
 pub(crate) fn report_error(shared: &Shared, err: &ModuleError) {
     let payload = err.payload();
     shared.log(&format!("error {}: {}", err.url, err.message));
+    // Held while broadcasting: a client joining now gets the error once (see `websocket` in server.rs).
+    let mut last = shared.last_error.lock().unwrap_or_else(|e| e.into_inner());
     shared.hub.broadcast(&payload.to_string());
-    *shared.last_error.lock().unwrap_or_else(|e| e.into_inner()) = Some((err.url.clone(), payload));
+    *last = Some((err.url.clone(), payload));
 }
 
 fn clear_error(shared: &Shared) {

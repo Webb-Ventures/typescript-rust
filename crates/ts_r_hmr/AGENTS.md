@@ -81,7 +81,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `ignoreInitial`, a file moved in with an old mtime during that window isn't reported.
 - **Errors never crash the server.** Transform/resolve/JSON failures become an `error` payload
   (message, `loc`, code frame) broadcast to clients, remembered and replayed to clients that
-  connect later, and a 500 for the request. The next successful update clears it. Malformed
+  connect later, and a 500 for the request. The next successful update clears it. A client
+  gets each error once: joining the hub and the replay happen under `last_error`'s lock, which
+  `report_error` holds while it broadcasts (and a reload or update clears it before it goes out). Malformed
   HTTP/WS input closes that connection only.
 - **Protocol compatibility is a public surface.** Server → client messages are Vite's
   (`connected`, `update` with `js-update`/`css-update` items carrying `path`, `acceptedPath`,
