@@ -88,11 +88,11 @@ base on dedicated cores, and a slowdown beyond the gate blocks the merge. Method
 <!-- bench:main:start -->
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
-| `version-startup` | `ts-r` 1.73 ms | `esbuild` 4.64 ms | **2.7× faster** |
-| `check-trpc` | `ts-r-check` 410 ms | `tsc-7` 969 ms | **2.4× faster** |
-| `check-date-fns` | `ts-r-check` 889 ms | `tsc-7` 1.76 s | **2.0× faster** |
-| `check-rxjs` | `ts-r-check` 980 ms | `tsc-7` 6.53 s | **6.7× faster** |
-| `build-three-x10` | `ts-r-build` 1.28 s | `esbuild` 1.21 s | 1.1× slower |
+| `version-startup` | `ts-r` 1.67 ms | `esbuild` 3.72 ms | **2.2× faster** |
+| `check-trpc` | `ts-r-check` 465 ms | `tsc-7` 1.01 s | **2.2× faster** |
+| `check-date-fns` | `ts-r-check` 871 ms | `tsc-7` 1.77 s | **2.0× faster** |
+| `check-rxjs` | `ts-r-check` 1.01 s | `tsc-7` 6.34 s | **6.3× faster** |
+| `build-three-x10` | `ts-r-build` 1.34 s | `esbuild` 1.35 s | **1.0× faster** |
 
 Medians on linux-x86_64 (four dedicated cores), measured 2026-10-21. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
 <!-- bench:main:end -->
