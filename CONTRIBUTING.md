@@ -79,7 +79,9 @@ files are plain text, so diffs stay readable.
    Each new push needs a new approval, so batch your fixes where you can.
 3. **Review.** A maintainer reviews the change. They may ask the review bot for an automated
    review (`@autoreview`) or start a benchmark run (`/bench`). Both run only when a maintainer
-   asks.
+   asks. A change to the code or the bench is also benchmarked against `main` on GitHub's Linux
+   runners (the Bench (Actions) workflow, once its run is approved): the job summary has the
+   tables, and the job fails on a slowdown beyond the gate.
 4. **Merge.** A maintainer merges once CI, the review and any benchmark pass. Your change is then
    carried to the development repo automatically and comes back in the next sync.
 

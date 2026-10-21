@@ -52,9 +52,10 @@ Commands:
   tasks <diff.json> | tasks --ours <a.json> --tsc <b.json> [--out <file>]
                                Group diagnostic differences into a markdown task list
   bench [<filter>...] [--list] [--save <name>] [--baseline <file>] [--bin-dir <dir>]
-        [--markdown <file>] [--no-fail] [--memory]
+        [--markdown <file>] [--no-fail] [--memory] [--ours-only]
                                Run bench/scenarios.toml with hyperfine and compare results
-                               (--memory: also the peak RSS of one extra run per tool)
+                               (--memory: also the peak RSS of one extra run per tool;
+                               --ours-only: skip the reference tools)
   bench --compare <results.json> --baseline <file> [--markdown <file>]
                                Gate two saved runs against each other without running
   bench --repos <names|all> [--large] [--mem-mb N [--dedicated-machine]] [--time-s N]

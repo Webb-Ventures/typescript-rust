@@ -41,6 +41,9 @@ const benchDir = (repo) => `${DATA}/bench/${repo.replace('/', '__')}`;
 // The box has 6 cores: Codex jobs (mostly waiting on the model) get two, benches the other four.
 const REVIEW_CPUS = ['--cpuset-cpus', env.REVIEW_CPUS ?? '0-1'];
 const BENCH_CPUS = ['--cpuset-cpus', env.BENCH_CPUS ?? '2-5'];
+// The lanes this box runs (LANES, default both). A separate bench box serves ["bench"] and the
+// review box ["review"], so a request sent to the wrong one is refused rather than run there.
+const LANES = new Set(JSON.parse(env.LANES ?? '["review","bench"]'));
 const MODEL = env.MODEL ?? 'gpt-6.1-sol';
 const EFFORT = env.EFFORT ?? 'high';
 for (const file of [env.GITHUB_APP_KEY_PATH ?? `${DATA}/secrets/github-app.pem`, env.DISPATCH_TOKEN_PATH ?? `${DATA}/secrets/dispatch-token`]) {
@@ -163,9 +166,15 @@ function restoreQueue() {
   }
   // Entries from before the box served several repositories are the first repository's.
   jobs = jobs.map((job) => ({ ...job, repo: job.repo ?? REPOS[0] })).filter((job) => {
-    if (REPOS.includes(job.repo)) return true;
-    log(`dropping queued ${label(job)}: ${job.repo} is no longer in REPOS`);
-    return false;
+    if (!REPOS.includes(job.repo)) {
+      log(`dropping queued ${label(job)}: ${job.repo} is no longer in REPOS`);
+      return false;
+    }
+    if (!LANES.has(job.kind === 'bench' ? 'bench' : 'review')) {
+      log(`dropping queued ${label(job)}: this box no longer runs its lane (LANES)`);
+      return false;
+    }
+    return true;
   });
   for (const job of jobs) (job.kind === 'bench' ? benchQueue : queue).push(job);
   log(`restored ${jobs.length} queued jobs: ${jobs.map(label).join(' ')}`);
@@ -401,8 +410,11 @@ function credentialsAbsent(files, logFile, before) {
 
 // A bench leaves only what saves downloads: the checkouts' sources, the pinned repos
 // (target/bench-repos), the TypeScript lib files (target/upstream), crates and package stores.
-// Builds, bench output and results go when it ends.
+// Builds, bench output and results go when it ends, unless BENCH_KEEP_BUILDS=1 (a box with the
+// disk for them): then the next run's base build is a no-op when the base is unchanged (the
+// checkout leaves unchanged files' mtimes alone) and its PR build recompiles only what changed.
 const BENCH_KEPT = new Set(['bench-repos', 'upstream']);
+const KEEP_BUILDS = env.BENCH_KEEP_BUILDS === '1';
 function cleanBench(bench) {
   for (const name of ['base', 'pr']) {
     const target = `${bench}/${name}/target`;
@@ -410,6 +422,7 @@ function cleanBench(bench) {
     try {
       entries = fs.readdirSync(target);
     } catch {}
+    if (KEEP_BUILDS) entries = [];
     for (const entry of entries) if (!BENCH_KEPT.has(entry)) fs.rmSync(`${target}/${entry}`, { recursive: true, force: true });
     fs.rmSync(`${bench}/${name}/bench/results`, { recursive: true, force: true });
   }
@@ -509,7 +522,7 @@ function enqueueBench(job) {
   const ahead = benchQueue.length - 1 + (benchRunning && !benchRunning.cancelled ? 1 : 0);
   const behind = ahead ? ` behind ${ahead} other bench${ahead === 1 ? '' : 'es'}` : '';
   benchStatus(job.repo, job.pr, `Bench of \`${short(job.head)}\` against \`${job.baseRef}\` queued${behind} (requested by @${job.by}).`, { busy: true });
-  commitStatus(job.repo, job.head, 'pending', `Queued${behind} on the review box`, job.runUrl);
+  commitStatus(job.repo, job.head, 'pending', `Queued${behind} on the bench box`, job.runUrl);
   saveQueue();
   if (!benchRunning) nextBench();
 }
@@ -526,8 +539,9 @@ async function nextBench() {
   nextBench();
 }
 
-// Disk on the box is tight: below 8 GB free, the release builds go (rebuilt from cached crates).
-// cleanBench removes them after every run; this covers a run that died before it could.
+// Below 8 GB free, the release builds go (rebuilt from cached crates). cleanBench removes them
+// after every run unless BENCH_KEEP_BUILDS is set; this covers a run that died before it could,
+// and a box keeping its builds that runs low.
 function benchDisk(bench, logFile) {
   const free = () => {
     const { bavail, bsize } = fs.statfsSync(DATA);
@@ -555,7 +569,7 @@ async function runBench(job) {
   const progress = async (phase) => job.cancelled || benchStatus(repo, pr, `${title} running since ${since} (requested by @${by}): ${phase}.`, { busy: true });
   log(`bench ${repo}#${pr} at ${short(head)} for @${by}: ${logFile}`);
   await progress('fetching');
-  commitStatus(repo, head, 'pending', `Running since ${since} on the review box`, runUrl);
+  commitStatus(repo, head, 'pending', `Running since ${since} on the bench box`, runUrl);
   const step = (name, args, envs, timeoutMs) => {
     if (job.cancelled) return 'cancelled';
     job.container = `tsr-${name}-${id}`;
@@ -582,8 +596,8 @@ async function runBench(job) {
     await commitStatus(repo, head, 'success', 'Same code already passed against this base', runUrl);
   } else if (info && !benchDisk(BENCH, logFile)) {
     outcome = 'no disk';
-    await benchStatus(repo, pr, `${title} could not run: the review box is out of disk.`);
-    await commitStatus(repo, head, 'error', 'The review box is out of disk', runUrl);
+    await benchStatus(repo, pr, `${title} could not run: the bench box is out of disk.`);
+    await commitStatus(repo, head, 'error', 'The bench box is out of disk', runUrl);
   } else if (info) {
     const checkedOut = await step('bench-checkout', ['--network', 'none', ...LOCKED_DOWN, '-v', `${BENCH}:${BENCH}`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`, '-v', `${dir}/in:${dir}/in:ro`, IMAGE, 'node', '/app/job.mjs', 'bench-checkout'], {}, 10 * 60_000);
     if (checkedOut === 0) await progress('installing the pinned repos and tools');
@@ -673,6 +687,7 @@ async function dispatch({ runId, pr, repo, commentId }) {
     if (!commentId) return null;
     return (await github.rest.issues.getComment({ owner, repo: name, comment_id: commentId })).data;
   };
+  if (!LANES.has(run.path === BENCH_WORKFLOW ? 'bench' : 'review')) return [421, `this box does not run ${run.path === BENCH_WORKFLOW ? 'benches' : 'reviews'}`];
   if (run.path === BENCH_WORKFLOW) return dispatchBench({ github, run, actor, pull, repo, getComment });
 
   const comment = run.event === 'issue_comment' ? await getComment() : null;

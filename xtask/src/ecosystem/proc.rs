@@ -200,6 +200,10 @@ mod tests {
         assert!(o.stdout_complete);
     }
 
+    // Unix only: Windows' sh (MSYS) waits for its background jobs before it exits, so the child
+    // itself runs for the whole `sleep` there (8 s on a CI runner) and nothing is left holding
+    // the pipes.
+    #[cfg(unix)]
     #[test]
     fn output_held_open_by_a_leftover_process_does_not_block() {
         let o = run(

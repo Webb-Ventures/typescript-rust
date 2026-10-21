@@ -1,0 +1,285 @@
+name: Bench (Actions)
+
+# Benches on GitHub-hosted runners, which are free in this public repository. The maintainers'
+# own PRs are benched on the review box before they merge (bench.yml); this workflow covers what
+# the box doesn't:
+#   - fork PRs: benched against their base on Linux, as a gate, on a throwaway runner, so a
+#     stranger's code never runs on the box (a fork PR's workflows wait for a maintainer's
+#     approval first). The result is the job's summary and its pass or fail.
+#   - nightly (and by hand): main on Linux, macOS (Apple silicon) and Windows, compared with the
+#     previous night on the same OS. Reporting only: a shared runner is too noisy to gate on
+#     across days. Windows runs the scenarios without pinned repos (their installs use limit.sh).
+#   - pushes to main: a release build of main, cached by commit, so a fork PR whose base is that
+#     commit doesn't build it again; and the crates, pinned repos and package stores, which PR
+#     runs can only read.
+# A fork PR's run uses the workflow and gate script from the PR itself: read a stranger's
+# changes to .github/ before trusting a pass.
+
+on:
+  pull_request:
+    paths: &code
+      - "crates/**"
+      - "bench/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "xtask/src/bench.rs"
+      - "xtask/src/bench_repos.rs"
+      - ".github/workflows/bench-actions.yml"
+      - ".github/scripts/bench-gate.sh"
+  push:
+    branches: [main]
+    paths: *code
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-actions-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_BUILD_JOBS: 4
+  RAYON_NUM_THREADS: 4
+  BENCH_REPOS: trpc,date-fns,rxjs,three-x10
+  HYPERFINE: hyperfine@1.20.0
+
+jobs:
+  fork-pr:
+    name: bench against the base (fork PR)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env: &bench-env
+      # The PR's and the base's builds share one target directory (its crates are built once).
+      CARGO_TARGET_DIR: ${{ github.workspace }}/pr/target
+      TS_R_BENCH_CACHE: ${{ github.workspace }}/bench-cache
+      # Both builds read the PR's lib files (a copied binary can't find them next to itself).
+      TS_R_LIB_DIR: ${{ github.workspace }}/pr/target/upstream/typescript/tsc/internal/bundled/libs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pr
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - &toolchains
+        name: Rust toolchains (each checkout's own)
+        shell: bash
+        run: |
+          (cd pr && rustup toolchain install)
+          if [ -d base ]; then (cd base && rustup toolchain install); fi
+      - &hyperfine
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ${{ env.HYPERFINE }}
+      - &node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - &corepack
+        run: corepack enable
+      - &rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pr
+          shared-key: bench-release
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - &upstream-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: pr/target/upstream/typescript
+          key: bench-upstream-${{ runner.os }}-${{ hashFiles('pr/upstream/UPSTREAM.json', 'pr/xtask/src/upstream.rs') }}
+      - &repos-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            pr/target/bench-repos
+            bench-cache
+          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
+      - id: base-bin
+        uses: actions/cache/restore@v4
+        with:
+          path: base-bin
+          key: bench-bin-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+      - &deps
+        name: Lib files, pinned repos
+        working-directory: pr
+        shell: bash
+        run: |
+          cargo xtask upstream sync --minimal
+          cargo xtask bench --fetch-repos --repos "$BENCH_REPOS"
+      - name: Build the base
+        if: steps.base-bin.outputs.cache-hit != 'true'
+        working-directory: base
+        run: |
+          cargo build --release --workspace --locked
+          bash ../pr/.github/scripts/bench-bins.sh "$CARGO_TARGET_DIR/release" ../base-bin
+      - name: Build the PR
+        working-directory: pr
+        run: cargo build --release --workspace --locked
+      - name: Bench
+        working-directory: pr
+        run: bash .github/scripts/bench-gate.sh "$GITHUB_WORKSPACE/base-bin" "$BENCH_REPOS"
+      - name: Summary
+        if: always()
+        working-directory: pr
+        run: |
+          if [ -f bench/results/comment.md ]; then
+            { echo "### Bench: this PR against \`${{ github.event.pull_request.base.ref }}\` @ \`${{ github.event.pull_request.base.sha }}\`"; echo; cat bench/results/comment.md; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: pr/bench/results
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Pushes to main: what fork PR runs reuse (caches saved here are readable by every PR).
+  main:
+    name: cache main's release build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env: *bench-env
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pr
+          persist-credentials: false
+      - *toolchains
+      - *hyperfine
+      - *node
+      - *corepack
+      - *rust-cache
+      - *upstream-cache
+      - *repos-cache
+      - *deps
+      - name: Build
+        working-directory: pr
+        run: |
+          cargo build --release --workspace --locked
+          bash .github/scripts/bench-bins.sh "$CARGO_TARGET_DIR/release" ../base-bin
+      - uses: actions/cache/save@v4
+        with:
+          path: base-bin
+          key: bench-bin-${{ runner.os }}-${{ github.sha }}
+      - &upstream-save
+        uses: actions/cache/save@v4
+        with:
+          path: pr/target/upstream/typescript
+          key: bench-upstream-${{ runner.os }}-${{ hashFiles('pr/upstream/UPSTREAM.json', 'pr/xtask/src/upstream.rs') }}
+        continue-on-error: true
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            pr/target/bench-repos
+            bench-cache
+          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
+        continue-on-error: true
+
+  nightly:
+    name: nightly (${{ matrix.os }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            repos: true
+          - os: macos-latest
+            repos: true
+          - os: windows-2025
+            repos: false
+    runs-on: ${{ matrix.os }}
+    # Windows support in the bench harness is partial; its numbers are a bonus.
+    continue-on-error: ${{ matrix.os == 'windows-2025' }}
+    timeout-minutes: 150
+    env: *bench-env
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pr
+          persist-credentials: false
+      - *toolchains
+      - *hyperfine
+      - *node
+      - *corepack
+      - *rust-cache
+      - *upstream-cache
+      - if: matrix.repos
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            pr/target/bench-repos
+            bench-cache
+          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
+      - name: Lib files, pinned repos
+        working-directory: pr
+        run: |
+          cargo xtask upstream sync --minimal
+          if [ "${{ matrix.repos }}" = true ]; then cargo xtask bench --fetch-repos --repos "$BENCH_REPOS"; fi
+      - name: Build
+        working-directory: pr
+        run: cargo build --release --workspace --locked
+      - id: previous
+        uses: actions/cache/restore@v4
+        with:
+          path: previous
+          key: bench-nightly-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: bench-nightly-${{ runner.os }}-
+      - name: Bench (compared with the previous night)
+        working-directory: pr
+        run: |
+          base() { if [ -f "../previous/$1.json" ]; then echo --baseline "../previous/$1.json"; fi; }
+          # shellcheck disable=SC2046
+          cargo xtask bench --save nightly --markdown bench/results/nightly.md --no-fail $(base nightly)
+          if [ "${{ matrix.repos }}" = true ]; then
+            # shellcheck disable=SC2046
+            cargo xtask bench --repos "$BENCH_REPOS" --save nightly-repos --markdown bench/results/nightly-repos.md \
+              --no-fail $(base nightly-repos)
+          fi
+          mkdir -p ../previous && cp bench/results/nightly*.json ../previous/
+      - name: Summary
+        if: always()
+        working-directory: pr
+        run: |
+          {
+            echo "### Nightly bench, ${{ runner.os }} ($(git rev-parse --short HEAD))"
+            if [ "${{ steps.previous.outputs.cache-matched-key }}" = "" ]; then echo; echo "No previous night to compare with."; fi
+            for f in bench/results/nightly.md bench/results/nightly-repos.md; do
+              if [ -f "$f" ]; then echo; cat "$f"; fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/cache/save@v4
+        with:
+          path: previous
+          key: bench-nightly-${{ runner.os }}-${{ github.run_id }}
+      - *upstream-save
+      - if: matrix.repos
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pr/target/bench-repos
+            bench-cache
+          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
+        continue-on-error: true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-nightly-${{ runner.os }}
+          path: pr/bench/results
+          if-no-files-found: ignore
+          retention-days: 30

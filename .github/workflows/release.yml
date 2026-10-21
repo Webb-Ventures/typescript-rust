@@ -3,19 +3,23 @@ name: Release
 # Builds every target, attaches archives, SHA256SUMS and an SBOM to a GitHub release, and
 # publishes the npm packages (npm/README.md) with npm trusted publishing (OIDC) and provenance.
 #
-# A release is a pull request: a branch release/vX.Y.Z or release/vX.Y.Z-<label> into main
-# (release/v0.1.0, release/v0.1.0-alpha.1), opened by the maintainers' release script with the
-# version bump, the CHANGELOG entry and the README's release benchmark table. Merging it
-# publishes: this workflow runs on every push to main, and goes past the version job only when
-# the pushed commit is the merge of such a pull request from this repository. Nothing else ever
-# publishes. The published version is [workspace.package] version in Cargo.toml: its X.Y.Z must
-# match the branch, and if it has a pre-release part (0.1.0-alpha.1) the branch label must start
-# with it. The workflow tags the merge commit vVERSION and fails if that tag already exists. The
-# GitHub release's notes are the version's CHANGELOG.md entry.
+# Releasing takes two steps, both by a maintainer:
+#   1. The release pull request: a branch release/vX.Y.Z or release/vX.Y.Z-<label> into main
+#      (release/v0.1.0, release/v0.1.0-alpha.1), opened by the maintainers' release script with the
+#      version bump, the CHANGELOG entry and the README's release benchmark table. Merging it
+#      publishes nothing.
+#   2. This workflow, run by hand on main with dry_run off (Actions > Release > Run workflow, or
+#      `gh workflow run release.yml --ref main -f dry_run=false`). It publishes the version in
+#      Cargo.toml's [workspace.package]: it refuses 0.0.0, a version whose tag vVERSION already
+#      exists, and a version with no CHANGELOG.md entry. It tags main's head commit vVERSION, so
+#      run it right after merging the release PR (anything merged in between ships too). The
+#      GitHub release's notes are the version's CHANGELOG.md entry.
+# Nothing runs this workflow automatically.
 #
-# To rehearse, run the workflow by hand on the release branch (the release script starts one when
-# it opens the pull request): everything builds and `npm publish --dry-run` runs. A run by hand is
-# always a dry run; no tag or GitHub release is created.
+# A run with dry_run on (the default) rehearses on main or on a release branch (the release
+# script starts one on the branch when it opens the pull request): everything builds and
+# `npm publish --dry-run` runs; no tag or GitHub release is created. On a release branch, the
+# version must match the branch name.
 #
 # npm auth: trusted publishing (OIDC), no long-lived token. The npm job runs on a GitHub-hosted
 # runner (ubuntu-latest) because npm trusted publishing does not accept self-hosted runners.
@@ -27,10 +31,10 @@ name: Release
 # A person must set up, once:
 #   - environment `release`: deployment branches limited to `main` (publishing) and `release/v*`
 #     (dry runs), and optionally required reviewers to gate publishing.
-#   - for each of the 64 packages listed in npm/README.md (`ts-r`, `@ts-r.dev/typescript`, the six
+#   - for each of the 64 packages listed in npm/README.md (`@ts-r.dev/cli`, `@ts-r.dev/typescript`, the six
 #     tool packages `@ts-r.dev/{run,dev,build,check,lint,lsp}` and the 56 platform packages
 #     `@ts-r.dev/{cli,run,dev,build,check,lint,lsp}-<platform>`), all owned by the `ts-r.dev` npm
-#     org except unscoped `ts-r`:
+#     org (`@ts-r.dev/cli` is the `ts-r` launcher):
 #     1. Publish it once: run this workflow with secret NPM_TOKEN set to a granular access token
 #        (packages and scopes: read and write, all packages; bypass 2FA; a short expiry), or
 #        publish it locally with 2FA. Already-published versions are skipped, so a rerun only
@@ -42,27 +46,31 @@ name: Release
 #   Then delete secret NPM_TOKEN and revoke the token.
 #
 # Binaries:
-#   macOS arm64/x64, Linux x64/arm64, Windows x64: PGO (`cargo xtask pgo --profile dist`),
+#   macOS arm64, Linux x64/arm64, Windows x64: PGO (`cargo xtask pgo --profile dist`),
 #     trained on the runner: repo fixtures, TypeScript's compiler test cases, up to 60
 #     ecosystem packages and (not on Windows) two small public bench repos, date-fns and
 #     three.js x10 (a local run trains on every fetched bench repo).
-#   Linux: trained on the native glibc build, then rebuilt with cargo-zigbuild against glibc
-#     2.17 and musl (same architecture, same profile).
+#   Linux: one job per architecture and libc, so glibc and musl build in parallel; each trains
+#     on the native glibc build, then rebuilds with cargo-zigbuild against glibc 2.17 or musl.
+#   macOS arm64 runs on a larger (paid) runner, macos-15-xlarge: its PGO build is the longest
+#     job of a release.
+#   macOS x64: cross-built on arm64 without PGO.
 #   Windows arm64: cross-built on x64 without PGO (the profile can't be trained there).
 # If PGO fails on a runner, the job warns and ships the plain `dist` build instead.
 
 on:
-  push:
-    branches: [main]
-  # A dry run of a release branch.
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build everything and run npm publish --dry-run (no tag, no GitHub release). Turn off on main to publish."
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
-# Per commit on main: a later push must never replace a release run that is still waiting.
 concurrency:
-  group: release-${{ github.event_name == 'push' && github.sha || github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -76,7 +84,6 @@ jobs:
     name: version
     runs-on: ubuntu-24.04
     outputs:
-      release: ${{ steps.v.outputs.release }}
       version: ${{ steps.v.outputs.version }}
       dry_run: ${{ steps.v.outputs.dry_run }}
       npm_tag: ${{ steps.v.outputs.npm_tag }}
@@ -84,71 +91,66 @@ jobs:
       - uses: actions/checkout@v4
       - id: v
         env:
-          GH_TOKEN: ${{ github.token }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-          EVENT: ${{ github.event_name }}
-          SHA: ${{ github.sha }}
-          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [ "$EVENT" = push ]; then
-            # A push to main: a release only if it is the merge of a release PR from this repo.
-            branch=""
-            for _ in 1 2 3; do
-              branch=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[] | select(.merge_commit_sha == env.SHA and .base.ref == "main" and .head.repo.full_name == env.REPO and (.head.ref | startswith("release/v"))) | .head.ref' | head -1)
-              [ -n "$branch" ] && break
-              sleep 10
-            done
-            if [ -z "$branch" ]; then
-              echo "release=false" >> "$GITHUB_OUTPUT"
-              echo "Not the merge of a release PR; nothing to publish." >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            dry_run=false
-          else
-            branch=$REF_NAME
-            dry_run=true
-            if [ "$REF_TYPE" != branch ]; then branch=""; fi
-          fi
-          if ! [[ "$branch" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
-            echo "::error::a release comes from a release/vX.Y.Z or release/vX.Y.Z-<label> branch (got $REF_TYPE $REF_NAME)"
-            exit 1
-          fi
-          REF_NAME=$branch
-          core="${BASH_REMATCH[1]}" label="${BASH_REMATCH[3]}"
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
-          if [ "${version%%-*}" != "$core" ]; then
-            echo "::error::branch $REF_NAME is for $core but [workspace.package] version is $version"
+          dry_run=true
+          [ "$DRY_RUN" = false ] && dry_run=false
+          if [ "$REF_TYPE" = branch ] && [ "$REF_NAME" = main ]; then
+            : # main: a dry run, or the release
+          elif [ "$REF_TYPE" = branch ] && [[ "$REF_NAME" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
+            if [ "$dry_run" != true ]; then
+              echo "::error::a release branch only gets dry runs; merge its release PR, then run this workflow on main"
+              exit 1
+            fi
+            core="${BASH_REMATCH[1]}" label="${BASH_REMATCH[3]}"
+            if [ "${version%%-*}" != "$core" ]; then
+              echo "::error::branch $REF_NAME is for $core but [workspace.package] version is $version"
+              exit 1
+            fi
+            if [ "$version" != "$core" ] && { [ -z "$label" ] || [ "${label#"${version#*-}"}" = "$label" ]; }; then
+              echo "::error::[workspace.package] version $version is a pre-release; the branch must be release/v$version or release/v$version-<label>"
+              exit 1
+            fi
+          else
+            echo "::error::run this on main (dry run or release) or on a release/vX.Y.Z[-label] branch (dry run); got $REF_TYPE $REF_NAME"
             exit 1
           fi
-          if [ "$version" != "$core" ] && { [ -z "$label" ] || [ "${label#"${version#*-}"}" = "$label" ]; }; then
-            echo "::error::[workspace.package] version $version is a pre-release; the branch must be release/v$version or release/v$version-<label>"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || [ "$version" = 0.0.0 ]; then
+            echo "::error::[workspace.package] version is $version; merge a release PR that sets the version first"
             exit 1
           fi
-          if [ "$dry_run" != true ] && git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
-            echo "::error::v$version is already released (tag v$version exists); bump [workspace.package] version to release again"
-            exit 1
+          if [ "$dry_run" != true ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+              echo "::error::v$version is already released (tag v$version exists); open a release PR for the next version"
+              exit 1
+            fi
+            if ! grep -qF "## [v$version]" CHANGELOG.md; then
+              echo "::error::CHANGELOG.md has no entry for v$version; the release PR adds it"
+              exit 1
+            fi
           fi
           npm_tag=latest
           case "$version" in *-*) npm_tag=next ;; esac
           {
-            echo "release=true"
             echo "version=$version"
             echo "dry_run=$dry_run"
             echo "npm_tag=$npm_tag"
           } >> "$GITHUB_OUTPUT"
-          echo "ts-r $version from $branch (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
+          echo "ts-r $version from $REF_NAME (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: build (${{ matrix.name }})
     needs: version
-    if: needs.version.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
+          # The longest job (a PGO build): on a larger, paid runner.
           - name: macos-arm64
-            os: macos-15
+            os: macos-15-xlarge
             targets: aarch64-apple-darwin
             builder: cargo
             pgo: true
@@ -159,14 +161,26 @@ jobs:
             targets: x86_64-apple-darwin
             builder: cargo
             pgo: false
-          - name: linux-x64
+          # glibc and musl in separate jobs, so they build in parallel (each trains its own
+          # profile on the native glibc build).
+          - name: linux-x64-gnu
             os: ubuntu-24.04
-            targets: x86_64-unknown-linux-gnu.2.17 x86_64-unknown-linux-musl
+            targets: x86_64-unknown-linux-gnu.2.17
             builder: zigbuild
             pgo: true
-          - name: linux-arm64
+          - name: linux-x64-musl
+            os: ubuntu-24.04
+            targets: x86_64-unknown-linux-musl
+            builder: zigbuild
+            pgo: true
+          - name: linux-arm64-gnu
             os: ubuntu-24.04-arm
-            targets: aarch64-unknown-linux-gnu.2.17 aarch64-unknown-linux-musl
+            targets: aarch64-unknown-linux-gnu.2.17
+            builder: zigbuild
+            pgo: true
+          - name: linux-arm64-musl
+            os: ubuntu-24.04-arm
+            targets: aarch64-unknown-linux-musl
             builder: zigbuild
             pgo: true
           - name: windows-x64
@@ -361,7 +375,7 @@ jobs:
           else
             notes=(--notes-file "$RUNNER_TEMP/notes.md")
           fi
-          # Tags vVERSION on the merge commit of the release PR.
+          # Tags vVERSION on main's head, the commit this run built.
           # shellcheck disable=SC2086
           gh release create "v$VERSION" out/* --target "$GITHUB_SHA" "${notes[@]}" --title "ts-r $VERSION" $prerelease
 
@@ -369,8 +383,8 @@ jobs:
     name: npm publish
     needs: [version, build, release]
     # The version job already decides; this keeps the publish job itself from running anywhere
-    # but main (publishing) or a release branch (dry run).
-    if: needs.version.outputs.release == 'true' && (github.ref == 'refs/heads/main' || (needs.version.outputs.dry_run == 'true' && startsWith(github.ref_name, 'release/v')))
+    # but main (dry run or release) or a release branch (dry run).
+    if: github.ref == 'refs/heads/main' || (needs.version.outputs.dry_run == 'true' && startsWith(github.ref_name, 'release/v'))
     # GitHub-hosted on purpose: npm trusted publishing rejects self-hosted runners.
     runs-on: ubuntu-latest
     environment: release
@@ -448,14 +462,5 @@ jobs:
           echo "npm auth: $auth"
           echo "npm auth: $auth" >> "$GITHUB_STEP_SUMMARY"
           # Provenance is automatic with trusted publishing; --provenance also covers the token path.
-          flags=(--provenance --access public --tag "$NPM_TAG")
-          if [ "$DRY_RUN" = true ]; then flags+=(--dry-run); fi
-          # Publish order from packages.json: platform packages, then fronts, ts-r, @ts-r.dev/typescript.
-          node -e 'for (const p of require("./npm-dist/packages.json").packages) console.log([p.name, p.version, p.dir].join(" "))' |
-            while read -r name version dir; do
-              if [ "$DRY_RUN" != true ] && npm view "$name@$version" version >/dev/null 2>&1; then
-                echo "$name@$version is already published; skipping"
-                continue
-              fi
-              npm publish "./npm-dist/$dir" "${flags[@]}"
-            done
+          # Two parallel phases: every platform package, then every front package.
+          bash .github/scripts/npm-publish.sh npm-dist

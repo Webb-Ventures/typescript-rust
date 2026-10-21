@@ -178,6 +178,9 @@ fn parse_mem_mb(value: Option<&str>, dedicated_machine: bool) -> Result<Option<u
 pub fn run(mut args: Args) -> Result<ExitCode> {
     let list = args.flag("list");
     let no_fail = args.flag("no-fail");
+    // Only our tools: a baseline run next to a full one (the bench box measures the reference
+    // tools once, in the PR's run; only ours are compared against the baseline).
+    let ours_only = args.flag("ours-only");
     let setup = args.flag("setup");
     let memory = args.flag("memory");
     let fetch_repos = args.flag("fetch-repos");
@@ -420,6 +423,9 @@ pub fn run(mut args: Args) -> Result<ExitCode> {
             if let Some(why) = &t.pending {
                 result.status = "pending".into();
                 result.reason = Some(why.clone());
+            } else if ours_only && !t.ours {
+                result.status = "skipped".into();
+                result.reason = Some("reference tool (--ours-only)".into());
             } else if let Some(r) = pin.filter(|r| !bench_repos::is_fetched(r)) {
                 result.status = "skipped".into();
                 result.reason = Some(format!(

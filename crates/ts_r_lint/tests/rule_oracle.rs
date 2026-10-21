@@ -343,6 +343,57 @@ fn load_baseline(path: &Path) -> BTreeMap<String, usize> {
         .collect()
 }
 
+enum FileResult {
+    /// Left out by `TS_R_LINT_ORACLE_RULE`.
+    Filtered,
+    NotImplemented(String),
+    /// `log` holds the mismatches `TS_R_LINT_ORACLE_VERBOSE` asked for.
+    Ran {
+        rule: String,
+        tally: Tally,
+        log: String,
+    },
+}
+
+/// Replays one rule's recorded cases.
+fn run_file(reg: &'static Registry, f: &Path, filter: Option<&str>, verbose: usize) -> FileResult {
+    let data: Value = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();
+    let rule = data["rule"].as_str().unwrap_or("").to_owned();
+    if let Some(fl) = filter
+        && !fl.split(',').any(|f| rule.contains(f))
+    {
+        return FileResult::Filtered;
+    }
+    if reg.find(&rule).is_none() {
+        return FileResult::NotImplemented(rule);
+    }
+    let mut tally = Tally::default();
+    let mut log = String::new();
+    let mut shown = 0;
+    for case in data["cases"].as_array().into_iter().flatten() {
+        tally.total += 1;
+        let res = std::panic::catch_unwind(|| run_case(reg, &rule, case))
+            .unwrap_or_else(|_| Err("panicked".to_owned()));
+        match res {
+            Ok(()) => tally.passed += 1,
+            Err(e) => {
+                if shown < verbose {
+                    shown += 1;
+                    log.push_str(&format!(
+                        "--- {rule} [{}] options={} \n{}\n  {e}\n",
+                        case["filename"].as_str().unwrap_or(""),
+                        case.get("options")
+                            .map(|o| o.to_string())
+                            .unwrap_or_default(),
+                        case["code"].as_str().unwrap_or("")
+                    ));
+                }
+            }
+        }
+    }
+    FileResult::Ran { rule, tally, log }
+}
+
 #[test]
 fn rule_oracle() {
     let reg = Registry::global();
@@ -359,44 +410,36 @@ fn rule_oracle() {
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .collect();
     files.sort();
+    // Rule files are independent: replay them on up to 4 threads (the CI and corpus limit),
+    // then report in file order so the output stays deterministic.
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<Vec<(usize, FileResult)>> = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(f) = files.get(i) else { break };
+                    let r = run_file(reg, f, filter.as_deref(), verbose);
+                    results.lock().unwrap().push((i, r));
+                }
+            });
+        }
+    });
+    let mut results = results.into_inner().unwrap();
+    results.sort_by_key(|(i, _)| *i);
     let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
     let mut not_implemented = Vec::new();
-    for f in files {
-        let data: Value = serde_json::from_str(&std::fs::read_to_string(&f).unwrap()).unwrap();
-        let rule = data["rule"].as_str().unwrap_or("").to_owned();
-        if let Some(fl) = &filter
-            && !fl.split(',').any(|f| rule.contains(f))
-        {
-            continue;
-        }
-        if reg.find(&rule).is_none() {
-            not_implemented.push(rule);
-            continue;
-        }
-        let mut t = Tally::default();
-        let mut shown = 0;
-        for case in data["cases"].as_array().into_iter().flatten() {
-            t.total += 1;
-            let res = std::panic::catch_unwind(|| run_case(reg, &rule, case))
-                .unwrap_or_else(|_| Err("panicked".to_owned()));
-            match res {
-                Ok(()) => t.passed += 1,
-                Err(e) => {
-                    if shown < verbose {
-                        shown += 1;
-                        eprintln!(
-                            "--- {rule} [{}] options={} \n{}\n  {e}",
-                            case["filename"].as_str().unwrap_or(""),
-                            case.get("options")
-                                .map(|o| o.to_string())
-                                .unwrap_or_default(),
-                            case["code"].as_str().unwrap_or("")
-                        );
-                    }
-                }
+    for (_, r) in results {
+        match r {
+            FileResult::Filtered => {}
+            FileResult::NotImplemented(rule) => not_implemented.push(rule),
+            FileResult::Ran { rule, tally, log } => {
+                eprint!("{log}");
+                tallies.insert(rule, tally);
             }
         }
-        tallies.insert(rule, t);
     }
     let (mut total, mut passed) = (0, 0);
     let mut report = String::from("# rule passed/total (generated by rule_oracle; do not edit)\n");

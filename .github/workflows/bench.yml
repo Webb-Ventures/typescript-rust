@@ -17,8 +17,9 @@ name: Bench
 #     from forks carry no secrets, so a fork's bench takes the comment);
 #   - by hand, a manual run by a trusted user.
 # The box checks each of these again against GitHub before it queues a bench.
-# CODE_REVIEW_BOX: the box's tailnet name, a secret in a public repo (its logs are public, and
-# secrets are masked in them) or a variable.
+# BENCH_BOX: the tailnet name of the box that runs benches (its own machine, with the disk for
+# cached builds), a secret in a public repo (its logs are public, and secrets are masked in them)
+# or a variable. Without it, benches go to the review box (CODE_REVIEW_BOX).
 
 on:
   pull_request:
@@ -75,16 +76,16 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
-      - name: Hand the bench to the review box
+      - name: Hand the bench to the bench box
         env:
-          BOX: ${{ secrets.CODE_REVIEW_BOX || vars.CODE_REVIEW_BOX }}
+          BOX: ${{ secrets.BENCH_BOX || vars.BENCH_BOX || secrets.CODE_REVIEW_BOX || vars.CODE_REVIEW_BOX }}
           PRIVATE_REPO: ${{ github.event.repository.private }}
           TAG: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
           DISPATCH_TOKEN: ${{ secrets.CODE_REVIEW_DISPATCH_TOKEN }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
           COMMENT_ID: ${{ github.event_name == 'issue_comment' && github.event.comment.id || '' }}
         run: |
-          if [ -z "$BOX" ]; then echo "::error::Set CODE_REVIEW_BOX (the review box's tailnet name): a secret in a public repo, so logs mask it, or a variable."; exit 1; fi
+          if [ -z "$BOX" ]; then echo "::error::Set BENCH_BOX or CODE_REVIEW_BOX (the bench box's tailnet name): a secret in a public repo, so logs mask it, or a variable."; exit 1; fi
           jq -nc --argjson run "$GITHUB_RUN_ID" --arg pr "$PR" --arg comment "$COMMENT_ID" --arg repo "$GITHUB_REPOSITORY" \
             '{run_id: $run, pr: ($pr | tonumber), comment_id: (if $comment == "" then null else ($comment | tonumber) end), repo: $repo}' \
             > request.json
