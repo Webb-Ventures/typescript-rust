@@ -40,7 +40,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 | Tool | Replaces | Works today | Known gaps |
 |---|---|---|---|
 | `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and JSX typing; 13% of conformance tests still differ |
-| `ts-r-lint` | ESLint, oxlint | 103 rules that pass every case of ESLint's and typescript-eslint's own tests; flat config, oxlint and Biome configs | No type-aware rules; plugins other than typescript-eslint |
+| `ts-r-lint` | ESLint, oxlint | 154 rules, 51 of them type-aware on ts-r's own checker; 15,471 of 15,517 cases of ESLint's and typescript-eslint's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint |
 | `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, no lowering below ES2022 |
 | `ts-r-run` | tsx, ts-node | Runs TypeScript on Node 22.15+ with tsc 7's JavaScript output | Only the entry's tsconfig is used |
 | `ts-r-dev` | `vite dev` | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling | No `vite.config`, no HTTPS |
@@ -88,11 +88,11 @@ base on dedicated cores, and a slowdown beyond the gate blocks the merge. Method
 <!-- bench:main:start -->
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
-| `version-startup` | `ts-r` 1.73 ms | `esbuild` 4.64 ms | **2.7× faster** |
-| `check-trpc` | `ts-r-check` 410 ms | `tsc-7` 969 ms | **2.4× faster** |
-| `check-date-fns` | `ts-r-check` 889 ms | `tsc-7` 1.76 s | **2.0× faster** |
-| `check-rxjs` | `ts-r-check` 980 ms | `tsc-7` 6.53 s | **6.7× faster** |
-| `build-three-x10` | `ts-r-build` 1.28 s | `esbuild` 1.21 s | 1.1× slower |
+| `version-startup` | `ts-r` 2.25 ms | `esbuild` 5.98 ms | **2.7× faster** |
+| `check-trpc` | `ts-r-check` 453 ms | `tsc-7` 959 ms | **2.1× faster** |
+| `check-date-fns` | `ts-r-check` 889 ms | `tsc-repo` 1.90 s | **2.1× faster** |
+| `check-rxjs` | `ts-r-check` 1.18 s | `tsc-7` 6.10 s | **5.2× faster** |
+| `build-three-x10` | `ts-r-build` 1.43 s | `esbuild` 1.26 s | 1.1× slower |
 
 Medians on linux-x86_64 (four dedicated cores), measured 2026-10-21. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
 <!-- bench:main:end -->

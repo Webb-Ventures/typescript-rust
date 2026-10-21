@@ -79,7 +79,7 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Area | Result |
 |---|---|
-| Type checker vs tsc's conformance suite (exact diagnostics) | 66.1% of 12,769 compared test variants |
+| Type checker vs tsc's conformance suite (exact diagnostics) | 87.1% of 12,750 compared test variants |
 | private-app projects with exactly tsc's diagnostics | 25 of 25 |
 | private-app diagnostics: extra / missing vs tsc | 4 / 128 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
@@ -87,7 +87,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Lint on private-app, every configured rule (type-aware included) vs ESLint | 26,578 match, 0 missed, 0 extra; 23 of 23 projects pass the parity gate |
 | Parser + printer round trip over tsc's test files | 18,260 files, 0 mismatches |
 | Parse corpus (tsc's tests + private-app) | 0 errors where tsc accepts the file |
-| esbuild's bundler test cases | 652 / 746 |
+| esbuild's bundler test cases | 646 / 746 |
 | tsconfig error projects matching tsc | 114 / 118 |
 | Sound-mode spec cases | 221 / 221 |
 | Incremental vs full check | identical in all 25 projects; 18,000 random edits (seeds 1–60 × 300) |

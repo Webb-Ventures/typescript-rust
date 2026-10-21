@@ -1733,13 +1733,11 @@ shares levels; the driver takes any checker (`check_program_with`, `check_files`
   (and without a `tsconfig.json` unit), JavaScript roots are left out of the program and
   reported as global TS6504 with tsc's "Root file specified for compilation" chain, except
   in a test that is itself a `.js` file.
-  Current (2026-10-16, 12769 compared variants, 9 s on 4 threads, after conformance
-  round 4, merged with `m1/transform-run`, and the bench-parity fixes): 8444 exact (66.1%; all
-  diagnostics and chains), 8516 (66.7%) exact on first lines; 1698 variants with a diagnostic
-  tsc does not report, 320 of them tests where tsc reports nothing (round 3 ended at 7879
-  exact, 2319 and 573).
-  The example checks through syntax errors as tsc's harness does (2026-10-19, m8/parser-diagnostics:
-  8642 exact, 306 tests with false positives).
+  Current (2026-10-21, main at 9f23c9d, 12750 compared variants, 22 s on 4 threads): 11111
+  exact (87.1%; all diagnostics and chains), 11136 (87.3%) exact on first lines; 703 variants
+  with a diagnostic tsc does not report, 92 of them tests where tsc reports nothing. Earlier:
+  8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
 - private-app (`ts-r-check -p . --no-history` vs tsc 7 `tsc -p .`): over all 25
