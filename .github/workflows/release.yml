@@ -3,23 +3,34 @@ name: Release
 # Builds every target, attaches archives, SHA256SUMS and an SBOM to a GitHub release, and
 # publishes the npm packages (npm/README.md) with npm trusted publishing (OIDC) and provenance.
 #
-# Releasing takes two steps, both by a maintainer:
-#   1. The release pull request: a branch release/vX.Y.Z or release/vX.Y.Z-<label> into main
-#      (release/v0.1.0, release/v0.1.0-alpha.1), opened by the maintainers' release script with the
-#      version bump, the CHANGELOG entry and the README's release benchmark table. Merging it
-#      publishes nothing.
-#   2. This workflow, run by hand on main with dry_run off (Actions > Release > Run workflow, or
-#      `gh workflow run release.yml --ref main -f dry_run=false`). It publishes the version in
-#      Cargo.toml's [workspace.package]: it refuses 0.0.0, a version whose tag vVERSION already
-#      exists, and a version with no CHANGELOG.md entry. It tags main's head commit vVERSION, so
-#      run it right after merging the release PR (anything merged in between ships too). The
-#      GitHub release's notes are the version's CHANGELOG.md entry.
-# Nothing runs this workflow automatically.
+# A release is a pull request into its own branch, and merging it publishes:
+#   1. A maintainer's release script creates the branch release/vX.Y.Z (or release/vX.Y.Z-<label>:
+#      release/v0.1.0, release/v0.1.0-alpha.2) from main, pushes a branch release-prep/vX.Y.Z with
+#      the version bump, the CHANGELOG entry and the README's release benchmark table, and opens
+#      a pull request from it into release/vX.Y.Z.
+#   2. Every push to that pull request runs this workflow as a dry run, a check on the PR:
+#      everything builds and `npm publish --dry-run` runs; no tag, no GitHub release.
+#   3. Merging the pull request publishes: the push it makes to release/vX.Y.Z runs this
+#      workflow for real. It doesn't build again when the PR's last dry run built exactly this
+#      code: it publishes that run's binaries (see "Reusing the dry run's build" below). It tags
+#      that commit vVERSION, creates the GitHub release (archives,
+#      SHA256SUMS, an SBOM; the notes are the version's CHANGELOG.md entry) and publishes the
+#      npm packages. It refuses 0.0.0, a version that doesn't match the branch, a version whose
+#      tag already exists and a version with no CHANGELOG.md entry.
+#   4. A pull request from release/vX.Y.Z into main brings the version and CHANGELOG back (the
+#      release script's next step; this workflow's token can't open pull requests).
+# Any other push to a release branch (creating it, a direct push) publishes nothing, and nothing
+# on main publishes. A failed publish: re-run the run's failed jobs (packages already on npm are
+# skipped), or merge a fix into the release branch, which publishes again.
+# By hand (Actions > Release > Run workflow): a dry run on any branch.
 #
-# A run with dry_run on (the default) rehearses on main or on a release branch (the release
-# script starts one on the branch when it opens the pull request): everything builds and
-# `npm publish --dry-run` runs; no tag or GitHub release is created. On a release branch, the
-# version must match the branch name.
+# Reusing the dry run's build: a PR dry run that passes uploads a marker artifact
+# release-tree-<tree>, named after the git tree it built (the PR merged into its base). On the
+# merge, the version job looks for that marker for the merged commit's tree: the same tree is the
+# same source, and nothing in a build depends on the commit (no hashes or dates are embedded).
+# Only a run from a branch of this repository counts (a fork's run uploads what it likes). The
+# release and npm jobs then download that run's dist-* archives instead of this run's. No
+# marker (the base moved, the dry run failed, or its artifacts expired after 14 days): it builds.
 #
 # npm auth: trusted publishing (OIDC), no long-lived token. The npm job runs on a GitHub-hosted
 # runner (ubuntu-latest) because npm trusted publishing does not accept self-hosted runners.
@@ -29,8 +40,8 @@ name: Release
 # otherwise the run uses OIDC alone. The publish step logs which one it used.
 #
 # A person must set up, once:
-#   - environment `release`: deployment branches limited to `main` (publishing) and `release/v*`
-#     (dry runs), and optionally required reviewers to gate publishing.
+#   - environment `release`: deployment branches limited to `release/v*` (dry runs don't use
+#     it), and optionally required reviewers to gate publishing.
 #   - for each of the 64 packages listed in npm/README.md (`@ts-r.dev/cli`, `@ts-r.dev/typescript`, the six
 #     tool packages `@ts-r.dev/{run,dev,build,check,lint,lsp}` and the 56 platform packages
 #     `@ts-r.dev/{cli,run,dev,build,check,lint,lsp}-<platform>`), all owned by the `ts-r.dev` npm
@@ -59,19 +70,22 @@ name: Release
 # If PGO fails on a runner, the job warns and ships the plain `dist` build instead.
 
 on:
+  # Merging a release PR: publishes (the version job checks the push is that merge).
+  push:
+    branches: ["release/v*"]
+  # A release PR's dry run.
+  pull_request:
+    branches: ["release/v*"]
+  # A dry run by hand.
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Dry run: build everything and run npm publish --dry-run (no tag, no GitHub release). Turn off on main to publish."
-        type: boolean
-        default: true
 
 permissions:
   contents: read
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  # A newer push to a release PR replaces its dry run; a publish is never cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -83,54 +97,81 @@ jobs:
   version:
     name: version
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     outputs:
       version: ${{ steps.v.outputs.version }}
       dry_run: ${{ steps.v.outputs.dry_run }}
       npm_tag: ${{ steps.v.outputs.npm_tag }}
+      skip: ${{ steps.v.outputs.skip }}
+      tree: ${{ steps.v.outputs.tree }}
+      reuse_run: ${{ steps.reuse.outputs.run }}
     steps:
       - uses: actions/checkout@v4
       - id: v
         env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          EVENT: ${{ github.event_name }}
+          # The release branch: a PR's base, or the branch pushed to.
+          BRANCH: ${{ github.base_ref || github.ref_name }}
+          CREATED: ${{ github.event.created }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
           dry_run=true
-          [ "$DRY_RUN" = false ] && dry_run=false
-          if [ "$REF_TYPE" = branch ] && [ "$REF_NAME" = main ]; then
-            : # main: a dry run, or the release
-          elif [ "$REF_TYPE" = branch ] && [[ "$REF_NAME" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
-            if [ "$dry_run" != true ]; then
-              echo "::error::a release branch only gets dry runs; merge its release PR, then run this workflow on main"
-              exit 1
+          if [ "$EVENT" = push ]; then
+            # Only the merge of a pull request into this branch publishes; creating the branch
+            # or pushing to it directly does nothing.
+            merged=0
+            if [ "$CREATED" != true ]; then
+              for _ in 1 2 3 4 5; do
+                merged=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                  --jq "[.[] | select(.merged_at != null and .base.ref == \"$BRANCH\")] | length")
+                [ "$merged" != 0 ] && break
+                sleep 5
+              done
             fi
+            if [ "$merged" = 0 ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "A push to $BRANCH that isn't a merged pull request: nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            dry_run=false
+          fi
+          if [[ "$BRANCH" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
             core="${BASH_REMATCH[1]}" label="${BASH_REMATCH[3]}"
             if [ "${version%%-*}" != "$core" ]; then
-              echo "::error::branch $REF_NAME is for $core but [workspace.package] version is $version"
+              echo "::error::branch $BRANCH is for $core but [workspace.package] version is $version"
               exit 1
             fi
             if [ "$version" != "$core" ] && { [ -z "$label" ] || [ "${label#"${version#*-}"}" = "$label" ]; }; then
               echo "::error::[workspace.package] version $version is a pre-release; the branch must be release/v$version or release/v$version-<label>"
               exit 1
             fi
-          else
-            echo "::error::run this on main (dry run or release) or on a release/vX.Y.Z[-label] branch (dry run); got $REF_TYPE $REF_NAME"
+          elif [ "$EVENT" != workflow_dispatch ]; then
+            echo "::error::not a release branch: $BRANCH (release/vX.Y.Z or release/vX.Y.Z-<label>)"
             exit 1
           fi
           if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || [ "$version" = 0.0.0 ]; then
-            echo "::error::[workspace.package] version is $version; merge a release PR that sets the version first"
+            echo "::error::[workspace.package] version is $version; the release PR sets the version"
             exit 1
           fi
-          if [ "$dry_run" != true ]; then
-            if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
-              echo "::error::v$version is already released (tag v$version exists); open a release PR for the next version"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            if [ "$dry_run" != true ]; then
+              echo "::error::v$version is already released (tag v$version exists); release the next version from a new branch"
               exit 1
             fi
-            if ! grep -qF "## [v$version]" CHANGELOG.md; then
+            echo "::warning::v$version is already released (tag v$version exists)"
+          fi
+          if ! grep -qF "## [v$version]" CHANGELOG.md; then
+            if [ "$dry_run" != true ]; then
               echo "::error::CHANGELOG.md has no entry for v$version; the release PR adds it"
               exit 1
             fi
+            echo "::warning::CHANGELOG.md has no entry for v$version"
           fi
           npm_tag=latest
           case "$version" in *-*) npm_tag=next ;; esac
@@ -138,12 +179,35 @@ jobs:
             echo "version=$version"
             echo "dry_run=$dry_run"
             echo "npm_tag=$npm_tag"
+            echo "tree=$(git rev-parse 'HEAD^{tree}')"
           } >> "$GITHUB_OUTPUT"
-          echo "ts-r $version from $REF_NAME (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
+          echo "ts-r $version for $BRANCH (dry run: $dry_run, npm dist-tag: $npm_tag)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Reuse the dry run's build?
+        id: reuse
+        if: steps.v.outputs.dry_run == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REPO_ID: ${{ github.repository_id }}
+          TREE: ${{ steps.v.outputs.tree }}
+        run: |
+          # The newest unexpired marker for this tree from a run on this repository's own branch,
+          # whose run passed.
+          runs=$(gh api "repos/$REPO/actions/artifacts?name=release-tree-$TREE&per_page=100" \
+            --jq "[.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == $REPO_ID) | .workflow_run.id] | unique | reverse | .[]")
+          for id in $runs; do
+            if [ "$(gh api "repos/$REPO/actions/runs/$id" --jq '.event + " " + .conclusion')" = "pull_request success" ]; then
+              echo "run=$id" >> "$GITHUB_OUTPUT"
+              echo "Publishing the binaries of dry run [$id](https://github.com/$REPO/actions/runs/$id), which built this tree ($TREE)." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "No passed dry run built this tree ($TREE): building." >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: build (${{ matrix.name }})
     needs: version
+    if: needs.version.outputs.skip != 'true' && needs.version.outputs.reuse_run == ''
     strategy:
       fail-fast: false
       matrix:
@@ -328,9 +392,14 @@ jobs:
   release:
     name: GitHub release (checksums, SBOM)
     needs: [version, build]
+    # The build is skipped when the dry run's is reused.
+    if: >-
+      !cancelled() && needs.version.result == 'success' && needs.version.outputs.skip != 'true'
+      && (needs.build.result == 'success' || (needs.build.result == 'skipped' && needs.version.outputs.reuse_run != ''))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     env:
       VERSION: ${{ needs.version.outputs.version }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
@@ -341,6 +410,9 @@ jobs:
           pattern: dist-*
           path: out
           merge-multiple: true
+          # The dry run's archives when reused; with no token, this run's.
+          run-id: ${{ needs.version.outputs.reuse_run || github.run_id }}
+          github-token: ${{ needs.version.outputs.reuse_run != '' && github.token || '' }}
       - name: SBOM (Cargo.lock, SPDX)
         uses: anchore/sbom-action@v0
         with:
@@ -375,21 +447,24 @@ jobs:
           else
             notes=(--notes-file "$RUNNER_TEMP/notes.md")
           fi
-          # Tags vVERSION on main's head, the commit this run built.
+          # Tags vVERSION on the release branch's head: the merge this run built.
           # shellcheck disable=SC2086
           gh release create "v$VERSION" out/* --target "$GITHUB_SHA" "${notes[@]}" --title "ts-r $VERSION" $prerelease
 
   npm:
     name: npm publish
     needs: [version, build, release]
-    # The version job already decides; this keeps the publish job itself from running anywhere
-    # but main (dry run or release) or a release branch (dry run).
-    if: github.ref == 'refs/heads/main' || (needs.version.outputs.dry_run == 'true' && startsWith(github.ref_name, 'release/v'))
+    # The version job already decides; this keeps a publish (not a dry run) to a push to a
+    # release branch, and the environment (npm trusted publishing is pinned to it) to publishing.
+    if: >-
+      !cancelled() && needs.release.result == 'success'
+      && (needs.version.outputs.dry_run == 'true' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/v')))
     # GitHub-hosted on purpose: npm trusted publishing rejects self-hosted runners.
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ needs.version.outputs.dry_run != 'true' && 'release' || '' }}
     permissions:
       contents: read
+      actions: read # the dry run's archives, when reused
       id-token: write # npm trusted publishing (OIDC) and provenance
     env:
       VERSION: ${{ needs.version.outputs.version }}
@@ -420,6 +495,8 @@ jobs:
           pattern: dist-*
           path: archives
           merge-multiple: true
+          run-id: ${{ needs.version.outputs.reuse_run || github.run_id }}
+          github-token: ${{ needs.version.outputs.reuse_run != '' && github.token || '' }}
       - name: Unpack binaries into artifacts/<triple>/
         run: |
           set -euo pipefail
@@ -464,3 +541,13 @@ jobs:
           # Provenance is automatic with trusted publishing; --provenance also covers the token path.
           # Two parallel phases: every platform package, then every front package.
           bash .github/scripts/npm-publish.sh npm-dist
+      # The last step of a passed PR dry run: its build can be published when the PR merges as is.
+      - name: Mark this build reusable by the merge
+        if: github.event_name == 'pull_request' && needs.version.outputs.dry_run == 'true'
+        run: echo "${{ needs.version.outputs.tree }}" > "$RUNNER_TEMP/tree"
+      - if: github.event_name == 'pull_request' && needs.version.outputs.dry_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tree-${{ needs.version.outputs.tree }}
+          path: ${{ runner.temp }}/tree
+          retention-days: 14
