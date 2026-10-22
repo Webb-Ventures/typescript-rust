@@ -1,0 +1,13 @@
+a.tsx(19,13): error TS2322: Type '{ children: () => string; }' is not assignable to type '{ children?: Node; }'.
+  Types of property 'children' are incompatible.
+    Type '() => string' is not assignable to type 'Node'.
+a.tsx(20,14): error TS2322: Type '{ children: (string | (() => string))[]; }' is not assignable to type '{ children?: Node; }'.
+  Types of property 'children' are incompatible.
+    Type '(string | (() => string))[]' is not assignable to type 'Node'.
+      Type '(string | (() => string))[]' is not assignable to type 'Iterable<Node>'.
+        The types returned by '[Symbol.iterator]().next(...)' are incompatible between these types.
+          Type 'IteratorResult<string | (() => string), undefined>' is not assignable to type 'IteratorResult<Node, any>'.
+            Type 'IteratorYieldResult<string | (() => string)>' is not assignable to type 'IteratorResult<Node, any>'.
+              Type 'IteratorYieldResult<string | (() => string)>' is not assignable to type 'IteratorYieldResult<Node>'.
+                Type 'string | (() => string)' is not assignable to type 'Node'.
+                  Type '() => string' is not assignable to type 'Node'.

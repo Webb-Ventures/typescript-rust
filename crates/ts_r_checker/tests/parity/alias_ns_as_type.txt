@@ -1,0 +1,4 @@
+a.ts(9,8): error TS2709: Cannot use namespace 'N' as a type.
+a.ts(10,8): error TS2709: Cannot use namespace 'T' as a type.
+a.ts(11,8): error TS2709: Cannot use namespace 'q' as a type.
+a.ts(12,8): error TS2709: Cannot use namespace 'n2' as a type.

@@ -454,3 +454,106 @@ fn imported_json_outside_root_dir() {
     assert!(!written.iter().any(|p| p.ends_with(".json")), "{written:?}");
     assert_eq!(codes, Vec::<u32>::new());
 }
+
+fn conflicts(files: &[(&str, &str)]) -> Vec<(u32, String)> {
+    let (fs, parsed) = project(files);
+    let program = load_program(&fs, &parsed.file_names, &parsed.options, None, 1);
+    let cfg = EmitConfig {
+        options: &parsed.options,
+        config: Some(&parsed),
+        threads: 1,
+        case_sensitive: true,
+        specifiers: None,
+    };
+    ts_r_emit::output_path_conflicts(&program, &cfg)
+}
+
+/// TS5055 for an output that is an input, TS5056 for an output two sources write; only
+/// emitted files count (JavaScript needs `allowJs`, `node_modules` files are libraries').
+/// Baselines: `jsFileCompilationWithJsEmitPathSameAsInput`,
+/// `moduleResolution_explicitNodeModulesImport`, `parserReturnStatement4`.
+#[test]
+fn output_path_conflicts() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "outDir": "out", "rootDir": "." }, "files": ["a.ts", "out/a.js"] }"#;
+    let found = conflicts(&[
+        ("tsconfig.json", config),
+        ("a.ts", "export {};\n"),
+        ("out/a.js", "var x;\n"),
+    ]);
+    assert_eq!(found, vec![(5055, "/p/out/a.js".to_owned())]);
+
+    let config = r#"{ "compilerOptions": { "allowJs": true }, "files": ["a.ts", "a.js"] }"#;
+    let found = conflicts(&[
+        ("tsconfig.json", config),
+        ("a.ts", "export {};\n"),
+        ("a.js", "var x;\n"),
+    ]);
+    // Raw, as tsc collects them: sorting the diagnostics drops the repeated TS5055.
+    let a = "/p/a.js".to_owned();
+    assert_eq!(found, vec![(5055, a.clone()), (5055, a.clone()), (5056, a)]);
+
+    let config = r#"{ "compilerOptions": { "outDir": "out" }, "files": ["a.ts", "a.tsx"] }"#;
+    let found = conflicts(&[
+        ("tsconfig.json", config),
+        ("a.ts", "export {};\n"),
+        ("a.tsx", "export {};\n"),
+    ]);
+    assert_eq!(found, vec![(5056, "/p/out/a.js".to_owned())]);
+
+    // No allowJs: the JavaScript root is not emitted, so its own path is no conflict.
+    let config = r#"{ "files": ["a.js"] }"#;
+    assert!(conflicts(&[("tsconfig.json", config), ("a.js", "var x;\n")]).is_empty());
+
+    // A library file reached by a relative import is not emitted.
+    let config = r#"{ "compilerOptions": { "allowJs": true, "maxNodeModuleJsDepth": 1 }, "files": ["src/a.ts"] }"#;
+    let found = conflicts(&[
+        ("tsconfig.json", config),
+        ("src/a.ts", "import \"../node_modules/foo\";\n"),
+        ("node_modules/foo/index.js", "var x;\n"),
+    ]);
+    assert!(found.is_empty(), "{found:?}");
+
+    let config = r#"{ "compilerOptions": { "noEmit": true }, "files": ["a.ts", "a.tsx"] }"#;
+    let found = conflicts(&[
+        ("tsconfig.json", config),
+        ("a.ts", "export {};\n"),
+        ("a.tsx", "export {};\n"),
+    ]);
+    assert!(found.is_empty());
+}
+
+/// TS5009 when `outDir` is set, there is no config file or `rootDir`, and the emitted files
+/// sit on different drives (baselines `commonSourceDir1`..`commonSourceDir4`).
+#[test]
+fn no_common_source_directory() {
+    let run = |second: &str, case_sensitive: bool| -> Vec<u32> {
+        let mut fs = if case_sensitive {
+            MemoryFs::new()
+        } else {
+            MemoryFs::case_insensitive()
+        };
+        fs.set_cwd("/p");
+        fs.add_file("A:/foo/bar.ts", "var x: number;\n");
+        fs.add_file(second, "var y: number;\n");
+        fs.add_file(
+            "/p/tsconfig.json",
+            r#"{ "compilerOptions": { "outDir": "A:/" }, "files": [] }"#,
+        );
+        let parsed = load_tsconfig(&fs, "/p/tsconfig.json");
+        let roots = vec!["A:/foo/bar.ts".to_owned(), second.to_owned()];
+        let program = load_program(&fs, &roots, &parsed.options, None, 1);
+        let cfg = EmitConfig {
+            options: &parsed.options,
+            config: None,
+            threads: 1,
+            case_sensitive,
+            specifiers: None,
+        };
+        let (_, global) = ts_r_emit::root_dir_diagnostics(&program, &cfg);
+        global.iter().map(|d| d.code).collect()
+    };
+    assert_eq!(run("A:/foo/baz.ts", true), Vec::<u32>::new());
+    assert_eq!(run("B:/foo/baz.ts", true), vec![5009]);
+    assert_eq!(run("a:/foo/baz.ts", true), vec![5009]);
+    assert_eq!(run("a:/foo/baz.ts", false), Vec::<u32>::new());
+}

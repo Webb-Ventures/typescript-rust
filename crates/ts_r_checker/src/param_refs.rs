@@ -31,7 +31,8 @@
 //! TS2304), when the class's constructor implementation declares the same name (a
 //! parameter or a local of its body): the initializer would run inside the constructor and
 //! see the local. Not reported when class fields are native (`useDefineForClassFields` with
-//! target ES2022 or later).
+//! target ES2022 or later). The same read in a `typeof` query of the property's type is TS2844
+//! (tsc: binder/nameresolver.go, the property-declaration case of name resolution).
 
 use ts_r_ast::{MethodKind, Modifiers, Node, NodeId, Span};
 use ts_r_config::ScriptTarget;
@@ -68,6 +69,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             Some((d_name, _)) => {
                 let d_span: Span = ast.span(d_name);
                 if d_span == unit_span {
+                    self.self_referencing_default_annotation(e, unit);
                     self.error(e, dg::PARAMETER_0_CANNOT_REFERENCE_ITSELF_2372, &[name]);
                 } else if d_span.start > unit_span.start {
                     self.error(
@@ -289,33 +291,35 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut prev = e;
         let mut cur = self.c.parent(e);
         let mut prop = None;
+        let mut in_query = false;
         for _ in 0..MAX_WALK {
             let Some(c) = cur else {
                 return false;
             };
             match *ast.node(c.node) {
                 Node::PropertyDef {
-                    value: Some(v),
+                    value,
+                    type_ann,
                     modifiers,
                     key,
                     ..
-                } if v == prev.node => {
+                } if value == Some(prev.node) || (in_query && type_ann == Some(prev.node)) => {
                     if modifiers.contains(Modifiers::STATIC) {
                         return false;
                     }
-                    prop = Some((c, key));
+                    prop = Some((c, key, type_ann == Some(prev.node)));
                     break;
                 }
-                Node::ClassDecl { .. }
-                | Node::ClassExpr { .. }
-                | Node::TypeQuery { .. }
-                | Node::Program { .. } => return false,
+                Node::TypeQuery { .. } => in_query = true,
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } | Node::Program { .. } => {
+                    return false;
+                }
                 _ => {}
             }
             prev = c;
             cur = self.c.parent(c);
         }
-        let Some((p, key)) = prop else {
+        let Some((p, key, in_type)) = prop else {
             return false;
         };
         let Some(class) = self.c.parent(p) else {
@@ -349,8 +353,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some((f, body)) = ctor else {
             return false;
         };
-        // An unresolved name that is also an instance member is TS2663 instead.
-        if s.is_none() {
+        // An unresolved name that is also an instance member is TS2663 instead (not in a
+        // `typeof` query, where no `this.` prefix is suggested).
+        if s.is_none() && !in_query {
             let member_named = ast.list(members).iter().any(|&m| match *ast.node(m) {
                 Node::PropertyDef { key, modifiers, .. }
                 | Node::MethodDef { key, modifiers, .. } => {
@@ -381,11 +386,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             return false;
         }
         let prop_name = self.c.text(Loc::new(e.file, key)).to_owned();
-        self.error(
-            e,
-            dg::INITIALIZER_OF_INSTANCE_MEMBER_VARIABLE_0_CANNOT_REFERENCE_IDENTIFIER_1_DECLARED_2301,
-            &[&prop_name, name],
-        );
+        let info = if in_type {
+            dg::TYPE_OF_INSTANCE_MEMBER_VARIABLE_0_CANNOT_REFERENCE_IDENTIFIER_1_DECLARED_IN_THE_2844
+        } else {
+            dg::INITIALIZER_OF_INSTANCE_MEMBER_VARIABLE_0_CANNOT_REFERENCE_IDENTIFIER_1_DECLARED_2301
+        };
+        self.error(e, info, &[&prop_name, name]);
         true
     }
 
@@ -427,6 +433,45 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The parameter or binding element whose default value evaluates `e` immediately, and
     /// that unit's name node.
+    /// TS2502 at a parameter whose default reads the parameter itself, when its declared
+    /// type (annotated or `?`) includes `undefined` under strict null checks: whether the
+    /// default removes `undefined` from it depends on the default's own type.
+    fn self_referencing_default_annotation(&mut self, e: Loc, unit: Loc) {
+        if !self.c.opts.strict_null_checks || self.c.file(e.file).is_js() {
+            return;
+        }
+        let ast = self.ast(unit.file);
+        let Node::Param {
+            pattern,
+            init: Some(init),
+            type_ann,
+            optional,
+            ..
+        } = *ast.node(unit.node)
+        else {
+            return;
+        };
+        let inside = ast.span(init);
+        let at = ast.span(e.node);
+        if (type_ann.is_none() && !optional)
+            || !matches!(ast.node(pattern), Node::Ident { .. })
+            || at.start < inside.start
+            || at.end > inside.end
+        {
+            return;
+        }
+        let t = self.param_type(unit);
+        if !self.contains_undefined(t) {
+            return;
+        }
+        let name = self.c.text(Loc::new(unit.file, pattern)).to_owned();
+        self.error(
+            Loc::new(unit.file, pattern),
+            dg::_0_IS_REFERENCED_DIRECTLY_OR_INDIRECTLY_IN_ITS_OWN_TYPE_ANNOTATION_2502,
+            &[&name],
+        );
+    }
+
     fn initializer_unit_of(&self, e: Loc) -> Option<(Loc, NodeId)> {
         let ast = self.ast(e.file);
         let mut prev = e;

@@ -305,6 +305,7 @@ pub fn with_files(
         roots: program.roots.clone(),
         missing_libs: program.missing_libs.clone(),
         missing_types: program.missing_types.clone(),
+        missing_type_references: program.missing_type_references.clone(),
         ambiguous_roots: program.ambiguous_roots.clone(),
         deps: program.deps.clone(),
     }

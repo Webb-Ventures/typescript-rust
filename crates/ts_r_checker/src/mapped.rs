@@ -142,6 +142,70 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.instantiate(raw, info.mapper)
     }
 
+    /// TS2322 when the keys of `{ [K in C as N]: X }` can't all be property keys: the
+    /// `as` type `N` if written, else the constraint `C`, must be a `string | number |
+    /// symbol` (tsc: tsc/internal/checker/checker.go, checkMappedType).
+    pub(crate) fn check_mapped_type_keys(&mut self, l: Loc) {
+        let t = self.mapped_type_from_node(l, AliasId::NONE);
+        let Some(info) = self.mapped_info(t) else {
+            return;
+        };
+        let (key, at) = match (info.name_node, info.constraint_node) {
+            (Some(n), _) => (self.mapped_name_raw(&info), n),
+            (None, Some(c)) => (Some(self.mapped_constraint(&info)), c),
+            (None, None) => return,
+        };
+        let Some(key) = key else { return };
+        if key == TypeId::UNRESOLVED || self.store().is_error(key) || self.key_param_exempt(l, key)
+        {
+            return;
+        }
+        // (In the true branch of a conditional type the key reads with what the check
+        // implies: `T` in `T extends string ? { [P in T]: X } : Y` is a `T & string`.)
+        let key = self.with_implied_constraints(Loc::new(l.file, at), key);
+        let keys = self.keyof_constraint();
+        self.check_type_related(
+            key,
+            keys,
+            ts_r_types::RelationKind::Assignable,
+            Some(Loc::new(l.file, at)),
+            None,
+        );
+    }
+
+    /// A key that is a type parameter tsc constrains differently: an `infer` parameter
+    /// (implicitly a property key where it is inferred), or one whose own constraint holds
+    /// this mapped type (`[P in P]`, `T extends { [P in T]: X }`: circular, TS2313).
+    fn key_param_exempt(&mut self, l: Loc, key: TypeId) -> bool {
+        let Some(sym) = self.store().type_param_data(key).map(|d| d.sym) else {
+            return false;
+        };
+        for d in self.c.decls(sym) {
+            if d.file != l.file {
+                continue;
+            }
+            if self
+                .c
+                .parent(d)
+                .is_some_and(|p| matches!(self.node(p), Node::InferType { .. }))
+            {
+                return true;
+            }
+            let mut cur = Some(l);
+            let mut steps = 0;
+            while let Some(c) = cur
+                && steps < 256
+            {
+                if c == d || self.c.parent(d) == Some(c) && c == l {
+                    return true;
+                }
+                cur = self.c.parent(c);
+                steps += 1;
+            }
+        }
+        false
+    }
+
     fn mapped_name_raw(&mut self, info: &MappedInfo) -> Option<TypeId> {
         let n = info.name_node?;
         Some(self.type_from_node(Loc::new(info.decl.file, n)))
@@ -189,7 +253,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The type parameter `T` of a `{ [K in keyof T]: ... }` declaration.
-    fn homomorphic_type_variable(&mut self, info: &MappedInfo) -> Option<TypeId> {
+    pub(crate) fn homomorphic_type_variable(&mut self, info: &MappedInfo) -> Option<TypeId> {
         let op = self.keyof_constraint_operand(info)?;
         let t = self.type_from_node(op);
         self.store()
@@ -222,6 +286,56 @@ impl<'c, 'a> Ck<'c, 'a> {
         let c = self.mapped_constraint(&info);
         let s = self.store();
         matches!(s.kind(c), TypeKind::Index(x) if s.flags(x).contains(TypeFlags::TYPE_PARAMETER))
+    }
+
+    /// The `?` direction of a mapped type: `1` when it adds `?`, `-1` when it removes it,
+    /// otherwise the direction of the mapped type it copies modifiers from (an intersection
+    /// counts when all its members agree).
+    pub fn combined_mapped_optionality(&mut self, t: TypeId) -> i8 {
+        let mut cur = t;
+        for _ in 0..16 {
+            if let Some(info) = self.mapped_info(cur) {
+                match info.optional {
+                    MappedModifier::Present | MappedModifier::Add => return 1,
+                    MappedModifier::Remove => return -1,
+                    MappedModifier::None => {}
+                }
+                cur = self.mapped_modifiers_type(&info);
+                continue;
+            }
+            if self.store().flags(cur).contains(TypeFlags::INTERSECTION) {
+                let ms = self.store().members_of_union(cur).to_vec();
+                let mut first = None;
+                for m in ms {
+                    let o = self.combined_mapped_optionality(m);
+                    match first {
+                        None => first = Some(o),
+                        Some(f) if f != o => return 0,
+                        _ => {}
+                    }
+                }
+                return first.unwrap_or(0);
+            }
+            return 0;
+        }
+        0
+    }
+
+    /// The template of a mapped type with its key parameter replaced by `key`, with
+    /// `undefined` added when the mapped type adds `?`; and its `as` type for that key.
+    pub fn mapped_template_and_name_for_key(
+        &mut self,
+        info: &MappedInfo,
+        key: TypeId,
+    ) -> (TypeId, Option<TypeId>) {
+        let m = self.mapped_template_mapper(info, key);
+        let raw = self.mapped_template_raw(info);
+        let mut tpl = self.instantiate(raw, m);
+        if includes(info.optional) {
+            tpl = self.add_optionality(tpl);
+        }
+        let name = self.mapped_name_raw(info).map(|n| self.instantiate(n, m));
+        (tpl, name)
     }
 
     pub fn is_generic_mapped_type(&mut self, t: TypeId) -> bool {
@@ -261,6 +375,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             return None;
         }
         let declared_alias = self.declared_alias_of_node(info.decl);
+        // A union constraint maps member by member (`Partial<A & C<T>>` with a conditional
+        // `C<T>` reads as `Partial<A & X> | Partial<A & Y>`), as an instantiation does.
+        if self.store().flags(b).contains(TypeFlags::UNION) {
+            let members = self.store().members_of_union(b).to_vec();
+            let parts: Vec<TypeId> = members
+                .into_iter()
+                .map(|c| self.mapped_constituent(&info, &outer, &args, i, c, declared_alias))
+                .collect();
+            return Some(self.union_with(&parts, crate::unions::Reduction::Literal, AliasId::NONE));
+        }
         Some(self.mapped_constituent(&info, &outer, &args, i, b, declared_alias))
     }
 
@@ -553,12 +677,112 @@ impl<'c, 'a> Ck<'c, 'a> {
     // ---------------------------------------------------------------------------------
 
     /// Members of a mapped type (empty while its constraint is generic).
+    /// The keys a generic key type is known to have at least: `keyof T` reads as the keys of
+    /// `T`'s apparent type, a distributive conditional over such a key type is applied to
+    /// those keys (`Exclude<keyof T, "a">` with `T extends { a; b }` is `"b"`), and unions
+    /// and intersections map their members. Anything else is itself.
+    /// (tsc: `getLowerBoundOfKeyType` in tsc/internal/checker/checker.go.)
+    pub(crate) fn lower_bound_of_key_type(&mut self, t: TypeId, depth: u32) -> TypeId {
+        if depth > 8 {
+            return t;
+        }
+        let s = self.store();
+        let f = s.flags(t);
+        if let TypeKind::Index(x) = s.kind(t) {
+            let a = self.apparent_type(x);
+            if a == TypeId::UNRESOLVED || self.c.is_tuple_type(a) || self.is_generic_type(a) {
+                return t;
+            }
+            return self.keyof_type(a);
+        }
+        if let Some(d) = s.conditional_data(t) {
+            let root = *s.conditional_root_data(d.root);
+            let outer = s.list_items(root.outer_params).to_vec();
+            if !root.distributive {
+                return t;
+            }
+            let Some(i) = outer.iter().position(|&p| p == root.check) else {
+                return t;
+            };
+            let args = self.mapped_args(&outer, d.mapper, MapperId::IDENTITY);
+            let check = args[i];
+            let lb = self.lower_bound_of_key_type(check, depth + 1);
+            if lb == check {
+                return t;
+            }
+            let members = self.union_members(lb);
+            let mut parts = Vec::with_capacity(members.len());
+            let mut a2 = args;
+            for mem in members {
+                a2[i] = mem;
+                let mm = self.canonical_mapper(&outer, &a2);
+                parts.push(self.get_conditional_type(d.root, mm, AliasId::NONE));
+            }
+            return self.union_with(&parts, crate::unions::Reduction::Literal, AliasId::NONE);
+        }
+        if f.contains(TypeFlags::UNION) {
+            let ms = s.members_of_union(t).to_vec();
+            let parts: Vec<TypeId> = ms
+                .into_iter()
+                .map(|m| self.lower_bound_of_key_type(m, depth + 1))
+                .collect();
+            return self.union_with(&parts, crate::unions::Reduction::Literal, AliasId::NONE);
+        }
+        if f.contains(TypeFlags::INTERSECTION) {
+            let ms = s.members_of_union(t).to_vec();
+            // `string & {}` stays as written.
+            if self.primitive_with_empty_object(t).is_some() {
+                return t;
+            }
+            let parts: Vec<TypeId> = ms
+                .into_iter()
+                .map(|m| self.lower_bound_of_key_type(m, depth + 1))
+                .collect();
+            return self.intersection(&parts);
+        }
+        t
+    }
+
+    /// The members of a generic mapped type whose key type is not `keyof X` can still be
+    /// read off its key type's lower bound when that bound is concrete.
+    pub(crate) fn mapped_lower_bound_keys(&mut self, t: TypeId) -> Option<TypeId> {
+        if let Some(&b) = self.mapped_key_bounds.get(&t) {
+            return b;
+        }
+        self.mapped_key_bounds.insert(t, None);
+        let b = self.mapped_lower_bound_keys_uncached(t);
+        self.mapped_key_bounds.insert(t, b);
+        b
+    }
+
+    fn mapped_lower_bound_keys_uncached(&mut self, t: TypeId) -> Option<TypeId> {
+        let info = self.mapped_info(t)?;
+        if self.keyof_constraint_operand(&info).is_some() {
+            return None;
+        }
+        let c = self.mapped_constraint(&info);
+        if c == TypeId::UNRESOLVED || !self.is_generic_index_type(c) {
+            return None;
+        }
+        let lb = self.lower_bound_of_key_type(c, 0);
+        if lb == c || lb == TypeId::UNRESOLVED || self.is_generic_index_type(lb) {
+            return None;
+        }
+        Some(lb)
+    }
+
     pub fn mapped_members(&mut self, t: TypeId) -> ResolvedMembers {
         let Some(info) = self.mapped_info(t) else {
             return ResolvedMembers::empty();
         };
-        let constraint = self.mapped_constraint(&info);
-        if constraint == TypeId::UNRESOLVED || self.is_generic_index_type(constraint) {
+        let mut constraint = self.mapped_constraint(&info);
+        if constraint != TypeId::UNRESOLVED && self.is_generic_index_type(constraint) {
+            match self.mapped_lower_bound_keys(t) {
+                Some(lb) => constraint = lb,
+                None => return ResolvedMembers::empty(),
+            }
+        }
+        if constraint == TypeId::UNRESOLVED {
             return ResolvedMembers::empty();
         }
         let name_raw = self.mapped_name_raw(&info);
@@ -583,6 +807,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 None => key,
             };
             for pn in self.union_members(pnt) {
+                // `string & {}` keys an index signature as `string` does.
+                let pn = self.primitive_with_empty_object(pn).unwrap_or(pn);
                 let pf = self.store().flags(pn);
                 if let Some(name) = self.property_name_of_type(pn) {
                     let nid = self.store().intern_str(&name);
@@ -811,12 +1037,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             // Through another template, an array from the call's contextual type still
             // reverse-maps to an array (`Post[]` against `Promise.all`'s `{ -readonly [P in
             // keyof T]: Awaited<T[P]> }` makes `T` an array, not a tuple context); its
-            // elements are a silent `any`.
+            // element reverse-maps through the template (a silent `any` when it can't), and
+            // an array of tuples (`[string, number][]`) keeps its elements tuple contexts.
+            let tuple_elements = self.is_array_of_tuples(source);
             let src = if simple {
                 self.constrained_reverse_source(source, tv, None, true)
                     .unwrap_or(source)
-            } else if ctx.from_return_context && self.c.is_array_type(source) {
-                self.create_array(TypeId::ANY, false)
+            } else if ctx.from_return_context && self.c.is_array_type(source) && !tuple_elements {
+                match self.reverse_mapped(source, tmpl, tv, &info, depth) {
+                    Some(r) if info.name_node.is_none() => r,
+                    _ => self.create_array(TypeId::ANY, false),
+                }
             } else if !self.mentions_type_variable(tmpl, tv)
                 && let Some(r) = self.reverse_mapped_unknown(source)
             {
@@ -920,9 +1151,25 @@ impl<'c, 'a> Ck<'c, 'a> {
         if s.flags(constraint)
             .intersects(TypeFlags::UNION_OR_INTERSECTION)
         {
+            // In a union, only a parameter that is a member or `keyof` one gets it (observed:
+            // `"x" | keyof C<T>` with a conditional `C` infers nothing for `T`).
+            let direct: Option<Vec<TypeId>> =
+                s.flags(constraint).contains(TypeFlags::UNION).then(|| {
+                    s.members_of_union(constraint)
+                        .iter()
+                        .map(|&m| match s.kind(m) {
+                            ts_r_types::TypeKind::Index(x) => x,
+                            _ => m,
+                        })
+                        .collect()
+                });
             for i in 0..ctx.params.len() {
                 let tv = ctx.params[i];
-                if self.type_mentions(constraint, tv) {
+                let mentioned = match &direct {
+                    Some(d) => d.contains(&tv),
+                    None => self.type_mentions(constraint, tv),
+                };
+                if mentioned {
                     let saved = ctx.weak_mode;
                     ctx.weak_mode = true;
                     self.infer_from(ctx, TypeId::UNRESOLVED, tv, contra, depth + 1);

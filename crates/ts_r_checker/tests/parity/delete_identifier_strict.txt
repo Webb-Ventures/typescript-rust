@@ -1,0 +1,4 @@
+a.ts(1,43): error TS1102: 'delete' cannot be called on an identifier in strict mode.
+a.ts(1,43): error TS2703: The operand of a 'delete' operator must be a property reference.
+a.ts(2,36): error TS1102: 'delete' cannot be called on an identifier in strict mode.
+a.ts(2,36): error TS2703: The operand of a 'delete' operator must be a property reference.

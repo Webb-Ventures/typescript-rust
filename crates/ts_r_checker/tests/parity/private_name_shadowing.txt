@@ -1,0 +1,3 @@
+a.ts(9,34): error TS18014: The property '#foo' cannot be accessed on type 'A' within this class because it is shadowed by another private identifier with the same spelling.
+a.ts(11,29): error TS18014: The property '#s' cannot be accessed on type 'typeof A' within this class because it is shadowed by another private identifier with the same spelling.
+a.ts(21,28): error TS18013: Property '#foo' is not accessible outside class 'A' because it has a private identifier.

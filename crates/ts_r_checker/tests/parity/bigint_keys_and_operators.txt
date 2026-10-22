@@ -1,0 +1,14 @@
+a.ts(2,18): error TS2322: Type 'bigint' is not assignable to type 'string | number | symbol'.
+  Type 'bigint' is not assignable to type 'string | number | symbol'.
+a.ts(3,18): error TS2322: Type 'boolean' is not assignable to type 'string | number | symbol'.
+a.ts(6,15): error TS1539: A 'bigint' literal cannot be used as a property name.
+a.ts(7,21): error TS1539: A 'bigint' literal cannot be used as a property name.
+a.ts(8,14): error TS1539: A 'bigint' literal cannot be used as a property name.
+a.ts(10,11): error TS2736: Operator '+' cannot be applied to type 'bigint'.
+a.ts(11,58): error TS2736: Operator '+' cannot be applied to type 'S'.
+a.ts(12,10): error TS2365: Operator '>>>' cannot be applied to types 'bigint' and '1n'.
+a.ts(13,13): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(13,13): error TS2365: Operator '&' cannot be applied to types 'string' and 'bigint'.
+a.ts(14,18): error TS6807: This operation can be simplified. This shift is identical to `1 << 0`.
+a.ts(14,31): error TS6807: This operation can be simplified. This shift is identical to `1 << -1`.
+a.ts(14,46): error TS6807: This operation can be simplified. This shift is identical to `8 >> 8`.

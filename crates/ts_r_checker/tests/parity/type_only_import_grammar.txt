@@ -1,0 +1,7 @@
+b.ts(2,8): error TS1363: A type-only import can specify a default import or named bindings, but not both.
+b.ts(3,8): error TS1363: A type-only import can specify a default import or named bindings, but not both.
+c.ts(4,1): error TS1392: An import alias cannot use 'import type'
+d.ts(2,12): error TS1380: An import alias cannot reference a declaration that was imported using 'import type'.
+d.ts(3,13): error TS1380: An import alias cannot reference a declaration that was imported using 'import type'.
+e.ts(2,12): error TS1380: An import alias cannot reference a declaration that was imported using 'import type'.
+e.ts(4,12): error TS1379: An import alias cannot reference a declaration that was exported using 'export type'.

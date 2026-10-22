@@ -1,0 +1,8 @@
+a.ts(11,17): error TS2341: Property 'priv' is private and only accessible within class 'K'.
+a.ts(17,9): error TS2341: Property 'priv' is private and only accessible within class 'K'.
+a.ts(18,9): error TS2445: Property 'prot' is protected and only accessible within class 'K' and its subclasses.
+a.ts(20,9): error TS2341: Property 'priv' is private and only accessible within class 'K'.
+a.ts(22,4): error TS2341: Property 'priv' is private and only accessible within class 'K'.
+a.ts(23,4): error TS2341: Property 'priv' is private and only accessible within class 'K'.
+a.ts(24,14): error TS2341: Property 'priv' is private and only accessible within class 'K'.
+a.ts(24,20): error TS2445: Property 'prot' is protected and only accessible within class 'K' and its subclasses.

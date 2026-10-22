@@ -1,0 +1,14 @@
+a.ts(2,4): error TS7030: Not all code paths return a value.
+a.ts(3,13): error TS7030: Not all code paths return a value.
+a.ts(4,13): error TS7030: Not all code paths return a value.
+a.ts(5,8): error TS7030: Not all code paths return a value.
+a.ts(6,15): error TS7030: Not all code paths return a value.
+a.ts(6,59): error TS7030: Not all code paths return a value.
+a.ts(6,112): error TS7030: Not all code paths return a value.
+a.ts(7,4): error TS7030: Not all code paths return a value.
+a.ts(8,4): error TS7030: Not all code paths return a value.
+a.ts(9,11): error TS7030: Not all code paths return a value.
+a.ts(11,17): error TS7030: Not all code paths return a value.
+a.ts(12,17): error TS7030: Not all code paths return a value.
+a.ts(13,24): error TS7030: Not all code paths return a value.
+a.ts(18,25): error TS7030: Not all code paths return a value.

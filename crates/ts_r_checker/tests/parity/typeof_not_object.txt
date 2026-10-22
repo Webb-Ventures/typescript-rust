@@ -1,0 +1,4 @@
+a.ts(4,38): error TS2322: Type 'object' is not assignable to type 'never'.
+a.ts(7,38): error TS2322: Type '{ a: 1; }' is not assignable to type 'never'.
+a.ts(9,36): error TS2322: Type '() => void' is not assignable to type 'never'.
+a.ts(12,36): error TS2322: Type '{}' is not assignable to type 'never'.

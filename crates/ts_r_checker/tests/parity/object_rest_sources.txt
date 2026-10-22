@@ -1,0 +1,7 @@
+a.ts(5,16): error TS2700: Rest types may only be created from object types.
+a.ts(6,16): error TS2700: Rest types may only be created from object types.
+a.ts(7,16): error TS2700: Rest types may only be created from object types.
+a.ts(9,16): error TS2700: Rest types may only be created from object types.
+a.ts(10,16): error TS2700: Rest types may only be created from object types.
+a.ts(12,16): error TS2700: Rest types may only be created from object types.
+a.ts(15,17): error TS2700: Rest types may only be created from object types.

@@ -1,0 +1,2 @@
+a.ts(2,5): error TS2322: Type 'null' is not assignable to type 'T'.
+  'null' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'unknown'.

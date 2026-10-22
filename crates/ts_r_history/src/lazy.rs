@@ -1500,7 +1500,16 @@ impl<'a, F: FileSystem> Run<'a, F> {
                     external: x.external,
                     included: x.included,
                     package: x.package,
+                    package_name: None,
+                    alternate: None,
                     reference_source: None,
+                    ts_extension: written_ts_extension_found(&r.spec, &x.path, x.ext),
+                    arbitrary_extension: !x.included
+                        && !self.options().effective().allow_arbitrary_extensions()
+                        && ts_r_checker::program::needs_arbitrary_extensions(
+                            &self.paths.abs(&x.path),
+                            &abs[i],
+                        ),
                 });
                 if let Some(mode) = r.mode {
                     mode_resolutions
@@ -1525,6 +1534,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             roots: self.config.file_names.clone(),
             missing_libs: missing_libs.to_vec(),
             missing_types: missing_types.to_vec(),
+            missing_type_references: Vec::new(),
             ambiguous_roots: Vec::new(),
             deps,
         }
@@ -1633,6 +1643,7 @@ fn global_diagnostics_of(missing_types: &[String]) -> Vec<Diagnostic> {
         roots: Vec::new(),
         missing_libs: Vec::new(),
         missing_types: missing_types.to_vec(),
+        missing_type_references: Vec::new(),
         ambiguous_roots: Vec::new(),
         deps: FxHashMap::default(),
     };
@@ -1654,4 +1665,18 @@ fn sort_and_dedup(paths: &[&str], mut diags: Vec<Diagnostic>) -> Vec<Diagnostic>
         a.file == b.file && a.span == b.span && a.code == b.code && a.message == b.message
     });
     diags
+}
+
+/// Whether `spec`'s own TypeScript extension found `path` (the resolver's
+/// `resolved_using_ts_extension`, which the saved history does not keep): the file has a
+/// TypeScript extension and the same stem as the specifier's last segment, so directory
+/// `index` results do not count.
+fn written_ts_extension_found(spec: &str, path: &str, ext: ts_r_resolver::Extension) -> bool {
+    let stem = |s: &str| {
+        let name = s.rsplit('/').next().unwrap_or(s);
+        ts_r_resolver::Extension::of(name)
+            .filter(|e| e.is_ts_like())
+            .map(|e| name[..name.len().saturating_sub(e.as_str().len())].to_owned())
+    };
+    ext.is_ts_like() && stem(spec).is_some_and(|a| stem(path).is_some_and(|b| a == b))
 }

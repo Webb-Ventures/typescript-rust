@@ -1,0 +1,1 @@
+a.ts(8,40): error TS2353: Object literal may only specify known properties, and 'x' does not exist in type '{ y: number; }'.

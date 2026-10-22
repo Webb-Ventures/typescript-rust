@@ -5,12 +5,17 @@
 //!   access: an identifier, `a.b`, `a[b]`, any of them parenthesized or wrapped in `!`,
 //!   `as`, `satisfies` or `<T>`. Anything else (`f()`, `new y`, `this`, a literal,
 //!   `obj.fn<number>`) is TS2364 at the whole left side, parentheses included, and the
-//!   assignment is not checked further. An object or array literal with a compound
-//!   operator is not (`[a, b] += 1` is an operator error).
+//!   assignment is not checked further. With a compound operator an object or array
+//!   literal is such a value too (`[a, b] += ""`: TS2364 at the literal, after the
+//!   operator check; `[a, b] *= 1` is only the operator error). A lone `super` there is
+//!   an error type (no operator error). A parenthesized literal is never a pattern:
+//!   `([]) = v` is TS2364 too.
 //! - A property access in an optional chain (`a?.b = 1`, not `(a?.b).c = 1`) is TS2779.
 //! - The same holds for each target inside a destructuring assignment pattern (`[""] =`,
 //!   `{ a: 1 } =`, `for ([""] of ...)`); nested patterns are walked, `[a = v]` checks `a`.
 //!   An object rest target (`{ ...f() } =`) is TS2701 instead, TS2778 when optional.
+//!   A parenthesized literal is a value there too (`[([])] =`, `{ ...({}) } =`). An object
+//!   pattern's first literal rest, parenthesized or not, is also TS2501 (expr.rs).
 //! - An expression head of `for...in`/`for...of` is TS2406/TS2487 (TS2780/TS2781 when
 //!   optional); `++`/`--` operands in an optional chain are TS2777 (expr.rs). A `for...in`
 //!   head is checked only when its type accepts the keys (TS2405 first: `for (this in o)`).
@@ -50,6 +55,18 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2364/TS2779 when the assignment target `l` is not a reference; returns whether it
     /// is.
     pub(crate) fn check_assignment_target_shape(&mut self, l: Loc) -> bool {
+        let ast = self.ast(l.file);
+        if matches!(
+            ast.node(crate::nodes::skip_parens(ast, l.node)),
+            Node::ObjectLit { .. } | Node::ArrayLit { .. }
+        ) {
+            self.error(
+                l,
+                dg::THE_LEFT_HAND_SIDE_OF_AN_ASSIGNMENT_EXPRESSION_MUST_BE_A_VARIABLE_OR_A_PROPERTY_A_2364,
+                &[],
+            );
+            return false;
+        }
         self.check_target_shape(
             l,
             dg::THE_LEFT_HAND_SIDE_OF_AN_ASSIGNMENT_EXPRESSION_MUST_BE_A_VARIABLE_OR_A_PROPERTY_A_2364,
@@ -105,9 +122,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     ) -> bool {
         let ast = self.ast(l.file);
         let inner = crate::nodes::skip_parens(ast, l.node);
+        // A nested pattern is checked as one; a parenthesized literal is a value.
+        if matches!(
+            ast.node(l.node),
+            Node::ObjectLit { .. } | Node::ArrayLit { .. }
+        ) {
+            return true;
+        }
         match ast.node(inner) {
             // A lone `super` is the parser's TS1034.
-            Node::ObjectLit { .. } | Node::ArrayLit { .. } | Node::Super {} => return true,
+            Node::Super {} => return true,
             Node::Member { .. } | Node::Index { .. }
                 if self.in_optional_chain(Loc::new(l.file, inner)) =>
             {

@@ -1,0 +1,2 @@
+file2.ts(1,13): error TS2440: Import declaration conflicts with local declaration of 'Lib'.
+file2.ts(6,12): error TS2694: Namespace 'Lib' has no exported member 'Bar'.

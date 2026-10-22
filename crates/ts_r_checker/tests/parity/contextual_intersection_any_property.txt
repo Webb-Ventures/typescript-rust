@@ -1,0 +1,11 @@
+a.ts(10,7): error TS2322: Type '{ k: string; j: "v"; }' is not assignable to type '{ k: any; } & { [s: string]: "v"; }'.
+  Type '{ k: string; j: "v"; }' is not assignable to type '{ [s: string]: "v"; }'.
+    Property 'k' is incompatible with index signature.
+      Type 'string' is not assignable to type '"v"'.
+a.ts(11,7): error TS2322: Type '{ ml: "other"; }' is not assignable to type '{ ml: any; } & { ml: "edge"; }'.
+  Type '{ ml: "other"; }' is not assignable to type '{ ml: "edge"; }'.
+    Types of property 'ml' are incompatible.
+      Type '"other"' is not assignable to type '"edge"'.
+a.ts(12,7): error TS2322: Type '[2]' is not assignable to type '[any] & [1]'.
+  Type '[2]' is not assignable to type '[1]'.
+    Type '2' is not assignable to type '1'.

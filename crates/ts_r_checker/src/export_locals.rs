@@ -9,6 +9,8 @@
 //! - A name that resolves to a declaration outside the exporting module (a global, lib
 //!   or `globalThis`, or a top-level declaration of the file around `declare module "m"`)
 //!   is TS2661 at the local name.
+//! - A `declare global` in a script (itself TS2669) checks its specifiers too; only its
+//!   own declarations are local there.
 
 use ts_r_ast::{ModuleKind, Node, NodeId};
 use ts_r_binder::meaning;
@@ -177,14 +179,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return matches!(ast.node(name), Node::StringLit { .. })
                         .then_some((n, own_global));
                 }
-                Node::Program { .. } => {
-                    return self
-                        .c
-                        .file(l.file)
-                        .bound
-                        .is_module
-                        .then_some((n, own_global));
+                // A `declare global` in a script (TS2669) exports only its own declarations.
+                Node::Program { .. } if !self.c.file(l.file).bound.is_module => {
+                    return own_global.map(|g| (g, own_global));
                 }
+                Node::Program { .. } => return Some((n, own_global)),
                 _ => {}
             }
             cur = parents.parent(n);

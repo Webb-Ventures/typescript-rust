@@ -4,7 +4,9 @@
 
 use rustc_hash::FxHashSet;
 use ts_r_binder::SymbolFlags;
-use ts_r_types::{AliasId, ListId, ObjectKind, SigFlags, SigId, TupleElement, TypeFlags, TypeId};
+use ts_r_types::{
+    AliasId, ListId, ObjectKind, SigFlags, SigId, TupleElement, TypeFlags, TypeId, TypeKind,
+};
 
 use crate::checker::Ck;
 use crate::members::SigKind;
@@ -115,6 +117,28 @@ impl InferenceContext {
         }
     }
 
+    /// Whether type parameter `j` has inferences (or is fixed).
+    pub(crate) fn has_inferences(&self, j: usize) -> bool {
+        self.fixed[j].is_some()
+            || !self.candidates[j].is_empty()
+            || !self.contra[j].is_empty()
+            || !self.weak[j].is_empty()
+            || !self.preferred[j].is_empty()
+            || !self.literal_keyof[j].is_empty()
+    }
+
+    /// Takes over the inferences `src` made for type parameter `j` (same parameters).
+    pub(crate) fn adopt(&mut self, src: &InferenceContext, j: usize) {
+        self.candidates[j] = src.candidates[j].clone();
+        self.contra[j] = src.contra[j].clone();
+        self.top_level[j] = src.top_level[j];
+        self.nested[j] = src.nested[j];
+        self.combine[j] = src.combine[j];
+        self.weak[j] = src.weak[j].clone();
+        self.literal_keyof[j] = src.literal_keyof[j].clone();
+        self.preferred[j] = src.preferred[j].clone();
+    }
+
     pub(crate) fn index_of(&self, t: TypeId) -> Option<usize> {
         self.params.iter().position(|&p| p == t)
     }
@@ -191,6 +215,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             return;
+        }
+        // A `NoInfer<X>` source infers as `X` (observed: `Lazy<NoInfer<R>>` still matches
+        // `Lazy<Router<any, infer T>>`); only a `NoInfer` target blocks inference.
+        if let TypeKind::Substitution { base, constraint } = self.store().kind(source)
+            && constraint == TypeId::UNKNOWN
+        {
+            return self.infer_from(ctx, base, target, contra, depth + 1);
         }
         if !ctx.visited.insert((source, target, contra)) {
             return;
@@ -724,11 +755,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             let tup = self.create_tuple(&mid, sshape.readonly);
             self.infer_from(ctx, tup, targs[vi], contra, depth + 1);
         } else {
+            // A rest target element infers once from the union of the middle's element
+            // types (`[1, "a", true]` to `[T, ...U[]]` gives `U` the one candidate
+            // `string | boolean`).
+            let mut ets = Vec::with_capacity(mid_end.saturating_sub(start));
             for (el, &arg) in sshape.elements[start..mid_end]
                 .iter()
                 .zip(&sargs[start..mid_end])
             {
-                let et = self.element_type_of_array_like_arg(el.kind, arg);
+                ets.push(self.element_type_of_array_like_arg(el.kind, arg));
+            }
+            if !ets.is_empty() {
+                let et = self.union_with(&ets, Reduction::Literal, AliasId::NONE);
                 self.infer_from(ctx, et, targs[vi], contra, depth + 1);
             }
         }
@@ -786,7 +824,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The parameters of `sig` from position `pos` on, as a tuple (or the rest parameter's
     /// own type when `pos` is the rest position).
-    fn rest_type_at(&mut self, sig: SigId, pos: usize) -> TypeId {
+    pub(crate) fn rest_type_at(&mut self, sig: SigId, pos: usize) -> TypeId {
         let d = self.store().sig(sig);
         let n = d.params.len();
         let has_rest = d.has_rest();
@@ -808,6 +846,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .count();
                 let from = (pos - (n - 1)).min(fixed);
                 return self.slice_tuple(&shape, &args, from, shape.elements.len());
+            }
+            // Past an array or generic rest: an array of its element (`T[number][]`;
+            // tsc: relater.go, getRestTypeAtPosition).
+            if let Some(el) = self.indexed_access_type(r, TypeId::NUMBER, None) {
+                return self.create_array(el, false);
             }
         }
         let params = d.params.to_vec();
@@ -862,8 +905,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         // `U = Box<X>`, not `Box<P>`), when the target's parameters fix its type
         // arguments without the type parameters being inferred here (`map(identity, "")`
         // with `(x: S) => T` keeps the old path).
-        let s = if ctx.base_signatures && self.store().sig(s).type_params != ListId::EMPTY {
+        let s_generic = self.store().sig(s).type_params != ListId::EMPTY;
+        let t_generic = self.store().sig(t).type_params != ListId::EMPTY;
+        // Against a generic target the source's type parameters are their constraints
+        // (`f1(x => x)` with `cb: <S>(x: S) => T` infers `T = unknown`, not `S`); so are
+        // the target's in a source that took its parameter types from it (a function
+        // expression contextually typed by the generic target).
+        let s = if s_generic && (ctx.base_signatures || t_generic) {
             self.base_signature(s)
+        } else if t_generic {
+            let ttps = self
+                .store()
+                .list_items(self.store().sig(t).type_params)
+                .to_vec();
+            let args = self.base_constraints_of(&ttps);
+            let m = self.store().mapper(&ttps, &args);
+            self.instantiate_signature_full(s, m)
         } else if self.store().sig(s).type_params != ListId::EMPTY
             && self.store().sig(t).type_params == ListId::EMPTY
         {
@@ -871,7 +928,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .store()
                 .list_items(self.store().sig(s).type_params)
                 .to_vec();
+            // A type parameter no parameter mentions infers nothing: it is its default (or
+            // constraint, else `unknown`) whatever the target (`pair: <T, S>(x: T) => (y: S)
+            // => ..` against `(x: number) => ..` has `S = unknown`).
+            let free = self.unmentioned_in_params(s, &tps);
             let mut args = self.infer_signature_in_context(s, t);
+            self.fill_free_type_args(&tps, &free, &mut args);
             let mut concrete = self.inferred_concretely(ctx, &args);
             if !concrete {
                 // The target mentions type parameters being inferred: use what is known
@@ -880,7 +942,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .map(|j| {
                         if let Some(f) = ctx.fixed[j] {
                             f
-                        } else if ctx.candidates[j].is_empty() {
+                        } else if ctx.candidates[j].is_empty() && ctx.contra[j].is_empty() {
                             ctx.params[j]
                         } else {
                             let mut c2 = ctx.clone();
@@ -892,6 +954,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let m = self.store().mapper(&ctx.params, &cur);
                     let t2 = self.instantiate_signature_full(t, m);
                     args = self.infer_signature_in_context(s, t2);
+                    self.fill_free_type_args(&tps, &free, &mut args);
                     concrete = self.inferred_concretely(ctx, &args);
                 }
             }
@@ -907,6 +970,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         // The type parameters of a source signature that stays generic are not inferred
         // from: a union mentioning one gives its naked target nothing (`T | U` from
         // `"a" | U'` leaves `T` alone), though other positions still infer (`[T, U]`).
+        // The generic target's own type parameters are erased to `any`, so a union with
+        // one infers nothing (`Set<T | U>` gives `T` nothing from `Set<unknown>`).
+        let t = if t_generic {
+            let ttps = self
+                .store()
+                .list_items(self.store().sig(t).type_params)
+                .to_vec();
+            let anys = vec![TypeId::ANY; ttps.len()];
+            let m = self.store().mapper(&ttps, &anys);
+            self.instantiate_signature_full(t, m)
+        } else {
+            t
+        };
         let mark = ctx.non_inferrable.len();
         let stps = self.store().sig(s).type_params;
         if stps != ListId::EMPTY {
@@ -917,24 +993,85 @@ impl<'c, 'a> Ck<'c, 'a> {
         ctx.non_inferrable.truncate(mark);
     }
 
+    /// For each of `tps`, whether no parameter type of `s` mentions it.
+    fn unmentioned_in_params(&mut self, s: SigId, tps: &[TypeId]) -> Vec<bool> {
+        let mut free = vec![true; tps.len()];
+        let n = self.store().sig(s).params.len();
+        for i in 0..n {
+            let Some(pt) = self.param_type_at(s, i) else {
+                continue;
+            };
+            for (k, &tp) in tps.iter().enumerate() {
+                if free[k] && self.type_mentions(pt, tp) {
+                    free[k] = false;
+                }
+            }
+        }
+        if let Some(this) = self.store().sig(s).this_type {
+            for (k, &tp) in tps.iter().enumerate() {
+                if free[k] && self.type_mentions(this, tp) {
+                    free[k] = false;
+                }
+            }
+        }
+        free
+    }
+
+    /// Sets the type arguments of the `free` type parameters (see
+    /// [`Ck::unmentioned_in_params`]) to their default, else constraint, else `unknown`.
+    fn fill_free_type_args(&mut self, tps: &[TypeId], free: &[bool], args: &mut [TypeId]) {
+        if !free.contains(&true) {
+            return;
+        }
+        let unknowns = vec![TypeId::UNKNOWN; tps.len()];
+        let to_unknown = self.store().mapper(tps, &unknowns);
+        for (k, &tp) in tps.iter().enumerate() {
+            if !free[k] {
+                continue;
+            }
+            let d = self
+                .type_param_default(tp)
+                .or_else(|| self.type_param_constraint(tp));
+            args[k] = match d {
+                Some(d) => self.instantiate(d, to_unknown),
+                None => TypeId::UNKNOWN,
+            };
+        }
+    }
+
     /// `s` with its type parameters replaced by their constraints (`unknown` without one).
+    /// Constraints mentioning other type parameters are resolved through theirs (one round
+    /// per further type parameter); what still mentions one (a circular constraint, `S
+    /// extends Array<S>`) has it as `any`.
     fn base_signature(&mut self, s: SigId) -> SigId {
         let tps = self
             .store()
             .list_items(self.store().sig(s).type_params)
             .to_vec();
-        let unknowns = vec![TypeId::UNKNOWN; tps.len()];
-        let to_unknown = self.store().mapper(&tps, &unknowns);
-        let mut args = Vec::with_capacity(tps.len());
-        for &tp in &tps {
-            let c = match self.type_param_constraint(tp) {
-                Some(c) => self.instantiate(c, to_unknown),
-                None => TypeId::UNKNOWN,
-            };
-            args.push(c);
-        }
+        let args = self.base_constraints_of(&tps);
         let m = self.store().mapper(&tps, &args);
         self.instantiate_signature_full(s, m)
+    }
+
+    /// The base constraints of `tps` (see [`Ck::base_signature`]).
+    fn base_constraints_of(&mut self, tps: &[TypeId]) -> Vec<TypeId> {
+        let constraints: Vec<TypeId> = tps
+            .iter()
+            .map(|&tp| self.type_param_constraint(tp).unwrap_or(TypeId::UNKNOWN))
+            .collect();
+        let step = self.store().mapper(tps, &constraints);
+        let mut args = constraints.clone();
+        for _ in 1..tps.len() {
+            for a in &mut args {
+                *a = self.instantiate(*a, step);
+            }
+        }
+        let anys = vec![TypeId::ANY; tps.len()];
+        let to_any = self.store().mapper(tps, &anys);
+        for a in &mut args {
+            *a = self.instantiate(*a, to_any);
+        }
+        args
     }
 
     fn infer_from_signature_parts(
@@ -970,7 +1107,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Infers between the parameters of `s` and `t`; `pcontra` is the parameters' variance.
-    fn infer_from_params(
+    pub(crate) fn infer_from_params(
         &mut self,
         ctx: &mut InferenceContext,
         s: SigId,
@@ -1128,11 +1265,38 @@ impl<'c, 'a> Ck<'c, 'a> {
         best
     }
 
+    /// Every candidate of parameter `i`, and of the other type parameters whose constraint
+    /// is parameter `i` itself, is assignable to `w`, `i`'s covariant inference.
+    fn covers_constrained_candidates(
+        &mut self,
+        ctx: &InferenceContext,
+        i: usize,
+        w: TypeId,
+    ) -> bool {
+        let tp = ctx.params[i];
+        for j in 0..ctx.params.len() {
+            if j != i && self.type_param_constraint(ctx.params[j]) != Some(tp) {
+                continue;
+            }
+            let cands: Vec<TypeId> = ctx.preferred[j]
+                .iter()
+                .chain(&ctx.candidates[j])
+                .copied()
+                .collect();
+            if !cands.iter().all(|&c| self.is_assignable(c, w)) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// The inferred type of type parameter `i`.
     pub fn inferred_type_at(&mut self, ctx: &mut InferenceContext, i: usize) -> TypeId {
         if let Some(t) = ctx.fixed[i] {
             return t;
         }
+        // The other variance's inference, tried when the chosen one breaks the constraint.
+        let mut fallback = None;
         let tp = ctx.params[i];
         // Preferred candidates go first, so the common supertype falls back to them.
         let mut cands = ctx.preferred[i].clone();
@@ -1207,12 +1371,25 @@ impl<'c, 'a> Ck<'c, 'a> {
                     contra.push(c);
                 }
             }
+            // The covariant inference also gives way when one of its own candidates, or
+            // one of another type parameter constrained to this one, is not assignable
+            // to it (`every<T, U extends T>(a: readonly T[], f: (x: T) => x is U)` with
+            // `T`'s candidates `Decorator` and `Modifier`, or `T`'s `Decorator` and
+            // `U`'s `Modifier`, infers `T` from the callback), and when it is `any`
+            // (tsc: `getInferredType` in `tsc/internal/checker/inference.go`).
             if !ctx.candidates[i].is_empty()
                 && !contra.is_empty()
-                && (w == TypeId::NEVER || !contra.iter().any(|&c| self.is_assignable(w, c)))
+                && (w == TypeId::NEVER
+                    || self.store().flags(w).contains(TypeFlags::ANY)
+                    || !contra.iter().any(|&c| self.is_assignable(w, c))
+                    || !self.covers_constrained_candidates(ctx, i, w))
             {
+                fallback = Some(w);
                 self.contra_inference(&contra)
             } else {
+                if !contra.is_empty() {
+                    fallback = Some(self.contra_inference(&contra));
+                }
                 w
             }
         } else if !ctx.contra[i].is_empty() {
@@ -1250,10 +1427,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                     }
                 }
-                inferred = if kept.is_empty() {
-                    ic
-                } else {
+                inferred = if !kept.is_empty() {
                     self.union(&kept)
+                } else if let Some(f) = fallback.filter(|&f| self.is_assignable(f, ic)) {
+                    f
+                } else {
+                    ic
                 };
             }
         }
@@ -1307,47 +1486,81 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.store().mapper(&src, &dst)
     }
 
-    /// tsc's `getCommonSupertype`: literals of one base type form a union; otherwise the
-    /// leftmost candidate every other candidate is a subtype of.
+    /// tsc's `getCommonSupertype`. Under strictNullChecks each candidate is taken without
+    /// its `null` and `undefined` members (a wholly nullable one becomes `never`), which
+    /// come back on the result. Literals of one base type (`never` aside) form a union;
+    /// otherwise the leftmost candidate no later one is a strict supertype of wins when
+    /// every other candidate is its strict subtype, else the leftmost no later one is a
+    /// supertype of (`equal(b as B, d as D | undefined)` infers `B | undefined`).
     pub fn common_supertype(&mut self, types: &[TypeId]) -> TypeId {
         if types.len() == 1 {
             return types[0];
         }
-        let non_nullable: Vec<TypeId> = types
-            .iter()
-            .copied()
-            .filter(|&t| !self.store().flags(t).intersects(TypeFlags::NULLABLE))
-            .collect();
-        if non_nullable.is_empty() {
-            return self.union(types);
-        }
-        let first_base = self.base_of_literal(non_nullable[0]);
-        let same_base_literals = non_nullable.iter().all(|&t| {
-            let b = self.base_of_literal(t);
-            b == first_base && b != t
-        });
-        let sup = if same_base_literals {
-            self.union(&non_nullable)
+        let mut nullable = Vec::new();
+        let primary: Vec<TypeId> = if self.c.opts.strict_null_checks {
+            types
+                .iter()
+                .map(|&t| {
+                    for m in [TypeId::UNDEFINED, TypeId::NULL] {
+                        if !nullable.contains(&m) && self.some_member(t, |x| x == m) {
+                            nullable.push(m);
+                        }
+                    }
+                    self.filter_type(t, |ck, u| {
+                        !ck.store().flags(u).intersects(TypeFlags::NULLABLE)
+                    })
+                })
+                .collect()
         } else {
-            let mut best = non_nullable[0];
-            for &t in &non_nullable[1..] {
-                if self.is_subtype(best, t) {
-                    best = t;
-                }
-            }
-            best
+            types.to_vec()
         };
-        if non_nullable.len() == types.len() {
+        let mut common_base = None;
+        let mut same_base_literals = true;
+        for &t in &primary {
+            if t == TypeId::NEVER {
+                continue;
+            }
+            let b = self.base_of_literal(t);
+            let cb = *common_base.get_or_insert(b);
+            if b == t || b != cb {
+                same_base_literals = false;
+                break;
+            }
+        }
+        let sup = if same_base_literals {
+            self.union(&primary)
+        } else {
+            let strict = self.leftmost_supertype(&primary, true);
+            if primary
+                .iter()
+                .all(|&t| t == strict || self.is_strict_subtype(t, strict))
+            {
+                strict
+            } else {
+                self.leftmost_supertype(&primary, false)
+            }
+        };
+        if nullable.is_empty() {
             return sup;
         }
-        let nulls: Vec<TypeId> = types
-            .iter()
-            .copied()
-            .filter(|&t| self.store().flags(t).intersects(TypeFlags::NULLABLE))
-            .collect();
-        let mut all = vec![sup];
-        all.extend(nulls);
-        self.union(&all)
+        nullable.insert(0, sup);
+        self.union(&nullable)
+    }
+
+    /// The leftmost of `types` for which no type to the right is a (strict) supertype.
+    fn leftmost_supertype(&mut self, types: &[TypeId], strict: bool) -> TypeId {
+        let mut best = types[0];
+        for &t in &types[1..] {
+            let sub = if strict {
+                self.is_strict_subtype(best, t)
+            } else {
+                self.is_subtype(best, t)
+            };
+            if sub {
+                best = t;
+            }
+        }
+        best
     }
 
     /// Inferred type arguments for `sig` given argument types (tsc-style two passes are

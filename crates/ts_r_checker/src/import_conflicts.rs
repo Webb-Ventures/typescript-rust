@@ -1,4 +1,5 @@
-//! Imports that share a name with a local declaration (TS2440).
+//! Imports that share a name with a local declaration (TS2440), and export specifiers
+//! that share one with an exported declaration (TS2484).
 //!
 //! Rules observed from tsc 7.0.2:
 //! - An import (`import x = ...`, `import {x}`, default and namespace imports) whose target
@@ -10,6 +11,15 @@
 //!   (`export var r; import r = m.v;`); an exported declaration of another block of the
 //!   same namespace does not conflict with a local import, but two exported ones do (they
 //!   are one symbol).
+//! - Without a conflict, a non-type-only import merged with a local value (`import { T }`
+//!   of a type and `let T`) is TS2865 when `isolatedModules` is set explicitly (not only
+//!   implied by `verbatimModuleSyntax`), since a transpiler cannot tell the import is unused
+//!   (tsc: checker.go checkAliasSymbol).
+//! - An `export { x }` specifier (also `x2 as x`, also inside a namespace) whose export
+//!   merged with an exported declaration that shares a meaning with the specifier's
+//!   target is TS2484 at the specifier: `export let x; export { x2 as x }`, or an
+//!   exported interface next to `export { I as J }`. A type exported next to a variable
+//!   of the same name is fine.
 
 use ts_r_ast::Node;
 use ts_r_binder::{SymbolFacts, SymbolFlags, SymbolId, meaning};
@@ -94,9 +104,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Some(target) = self.c.resolve_alias(sym) else {
                 continue;
             };
-            if meanings(self.c.sym_flags(target)) & local == 0 {
-                continue;
-            }
             let name = self.c.sym_name(sym).to_owned();
             // Default and namespace imports report at the name.
             let at = match *self.ast(file).node(decl) {
@@ -104,9 +111,67 @@ impl<'c, 'a> Ck<'c, 'a> {
                 | Node::ImportNamespaceSpecifier { local } => local,
                 _ => decl,
             };
+            if meanings(self.c.sym_flags(target)) & local == 0 {
+                // Without a conflict, an import a transpiler keeps next to a local value is
+                // TS2865 under `isolatedModules` set explicitly.
+                if local & meaning::VALUE != 0
+                    && self.c.opts.isolated_modules_explicit
+                    && !self
+                        .c
+                        .bound(file)
+                        .symbol(s)
+                        .facts
+                        .intersects(SymbolFacts::TYPE_ONLY)
+                {
+                    self.error(
+                        Loc::new(file, at),
+                        dg::IMPORT_0_CONFLICTS_WITH_LOCAL_VALUE_SO_MUST_BE_DECLARED_WITH_A_TYPE_ONLY_IMPORT_W_2865,
+                        &[&name, "isolatedModules"],
+                    );
+                }
+                continue;
+            }
             self.error(
                 Loc::new(file, at),
                 dg::IMPORT_DECLARATION_CONFLICTS_WITH_LOCAL_DECLARATION_OF_0_2440,
+                &[&name],
+            );
+        }
+    }
+
+    /// TS2484 at each `export { x }` specifier whose export merged with a declaration that
+    /// shares a meaning with what the specifier exports (tsc: checker.go checkAliasSymbol).
+    pub(crate) fn check_export_specifier_conflicts(&mut self, file: FileId) {
+        if !self.reporting(file) || self.c.file(file).is_js() {
+            return;
+        }
+        let b = self.c.bound(file);
+        let ast = self.ast(file);
+        let mut found = Vec::new();
+        for a in &b.aliases {
+            let sym = b.symbol(a.symbol);
+            if sym.facts.intersects(SymbolFacts::DETACHED)
+                || !matches!(ast.node(a.decl), Node::ExportSpecifier { .. })
+            {
+                continue;
+            }
+            let local = meanings(sym.flags.without(SymbolFlags::ALIAS));
+            if local != 0 {
+                found.push((a.decl, a.symbol, local));
+            }
+        }
+        for (decl, s, local) in found {
+            let sym = self.c.sym(file, s);
+            let Some(target) = self.c.resolve_alias(sym) else {
+                continue;
+            };
+            if meanings(self.c.sym_flags(target).without(SymbolFlags::ALIAS)) & local == 0 {
+                continue;
+            }
+            let name = self.c.sym_name(sym).to_owned();
+            self.error(
+                Loc::new(file, decl),
+                dg::EXPORT_DECLARATION_CONFLICTS_WITH_EXPORTED_DECLARATION_OF_0_2484,
                 &[&name],
             );
         }

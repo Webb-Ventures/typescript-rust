@@ -165,6 +165,44 @@ pub fn skip_type_parens(ast: &Ast, mut e: NodeId) -> NodeId {
     e
 }
 
+/// The first position at or after `pos` (and before `end`) that is not whitespace or a
+/// comment.
+pub fn skip_trivia(text: &[u8], mut pos: usize, end: usize) -> usize {
+    let end = end.min(text.len());
+    while pos < end {
+        match text[pos] {
+            b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c => pos += 1,
+            b'/' if text.get(pos + 1) == Some(&b'/') => {
+                while pos < end && text[pos] != b'\n' {
+                    pos += 1;
+                }
+            }
+            b'/' if text.get(pos + 1) == Some(&b'*') => {
+                pos += 2;
+                while pos < end && !(text[pos] == b'*' && text.get(pos + 1) == Some(&b'/')) {
+                    pos += 1;
+                }
+                pos = (pos + 2).min(end);
+            }
+            _ => break,
+        }
+    }
+    pos
+}
+
+/// Skips parentheses and `satisfies`: the node an argument, returned expression or array
+/// element's relation error is reported at and elaborated into
+/// (`f(({ a: 1 }) satisfies unknown)` reports at `a`).
+pub fn effective_check_node(ast: &Ast, mut e: NodeId) -> NodeId {
+    for _ in 0..10_000 {
+        match *ast.node(e) {
+            Node::Paren { expr } | Node::Satisfies { expr, .. } => e = expr,
+            _ => break,
+        }
+    }
+    e
+}
+
 /// Skips parentheses, `as`, `satisfies`, `!` and type assertions.
 pub fn skip_outer_expressions(ast: &Ast, mut e: NodeId) -> NodeId {
     for _ in 0..10_000 {
@@ -187,7 +225,8 @@ pub fn key_text(ast: &Ast, key: NodeId) -> Option<String> {
         Node::Ident { name } | Node::StringLit { value: name } => Some(ast.atom(name).to_owned()),
         Node::PrivateName { name } => Some(format!("#{}", ast.atom(name))),
         Node::NumberLit { value } => Some(js_number_to_string(value.get())),
-        Node::BigIntLit { value } => Some(ast.atom(value).to_owned()),
+        // A bigint key names no property (tsc 7.0.2, bigintPropertyName).
+        Node::BigIntLit { .. } => None,
         // A template without substitutions (`` o[`kind`] ``).
         Node::TemplateLit { parts } => match ast.list(parts) {
             [p] => match *ast.node(*p) {

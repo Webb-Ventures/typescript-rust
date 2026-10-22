@@ -843,6 +843,18 @@ impl<'a> Checker<'a> {
         None
     }
 
+    /// Whether the export tables of the parts of `s` themselves hold `name` (what
+    /// `export *` brings in does not count).
+    pub fn has_own_export(&self, s: SymId, name: &str) -> bool {
+        self.parts(s).any(|r| {
+            let f = self.file(r.file);
+            let t = f.bound.symbol(r.symbol).exports;
+            f.bound
+                .lookup_str(&f.ast, t, name)
+                .is_some_and(|x| !f.bound.symbol(x).facts.intersects(SymbolFacts::DETACHED))
+        })
+    }
+
     /// Export tables of augmentations merged into a file module from outside its own
     /// module target: those of a module whose `export =` names this module.
     fn merged_augmentation_exports(&self, s: SymId) -> impl Iterator<Item = (FileId, TableId)> {
@@ -997,7 +1009,13 @@ impl<'a> Checker<'a> {
         if let Some(s) = b.resolved(l.node) {
             let id = self.sym(l.file, s);
             let f = self.sym_flags(id);
-            if symbol_meaning(f) & meaning != 0 {
+            if f.intersects(SymbolFlags::ALIAS)
+                && meaning == ts_r_binder::meaning::VALUE
+                && let Some(p) = self.import_merged_export_value(id)
+            {
+                return Some(p);
+            }
+            if symbol_meaning(f) & meaning != 0 && !self.alias_lacks_meaning(id, meaning) {
                 if !self.member_out_of_scope(l, f, meaning) && !self.namespace_export_in_enum(l, id)
                 {
                     return Some(id);
@@ -1028,6 +1046,91 @@ impl<'a> Checker<'a> {
             return Some(s);
         }
         self.global_symbol(name, meaning)
+    }
+
+    /// A top-level import of a module file that shares its name with an exported variable of
+    /// the same file (`import Obj from "./m"; export const Obj = Obj;`, TS2440): tsc merges
+    /// the two into one local symbol, so a value read of the name is the exported value
+    /// (tsc: checker.go getExportSymbolOfValueSymbolIfExported).
+    fn import_merged_export_value(&self, id: SymId) -> Option<SymId> {
+        let SymKind::Binder(file, local) = self.sym_kind(id) else {
+            return None;
+        };
+        let b = self.bound(file);
+        let sym = b.symbol(local);
+        if sym.facts.intersects(SymbolFacts::EXPORTED) {
+            return None;
+        }
+        let &d = b.decls(local).first()?;
+        let f = self.file(file);
+        let stmt = match f.ast.node(d) {
+            Node::ImportEquals { .. } => d,
+            Node::ImportSpecifier { .. }
+            | Node::ImportDefaultSpecifier { .. }
+            | Node::ImportNamespaceSpecifier { .. } => f.parents().parent(d)?,
+            _ => return None,
+        };
+        let top = f.parents().parent(stmt)?;
+        if !matches!(f.ast.node(top), Node::Program { .. }) {
+            return None;
+        }
+        let module = b.scopes.first()?.symbol?;
+        let p = b.lookup(b.symbol(module).exports, sym.name)?;
+        if p == local {
+            return None;
+        }
+        let pf = b.symbol(p).flags;
+        // Only variables: an exported function keeps the import's reading (its expando
+        // assignments `Foo.bar = ...` are bound through the import, which errors nothing).
+        (pf.intersects(SymbolFlags::VARIABLE) && !pf.intersects(SymbolFlags::ALIAS))
+            .then(|| self.sym(file, p))
+    }
+
+    /// The exported value declared in the same block as the local, valueless symbol `id`
+    /// (`interface F {}` next to `export const F = ...`): tsc keeps both in the block's
+    /// local symbol, so `export default F` exports the value too.
+    pub(crate) fn local_merged_export_value(&self, id: SymId) -> Option<SymId> {
+        let SymKind::Binder(file, local) = self.sym_kind(id) else {
+            return None;
+        };
+        let b = self.bound(file);
+        let sym = b.symbol(local);
+        if sym.facts.intersects(SymbolFacts::EXPORTED)
+            || sym
+                .flags
+                .intersects(SymbolFlags::VALUE | SymbolFlags::ALIAS)
+        {
+            return None;
+        }
+        let f = self.file(file);
+        let &d = b.decls(local).first()?;
+        let block = f.parents().parent(d)?;
+        let container = match f.ast.node(block) {
+            Node::Program { .. } if b.is_module => b.scopes.first()?.symbol?,
+            Node::ModuleBlock { .. } => b.scopes[b.scope_of(block)?.0 as usize].symbol?,
+            _ => return None,
+        };
+        let p = b.lookup(b.symbol(container).exports, sym.name)?;
+        let pf = b.symbol(p).flags;
+        if p == local || !pf.intersects(SymbolFlags::VALUE) || pf.intersects(SymbolFlags::ALIAS) {
+            return None;
+        }
+        // A variable's declarator sits two levels below its block.
+        let in_block = |pd| {
+            let mut cur = f.parents().parent(pd);
+            for _ in 0..3 {
+                match cur {
+                    Some(n) if n == block => return true,
+                    Some(n) => cur = f.parents().parent(n),
+                    None => return false,
+                }
+            }
+            false
+        };
+        b.decls(p)
+            .iter()
+            .any(|&pd| in_block(pd))
+            .then(|| self.sym(file, p))
     }
 
     /// An export of a namespace merged with an enum, read inside an enum declaration: only
@@ -1102,6 +1205,16 @@ impl<'a> Checker<'a> {
             if guard > 10_000 {
                 break;
             }
+            // Inside an enum, the members of every declaration of the merged enum are in
+            // scope, also those of declarations in other files.
+            if let Node::Enum { .. } = ast.node(node)
+                && meaning & ts_r_binder::meaning::VALUE != 0
+                && let Some(en) = self.sym_of_decl(Loc::new(l.file, node))
+                && let Some(s) = self.export_of(en, name)
+                && self.sym_flags(s).intersects(SymbolFlags::ENUM_MEMBER)
+            {
+                return Some(s);
+            }
             if let Node::Module { name: mname, .. } = *ast.node(node) {
                 // `namespace A.B { }` is inside `A` too: B's exports, then A's (the outer
                 // parts are declared at their name identifiers).
@@ -1118,7 +1231,8 @@ impl<'a> Checker<'a> {
                     if let Some(ns) = self.sym_of_decl(Loc::new(l.file, decl))
                         && self.sym_flags(ns).intersects(SymbolFlags::NAMESPACE)
                         && let Some(s) = self.own_export_of(ns, name)
-                        && !self.sym_flags(s).intersects(SymbolFlags::ALIAS)
+                        && symbol_meaning(self.sym_flags(s).without(SymbolFlags::ALIAS)) & meaning
+                            != 0
                         && !self.member_out_of_scope(l, self.sym_flags(s), meaning)
                     {
                         return Some(s);
@@ -1144,6 +1258,7 @@ impl<'a> Checker<'a> {
         let n = b.names.find(ast, name)?;
         let parents = self.file(l.file).parents();
         let mut cur = Some(l.node);
+        let mut prev = l.node;
         let mut guard = 0;
         while let Some(node) = cur {
             guard += 1;
@@ -1152,9 +1267,18 @@ impl<'a> Checker<'a> {
             }
             if let Some(scope) = b.scope_of(node) {
                 let sc = b.scopes[scope.0 as usize];
+                // Parameters and the return type do not see the body's own declarations
+                // (as in the binder's reference resolution).
+                let outside_body = sc.kind == ts_r_binder::ScopeKind::Function
+                    && prev != node
+                    && crate::nodes::fn_parts(ast, node).is_some_and(|p| p.body != Some(prev));
                 if let Some(s) = b.lookup(sc.locals, n) {
                     let id = self.sym(l.file, s);
-                    if symbol_meaning(self.sym_flags(id)) & meaning != 0 {
+                    let f = self.sym_flags(id);
+                    if symbol_meaning(f) & meaning != 0
+                        && !(outside_body && ts_r_binder::is_body_local(f))
+                        && !self.alias_lacks_meaning(id, meaning)
+                    {
                         return Some(id);
                     }
                 }
@@ -1176,6 +1300,7 @@ impl<'a> Checker<'a> {
                     return Some(id);
                 }
             }
+            prev = node;
             cur = parents.parent(node);
         }
         let file_scope = b.scopes.first()?;
@@ -1210,9 +1335,10 @@ impl<'a> Checker<'a> {
         }
         let s = b.lookup(exports, n)?;
         let id = self.sym(file, s);
-        // Export specifiers and `export * as ns` are not in scope.
-        let flags = self.sym_flags(id);
-        (!flags.contains(SymbolFlags::ALIAS) && symbol_meaning(flags) & meaning != 0).then_some(id)
+        // Export specifiers and `export * as ns` are not in scope; a declaration merged
+        // with one is, by its own meaning.
+        let flags = self.sym_flags(id).without(SymbolFlags::ALIAS);
+        (symbol_meaning(flags) & meaning != 0).then_some(id)
     }
 
     /// For a named import `import { x } from "m"` of a module whose `export =` entity is a
@@ -1254,6 +1380,19 @@ impl<'a> Checker<'a> {
         {
             return (!t.is_none()).then_some(t);
         }
+        if let Some(m) = self.module_exports_export(s) {
+            let t = self.resolve_alias(m).unwrap_or(m);
+            if let Some(l) = self.sym_links(s) {
+                let _ = l.alias.set(t);
+            }
+            return Some(t);
+        }
+        if let Some(m) = self.node_commonjs_default_module(s) {
+            if let Some(l) = self.sym_links(s) {
+                let _ = l.alias.set(m);
+            }
+            return Some(m);
+        }
         // The default import of a CommonJS module is the module (its synthetic default,
         // see `synthetic_default_module`), not an `exports.default` assignment.
         if self.commonjs_default_module(s).is_some() {
@@ -1268,6 +1407,46 @@ impl<'a> Checker<'a> {
             let _ = l.alias.set(target.unwrap_or(SymId::NONE));
         }
         target
+    }
+
+    /// Whether a value lookup passes over alias `s` because it stands for no value: its
+    /// target has no value meaning, no alias on the way merges with a value and it is not a
+    /// named import of an `export =` value (see `export_equals_member`). The lookup
+    /// then goes on to outer scopes and the globals, so `import { Date }` of an interface
+    /// does not hide the global `Date` constructor (tsc: checker.go getSymbol).
+    pub fn alias_lacks_meaning(&self, s: SymId, m: u8) -> bool {
+        let f = self.sym_flags(s);
+        if m != meaning::VALUE
+            || !f.intersects(SymbolFlags::ALIAS)
+            || f.intersects(SymbolFlags::VALUE)
+        {
+            return false;
+        }
+        let Some(t) = self.resolve_alias(s) else {
+            return false;
+        };
+        let tf = self.sym_flags(t);
+        t != s
+            && !tf.is_empty()
+            && !tf.intersects(SymbolFlags::VALUE | SymbolFlags::ALIAS)
+            && self.value_merged_in_alias_chain(s).is_none()
+            && self.export_equals_member(s).is_none()
+    }
+
+    /// The first symbol after `s` on its alias chain that declares a value of its own
+    /// besides being an alias: an export specifier of a type-only import merged with a
+    /// local `const` (`import { A } from "./a"; const A = 0; export { A }`) is that
+    /// value for value uses, as tsc resolves each name in the chain by meaning.
+    pub fn value_merged_in_alias_chain(&self, s: SymId) -> Option<SymId> {
+        let r = self.parts(s).next()?;
+        self.link
+            .alias_chain(r)
+            .into_iter()
+            .skip(1)
+            .map(|a| self.sym_ref(a))
+            .find(|&a| {
+                symbol_meaning(self.sym_flags(a).without(SymbolFlags::ALIAS)) & meaning::VALUE != 0
+            })
     }
 
     /// The module a default import `s` (`import d from "m"`) stands for when the module has
@@ -1320,6 +1499,94 @@ impl<'a> Checker<'a> {
             .then_some(m)
     }
 
+    /// Under `node20` and `nodenext`, an ES module's `export { x as "module.exports" }` is
+    /// what `require` returns: the target of `import x = require("m")` (whatever the
+    /// formats), and of a default or namespace import in a CommonJS-format file of an
+    /// ES-format module (tsc: checker.go getTargetOfImportEqualsDeclaration,
+    /// getTargetOfModuleDefault, resolveESModuleSymbol).
+    pub fn module_exports_export(&self, s: SymId) -> Option<SymId> {
+        use ts_r_config::ModuleKind as M;
+        if !matches!(self.opts.module, M::Node20 | M::NodeNext) {
+            return None;
+        }
+        let SymKind::Binder(file, local) = self.sym_kind(s) else {
+            return None;
+        };
+        let b = self.bound(file);
+        let info = b.alias(local)?;
+        let ts_r_binder::AliasTarget::Module { request, import } = info.target else {
+            return None;
+        };
+        let any_format = match import {
+            ts_r_binder::ImportName::ExportEquals => true,
+            ts_r_binder::ImportName::Default | ts_r_binder::ImportName::Namespace => false,
+            ts_r_binder::ImportName::Named(n) if b.name_text(self.ast(file), n) == "default" => {
+                false
+            }
+            _ => return None,
+        };
+        let ModuleTarget::File(f) = self.link.module_target(file, request) else {
+            return None;
+        };
+        let sf = self.file(f);
+        if !sf.bound.is_module || !any_format && (self.file(file).esm_format || !sf.esm_format) {
+            return None;
+        }
+        let m = self.sym(f, sf.bound.file_symbol);
+        self.export_of(m, "module.exports").filter(|&x| x != s)
+    }
+
+    /// Under `node16`..`nodenext`, the module that a default import (or `{ default }` import
+    /// or re-export) `s` in an ES module of a CommonJS-format file without `export =` stands
+    /// for: Node.js gives it a synthetic default that overrides its own `default` export
+    /// (tsc: checker.go getTargetOfModuleDefault, canHaveSyntheticDefault).
+    ///
+    /// A `{ default }` import or re-export of a TypeScript source with `export =` is, like a
+    /// default import, the `export =` entity (not its `default` member).
+    pub fn node_commonjs_default_module(&self, s: SymId) -> Option<SymId> {
+        use ts_r_config::ModuleKind as M;
+        let SymKind::Binder(file, local) = self.sym_kind(s) else {
+            return None;
+        };
+        let b = self.bound(file);
+        let info = b.alias(local)?;
+        let ts_r_binder::AliasTarget::Module { request, import } = info.target else {
+            return None;
+        };
+        let named = match import {
+            ts_r_binder::ImportName::Default => false,
+            ts_r_binder::ImportName::Named(n) if b.name_text(self.ast(file), n) == "default" => {
+                true
+            }
+            _ => return None,
+        };
+        let target = self.link.module_target(file, request);
+        let ModuleTarget::File(f) = target else {
+            return None;
+        };
+        let sf = self.file(f);
+        if sf.is_json() || !sf.bound.is_module {
+            return None;
+        }
+        let m = self.sym(f, sf.bound.file_symbol);
+        let node = matches!(
+            self.opts.module,
+            M::Node16 | M::Node18 | M::Node20 | M::NodeNext
+        );
+        if node
+            && self.file(file).esm_format
+            && !sf.esm_format
+            && self.export_of(m, "export=").is_none()
+        {
+            return Some(m);
+        }
+        if !named || sf.is_js() || sf.is_declaration() || self.esm_imports_esm(file, m) {
+            return None;
+        }
+        let eq = self.link.resolve_export(target, "export=")?;
+        self.link.resolve_alias(eq).map(|t| self.sym_ref(t))
+    }
+
     /// The module symbol of a resolved module target (a TypeScript file module or a
     /// non-shorthand ambient module).
     pub fn module_target_symbol(&self, target: ModuleTarget) -> Option<SymId> {
@@ -1345,6 +1612,9 @@ impl<'a> Checker<'a> {
         if self.export_of(m, "default").is_some() || self.export_of(m, "export=").is_some() {
             return false;
         }
+        if self.esm_imports_esm(importer, m) {
+            return false;
+        }
         if let SymKind::Binder(f, l) = self.sym_kind(m)
             && self.bound(f).file_symbol == l
         {
@@ -1368,6 +1638,26 @@ impl<'a> Checker<'a> {
             }
         }
         self.export_of(m, "__esModule").is_none()
+    }
+
+    /// Under `node16`..`nodenext`, whether an ES module `importer` imports the file module
+    /// `m` that is itself an ES module: such a module has no synthetic default, not even
+    /// for an `export =` (tsc: tsc/internal/checker/checker.go canHaveSyntheticDefault).
+    pub fn esm_imports_esm(&self, importer: FileId, m: SymId) -> bool {
+        use ts_r_config::ModuleKind as M;
+        if !matches!(
+            self.opts.module,
+            M::Node16 | M::Node18 | M::Node20 | M::NodeNext
+        ) || !self.file(importer).esm_format
+        {
+            return false;
+        }
+        match self.sym_kind(m) {
+            SymKind::Binder(f, l) => {
+                self.bound(f).file_symbol == l && !self.file(f).is_json() && self.file(f).esm_format
+            }
+            _ => false,
+        }
     }
 
     /// `true` when the symbol meaning includes `m`.

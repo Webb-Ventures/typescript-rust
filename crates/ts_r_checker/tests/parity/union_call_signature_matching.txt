@@ -1,0 +1,5 @@
+a.ts(9,1): error TS2554: Expected 2 arguments, but got 1.
+a.ts(10,16): error TS2554: Expected 2 arguments, but got 3.
+a.ts(18,3): error TS2554: Expected 1 arguments, but got 0.
+a.ts(31,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type 'never'.
+a.ts(33,1): error TS2555: Expected at least 1 arguments, but got 0.

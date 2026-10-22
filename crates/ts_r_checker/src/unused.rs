@@ -20,12 +20,19 @@
 //!   one TS6205 at the list. A declaration list (more than one declarator) whose variables
 //!   are all unused gives TS6199 at the list; a binding pattern (more than one element) whose
 //!   elements are all unused gives TS6198 at the pattern; an import with several names, all
-//!   unused, gives TS6192 at the import.
+//!   unused, gives TS6192 at the import. An import is reported whether or not its module
+//!   resolves (tsc: tsc/internal/checker/checker.go, checkUnusedLocalsAndParameters).
 //! - Private members (`private`, `#name`) are read by a property access with their name that
 //!   is not a plain assignment target; method and accessor bodies do not read themselves.
 //!   Outside the class, a literal element read (`new C()["x"]`) of a `private` member
-//!   counts when its object's type resolves to that member.
+//!   counts when its object's type resolves to that member. Inside it, a non-literal element
+//!   read (`this[k]`) reads the members its key's literal or unique symbol types name, and
+//!   every member when the key has a non-literal member (`string`, `any`). A computed
+//!   `private [x]` is named by the type of `x` and shown as written (`'[x]'`).
 //!   `private` parameter properties report TS6138.
+//! - A type parameter and a parameter of one name (`function f<T>(T: T)`) share a symbol;
+//!   a read as a type reference's name uses the type parameter, any other read the
+//!   parameter, and each is reported on its own.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::{AssignOp, Ast, BinaryOp, MethodKind, Modifiers, Node, NodeId, Span, VarKind};
@@ -38,6 +45,24 @@ use crate::diagnostics_generated::DiagnosticInfo;
 
 type Report = (Span, DiagnosticInfo, String);
 
+/// A private member unread by name inside its class whose other reads need types.
+struct Escaped {
+    /// Where the report goes, and the name it shows (`x`, `[x]`).
+    key: NodeId,
+    name: String,
+    /// A computed key's expression: the member's name is its (unique symbol or literal) type.
+    computed: Option<NodeId>,
+    nodes: Vec<NodeId>,
+    /// Literal element reads outside the class (`new C()["x"]`): the member is read when
+    /// their object's type resolves to it.
+    outside: Vec<NodeId>,
+    /// Element reads inside the class with a non-literal key (`this[key]`): the member is
+    /// read when the key's type names it, or is not a literal (tsc marks the properties an
+    /// indexed access resolves to: `tsc: tsc/internal/checker/checker.go`,
+    /// `getPropertyTypeForIndexType`).
+    dynamic: Vec<NodeId>,
+}
+
 /// Per-file facts the rules need.
 struct Unused<'x, 'a> {
     c: &'x crate::checker::Checker<'a>,
@@ -46,6 +71,10 @@ struct Unused<'x, 'a> {
     b: &'x BoundFile,
     parents: &'x ts_r_ast::visit::ParentMap,
     read: FxHashSet<SymbolId>,
+    /// Reads of type parameter symbols, as a type and as a value (a parameter that shares
+    /// the type parameter's name and symbol).
+    read_type: FxHashSet<SymbolId>,
+    read_value: FxHashSet<SymbolId>,
     /// Script-global symbols (never reported).
     global: FxHashSet<SymbolId>,
     /// Property names accessed in the file: name → (access node, is a read).
@@ -60,13 +89,11 @@ struct Unused<'x, 'a> {
     pragma_fragments: Vec<String>,
     /// Names referenced by JSDoc `{@link X}` tags (count as used).
     jsdoc_names: FxHashSet<String>,
-    /// Classes with an element access whose key is not a literal (`this[key]`): their
-    /// private members may be read through it.
-    dynamic_access: Vec<Span>,
-    /// `private` members unread inside their class but named by literal element reads
-    /// outside it (`new C()["x"]`): (key, name, member nodes, element accesses). Whether
-    /// those reads reach the member needs types, so `check_unused` decides.
-    escaped: Vec<(NodeId, String, Vec<NodeId>, Vec<NodeId>)>,
+    /// Element accesses whose key is not a literal (`this[key]`), and whether each reads:
+    /// the private members of a class around one may be read through it.
+    dynamic_access: Vec<(NodeId, bool)>,
+    /// Private members whose reads need types, so `check_unused` decides.
+    escaped: Vec<Escaped>,
     out: Vec<Report>,
 }
 
@@ -94,6 +121,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             b: &sf.bound,
             parents: sf.parents(),
             read: FxHashSet::default(),
+            read_type: FxHashSet::default(),
+            read_value: FxHashSet::default(),
             global: FxHashSet::default(),
             accesses: FxHashMap::default(),
             locals,
@@ -112,24 +141,45 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut out = std::mem::take(&mut u.out);
         let escaped = std::mem::take(&mut u.escaped);
         let ast = &sf.ast;
-        for (key, name, nodes, reads) in escaped {
-            let read = reads.iter().any(|&a| {
+        for e in escaped {
+            let prop = match e.computed {
+                Some(x) => {
+                    let t = self.quietly(|ck| ck.check_expr(crate::checker::Loc::new(file, x)));
+                    match self.property_name_of_type(t) {
+                        Some(p) => p,
+                        // Not a literal or unique symbol name: not tracked.
+                        None => continue,
+                    }
+                }
+                None => e.name.clone(),
+            };
+            let outside = e.outside.iter().any(|&a| {
                 let Node::Index { obj, .. } = *ast.node(a) else {
                     return false;
                 };
                 let t = self.quietly(|ck| ck.check_expr(crate::checker::Loc::new(file, obj)));
-                self.property_of_type(t, &name).is_some_and(|p| {
+                self.property_of_type(t, &prop).is_some_and(|p| {
                     self.c
                         .decls(p)
                         .iter()
-                        .any(|d| d.file == file && nodes.contains(&d.node))
+                        .any(|d| d.file == file && e.nodes.contains(&d.node))
                 })
             });
-            if !read {
+            let dynamic = !outside
+                && e.dynamic.iter().any(|&a| {
+                    let Node::Index { index, .. } = *ast.node(a) else {
+                        return false;
+                    };
+                    let t = self.quietly(|ck| ck.check_expr(crate::checker::Loc::new(file, index)));
+                    self.union_members(t)
+                        .into_iter()
+                        .any(|m| self.property_name_of_type(m).is_none_or(|n| n == prop))
+                });
+            if !outside && !dynamic {
                 out.push((
-                    ast.span(key),
+                    ast.span(e.key),
                     dg::_0_IS_DECLARED_BUT_ITS_VALUE_IS_NEVER_READ_6133,
-                    name,
+                    e.name,
                 ));
             }
         }
@@ -176,6 +226,18 @@ impl<'x, 'a> Unused<'x, 'a> {
                 }
             }
             self.read.insert(sym);
+            // A type parameter and a parameter of one name share a symbol: which of the
+            // two a read names follows from where it stands.
+            if s.flags.intersects(SymbolFlags::TYPE_PARAMETER) {
+                let as_type = self.parents.parent(node).is_some_and(
+                    |p| matches!(*ast.node(p), Node::TypeRef { name, .. } if name == node),
+                );
+                if as_type {
+                    self.read_type.insert(sym);
+                } else {
+                    self.read_value.insert(sym);
+                }
+            }
         }
         // Property accesses by name.
         let mut stack = vec![ast.root];
@@ -202,7 +264,7 @@ impl<'x, 'a> Unused<'x, 'a> {
                         ast.node(index),
                         Node::StringLit { .. } | Node::NumberLit { .. }
                     ) {
-                        self.dynamic_access.push(ast.span(n));
+                        self.dynamic_access.push((n, !self.is_write_only(n)));
                     }
                     if let Node::StringLit { value } = *ast.node(index) {
                         let r = !self.is_write_only(n);
@@ -901,7 +963,8 @@ impl<'x, 'a> Unused<'x, 'a> {
                         continue;
                     }
                     if let Some(s) = self.sym_of(p).or_else(|| self.sym_of_ident(pattern))
-                        && !self.read.contains(&s)
+                        && (!self.read.contains(&s)
+                            || (self.merged_type_param(s) && !self.read_value.contains(&s)))
                     {
                         self.push(
                             pattern,
@@ -913,6 +976,12 @@ impl<'x, 'a> Unused<'x, 'a> {
                 _ => self.report_binding(pattern, false),
             }
         }
+    }
+
+    /// A type parameter merged with a value of its name (`function f<T>(T: number)`).
+    fn merged_type_param(&self, s: SymbolId) -> bool {
+        let f = self.b.symbol(s).flags;
+        f.intersects(SymbolFlags::TYPE_PARAMETER) && f.intersects(SymbolFlags::VALUE)
     }
 
     fn param_property(&mut self, p: NodeId, pattern: NodeId) {
@@ -956,7 +1025,9 @@ impl<'x, 'a> Unused<'x, 'a> {
             let Some(s) = self.sym_of(p).or_else(|| self.sym_of_ident(name)) else {
                 return;
             };
-            if !self.read.contains(&s) {
+            if !self.read.contains(&s)
+                || (self.merged_type_param(s) && !self.read_type.contains(&s))
+            {
                 unused.push(name);
             }
         }
@@ -1010,10 +1081,6 @@ impl<'x, 'a> Unused<'x, 'a> {
             if self.jsx_factory_name(self.text(local)) || starts_underscore(self.text(local)) {
                 continue;
             }
-            // Imports of unresolvable modules are not reported.
-            if self.c.resolve_alias(self.c.sym(self.file, s)).is_none() {
-                return;
-            }
             if self.unread(s) {
                 unused.push(local);
             }
@@ -1050,23 +1117,29 @@ impl<'x, 'a> Unused<'x, 'a> {
 
     fn private_members(&mut self, class: NodeId, members: ts_r_ast::NodeList) {
         let class_span = self.ast.span(class);
-        let dynamic = self
+        let ast = self.ast;
+        let inside = |n: NodeId| {
+            let pos = ast.span(n).start;
+            class_span.start <= pos && pos < class_span.end
+        };
+        let dynamic: Vec<(NodeId, bool)> = self
             .dynamic_access
             .iter()
-            .any(|s| class_span.start <= s.start && s.start < class_span.end);
-        let ast = self.ast;
+            .copied()
+            .filter(|&(n, _)| inside(n))
+            .collect();
         let list: Vec<NodeId> = ast.list(members).to_vec();
-        // name → (first declaration's key, member nodes)
-        let mut seen: Vec<(String, NodeId, Vec<NodeId>, bool)> = Vec::new();
+        // name → (first declaration's key, member nodes, computed key expression)
+        let mut seen: Vec<(String, NodeId, Vec<NodeId>, Option<NodeId>)> = Vec::new();
         for &m in &list {
-            let (modifiers, key, is_method, kind) = match *ast.node(m) {
-                Node::PropertyDef { modifiers, key, .. } => (modifiers, key, false, None),
+            let (modifiers, key, kind) = match *ast.node(m) {
+                Node::PropertyDef { modifiers, key, .. } => (modifiers, key, None),
                 Node::MethodDef {
                     modifiers,
                     key,
                     kind,
                     ..
-                } => (modifiers, key, true, Some(kind)),
+                } => (modifiers, key, Some(kind)),
                 _ => continue,
             };
             if kind == Some(MethodKind::Constructor) {
@@ -1075,19 +1148,31 @@ impl<'x, 'a> Unused<'x, 'a> {
             if modifiers.intersects(Modifiers::DECLARE | Modifiers::ABSTRACT) {
                 continue;
             }
-            let name = match *ast.node(key) {
-                Node::PrivateName { name } => format!("#{}", ast.atom(name)),
-                Node::Ident { name } if modifiers.intersects(Modifiers::PRIVATE) && !dynamic => {
-                    ast.atom(name).to_owned()
+            let (name, computed) = match *ast.node(key) {
+                Node::PrivateName { name } => (format!("#{}", ast.atom(name)), None),
+                Node::Ident { name } if modifiers.intersects(Modifiers::PRIVATE) => {
+                    (ast.atom(name).to_owned(), None)
+                }
+                // `private [x]`: shown as written, named by the key's type.
+                Node::ComputedKey { expr }
+                    if modifiers.intersects(Modifiers::PRIVATE)
+                        && matches!(ast.node(expr), Node::Ident { .. }) =>
+                {
+                    let sp = ast.span(key);
+                    let text = &self.c.file(self.file).text;
+                    match text.get(sp.start as usize..sp.end as usize) {
+                        Some(t) => (t.to_owned(), Some(expr)),
+                        None => continue,
+                    }
                 }
                 _ => continue,
             };
             match seen.iter_mut().find(|e| e.0 == name) {
                 Some(e) => e.2.push(m),
-                None => seen.push((name, key, vec![m], is_method)),
+                None => seen.push((name, key, vec![m], computed)),
             }
         }
-        for (name, key, nodes, _) in seen {
+        for (name, key, nodes, computed) in seen {
             // A get/set pair or a single member; overloads are not handled.
             let ok = nodes.len() == 1
                 || (nodes.len() == 2
@@ -1118,18 +1203,19 @@ impl<'x, 'a> Unused<'x, 'a> {
                     }
                 )
             });
-            let used = self.accesses.get(&name).is_some_and(|v| {
-                v.iter().any(|&(a, r)| {
-                    let pos = ast.span(a).start;
-                    (r || accessor)
-                        && class_span.start <= pos
-                        && pos < class_span.end
-                        && !own.iter().any(|s| s.start <= pos && pos < s.end)
-                })
-            });
+            let used = computed.is_none()
+                && self.accesses.get(&name).is_some_and(|v| {
+                    v.iter().any(|&(a, r)| {
+                        let pos = ast.span(a).start;
+                        (r || accessor)
+                            && class_span.start <= pos
+                            && pos < class_span.end
+                            && !own.iter().any(|s| s.start <= pos && pos < s.end)
+                    })
+                });
             // `private` is not enforced through literal element access, so reads like
             // `new C()["x"]` outside the class can reach the member.
-            let escapes: Vec<NodeId> = if used || name.starts_with('#') {
+            let escapes: Vec<NodeId> = if used || name.starts_with('#') || computed.is_some() {
                 Vec::new()
             } else {
                 self.accesses.get(&name).map_or(Vec::new(), |v| {
@@ -1144,8 +1230,28 @@ impl<'x, 'a> Unused<'x, 'a> {
                         .collect()
                 })
             };
-            if !escapes.is_empty() {
-                self.escaped.push((key, name, nodes, escapes));
+            // Non-literal element reads in the class (not of `#names`, which need a name).
+            let dynamic_reads: Vec<NodeId> = if used || name.starts_with('#') {
+                Vec::new()
+            } else {
+                dynamic
+                    .iter()
+                    .filter(|&&(a, r)| {
+                        let pos = ast.span(a).start;
+                        (r || accessor) && !own.iter().any(|s| s.start <= pos && pos < s.end)
+                    })
+                    .map(|&(a, _)| a)
+                    .collect()
+            };
+            if !used && (!escapes.is_empty() || !dynamic_reads.is_empty() || computed.is_some()) {
+                self.escaped.push(Escaped {
+                    key,
+                    name,
+                    computed,
+                    nodes,
+                    outside: escapes,
+                    dynamic: dynamic_reads,
+                });
             } else if !used {
                 self.push(
                     key,

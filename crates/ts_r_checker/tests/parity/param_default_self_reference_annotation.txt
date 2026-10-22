@@ -1,0 +1,15 @@
+a.ts(4,14): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+a.ts(4,38): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(4,38): error TS18048: 'x' is possibly 'undefined'.
+a.ts(4,46): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(5,14): error TS1015: Parameter cannot have question mark and initializer.
+a.ts(5,14): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+a.ts(5,54): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(6,22): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(7,25): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(8,13): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+a.ts(8,37): error TS2372: Parameter 'x' cannot reference itself.
+a.ts(9,36): error TS2502: 'y' is referenced directly or indirectly in its own type annotation.
+a.ts(9,65): error TS2372: Parameter 'y' cannot reference itself.
+a.ts(10,13): error TS2502: 'x' is referenced directly or indirectly in its own type annotation.
+a.ts(10,37): error TS2372: Parameter 'x' cannot reference itself.

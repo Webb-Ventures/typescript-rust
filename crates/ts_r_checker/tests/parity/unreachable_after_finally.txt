@@ -1,0 +1,5 @@
+a.ts(6,9): error TS7027: Unreachable code detected.
+a.ts(11,5): error TS7027: Unreachable code detected.
+a.ts(30,9): error TS7027: Unreachable code detected.
+a.ts(34,5): error TS7027: Unreachable code detected.
+a.ts(44,9): error TS7027: Unreachable code detected.

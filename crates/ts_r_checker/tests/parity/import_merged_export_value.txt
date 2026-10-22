@@ -1,0 +1,8 @@
+a.ts(2,8): error TS2395: Individual declarations in merged declaration 'Obj' must be all exported or all local.
+a.ts(2,8): error TS2440: Import declaration conflicts with local declaration of 'Obj'.
+a.ts(3,14): error TS2395: Individual declarations in merged declaration 'Obj' must be all exported or all local.
+a.ts(3,25): error TS2448: Block-scoped variable 'Obj' used before its declaration.
+b.ts(3,13): error TS2440: Import declaration conflicts with local declaration of 'pick'.
+c.ts(2,23): error TS2448: Block-scoped variable 'x' used before its declaration.
+c.ts(3,7): error TS7022: 'y' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+c.ts(3,18): error TS2448: Block-scoped variable 'y' used before its declaration.

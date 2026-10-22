@@ -120,7 +120,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             TypeKind::Substitution { base, constraint } => {
                 let b = self.instantiate(base, m);
                 // `NoInfer<T>` stays a marker while its type is generic.
-                if constraint == TypeId::UNKNOWN && self.is_generic_type(b) {
+                if constraint == TypeId::UNKNOWN && self.is_no_infer_target(b, 0) {
                     return self.store().substitution(b, TypeId::UNKNOWN);
                 }
                 b
@@ -653,6 +653,22 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Whether a type contains type parameters (by its interned summary bit).
+    /// Whether `NoInfer<t>` stays a marker: `t` is generic, or an object type (or a union
+    /// or intersection member) that could contain type parameters (`NoInfer<T[]>`).
+    fn is_no_infer_target(&mut self, t: TypeId, depth: u32) -> bool {
+        let f = self.store().flags(t);
+        if depth < 16 && f.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION) {
+            let members = self.store().members_of_union(t).to_vec();
+            return members
+                .iter()
+                .any(|&m| self.is_no_infer_target(m, depth + 1));
+        }
+        if f.contains(TypeFlags::OBJECT) {
+            return self.could_contain_type_params(t);
+        }
+        self.is_generic_type(t)
+    }
+
     pub fn could_contain_type_params(&self, t: TypeId) -> bool {
         self.store()
             .traits(t)

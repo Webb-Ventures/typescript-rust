@@ -1,0 +1,17 @@
+a.ts(2,6): error TS2456: Type alias 'A1' circularly references itself.
+a.ts(6,6): error TS2456: Type alias 'A5' circularly references itself.
+a.ts(9,6): error TS2456: Type alias 'A8' circularly references itself.
+a.ts(10,6): error TS2456: Type alias 'A9' circularly references itself.
+a.ts(11,6): error TS2456: Type alias 'A10' circularly references itself.
+a.ts(12,6): error TS2456: Type alias 'A11' circularly references itself.
+a.ts(13,6): error TS2456: Type alias 'A12' circularly references itself.
+a.ts(23,6): error TS2456: Type alias 'A23' circularly references itself.
+a.ts(27,6): error TS2456: Type alias 'A26' circularly references itself.
+a.ts(28,5): error TS2502: 'v26' is referenced directly or indirectly in its own type annotation.
+a.ts(31,6): error TS2456: Type alias 'A28' circularly references itself.
+a.ts(32,5): error TS2502: 'v28' is referenced directly or indirectly in its own type annotation.
+a.ts(33,6): error TS2456: Type alias 'A29' circularly references itself.
+a.ts(34,5): error TS2502: 'v29' is referenced directly or indirectly in its own type annotation.
+a.ts(35,6): error TS2456: Type alias 'A30' circularly references itself.
+a.ts(36,5): error TS2502: 'v30' is referenced directly or indirectly in its own type annotation.
+a.ts(37,6): error TS2456: Type alias 'A31' circularly references itself.

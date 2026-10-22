@@ -126,6 +126,11 @@ pub(crate) struct Binder<'a> {
     partners: FxHashMap<u32, TableId>,
     /// The function expression about to be bound as an immediately invoked one.
     iife: Option<NodeId>,
+    /// Members of a class expression are being bound (not of a class declaration).
+    in_class_expr: bool,
+    /// A method's function about to be bound whose flow does not continue the outer flow:
+    /// a constructor, or a member of a class declaration.
+    detached_function: Option<NodeId>,
     /// Binding the object or callee of a property access, element access or call (the
     /// spine of a possible optional chain).
     in_spine: bool,
@@ -245,6 +250,8 @@ impl<'a> Binder<'a> {
             iface_tables: FxHashMap::default(),
             partners: FxHashMap::default(),
             iife: None,
+            in_class_expr: false,
+            detached_function: None,
             in_spine: false,
             chain_skips: None,
             no_fold: 0,
@@ -1070,15 +1077,13 @@ impl<'a> Binder<'a> {
                 if let Node::Call { callee, .. } = *ast.node(e)
                     && !self.current.is_unreachable()
                 {
-                    let kind = if self.is_array_mutation_call(callee) {
-                        FlowKind::ArrayMutation
-                    } else {
-                        FlowKind::Call
-                    };
-                    let f = self.add_flow(kind, Some(e), self.current.0, 0);
-                    self.current = f;
-                    if let Some(t) = self.jumps.exception {
-                        self.add_ante(t, f);
+                    // `xs.push(..)` got its ArrayMutation node in `bind_expr`.
+                    if !self.is_array_mutation_call(callee) {
+                        let f = self.add_flow(FlowKind::Call, Some(e), self.current.0, 0);
+                        self.current = f;
+                        if let Some(t) = self.jumps.exception {
+                            self.add_ante(t, f);
+                        }
                     }
                 }
             }
@@ -1403,8 +1408,22 @@ impl<'a> Binder<'a> {
                 }
             }
             Node::NamespaceExport { name } => {
-                let n = self.ident_name(name);
-                self.umd_name = Some((n, id));
+                // `export as namespace N` declares a UMD global only at the top of a module
+                // declaration file; modifiers on it are an error of their own.
+                let span = self.ast.span(id);
+                if !self.ast.modifier_tokens_of(id).is_empty() {
+                    self.error(m::MODIFIERS_CANNOT_APPEAR_HERE, span, &[]);
+                }
+                if self.ctx.module_depth != 0 || self.ctx.scope != ScopeId(0) {
+                    self.error(m::GLOBAL_EXPORTS_AT_TOP_LEVEL, span, &[]);
+                } else if !self.is_module {
+                    self.error(m::GLOBAL_EXPORTS_IN_MODULE_FILES, span, &[]);
+                } else if !self.ast.source_kind.is_declaration() {
+                    self.error(m::GLOBAL_EXPORTS_IN_DECLARATION_FILES, span, &[]);
+                } else {
+                    let n = self.ident_name(name);
+                    self.umd_name = Some((n, id));
+                }
             }
             Node::Directive { .. } | Node::Empty {} | Node::Debugger {} | Node::Missing {} => {}
             _ => self.bind_any(id),
@@ -1434,10 +1453,24 @@ impl<'a> Binder<'a> {
             && let Some(p) = self.ident_text(prop)
             && (p == "push" || p == "unshift")
         {
-            return matches!(
-                self.ast.node(skip_parens(self.ast, obj)),
-                Node::Ident { .. }
-            );
+            // The reference the object stands for: `(xs)`, `(a, xs)`, `(xs = v)`.
+            let mut o = obj;
+            loop {
+                match *self.ast.node(o) {
+                    Node::Paren { expr } => o = expr,
+                    Node::Seq { exprs } => match self.ast.list(exprs).last() {
+                        Some(&last) => o = last,
+                        None => return false,
+                    },
+                    Node::Assign {
+                        left,
+                        op: AssignOp::Assign,
+                        ..
+                    } => o = left,
+                    Node::Ident { .. } => return true,
+                    _ => return false,
+                }
+            }
         }
         false
     }
@@ -2348,8 +2381,9 @@ impl<'a> Binder<'a> {
             Node::Unary { op, arg } => {
                 if op == UnaryOp::Delete
                     && self.ctx.strict
-                    && matches!(ast.node(arg), Node::Ident { .. })
+                    && matches!(ast.node(arg), Node::Ident { .. } | Node::Missing {})
                 {
+                    // (A missing operand is an identifier to tsc.)
                     let span = ast.span(arg);
                     self.error(m::DELETE_IDENTIFIER_IN_STRICT_MODE, span, &[]);
                 }
@@ -2408,6 +2442,15 @@ impl<'a> Binder<'a> {
                         && matches!(*ast.node(f), Node::Ident { name } if ast.atom(name) == "require")
                     {
                         self.add_request(*a, RequestKind::ImportEquals, false);
+                    }
+                    // Any `xs.push(..)` / `xs.unshift(..)` call mutates an evolving array,
+                    // also inside an expression (`(xs.push(1), xs).push(2)`).
+                    if self.is_array_mutation_call(callee) && !self.current.is_unreachable() {
+                        let m = self.add_flow(FlowKind::ArrayMutation, Some(id), self.current.0, 0);
+                        self.current = m;
+                        if let Some(t) = self.jumps.exception {
+                            self.add_ante(t, m);
+                        }
                     }
                     if self.commonjs {
                         self.record_commonjs_define_property(id, f, args);
@@ -2721,7 +2764,8 @@ impl<'a> Binder<'a> {
                 let s = js_number_to_string(value.get());
                 self.names.name_for(ast, &s)
             }
-            Node::BigIntLit { value } => Name::from_atom(value),
+            // A bigint key names no member (it is TS1539; tsc's binder leaves it nameless).
+            Node::BigIntLit { .. } => Name::MISSING,
             Node::ComputedKey { expr } => {
                 let e = skip_parens(ast, expr);
                 match *ast.node(e) {
@@ -2944,10 +2988,15 @@ impl<'a> Binder<'a> {
         if iife {
             self.jumps.exception = saved_jumps.exception;
         }
+        let detached = self.detached_function.take() == Some(id);
         let start = self.add_flow(
             FlowKind::Start,
             Some(id),
-            if is_expr { outer_current.0 } else { 0 },
+            if is_expr && !detached {
+                outer_current.0
+            } else {
+                0
+            },
             0,
         );
         self.current = if iife && outer_current.is_unreachable() {
@@ -2963,10 +3012,12 @@ impl<'a> Binder<'a> {
         for &p in ast.list(params) {
             self.bind_param(p, table);
         }
-        self.ctx.params_of = None;
+        // The return type sees what the parameters see (`function f(): typeof b { var b }`
+        // reads an outer `b`).
         if let Some(r) = ret {
             self.bind_type(r);
         }
+        self.ctx.params_of = None;
         if let Some(b) = body {
             match *ast.node(b) {
                 Node::Block { stmts } if !is_signature => {
@@ -3298,6 +3349,7 @@ impl<'a> Binder<'a> {
         // after the class (`let a; class C { [(a = 1, "m")]() {} } a;` is TS2454, while
         // a name sees a later static block's assignment).
         let is_block = |m: &NodeId| matches!(ast.node(*m), Node::StaticBlock { .. });
+        let saved_class_expr = std::mem::replace(&mut self.in_class_expr, is_expr);
         for &mem in ast.list(members).iter().filter(|m| is_block(m)) {
             self.bind_class_member(mem, sym, inst, stat);
         }
@@ -3305,6 +3357,7 @@ impl<'a> Binder<'a> {
         for &mem in ast.list(members).iter().filter(|m| !is_block(m)) {
             self.bind_class_member(mem, sym, inst, stat);
         }
+        self.in_class_expr = saved_class_expr;
         self.current = after_blocks;
         if !self.ast.source_kind.is_typescript() && !self.ctx.ambient {
             self.declare_this_properties(members, sym, inst, stat);
@@ -3542,6 +3595,12 @@ impl<'a> Binder<'a> {
                             );
                         }
                     }
+                }
+                // Only methods and accessors of class expressions continue the flow
+                // around them (observed: narrowing reaches them, not constructors or
+                // members of class declarations).
+                if kind == MethodKind::Constructor || !self.in_class_expr {
+                    self.detached_function = Some(value);
                 }
                 self.bind_function_like(value);
             }
@@ -4039,6 +4098,28 @@ impl<'a> Binder<'a> {
             return;
         };
         let at_top = self.ctx.module_depth == 0 && self.ctx.scope == ScopeId(0);
+        let quoted = match *ast.node(name) {
+            Node::StringLit { value } => Some(ast.atom(value)),
+            _ => None,
+        };
+        // `export` on an ambient module or a global augmentation: TS2668 at the first
+        // modifier (tsc: binder.go, bindModuleDeclaration).
+        if (quoted.is_some() || kind == ModuleKind::Global)
+            && modifiers.contains(Modifiers::EXPORT)
+            && let Some(t) = ast.modifier_tokens_of(id).first()
+        {
+            self.error(m::EXPORT_ON_AMBIENT_MODULE, t.span, &[]);
+        }
+        // A script's top-level `module "./x"`: TS2436 at the name (tsc: checker.go,
+        // checkModuleDeclaration).
+        if let Some(text) = quoted
+            && kind == ModuleKind::Module
+            && !self.is_module
+            && at_top
+            && is_relative_module_name(text)
+        {
+            self.error(m::AMBIENT_MODULE_RELATIVE_NAME, ast.span(name), &[]);
+        }
         match kind {
             ModuleKind::Global => {
                 let ok = (self.is_module && at_top)
@@ -4086,6 +4167,16 @@ impl<'a> Binder<'a> {
                 {
                     let span = ast.span(name);
                     self.error(m::AMBIENT_MODULE_NESTED, span, &[]);
+                }
+                // An ambient module (not an augmentation) is a pattern when its name has a
+                // `*`; more than one is an error at the name (`tsc: tsc/internal/binder/binder.go`).
+                if !(self.is_module && at_top)
+                    && let Node::StringLit { value } = *ast.node(name)
+                {
+                    let text = ast.atom(value);
+                    if text.bytes().filter(|&c| c == b'*').count() > 1 {
+                        self.error(m::PATTERN_TOO_MANY_ASTERISKS, ast.span(name), &[text]);
+                    }
                 }
                 let table = if self.is_module {
                     self.module_augmentations
@@ -4440,7 +4531,19 @@ impl<'a> Binder<'a> {
                         self.add_entity_ref(expr_name, meaning::VALUE);
                         self.record_flow(expr_name);
                     }
-                    Node::QualifiedName { .. } => self.add_entity_ref(expr_name, meaning::VALUE),
+                    // `typeof x.p` and `typeof this.a.b` narrow the reference: the name and
+                    // its leftmost identifier record where they stand.
+                    Node::QualifiedName { .. } => {
+                        self.add_entity_ref(expr_name, meaning::VALUE);
+                        self.record_flow(expr_name);
+                        let mut left = expr_name;
+                        while let Node::QualifiedName { left: l, .. } = *ast.node(left) {
+                            left = l;
+                        }
+                        if matches!(ast.node(left), Node::Ident { .. }) {
+                            self.record_flow(left);
+                        }
+                    }
                     _ => self.bind_type(expr_name),
                 }
                 if let Some(t) = type_args {
@@ -5349,5 +5452,24 @@ fn resolution_mode_attribute(ast: &Ast, a: NodeId) -> Option<ts_r_resolver::Reso
             _ => None,
         },
         _ => None,
+    }
+}
+
+/// A module name tsc treats as relative: `.`, `..`, starting with `./`, `../` (or with
+/// backslashes), or a rooted path: `/`, `\`, a drive (`c:`, `c:/`), `^/`, or a URL with a
+/// path (`file:///x`).
+fn is_relative_module_name(name: &str) -> bool {
+    let b = name.as_bytes();
+    let sep = |c: u8| c == b'/' || c == b'\\';
+    match b {
+        [b'.'] | [b'.', b'.'] => true,
+        [b'.', c, ..] | [b'.', b'.', c, ..] if sep(*c) => true,
+        [c, ..] if sep(*c) => true,
+        [d, b':'] if d.is_ascii_alphabetic() => true,
+        [d, b':', c, ..] if d.is_ascii_alphabetic() && sep(*c) => true,
+        [b'^', b'/', ..] => true,
+        _ => name
+            .find("://")
+            .is_some_and(|i| name[i + 3..].contains('/')),
     }
 }

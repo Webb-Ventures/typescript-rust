@@ -1,0 +1,1 @@
+a.ts(6,3): error TS18048: 'o.router' is possibly 'undefined'.

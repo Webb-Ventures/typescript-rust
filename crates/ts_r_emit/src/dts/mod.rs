@@ -763,8 +763,192 @@ impl<'c, 'a> Emitter<'c, 'a> {
             {
                 return;
             }
+            if self.declared_in_block(sym) && self.private_name(n) {
+                return;
+            }
             self.reference_symbol(sym);
         }
+    }
+
+    /// Whether `sym` has a declaration in this file whose statement sits in a block, a
+    /// loop head or any other place that is not a file or namespace body (`{ var a; }`,
+    /// exported or not): a declaration file cannot print it, so names written from the
+    /// source cannot refer to it (`tsc: tsc/internal/checker/emitresolver.go`, where the
+    /// container of such a statement is never visible).
+    fn declared_in_block(&self, sym: SymId) -> bool {
+        if self
+            .c
+            .sym_flags(sym)
+            .intersects(SymbolFlags::ALIAS | SymbolFlags::TYPE_PARAMETER)
+        {
+            return false;
+        }
+        self.c.decls(sym).iter().any(|d| {
+            if d.file != self.file || d.node.index() >= self.orig_len {
+                return false;
+            }
+            // From the declared name (through binding patterns) to its statement.
+            let mut cur = d.node;
+            let mut stmt = None;
+            for _ in 0..64 {
+                match self.ast.node(cur) {
+                    Node::VarDeclarator { .. } => {
+                        stmt = self
+                            .parents
+                            .parent(cur)
+                            .filter(|&p| matches!(self.ast.node(p), Node::VarDecl { .. }));
+                        break;
+                    }
+                    Node::FunctionDecl { .. }
+                    | Node::ClassDecl { .. }
+                    | Node::Enum { .. }
+                    | Node::Interface { .. }
+                    | Node::TypeAlias { .. } => {
+                        stmt = Some(cur);
+                        break;
+                    }
+                    Node::Ident { .. }
+                    | Node::ObjectPattern { .. }
+                    | Node::ArrayPattern { .. }
+                    | Node::BindingProperty { .. }
+                    | Node::AssignPattern { .. }
+                    | Node::Rest { .. } => match self.parents.parent(cur) {
+                        Some(p) => cur = p,
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
+            let Some(stmt) = stmt else {
+                return false;
+            };
+            self.parents.parent(stmt).is_some_and(|p| {
+                !matches!(
+                    self.ast.node(p),
+                    Node::Program { .. } | Node::ModuleBlock { .. } | Node::Module { .. }
+                )
+            })
+        })
+    }
+
+    /// Reports the source name `n` as a private name of the declaration it is written in
+    /// (TS4025 and its kin, at `n`). False when the declaration is of a kind not covered,
+    /// so the caller goes on as before.
+    fn private_name(&mut self, n: NodeId) -> bool {
+        let name = self.raw(n);
+        let mut cur = n;
+        let mut from_param = None;
+        let (code, message) = 'found: {
+            for _ in 0..256 {
+                let Some(p) = self.parents.parent(cur) else {
+                    return false;
+                };
+                match *self.ast.node(p) {
+                    Node::VarDeclarator { name: d, .. } => {
+                        if !matches!(self.ast.node(d), Node::Ident { .. }) {
+                            return false;
+                        }
+                        break 'found (
+                            4025,
+                            format!(
+                                "Exported variable '{}' has or is using private name '{name}'.",
+                                self.raw(d)
+                            ),
+                        );
+                    }
+                    Node::TypeAlias { name: d, ty, .. } if ty == cur => {
+                        break 'found (
+                            4081,
+                            format!(
+                                "Exported type alias '{}' has or is using private name '{name}'.",
+                                self.raw(d)
+                            ),
+                        );
+                    }
+                    Node::Param {
+                        pattern, type_ann, ..
+                    } if type_ann == Some(cur) => {
+                        if !matches!(self.ast.node(pattern), Node::Ident { .. }) {
+                            return false;
+                        }
+                        from_param = Some(pattern);
+                    }
+                    Node::FunctionDecl { return_type, .. } => {
+                        if let Some(param) = from_param {
+                            break 'found (
+                                4078,
+                                format!(
+                                    "Parameter '{}' of exported function has or is using private name '{name}'.",
+                                    self.raw(param)
+                                ),
+                            );
+                        }
+                        if return_type == Some(cur) {
+                            break 'found (
+                                4060,
+                                format!(
+                                    "Return type of exported function has or is using private name '{name}'."
+                                ),
+                            );
+                        }
+                        return false;
+                    }
+                    Node::PropertyDef {
+                        modifiers,
+                        key,
+                        type_ann,
+                        ..
+                    } if type_ann == Some(cur)
+                        && matches!(self.ast.node(key), Node::Ident { .. }) =>
+                    {
+                        let (code, what) = if modifiers.intersects(ts_r_ast::Modifiers::STATIC) {
+                            (4028, "Public static property")
+                        } else {
+                            (4031, "Public property")
+                        };
+                        break 'found (
+                            code,
+                            format!(
+                                "{what} '{}' of exported class has or is using private name '{name}'.",
+                                self.raw(key)
+                            ),
+                        );
+                    }
+                    Node::PropertySignature { key, type_ann, .. }
+                        if type_ann == Some(cur)
+                            && matches!(self.ast.node(key), Node::Ident { .. })
+                            && self.parents.parent(p).is_some_and(|i| {
+                                matches!(self.ast.node(i), Node::Interface { .. })
+                            }) =>
+                    {
+                        break 'found (
+                            4033,
+                            format!(
+                                "Property '{}' of exported interface has or is using private name '{name}'.",
+                                self.raw(key)
+                            ),
+                        );
+                    }
+                    Node::Program { .. }
+                    | Node::ModuleBlock { .. }
+                    | Node::Block { .. }
+                    | Node::ClassDecl { .. }
+                    | Node::ClassExpr { .. }
+                    | Node::Interface { .. }
+                    | Node::Arrow { .. }
+                    | Node::FunctionExpr { .. }
+                    | Node::MethodDef { .. } => return false,
+                    _ => {}
+                }
+                cur = p;
+            }
+            return false;
+        };
+        let span = self.ast.span(n);
+        if !self.failed.iter().any(|f| f.0 == code && f.1 == span) {
+            self.failed.push((code, span, message, None));
+        }
+        true
     }
 
     /// Records the references of an entity name (`A.B.C`; the leftmost identifier).
@@ -1654,6 +1838,11 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if used.is_empty() {
             // An import of a module that augments others stays as `import "m";`.
             if self.imports_augmenting_module(&specs) {
+                // Keeping the bare import needs the other file: refused under
+                // isolatedDeclarations (TS9026 at the import).
+                if self.iso_on(s) {
+                    self.iso_error(9026, s);
+                }
                 self.leading_jsdoc(s, prev_end);
                 self.w("import ");
                 self.name_text(source);
@@ -3056,7 +3245,11 @@ impl<'c, 'a> Emitter<'c, 'a> {
                         self.w(" => ");
                         match return_type {
                             Some(r) => self.type_node(r),
-                            None => self.inferred_return(value),
+                            None => {
+                                // Its return is still inferred alongside the name's TS9038.
+                                self.iso_return(value, 9008, key);
+                                self.inferred_return(value);
+                            }
                         }
                         if wrap {
                             self.w(") | undefined");

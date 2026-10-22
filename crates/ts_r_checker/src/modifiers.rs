@@ -36,7 +36,10 @@
 //!   the later keyword (always at `async`).
 //! - `accessor` only on class properties: TS1275.
 //! - After the keyword rules: `declare` on an import declaration or `import x =` is TS1079
-//!   at `declare`; then `export` on an import declaration is TS1191 at `export`.
+//!   at `declare`; then `export` on an import declaration is TS1191 at `export`. Any
+//!   modifier on `export {..}` / `export *` is TS1193, on `export default <expr>` TS1120,
+//!   at the first one (tsc: checker.go, checkExportDeclaration, checkExportAssignment). The
+//!   keyword rules run first: `accessor export {}` is TS1275.
 //! - The first top-level `var`, function, class, enum or namespace of a `.d.ts` file
 //!   without `declare` or `export`: TS1046 (once per file).
 //!
@@ -510,17 +513,26 @@ impl<'c, 'a> Ck<'c, 'a> {
             | Node::Enum { .. }
             | Node::Module { .. }
             | Node::ImportEquals { .. }
-            | Node::ImportDecl { .. } => {
+            | Node::ImportDecl { .. }
+            | Node::ExportNamed { .. }
+            | Node::ExportAll { .. }
+            | Node::ExportDefaultExpr { .. } => {
                 let place = match pnode {
                     Some(Node::Program { .. }) => Place::Top,
                     Some(Node::ModuleBlock { .. }) => Place::Namespace,
                     _ => Place::Block,
                 };
-                // A namespace or import in a block is TS1235/TS1234/TS1232 instead.
+                // A namespace, import or export in a block is TS1235/TS1234/TS1232/TS1474/
+                // TS1258 instead.
                 if place == Place::Block
                     && matches!(
                         ast.node(n),
-                        Node::Module { .. } | Node::ImportEquals { .. } | Node::ImportDecl { .. }
+                        Node::Module { .. }
+                            | Node::ImportEquals { .. }
+                            | Node::ImportDecl { .. }
+                            | Node::ExportNamed { .. }
+                            | Node::ExportAll { .. }
+                            | Node::ExportDefaultExpr { .. }
                     )
                 {
                     return None;
@@ -560,9 +572,33 @@ impl<'c, 'a> Ck<'c, 'a> {
             .union(Modifiers::DEFAULT)
             .union(Modifiers::IN)
             .union(Modifiers::OUT);
+        // Under verbatimModuleSyntax, a CommonJS file cannot `export` a top-level value
+        // declaration (tsc: grammarchecks.go checkGrammarModifiers; namespaces are checked
+        // with the other namespace rules).
+        let cjs_export = matches!(
+            site,
+            Site::Stmt {
+                kind,
+                place: Place::Top,
+                ..
+            } if !matches!(
+                kind,
+                NodeKind::TypeAlias | NodeKind::Interface | NodeKind::Module
+            )
+        ) && self.c.opts.verbatim_module_syntax
+            && !self.is_ambient_node(Loc::new(file, n))
+            && self.emits_commonjs(file);
         for t in toks {
             if t.flag.intersects(skipped) {
                 continue;
+            }
+            if cjs_export && t.flag == Modifiers::EXPORT {
+                return Some(err(
+                    t.span,
+                    dg::A_TOP_LEVEL_EXPORT_MODIFIER_CANNOT_BE_USED_ON_VALUE_DECLARATIONS_IN_A_COMMONJS_M_1287,
+                    "",
+                    "",
+                ));
             }
             if let Some(e) = keyword_error(site, t.flag, t.span, seen, async_span) {
                 return Some(e);
@@ -646,6 +682,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 "",
                 "",
             ));
+        }
+        // `declare export { a }`, `export export * from "m"`: TS1193; `declare export
+        // default x`: TS1120; at the first modifier, when no keyword rule fired.
+        let whole = match ast.node(n) {
+            Node::ExportNamed { .. } | Node::ExportAll { .. } => {
+                Some(dg::AN_EXPORT_DECLARATION_CANNOT_HAVE_MODIFIERS_1193)
+            }
+            Node::ExportDefaultExpr { .. } => {
+                Some(dg::AN_EXPORT_ASSIGNMENT_CANNOT_HAVE_MODIFIERS_1120)
+            }
+            _ => None,
+        };
+        if let (Some(info), Some(t)) = (whole, toks.first()) {
+            return Some(err(t.span, info, "", ""));
         }
         None
     }

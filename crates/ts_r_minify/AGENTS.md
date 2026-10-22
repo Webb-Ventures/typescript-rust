@@ -7,8 +7,8 @@ Root rules: [../../AGENTS.md](../../AGENTS.md). Design:
 [../../docs/design/0008-bundler.md](../../docs/design/0008-bundler.md); AST:
 [../../docs/design/0001-ast.md](../../docs/design/0001-ast.md).
 
-Written from scratch. Never read or port terser, esbuild, swc or oxc source. Their docs and
-observed output are fine as oracles.
+Written from scratch. terser's, esbuild's, swc's and oxc's docs and observed output are the
+oracles; their source may be read to understand a rule, never ported (root AGENTS.md).
 
 ## API in one breath
 
@@ -25,7 +25,7 @@ rename::apply(&mut ast, &scopes, &names);
 
 Files: `scope.rs` (scopes, symbols, references, hoisting, `eval`/`with` detection),
 `purity.rs` (side-effect analysis, `/*#__PURE__*/`), `fold.rs` (constant folding,
-dead branches), `compress.rs` (size rewrites), `rename.rs` (mangle/deconflict), `private.rs`
+dead branches, the handler of an empty `try`), `compress.rs` (size rewrites), `rename.rs` (mangle/deconflict), `private.rs`
 (`#private` member names, per class; untouched when a direct `eval` exists), `names.rs`
 (short-name sequence, reserved words, sanitising), `build.rs` (synthesized node helpers).
 

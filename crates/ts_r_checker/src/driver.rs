@@ -171,6 +171,11 @@ pub fn check_program_with<'a>(
     check_program_impl(program, run, make, false)
 }
 
+/// TS1xxx codes that tsc's binder reports whatever the parser found (`eval`/`arguments`,
+/// `delete`, `with`, labels, `export as namespace` placement): they survive syntax errors
+/// in the file. Reserved words as identifiers (TS1212-TS1214) wait for a clean parse.
+const BINDER_CODES: &[u32] = &[1100, 1101, 1102, 1184, 1210, 1215, 1314, 1315, 1316, 1344];
+
 fn check_program_impl<'a>(
     program: &'a ProgramFiles,
     run: CheckRun,
@@ -199,6 +204,17 @@ fn check_program_impl<'a>(
     for (i, f) in program.files.iter().enumerate() {
         syntax.extend(
             crate::reference_diagnostics(f, &program.options, &paths)
+                .into_iter()
+                .map(|d| d.with_file(FileId(i as u32))),
+        );
+        let missing: Vec<&str> = program
+            .missing_type_references
+            .iter()
+            .filter(|(p, _)| *p == f.path)
+            .map(|(_, n)| n.as_str())
+            .collect();
+        syntax.extend(
+            crate::references::type_reference_diagnostics(f, &missing)
                 .into_iter()
                 .map(|d| d.with_file(FileId(i as u32))),
         );
@@ -233,6 +249,23 @@ fn check_program_impl<'a>(
     }
     out.extend(ambiguous_root_diagnostics(program));
     let mut checker = make(program);
+    // tsc's binder reports its strict-mode and `export as namespace` errors whatever the
+    // parser found; only the checker's grammar errors wait for a clean parse.
+    let bind_kept: rustc_hash::FxHashSet<(u32, u32, u32)> = if through_syntax_errors {
+        (0..program.files.len())
+            .filter(|&i| broken[i])
+            .flat_map(|i| {
+                checker
+                    .bound(FileId(i as u32))
+                    .diagnostics
+                    .iter()
+                    .filter(|d| BINDER_CODES.contains(&d.code))
+                    .map(move |d| (i as u32, d.span.start, d.code))
+            })
+            .collect()
+    } else {
+        Default::default()
+    };
     out.extend(missing_global_type_diagnostics(&checker));
     for d in &checker.link.diagnostics {
         let f = d.file.0 as usize;
@@ -264,8 +297,17 @@ fn check_program_impl<'a>(
         out.retain(|d| {
             i += 1;
             i <= n_syntax
-                || !((1000..2000).contains(&d.code) || matches!(d.code, 8020 | 17019 | 17020))
+                // (TS1294, `erasableSyntaxOnly`, TS1141 for `import(x)` types, TS1539 for
+                // bigint property names, and the import checks TS1192, TS1205, TS1340, TS1361,
+                // TS1362, TS1484 and TS1485 are semantic errors to tsc 7.)
+                || !((1000..2000).contains(&d.code)
+                    && !matches!(
+                        d.code,
+                        1141 | 1192 | 1205 | 1294 | 1340 | 1361 | 1362 | 1484 | 1485 | 1539
+                    )
+                    || matches!(d.code, 8020 | 17019 | 17020))
                 || !broken.get(d.file.0 as usize).copied().unwrap_or(false)
+                || bind_kept.contains(&(d.file.0, d.span.start, d.code))
                 // JSDoc syntax errors stay (tsc 7 parses JSDoc apart from the file).
                 || program.files.get(d.file.0 as usize).is_some_and(|f| {
                     f.jsdoc
@@ -315,10 +357,17 @@ pub const REQUIRED_GLOBAL_TYPES: [&str; 10] = [
 ];
 
 /// TS2318 for each global type every program needs that no file declares (observed with
-/// `noLib`). Global diagnostics: reported with option errors too.
+/// `noLib`). Global diagnostics: reported with option errors too. `CallableFunction` and
+/// `NewableFunction` are only looked up under `strictBindCallApply` (without it `Function`
+/// stands in; `tsc/internal/checker/checker.go`, the checker's global type setup).
 pub fn missing_global_type_diagnostics(checker: &Checker<'_>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for name in REQUIRED_GLOBAL_TYPES {
+        if !checker.opts.strict_bind_call_apply
+            && matches!(name, "CallableFunction" | "NewableFunction")
+        {
+            continue;
+        }
         if checker
             .global_symbol(name, ts_r_binder::meaning::TYPE)
             .is_none()
@@ -365,11 +414,8 @@ pub fn check_files(
             let fi = targets[i];
             let file = FileId(fi as u32);
             let ck = ck.get_or_insert_with(|| Ck::new(checker, file));
-            let mut diags = ck.check_source_file(file);
-            // JSDoc syntax errors (JavaScript) are reported with the file's checker errors.
-            if let Some(f) = checker.files.get(fi) {
-                diags.extend(f.jsdoc.iter().map(|d| d.clone().with_file(file)));
-            }
+            // (JSDoc syntax errors of JavaScript files come with the checker errors.)
+            let diags = ck.check_source_file(file);
             *results[i].lock().unwrap_or_else(|e| e.into_inner()) = diags;
         }
     };

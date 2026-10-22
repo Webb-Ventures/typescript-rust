@@ -1,0 +1,5 @@
+a.ts(7,22): error TS2499: An interface can only extend an identifier/qualified-name with optional type arguments.
+a.ts(8,22): error TS2503: Cannot find namespace 'ns'.
+a.ts(8,22): error TS2499: An interface can only extend an identifier/qualified-name with optional type arguments.
+a.ts(10,21): error TS2503: Cannot find namespace 'ns'.
+a.ts(10,21): error TS2500: A class can only implement an identifier/qualified-name with optional type arguments.

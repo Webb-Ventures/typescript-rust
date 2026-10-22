@@ -1,0 +1,12 @@
+a.ts(4,18): error TS2345: Argument of type '({ a }: { a: any; }) => any' is not assignable to parameter of type '(x: unknown) => string'.
+  Types of parameters '__0' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type '{ a: any; }'.
+a.ts(5,18): error TS2345: Argument of type '([b, c]: [any, any]) => string' is not assignable to parameter of type '(x: unknown) => string'.
+  Types of parameters '__0' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type '[any, any]'.
+a.ts(6,18): error TS2345: Argument of type '({ d: [e, f] }: { d: [any, any]; }) => string' is not assignable to parameter of type '(x: unknown) => string'.
+  Types of parameters '__0' and 'x' are incompatible.
+    Type 'unknown' is not assignable to type '{ d: [any, any]; }'.
+a.ts(8,8): error TS2345: Argument of type '({ data }: { data: any; }) => any' is not assignable to parameter of type '(value: unknown) => any'.
+  Types of parameters '__0' and 'value' are incompatible.
+    Type 'unknown' is not assignable to type '{ data: any; }'.

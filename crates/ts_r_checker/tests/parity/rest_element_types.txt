@@ -1,0 +1,12 @@
+a.ts(1,12): error TS2370: A rest parameter must be of an array type.
+a.ts(2,17): error TS2370: A rest parameter must be of an array type.
+a.ts(2,39): error TS2370: A rest parameter must be of an array type.
+a.ts(2,61): error TS2370: A rest parameter must be of an array type.
+a.ts(3,16): error TS2370: A rest parameter must be of an array type.
+a.ts(6,12): error TS2574: A rest element type must be an array type.
+a.ts(7,25): error TS1265: A rest element cannot follow another rest element.
+a.ts(8,25): error TS1266: An optional element cannot follow a rest element.
+a.ts(10,18): error TS1265: A rest element cannot follow another rest element.
+a.ts(11,38): error TS1265: A rest element cannot follow another rest element.
+a.ts(15,27): error TS1265: A rest element cannot follow another rest element.
+a.ts(16,13): error TS2574: A rest element type must be an array type.

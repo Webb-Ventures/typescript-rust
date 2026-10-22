@@ -26,9 +26,11 @@ share one per option set. `resolve_module_traced` / `resolve_type_reference_trac
 - Every step reports to a `Tracer` (`Option<&mut Trace>`) through the `tr!` macro, which
   formats nothing when tracing is off: the untraced entry points pay one `None` check per step.
 - **Tracing never changes a result.** A traced call bypasses the module/type-reference
-  result caches (so every step is logged) but uses the same code path. The one trace-only
-  branch is tsc's "trying with modern Node resolution features disabled" retry (ESM import,
-  JS result from a package with `exports`): it is logged and its result discarded.
+  result caches (so every step is logged) but uses the same code path. tsc's "trying with
+  modern Node resolution features disabled" retry (ESM import, JS result from a package with
+  `exports`; declarations only, `exports` ignored) runs traced or not: what it finds is only
+  `ResolvedModule::alternate_result`, a hint for TS7016, never the resolution
+  (tsc: tsc/internal/module/resolver.go resolveNodeLike).
 - The traced footer shows the file resolution found before a referenced project's source is
   swapped for its declaration output, as tsc shows it.
 - Oracles: ts_r_check's `trace_oracle` example (tsc's `.trace.json` baselines) and the
@@ -121,6 +123,14 @@ share one per option set. `resolve_module_traced` / `resolve_type_reference_trac
   `*` matched, else `.`) and its `package.json` is recorded once, in order met
   (`Resolver::ambiguous_roots`); the checker reports them as global diagnostics. tsc then
   reports no semantic diagnostics; the CLI does not suppress them yet (see Gaps).
+- **`resolved_using_ts_extension`**: true only when the TypeScript extension the candidate
+  ends with found a TypeScript file by the extension probe (`./a.ts` → `a.ts`/`a.tsx`/`a.d.ts`).
+  A directory or `index` result (`./foo.ts` → `foo.ts/index.ts`), a JavaScript-extension
+  specifier, and a `paths` substitution that carries its own extension (`"./src/*.ts"`) are
+  false; for `imports` targets it is true when the `*` brought the extension in
+  (`#internal/foo.ts` through `"./internal/*"`). The checker uses it for TS5097, TS2876 and
+  TS2877 (tsc: tsc/internal/module/resolver.go tryExtension, loadFileNameFromPackageJSONField).
+  The `exports` paths of packages leave it false (not needed so far).
 - **Caching:** top-level module results keyed by (containing directory, specifier, mode).
   Recursive `imports` targets bypass that cache because their remaining depth budget differs.
   Fs probes, `package.json` and real paths are cached too, behind `RwLock`s. Nothing is invalidated

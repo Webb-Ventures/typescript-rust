@@ -1,0 +1,7 @@
+a.ts(9,15): error TS2339: Property '#bar' does not exist on type 'any'.
+a.ts(12,9): error TS18046: 'thing' is of type 'unknown'.
+a.ts(13,9): error TS18046: 'thing' is of type 'unknown'.
+a.ts(13,15): error TS2339: Property '#bar' does not exist on type 'any'.
+a.ts(21,13): error TS2339: Property '#prop' does not exist on type '{}'.
+a.ts(23,14): error TS2339: Property '#prop' does not exist on type '{}'.
+a.ts(25,17): error TS2339: Property '#propStatic' does not exist on type '{ prototype: C; }'.

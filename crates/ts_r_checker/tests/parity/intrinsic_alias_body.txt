@@ -1,0 +1,3 @@
+a.ts(4,15): error TS2795: The 'intrinsic' keyword can only be used to declare compiler provided intrinsic types.
+a.ts(5,12): error TS2795: The 'intrinsic' keyword can only be used to declare compiler provided intrinsic types.
+a.ts(6,25): error TS2795: The 'intrinsic' keyword can only be used to declare compiler provided intrinsic types.

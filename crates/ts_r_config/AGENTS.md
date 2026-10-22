@@ -26,7 +26,9 @@ an empty `files` list unless references are listed; TS18003 unless the config ha
 `resolve_json_module()`, `lib_files()`, ...). `show_config(&parsed)` prints exactly what
 `tsc --showConfig` prints. `find_config_file` / `resolve_project_arg` do project discovery
 (nearest `tsconfig.json` upwards, `-p` file-or-directory). `FileSystem` (with `RealFs`,
-`MemoryFs`) is the fs abstraction the resolver reuses (`stamp(path)`: length and
+`MemoryFs`) is the fs abstraction the resolver reuses (`RealFs::read_file` decodes through
+`fs::decode_text`: a UTF-16 byte order mark, either endianness, means UTF-16 as in tsc;
+otherwise UTF-8 with U+FFFD for invalid bytes; `stamp(path)`: length and
 modification time without a read, `RealFs` only; the default `None` makes callers read and
 compare, so a wrapper that changes contents must not forward it; `may_be_symlink(path)`:
 `false` only when the path is known not to be a symlink, so globbing derives a directory's
@@ -63,12 +65,14 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   TS5023, wrong type TS5024, bad value TS6046); tsc still checks the program after them.
   `option_diagnostics()` (`verify.rs`) and `emit_overwrite_diagnostics()` (TS5055) are tsc's
   program-level option checks; after any of them tsc reports no syntactic or semantic errors.
-  `verify.rs` covers TS5051/5052/5053/5059/5067/5069/5089/5091/5095/5096/5102/5108/5109/5110,
+  `verify.rs` covers TS5051/5052/5053/5059/5067/5069/5074/5089/5091/5095/5096/5102/5108/5109/5110,
   TS6304/6379 and TS18035. Anchors (observed): the option's key, or its value for
   TS5095/5096/5108/5109/5110; an option set in a base config, or not set at all, is anchored
   at the leaf's `compilerOptions` key (no location when the leaf has none); TS5052/5053/5091
   use whichever of the two options comes first; TS6379 uses the `declaration` key if present.
   `checkJs` implies `allowJs`, so `checkJs` is TS5052 only beside an explicit `allowJs: false`.
+  TS5074 (no location): an explicit `incremental: true` (not implied by `composite`) with
+  neither a config file nor `tsBuildInfoFile` (`tsc: tsc/internal/compiler/program.go`).
   `sort_and_dedupe` orders like tsc: file, start, end, code, message.
 - **Command line (`cli.rs`) follows observed tsc 7.0.2 behaviour**, summarised in the module
   docs: flags case-insensitive with one or two dashes, no `--flag=value` form, booleans take

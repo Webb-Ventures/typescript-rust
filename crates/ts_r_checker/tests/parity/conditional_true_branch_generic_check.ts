@@ -1,0 +1,7 @@
+// In a conditional's true branch a generic check type (a tuple, a generic reference) meets
+// the `extends` type, so it satisfies a constraint the `extends` type does.
+type Foo1<A, B> = [A, B] extends unknown[][] ? Bar1<[A, B]> : "else";
+type Bar1<T extends unknown[][]> = T;
+type Foo2<A> = Set<A> extends Set<unknown[]> ? Bar2<Set<A>> : "else";
+type Bar2<T extends Set<unknown[]>> = T;
+type Foo3<A> = Set<A> extends Set<unknown> ? Bar2<Set<A>> : "else";

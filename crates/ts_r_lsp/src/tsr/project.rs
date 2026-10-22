@@ -1198,6 +1198,7 @@ fn empty_program(options: &CompilerOptions) -> ProgramFiles {
         roots: Vec::new(),
         missing_libs: Vec::new(),
         missing_types: Vec::new(),
+        missing_type_references: Vec::new(),
         ambiguous_roots: Vec::new(),
         deps: Default::default(),
     }

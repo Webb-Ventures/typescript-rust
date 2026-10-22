@@ -1,0 +1,7 @@
+a.ts(8,3): error TS2416: Property ''2.0'' in type 'B' is not assignable to the same property in base type 'A'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(10,7): error TS2415: Class 'C' incorrectly extends base class 'A'.
+  Property ''1'' is private in type 'C' but not in type 'A'.
+a.ts(14,3): error TS2300: Duplicate identifier '"1"'.
+a.ts(15,3): error TS2300: Duplicate identifier '"1"'.
+a.ts(15,3): error TS2717: Subsequent property declarations must have the same type.  Property '1.0' must be of type 'number', but here has type 'string'.

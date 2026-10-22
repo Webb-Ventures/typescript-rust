@@ -13,7 +13,10 @@
 //! - Two default-exported function implementations are also TS2393 at each (unless their
 //!   local names clash too, which reports them already).
 //! - The error is at the declaration's name, or at the start of a nameless declaration
-//!   (`export default function () {}`, `export default x`).
+//!   (`export default function () {}`, `export default x`), and at the whole specifier of
+//!   `export { a as x }`.
+//! - A default-exported class that is not ambient, merged with default-exported functions,
+//!   is TS2813 at the class and TS2814 at each function, related to the class.
 
 use ts_r_ast::{Node, NodeId};
 use ts_r_binder::SymbolFlags;
@@ -33,6 +36,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let bound = &f.bound;
         let mut errors = Vec::new();
         let mut duplicate_impls = Vec::new();
+        let mut class_merges = Vec::new();
         for &(name, sym) in bound.exports() {
             let flags = bound.symbol(sym).flags;
             if flags.intersects(SymbolFlags::MODULE | SymbolFlags::ENUM) {
@@ -49,6 +53,25 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             let text = bound.name_text(ast, name).to_owned();
             if text == "default" {
+                let class = decls.iter().copied().find(|&d| {
+                    matches!(ast.node(d), Node::ClassDecl { .. })
+                        && !self.is_ambient_node(Loc::new(file, d))
+                });
+                if let Some(class) = class
+                    && decls
+                        .iter()
+                        .any(|&d| matches!(ast.node(d), Node::FunctionDecl { .. }))
+                {
+                    let at = |d| ts_r_binder::decl_name_node(ast, d).unwrap_or(d);
+                    for &d in decls.iter() {
+                        match ast.node(d) {
+                            Node::ClassDecl { .. } | Node::FunctionDecl { .. } => {
+                                class_merges.push((at(d), at(class), d == class));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 let impls: Vec<_> = decls
                     .iter()
                     .copied()
@@ -60,7 +83,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             for &d in decls.iter().filter(|&&d| !overload(d)) {
                 let at = match ast.node(d) {
-                    Node::ExportDefaultExpr { .. } => d,
+                    Node::ExportDefaultExpr { .. } | Node::ExportSpecifier { .. } => d,
                     _ => ts_r_binder::decl_name_node(ast, d).unwrap_or(d),
                 };
                 errors.push((at, text.clone()));
@@ -80,6 +103,31 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.error(
                 Loc::new(file, name.unwrap_or(d)),
                 dg::DUPLICATE_FUNCTION_IMPLEMENTATION_2393,
+                &[],
+            );
+        }
+        // A non-ambient default-exported class merged with default-exported functions:
+        // TS2813 at the class, TS2814 at each function (tsc: checker.go
+        // checkFunctionOrConstructorSymbol).
+        for (at, class, is_class) in class_merges {
+            let mark = self.diags.len();
+            if is_class {
+                self.error(
+                    Loc::new(file, at),
+                    dg::CLASS_DECLARATION_CANNOT_IMPLEMENT_OVERLOAD_LIST_FOR_0_2813,
+                    &["default"],
+                );
+            } else {
+                self.error(
+                    Loc::new(file, at),
+                    dg::FUNCTION_WITH_BODIES_CAN_ONLY_MERGE_WITH_CLASSES_THAT_ARE_AMBIENT_2814,
+                    &[],
+                );
+            }
+            self.relate_last(
+                mark,
+                Loc::new(file, class),
+                dg::CONSIDER_ADDING_A_DECLARE_MODIFIER_TO_THIS_CLASS_6506,
                 &[],
             );
         }

@@ -11,7 +11,7 @@ use ts_r_diagnostics::FileId;
 use crate::checker::{Ck, Loc};
 use crate::diag::dg;
 
-const RESERVED: [&str; 10] = [
+pub(crate) const RESERVED: [&str; 10] = [
     "any",
     "unknown",
     "never",

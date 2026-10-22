@@ -85,6 +85,7 @@ fn copy_program(p: &ProgramFiles) -> ProgramFiles {
         roots: p.roots.clone(),
         missing_libs: p.missing_libs.clone(),
         missing_types: p.missing_types.clone(),
+        missing_type_references: p.missing_type_references.clone(),
         ambiguous_roots: p.ambiguous_roots.clone(),
         deps: p.deps.clone(),
     }

@@ -1,0 +1,12 @@
+a.ts(5,7): error TS2571: Object is of type 'unknown'.
+a.ts(6,7): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(6,7): error TS2571: Object is of type 'unknown'.
+a.ts(7,7): error TS2531: Object is possibly 'null'.
+a.ts(8,7): error TS2532: Object is possibly 'undefined'.
+a.ts(10,7): error TS2488: Type 'string | undefined' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(10,7): error TS2532: Object is possibly 'undefined'.
+a.ts(11,12): error TS2571: Object is of type 'unknown'.
+a.ts(11,25): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(13,2): error TS2571: Object is of type 'unknown'.
+a.ts(14,2): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(15,12): error TS2571: Object is of type 'unknown'.

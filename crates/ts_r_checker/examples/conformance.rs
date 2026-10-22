@@ -17,9 +17,13 @@
 //! without `allowJs` (left out of the program; not for a test that is itself a `.js` file).
 //! Under `@noImplicitReferences` only
 //! the last file is a root. A test with its own `tsconfig.json` uses its options (the
-//! directives on top, through `extends`) and its `files`/`include` as the roots. Results per
+//! directives on top, through `extends`) and its `files`/`include` as the roots; its own
+//! diagnostics, and option errors about what it sets, are reported at their place in it.
+//! Results per
 //! area go to
-//! stdout; mismatches to `target/checker-conformance.txt`.
+//! stdout; mismatches to `target/checker-conformance.txt` (or `$TS_R_CONFORMANCE_OUT`).
+//! `TS_R_CONFORMANCE_ROOT` replaces `target/upstream/typescript` (ad-hoc tests: a
+//! `tests/cases/compiler/x.ts` with a `tsc/testdata/baselines/reference/submodule/compiler/x.*`).
 //!
 //! Skipped (counted, not compared): tests tsc 7 has no baseline of any kind for (mostly
 //! `@module: amd`/`system`, which tsc 7 no longer runs), and `@pretty: true` tests, whose
@@ -49,7 +53,19 @@ struct Test {
 }
 
 fn upstream() -> PathBuf {
+    // `TS_R_CONFORMANCE_ROOT`: another tree of the same layout (ad-hoc tests and baselines).
+    if let Some(r) = std::env::var_os("TS_R_CONFORMANCE_ROOT") {
+        return PathBuf::from(r);
+    }
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/upstream/typescript")
+}
+
+/// Where the mismatches go: `TS_R_CONFORMANCE_OUT`, else `target/checker-conformance.txt`.
+fn mismatch_path() -> PathBuf {
+    match std::env::var_os("TS_R_CONFORMANCE_OUT") {
+        Some(p) => PathBuf::from(p),
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/checker-conformance.txt"),
+    }
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -105,6 +121,13 @@ fn split_test(text: &str, default_name: &str) -> (Pairs, Pairs) {
                     cur.clear();
                 }
                 cur_name = Some(v);
+            } else if k == "symlink"
+                && let Some(n) = &cur_name
+            {
+                // `// @symlink: a,b` under `@filename: f` makes `a` and `b` symlinks to `f`.
+                for link in v.split(',') {
+                    options.push(("link".to_owned(), format!("{n} -> {}", link.trim())));
+                }
             } else {
                 options.push((k, v));
             }
@@ -247,7 +270,7 @@ fn load(path: &Path, root: &Path, baselines: &Path, names: &BTreeSet<String>) ->
     let Ok(raw) = std::fs::read(path) else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&raw).into_owned();
+    let text = ts_r_config::fs::decode_text(raw);
     let (Some(stem), Some(file_name)) = (
         path.file_stem().and_then(|s| s.to_str()),
         path.file_name().and_then(|s| s.to_str()),
@@ -358,14 +381,23 @@ fn test_libs() -> &'static [(String, String)] {
 fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
     let abs = |n: &str| {
         let n = n.trim_start_matches("./");
-        if n.starts_with('/') {
+        if ts_r_config::path::is_rooted(n) {
             n.to_owned()
         } else {
             format!("/.src/{n}")
         }
     };
     let shown = |p: &str| p.strip_prefix("/.src/").unwrap_or(p).to_owned();
-    let mut fs = MemoryFs::new();
+    // The harness's file system is case-sensitive unless `@useCaseSensitiveFileNames: false`
+    // (`tsc: tsc/internal/testutil/harnessutil/harnessutil.go`).
+    let insensitive = test.options.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("usecasesensitivefilenames") && v.eq_ignore_ascii_case("false")
+    });
+    let mut fs = if insensitive {
+        MemoryFs::case_insensitive()
+    } else {
+        MemoryFs::new()
+    };
     fs.set_cwd("/.src");
     let mut roots = Vec::new();
     // tsc's harness compiles only the last unit (the others are just on disk) under
@@ -456,8 +488,13 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
         }
     };
     let mut cfg = load_tsconfig(&fs, &wrapper);
+    // Errors in the test's own `tsconfig.json` (TS5024 and the like) are reported at their
+    // place in it, as tsc reports a config file's diagnostics.
+    let mut own_diagnostics = Vec::new();
     if let Some(own) = &own_config {
-        roots = load_tsconfig(&fs, own).file_names;
+        let parsed = load_tsconfig(&fs, own);
+        roots = parsed.file_names;
+        own_diagnostics = parsed.diagnostics;
     } else {
         // tsc's harness passes the directives as options, not as a config file: there is no
         // tsconfig directory to stand in for `rootDir` (TS2209/TS2210).
@@ -485,20 +522,105 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
             !js
         });
     }
+    // tsc's root files (`tsc/internal/compiler/fileloader.go`): a root with an extension that
+    // is not a supported one (JSON only with `resolveJsonModule`) is left out, TS6054; one
+    // without an extension is the first file of it plus `.ts`, `.tsx`, `.d.ts` (and `.js`,
+    // `.jsx` with `allowJs`) that exists.
+    let mut unsupported_roots = Vec::new();
+    if own_config.is_none() {
+        let e = cfg.options.effective();
+        let mut groups: Vec<&[&str]> = if e.allow_js() {
+            vec![
+                &[".ts", ".tsx", ".d.ts", ".js", ".jsx"],
+                &[".cts", ".d.cts", ".cjs"],
+                &[".mts", ".d.mts", ".mjs"],
+            ]
+        } else {
+            vec![
+                &[".ts", ".tsx", ".d.ts"],
+                &[".cts", ".d.cts"],
+                &[".mts", ".d.mts"],
+            ]
+        };
+        let listed = groups
+            .iter()
+            .flat_map(|g| g.iter())
+            .map(|x| format!("'{x}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let first = groups[0];
+        if e.resolve_json_module() {
+            groups.push(&[".json"]);
+        }
+        let mut kept = Vec::with_capacity(roots.len());
+        for r in std::mem::take(&mut roots) {
+            let base = r.rsplit('/').next().unwrap_or(&r);
+            let lower = base.to_ascii_lowercase();
+            if !base.contains('.') {
+                let found = first
+                    .iter()
+                    .map(|x| format!("{r}{x}"))
+                    .find(|c| ts_r_config::FileSystem::file_exists(&fs, c));
+                kept.push(found.unwrap_or(r));
+            } else if groups
+                .iter()
+                .flat_map(|g| g.iter())
+                .any(|x| lower.ends_with(x))
+                || [".js", ".jsx", ".mjs", ".cjs"]
+                    .iter()
+                    .any(|x| lower.ends_with(x))
+            {
+                kept.push(r);
+            } else {
+                unsupported_roots.push(format!(
+                    "File '{}' has an unsupported extension. The only supported extensions are {listed}.\n  The file is in the program because:\n    Root file specified for compilation",
+                    shown(&r)
+                ));
+            }
+        }
+        roots = kept;
+    }
     let program = load_program(&fs, &roots, &cfg.options, Some(libs), 1);
     let result = check_program_through_syntax_errors(&program, CheckRun { threads: 1 });
     let mut out = BTreeSet::new();
     // Option checks: the directives are not a config file, so tsc reports them without a
     // location.
-    for d in ts_r_config::verify::verify_options(&cfg.options, None) {
+    // Options from the test's own config are reported where it sets them.
+    let located = |d: &ts_r_config::ConfigDiagnostic| -> Option<(String, u32, u32)> {
+        let (file, span) = (d.file.as_deref()?, d.span?);
+        if file == wrapper || own_config.is_none() {
+            return None;
+        }
+        let text = ts_r_config::FileSystem::read_file(&fs, file)?;
+        let lc = ts_r_span::LineIndex::new(&text).line_col_utf16(&text, span.0);
+        Some((shown(file), lc.line + 1, lc.col + 1))
+    };
+    let own_errors = own_diagnostics
+        .iter()
+        .filter(|d| d.file.as_deref().is_some_and(|f| f != wrapper));
+    // The test's own config is the leaf for the option checks: what it sets is located
+    // there, the directives (the wrapper's options) stay global.
+    let verified = match &own_config {
+        Some(own) => {
+            let mut o = cfg.options.clone();
+            o.config_file_path = Some(own.clone());
+            ts_r_config::verify::verify_options(&o, None)
+        }
+        None => ts_r_config::verify::verify_options(&cfg.options, None),
+    };
+    for d in verified.iter().chain(own_errors) {
         if d.severity == ts_r_config::Severity::Error {
             let mut message = d.message.clone();
             for r in &d.related {
                 message.push_str("\n  ");
                 message.push_str(r);
             }
-            out.insert((String::new(), 0, 0, d.code, message));
+            let (file, line, col) = located(d).unwrap_or_default();
+            out.insert((file, line, col, d.code, message));
         }
+    }
+    for m in unsupported_roots {
+        out.insert((String::new(), 0, 0, 6054, m));
     }
     for r in &js_roots {
         out.insert((
@@ -512,51 +634,65 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
             ),
         ));
     }
-    // TS5055: an emitted JavaScript program file whose output is itself (no config file, so
-    // with the tsconfig hint). Not with `@suppressOutputPathCheck` or a test's own
-    // `tsconfig.json`; only with an explicit `@allowJs` (or `@checkJs`, which implies it).
-    let o = &cfg.options;
+    // TS5055/TS5056: tsc's output-path check (a program diagnostic): an output that is a
+    // program file or that an earlier source writes too. Without a config file TS5055 has
+    // the tsconfig hint. Not with the harness's `@suppressOutputPathCheck`.
     let opt_true = |name: &str| {
         test.options
             .iter()
             .any(|(k, v)| k == name && v.eq_ignore_ascii_case("true"))
     };
-    if (opt_true("allowjs") || (o.effective().allow_js() && opt_true("checkjs")))
-        && !opt_true("suppressoutputpathcheck")
-        && !test
-            .files
-            .iter()
-            .any(|(n, _)| n == "tsconfig.json" || n.ends_with("/tsconfig.json"))
-        && !o.effective().no_emit()
-        && o.emit_declaration_only() != Some(true)
-        && o.out_dir().is_none()
-    {
-        let preserve_jsx = o.jsx() == Some(ts_r_config::enums::JsxEmit::Preserve);
-        for f in program
-            .files
-            .iter()
-            .filter(|f| !f.is_lib && !f.is_external && !f.path.contains("/node_modules/"))
-        {
-            let lower = f.path.to_ascii_lowercase();
-            if lower.ends_with(".js")
-                || lower.ends_with(".mjs")
-                || lower.ends_with(".cjs")
-                || (preserve_jsx && lower.ends_with(".jsx"))
-            {
-                out.insert((
-                    String::new(),
-                    0,
-                    0,
-                    5055,
-                    format!(
-                        "Cannot write file '{}' because it would overwrite input file.\n  Adding a tsconfig.json file will help organize projects that contain both TypeScript and JavaScript files. Learn more at https://aka.ms/tsconfig.",
-                        shown(&f.path)
-                    ),
-                ));
-            }
+    let emit_cfg = ts_r_emit::EmitConfig {
+        options: &cfg.options,
+        config: own_config.as_ref().map(|_| &cfg),
+        threads: 1,
+        case_sensitive: ts_r_config::FileSystem::case_sensitive(&fs),
+        specifiers: None,
+    };
+    if !opt_true("suppressoutputpathcheck") {
+        for (code, path) in ts_r_emit::output_path_conflicts(&program, &emit_cfg) {
+            let message = if code == 5055 {
+                let hint = if own_config.is_none() {
+                    "\n  Adding a tsconfig.json file will help organize projects that contain both TypeScript and JavaScript files. Learn more at https://aka.ms/tsconfig."
+                } else {
+                    ""
+                };
+                format!(
+                    "Cannot write file '{}' because it would overwrite input file.{hint}",
+                    shown(&path)
+                )
+            } else {
+                format!(
+                    "Cannot write file '{}' because it would be overwritten by multiple input files.",
+                    shown(&path)
+                )
+            };
+            out.insert((String::new(), 0, 0, code, message));
         }
     }
-    for d in &result.diagnostics {
+    // The program's output-layout checks (TS5009, TS5011, TS6059), as option errors.
+    // They name the test's own config, not the wrapper that extends it.
+    let named = own_config.as_ref().map(|own| {
+        let mut c = cfg.clone();
+        c.config_path = own.clone();
+        c
+    });
+    let layout_cfg = ts_r_emit::EmitConfig {
+        config: named.as_ref(),
+        ..emit_cfg
+    };
+    let (_, layout) = ts_r_emit::root_dir_diagnostics(&program, &layout_cfg);
+    for d in &layout {
+        let mut message = d.message.clone();
+        for r in &d.related {
+            message.push_str("\n  ");
+            message.push_str(r);
+        }
+        let (file, line, col) = located(d).unwrap_or_default();
+        out.insert((file, line, col, d.code, message));
+    }
+    let declaration_diagnostics = declaration_diagnostics(&fs, &program, &cfg.options);
+    for d in result.diagnostics.iter().chain(&declaration_diagnostics) {
         if !d.is_error() {
             continue;
         }
@@ -566,10 +702,17 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
                 // tsc's harness keeps test file names relative, and a source file's module
                 // symbol is named by its file name (TS1192 `Module '"server"'`,
                 // `typeof import("server")`).
-                let message = if d.message.contains("\"/.src/") {
+                // TS6263, TS2306 and TS7016 name the resolved file as the harness gave it too,
+                // and so do the declaration errors naming a module (TS4023 `external module`).
+                let message = if d.message.contains("\"/.src/") || d.message.contains("'/.src/") {
                     d.message
                         .replace("'\"/.src/", "'\"")
                         .replace("import(\"/.src/", "import(\"")
+                        .replace("resolved to '/.src/", "resolved to '")
+                        .replace("File '/.src/", "File '")
+                        .replace(". '/.src/", ". '")
+                        .replace("from \"/.src/", "from \"")
+                        .replace("external module \"/.src/", "external module \"")
                 } else {
                     d.message.clone()
                 };
@@ -582,6 +725,42 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
             }
         }
     }
+    out
+}
+
+/// tsc's harness adds the program's declaration diagnostics when declarations are emitted
+/// (`declaration` or `composite`), whether or not the program is emitted: TS2883, TS4094,
+/// TS7056, the TS9xxx `isolatedDeclarations` errors, ... They come from declaration emit
+/// (ts_r_emit), run here for declarations only. ts-r's own codes (TSR: a file it does not
+/// write) and the output-path errors (program diagnostics to tsc) are left out.
+fn declaration_diagnostics(
+    fs: &MemoryFs,
+    program: &ts_r_checker::ProgramFiles,
+    options: &ts_r_config::CompilerOptions,
+) -> Vec<ts_r_diagnostics::Diagnostic> {
+    use ts_r_config::options::{OptionId, OptionValue};
+    if !options.effective().declaration() {
+        return Vec::new();
+    }
+    let mut options = options.clone();
+    options.set(OptionId::NoEmit, Some(OptionValue::Bool(false)), None);
+    options.set(
+        OptionId::EmitDeclarationOnly,
+        Some(OptionValue::Bool(true)),
+        None,
+    );
+    let checker = ts_r_checker::Checker::new(program);
+    let resolver = ts_r_emit::CheckerResolver::new(&checker, &options);
+    let host = ts_r_checker::typenode::specifier_host(fs, &options);
+    let cfg = ts_r_emit::EmitConfig {
+        options: &options,
+        config: None,
+        threads: 1,
+        case_sensitive: ts_r_config::FileSystem::case_sensitive(fs),
+        specifiers: Some(&host),
+    };
+    let mut out = ts_r_emit::emit(program, &resolver, &cfg).diagnostics;
+    out.retain(|d| d.code < ts_r_diagnostics::SOUND_CODE_BASE && !matches!(d.code, 5055 | 5056));
     out
 }
 
@@ -754,7 +933,7 @@ fn main() {
             }
         }
     }
-    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/checker-conformance.txt");
+    let out = mismatch_path();
     let _ = std::fs::write(&out, &report);
     println!(
         "{} tests in {:.1}s (skipped: {} without a tsc 7 baseline, {} with --pretty baselines)",

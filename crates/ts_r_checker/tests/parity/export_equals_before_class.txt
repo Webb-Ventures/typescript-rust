@@ -1,0 +1,1 @@
+b.ts(1,16): error TS2449: Class 'Bar' used before its declaration.

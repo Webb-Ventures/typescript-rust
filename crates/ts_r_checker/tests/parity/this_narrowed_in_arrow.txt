@@ -1,0 +1,4 @@
+a.ts(13,10): error TS2339: Property 'name' does not exist on type 'C | W'.
+  Property 'name' does not exist on type 'W'.
+a.ts(21,14): error TS2339: Property 'name' does not exist on type 'C | W'.
+  Property 'name' does not exist on type 'W'.

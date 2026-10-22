@@ -312,13 +312,15 @@ fn resolution_modes_survive_history_replay() {
 #[test]
 fn commonjs_mts_resolution_mode_survives_history_replay() {
     let dir = temp("commonjs-mts-resolution-mode");
-    // A minimal lib with the core global types (without them every check reports TS2318).
+    // A minimal lib with the core global types (without them every check reports TS2318;
+    // `ImportAttributes` for the import attributes).
     std::fs::create_dir_all(dir.join("libs")).unwrap();
     std::fs::write(
         dir.join("libs/lib.es5.d.ts"),
         "interface Array<T> {}\ninterface Boolean {}\ninterface CallableFunction {}\n\
          interface Function {}\ninterface IArguments {}\ninterface NewableFunction {}\n\
-         interface Number {}\ninterface Object {}\ninterface RegExp {}\ninterface String {}\n",
+         interface Number {}\ninterface Object {}\ninterface RegExp {}\ninterface String {}\n\
+         interface ImportAttributes {}\n",
     )
     .unwrap();
     let libs = LibStore::new(dir.join("libs"));

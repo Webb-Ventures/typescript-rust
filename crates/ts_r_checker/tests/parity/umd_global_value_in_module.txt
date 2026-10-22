@@ -1,0 +1,2 @@
+e.ts(1,18): error TS2686: 'Mod' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+e.ts(2,37): error TS2686: 'Mod' refers to a UMD global, but the current file is a module. Consider adding an import instead.

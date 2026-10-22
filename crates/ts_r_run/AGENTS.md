@@ -45,6 +45,8 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
 
 ## Invariants
 
+- **Syntax errors stop a run; tsc's checker grammar errors that esbuild accepts do not**
+  (`ts_r_transform::build_errors`, the same rule as ts-r-build).
 - **Node semantics for module format**: `.mts`/`.cts`, then `package.json` `type`, then
   syntax detection (`compile::has_esm_syntax`); ES syntax mixed with CommonJS globals runs as
   CommonJS (tsx compatibility). Change both the doc comment and the tests when this changes.

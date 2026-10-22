@@ -1,0 +1,2 @@
+a.tsx(16,12): error TS6229: Tag 'Three' expects at least '3' arguments, but the JSX factory 'React.createElement' provides at most '2'.
+a.tsx(17,12): error TS6229: Tag 'Three' expects at least '3' arguments, but the JSX factory 'React.createElement' provides at most '2'.

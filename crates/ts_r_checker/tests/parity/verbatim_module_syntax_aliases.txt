@@ -1,0 +1,7 @@
+main.ts(1,10): error TS1484: 'I' is a type and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+main.ts(1,13): error TS1485: 'TC' resolves to a type-only declaration and must be imported using a type-only import when 'verbatimModuleSyntax' is enabled.
+main.ts(2,10): error TS2748: Cannot access ambient const enums when 'verbatimModuleSyntax' is enabled.
+main.ts(3,10): error TS1205: Re-exporting a type when 'verbatimModuleSyntax' is enabled requires using 'export type'.
+main.ts(4,10): error TS1448: 'TC' resolves to a type-only declaration and must be re-exported using a type-only re-export when 'verbatimModuleSyntax' is enabled.
+main.ts(6,10): error TS1205: Re-exporting a type when 'verbatimModuleSyntax' is enabled requires using 'export type'.
+main.ts(8,5): error TS1362: 'TC' cannot be used as a value because it was exported using 'export type'.

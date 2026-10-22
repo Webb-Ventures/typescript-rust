@@ -1,0 +1,7 @@
+a.ts(1,6): error TS2501: A rest element cannot contain a binding pattern.
+a.ts(2,6): error TS2501: A rest element cannot contain a binding pattern.
+a.ts(2,6): error TS2701: The target of an object rest assignment must be a variable or a property access.
+a.ts(3,6): error TS2488: Type '{}' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(3,6): error TS2501: A rest element cannot contain a binding pattern.
+a.ts(4,6): error TS2501: A rest element cannot contain a binding pattern.
+a.ts(4,6): error TS2701: The target of an object rest assignment must be a variable or a property access.

@@ -168,12 +168,18 @@ pub struct ResolvedModule {
     pub is_external_library_import: bool,
     /// Package identity for files inside a package with `name` and `version`.
     pub package_id: Option<PackageId>,
-    /// The specifier itself ended in a TypeScript extension (`./a.ts`).
+    /// The TypeScript extension the specifier was written with found the file (`./a.ts` →
+    /// `a.ts`, `./a.ts` → `a.d.ts`); false for directory and `index` results, for a `paths`
+    /// substitution that carries its own extension, and for `exports`/`imports` targets
+    /// unless the `*` brought in the extension (tsc: TS5097, TS2876, TS2877).
     pub resolved_using_ts_extension: bool,
     /// The module is a source (or an output) of a referenced project and
     /// `resolved_file_name` is that project's declaration output for it: the source's path
     /// ([`crate::references`]). The output may not exist yet (tsc: TS6305).
     pub project_reference_source: Option<String>,
+    /// For an `import` of a package whose `exports` lead to JavaScript only: the declaration
+    /// file a lookup ignoring `exports` finds (tsc names it in TS7016's hint).
+    pub alternate_result: Option<String>,
 }
 
 /// A successful type reference (`/// <reference types>` or a `types` entry) resolution.
@@ -1140,6 +1146,7 @@ impl<F: FileSystem> Resolver<F> {
             package_id: r.package_id.clone(),
             resolved_using_ts_extension: r.resolved_using_ts_extension,
             project_reference_source: Some(src.to_owned()),
+            alternate_result: None,
         })
     }
 
@@ -1365,12 +1372,14 @@ impl<F: FileSystem> Resolver<F> {
             } else {
                 package_dir_of(&found.path).and_then(|d| self.package_id(&d, &found, true, tr))
             };
+            let using_ts_ext = using_ts_ext && !found.from_directory && found.ext.is_ts_like();
             return Some(self.finish(found, package_id, false, using_ts_ext, tr));
         }
-        if let Some(found) = self.try_paths(spec, ctx, tr) {
+        if let Some((found, candidate_ts_ext)) = self.try_paths(spec, ctx, tr) {
             if found.path.contains("/node_modules/") && !self.options.preserve_symlinks {
                 self.realpath_traced(&found.path, tr);
             }
+            let using_ts_ext = candidate_ts_ext && !found.from_directory && found.ext.is_ts_like();
             return Some(self.finish(found, None, false, using_ts_ext, tr));
         }
         // Under node16 `#/...` is not a valid `imports` specifier (observed: "Invalid import
@@ -1413,12 +1422,11 @@ impl<F: FileSystem> Resolver<F> {
         else {
             return self.resolve_from_type_roots(spec, ctx, tr);
         };
-        let r = self.finish(found, package_id, true, false, tr);
+        let mut r = self.finish(found, package_id, true, false, tr);
         // An `import` of a package whose `exports` lead to JavaScript only: tsc looks again
-        // without `exports` (for a hint in its diagnostics) and shows that lookup too. Its
-        // result is not used.
-        if tr.enabled()
-            && mode == ResolutionMode::Import
+        // without `exports` for declarations, and shows that lookup too. What it finds is
+        // only a hint for diagnostics (`alternate_result`), never the resolution.
+        if mode == ResolutionMode::Import
             && matches!(
                 r.extension,
                 Extension::Js | Extension::Jsx | Extension::Mjs | Extension::Cjs
@@ -1445,7 +1453,7 @@ impl<F: FileSystem> Resolver<F> {
             if let Some((f, _, id)) =
                 self.node_modules_lookup(spec, dir, loose, &[TS | DECL], true, tr)
             {
-                self.finish(f, id, true, false, tr);
+                r.alternate_result = Some(self.finish(f, id, true, false, tr).resolved_file_name);
             }
         }
         Some(r)
@@ -1505,6 +1513,7 @@ impl<F: FileSystem> Resolver<F> {
             package_id,
             resolved_using_ts_extension: using_ts_ext,
             project_reference_source: None,
+            alternate_result: None,
         }
     }
 
@@ -1632,7 +1641,9 @@ impl<F: FileSystem> Resolver<F> {
         None
     }
 
-    fn try_paths(&self, spec: &str, ctx: Ctx<'_>, tr: &mut Tracer<'_>) -> Option<Found> {
+    /// The found file, and whether the substituted candidate ended in a TypeScript extension
+    /// that came from the specifier (not from the substitution itself).
+    fn try_paths(&self, spec: &str, ctx: Ctx<'_>, tr: &mut Tracer<'_>) -> Option<(Found, bool)> {
         let map = self.options.paths.as_ref()?;
         let base = self.options.paths_base.as_deref()?;
         tr!(
@@ -1664,8 +1675,10 @@ impl<F: FileSystem> Resolver<F> {
                     tr,
                 )
             {
-                return Some(f);
+                return Some((f, false));
             }
+            let candidate_ts_ext = Extension::of(sub).is_none()
+                && Extension::of(&s).is_some_and(Extension::is_ts_like);
             tr!(
                 tr,
                 "Loading module as file / folder, candidate module location '{}', target file types: {}.",
@@ -1692,8 +1705,8 @@ impl<F: FileSystem> Resolver<F> {
             } else {
                 self.load_file_or_dir(&candidate, self.all_exts(), ctx, tr)
             };
-            if found.is_some() {
-                return found;
+            if let Some(found) = found {
+                return Some((found, candidate_ts_ext));
             }
         }
         None
@@ -1740,7 +1753,14 @@ impl<F: FileSystem> Resolver<F> {
                     } else if t.starts_with("./") {
                         self.load_exact_target(&scope.dir, t, exts, tr).map(|f| {
                             let id = self.package_id(&scope.dir, &f, false, tr);
-                            self.finish(f, id, false, false, tr)
+                            // The `*` brought a TypeScript extension in from the specifier
+                            // (`#internal/foo.ts` through `"./internal/*"`).
+                            let using_ts_ext = replacement
+                                .as_deref()
+                                .is_some_and(|r| !r.is_empty() && t.ends_with(r))
+                                && Extension::of(t).is_some_and(Extension::is_ts_like)
+                                && f.ext.is_ts_like();
+                            self.finish(f, id, false, using_ts_ext, tr)
                         })
                     } else if i == 0 {
                         // Bare targets resolve as packages from the package directory.

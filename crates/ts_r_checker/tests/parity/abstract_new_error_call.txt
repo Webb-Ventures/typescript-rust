@@ -1,0 +1,1 @@
+a.ts(6,11): error TS2511: Cannot create an instance of an abstract class.

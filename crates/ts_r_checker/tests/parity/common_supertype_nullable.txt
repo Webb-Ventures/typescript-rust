@@ -1,0 +1,4 @@
+a.ts(14,7): error TS2322: Type 'B | undefined' is not assignable to type 'B'.
+  Type 'undefined' is not assignable to type 'B'.
+a.ts(15,7): error TS2322: Type 'string | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

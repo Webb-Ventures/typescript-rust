@@ -1,0 +1,4 @@
+a.ts(8,9): error TS2801: This condition will always return true since this 'Promise<number>' is always defined.
+a.ts(13,9): error TS2801: This condition will always return true since this 'Promise<boolean>' is always defined.
+a.ts(14,15): error TS2801: This condition will always return true since this 'Promise<string>' is always defined.
+a.ts(19,16): error TS2713: Cannot access 'Foo.a' because 'Foo' is a type, but not a namespace. Did you mean to retrieve the type of the property 'a' in 'Foo' with 'Foo["a"]'?
