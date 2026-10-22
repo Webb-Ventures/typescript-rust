@@ -11,10 +11,7 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
-  # write: the last step edits the preview comment (read-only got HTTP 403).
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: preview-cleanup-${{ github.event.pull_request.number || 'sweep' }}
@@ -27,6 +24,11 @@ jobs:
       (github.event.pull_request.head.repo.full_name == github.repository &&
        contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # write: the last step edits the preview comment (read-only got HTTP 403).
+      pull-requests: write
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}

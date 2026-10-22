@@ -1,7 +1,7 @@
 name: CI re-run after approval
 
-# Step two (see ci-approval.yml): re-runs the failed jobs of the pull request's CI run on the
-# approved commit when that run was blocked waiting for approval (its first job failed). The
+# Step two (see ci-approval.yml): re-runs the failed jobs of the pull request's CI and Pages runs
+# on the approved commit when a run was blocked waiting for approval (its first job failed). The
 # re-run checks the approval again, in the pull request's own context; this workflow never
 # checks out or runs pull request code.
 
@@ -26,11 +26,13 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&per_page=1" \
-            --jq '.workflow_runs[0] | select(.status == "completed" and .conclusion == "failure") | .id')
-          if [ -z "$run" ]; then echo "No blocked CI run for $SHA."; exit 0; fi
-          blocked=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" \
-            --jq '[.jobs[] | select(.name == "top of stack?" and .conclusion == "failure")] | length')
-          if [ "$blocked" = 0 ]; then echo "CI run $run failed in its tests, not at the approval check; not re-run."; exit 0; fi
-          gh run rerun "$run" --failed -R "$GITHUB_REPOSITORY"
-          echo "Re-ran CI run $run for $SHA."
+          for workflow in ci.yml pages.yml; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?head_sha=$SHA&event=pull_request&per_page=1" \
+              --jq '.workflow_runs[0] | select(.status == "completed" and .conclusion == "failure") | .id')
+            if [ -z "$run" ]; then echo "No blocked $workflow run for $SHA."; continue; fi
+            blocked=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" \
+              --jq '[.jobs[] | select(.name == "top of stack?" and .conclusion == "failure")] | length')
+            if [ "$blocked" = 0 ]; then echo "$workflow run $run failed after the approval check; not re-run."; continue; fi
+            gh run rerun "$run" --failed -R "$GITHUB_REPOSITORY"
+            echo "Re-ran $workflow run $run for $SHA."
+          done
