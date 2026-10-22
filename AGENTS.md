@@ -51,7 +51,7 @@ minifier, resolver, bundler, linter, dev server, language server.
 | `upstream/UPSTREAM.json` | Pinned TypeScript / esbuild / Vite / typescript-eslint / test262 versions |
 | `docs/design/` | Design records. Agents must follow them; people review changes to them |
 | `landing/` | The website, ts-r.dev: one Next.js static export with the home, tool and sponsor pages and, once launched, the docs (sources in `landing/content/`), error-code pages and benchmarks (`landing/AGENTS.md`). Only in the development repo, not the public one |
-| `.public/` | Files only the public repo has (its release, sync-back and AI-policy workflows), laid over its root by the sync (`.github/public-sync/README.md`, development repo only) |
+| `.public/` | Files only the public repo has (its release and AI-policy workflows), laid over its root by the sync (`.github/public-sync/README.md`, development repo only) |
 | `.agents/skills/` | Task playbooks (SKILL.md) for recurring agent work (`.claude/skills` links here); `.agents/plugins/` holds the code-review plugin |
 
 More crates arrive per the roadmap (binder, checker, transform, codegen, bundler, lint).
@@ -71,8 +71,8 @@ More crates arrive per the roadmap (binder, checker, transform, codegen, bundler
 ## Branches and commits
 
 ts-r is developed in a private repo (Webb-Ventures/tsc-rust) and published to the public one
-(github.com/Webb-Ventures/typescript-rust): every push to the private main opens a sync PR there,
-and a PR merged in the public repo is carried back as a PR in the private one. Outside
+(github.com/Webb-Ventures/typescript-rust): every push to the private main opens a sync PR there.
+Nothing is carried back: a PR merged in the public repo stays there. Outside
 contributors work in the public repo: see CONTRIBUTING.md and AI_POLICY.md. The rest of this
 section is how the core team works in the private repo.
 
