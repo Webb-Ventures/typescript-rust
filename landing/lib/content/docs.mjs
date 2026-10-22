@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { frontMatter, render, inline, esc } from './markdown.mjs';
 import { exampleBlocks, exampleHash, effectiveTsconfig } from './examples.mjs';
+import { published } from '../commits.mjs';
 
 export const REPO = 'https://github.com/Webb-Ventures/typescript-rust';
 
@@ -222,7 +223,7 @@ function build() {
 <figcaption><code>${esc(run.command)}</code> <span class="tag">ts-r output</span></figcaption>
 <pre><code>${esc(run.output.trimEnd())}</code></pre>
 </figure>
-<p class="small muted">Recorded by <code>node scripts/verify-examples.mjs</code> with ts-r built from commit <a href="${REPO}/commit/${esc(run.commit)}"><code>${esc(run.commit)}</code></a>.${ex.tsconfig ? '' : ' The example uses the default tsconfig: <code>strict</code>, <code>target: es2022</code>, <code>module: esnext</code>, <code>moduleResolution: bundler</code>.'}</p>`;
+<p class="small muted">Recorded by <code>node scripts/verify-examples.mjs</code> with ts-r built from commit ${published(run.commit) ? `<a href="${REPO}/commit/${esc(run.commit)}"><code>${esc(run.commit)}</code></a>` : `<code>${esc(run.commit)}</code>`}.${ex.tsconfig ? '' : ' The example uses the default tsconfig: <code>strict</code>, <code>target: es2022</code>, <code>module: esnext</code>, <code>moduleResolution: bundler</code>.'}</p>`;
       html = insertAfterSection(html, 'example', out);
     }
     const badges = e.planned
@@ -372,7 +373,7 @@ function ecosystemMarkdown(problems) {
     return `|${cells.slice(0, 6).join('|')}|`;
   });
   if (!stages.length || !causes.length) problems.push('ecosystem/STATUS.md: tables not found; update ecosystemMarkdown() in landing/lib/content/docs.mjs');
-  return `Run on ${gen[1]} at commit [\`${gen[2]}\`](${REPO}/commit/${gen[2]}) over the top ${gen[3]} npm packages (${gen[4]} s). Reference tools: ${tools[1]}. Pass rate = pass / (pass + fail + error); skips have nothing to compare.
+  return `Run on ${gen[1]} at commit ${published(gen[2]) ? `[\`${gen[2]}\`](${REPO}/commit/${gen[2]})` : `\`${gen[2]}\``} over the top ${gen[3]} npm packages (${gen[4]} s). Reference tools: ${tools[1]}. Pass rate = pass / (pass + fail + error); skips have nothing to compare.
 
 ${stages.join('\n')}
 
@@ -402,7 +403,7 @@ function conformanceMarkdown(problems, file) {
       if (!r.quote || !flat.includes(r.quote)) problems.push(`data/conformance.json: "${r.quote}" is not in ${r.source}; update the row`);
       cite = `[${r.source.split('/').slice(-2).join('/')}](${rel(r.source)})`;
     }
-    if (r.commit) cite += `${cite ? ', ' : ''}commit [\`${r.commit}\`](${REPO}/commit/${r.commit})`;
+    if (r.commit) cite += `${cite ? ', ' : ''}commit ${published(r.commit) ? `[\`${r.commit}\`](${REPO}/commit/${r.commit})` : `\`${r.commit}\``}`;
     if (!cite) problems.push(`data/conformance.json: row "${r.area}" needs a source or a commit`);
     out.push(`| ${r.area} | ${r.against} | ${r.result} | ${cite} |`);
   }

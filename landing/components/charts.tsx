@@ -5,6 +5,7 @@
 import type { Chart, Method, Section, Table } from '@/lib/bench';
 import { hmrTarget, shown } from '@/lib/bench';
 import { site } from '@/lib/site';
+import { published } from '@/lib/commits.mjs';
 
 const KIND_NAME: Record<string, string> = { ours: 'ts-r', other: 'Other tools', floor: 'Baseline' };
 
@@ -206,8 +207,18 @@ export function MethodList({ m, sources = false }: { m: Method; sources?: boolea
         <>
           <dt>Recorded in</dt>
           <dd>
-            commit <a href={`${site.repo}/commit/${m.commit}`}><code>{m.commit}</code></a>
-            {m.sources?.map(s => <span key={s}>, <a href={`${site.repo}/blob/${m.commit}/${s}`}><code>{s}</code></a></span>)}
+            {published(m.commit) ? (
+              <>
+                commit <a href={`${site.repo}/commit/${m.commit}`}><code>{m.commit}</code></a>
+                {m.sources?.map(s => <span key={s}>, <a href={`${site.repo}/blob/${m.commit}/${s}`}><code>{s}</code></a></span>)}
+              </>
+            ) : (
+              // A development-repository commit: the sources link to their current version.
+              <>
+                commit <code>{m.commit}</code>
+                {m.sources?.map(s => <span key={s}>, <a href={`${site.repo}/blob/main/${s}`}><code>{s}</code></a></span>)}
+              </>
+            )}
           </dd>
         </>
       ) : (
