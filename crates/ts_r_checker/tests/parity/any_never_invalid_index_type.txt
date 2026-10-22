@@ -1,0 +1,8 @@
+a.ts(2,12): error TS2538: Type '[]' cannot be used as an index type.
+a.ts(3,15): error TS2538: Type 'boolean' cannot be used as an index type.
+a.ts(4,15): error TS2538: Type '{}' cannot be used as an index type.
+a.ts(5,15): error TS2538: Type 'false' cannot be used as an index type.
+a.ts(5,15): error TS2538: Type 'true' cannot be used as an index type.
+a.ts(7,15): error TS2538: Type 'undefined' cannot be used as an index type.
+a.ts(8,17): error TS2538: Type '[]' cannot be used as an index type.
+a.ts(9,15): error TS2538: Type 'null' cannot be used as an index type.

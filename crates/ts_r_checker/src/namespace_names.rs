@@ -17,6 +17,12 @@
 //!   (`import i = NI; x: i.Z` says `Namespace 'NI'`), and as written otherwise.
 //! - `import x = A.B.C` checks its entity: TS2503 for a missing first name, TS2694 for a
 //!   missing member (the last member may have any meaning), `globalThis` alone is fine.
+//! - When the entity is a value, its first name looked up as value or namespace must be a
+//!   namespace (or enum), else a local value hides it (TS2437 at that name); when it is a
+//!   type, the alias may not be named like a predefined type (TS2438). An exported alias
+//!   whose entity does not resolve still reads its first name as a value (TS2708 for a
+//!   namespace without values). (tsc:
+//!   `checkImportEqualsDeclaration` in `tsc/internal/checker/checker.go`.)
 //!
 //! JavaScript files and symbols declared in them are left alone (expando namespaces).
 
@@ -37,6 +43,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         if self.c.file(l.file).is_js() {
             return;
+        }
+        if !matches!(ast.node(module_ref), Node::ExternalModuleRef { .. }) {
+            self.check_import_equals_target(l, module_ref);
         }
         let r = Loc::new(l.file, module_ref);
         match *ast.node(module_ref) {
@@ -78,6 +87,72 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// What `import x = A.B` stands for: a value whose first name `A` is shadowed by a
+    /// local value (TS2437), a type under a predefined type's name (TS2438).
+    fn check_import_equals_target(&mut self, l: Loc, module_ref: NodeId) {
+        let ast = self.ast(l.file);
+        let Node::ImportEquals {
+            name, modifiers, ..
+        } = *ast.node(l.node)
+        else {
+            return;
+        };
+        let mut first = module_ref;
+        for _ in 0..4096 {
+            match *ast.node(first) {
+                Node::QualifiedName { left, .. } | Node::Member { obj: left, .. } => first = left,
+                _ => break,
+            }
+        }
+        let fl = Loc::new(l.file, first);
+        let Some(sym) = self.c.sym_of_decl(l) else {
+            return;
+        };
+        let Some(target) = self.c.resolve_alias(sym) else {
+            // An exported alias of nothing is still emitted as a value read of its first
+            // name: a namespace without values there is TS2708.
+            if modifiers.contains(ts_r_ast::Modifiers::EXPORT)
+                && !self.is_ambient_node(l)
+                && let Some(text) = ident_text(ast, first)
+                && self.c.resolve_ident(fl, meaning::VALUE).is_none()
+                && let Some(t) = self.c.resolve_ident(fl, meaning::NAMESPACE)
+                && let Some(t) = self.c.resolve_alias(t)
+            {
+                let text = text.to_owned();
+                self.report_non_value(fl, t, &text);
+            }
+            return;
+        };
+        // Only a namespace or enum target counts: an alias that resolved to a plain value
+        // already got TS2503 or TS2702 from the namespace lookup.
+        // The binder resolved `A` as a namespace; look it up again with both meanings.
+        if self.c.has_meaning(target, meaning::VALUE)
+            && self.c.sym_flags(target).intersects(SymbolFlags::NAMESPACE)
+            && let Some(text) = ident_text(ast, first)
+            && let Some(s) =
+                self.c
+                    .lookup_in_scope_chain(fl, text, meaning::VALUE | meaning::NAMESPACE)
+            && let Some(s) = self.c.resolve_alias(s)
+            && !self.c.sym_flags(s).intersects(SymbolFlags::NAMESPACE)
+        {
+            self.error(
+                fl,
+                dg::MODULE_0_IS_HIDDEN_BY_A_LOCAL_DECLARATION_WITH_THE_SAME_NAME_2437,
+                &[text],
+            );
+        }
+        if self.c.has_meaning(target, meaning::TYPE)
+            && let Some(text) = ident_text(ast, name)
+            && crate::decl_names::RESERVED.contains(&text)
+        {
+            self.error(
+                Loc::new(l.file, name),
+                dg::IMPORT_NAME_CANNOT_BE_0_2438,
+                &[text],
+            );
         }
     }
 
@@ -214,7 +289,8 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// How TS2694 names the namespace `ls` written as `left`: its symbol's qualified name
-    /// when `left` is an alias, the text as written otherwise.
+    /// when `left` is an alias, the text as written otherwise; either way a namespace
+    /// exported from a module file is led by that file's quoted path (`"a".N`).
     pub(crate) fn namespace_display(&mut self, ls: SymId, left: Loc) -> String {
         let ast = self.ast(left.file);
         let through_alias = matches!(ast.node(left.node), Node::Ident { .. })
@@ -222,16 +298,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .c
                 .resolve_ident(left, meaning::NAMESPACE)
                 .is_some_and(|s| self.c.sym_flags(s).intersects(SymbolFlags::ALIAS));
-        if !through_alias || self.c.sym_flags(ls).intersects(SymbolFlags::MODULE_FILE) {
+        if self.c.sym_flags(ls).intersects(SymbolFlags::MODULE_FILE) {
             return crate::nodes::entity_text(ast, left.node);
         }
         let mut out = self.c.sym_name(ls).to_owned();
+        let mut file_prefix = None;
         let mut cur = self.c.sym_parent(ls);
         for _ in 0..32 {
             let Some(p) = cur else { break };
             let f = self.c.sym_flags(p);
-            if f.intersects(SymbolFlags::MODULE_FILE)
-                || !f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
+            if f.intersects(SymbolFlags::MODULE_FILE) {
+                file_prefix = self.module_file_display(p);
+                break;
+            }
+            if !f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
                 || self.c.sym_name(p) == "__global"
             {
                 break;
@@ -239,7 +319,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             out = format!("{}.{}", self.c.sym_name(p), out);
             cur = self.c.sym_parent(p);
         }
-        out
+        match file_prefix {
+            Some(m) => format!("{m}.{out}"),
+            None if through_alias => out,
+            None => crate::nodes::entity_text(ast, left.node),
+        }
+    }
+
+    /// A source file's module symbol as tsc names it: its path without the extension,
+    /// quoted. `None` for anything else.
+    fn module_file_display(&self, m: SymId) -> Option<String> {
+        if self.c.sym_name(m) != "__file" {
+            return None;
+        }
+        let d = self.c.first_decl(m)?;
+        let path = crate::print::strip_ts_ext(&self.c.file(d.file).path);
+        Some(format!("\"{path}\""))
     }
 
     /// TS2503 for a namespace name that resolves to none, TS2833 with a suggestion among
@@ -293,48 +388,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// A spelling suggestion for `name` among the names of meaning `m` in scope at `e`:
-    /// locals of the enclosing scopes, then globals.
+    /// A spelling suggestion for `name` among the names of meaning `m` in scope at `e`
+    /// (`Ck::scope_name_candidates`), not the alias being declared (`import v = V`).
     fn meaning_name_suggestion(&mut self, e: Loc, name: &str, m: u8) -> Option<String> {
-        let b = self.c.bound(e.file);
-        let ast = self.ast(e.file);
-        let parents = self.c.file(e.file).parents();
-        let mut cur = Some(e.node);
-        let mut scope = None;
-        while let Some(n) = cur {
-            if let Some(sc) = b.scope_of(n) {
-                scope = Some(sc);
-                break;
-            }
-            cur = parents.parent(n);
-        }
-        let at = self.c.span(e);
-        // Not the alias being declared (`import v = V`).
-        let declaring = |s: SymId| {
-            self.c.decls(s).iter().any(|d| {
-                let ds = self.c.span(*d);
-                d.file == e.file && ds.start <= at.start && at.end <= ds.end
-            })
-        };
-        let mut names: Vec<String> = Vec::new();
-        for _ in 0..1000 {
-            let Some(sc) = scope else { break };
-            let Some(data) = b.scopes.get(sc.0 as usize) else {
-                break;
-            };
-            for (n, sym) in b.table(data.locals) {
-                let s = self.c.sym(e.file, *sym);
-                if self.c.has_meaning(s, m) && !declaring(s) {
-                    names.push(b.names.text(ast, *n).to_owned());
-                }
-            }
-            scope = data.parent;
-        }
-        for (g, _) in self.c.link.globals.iter() {
-            if self.c.global_symbol(g, m).is_some_and(|s| !declaring(s)) {
-                names.push(g.to_string());
-            }
-        }
+        let names = self.scope_name_candidates(e, m, true);
         crate::relate::spelling_suggestion(name, names.iter().map(String::as_str))
     }
 }

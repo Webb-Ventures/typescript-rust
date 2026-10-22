@@ -1,0 +1,2 @@
+a.ts(28,14): error TS2741: Property 'a' is missing in type '{ [x: string]: (y: any) => any; }' but required in type '{ a: (x: string) => void; }'.
+a.ts(28,56): error TS7006: Parameter 'y' implicitly has an 'any' type.

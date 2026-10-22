@@ -196,10 +196,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// A failed JSDoc `@satisfies` (`e` is the `Satisfies` node it became): reported at the
-    /// tag name, elaborated as an assignment is, with TS1360 instead of TS2322 as the head
-    /// (tsc 7). Returns false for a TypeScript `satisfies`.
-    pub(crate) fn report_jsdoc_satisfies(
+    /// A failed `satisfies` (`e` is the `Satisfies` node; a JSDoc `@satisfies` became one
+    /// too): elaborated into the expression as an assignment is (property errors keep
+    /// their own messages), else reported at the `satisfies` keyword (the tag name of
+    /// `@satisfies`) with TS1360 instead of TS2322 as the head (tsc 7). Returns false when
+    /// the keyword is not found (the caller reports at the expression).
+    pub(crate) fn report_satisfies(
         &mut self,
         e: Loc,
         ty: ts_r_ast::NodeId,
@@ -207,25 +209,32 @@ impl<'c, 'a> Ck<'c, 'a> {
         target: TypeId,
     ) -> bool {
         let ast = self.ast(e.file);
-        if !ast.is_jsdoc(e.node) {
-            return false;
-        }
         let Node::Satisfies { expr, .. } = *ast.node(e.node) else {
             return false;
         };
-        // The `satisfies` of `@satisfies {T}`, before the type's `{`.
         let text = self.c.file(e.file).text.as_bytes();
-        let mut i = ast.span(ty).start as usize;
-        let mut steps = 0;
-        while i > 0 && steps < 4096 && matches!(text[i - 1], b'{' | b' ' | b'\t' | b'(') {
-            i -= 1;
-            steps += 1;
-        }
         let name = "satisfies".len();
-        if i < name + 1 || &text[i - name..i] != b"satisfies" || text[i - name - 1] != b'@' {
-            return false;
-        }
-        let span = ts_r_span::Span::new((i - name) as u32, i as u32);
+        let span = if ast.is_jsdoc(e.node) {
+            // The `satisfies` of `@satisfies {T}`, before the type's `{`.
+            let mut i = ast.span(ty).start as usize;
+            let mut steps = 0;
+            while i > 0 && steps < 4096 && matches!(text[i - 1], b'{' | b' ' | b'\t' | b'(') {
+                i -= 1;
+                steps += 1;
+            }
+            if i < name + 1 || &text[i - name..i] != b"satisfies" || text[i - name - 1] != b'@' {
+                return false;
+            }
+            ts_r_span::Span::new((i - name) as u32, i as u32)
+        } else {
+            // The keyword: the first token after the expression.
+            let end = ast.span(ty).start as usize;
+            let i = crate::nodes::skip_trivia(text, ast.span(expr).end as usize, end);
+            if i + name > end || &text[i..i + name] != b"satisfies" {
+                return false;
+            }
+            ts_r_span::Span::new(i as u32, (i + name) as u32)
+        };
         let xl = Loc::new(e.file, expr);
         if self.elaborate_error(xl, source, target) {
             return true;

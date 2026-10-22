@@ -1,0 +1,5 @@
+a.ts(13,1): error TS2322: Type 'C' is not assignable to type 'C2'.
+  Property 'x' is missing in type 'C' but required in type 'A'.
+a.ts(18,5): error TS2322: Type 'Q' is not assignable to type 'P2'.
+  Property 'z' is missing in type 'Q' but required in type 'P'.
+a.ts(20,5): error TS2741: Property 'z' is missing in type 'Q' but required in type 'R'.

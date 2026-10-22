@@ -1,6 +1,6 @@
 ---
 name: fix-conformance-diff
-description: Take one group of diagnostic differences between ts-r and tsc 7 (from cargo xtask tasks), find the cause, fix it from observed behaviour and design records (never from tsc source), and prove nothing else changed. Use when working an upstream-sync task or any "ts-r reports X but tsc reports Y" issue.
+description: Take one group of diagnostic differences between ts-r and tsc 7 (from cargo xtask tasks), find the cause, fix it from observed behaviour, design records and tsc source read as a reference (never ported), and prove nothing else changed. Use when working an upstream-sync task or any "ts-r reports X but tsc reports Y" issue.
 ---
 
 # Fix a conformance difference
@@ -31,9 +31,14 @@ Choose one group in `tasks.md`. Note its counts (missing / extra / mismatch).
   description and discussion. That, the tests and observed tsc behaviour are the spec.
 - Read the design record for the area in `docs/design/` and the owning crate's AGENTS.md.
 
-**Do not open, copy or translate tsc / typescript-go / ts-rust source.** If you cannot work out
-the rule from tests and behaviour, write more probes and run them through
-`cargo xtask oracle`.
+- Read tsc's source to see how the rule works: which error it reports when several apply, in
+  what order it checks, how it prints the type. The clone is at `../TypeScript` from the main
+  checkout; read it at the pinned tag without checking it out
+  (`git -C ../TypeScript show v7.0.2:tsc/internal/checker/relater.go`; the Go checker is
+  `tsc/internal/checker/`). Then write our own
+  implementation on our data model. **Never copy or translate it line by line, and never open
+  ts-rust or any other Rust port of TypeScript.** Record the rule in your own words in the
+  crate's AGENTS.md, citing the upstream file. Confirm with probes through `cargo xtask oracle`.
 
 ## 3. Reproduce small
 

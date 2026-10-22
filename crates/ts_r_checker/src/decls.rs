@@ -57,7 +57,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if matches!(
                 ast.node(n),
-                Node::FunctionDecl { body: None, .. }
+                Node::FunctionDecl { .. }
                     | Node::MethodDef { .. }
                     | Node::MethodSignature { .. }
                     | Node::ConstructSignature { .. }
@@ -118,6 +118,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_enum_merge_initializers(Loc::new(file, n));
             } else {
                 self.check_namespace_merge_order(Loc::new(file, n));
+                self.check_namespace_prototype_export(Loc::new(file, n));
             }
         }
         for n in sigs {

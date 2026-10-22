@@ -1,0 +1,4 @@
+a.ts(3,23): error TS2353: Object literal may only specify known properties, and 'foo' does not exist in type '{ id: number; }'.
+a.ts(5,1): error TS2352: Conversion of type '{ foo: string; }' to type '{ id: number; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'id' is missing in type '{ foo: string; }' but required in type '{ id: number; }'.
+a.ts(6,4): error TS2353: Object literal may only specify known properties, and 'foo' does not exist in type '{ id: number; }'.

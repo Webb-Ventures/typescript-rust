@@ -318,6 +318,8 @@ pub struct Resolver {
     conditions: Vec<String>,
     main_fields: Vec<String>,
     extensions: Vec<String>,
+    /// `extensions` for files inside `node_modules`: JavaScript before TypeScript.
+    node_modules_extensions: Vec<String>,
     external: Vec<String>,
     packages_external: bool,
     explicit_tsconfig: Option<String>,
@@ -340,6 +342,27 @@ impl std::fmt::Debug for Resolver {
     }
 }
 
+/// `extensions` with the TypeScript ones moved after the last JavaScript one, as esbuild
+/// orders implicit extensions inside `node_modules` (observed: `pkg/path` finds `path.js`
+/// before `path.ts`, and `path.ts` still before `path.css`).
+fn javascript_first(extensions: &[String]) -> Vec<String> {
+    let is_ts = |e: &str| matches!(e, ".ts" | ".tsx" | ".mts" | ".cts");
+    let is_js = |e: &str| matches!(e, ".js" | ".jsx" | ".mjs" | ".cjs");
+    let Some(last_js) = extensions.iter().rposition(|e| is_js(e)) else {
+        return extensions.to_vec();
+    };
+    let mut out = Vec::with_capacity(extensions.len());
+    for (i, e) in extensions.iter().enumerate() {
+        if !(is_ts(e) && i < last_js) {
+            out.push(e.clone());
+        }
+        if i == last_js {
+            out.extend(extensions[..i].iter().filter(|e| is_ts(e)).cloned());
+        }
+    }
+    out
+}
+
 impl Resolver {
     pub fn new(fs: Arc<dyn FileSystem>, opts: &BuildOptions) -> Resolver {
         Resolver {
@@ -348,6 +371,7 @@ impl Resolver {
             conditions: opts.effective_conditions(),
             main_fields: opts.effective_main_fields(),
             extensions: opts.resolve_extensions.clone(),
+            node_modules_extensions: javascript_first(&opts.resolve_extensions),
             external: opts.external.clone(),
             packages_external: opts.packages_external,
             explicit_tsconfig: opts.tsconfig.clone(),
@@ -653,7 +677,21 @@ impl Resolver {
         }
         let mut found = None;
         let mut d = dir.to_owned();
+        // Directories walked through without a config: they share the answer.
+        let mut walked: Vec<String> = Vec::new();
         loop {
+            if d != dir {
+                if let Some(r) = self
+                    .tsconfig_for_dir
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&d)
+                {
+                    found = r.clone();
+                    break;
+                }
+                walked.push(d.clone());
+            }
             let ts = path::resolve(&d, "tsconfig.json");
             let js = path::resolve(&d, "jsconfig.json");
             if self.fs.file_exists(&ts) {
@@ -670,10 +708,14 @@ impl Resolver {
             }
             d = parent;
         }
-        self.tsconfig_for_dir
+        let mut cache = self
+            .tsconfig_for_dir
             .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(dir.to_owned(), found.clone());
+            .unwrap_or_else(|e| e.into_inner());
+        for w in walked {
+            cache.insert(w, found.clone());
+        }
+        cache.insert(dir.to_owned(), found.clone());
         found
     }
 
@@ -924,7 +966,12 @@ impl Resolver {
         if self.fs.file_exists(p) {
             return Some(p.to_owned());
         }
-        for ext in &self.extensions {
+        let extensions = if p.contains("/node_modules/") {
+            &self.node_modules_extensions
+        } else {
+            &self.extensions
+        };
+        for ext in extensions {
             let cand = format!("{p}{ext}");
             if self.fs.file_exists(&cand) {
                 return Some(cand);
@@ -1050,6 +1097,23 @@ mod tests {
         assert_eq!(res("path/posix"), ext("path/posix"));
         assert_eq!(res("node:fs/promises"), ext("node:fs/promises"));
         assert_eq!(res("node:test"), ext("node:test"));
+    }
+
+    #[test]
+    fn node_modules_extension_order() {
+        let ext = |l: &[&str]| l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            javascript_first(&ext(&[".tsx", ".ts", ".jsx", ".js", ".css", ".json"])),
+            ext(&[".jsx", ".js", ".tsx", ".ts", ".css", ".json"])
+        );
+        assert_eq!(
+            javascript_first(&ext(&[".ts", ".css"])),
+            ext(&[".ts", ".css"])
+        );
+        assert_eq!(
+            javascript_first(&ext(&[".js", ".ts"])),
+            ext(&[".js", ".ts"])
+        );
     }
 
     #[test]

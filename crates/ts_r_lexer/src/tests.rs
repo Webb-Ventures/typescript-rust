@@ -75,7 +75,7 @@ fn punctuators() {
             T::QuestionDot,
             T::Colon,
             T::At,
-            T::Hash,
+            T::PrivateName,
         ]
     );
     assert_eq!(
@@ -147,11 +147,11 @@ fn identifiers_and_keywords() {
     assert!(lx.token().flags.has(TokenFlags::ESCAPED));
     lx.next_token();
     assert_eq!(lx.ident_value(lx.token()), "abc");
-    // Escaped keyword stays an identifier but is flagged.
+    // An escaped keyword is the keyword, flagged.
     let mut lx = Lexer::new(concat!("\\", "u0076ar"));
-    assert_eq!(lx.next_token(), T::Ident);
+    assert_eq!(lx.next_token(), T::Var);
     assert!(lx.token().flags.has(TokenFlags::ESCAPED_KEYWORD));
-    assert_eq!(kinds("#priv #"), vec![T::PrivateName, T::Hash]);
+    assert_eq!(kinds("#priv #"), vec![T::PrivateName, T::PrivateName]);
     // After an ASCII prefix, escapes and non-ASCII characters only need to continue it.
     let mut lx = Lexer::new(concat!("a", "\\", "u0030"));
     lx.next_token();
@@ -205,6 +205,23 @@ fn numbers() {
     assert_eq!(errors("0x"), vec![1125]);
     assert_eq!(errors("3in"), vec![1351]);
     assert_eq!(errors("1e"), vec![1124]);
+    // TS1351 only after a plain decimal literal; the name is its own token (`3in x`).
+    assert_eq!(kinds("3in x"), vec![T::Number, T::In, T::Ident]);
+    assert_eq!(errors("0x1g"), Vec::<u32>::new());
+    assert_eq!(errors("0b1x"), Vec::<u32>::new());
+    // `0_1`: a separator after a leading zero, reported once.
+    assert_eq!(errors("0_1"), vec![6188]);
+    assert_eq!(errors("0_1_2"), vec![6188]);
+    // Bigint literal errors (parseBigInt).
+    assert_eq!(errors("0bn 0on 0xn"), vec![1177, 1178, 1125]);
+    assert_eq!(errors("1e2n 4.1n .1n"), vec![1352, 1353, 1353]);
+    assert_eq!(kinds("1e2n"), vec![T::Number]);
+    assert_eq!(errors("0123n"), Vec::<u32>::new());
+    // A backslash at the end of the file ends a string or template: TS1126.
+    assert_eq!(errors("\"\\"), vec![1126]);
+    assert_eq!(errors("`\\"), vec![1126]);
+    // A lone `#`: TS1127.
+    assert_eq!(errors("# x"), vec![1127]);
 }
 
 #[test]
@@ -317,6 +334,30 @@ fn regex_rescan() {
     lx.next_token();
     lx.rescan_slash_as_regex();
     assert_eq!(lx.diagnostics[0].code, 1161);
+    // An unterminated regex ends at a `)` it did not open, or before a trailing `;`.
+    for (src, text) in [
+        ("/a (b) c) d", "/a (b) c"),
+        ("/a b;;", "/a b"),
+        ("/a; b", "/a; b"),
+    ] {
+        let mut lx = Lexer::new(src);
+        lx.next_token();
+        lx.rescan_slash_as_regex();
+        assert_eq!(lx.token_text(), text);
+    }
+    // Pattern errors (the parser defers them).
+    let codes = |src: &str| {
+        let mut lx = Lexer::new(src);
+        lx.next_token();
+        lx.rescan_slash_as_regex();
+        lx.diagnostics.iter().map(|d| d.code).collect::<Vec<_>>()
+    };
+    assert_eq!(codes(r"/[b-a]/"), vec![1517]);
+    assert_eq!(codes(r"/[\u{1F600}-\u{1F601}]/u"), Vec::<u32>::new());
+    assert_eq!(codes(r"/[😀-😁]/"), vec![1517]);
+    assert_eq!(codes(r"/\x4/"), vec![1125]);
+    assert_eq!(codes(r"/a}]/u"), vec![1508, 1508]);
+    assert_eq!(codes(r"/a{1,2}\p{L}[\q{x}]/v"), Vec::<u32>::new());
 }
 
 #[test]

@@ -10,16 +10,29 @@
 //!   TS4114 (TS4115 for parameter properties). Implementing an abstract member does not
 //!   need `override`. Ambient classes and `declare` fields are exempt.
 //! - The base class prints as its instance type (`'A'`, `'{ mx(): void; }'`).
+//! - Member kinds (tsc: checkKindsOfPropertyMemberOverrides in checker.go): a method
+//!   overrides a method and is overridden by a method or field; an accessor over a base
+//!   method is TS2423, a method over a base field TS2425, over a base accessor TS2426.
+//!   Private members on either side override nothing.
 //! - In JavaScript the modifier is a JSDoc `@override` tag, with the JSDoc messages
 //!   (TS4119-TS4123, TS4128) in place of TS4112-TS4117 and TS4127.
 
 use ts_r_ast::{HeritageKind, MethodKind, Modifiers, Node, NodeId};
+use ts_r_binder::SymbolFlags;
 use ts_r_diagnostics::FileId;
 use ts_r_types::{SymId, TypeFlags, TypeId};
 
 use crate::checker::{Ck, Loc};
 use crate::diag::dg;
 use crate::nodes::{fn_parts, key_text};
+
+/// The kind of an instance member for override kind checks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemberKind {
+    Property,
+    Accessor,
+    Method,
+}
 
 /// One member subject to override rules.
 struct Member {
@@ -180,9 +193,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         class_name: &str,
     ) {
         let ast = self.ast(file);
-        // (error node, name, derived member is an accessor)
-        let mut derived: Vec<(NodeId, String, bool)> = Vec::new();
-        let mut push = |at: NodeId, key: NodeId, accessor: bool| {
+        // (error node, name, kind of the derived member, derived member is private)
+        let mut derived: Vec<(NodeId, String, MemberKind, bool)> = Vec::new();
+        let mut push = |at: NodeId, key: NodeId, kind: MemberKind, private: bool| {
             if matches!(
                 ast.node(key),
                 Node::ComputedKey { .. } | Node::PrivateName { .. }
@@ -190,9 +203,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return;
             }
             if let Some(name) = key_text(ast, key)
-                && !derived.iter().any(|(_, n, _)| *n == name)
+                && !derived.iter().any(|(_, n, _, _)| *n == name)
             {
-                derived.push((at, name, accessor));
+                derived.push((at, name, kind, private));
             }
         };
         for &m in ast.list(members) {
@@ -200,14 +213,26 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::PropertyDef { key, modifiers, .. }
                     if !modifiers.contains(Modifiers::STATIC) =>
                 {
-                    push(key, key, modifiers.contains(Modifiers::ACCESSOR));
+                    let kind = if modifiers.contains(Modifiers::ACCESSOR) {
+                        MemberKind::Accessor
+                    } else {
+                        MemberKind::Property
+                    };
+                    push(key, key, kind, modifiers.contains(Modifiers::PRIVATE));
                 }
                 Node::MethodDef {
                     key,
                     modifiers,
-                    kind: MethodKind::Get | MethodKind::Set,
+                    kind: kind @ (MethodKind::Get | MethodKind::Set | MethodKind::Method),
                     ..
-                } if !modifiers.contains(Modifiers::STATIC) => push(key, key, true),
+                } if !modifiers.contains(Modifiers::STATIC) => {
+                    let kind = if kind == MethodKind::Method {
+                        MemberKind::Method
+                    } else {
+                        MemberKind::Accessor
+                    };
+                    push(key, key, kind, modifiers.contains(Modifiers::PRIVATE));
+                }
                 Node::MethodDef {
                     kind: MethodKind::Constructor,
                     value,
@@ -217,21 +242,47 @@ impl<'c, 'a> Ck<'c, 'a> {
                         continue;
                     };
                     for &p in ast.list(parts.params) {
-                        if let Node::Param { pattern, .. } = *ast.node(p)
+                        if let Node::Param {
+                            pattern, modifiers, ..
+                        } = *ast.node(p)
                             && matches!(ast.node(pattern), Node::Ident { .. })
                             && self.is_parameter_property(Loc::new(file, p))
                         {
-                            push(pattern, pattern, false);
+                            let private = modifiers.contains(Modifiers::PRIVATE);
+                            push(pattern, pattern, MemberKind::Property, private);
                         }
                     }
                 }
                 _ => {}
             }
         }
-        for (at, name, accessor) in derived {
+        for (at, name, kind, private) in derived {
             let Some(bp) = self.property_of_type(base, &name) else {
                 continue;
             };
+            // A method on either side: methods override methods and are overridden by
+            // fields; any other pairing is TS2423 / TS2425 / TS2426. Private members on
+            // either side override nothing (tsc: checkKindsOfPropertyMemberOverrides).
+            let base_kind = self.overridden_member_kind(bp);
+            if kind == MemberKind::Method || base_kind == Some(MemberKind::Method) {
+                let info = match (base_kind, kind) {
+                    (Some(MemberKind::Method), MemberKind::Accessor) => {
+                        dg::CLASS_0_DEFINES_INSTANCE_MEMBER_FUNCTION_1_BUT_EXTENDED_CLASS_2_DEFINES_IT_AS_IN_2423
+                    }
+                    (Some(MemberKind::Accessor), MemberKind::Method) => {
+                        dg::CLASS_0_DEFINES_INSTANCE_MEMBER_ACCESSOR_1_BUT_EXTENDED_CLASS_2_DEFINES_IT_AS_IN_2426
+                    }
+                    (Some(MemberKind::Property), MemberKind::Method) => {
+                        dg::CLASS_0_DEFINES_INSTANCE_MEMBER_PROPERTY_1_BUT_EXTENDED_CLASS_2_DEFINES_IT_AS_IN_2425
+                    }
+                    _ => continue,
+                };
+                if !private {
+                    self.error(Loc::new(file, at), info, &[base_s, &name, class_name]);
+                }
+                continue;
+            }
+            let accessor = kind == MemberKind::Accessor;
             let Some(base_accessor) = self.class_member_kind(bp) else {
                 continue;
             };
@@ -244,6 +295,37 @@ impl<'c, 'a> Ck<'c, 'a> {
                 dg::_0_IS_DEFINED_AS_AN_ACCESSOR_IN_CLASS_1_BUT_IS_OVERRIDDEN_HERE_IN_2_AS_AN_INSTANC_2610
             };
             self.error(Loc::new(file, at), info, &[&name, base_s, class_name]);
+        }
+    }
+
+    /// What a base member `p` is for override kind checks; `None` when it is private (or
+    /// not a property, method or accessor).
+    fn overridden_member_kind(&self, p: SymId) -> Option<MemberKind> {
+        let p = match self.c.synth_sym(p) {
+            Some(x) if x.origins.len() == 1 => x.origins[0],
+            Some(_) => return None,
+            None => p,
+        };
+        for d in self.c.decls(p) {
+            let private = match *self.ast(d.file).node(d.node) {
+                Node::PropertyDef { modifiers, .. }
+                | Node::MethodDef { modifiers, .. }
+                | Node::Param { modifiers, .. } => modifiers.contains(Modifiers::PRIVATE),
+                _ => false,
+            };
+            if private {
+                return None;
+            }
+        }
+        let f = self.c.sym_flags(p);
+        if f.intersects(SymbolFlags::METHOD) {
+            Some(MemberKind::Method)
+        } else if f.intersects(SymbolFlags::ACCESSOR) {
+            Some(MemberKind::Accessor)
+        } else if f.intersects(SymbolFlags::PROPERTY) {
+            Some(MemberKind::Property)
+        } else {
+            None
         }
     }
 

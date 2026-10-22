@@ -21,34 +21,38 @@ const MAX_STEPS: u32 = 4096;
 impl<'c, 'a> Ck<'c, 'a> {
     /// Checks type reference `r` that resolved to type parameter `sym`.
     pub(crate) fn check_static_type_parameter_use(&mut self, r: Loc, sym: SymId) {
-        if !self.reporting(r.file) {
-            return;
+        if self.reporting(r.file) && self.is_static_type_parameter_use(r, sym) {
+            self.error(
+                r,
+                dg::STATIC_MEMBERS_CANNOT_REFERENCE_CLASS_TYPE_PARAMETERS_2302,
+                &[],
+            );
         }
+    }
+
+    /// `true` when type reference `r` names type parameter `sym` of a class from inside a
+    /// static member of that class. Such a reference is tsc's error type (`any`), so
+    /// `static m(): List<T> { return new List<T>(null) }` reports only TS2302.
+    pub(crate) fn is_static_type_parameter_use(&self, r: Loc, sym: SymId) -> bool {
         let Some(class) = self.type_param_class(sym) else {
-            return;
+            return false;
         };
         if class.file != r.file {
-            return;
+            return false;
         }
         let ast = self.ast(r.file);
         let parents = self.c.file(r.file).parents();
         let mut child = r.node;
         for _ in 0..MAX_STEPS {
             let Some(p) = parents.parent(child) else {
-                return;
+                return false;
             };
             if p == class.node {
-                if is_static_member(ast.node(child)) {
-                    self.error(
-                        r,
-                        dg::STATIC_MEMBERS_CANNOT_REFERENCE_CLASS_TYPE_PARAMETERS_2302,
-                        &[],
-                    );
-                }
-                return;
+                return is_static_member(ast.node(child));
             }
             child = p;
         }
+        false
     }
 
     /// The class declaring type parameter `sym`.

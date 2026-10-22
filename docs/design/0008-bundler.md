@@ -10,8 +10,8 @@ M3 ships `ts-r-build`, a replacement for esbuild (and for Rollup in Vite builds)
 projects. Its behaviour is specified by **esbuild 0.28.2**: its documented options, its
 end-to-end bundler tests (`internal/bundler_tests/*.go` at commit
 `609683d892977362a0f99026cb74b96263d728a9`, used as data only) and its observed output on real
-projects (excalidraw and three.js, pinned in `bench/repos.toml`). We never read or port esbuild, Rollup, Rolldown, webpack, terser,
-swc or oxc source.
+projects (excalidraw and three.js, pinned in `bench/repos.toml`). The source of esbuild, Rollup, Rolldown,
+webpack, terser, swc or oxc may be read to understand a rule, never ported.
 
 We match esbuild's **semantics** (what the bundle does when run, which modules and exports
 survive, which errors are reported), not its exact bytes. Our runtime helpers, generated names
@@ -100,7 +100,8 @@ short bundle-wide names. `--minify-syntax` runs `compress` (statement merging, `
 ### Incremental builds and caching
 
 - In memory (`BuildContext`): prepared modules keyed by `prep_key` = blake3 of file contents,
-  loader, transform options cache key and defines; printed fragments keyed by
+  loader, transform options cache key, defines, annotation handling and effective output
+  format (including strict-mode validation); printed fragments keyed by
   `blake3(prep_key, ModulePlan)`. A rebuild re-reads changed files, re-links (cheap), and
   reprints only modules whose plan changed. Fragments not used by the latest build are
   evicted.

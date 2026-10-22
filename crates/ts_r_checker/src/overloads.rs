@@ -11,6 +11,9 @@
 //! - Each declaration whose `export`, `declare`, visibility, `?` or `abstract` differs from
 //!   the implementation's (else the first declaration's): TS2383/2384/2385/2386/2512 at its
 //!   name.
+//! - Method signatures of one interface or type literal symbol (merged declarations
+//!   included) take the first one's `?` as canonical: TS2386 at each deviating name
+//!   (tsc: checkFunctionOrConstructorSymbol in checker.go).
 //! - Each overload must be compatible with the implementation (TS2394 at the overload
 //!   name): the overload's parameter types are assignable to the implementation's (optional
 //!   parameters include `undefined`, rest parameters expand), the implementation does not
@@ -202,12 +205,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ast = self.ast(file);
         let name = match *ast.node(n) {
+            // A body the parser recovered from nothing (`function f() => 4`) is none.
             Node::FunctionDecl {
                 name: Some(name),
-                body: None,
+                body,
                 return_type: None,
                 ..
-            } => name,
+            } if body.is_none_or(|b| ast.span(b).is_empty()) => name,
             // Private methods are exempt (their types are not part of declarations).
             Node::MethodDef {
                 kind: MethodKind::Method,
@@ -250,7 +254,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => return,
         };
-        let text = self.c.text(Loc::new(file, name)).to_owned();
+        let mut text = self.c.text(Loc::new(file, name)).to_owned();
+        // A name the parser recovered as missing prints as tsc's `(Missing)`.
+        if text.is_empty() {
+            text = "(Missing)".to_owned();
+        }
         self.error(
             Loc::new(file, name),
             dg::_0_WHICH_LACKS_RETURN_TYPE_ANNOTATION_IMPLICITLY_HAS_AN_1_RETURN_TYPE_7010,
@@ -364,6 +372,53 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// TS2383/2384/2385/2386/2512: modifiers that must agree across an overload set.
+    /// TS2386 at the method signature `n` (interface or type literal) when its `?` differs
+    /// from the first method signature of the same symbol, merged declarations included.
+    pub(crate) fn check_method_signature_optionality(&mut self, file: FileId, n: NodeId) {
+        if !self.reporting(file) {
+            return;
+        }
+        let Node::MethodSignature {
+            kind: MethodKind::Method,
+            key,
+            optional,
+            ..
+        } = *self.ast(file).node(n)
+        else {
+            return;
+        };
+        let here = Loc::new(file, n);
+        let Some(sym) = self.c.sym_of_decl(here) else {
+            return;
+        };
+        let first = self.c.decls(sym).into_iter().find(|d| {
+            matches!(
+                self.c.file(d.file).ast.node(d.node),
+                Node::MethodSignature {
+                    kind: MethodKind::Method,
+                    ..
+                }
+            )
+        });
+        let Some(first) = first else {
+            return;
+        };
+        let Node::MethodSignature {
+            optional: canonical,
+            ..
+        } = *self.c.file(first.file).ast.node(first.node)
+        else {
+            return;
+        };
+        if first != here && optional != canonical {
+            self.error(
+                Loc::new(file, key),
+                dg::OVERLOAD_SIGNATURES_MUST_ALL_BE_OPTIONAL_OR_REQUIRED_2386,
+                &[],
+            );
+        }
+    }
+
     fn check_overload_modifiers(
         &mut self,
         file: FileId,

@@ -1,0 +1,5 @@
+a.ts(1,18): error TS17013: Meta-property 'new.target' is only allowed in the body of a function declaration, function expression, or constructor.
+a.ts(2,24): error TS17013: Meta-property 'new.target' is only allowed in the body of a function declaration, function expression, or constructor.
+a.ts(14,12): error TS17013: Meta-property 'new.target' is only allowed in the body of a function declaration, function expression, or constructor.
+a.ts(16,13): error TS17013: Meta-property 'new.target' is only allowed in the body of a function declaration, function expression, or constructor.
+a.ts(20,12): error TS17013: Meta-property 'new.target' is only allowed in the body of a function declaration, function expression, or constructor.

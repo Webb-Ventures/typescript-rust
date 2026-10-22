@@ -1,5 +1,5 @@
 //! `super` placement (TS2335, TS2336, TS2337, TS2660) and `super()` in constructors of
-//! derived classes (TS2377, TS17009, TS17011).
+//! derived classes (TS2377, TS17005, TS17009, TS17011).
 //!
 //! Rules observed from tsc 7.0.2, for the constructor (with a body) of a class whose
 //! `extends` expression is not `null`:
@@ -9,6 +9,8 @@
 //!   path from the start of the constructor (parameter initializers included). Only `this`
 //!   whose container is the constructor itself counts: arrow and function bodies do not,
 //!   decorators of a class nested in the constructor do. Unreachable code is fine.
+//!
+//! - A class that `extends null`: the first `super(...)` call is TS17005.
 //!
 //! The flow graph records calls only as statements, so a constructor with a `super(...)`
 //! call inside a larger expression (`super() || this`) is not checked for TS17009/TS17011.
@@ -84,6 +86,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         if !self.extends_non_null(Loc::new(m.file, class)) {
+            // A class that `extends null` has no base constructor to call: TS17005 at the
+            // first `super(...)` call.
+            if self.has_extends_clause(Loc::new(m.file, class))
+                && let Some(call) = self.first_super_call(Loc::new(m.file, value))
+            {
+                self.error(
+                    Loc::new(m.file, call),
+                    dg::A_CONSTRUCTOR_CANNOT_CONTAIN_A_SUPER_CALL_WHEN_ITS_CLASS_EXTENDS_NULL_17005,
+                    &[],
+                );
+            }
             return;
         }
         if self.super_calls(Loc::new(m.file, value)) == SuperCalls::None {
@@ -258,6 +271,57 @@ impl<'c, 'a> Ck<'c, 'a> {
             }),
             _ => false,
         })
+    }
+
+    /// Whether `class` has an `extends` clause.
+    fn has_extends_clause(&self, class: Loc) -> bool {
+        let ast = self.ast(class.file);
+        let heritage = match *ast.node(class.node) {
+            Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. } => heritage,
+            _ => return false,
+        };
+        ast.list(heritage).iter().any(|&h| {
+            matches!(
+                *ast.node(h),
+                Node::HeritageClause {
+                    kind: ts_r_ast::HeritageKind::Extends,
+                    ..
+                }
+            )
+        })
+    }
+
+    /// The first `super(...)` call in source order in a constructor function, outside
+    /// nested functions, arrows and classes.
+    fn first_super_call(&self, ctor: Loc) -> Option<NodeId> {
+        let ast = self.ast(ctor.file);
+        let mut best: Option<(u32, NodeId)> = None;
+        let mut stack: Vec<NodeId> = Vec::new();
+        ast.for_each_child(ctor.node, |c| stack.push(c));
+        let mut seen = 0usize;
+        while let Some(n) = stack.pop() {
+            seen += 1;
+            if seen > MAX_NODES {
+                break;
+            }
+            match *ast.node(n) {
+                Node::FunctionDecl { .. }
+                | Node::FunctionExpr { .. }
+                | Node::Arrow { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. }
+                | Node::Param { .. } => continue,
+                Node::Call { callee, .. } if matches!(ast.node(callee), Node::Super { .. }) => {
+                    let start = ast.span(n).start;
+                    if best.is_none_or(|(b, _)| start < b) {
+                        best = Some((start, n));
+                    }
+                }
+                _ => {}
+            }
+            ast.for_each_child(n, |c| stack.push(c));
+        }
+        best.map(|(_, n)| n)
     }
 
     /// The `super(...)` calls of a constructor function (not those in nested functions,

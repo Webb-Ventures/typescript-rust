@@ -7,13 +7,18 @@
 //!   own type is its annotation, else its widened initializer type, else `any`; a `for-in`
 //!   variable is `string` (`Extract<keyof T, string>` over a generic `T` or `this`), a
 //!   `for-of` variable the iterated type. `= null` and `= undefined` initializers count as
-//!   `any` (they start an evolving `any`). JavaScript files too (a JSDoc `@type` is the
+//!   `any` (they start an evolving `any`), and so does an initializer that makes the
+//!   variable's type circular (TS7022). JavaScript files too (a JSDoc `@type` is the
 //!   annotation; a function initializer's type has the variable's expandos).
 //! - Every property declaration merged into a symbol (interface/interface or class/interface
 //!   merges) after the first must have a type identical to the first: TS2717 at the later
 //!   declaration's name. Optional declarations include `undefined`.
+//! - Property declarations of one symbol must agree on optionality and on `private`,
+//!   `protected`, `async`, `abstract`, `readonly` and `static`: TS2687 at the first
+//!   declaration when any other differs, and at each later one that differs from the first
+//!   (tsc: checkVariableLikeDeclaration and areDeclarationFlagsIdentical in checker.go).
 
-use ts_r_ast::{Node, NodeId};
+use ts_r_ast::{Modifiers, Node, NodeId};
 use ts_r_binder::SymbolFlags;
 use ts_r_diagnostics::FileId;
 use ts_r_types::{TypeFlags, TypeId};
@@ -119,14 +124,31 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(&first) = decls.first() else {
             return;
         };
-        if decls.len() < 2 || first == here || !decls.contains(&here) {
-            return;
+        let peers = self.same_named_members(sym, here);
+        if peers.len() > 1 {
+            self.check_property_modifier_agreement(sym, here, &peers);
         }
-        let Some(ft) = self.own_property_type(first) else {
-            return;
-        };
-        let Some(ht) = self.own_property_type(here) else {
-            return;
+        let (ft, ht) = if decls.len() < 2 || first == here || !decls.contains(&here) {
+            // A class field repeated in one body (or after an accessor) joins the earlier
+            // member's symbol in tsc; this binder reports the repeat and keeps it apart.
+            let Some(earlier) = self.class_member_merged_into(file, m) else {
+                return;
+            };
+            let (Some(es), Some(hs)) = (
+                self.c.sym_of_decl(Loc::new(file, earlier)),
+                self.c.sym_of_decl(here),
+            ) else {
+                return;
+            };
+            (self.type_of_symbol(es), self.type_of_symbol(hs))
+        } else {
+            let Some(ft) = self.own_property_type(first) else {
+                return;
+            };
+            let Some(ht) = self.own_property_type(here) else {
+                return;
+            };
+            (ft, ht)
         };
         if !self.types_differ_for_redeclaration(ft, ht, (false, false)) {
             return;
@@ -136,7 +158,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::PropertySignature { key, .. } | Node::PropertyDef { key, .. } => key,
             _ => return,
         };
-        let n = self.c.sym_name(sym).to_owned();
+        // The property is named as this declaration writes it (`1.0`, `[c1]`).
+        let n = self.c.text(Loc::new(file, key)).to_owned();
         let fs = self.type_to_string(ft);
         let hs = self.type_to_string(ht);
         self.error(
@@ -144,6 +167,185 @@ impl<'c, 'a> Ck<'c, 'a> {
             dg::SUBSEQUENT_PROPERTY_DECLARATIONS_MUST_HAVE_THE_SAME_TYPE_PROPERTY_0_MUST_BE_OF_T_2717,
             &[&n, &fs, &hs],
         );
+    }
+
+    /// TS2687 at `here`, a declaration of the property `sym`: the first declaration is
+    /// reported when any other differs from it, a later one when it differs from the first.
+    /// Declarations differ in optionality or in `private`, `protected`, `async`, `abstract`,
+    /// `readonly` or `static`. When the first declaration is a parameter property (which
+    /// is not visited here) its errors are reported with the first later declaration.
+    fn check_property_modifier_agreement(
+        &mut self,
+        sym: ts_r_types::SymId,
+        here: Loc,
+        decls: &[Loc],
+    ) {
+        let Some(h) = self.variable_like_flags(here) else {
+            return;
+        };
+        let first = decls[0];
+        let Some(f) = self.variable_like_flags(first) else {
+            return;
+        };
+        let differs = |s: &Self, d: Loc| s.variable_like_flags(d).is_some_and(|x| x != f);
+        let n = self.c.sym_name(sym).to_owned();
+        if first == here {
+            if decls[1..].iter().any(|&d| differs(self, d)) {
+                self.error_at_decl_name(here, &n);
+            }
+            return;
+        }
+        // A parameter property first: report it from the first property declaration after it.
+        if matches!(self.node(first), Node::Param { .. })
+            && decls[1..]
+                .iter()
+                .find(|&&d| !matches!(self.node(d), Node::Param { .. }))
+                == Some(&here)
+            && decls[1..].iter().any(|&d| differs(self, d))
+        {
+            self.error_at_decl_name(first, &n);
+        }
+        if h != f {
+            self.error_at_decl_name(here, &n);
+        }
+    }
+
+    /// Every declaration named like the property `sym` in the instance member tables of its
+    /// class or interface, across all merged declarations of that container and including
+    /// duplicates the binder split into their own symbols, in file and source order.
+    fn same_named_members(&self, sym: ts_r_types::SymId, here: Loc) -> Vec<Loc> {
+        let Some(parent) = self.c.sym_parent(sym) else {
+            return self.c.decls(sym);
+        };
+        if !self
+            .c
+            .sym_flags(parent)
+            .intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE)
+        {
+            return self.c.decls(sym);
+        }
+        let name = self.c.sym_name(sym).to_owned();
+        let mut out = Vec::new();
+        for (file, table) in self.c.member_tables(parent) {
+            let ff = self.c.file(file);
+            for &(n, s) in ff.bound.table(table) {
+                if ff.bound.name_text(&ff.ast, n) == name {
+                    out.extend(ff.bound.decls(s).iter().map(|&d| Loc::new(file, d)));
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        if !out.contains(&here) {
+            return self.c.decls(sym);
+        }
+        out
+    }
+
+    fn error_at_decl_name(&mut self, d: Loc, name: &str) {
+        let at = match *self.node(d) {
+            Node::PropertySignature { key, .. } | Node::PropertyDef { key, .. } => key,
+            Node::Param { pattern, .. } => pattern,
+            _ => d.node,
+        };
+        self.error(
+            Loc::new(d.file, at),
+            dg::ALL_DECLARATIONS_OF_0_MUST_HAVE_IDENTICAL_MODIFIERS_2687,
+            &[name],
+        );
+    }
+
+    /// Optionality and the modifiers that must agree across declarations of a property.
+    fn variable_like_flags(&self, d: Loc) -> Option<(bool, Modifiers)> {
+        let (optional, modifiers) = match *self.node(d) {
+            Node::PropertySignature {
+                optional,
+                modifiers,
+                ..
+            }
+            | Node::PropertyDef {
+                optional,
+                modifiers,
+                ..
+            }
+            | Node::Param {
+                optional,
+                modifiers,
+                ..
+            } => (optional, modifiers),
+            _ => return None,
+        };
+        let interesting = Modifiers::PRIVATE
+            | Modifiers::PROTECTED
+            | Modifiers::ASYNC
+            | Modifiers::ABSTRACT
+            | Modifiers::READONLY
+            | Modifiers::STATIC;
+        Some((optional, Modifiers(modifiers.0 & interesting.0)))
+    }
+
+    /// The earlier member of the same class whose symbol the field `m` merges into under
+    /// tsc's class member excludes: a field merges with fields and accessors before it, a
+    /// method only with methods, a getter only with a setter and a setter only with a getter;
+    /// a member that conflicts starts a new symbol. `None` when `m` starts its own symbol.
+    fn class_member_merged_into(&self, file: FileId, m: NodeId) -> Option<NodeId> {
+        const FIELD: u8 = 1;
+        const METHOD: u8 = 2;
+        const GET: u8 = 4;
+        const SET: u8 = 8;
+        const ALL: u8 = FIELD | METHOD | GET | SET;
+        let ast = self.ast(file);
+        let Node::PropertyDef { key, modifiers, .. } = *ast.node(m) else {
+            return None;
+        };
+        let name = crate::nodes::key_text(ast, key)?;
+        let is_static = modifiers.contains(ts_r_ast::Modifiers::STATIC);
+        let class = self.c.parent(Loc::new(file, m))?;
+        let members = match *ast.node(class.node) {
+            Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => members,
+            _ => return None,
+        };
+        // (first member of the current symbol, kinds merged into it)
+        let mut cur: Option<(NodeId, u8)> = None;
+        for &x in ast.list(members) {
+            let (k, mods, kind, excl) = match *ast.node(x) {
+                Node::PropertyDef { key, modifiers, .. } => {
+                    if modifiers.contains(ts_r_ast::Modifiers::ACCESSOR) {
+                        (key, modifiers, FIELD, ALL)
+                    } else {
+                        (key, modifiers, FIELD, METHOD)
+                    }
+                }
+                Node::MethodDef {
+                    key,
+                    modifiers,
+                    kind,
+                    ..
+                } => match kind {
+                    ts_r_ast::MethodKind::Method => (key, modifiers, METHOD, FIELD | GET | SET),
+                    ts_r_ast::MethodKind::Get => (key, modifiers, GET, FIELD | METHOD | GET),
+                    ts_r_ast::MethodKind::Set => (key, modifiers, SET, FIELD | METHOD | SET),
+                    ts_r_ast::MethodKind::Constructor => continue,
+                },
+                _ => continue,
+            };
+            if mods.contains(ts_r_ast::Modifiers::STATIC) != is_static
+                || crate::nodes::key_text(ast, k).as_deref() != Some(name.as_str())
+            {
+                continue;
+            }
+            cur = match cur {
+                Some((first, kinds)) if kinds & excl == 0 => Some((first, kinds | kind)),
+                _ => Some((x, kind)),
+            };
+            if x == m {
+                break;
+            }
+        }
+        match cur {
+            Some((first, _)) if first != m => Some(first),
+            _ => None,
+        }
     }
 
     /// The type a single variable declaration (`Ident` binding or parameter) gives its symbol;
@@ -188,7 +390,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .flatten()
                         .any(|n| mentions_ident(ast, n, own))
                 {
-                    return None;
+                    // An initializer whose variable type is circular through variables
+                    // alone (TS7022) makes the variable `any`, compared as such.
+                    return (type_ann.is_none() && self.var_type_circular(d))
+                        .then_some(TypeId::ANY);
                 }
                 if type_ann.is_none()
                     && let Some(i) = init
@@ -253,6 +458,27 @@ impl<'c, 'a> Ck<'c, 'a> {
             _ => return None,
         };
         Some(if t == TypeId::AUTO { TypeId::ANY } else { t })
+    }
+
+    /// Whether the type of the variable declared at `d` is circular through the types of
+    /// variables alone.
+    fn var_type_circular(&mut self, d: Loc) -> bool {
+        let Some(sym) = self.c.sym_of_decl(d) else {
+            return false;
+        };
+        self.type_of_symbol(sym);
+        if !self
+            .circular
+            .contains(&crate::checker::Resolving::Type(sym))
+        {
+            return false;
+        }
+        let path = self.type_cycles.get(&sym).cloned().unwrap_or_default();
+        !path.is_empty()
+            && path.iter().all(|r| {
+                matches!(*r, crate::checker::Resolving::Type(s) if self.c.sym_flags(s).intersects(SymbolFlags::VARIABLE)
+                    && !self.c.sym_flags(s).intersects(SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION))
+            })
     }
 
     /// Whether `e` is `E.a` for an enum `E`.
@@ -527,11 +753,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 continue;
             }
-            // A member reports one grammar error (a misplaced decorator wins).
+            // A member reports one grammar error (a misplaced decorator wins); an `await`
+            // or `yield` in its initializer (TS1308, TS1163) is not the member's error.
             let span = ast.span(m);
             if self.diags.iter().any(|g| {
                 g.file == d.file
                     && (1000..2000).contains(&g.code)
+                    && !matches!(g.code, 1163 | 1308)
                     && span.start <= g.span.start
                     && g.span.start < span.end
             }) {

@@ -98,6 +98,9 @@ pub struct LinkOptions {
     pub keep_entry_exports: bool,
 }
 
+/// Modules (and the export names, interned by [`Linker::name_id`]) on a resolution path.
+type Seen = FxHashSet<(ModuleId, u32)>;
+
 #[derive(Debug)]
 enum Task {
     Include(ModuleId),
@@ -124,9 +127,11 @@ struct Linker<'g> {
     /// Finished `resolve_export` results: the binding, and for `None` whether the name was
     /// ambiguous. Without it, modules reached through several `export *` paths are
     /// re-resolved once per path, which is exponential in the depth of such diamonds.
-    export_memo: FxHashMap<(ModuleId, String), (Option<Binding>, bool)>,
+    export_memo: FxHashMap<(ModuleId, u32), (Option<Binding>, bool)>,
     /// Finished `export_exists` results.
-    exists_memo: FxHashMap<(ModuleId, String), bool>,
+    exists_memo: FxHashMap<(ModuleId, u32), bool>,
+    /// Export names interned for the memo and path keys (no string copies per lookup).
+    name_ids: FxHashMap<String, u32>,
     /// Times a resolution met a module already on its path. A result is only memoized
     /// when this did not change while computing it, because a cycle cut depends on the
     /// path it was reached from.
@@ -168,6 +173,7 @@ pub fn link(g: &Graph, entries: &[ModuleId], dynamic_entries: &[ModuleId], o: Li
         ambiguous: false,
         export_memo: FxHashMap::default(),
         exists_memo: FxHashMap::default(),
+        name_ids: FxHashMap::default(),
         cycle_hits: 0,
     };
     for m in &g.modules {
@@ -366,7 +372,7 @@ impl Linker<'_> {
         m: ModuleId,
         record: u32,
         name: &Imported,
-        seen: &mut FxHashSet<(ModuleId, String)>,
+        seen: &mut Seen,
     ) -> Binding {
         let module = &self.g.modules[m as usize];
         let Some(target) = module.targets.get(record as usize).cloned() else {
@@ -476,14 +482,9 @@ impl Linker<'_> {
 
     /// Whether module `t` has export `name`, without including anything (cycles and
     /// dynamic cases count as present; ambiguity is reported where the import is used).
-    fn export_exists(
-        &mut self,
-        t: ModuleId,
-        name: &str,
-        seen: &mut FxHashSet<(ModuleId, String)>,
-    ) -> bool {
-        let key = (t, name.to_owned());
-        if !seen.insert(key.clone()) {
+    fn export_exists(&mut self, t: ModuleId, name: &str, seen: &mut Seen) -> bool {
+        let key = (t, self.name_id(name));
+        if !seen.insert(key) {
             self.cycle_hits += 1;
             return true;
         }
@@ -498,12 +499,7 @@ impl Linker<'_> {
         r
     }
 
-    fn export_exists_uncached(
-        &mut self,
-        t: ModuleId,
-        name: &str,
-        seen: &mut FxHashSet<(ModuleId, String)>,
-    ) -> bool {
+    fn export_exists_uncached(&mut self, t: ModuleId, name: &str, seen: &mut Seen) -> bool {
         let g = self.g;
         let module = &g.modules[t as usize];
         match self.l.kinds[t as usize] {
@@ -515,14 +511,13 @@ impl Linker<'_> {
             Kind::Esm => {}
         }
         let meta = &module.meta;
-        let through =
-            |this: &mut Self, record: u32, imported: &Imported, seen: &mut FxHashSet<_>| match (
-                module.targets.get(record as usize),
-                imported,
-            ) {
-                (Some(Target::Module(u)), Imported::Name(n)) => this.export_exists(*u, n, seen),
-                _ => true,
-            };
+        let through = |this: &mut Self, record: u32, imported: &Imported, seen: &mut Seen| match (
+            module.targets.get(record as usize),
+            imported,
+        ) {
+            (Some(Target::Module(u)), Imported::Name(n)) => this.export_exists(*u, n, seen),
+            _ => true,
+        };
         if let Some(e) = meta.export(name) {
             return match e {
                 ExportTarget::Local(sym) => match self.import_idx[t as usize].get(sym) {
@@ -551,15 +546,19 @@ impl Linker<'_> {
             })
     }
 
+    fn name_id(&mut self, name: &str) -> u32 {
+        if let Some(&id) = self.name_ids.get(name) {
+            return id;
+        }
+        let id = self.name_ids.len() as u32;
+        self.name_ids.insert(name.to_owned(), id);
+        id
+    }
+
     /// Resolves export `name` of ESM module `t`. `None` when it doesn't exist.
-    fn resolve_export(
-        &mut self,
-        t: ModuleId,
-        name: &str,
-        seen: &mut FxHashSet<(ModuleId, String)>,
-    ) -> Option<Binding> {
-        let key = (t, name.to_owned());
-        if !seen.insert(key.clone()) {
+    fn resolve_export(&mut self, t: ModuleId, name: &str, seen: &mut Seen) -> Option<Binding> {
+        let key = (t, self.name_id(name));
+        if !seen.insert(key) {
             self.cycle_hits += 1;
             return Some(Binding::Undefined);
         }
@@ -584,7 +583,7 @@ impl Linker<'_> {
         &mut self,
         t: ModuleId,
         name: &str,
-        seen: &mut FxHashSet<(ModuleId, String)>,
+        seen: &mut Seen,
     ) -> Option<Binding> {
         // Modules an import passes through are part of the bundle (esbuild keeps the side
         // effects of re-exporting files even in `sideEffects: false` packages).

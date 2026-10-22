@@ -1047,6 +1047,12 @@ impl<'a> Doc<'a> {
                         default = Some(ty);
                     }
                     i = self.skip_ws(end, r.end);
+                } else if !self.diags.iter().any(|d| d.span.start == i) {
+                    // `[T]` without a default: `'=' expected` at what follows the name
+                    // (jsdocTemplateTagDefault).
+                    let span = Span::new(i, (i + 1).min(r.end));
+                    self.diags
+                        .push(Diagnostic::new(messages::EXPECTED, span, &["="]));
                 }
                 if self.bytes().get(i as usize) == Some(&b']') {
                     i += 1;
@@ -2279,7 +2285,9 @@ impl<'a> Doc<'a> {
         self.p.lx.seek(start);
         self.p.lx.next_token();
         self.p.prev_end = start;
+        self.p.jsdoc_import = true;
         let imp = self.p.parse_import(start, Modifiers::NONE);
+        self.p.jsdoc_import = false;
         let lexed: Vec<Diagnostic> = self.p.lx.diagnostics.drain(..).collect();
         self.p.lx = saved_lx;
         self.p.src = saved_src;
@@ -2298,6 +2306,18 @@ impl<'a> Doc<'a> {
         };
         if last && source_missing {
             self.import_tag_specifier_errors(&mut new, start, r.end, source_end);
+        }
+        if source_missing
+            && let Some(from) = new
+                .iter()
+                .filter(|d| d.code == 1005 && d.message == "'from' expected.")
+                .map(|d| d.span.start)
+                .min()
+            && from < r.end
+        {
+            // `@import defer * as ns from "m"`: nothing after the missing `from` is an
+            // error (importDeferJsdoc).
+            new.retain(|d| d.span.start <= from);
         }
         // `@import x = require("m")`: no import-equals form; the token after `x` is where
         // `from` and the specifier are missing (observed tsc 7).
@@ -2563,7 +2583,12 @@ impl Parser<'_> {
             );
         }
         if self.eat(T::DotDotDot) {
-            let ty = self.parse_type();
+            let inner = self.start();
+            let mut ty = self.parse_type();
+            // `{...*=}`: an optional rest, which the checker reports (jsdocParseStarEquals).
+            if self.eat(T::Eq) {
+                ty = self.finish_node(inner, Node::OptionalType { ty });
+            }
             return self.finish_node(start, Node::RestType { ty });
         }
         let ty = self.parse_type_or_predicate();
@@ -2744,6 +2769,16 @@ mod tests {
         }
         let deep = format!("/** @type {{{}}} */ var x;", "Array<".repeat(20_000));
         let _ = run(&deep);
+    }
+
+    /// `@import defer`: no import phase in JSDoc; `defer` is a default import, then
+    /// `'from' expected` and nothing after it (importDeferJsdoc).
+    #[test]
+    fn import_tag_without_phase() {
+        let src = "/**\n * @import defer * as ns from \"./types\"\n */\nlet a = 2;\n";
+        let (_, d) = run(src);
+        let got: Vec<(u32, u32)> = d.iter().map(|d| (d.code, d.span.start)).collect();
+        assert_eq!(got, vec![(1005, 21), (1141, 21)], "{d:?}");
     }
 
     #[test]

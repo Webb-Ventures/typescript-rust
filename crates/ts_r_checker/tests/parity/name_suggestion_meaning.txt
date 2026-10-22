@@ -1,0 +1,8 @@
+a.ts(8,10): error TS2304: Cannot find name 'a'.
+a.ts(9,10): error TS2552: Cannot find name 'Alia'. Did you mean 'alias'?
+a.ts(10,9): error TS2552: Cannot find name 'alia'. Did you mean 'Alias'?
+a.ts(14,14): error TS2552: Cannot find name 'Identifiers'. Did you mean 'Identifier'?
+a.ts(15,14): error TS2552: Cannot find name 'x'. Did you mean 'X'?
+a.ts(17,18): error TS2552: Cannot find name 'Undefined'. Did you mean 'undefined'?
+a.ts(19,10): error TS2552: Cannot find name 'loc'. Did you mean 'ELoc'?
+a.ts(21,15): error TS2552: Cannot find name 'RoomInterface'. Did you mean 'RoomInterfae'?

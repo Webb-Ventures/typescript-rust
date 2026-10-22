@@ -1,0 +1,19 @@
+a.ts(2,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(2,19): error TS1183: An implementation cannot be declared in ambient contexts.
+a.ts(3,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(6,9): error TS1066: In ambient enum declarations member initializer must be constant expression.
+a.ts(15,5): error TS1021: An index signature must have a type annotation.
+a.ts(17,11): error TS1021: An index signature must have a type annotation.
+a.ts(18,12): error TS1021: An index signature must have a type annotation.
+a.ts(20,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(21,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(21,17): error TS7032: Property 'x' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(21,19): error TS7006: Parameter 'v' implicitly has an 'any' type.
+a.ts(22,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(22,24): error TS1183: An implementation cannot be declared in ambient contexts.
+a.ts(23,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(23,18): error TS1183: An implementation cannot be declared in ambient contexts.
+a.ts(24,5): error TS1031: 'declare' modifier cannot appear on class elements of this kind.
+a.ts(24,23): error TS1183: An implementation cannot be declared in ambient contexts.
+a.ts(26,14): error TS1042: 'declare' modifier cannot be used here.
+a.ts(26,14): error TS1184: Modifiers cannot appear here.

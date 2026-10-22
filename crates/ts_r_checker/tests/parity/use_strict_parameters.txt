@@ -1,0 +1,28 @@
+a.ts(1,12): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(2,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(15,15): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(16,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(19,16): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(19,23): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(19,23): error TS7019: Rest parameter 'args' implicitly has an 'any[]' type.
+a.ts(20,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(23,23): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(24,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(27,31): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(28,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(31,30): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(32,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(35,24): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(35,32): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(36,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(39,23): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(39,31): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(41,5): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(49,12): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(49,27): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(50,13): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(50,22): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(50,50): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(50,65): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.
+a.ts(50,87): error TS1346: This parameter is not allowed with 'use strict' directive.
+a.ts(50,99): error TS1347: 'use strict' directive cannot be used with non-simple parameter list.

@@ -110,17 +110,47 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
         };
     }
     let js_ts = !kind.is_typescript() && opts.ts_in_js != TsInJs::Reject;
-    let mut p = Parser::new(src, kind);
-    if js_ts {
-        p.ts = true;
-        p.jsx = true;
-        p.js_ts = true;
+    let start = |module_await: bool| {
+        let mut p = Parser::new(src, kind);
+        if js_ts {
+            p.ts = true;
+            p.jsx = true;
+            p.js_ts = true;
+        }
+        p.module_await = module_await;
+        p.parse_program();
+        p
+    };
+    let mut p = start(false);
+    // In a module, `await` at the top level is an operator even before a line break: the
+    // file is parsed again when that changes anything (rare: `await` then a newline).
+    if p.await_newline_seen && p.program_is_module() {
+        p = start(true);
     }
-    p.parse_program();
     if js_ts && opts.ts_in_js == TsInJs::Report {
         p.report_ts_in_js();
     }
     p.finish()
+}
+
+impl Parser<'_> {
+    /// The parsed program has top-level `import` or `export` syntax.
+    fn program_is_module(&self) -> bool {
+        let Node::Program { stmts } = *self.ast.node(self.ast.root) else {
+            return false;
+        };
+        self.ast
+            .list(stmts)
+            .iter()
+            .any(|&s| match *self.ast.node(s) {
+                Node::ImportDecl { .. } => !self.ast.is_jsdoc(s),
+                Node::ExportNamed { .. }
+                | Node::ExportAll { .. }
+                | Node::ExportDefaultExpr { .. }
+                | Node::ExportAssignment { .. } => true,
+                ref n => n.modifiers().contains(ts_r_ast::Modifiers::EXPORT),
+            })
+    }
 }
 
 /// Parses a JSON file as tsc does for a `.json` source file (`resolveJsonModule`): a
@@ -180,6 +210,9 @@ impl Ctx {
     const DECORATOR: u32 = 1 << 8;
     /// Parsing a type (affects `<` handling and keywords).
     const TYPE: u32 = 1 << 9;
+    /// Directly in a class static block, where `await` is an operator but every await
+    /// expression is TS18037. Functions and field initializers clear it.
+    const STATIC_BLOCK: u32 = 1 << 10;
 
     #[inline]
     fn has(self, f: u32) -> bool {
@@ -198,10 +231,16 @@ struct ParserCheckpoint {
     spec_failed: bool,
     halted: bool,
     grammar_diags: u32,
+    soft_diags: u32,
     lex_diags_seen: u32,
     lists: u32,
     deferred: u32,
+    checker_errs: u32,
     misplaced_module_names: u32,
+    shorthand_inits: u32,
+    pattern_literals: u32,
+    regex_errs: u32,
+    kept_grammar: u32,
 }
 
 /// Maximum nesting depth of recursive constructs before giving up on the file.
@@ -259,12 +298,47 @@ pub(crate) struct Parser<'a> {
     failed_type_args: std::collections::HashSet<u32>,
     /// Nesting of `is_contextual_declaration_after_modifier` lookaheads.
     modifier_lookahead: u32,
+    /// The tag name of the JSX element whose child element is about to be parsed (set by
+    /// `parse_jsx_children`, taken at the child's start).
+    jsx_parent_name: Option<NodeId>,
+    /// End of the `}` of the last block (statement block or function body) read, for
+    /// TS2809 (`{ a: 0 } = value;`).
+    last_block_end: u32,
+    /// `{ a = 1 }` shorthand initializers: (`=` offset, start of the object literal). One
+    /// whose literal never becomes a destructuring target is the checker's TS1312.
+    shorthand_inits: Vec<(u32, u32)>,
+    /// Starts of the object literals used as destructuring targets.
+    pattern_literals: Vec<u32>,
+    /// Regular expression errors (flags, escapes, class ranges): the checker's in tsc 7, so
+    /// kept only in a file without syntax errors, and never merged with another error at
+    /// the same position.
+    regex_errs: Vec<Diagnostic>,
+    /// Checker grammar errors tsc reports even in a file with syntax errors, and which do
+    /// not stop the check: in both `diagnostics` and `grammar`, never deduplicated.
+    kept_grammar: Vec<Diagnostic>,
+    /// Start of the object literal being parsed (`u32::MAX` outside one).
+    object_literal_start: u32,
+    /// Start of the operand of the innermost prefix operator (`~<a/>`): a JSX element there
+    /// takes no adjacent sibling elements (no TS2657).
+    unary_operand_start: u32,
+    /// Parsing a JSDoc `@import` tag (an `import type` without `import x =` forms).
+    jsdoc_import: bool,
+    /// A top-level `await` had its operand on the next line, so it was read as a name.
+    await_newline_seen: bool,
+    /// Reparsing a module: such an `await` is an operator (as in tsc, topLevelAwait.1).
+    module_await: bool,
     /// Stack address when parsing started.
     stack_base: usize,
     /// The nesting limit was hit; the rest of the file was skipped.
     halted: bool,
     /// How many entries of `diags` are grammar errors (see `grammar_error_at`).
     grammar_diags: u32,
+    /// Start of the last token read as a name (`intern_token`): an escaped keyword there is
+    /// no TS1260.
+    name_tok: u32,
+    /// How many entries of `diags` are syntax errors that do not fail an enclosing
+    /// speculative parse (see `soft_error`).
+    soft_diags: u32,
     /// Length of the lexer's diagnostics when the parser last reported one. Scanner and
     /// parser errors form one stream in tsc; this tells which of the two came last.
     lex_diags_seen: u32,
@@ -273,6 +347,9 @@ pub(crate) struct Parser<'a> {
     /// Grammar errors tsc's checker reports only in a file without syntax errors (TS1123,
     /// TS1009, TS1248, ...): kept only if the file has no other parse error.
     deferred: Vec<Diagnostic>,
+    /// Grammar errors tsc's checker reports even in a file with syntax errors
+    /// (`checker_error_at`). Kept apart so they never merge with a syntax error.
+    checker_errs: Vec<Diagnostic>,
     /// Names of misplaced `module` declarations, whose TS1540 errors are suppressed.
     misplaced_module_names: Vec<Span>,
     /// Enclosing loops, switches, labels and function bodies, for `break`/`continue`.
@@ -318,12 +395,26 @@ impl<'a> Parser<'a> {
             failed_arrows: std::collections::HashSet::new(),
             failed_type_args: std::collections::HashSet::new(),
             modifier_lookahead: 0,
+            jsx_parent_name: None,
+            last_block_end: u32::MAX,
+            shorthand_inits: Vec::new(),
+            pattern_literals: Vec::new(),
+            regex_errs: Vec::new(),
+            kept_grammar: Vec::new(),
+            object_literal_start: u32::MAX,
+            unary_operand_start: u32::MAX,
+            jsdoc_import: false,
+            await_newline_seen: false,
+            module_await: false,
             stack_base: stack_addr(),
             halted: false,
             grammar_diags: 0,
+            name_tok: u32::MAX,
+            soft_diags: 0,
             lex_diags_seen: 0,
             lists: 0,
             deferred: Vec::new(),
+            checker_errs: Vec::new(),
             misplaced_module_names: Vec::new(),
             jumps: Vec::new(),
             with_depth: 0,
@@ -340,7 +431,22 @@ impl<'a> Parser<'a> {
         // `push_diag` already dropped a parser error at the position of the error just
         // before it (scanner or parser); scanner errors are always kept, as in tsc.
         let clean = self.diags.len() as u32 == self.grammar_diags && self.lx.diagnostics.is_empty();
+        // `{ s = 5 }` outside a destructuring target: TS1312 at the `=`
+        // (shorthandPropertyAssignmentsInDestructuring).
+        let patterns: std::collections::HashSet<u32> =
+            self.pattern_literals.iter().copied().collect();
+        let mut seen = std::collections::HashSet::new();
+        for (eq, lit) in std::mem::take(&mut self.shorthand_inits) {
+            if !patterns.contains(&lit) && seen.insert(eq) {
+                self.deferred.push(Diagnostic::new(
+                    messages::SHORTHAND_INIT_OUTSIDE_PATTERN,
+                    Span::new(eq, eq + 1),
+                    &[],
+                ));
+            }
+        }
         let mut diags = std::mem::take(&mut self.diags);
+        diags.append(&mut self.checker_errs);
         let mut grammar = Vec::new();
         if clean {
             if !self.misplaced_module_names.is_empty() {
@@ -354,7 +460,13 @@ impl<'a> Parser<'a> {
             diags.append(&mut self.deferred);
         }
         diags.sort_by_key(|d| (d.span.start, d.span.end));
-        diags.dedup_by(|a, b| a.span.start == b.span.start);
+        // A deferred or TS8xxx error at the position of another error is dropped. Syntax
+        // errors were deduplicated in the order they were reported (`push_diag`): two at
+        // one position stay when another came between them (`<` at the end of the file is
+        // `Type expected`, `'>' expected` at the end, then `Expression expected`).
+        diags.dedup_by(|a, b| {
+            a.span.start == b.span.start && (clean || a.code >= 2000 || b.code >= 2000)
+        });
         let mut kept = diags.iter().peekable();
         grammar.retain(|d| {
             while kept.peek().is_some_and(|k| k.span.start < d.span.start) {
@@ -363,6 +475,16 @@ impl<'a> Parser<'a> {
             kept.peek().is_some_and(|k| *k == d)
         });
         grammar.dedup_by(|a, b| a.span.start == b.span.start);
+        if clean && !self.regex_errs.is_empty() {
+            grammar.extend(self.regex_errs.iter().cloned());
+            grammar.sort_by_key(|d| d.span.start);
+            diags.append(&mut self.regex_errs);
+        }
+        if !self.kept_grammar.is_empty() {
+            grammar.extend(self.kept_grammar.iter().cloned());
+            grammar.sort_by_key(|d| d.span.start);
+            diags.append(&mut self.kept_grammar);
+        }
         diags.append(&mut self.lx.diagnostics);
         diags.sort_by_key(|d| d.span.start);
         self.ast.comments = std::mem::take(&mut self.lx.comments);
@@ -403,8 +525,19 @@ impl<'a> Parser<'a> {
     /// Consumes the current token.
     #[inline]
     fn bump(&mut self) {
-        self.prev_end = self.lx.token().end;
+        let tok = self.lx.token();
+        if tok.flags.has(TokenFlags::ESCAPED_KEYWORD) && tok.start != self.name_tok {
+            self.escaped_keyword_error(tok);
+        }
+        self.prev_end = tok.end;
         self.lx.next_token();
+    }
+
+    /// An escaped keyword consumed as a keyword, not read as a name (`intern_token`):
+    /// TS1260, as in tsc (scannerUnicodeEscapeInKeyword1: `\u{0076}ar x`).
+    #[cold]
+    fn escaped_keyword_error(&mut self, tok: Token) {
+        self.error_at(messages::KEYWORD_WITH_ESCAPES, tok.span(), &[]);
     }
 
     #[inline]
@@ -450,7 +583,7 @@ impl<'a> Parser<'a> {
 
     /// True if the current token is the identifier-like keyword or identifier with this text.
     fn at_contextual(&self, k: TokenKind) -> bool {
-        self.at(k) && !self.tok().flags.has(TokenFlags::ESCAPED)
+        self.at(k)
     }
 
     /// Identifier or a keyword usable as one in this context.
@@ -482,10 +615,16 @@ impl<'a> Parser<'a> {
             spec_failed: self.spec_failed,
             halted: self.halted,
             grammar_diags: self.grammar_diags,
+            soft_diags: self.soft_diags,
             lex_diags_seen: self.lex_diags_seen,
             lists: self.lists,
             deferred: self.deferred.len() as u32,
+            checker_errs: self.checker_errs.len() as u32,
             misplaced_module_names: self.misplaced_module_names.len() as u32,
+            shorthand_inits: self.shorthand_inits.len() as u32,
+            pattern_literals: self.pattern_literals.len() as u32,
+            regex_errs: self.regex_errs.len() as u32,
+            kept_grammar: self.kept_grammar.len() as u32,
         }
     }
 
@@ -499,11 +638,17 @@ impl<'a> Parser<'a> {
         self.spec_failed = cp.spec_failed;
         self.halted = cp.halted;
         self.grammar_diags = cp.grammar_diags;
+        self.soft_diags = cp.soft_diags;
         self.lex_diags_seen = cp.lex_diags_seen;
         self.lists = cp.lists;
         self.deferred.truncate(cp.deferred as usize);
+        self.checker_errs.truncate(cp.checker_errs as usize);
         self.misplaced_module_names
             .truncate(cp.misplaced_module_names as usize);
+        self.shorthand_inits.truncate(cp.shorthand_inits as usize);
+        self.pattern_literals.truncate(cp.pattern_literals as usize);
+        self.regex_errs.truncate(cp.regex_errs as usize);
+        self.kept_grammar.truncate(cp.kept_grammar as usize);
     }
 
     /// Runs `f` and always restores the parser state afterwards.
@@ -540,7 +685,7 @@ impl<'a> Parser<'a> {
         let r = f(self);
         self.speculating -= 1;
         let new_diags = self.diags.len() as u32 - cp.diags;
-        let new_grammar = self.grammar_diags - cp.grammar_diags;
+        let new_grammar = self.grammar_diags - cp.grammar_diags + self.soft_diags - cp.soft_diags;
         let failed =
             self.spec_failed || new_diags > new_grammar || self.lx.diagnostics.len() > lex_errs;
         match r {
@@ -603,12 +748,41 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// A grammar error tsc's checker reports even in a file with syntax errors (its code is
-    /// in the checker's `CHECKER_GRAMMAR_CODES`, so it does not stop the check). Not merged
-    /// with a parse error at the same position, and does not fail speculation.
+    /// A syntax error at the current token that does not make an enclosing speculative
+    /// parse fail (it is still rolled back with it).
+    fn soft_error(&mut self, msg: DiagnosticMessage) {
+        let failed = self.spec_failed;
+        let before = self.diags.len();
+        let span = self.error_span();
+        self.push_diag(Diagnostic::new(msg, span, &[]));
+        self.spec_failed = failed;
+        if self.diags.len() > before {
+            self.soft_diags += 1;
+        }
+    }
+
+    /// A grammar error tsc's checker reports even in a file with syntax errors (TS1164 is in
+    /// the checker's `CHECKER_GRAMMAR_CODES`, so it does not stop the check; TS1141 for a
+    /// module specifier is not). Never merged with a parse error at the same position, not
+    /// part of the order `push_diag` deduplicates in, and does not fail speculation.
     fn checker_error_at(&mut self, msg: DiagnosticMessage, span: Span) {
-        self.diags.push(Diagnostic::new(msg, span, &[]));
-        self.grammar_diags += 1;
+        self.checker_errs.push(Diagnostic::new(msg, span, &[]));
+    }
+
+    /// A checker grammar error: deferred in TypeScript, and kept next to syntax errors in
+    /// JavaScript, as tsc 7 does (plainJSGrammarErrors).
+    fn checker_grammar_error(&mut self, msg: DiagnosticMessage, span: Span) {
+        if !self.ts || self.js_ts {
+            self.grammar_error_at(msg, span, &[]);
+        } else {
+            self.deferred_grammar_error_at(msg, span, &[]);
+        }
+    }
+
+    /// A checker grammar error tsc reports next to syntax errors without stopping the
+    /// check (TS18037): see `kept_grammar`. Does not fail speculation.
+    fn kept_grammar_error_at(&mut self, msg: DiagnosticMessage, span: Span) {
+        self.kept_grammar.push(Diagnostic::new(msg, span, &[]));
     }
 
     /// A grammar error tsc's checker reports only when the file has no syntax errors: kept
@@ -622,11 +796,18 @@ impl<'a> Parser<'a> {
         self.deferred.push(Diagnostic::new(msg, span, args));
     }
 
-    /// After a rest element: a `,` directly followed by `close` is TS1013.
+    /// After a rest element: a `,` directly followed by `close` is TS1013, except in an
+    /// ambient context (`declare function f(...args,): void;`, tsc 7).
     fn check_rest_trailing_comma(&mut self, close: TokenKind) {
-        if self.at(TokenKind::Comma) && self.peek_kind() == close {
+        if self.at(TokenKind::Comma) && self.peek_kind() == close && !self.ctx.has(Ctx::AMBIENT) {
+            // The checker's error in tsc 7: only in a TypeScript file without syntax errors
+            // (kept next to them in JavaScript, plainJSGrammarErrors).
             let span = self.tok().span();
-            self.grammar_error_at(messages::REST_TRAILING_COMMA, span, &[]);
+            if !self.ts || self.js_ts {
+                self.grammar_error_at(messages::REST_TRAILING_COMMA, span, &[]);
+            } else {
+                self.deferred_grammar_error_at(messages::REST_TRAILING_COMMA, span, &[]);
+            }
         }
     }
 
@@ -685,13 +866,31 @@ impl<'a> Parser<'a> {
 
     /// Reports `msg` at the current token.
     fn error(&mut self, msg: DiagnosticMessage) {
-        let span = self.error_span();
+        let mut span = self.error_span();
+        // As in tsc 7, a missing expression or type at the end of the file is reported
+        // just after the last token, before any trailing trivia (`'}' expected` is not).
+        if self.at(TokenKind::Eof) && matches!(msg.code, 1003 | 1109 | 1110) {
+            span = Span::at(self.prev_end.min(span.start));
+        }
         self.error_at(msg, span, &[]);
     }
 
     fn error_expected(&mut self, what: &str) {
+        // `() => {} = value;`: TS2809 at the `=`, which is skipped, then the `;` (or `,`)
+        // is expected at the next token (tsc 7).
+        if matches!(what, ";" | ",") && self.at_equals_after_block() {
+            let span = self.tok().span();
+            self.error_at(messages::EQUALS_AFTER_BLOCK, span, &[]);
+            self.bump();
+        }
         let span = self.error_span();
         self.error_at(messages::EXPECTED, span, &[what]);
+    }
+
+    /// At an `=` right after the `}` of a block (`{ a: 0 } = value;`, `() => {} = x`), not
+    /// a `}` read some other way (`var {a, %} = x;` is TS1128 at the `=`).
+    fn at_equals_after_block(&self) -> bool {
+        self.at(TokenKind::Eq) && self.prev_end == self.last_block_end
     }
 
     // ---- Node building ----
@@ -733,6 +932,7 @@ impl<'a> Parser<'a> {
     }
 
     fn intern_token(&mut self) -> ts_r_ast::Atom {
+        self.name_tok = self.tok().start;
         let v = self.lx.ident_value(self.tok());
         self.ast.intern(&v)
     }

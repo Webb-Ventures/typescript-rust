@@ -12,6 +12,7 @@
 //! - Anything else (an interface, a class, `RegExp`, `string | boolean`, `never`, an
 //!   unresolved name) is TS1268.
 //! - `unique symbol` is TS1335 (not checked here).
+//! - A valid key on a signature without a type annotation is TS1021 at the signature.
 //!
 //! Duplicate index signatures (TS2374), at the signature (modifiers included):
 //! - Among the instance index signatures of one symbol (merged interfaces, a class merged
@@ -32,7 +33,12 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Checks the key type of the index signature `l`.
     pub(crate) fn check_index_key_type(&mut self, l: Loc) {
         let ast = self.ast(l.file);
-        let Node::IndexSignature { params, .. } = *ast.node(l.node) else {
+        let Node::IndexSignature {
+            params,
+            type_ann: sig_type,
+            ..
+        } = *ast.node(l.node)
+        else {
             return;
         };
         let &[p] = ast.list(params) else {
@@ -68,6 +74,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let t = self.type_from_node(Loc::new(l.file, kt));
         if self.is_valid_index_key(t) {
+            // A valid key written as a reference and no annotation: TS1021 at the
+            // signature (the parser's for keyword keys).
+            if sig_type.is_none() {
+                self.error(
+                    l,
+                    dg::AN_INDEX_SIGNATURE_MUST_HAVE_A_TYPE_ANNOTATION_1021,
+                    &[],
+                );
+            }
             return;
         }
         let info = if self.is_generic_type(t) || self.has_literal_member(t) {

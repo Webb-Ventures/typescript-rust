@@ -452,6 +452,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             TypeKind::Union { list, .. } => {
                 let members = match s.union_origin(t) {
+                    Some(&[one]) => return self.tn(one, cx),
                     Some(o) => o.to_vec(),
                     None => s.list_items(list).to_vec(),
                 };

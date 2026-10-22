@@ -1,0 +1,1 @@
+a.ts(8,10): error TS2694: Namespace '"/p/a".c' has no exported member 'b'.

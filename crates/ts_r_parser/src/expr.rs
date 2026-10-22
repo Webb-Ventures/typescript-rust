@@ -130,6 +130,9 @@ impl<'a> Parser<'a> {
             && self.is_lhs_expression(left)
         {
             self.bump();
+            if op == AssignOp::Assign {
+                self.check_assignment_pattern(left, 0);
+            }
             let right = self.parse_assignment();
             return self.finish_node(start, Node::Assign { left, op, right });
         }
@@ -177,9 +180,6 @@ impl<'a> Parser<'a> {
     /// strictness: `yield 1`, `yield foo`, `yield this`. Otherwise (`yield;`, `yield * 2`,
     /// `yield(x)`, `yield => 1`, `yield\n1`) it is an identifier.
     fn yield_outside_generator(&mut self) -> bool {
-        if self.tok().flags.has(TokenFlags::ESCAPED) {
-            return false;
-        }
         let next = self.peek();
         !next.newline_before()
             && (next.kind.is_identifier_or_keyword()
@@ -227,7 +227,7 @@ impl<'a> Parser<'a> {
     fn try_arrow_function(&mut self) -> Option<NodeId> {
         let start = self.start();
         match self.kind() {
-            T::Async if !self.tok().flags.has(TokenFlags::ESCAPED) => {
+            T::Async => {
                 let next = self.peek();
                 if next.kind == T::Arrow {
                     // `async => async`: a parameter named `async`.
@@ -237,6 +237,14 @@ impl<'a> Parser<'a> {
                     return None;
                 }
                 match next.kind {
+                    T::LParen
+                        if self.lookahead(|p| {
+                            p.bump();
+                            p.paren_starts_with_operator_keyword()
+                        }) =>
+                    {
+                        None
+                    }
                     T::LParen | T::Lt => {
                         if self.ts || next.kind == T::LParen {
                             return self.parse_paren_arrow(start, true);
@@ -260,7 +268,7 @@ impl<'a> Parser<'a> {
                 }
             }
             T::LParen => {
-                if self.paren_may_start_arrow() {
+                if !self.paren_starts_with_operator_keyword() && self.paren_may_start_arrow() {
                     self.parse_paren_arrow(start, false)
                 } else {
                     None
@@ -347,6 +355,11 @@ impl<'a> Parser<'a> {
                     matches!(p.kind(), T::Colon | T::LBrace)
                 }
                 T::DotDotDot => true,
+                // `(this: T)` (jsdocDisallowedInTypescript).
+                T::This => {
+                    p.bump();
+                    p.at(T::Colon)
+                }
                 k if k.is_identifier_like() => {
                     p.bump();
                     p.at(T::Colon)
@@ -357,6 +370,29 @@ impl<'a> Parser<'a> {
                 _ => false,
             }
         })
+    }
+
+    /// At `<` in JSX: does a tag start here? Not before a namespace prefix with no
+    /// namespace (`<:a />`) or at `</`, a closing tag; other bad starts (`< <`, `<1>`)
+    /// are tags with a missing name.
+    fn lt_starts_jsx(&mut self) -> bool {
+        self.peek_kind() != T::Colon && !self.at_lt_slash()
+    }
+
+    /// At `<`: is `/` the very next character (`</`, a JSX closing tag)?
+    pub(crate) fn at_lt_slash(&mut self) -> bool {
+        let end = self.lx.token().end;
+        let next = self.peek();
+        next.kind == T::Slash && next.start == end
+    }
+
+    /// At `(`: is the next token `await` or `yield` where it is an operator? Then the
+    /// parentheses hold an expression, not parameters (`(await) => {}` in an async function
+    /// is TS1109 at the `)`, then `';' expected` at the `=>`, as in tsc).
+    fn paren_starts_with_operator_keyword(&mut self) -> bool {
+        let next = self.peek_kind();
+        (next == T::Await && self.ctx.has(Ctx::AWAIT))
+            || (next == T::Yield && self.ctx.has(Ctx::YIELD))
     }
 
     fn paren_may_start_arrow(&mut self) -> bool {
@@ -439,7 +475,7 @@ impl<'a> Parser<'a> {
                 p.bump_modifier(Modifiers::ASYNC);
             }
             let mut add = 0;
-            let mut remove = Ctx::DECORATOR | Ctx::IN_CONDITIONAL_TRUE;
+            let mut remove = Ctx::DECORATOR | Ctx::IN_CONDITIONAL_TRUE | Ctx::STATIC_BLOCK;
             if is_async {
                 add |= Ctx::AWAIT
             } else {
@@ -490,7 +526,7 @@ impl<'a> Parser<'a> {
                 p.bump();
                 match p.kind() {
                     T::RParen | T::DotDotDot => true,
-                    k if k.is_identifier_like() => {
+                    k if k.is_identifier_like() || k == T::This => {
                         p.bump();
                         p.at(T::Colon)
                     }
@@ -561,7 +597,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn parse_arrow_body(&mut self, flags: FnFlags) -> (NodeId, FnFlags) {
         let mut add = Ctx::IN_FUNCTION;
-        let mut remove = Ctx::YIELD | Ctx::DECORATOR;
+        let mut remove = Ctx::YIELD | Ctx::DECORATOR | Ctx::STATIC_BLOCK;
         if flags.contains(FnFlags::ASYNC) {
             add |= Ctx::AWAIT
         } else {
@@ -602,7 +638,10 @@ impl<'a> Parser<'a> {
             p.parse_assignment()
         });
         self.expect(T::Colon);
-        let alt = self.with_ctx(0, Ctx::IN_CONDITIONAL_TRUE, |p| p.parse_assignment());
+        // The false branch keeps the enclosing context: in an outer true branch, `(d): e =>
+        // f` is still not an arrow unless a `:` follows (`a ? b ? c : (d) : e => f`,
+        // parserArrowFunctionExpression11).
+        let alt = self.parse_assignment();
         self.finish_node(start, Node::Conditional { test, cons, alt })
     }
 
@@ -621,10 +660,11 @@ impl<'a> Parser<'a> {
                 self.lx.rescan_greater();
             }
             let k = self.kind();
-            if (k == T::As || k == T::Satisfies)
-                && self.ts
-                && !self.tok().flags.has(TokenFlags::ESCAPED)
-            {
+            // `</` in JSX is a closing tag, never `<` (`<div>{ </div>`: tsxErrorRecovery1).
+            if k == T::Lt && self.jsx && self.at_lt_slash() {
+                break;
+            }
+            if (k == T::As || k == T::Satisfies) && self.ts {
                 if self.newline_before() || PREC_RELATIONAL <= min_prec {
                     break;
                 }
@@ -742,6 +782,7 @@ impl<'a> Parser<'a> {
         };
         if let Some(op) = op {
             self.bump();
+            self.unary_operand_start = self.start();
             let arg = self.parse_unary();
             return self.finish_node(start, Node::Unary { op, arg });
         }
@@ -767,7 +808,21 @@ impl<'a> Parser<'a> {
                 );
             }
             T::Await if self.is_await_expression() => {
+                if self.ctx.has(Ctx::STATIC_BLOCK) {
+                    let span = self.tok().span();
+                    self.kept_grammar_error_at(messages::AWAIT_IN_STATIC_BLOCK, span);
+                }
                 self.bump();
+                if self.lists & List::Parameters.bit() != 0
+                    && matches!(self.kind(), T::RParen | T::Comma)
+                {
+                    // `async (a = await) => {}` stays an arrow function: the missing operand
+                    // does not undo it (asyncArrowFunction6).
+                    self.soft_error(messages::EXPRESSION_EXPECTED);
+                    let arg = self.missing();
+                    return self.finish_node(start, Node::Await { arg });
+                }
+                self.unary_operand_start = self.start();
                 let arg = self.parse_unary();
                 return self.finish_node(start, Node::Await { arg });
             }
@@ -828,12 +883,10 @@ impl<'a> Parser<'a> {
                         T::Number | T::BigInt | T::String | T::NoSubstTemplate
                     ));
         }
-        // Top-level await: `await` followed by an expression on the same line.
+        // Top-level await: `await` followed by an expression on the same line (or, in a
+        // module, on the next one).
         let next = self.peek();
-        if next.newline_before() {
-            return false;
-        }
-        match next.kind {
+        let starts_operand = match next.kind {
             T::Ident
             | T::Number
             | T::BigInt
@@ -866,7 +919,12 @@ impl<'a> Parser<'a> {
                 k.is_identifier_like()
                     && !matches!(k, T::In | T::InstanceOf | T::As | T::Satisfies | T::Of)
             }
+        };
+        if starts_operand && next.newline_before() && !self.module_await {
+            self.await_newline_seen = true;
+            return false;
         }
+        starts_operand
     }
 
     // ---- Call and member chains ----
@@ -887,17 +945,69 @@ impl<'a> Parser<'a> {
         let expr = match self.kind() {
             T::New => self.parse_new(),
             T::Import => self.parse_import_expression(),
-            T::Super => {
-                self.bump();
-                self.finish_node(start, Node::Super {})
-            }
+            T::Super => self.parse_super(start),
             _ => self.parse_primary(),
         };
         self.parse_member_tail(start, expr, true)
     }
 
+    /// `super`, which must be followed by `(`, `.` or `[`: anything else is TS1034 at the
+    /// next token (`super;`, `super?.x`). Type arguments after it are parsed and dropped,
+    /// TS2754 on them (parserSuperExpression2, taggedTemplatesWithTypeArguments2).
+    fn parse_super(&mut self, start: u32) -> NodeId {
+        self.bump();
+        let node = self.finish_node(start, Node::Super {});
+        if self.ts
+            && !self.js_ts
+            && matches!(self.kind(), T::Lt | T::LtLt)
+            && !self.type_args_known_to_fail()
+        {
+            let lt = self.start();
+            let type_args = self.try_parse(|p| {
+                let ta = p.parse_type_args();
+                (p.at(T::LParen) || p.can_follow_type_args()).then_some(ta)
+            });
+            if type_args.is_some() {
+                let span = Span::new(lt, self.prev_end);
+                self.error_at(messages::SUPER_TYPE_ARGUMENTS, span, &[]);
+            }
+        }
+        if !matches!(self.kind(), T::LParen | T::Dot | T::LBracket) {
+            self.error(messages::SUPER_MUST_BE_FOLLOWED);
+        }
+        node
+    }
+
     fn parse_import_expression(&mut self) -> NodeId {
         let start = self.start();
+        if self.ts && matches!(self.peek_kind(), T::Lt | T::LtLt) {
+            // `import<T>("m")`, `import<>("m")`, `import<T>;`: type arguments are parsed
+            // and dropped, the call is still a module request, and the whole expression is
+            // the checker's TS1326 (importCallExpressionWithTypeArgument).
+            self.bump();
+            if self.at(T::Lt) && self.peek_kind() == T::Gt {
+                self.bump();
+                self.bump();
+            } else {
+                self.parse_type_args();
+            }
+            let call = if self.at(T::LParen) {
+                self.parse_import_call_rest(start, ImportPhase::Evaluation)
+            } else {
+                let arg = self.missing();
+                self.finish_node(
+                    start,
+                    Node::ImportCall {
+                        phase: ImportPhase::Evaluation,
+                        arg,
+                        options: None,
+                    },
+                )
+            };
+            let span = Span::new(start, self.prev_end);
+            self.deferred_grammar_error_at(messages::IMPORT_TYPE_ARGUMENTS, span, &[]);
+            return call;
+        }
         if !matches!(self.peek_kind(), T::LParen | T::Dot) {
             // `var x = import { foo } from "m"`: `Expression expected` at `import`, which is
             // left for the import declaration that follows (importCallExpressionIncorrect2).
@@ -916,12 +1026,7 @@ impl<'a> Parser<'a> {
                 };
                 self.bump();
             } else {
-                if self.text() != "meta" {
-                    self.error_expected("meta");
-                }
-                if self.kind().is_identifier_or_keyword() {
-                    self.bump();
-                }
+                self.parse_meta_property_name("import", "meta");
                 return self.finish_node(
                     start,
                     Node::MetaProperty {
@@ -930,6 +1035,11 @@ impl<'a> Parser<'a> {
                 );
             }
         }
+        self.parse_import_call_rest(start, phase)
+    }
+
+    /// `(specifier, options)` of an `import()` call starting at `start`.
+    fn parse_import_call_rest(&mut self, start: u32, phase: ImportPhase) -> NodeId {
         let open = self.start();
         if !self.expect(T::LParen) {
             let arg = self.missing();
@@ -996,17 +1106,41 @@ impl<'a> Parser<'a> {
         r
     }
 
+    /// The name after `new.` or `import.`: any name, as in tsc 7; one other than `expected`
+    /// is the checker's grammar error TS17012 (kept in files without syntax errors).
+    fn parse_meta_property_name(&mut self, keyword: &str, expected: &str) {
+        if !self.kind().is_identifier_or_keyword() {
+            self.error(messages::IDENTIFIER_EXPECTED);
+            return;
+        }
+        let span = self.tok().span();
+        let text = self.text();
+        if text != expected {
+            let text = text.to_owned();
+            if keyword == "import" && self.peek_kind() == T::LParen {
+                // `import.foo()`: could also have meant `import.defer(...)`.
+                self.deferred_grammar_error_at(
+                    messages::INVALID_IMPORT_META_PROPERTY_CALL,
+                    span,
+                    &[&text],
+                );
+            } else {
+                self.deferred_grammar_error_at(
+                    messages::INVALID_META_PROPERTY,
+                    span,
+                    &[&text, keyword, expected],
+                );
+            }
+        }
+        self.bump();
+    }
+
     fn parse_new_inner(&mut self) -> NodeId {
         let start = self.start();
         self.bump();
         if self.at(T::Dot) {
             self.bump();
-            if self.text() != "target" {
-                self.error_expected("target");
-            }
-            if self.kind().is_identifier_or_keyword() {
-                self.bump();
-            }
+            self.parse_meta_property_name("new", "target");
             return self.finish_node(
                 start,
                 Node::MetaProperty {
@@ -1018,10 +1152,7 @@ impl<'a> Parser<'a> {
         let mut callee = match self.kind() {
             T::New => self.parse_new(),
             T::Import => self.parse_import_expression(),
-            T::Super => {
-                self.bump();
-                self.finish_node(cstart, Node::Super {})
-            }
+            T::Super => self.parse_super(cstart),
             _ => self.parse_primary(),
         };
         let mut type_args;
@@ -1153,6 +1284,21 @@ impl<'a> Parser<'a> {
                                 },
                             );
                         }
+                        // `a?.\`b\``: TS1358 at the template.
+                        T::NoSubstTemplate | T::TemplateHead => {
+                            let quasi = self.parse_template(true);
+                            let span = self.ast.span(quasi);
+                            self.error_at(messages::TAGGED_TEMPLATE_IN_OPTIONAL_CHAIN, span, &[]);
+                            in_chain = false;
+                            expr = self.finish_node(
+                                start,
+                                Node::TaggedTemplate {
+                                    tag: expr,
+                                    type_args: None,
+                                    quasi,
+                                },
+                            );
+                        }
                         T::Lt | T::LtLt if self.ts && !self.js_ts => {
                             let type_args = self.parse_type_args();
                             let args = if self.at(T::LParen) {
@@ -1172,7 +1318,15 @@ impl<'a> Parser<'a> {
                             );
                         }
                         _ => {
-                            let prop = self.parse_member_name();
+                            // `a?.` at the end of the file: TS1003 at the end, not after the
+                            // `?.` as after a `.` (observed in tsc 7).
+                            let prop = if self.at(T::Eof) {
+                                let span = self.tok().span();
+                                self.error_at(messages::IDENTIFIER_EXPECTED, span, &[]);
+                                self.missing()
+                            } else {
+                                self.parse_member_name()
+                            };
                             self.check_private_name_in_chain(prop, in_chain);
                             expr = self.finish_node(
                                 start,
@@ -1202,6 +1356,11 @@ impl<'a> Parser<'a> {
                 }
                 T::NoSubstTemplate | T::TemplateHead => {
                     let quasi = self.parse_template(true);
+                    // `a?.b\`x\``: TS1358 at the template (not after `a?.b!`).
+                    if in_chain && !matches!(self.ast.node(expr), Node::NonNull { .. }) {
+                        let span = self.ast.span(quasi);
+                        self.error_at(messages::TAGGED_TEMPLATE_IN_OPTIONAL_CHAIN, span, &[]);
+                    }
                     in_chain = false;
                     expr = self.finish_node(
                         start,
@@ -1308,7 +1467,9 @@ impl<'a> Parser<'a> {
         let open = self.start();
         self.bump();
         let index = if self.at(T::RBracket) {
-            self.error(messages::ELEMENT_ACCESS_NEEDS_ARGUMENT);
+            // Just after the `[`, as in tsc 7 (badArraySyntax: `new Z[   ]`).
+            let at = Span::at(self.prev_end);
+            self.error_at(messages::ELEMENT_ACCESS_NEEDS_ARGUMENT, at, &[]);
             self.missing()
         } else {
             self.with_ctx(0, NESTED_CLEAR, |p| p.parse_expression())
@@ -1373,7 +1534,9 @@ impl<'a> Parser<'a> {
             T::String => self.parse_string_literal(),
             T::NoSubstTemplate | T::TemplateHead => self.parse_template(false),
             T::Slash | T::SlashEq => {
+                let before = self.lx.diagnostics.len();
                 self.lx.rescan_slash_as_regex();
+                self.defer_regex_errors(before);
                 let tok = self.tok();
                 let (ps, fs) = self.lx.regex_parts(tok);
                 let pattern = self.ast.intern(self.lx.text(ps));
@@ -1395,22 +1558,30 @@ impl<'a> Parser<'a> {
                 if self.at(T::Class) {
                     self.parse_class(start, decorators, Modifiers::NONE, true)
                 } else {
-                    self.error_expected("class");
+                    // `@dec () => {}`: TS1109 just after the decorators (tsc 7).
+                    let at = Span::at(self.prev_end);
+                    self.error_at(messages::EXPRESSION_EXPECTED, at, &[]);
                     self.missing()
                 }
+            }
+            // `<:a />` is no JSX: TS1109 at the `<`, which is then a binary operator
+            // (jsxNamespacePrefixInName).
+            T::Lt if self.jsx && !self.lt_starts_jsx() => {
+                self.error(messages::EXPRESSION_EXPECTED);
+                self.missing()
             }
             T::Lt if self.jsx => self.parse_jsx_element_or_fragment(false),
             T::PrivateName => self.parse_private_name(),
             T::New => self.parse_new(),
             // In a generator, `yield` is not an operand (`<T> yield x`, `1 + yield x`): tsc
             // reports TS1109 and leaves `yield` for the next statement or argument.
-            T::Yield if self.ctx.has(Ctx::YIELD) && !self.tok().flags.has(TokenFlags::ESCAPED) => {
+            T::Yield if self.ctx.has(Ctx::YIELD) => {
                 self.error(messages::EXPRESSION_EXPECTED);
                 self.missing()
             }
             // Likewise `await` in an async function where only an operand may appear
             // (`++await x`): TS1109, `await` left for the next statement.
-            T::Await if self.ctx.has(Ctx::AWAIT) && !self.tok().flags.has(TokenFlags::ESCAPED) => {
+            T::Await if self.ctx.has(Ctx::AWAIT) => {
                 self.error(messages::EXPRESSION_EXPECTED);
                 self.missing()
             }
@@ -1466,9 +1637,11 @@ impl<'a> Parser<'a> {
         let start = self.start();
         let open = self.start();
         self.bump();
+        let outer = std::mem::replace(&mut self.object_literal_start, start);
         let (props, _) = self.with_ctx(0, NESTED_CLEAR, |p| {
             p.parse_delimited(List::ObjectLiteralMembers, |p| p.parse_object_member())
         });
+        self.object_literal_start = outer;
         self.expect_closing(T::RBrace, T::LBrace, open);
         self.finish_node(start, Node::ObjectLit { props })
     }
@@ -1491,6 +1664,7 @@ impl<'a> Parser<'a> {
         }
         if !is_method
             && matches!(self.kind(), T::Get | T::Set)
+            && self.peek_kind() != T::Star
             && self.next_is_property_name_after_modifier(false)
         {
             kind = if self.at(T::Get) {
@@ -1502,10 +1676,26 @@ impl<'a> Parser<'a> {
             is_method = true;
         }
         let key_tok = self.tok();
-        let key = self.parse_property_key();
+        let key = if flags.contains(FnFlags::GENERATOR) && !self.at_property_key() {
+            // `{ *() {} }`, `{ * }`: tsc 7 reports `Identifier expected.` after the `*`.
+            self.error(messages::IDENTIFIER_EXPECTED);
+            self.missing()
+        } else {
+            self.parse_property_key()
+        };
         if self.ts && self.at(T::Question) {
-            // `{ a?() {} }` is an error but parse it.
-            self.error(messages::AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL);
+            // `{ a?() {} }`, `{ h?: 1 }`: the checker's TS1162 at the `?` (kept next to
+            // syntax errors in JavaScript, plainJSGrammarErrors).
+            if self.js_ts {
+                self.error(messages::AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL);
+            } else {
+                let span = self.tok().span();
+                self.deferred_grammar_error_at(
+                    messages::AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL,
+                    span,
+                    &[],
+                );
+            }
             self.bump();
         }
         if is_method || matches!(self.kind(), T::LParen | T::Lt) {
@@ -1556,21 +1746,45 @@ impl<'a> Parser<'a> {
                 },
             );
         }
-        let shorthand_ok =
-            key_tok.kind.is_identifier_like() && matches!(self.ast.node(key), Node::Ident { .. });
+        // `{ await }` where `await` is an operator is `':' expected` (classStaticBlock26),
+        // likewise `{ yield }` in a generator.
+        let shorthand_ok = key_tok.kind.is_identifier_like()
+            && matches!(self.ast.node(key), Node::Ident { .. })
+            && !(key_tok.kind == T::Await && self.ctx.has(Ctx::AWAIT))
+            && !(key_tok.kind == T::Yield && self.ctx.has(Ctx::YIELD));
         if !shorthand_ok {
+            // `{ return 0; }`: `':' expected` at `0`, which is still the value (then `','
+            // expected` at `;`), as in tsc.
             self.error_expected(":");
-            return key;
+            let value = self.parse_assignment();
+            return self.finish_node(
+                start,
+                Node::Property {
+                    modifiers,
+                    key,
+                    value,
+                },
+            );
         }
+        if self.ts && self.at(T::Bang) {
+            // `{ a! }`: the checker's TS1255 at the `!` (definiteAssignmentAssertionsWith-
+            // ObjectShortHand).
+            let span = self.tok().span();
+            self.deferred_grammar_error_at(messages::DEFINITE_NOT_PERMITTED, span, &[]);
+            self.bump();
+        }
+        let eq = self.tok().start;
         let init = if self.eat(T::Eq) {
-            Some(self.parse_assignment())
+            let lit = self.object_literal_start;
+            self.shorthand_inits.push((eq, lit));
+            // The initializer is not part of the enclosing literal.
+            let outer = std::mem::replace(&mut self.object_literal_start, u32::MAX);
+            let init = self.parse_assignment();
+            self.object_literal_start = outer;
+            Some(init)
         } else {
             None
         };
-        if self.ts && self.at(T::Bang) {
-            // `{ a! }` (invalid) — skip.
-            self.bump();
-        }
         self.finish_node(
             start,
             Node::ShorthandProp {
@@ -1592,6 +1806,14 @@ impl<'a> Parser<'a> {
             T::String | T::Number | T::BigInt | T::LBracket | T::PrivateName | T::Star => true,
             k => k.is_identifier_or_keyword(),
         }
+    }
+
+    /// Can the current token start a property name?
+    fn at_property_key(&self) -> bool {
+        matches!(
+            self.kind(),
+            T::String | T::Number | T::BigInt | T::LBracket | T::PrivateName
+        ) || self.kind().is_identifier_or_keyword()
     }
 
     /// Property name: identifier/keyword, string, number, bigint, `[computed]`, `#private`.
@@ -1623,7 +1845,13 @@ impl<'a> Parser<'a> {
         let start = self.start();
         let open = self.start();
         self.bump();
-        let expr = self.with_ctx(0, NESTED_CLEAR, |p| p.parse_assignment());
+        // A comma expression is parsed whole, with the checker's TS1171
+        // (parserComputedPropertyName35).
+        let expr = self.with_ctx(0, NESTED_CLEAR, |p| p.parse_expression());
+        if matches!(self.ast.node(expr), Node::Seq { .. }) {
+            let span = self.ast.span(expr);
+            self.checker_grammar_error(messages::COMMA_IN_COMPUTED_NAME, span);
+        }
         self.expect_closing(T::RBracket, T::LBracket, open);
         self.finish_node(start, Node::ComputedKey { expr })
     }
@@ -1647,12 +1875,18 @@ impl<'a> Parser<'a> {
             let text = self.text();
             if text.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
                 let n = ts_r_lexer::parse_number(text) as u64;
-                let suggestion = format!("0o{n:o}");
-                self.error_at(
-                    messages::OCTAL_LITERALS_NOT_ALLOWED,
-                    tok.span(),
-                    &[&suggestion],
-                );
+                // After a `-` token (`-01`, `1 - 01`) the error starts one byte before the
+                // literal and suggests `-0o1`, as in tsc 7.
+                let b = self.src.as_bytes();
+                let pe = self.prev_end as usize;
+                let after_minus = pe > 0 && b[pe - 1] == b'-' && (pe < 2 || b[pe - 2] != b'-');
+                let (sign, span) = if after_minus {
+                    ("-", Span::new(tok.start - 1, tok.end))
+                } else {
+                    ("", tok.span())
+                };
+                let suggestion = format!("{sign}0o{n:o}");
+                self.error_at(messages::OCTAL_LITERALS_NOT_ALLOWED, span, &[&suggestion]);
             } else {
                 self.error_at(messages::DECIMALS_WITH_LEADING_ZEROS, tok.span(), &[]);
             }
@@ -1672,6 +1906,33 @@ impl<'a> Parser<'a> {
         let value = self.ast.intern(text.strip_suffix('n').unwrap_or(text));
         self.bump();
         self.finish_node(start, Node::BigIntLit { value })
+    }
+
+    /// Regular expression errors other than an unterminated literal (flags, escapes, class
+    /// ranges) are the checker's in tsc 7: kept only when the file has no syntax error
+    /// (shebangError: `!/usr/bin/env` after a misplaced `#!`).
+    fn defer_regex_errors(&mut self, before: usize) {
+        if self.lx.diagnostics.len() <= before {
+            return;
+        }
+        let new: Vec<_> = self.lx.diagnostics.drain(before..).collect();
+        for d in new {
+            if d.code == messages::UNTERMINATED_REGEX_LITERAL.code {
+                // Like a parse error, it is dropped at the position of the error just before
+                // it (`var v = /[]/]/`: TS1134 at the last `/`, parser645086_1).
+                let last = if self.lx.diagnostics.len() as u32 > self.lex_diags_seen {
+                    self.lx.diagnostics.last()
+                } else {
+                    self.diags.last()
+                };
+                if last.is_none_or(|l| l.span.start != d.span.start) {
+                    self.lx.diagnostics.push(d);
+                }
+            } else {
+                self.regex_errs.push(d);
+            }
+        }
+        self.lex_diags_seen = self.lex_diags_seen.min(self.lx.diagnostics.len() as u32);
     }
 
     pub(crate) fn parse_private_name(&mut self) -> NodeId {
@@ -1812,9 +2073,11 @@ impl<'a> Parser<'a> {
         let span = self.lx.template_raw_span(tok);
         let (cooked, invalid_escape) = match self.lx.template_cooked(tok) {
             Ok(c) => (self.ast.intern(&c), false),
-            Err((at, msg)) => {
+            Err(_) => {
                 if !tagged {
-                    self.error_at(msg, at, &[]);
+                    for (at, msg) in self.lx.template_escape_errors(tok) {
+                        self.error_at(msg, at, &[]);
+                    }
                 }
                 (Atom::EMPTY, true)
             }
@@ -1868,13 +2131,14 @@ impl<'a> Parser<'a> {
                     let s = self.start();
                     self.bump();
                     let arg = self.parse_binding_target();
+                    self.rest_element_initializer();
                     let n = self.finish_node(s, Node::Rest { arg });
                     self.scratch.push(n);
                     self.check_rest_trailing_comma(T::RBracket);
                 }
                 // `[debugger, if]`: a reserved word ends the pattern (tsc: TS1181) rather
                 // than becoming a missing name.
-                k if k.is_reserved() => {
+                k if k.is_reserved() || !self.at_binding_identifier_or_pattern() => {
                     self.error(messages::ARRAY_ELEMENT_DESTRUCTURING_PATTERN_EXPECTED);
                     break;
                 }
@@ -1902,6 +2166,93 @@ impl<'a> Parser<'a> {
         self.finish_node(start, Node::ArrayPattern { elements })
     }
 
+    /// The checker's grammar errors on an array or object literal used as an assignment
+    /// target (trailingCommasInBindingPatterns, restElementWithInitializer2): a `,` after
+    /// a final spread is TS1013 at the `,`, and `...x = a` TS1186 at the `=`. Nested
+    /// targets are checked too, to a bounded depth.
+    pub(crate) fn check_assignment_pattern(&mut self, target: NodeId, depth: u32) {
+        if depth > 64 {
+            return;
+        }
+        let list = match *self.ast.node(target) {
+            Node::ArrayLit { elements } => elements,
+            Node::ObjectLit { props } => {
+                let start = self.ast.span(target).start;
+                self.pattern_literals.push(start);
+                props
+            }
+            _ => return,
+        };
+        let len = self.ast.list(list).len();
+        for i in 0..len {
+            let el = self.ast.list(list)[i];
+            match *self.ast.node(el) {
+                Node::Spread { arg } => {
+                    if let Node::Assign {
+                        left,
+                        op: AssignOp::Assign,
+                        ..
+                    } = *self.ast.node(arg)
+                    {
+                        let end = self.ast.span(left).end;
+                        if let Some(eq) = self.next_byte_after_spaces(end, b'=') {
+                            let span = Span::new(eq, eq + 1);
+                            self.deferred_grammar_error_at(
+                                messages::REST_ELEMENT_INITIALIZER,
+                                span,
+                                &[],
+                            );
+                        }
+                    } else {
+                        self.check_assignment_pattern(arg, depth + 1);
+                    }
+                    if i + 1 == len {
+                        let end = self.ast.span(el).end;
+                        if let Some(comma) = self.next_byte_after_spaces(end, b',') {
+                            let span = Span::new(comma, comma + 1);
+                            self.deferred_grammar_error_at(
+                                messages::REST_TRAILING_COMMA,
+                                span,
+                                &[],
+                            );
+                        }
+                    }
+                }
+                Node::Property { value, .. } => {
+                    // `{ a: { b = 1 } = {} }`: the target is the default's left side.
+                    let value = match *self.ast.node(value) {
+                        Node::Assign { left, .. } => left,
+                        _ => value,
+                    };
+                    self.check_assignment_pattern(value, depth + 1);
+                }
+                Node::Assign { left, .. } => self.check_assignment_pattern(left, depth + 1),
+                _ => self.check_assignment_pattern(el, depth + 1),
+            }
+        }
+    }
+
+    /// The offset of `byte` if it is the next non-whitespace byte at or after `pos`.
+    fn next_byte_after_spaces(&self, pos: u32, byte: u8) -> Option<u32> {
+        let bytes = self.src.as_bytes();
+        let mut i = pos as usize;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        (bytes.get(i) == Some(&byte)).then_some(i as u32)
+    }
+
+    /// `...x = a` in a binding pattern: a checker grammar error (TS1186 at the `=`); the
+    /// initializer is parsed and dropped.
+    fn rest_element_initializer(&mut self) {
+        if self.at(T::Eq) {
+            let span = self.tok().span();
+            self.bump();
+            self.with_ctx(0, Ctx::DISALLOW_IN, |p| p.parse_assignment());
+            self.deferred_grammar_error_at(messages::REST_ELEMENT_INITIALIZER, span, &[]);
+        }
+    }
+
     fn parse_object_pattern(&mut self) -> NodeId {
         let start = self.start();
         let open = self.start();
@@ -1909,13 +2260,42 @@ impl<'a> Parser<'a> {
         let mark = self.scratch.len();
         while !matches!(self.kind(), T::RBrace | T::Eof) && !self.aborting() {
             let s = self.start();
+            if !(self.kind().is_identifier_or_keyword()
+                || matches!(
+                    self.kind(),
+                    T::String | T::Number | T::BigInt | T::LBracket | T::DotDotDot
+                ))
+            {
+                // Not a property: TS1180 and skipped, unless an enclosing list uses it
+                // (`var {a ) = x;`).
+                if self.abort_list_or_skip(List::ObjectBindingElements) {
+                    break;
+                }
+                continue;
+            }
             if self.eat(T::DotDotDot) {
-                let arg = self.parse_binding_target();
+                let mut arg = self.parse_binding_target();
+                if self.at(T::Colon) {
+                    // `{ ...a: b }` binds `b` (a checker grammar error, TS2566 at it).
+                    self.bump();
+                    let target = self.tok().span();
+                    arg = self.parse_binding_target();
+                    self.deferred_grammar_error_at(
+                        messages::REST_ELEMENT_PROPERTY_NAME,
+                        target,
+                        &[],
+                    );
+                }
+                self.rest_element_initializer();
                 let n = self.finish_node(s, Node::Rest { arg });
                 self.scratch.push(n);
                 self.check_rest_trailing_comma(T::RBrace);
             } else {
                 let key_kind = self.kind();
+                if self.peek_kind() != T::Colon {
+                    // `let { await } = x` in a static block (not `{ await: other }`).
+                    self.check_await_binding_in_static_block();
+                }
                 let key = self.parse_property_key();
                 let (value, init) = if self.eat(T::Colon) {
                     let v = self.parse_binding_target();
@@ -1958,18 +2338,18 @@ impl<'a> Parser<'a> {
                 }
                 self.error_expected(",");
                 // As in tsc, the list goes on at anything that starts a binding property
-                // (`{ return 'thing' }` is two of them), and skips a `;`.
-                if self.at(T::Semi) {
-                    self.bump();
-                    continue;
-                }
+                // (`{ return 'thing' }` is two of them).
                 if !(self.kind().is_identifier_or_keyword()
                     || matches!(
                         self.kind(),
                         T::String | T::Number | T::BigInt | T::LBracket | T::DotDotDot
                     ))
                 {
-                    break;
+                    // Any other token is skipped unless an enclosing list uses it
+                    // (`var {h?} = x` is only `',' expected`).
+                    if self.abort_list_or_skip(List::ObjectBindingElements) {
+                        break;
+                    }
                 }
             }
         }

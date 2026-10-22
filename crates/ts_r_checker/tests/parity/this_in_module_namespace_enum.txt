@@ -1,0 +1,14 @@
+a.ts(4,13): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(4,13): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(5,22): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(5,22): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(6,27): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(7,21): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(7,21): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(10,9): error TS2332: 'this' cannot be referenced in current location.
+a.ts(10,9): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(11,9): error TS2332: 'this' cannot be referenced in current location.
+a.ts(11,9): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(13,24): error TS2532: Object is possibly 'undefined'.
+a.ts(14,13): error TS2532: Object is possibly 'undefined'.
+a.ts(16,7): error TS2322: Type 'undefined' is not assignable to type 'number'.

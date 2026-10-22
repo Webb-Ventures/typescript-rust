@@ -8,6 +8,7 @@ use ts_r_ast::{
 use ts_r_diagnostics::messages;
 use ts_r_lexer::TokenKind as T;
 
+use crate::lists::List;
 use crate::modifiers::{ModCtx, is_export_param_modifier_follow, is_param_modifier};
 use crate::{Ctx, Parser};
 
@@ -184,6 +185,7 @@ impl<'a> Parser<'a> {
         let params = self.parse_params();
         self.expect(T::Arrow);
         let return_type = self.parse_return_type_after_arrow();
+        self.check_predicate_return(Some(return_type));
         self.finish_node(
             start,
             Node::ConstructorType {
@@ -266,6 +268,24 @@ impl<'a> Parser<'a> {
         self.parse_type()
     }
 
+    /// A type predicate where only a type may be (a constructor, accessor or construct
+    /// signature's return type, or any other type position): the checker's TS1228 on it,
+    /// deferred (not in JSDoc). Returns whether `ty` is a predicate.
+    pub(crate) fn check_predicate_return(&mut self, ty: Option<NodeId>) -> bool {
+        let Some(ty) = ty else {
+            return false;
+        };
+        if !matches!(self.ast.node(ty), Node::TypePredicate { .. }) {
+            return false;
+        }
+        // In JSDoc the checker reports it (it knows the tag).
+        if !self.jsdoc {
+            let span = self.ast.span(ty);
+            self.deferred_grammar_error_at(messages::TYPE_PREDICATE_NOT_RETURN, span, &[]);
+        }
+        true
+    }
+
     fn parse_predicate_param(&mut self) -> NodeId {
         if self.at(T::This) {
             let s = self.start();
@@ -279,7 +299,7 @@ impl<'a> Parser<'a> {
     fn parse_union_type(&mut self) -> NodeId {
         let start = self.start();
         let leading = self.eat(T::Pipe);
-        let first = self.parse_intersection_type();
+        let first = self.parse_intersection_type(leading);
         if !self.at(T::Pipe) {
             if leading {
                 let mark = self.scratch.len();
@@ -295,17 +315,24 @@ impl<'a> Parser<'a> {
             if self.aborting() {
                 break;
             }
-            let t = self.parse_intersection_type();
+            let t = self.parse_intersection_type(true);
             self.scratch.push(t);
         }
         let types = self.finish_list(mark);
         self.finish_node(start, Node::UnionType { types })
     }
 
-    fn parse_intersection_type(&mut self) -> NodeId {
+    /// `after_pipe`: a `|` comes just before (a function type here is TS1385/TS1386).
+    fn parse_intersection_type(&mut self, after_pipe: bool) -> NodeId {
         let start = self.start();
         let leading = self.eat(T::Amp);
-        let first = self.parse_type_operator_or_function();
+        let first = self.parse_type_operator_or_function(if leading {
+            Some(false)
+        } else if after_pipe {
+            Some(true)
+        } else {
+            None
+        });
         if !self.at(T::Amp) {
             if leading {
                 let mark = self.scratch.len();
@@ -321,7 +348,7 @@ impl<'a> Parser<'a> {
             if self.aborting() {
                 break;
             }
-            let t = self.parse_type_operator_or_function();
+            let t = self.parse_type_operator_or_function(Some(false));
             self.scratch.push(t);
         }
         let types = self.finish_list(mark);
@@ -329,15 +356,30 @@ impl<'a> Parser<'a> {
     }
 
     /// Union/intersection members may be (unparenthesized, erroneous) function types.
-    fn parse_type_operator_or_function(&mut self) -> NodeId {
+    /// `after_op` is `Some(true)` after a `|`, `Some(false)` after a `&`: a function type
+    /// there is TS1385/TS1387 (TS1386/TS1388 for a constructor type), from the end of the
+    /// operator to the end of the type (unparenthesizedFunctionTypeInUnionOrIntersection).
+    fn parse_type_operator_or_function(&mut self, after_op: Option<bool>) -> NodeId {
         let start = self.start();
-        if self.is_start_of_function_type() {
-            return self.parse_function_type(start);
+        let op_end = self.prev_end;
+        let (ty, constructor) = if self.is_start_of_function_type() {
+            (self.parse_function_type(start), false)
+        } else if self.at(T::New) || (self.at(T::Abstract) && self.peek_kind() == T::New) {
+            (self.parse_constructor_type(start), true)
+        } else {
+            return self.parse_type_operator();
+        };
+        if let Some(union) = after_op {
+            let msg = match (union, constructor) {
+                (true, false) => messages::FUNCTION_TYPE_IN_UNION,
+                (true, true) => messages::CONSTRUCTOR_TYPE_IN_UNION,
+                (false, false) => messages::FUNCTION_TYPE_IN_INTERSECTION,
+                (false, true) => messages::CONSTRUCTOR_TYPE_IN_INTERSECTION,
+            };
+            let span = Span::new(op_end.min(start), self.prev_end);
+            self.error_at(msg, span, &[]);
         }
-        if self.at(T::New) || (self.at(T::Abstract) && self.peek_kind() == T::New) {
-            return self.parse_constructor_type(start);
-        }
-        self.parse_type_operator()
+        ty
     }
 
     fn parse_type_operator(&mut self) -> NodeId {
@@ -422,6 +464,11 @@ impl<'a> Parser<'a> {
             let open = self.start();
             self.bump();
             if self.eat(T::RBracket) {
+                ty = self.finish_node(start, Node::ArrayType { elem: ty });
+            } else if !self.is_start_of_type(false) {
+                // `C[#bar]`, `C[;`: an array type missing its `]`, as in tsc
+                // (privateNamesAndIndexedAccess).
+                self.expect(T::RBracket);
                 ty = self.finish_node(start, Node::ArrayType { elem: ty });
             } else {
                 let index = self.parse_type_in_brackets();
@@ -540,8 +587,9 @@ impl<'a> Parser<'a> {
         let start = self.start();
         if self.jsdoc_types() {
             match self.kind() {
-                // `*`: any type.
-                T::Star => {
+                // `*`: any type; `*=` is `*` then the optional `=` (jsdocParseStarEquals).
+                T::Star | T::StarEq => {
+                    self.lx.split_star_eq();
                     self.bump();
                     self.note_jsdoc_syntax(start, JsDocSyntaxKind::All, None);
                     return self.finish_node(
@@ -596,7 +644,23 @@ impl<'a> Parser<'a> {
             }
             T::This => {
                 self.bump();
-                self.finish_node(start, Node::ThisType {})
+                let this = self.finish_node(start, Node::ThisType {});
+                if self.at(T::Is) && !self.newline_before() {
+                    // `this is T` outside a return type: a predicate, and TS1228.
+                    self.bump();
+                    let ty = Some(self.parse_type());
+                    let pred = self.finish_node(
+                        start,
+                        Node::TypePredicate {
+                            asserts: false,
+                            param: this,
+                            ty,
+                        },
+                    );
+                    self.check_predicate_return(Some(pred));
+                    return pred;
+                }
+                this
             }
             T::TypeOf => {
                 self.bump();
@@ -604,6 +668,7 @@ impl<'a> Parser<'a> {
                     return self.parse_import_type(start, true);
                 }
                 let expr_name = self.parse_entity_name(true);
+                // `typeof f<<T>() => T>` does not split the `<<` (tsc 7).
                 let type_args = if self.at(T::Lt) && !self.newline_before() {
                     Some(self.parse_type_args())
                 } else {
@@ -663,7 +728,27 @@ impl<'a> Parser<'a> {
             }
             T::TemplateHead => self.parse_template_literal_type(),
             T::Lt => self.parse_function_type(start),
-            T::Asserts | T::Infer => {
+            T::Asserts
+                if self.peek().newline_before()
+                    || !(self.peek_kind() == T::This
+                        || (self.peek_kind().is_identifier_like()
+                            && !matches!(
+                                self.peek_kind(),
+                                T::Is | T::As | T::Satisfies | T::Implements
+                            ))) =>
+            {
+                // As a plain type name.
+                let name = self.parse_entity_name(false);
+                self.finish_type_ref(start, name)
+            }
+            T::Asserts => {
+                // `asserts x` / `asserts this is T` outside a return type: a predicate,
+                // and TS1228 (assertionTypePredicates1).
+                let pred = self.parse_type_or_predicate();
+                self.check_predicate_return(Some(pred));
+                pred
+            }
+            T::Infer => {
                 // As a plain type name.
                 let name = self.parse_entity_name(false);
                 self.finish_type_ref(start, name)
@@ -684,6 +769,13 @@ impl<'a> Parser<'a> {
                 let name = self.parse_entity_name(true);
                 self.finish_type_ref(start, name)
             }
+            // `.foo`: a name whose first part is missing, as in tsc (`typeof import.defer(...)`
+            // is `'(' expected`, then `.defer` is the argument: typeofImportDefer).
+            T::Dot if !self.jsdoc => {
+                self.error(messages::TYPE_EXPECTED);
+                let name = self.parse_entity_name(false);
+                self.finish_type_ref(start, name)
+            }
             _ => {
                 self.error(messages::TYPE_EXPECTED);
                 self.missing()
@@ -696,7 +788,7 @@ impl<'a> Parser<'a> {
         if self.jsdoc_types() && self.at(T::Dot) && self.peek_kind() == T::Lt {
             self.bump();
         }
-        let type_args = if self.at(T::Lt) && !self.newline_before() {
+        let type_args = if matches!(self.kind(), T::Lt | T::LtLt) && !self.newline_before() {
             Some(self.parse_type_args())
         } else {
             None
@@ -785,7 +877,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let type_args = if self.at(T::Lt) && !self.newline_before() {
+        let type_args = if matches!(self.kind(), T::Lt | T::LtLt) && !self.newline_before() {
             Some(self.parse_type_args())
         } else {
             None
@@ -930,9 +1022,38 @@ impl<'a> Parser<'a> {
                     let name = p.parse_identifier_name();
                     let optional = p.eat(T::Question);
                     p.expect(T::Colon);
-                    let ty = p.parse_type();
-                    // `[name: T?]` is TS5086's, not a JSDoc nullable (tsc 7).
-                    p.unnote_postfix_nullable(ty);
+                    // The checker's TS5087 for `[name: ...T]`, TS5086 for `[name: T?]` (not
+                    // a JSDoc nullable, tsc 7) and TS5085 for `[...name?: T]`
+                    // (namedTupleMembersErrors).
+                    let ty = if p.at(T::DotDotDot) {
+                        let rs = p.start();
+                        p.bump();
+                        let inner = p.parse_type();
+                        let r = p.finish_node(rs, Node::RestType { ty: inner });
+                        let span = p.ast.span(r);
+                        p.deferred_grammar_error_at(messages::TUPLE_REST_AFTER_LABEL, span, &[]);
+                        r
+                    } else {
+                        let ty = p.parse_type();
+                        if p.jsdoc_postfix_nullable_inner(ty).is_some() {
+                            let span = p.ast.span(ty);
+                            p.deferred_grammar_error_at(
+                                messages::TUPLE_OPTIONAL_AFTER_TYPE,
+                                span,
+                                &[],
+                            );
+                        }
+                        p.unnote_postfix_nullable(ty);
+                        ty
+                    };
+                    if rest && optional {
+                        let span = Span::new(s, p.ast.span(ty).end);
+                        p.deferred_grammar_error_at(
+                            messages::TUPLE_MEMBER_OPTIONAL_AND_REST,
+                            span,
+                            &[],
+                        );
+                    }
                     p.finish_node(
                         s,
                         Node::NamedTupleMember {
@@ -973,6 +1094,29 @@ impl<'a> Parser<'a> {
             }
         });
         let elems = self.finish_list(mark);
+        // The first required element after an optional one, even across a rest element,
+        // is the checker's TS1257 (optionalTupleElements1, restTupleElements1).
+        let mut seen_optional = false;
+        for i in 0..self.ast.list(elems).len() {
+            let el = self.ast.list(elems)[i];
+            let (optional, rest) = match *self.ast.node(el) {
+                Node::OptionalType { .. } => (true, false),
+                Node::RestType { .. } => (false, true),
+                Node::NamedTupleMember { rest, optional, .. } => (optional, rest),
+                _ => (false, false),
+            };
+            if optional {
+                seen_optional = true;
+            } else if !rest && seen_optional {
+                let span = self.ast.span(el);
+                self.deferred_grammar_error_at(
+                    messages::REQUIRED_ELEMENT_AFTER_OPTIONAL,
+                    span,
+                    &[],
+                );
+                break;
+            }
+        }
         self.expect_closing(T::RBracket, T::LBracket, open);
         self.finish_node(start, Node::TupleType { elems })
     }
@@ -1023,16 +1167,26 @@ impl<'a> Parser<'a> {
             Ctx::TYPE,
             Ctx::DISALLOW_CONDITIONAL_TYPES | Ctx::DISALLOW_IN,
             |p| {
-                while !matches!(p.kind(), T::RBrace | T::Eof) && !p.aborting() {
-                    let before = p.tok().start;
-                    if let Some(m) = p.parse_type_member(interface) {
-                        p.scratch.push(m);
+                // tsc's list recovery: a token that starts no member (`var x`, `a = 1`) is
+                // TS1131 and ends the list when an enclosing list can use it.
+                p.in_list(List::TypeMembers, |p| {
+                    while !p.aborting() && !p.is_list_terminator(List::TypeMembers) {
+                        if !p.is_list_element(List::TypeMembers, false) {
+                            if p.abort_list_or_skip(List::TypeMembers) {
+                                break;
+                            }
+                            continue;
+                        }
+                        let before = p.tok().start;
+                        if let Some(m) = p.parse_type_member(interface) {
+                            p.scratch.push(m);
+                        }
+                        if p.tok().start == before && !p.at(T::RBrace) && !p.at(T::Eof) {
+                            p.error(messages::PROPERTY_OR_SIGNATURE_EXPECTED);
+                            p.bump();
+                        }
                     }
-                    if p.tok().start == before && !p.at(T::RBrace) && !p.at(T::Eof) {
-                        p.error(messages::PROPERTY_OR_SIGNATURE_EXPECTED);
-                        p.bump();
-                    }
-                }
+                })
             },
         );
         let members = self.finish_list(mark);
@@ -1061,6 +1215,7 @@ impl<'a> Parser<'a> {
             let type_params = self.parse_type_params_opt();
             let params = self.parse_params();
             let return_type = self.parse_signature_return_type();
+            self.check_predicate_return(return_type);
             self.type_member_separator();
             return Some(self.finish_node(
                 start,
@@ -1114,7 +1269,8 @@ impl<'a> Parser<'a> {
                         | Ctx::DISALLOW_CONDITIONAL_TYPES
                         | Ctx::DISALLOW_IN
                         | Ctx::AWAIT
-                        | Ctx::YIELD,
+                        | Ctx::YIELD
+                        | Ctx::STATIC_BLOCK,
                     |p| p.parse_function_body_block(),
                 );
                 let span = self.ast.span(body);
@@ -1187,13 +1343,26 @@ impl<'a> Parser<'a> {
             let pstart = self.start();
             // `const`/`in`/`out`, and misplaced modifiers (`<public T>`).
             let modifiers = self.parse_modifiers(ModCtx::TypeParam);
-            if !self.kind().is_identifier_like() {
-                self.error(messages::TYPE_PARAMETER_DECLARATION_EXPECTED);
-                if !matches!(self.kind(), T::Comma) {
-                    break;
+            let name = if self.at(T::In) {
+                // `<in in>`, `<in>`: TS1359 at the last `in` and the name is missing; after a
+                // modifier the word is left to start the next type parameter (its `','
+                // expected` falls at the same position), otherwise it is skipped
+                // (varianceAnnotationsWithCircularlyReferencesError).
+                self.reserved_word_error();
+                let name = self.missing();
+                if modifiers.is_empty() {
+                    self.bump();
                 }
-            }
-            let name = self.parse_identifier();
+                name
+            } else {
+                if !self.kind().is_identifier_like() {
+                    self.error(messages::TYPE_PARAMETER_DECLARATION_EXPECTED);
+                    if !matches!(self.kind(), T::Comma) {
+                        break;
+                    }
+                }
+                self.parse_identifier()
+            };
             let constraint = if self.eat(T::Extends) {
                 Some(self.parse_type_in_brackets())
             } else {
@@ -1215,6 +1384,10 @@ impl<'a> Parser<'a> {
             );
             self.scratch.push(tp);
             if !self.eat(T::Comma) {
+                if self.at(T::In) && self.ast.span(name).is_empty() {
+                    self.error_expected(",");
+                    continue;
+                }
                 break;
             }
         }
@@ -1256,6 +1429,16 @@ impl<'a> Parser<'a> {
             Ctx::DISALLOW_CONDITIONAL_TYPES | Ctx::DISALLOW_IN,
             |p| {
                 while !matches!(p.kind(), T::Gt | T::Eof) && !p.aborting() {
+                    if p.at(T::Comma) {
+                        // An empty element (`f<a,,b>()`) is `Type expected.`, and the list
+                        // still counts as type arguments, as in tsc.
+                        let span = p.tok().span();
+                        p.grammar_error_at(messages::TYPE_EXPECTED, span, &[]);
+                        let m = p.missing();
+                        p.scratch.push(m);
+                        p.bump();
+                        continue;
+                    }
                     let t = p.parse_type();
                     p.scratch.push(t);
                     if !p.eat(T::Comma) {

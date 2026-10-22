@@ -14,7 +14,9 @@
 //! function bodies, contextual types and loop flow resolve variable types in a different
 //! order from tsc's, so only cycles made of variable types alone (no accessor, method or
 //! function symbol on the path) are reported, for declarations outside loops whose
-//! initializer has no function, method, class or `this`.
+//! initializer has no function, method, class or `this`, and class properties (any key
+//! but a computed non-literal one) whose initializer has no function, method or class, and
+//! `for`-`in`/`of` variables whose iterated expression has none either.
 //!
 //! The symbol type resolution stack (`Ck::push_resolution`) records the cycles; this check
 //! resolves the declaration's symbol and reports when its resolution was circular.
@@ -35,6 +37,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(file);
         // Unannotated declarations with an initializer are TS7022 under `noImplicitAny`.
         let mut implicit = false;
+        let for_of = self
+            .c
+            .parent(Loc::new(file, n))
+            .and_then(|list| self.c.parent(list))
+            .and_then(|h| match *ast.node(h.node) {
+                Node::ForOf { right, .. } | Node::ForIn { right, .. } => Some(right),
+                _ => None,
+            });
         let name = match *ast.node(n) {
             Node::VarDeclarator {
                 name,
@@ -48,7 +58,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ..
             } if self.c.opts.no_implicit_any
                 && !self.in_loop(file, n)
-                && !has_function(ast, init) =>
+                && !has_function(ast, init, true) =>
+            {
+                implicit = true;
+                name
+            }
+            // A `for`-`of` variable is typed by its iterable; a `for`-`in` one checks its
+            // object.
+            Node::VarDeclarator {
+                name,
+                type_ann: None,
+                init: None,
+                ..
+            } if self.c.opts.no_implicit_any
+                && for_of.is_some_and(|right| !has_function(ast, right, true)) =>
             {
                 implicit = true;
                 name
@@ -58,6 +81,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                 type_ann: Some(_),
                 ..
             } => pattern,
+            // A class property's initializer reads its siblings through `this`.
+            Node::PropertyDef {
+                key,
+                type_ann: None,
+                value: Some(init),
+                ..
+            } if self.c.opts.no_implicit_any && !has_function(ast, init, false) => {
+                implicit = true;
+                key
+            }
             Node::PropertyDef {
                 key,
                 type_ann: Some(_),
@@ -85,7 +118,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => return,
         };
-        if !matches!(ast.node(name), Node::Ident { .. } | Node::StringLit { .. }) {
+        let property = implicit && matches!(ast.node(n), Node::PropertyDef { .. });
+        let named = match ast.node(name) {
+            Node::Ident { .. } | Node::StringLit { .. } => true,
+            Node::PrivateName { .. } | Node::ComputedKey { .. } => property,
+            _ => false,
+        };
+        if !named {
             return;
         }
         let Some(sym) = self
@@ -272,7 +311,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
 /// `n` contains a function, arrow, method, accessor or class (their bodies and flow are
 /// checked in an order that differs from tsc's).
-fn has_function(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
+fn has_function(ast: &ts_r_ast::Ast, n: NodeId, this_counts: bool) -> bool {
     let mut stack = vec![n];
     let mut seen = 0u32;
     while let Some(c) = stack.pop() {
@@ -287,7 +326,7 @@ fn has_function(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
             | Node::ClassExpr { .. } => return true,
             // `this` is the enclosing class or object literal, whose accessors' return
             // types close the cycle (`var _this = this` in a getter returning `_this.x`).
-            Node::This {} => return true,
+            Node::This {} if this_counts => return true,
             _ => ast.for_each_child(c, |x| stack.push(x)),
         }
     }

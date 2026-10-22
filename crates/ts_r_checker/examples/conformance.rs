@@ -247,7 +247,7 @@ fn load(path: &Path, root: &Path, baselines: &Path, names: &BTreeSet<String>) ->
     let Ok(raw) = std::fs::read(path) else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&raw).into_owned();
+    let text = ts_r_config::fs::decode_text(raw);
     let (Some(stem), Some(file_name)) = (
         path.file_stem().and_then(|s| s.to_str()),
         path.file_name().and_then(|s| s.to_str()),

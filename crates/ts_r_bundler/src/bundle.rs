@@ -129,6 +129,14 @@ fn fragment_key(module_key: &[u8; 32], plan: &ModulePlan) -> [u8; 32] {
 }
 
 impl BuildContext {
+    /// Ends a one-shot build in a process about to exit: flushes the persistent cache and
+    /// leaks the in-memory caches instead of freeing them one allocation at a time (about
+    /// 10 ms for three.js x10). Watch mode and the dev server keep their context instead.
+    pub fn finish_and_leak(mut self) {
+        drop(self.disk.take());
+        std::mem::forget(self);
+    }
+
     pub fn new(opts: BuildOptions, fs: Arc<dyn FileSystem>) -> Result<BuildContext, Vec<Message>> {
         let defines = Defines::from_options(&opts)
             .map_err(|e| vec![Message::new(Severity::Error, None, e)])?;
@@ -272,6 +280,7 @@ impl BuildContext {
             threads: self.threads,
             changed: trusted.as_ref(),
             parsed: Default::default(),
+            read_ahead: (trusted.is_none() && self.threads > 1).then_some(&*self.fs_cache),
         };
         let mut timer = Timer::new();
         let graph = build_graph(&gctx, &entries);
@@ -445,11 +454,12 @@ impl BuildContext {
         }
         timer.lap("print");
         // Assemble.
-        let chunk_outs: Vec<ChunkOutput> = (0..pl.chunks.len())
-            .map(|ci| assemble(ci, &pl, &graph, &by_module, opts))
+        let mut chunk_outs: Vec<ChunkOutput> = (0..pl.chunks.len())
+            .map(|ci| assemble(ci, &pl, &graph, &by_module, opts, self.threads))
             .collect();
         let mut outputs = Vec::new();
-        for (ci, co) in chunk_outs.iter().enumerate() {
+        // The outputs take the chunks' text (the metafile only needs `module_bytes`).
+        for (ci, co) in chunk_outs.iter_mut().enumerate() {
             let file = format!("{outdir}/{}", pl.chunks[ci].file);
             // A CSS entry point produces only its stylesheet.
             let css_entry = pl.chunks[ci]
@@ -466,15 +476,15 @@ impl BuildContext {
                 });
                 continue;
             }
-            if let Some(map) = &co.map {
+            if let Some(map) = co.map.take() {
                 outputs.push(OutputFile {
                     path: format!("{file}.map"),
-                    contents: map.as_bytes().to_vec(),
+                    contents: map.into_bytes(),
                 });
             }
             outputs.push(OutputFile {
                 path: file.clone(),
-                contents: co.code.as_bytes().to_vec(),
+                contents: std::mem::take(&mut co.code).into_bytes(),
             });
             if let Some(css) = &co.css {
                 let css_file = match file.rsplit_once('.') {
@@ -501,21 +511,14 @@ impl BuildContext {
             }
         }
         timer.lap("assemble");
-        timer.report(&stats);
         let metafile = opts
             .metafile
             .then(|| crate::metafile::render(&graph, &lk, &pl, &chunk_outs, &outputs, opts));
         if opts.write {
-            for o in &outputs {
-                if let Err(e) = write_file(&o.path, &o.contents) {
-                    messages.push(Message::new(
-                        Severity::Error,
-                        None,
-                        format!("Failed to write to output file {}: {e}", o.path),
-                    ));
-                }
-            }
+            messages.extend(write_outputs(&outputs, self.threads));
         }
+        timer.lap("write");
+        timer.report(&stats);
         BuildResult {
             outputs,
             messages: sorted(messages),
@@ -719,15 +722,7 @@ impl BuildContext {
             return BuildResult::fail(sorted(messages));
         }
         if opts.write {
-            for o in &outputs {
-                if let Err(e) = write_file(&o.path, &o.contents) {
-                    messages.push(Message::new(
-                        Severity::Error,
-                        None,
-                        format!("Failed to write to output file {}: {e}", o.path),
-                    ));
-                }
-            }
+            messages.extend(write_outputs(&outputs, self.threads));
         }
         BuildResult {
             outputs,
@@ -766,15 +761,78 @@ fn common_dir(entries: &[String]) -> String {
     if s.is_empty() { "/".into() } else { s }
 }
 
+/// Writes the outputs in parallel (a bundle and its source map are large); one error
+/// message per file that could not be written, in output order.
+fn write_outputs(outputs: &[OutputFile], threads: usize) -> Vec<Message> {
+    let mut paths = FxHashSet::default();
+    let mut messages = Vec::new();
+    for o in outputs {
+        if !paths.insert(&o.path) {
+            messages.push(Message::new(
+                Severity::Error,
+                None,
+                format!("Two output files share the same path: {}", o.path),
+            ));
+        }
+    }
+    if !messages.is_empty() {
+        return messages;
+    }
+    let work: Vec<usize> = (0..outputs.len()).collect();
+    pool::map(threads, work, |i| {
+        write_file(&outputs[i].path, &outputs[i].contents)
+    })
+    .into_iter()
+    .zip(outputs)
+    .filter_map(|(r, o)| {
+        let e = r.err()?;
+        Some(Message::new(
+            Severity::Error,
+            None,
+            format!("Failed to write to output file {}: {e}", o.path),
+        ))
+    })
+    .collect()
+}
+
 fn write_file(p: &str, contents: &[u8]) -> std::io::Result<()> {
     let dir = path::directory_of(p);
     if !dir.is_empty() {
         std::fs::create_dir_all(dir)?;
     }
-    if std::fs::read(p).is_ok_and(|old| old == contents) {
+    if same_contents(p, contents) {
         return Ok(());
     }
     std::fs::write(p, contents)
+}
+
+/// Whether file `p` already holds `contents` (then it is left alone, keeping its mtime for
+/// watchers). Compares the size first and then 1 MB at a time, without reading the old file
+/// into one buffer.
+fn same_contents(p: &str, contents: &[u8]) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(p) else {
+        return false;
+    };
+    if f.metadata().map(|m| m.len()).ok() != Some(contents.len() as u64) {
+        return false;
+    }
+    let mut buf = vec![0u8; (1 << 20).min(contents.len().max(1))];
+    let mut at = 0;
+    loop {
+        let n = match f.read(&mut buf) {
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return false,
+        };
+        if n == 0 {
+            return at == contents.len();
+        }
+        if contents.get(at..at + n) != Some(&buf[..n]) {
+            return false;
+        }
+        at += n;
+    }
 }
 
 /// Loader of a module (for callers that inspect the graph).

@@ -18,7 +18,7 @@
 
 use ts_r_ast::{NodeId, NodeList};
 use ts_r_diagnostics::{DiagnosticMessage, messages};
-use ts_r_lexer::{TokenFlags, TokenKind as T};
+use ts_r_lexer::TokenKind as T;
 
 use crate::Parser;
 use crate::modifiers::MAX_MODIFIER_CHAIN;
@@ -80,7 +80,7 @@ const ALL_LISTS: [List; 23] = [
 
 impl List {
     #[inline]
-    fn bit(self) -> u32 {
+    pub(crate) fn bit(self) -> u32 {
         1 << self as u32
     }
 }
@@ -244,17 +244,21 @@ impl<'a> Parser<'a> {
     /// inside can use the token (the caller ends its list without consuming it); otherwise
     /// skips the token and returns false.
     pub(crate) fn abort_list_or_skip(&mut self, l: List) -> bool {
-        let (msg, keyword_text) = self.list_error(l);
+        let (mut msg, keyword_text) = self.list_error(l);
+        // `{ a: 0 } = value;`, `class A { m() {} = 1 }`: TS2809 in any list (tsc 7).
+        if self.at_equals_after_block() {
+            msg = messages::EQUALS_AFTER_BLOCK;
+        }
         let k = self.kind();
         if keyword_text && k.is_reserved() {
-            let text = self.text();
+            let text = self.lx.ident_value(self.tok());
             let msg = if l == List::Parameters {
                 messages::NOT_ALLOWED_AS_PARAMETER_NAME
             } else {
                 messages::NOT_ALLOWED_AS_VARIABLE_NAME
             };
             let span = self.error_span();
-            self.error_at(msg, span, &[text]);
+            self.error_at(msg, span, &[&text]);
         } else {
             self.error(msg);
         }
@@ -479,9 +483,6 @@ impl<'a> Parser<'a> {
         self.lookahead(|p| {
             let mut name: Option<T> = None;
             for _ in 0..MAX_MODIFIER_CHAIN {
-                if p.tok().flags.has(TokenFlags::ESCAPED) {
-                    break;
-                }
                 match p.kind() {
                     // Class member modifiers start a member whatever follows.
                     T::Public
@@ -543,7 +544,14 @@ impl<'a> Parser<'a> {
                         | T::Async
                         | T::Override
                         | T::Accessor
-                ) {
+                ) && {
+                    // A modifier only when a name follows (`async?: boolean` is a name).
+                    let next = p.peek_kind();
+                    matches!(
+                        next,
+                        T::LBracket | T::PrivateName | T::String | T::Number | T::BigInt
+                    ) || next.is_identifier_or_keyword()
+                } {
                     modifier = true;
                     p.bump();
                 } else {
@@ -553,7 +561,7 @@ impl<'a> Parser<'a> {
             if p.at(T::LBracket) {
                 return true;
             }
-            if p.at_literal_property_name() {
+            if p.at_literal_property_name() || p.at(T::PrivateName) {
                 p.bump();
                 return matches!(
                     p.kind(),

@@ -363,6 +363,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // A union that remembers how it was written prints its origin
                 // (`HeadersInit | undefined`).
                 let members = match s.union_origin(t) {
+                    // `T & (0 | 1)` distributed over its union, written as one intersection.
+                    Some(&[one]) => return self.print_type(one, depth, stack),
                     Some(o) => o.to_vec(),
                     None => s.list_items(list).to_vec(),
                 };
