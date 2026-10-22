@@ -318,7 +318,7 @@ const stripFenceInfo = md => md.replace(/^(\s*`{3,})(\w+)[^\n]*$/gm, '$1$2');
 function llms(docs, errors) {
   return `# ts-r
 
-> Fast TypeScript tooling written from scratch in Rust: ts-r-dev, ts-r-build, ts-r-check, ts-r-lint, ts-r-run and ts-r-lsp, plus a tiny ts-r launcher. Each tool is a separate binary that works on its own next to tsc, ESLint and Vite. Alpha: install from npm with \`npm install --save-dev ts-r@next\`.
+> Fast TypeScript tooling written from scratch in Rust: ts-r-dev, ts-r-build, ts-r-check, ts-r-lint, ts-r-run and ts-r-lsp, plus a tiny ts-r launcher. Each tool is a separate binary that works on its own next to tsc, ESLint and Vite. Alpha: install from npm with \`npm install --save-dev @ts-r.dev/cli@next\`.
 
 Every page below has a Markdown version at the same address with \`index.md\` appended.
 
