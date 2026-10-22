@@ -8,6 +8,12 @@
 //!   annotated, the setter is TS7032 (or a lone getter TS7033) at its name. The setter's
 //!   parameter is TS7006 only when there is no getter: a getter (annotated or not) types it.
 //!   An accessor written with a body (TS1183) is typed by its body.
+//! - An untyped parameter of a call signature, method signature or function type (not a
+//!   construct signature, constructor type or accessor) whose name is a type keyword
+//!   (`string`, `object`, `undefined`, ...) or resolves to a type where it is written
+//!   (`(C, number) => void` with a class `C`) is TS7051 `Did you mean 'argN: name'?`
+//!   (`name[]` for a rest parameter) instead of TS7006/TS7019 (tsc:
+//!   `tsc/internal/checker/checker.go`, `reportImplicitAny`).
 
 use ts_r_ast::{MethodKind, Node, NodeId};
 use ts_r_diagnostics::FileId;
@@ -90,6 +96,57 @@ impl<'c, 'a> Ck<'c, 'a> {
             _ => return,
         };
         self.error(Loc::new(file, key), info, &[name]);
+    }
+
+    /// The index of the signature parameter `p` (named `name`) when its name reads as a
+    /// type (TS7051), else `None`.
+    pub(crate) fn param_named_like_type(
+        &self,
+        file: FileId,
+        p: NodeId,
+        parent_kind: ts_r_ast::NodeKind,
+        name: &str,
+    ) -> Option<usize> {
+        use ts_r_ast::NodeKind;
+        let ast = self.ast(file);
+        let sig = self.c.file(file).parents().parent(p)?;
+        let params = match (parent_kind, ast.node(sig)) {
+            (NodeKind::CallSignature, Node::CallSignature { params, .. })
+            | (NodeKind::FunctionType, Node::FunctionType { params, .. }) => *params,
+            (
+                NodeKind::MethodSignature,
+                Node::MethodSignature {
+                    kind: MethodKind::Method,
+                    params,
+                    ..
+                },
+            ) => *params,
+            _ => return None,
+        };
+        let index = ast.list(params).iter().position(|&q| q == p)?;
+        let keyword = matches!(
+            name,
+            "any"
+                | "unknown"
+                | "number"
+                | "bigint"
+                | "object"
+                | "boolean"
+                | "string"
+                | "symbol"
+                | "void"
+                | "undefined"
+                | "never"
+                | "intrinsic"
+        );
+        let names_type = || {
+            let at = Loc::new(file, p);
+            self.c
+                .lookup_in_scope_chain(at, name, ts_r_binder::meaning::TYPE)
+                .or_else(|| self.c.global_symbol(name, ts_r_binder::meaning::TYPE))
+                .is_some()
+        };
+        (keyword || names_type()).then_some(index)
     }
 
     /// The parameter `p` of a set accessor signature that has a getter, which types it.

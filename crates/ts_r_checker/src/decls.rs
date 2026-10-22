@@ -57,7 +57,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if matches!(
                 ast.node(n),
-                Node::FunctionDecl { body: None, .. }
+                Node::FunctionDecl { .. }
                     | Node::MethodDef { .. }
                     | Node::MethodSignature { .. }
                     | Node::ConstructSignature { .. }
@@ -96,6 +96,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::TypeLiteral { .. } => literals.push(n),
                 Node::VarDeclarator { .. } => vars.push(n),
                 Node::PropertySignature { .. } | Node::PropertyDef { .. } => props.push(n),
+                // Parameter properties.
+                Node::Param { modifiers, .. } if !modifiers.is_empty() => props.push(n),
                 _ => {}
             }
             ast.for_each_child(n, |c| stack.push(c));
@@ -118,6 +120,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_enum_merge_initializers(Loc::new(file, n));
             } else {
                 self.check_namespace_merge_order(Loc::new(file, n));
+                self.check_namespace_prototype_export(Loc::new(file, n));
             }
         }
         for n in sigs {
@@ -136,6 +139,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         for p in props {
             self.check_property_redeclaration(file, p);
+            self.check_identical_modifiers(file, p);
         }
         for c in classes {
             if matches!(self.ast(file).node(c), Node::ClassDecl { .. }) {

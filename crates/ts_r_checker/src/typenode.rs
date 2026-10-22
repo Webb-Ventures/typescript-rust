@@ -452,6 +452,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             TypeKind::Union { list, .. } => {
                 let members = match s.union_origin(t) {
+                    Some(&[one]) => return self.tn(one, cx),
                     Some(o) => o.to_vec(),
                     None => s.list_items(list).to_vec(),
                 };
@@ -2831,10 +2832,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     ty = t2;
                 }
             }
-            let tnode = match self
-                .param_annotation(p.sym)
-                .and_then(|a| self.reuse_type_node(a, ty, cx))
-            {
+            let ann = self.param_annotation(p.sym);
+            let tnode = match ann.and_then(|a| self.reuse_type_node(a, ty, cx)) {
+                // A JSDoc `{T=}` is written `T | undefined` (observed tsc 7, with or
+                // without `strictNullChecks`).
+                Some(r) if ann.is_some_and(|a| self.is_jsdoc_optional_annotation(a)) => {
+                    with_undefined_node(cx, r)
+                }
                 Some(r) => r,
                 // A `x?: T` written from its type (an instantiated signature) says
                 // `| undefined`, with or without `strictNullChecks` (observed:
@@ -2850,6 +2854,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             out.push(param_node(cx, pat, rest, optional, Some(tnode)));
         }
         Ok(out)
+    }
+
+    /// Whether parameter annotation `a` is the `T` of a JSDoc `{T=}` (the parser keeps `T`
+    /// and makes the parameter optional; the `=` follows it in the comment).
+    pub(crate) fn is_jsdoc_optional_annotation(&self, a: Loc) -> bool {
+        let ast = self.ast(a.file);
+        ast.is_jsdoc(a.node)
+            && self
+                .c
+                .file(a.file)
+                .text
+                .as_bytes()
+                .get(ast.span(a.node).end as usize)
+                == Some(&b'=')
     }
 
     /// Whether the type of annotation `t` includes `undefined` (or is `any`/`unknown`).

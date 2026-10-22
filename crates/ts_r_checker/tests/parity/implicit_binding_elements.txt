@@ -1,0 +1,17 @@
+a.ts(4,15): error TS7031: Binding element 'x' implicitly has an 'any' type.
+a.ts(4,18): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(5,15): error TS7031: Binding element 'x' implicitly has an 'any' type.
+a.ts(5,18): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(6,18): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(8,22): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(9,22): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(10,22): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(12,15): error TS7031: Binding element 'x' implicitly has an 'any' type.
+a.ts(13,15): error TS7031: Binding element 'a' implicitly has an 'any' type.
+a.ts(13,18): error TS7031: Binding element 'b' implicitly has an 'any' type.
+a.ts(13,23): error TS7031: Binding element 'c' implicitly has an 'any' type.
+a.ts(13,31): error TS7031: Binding element 'x' implicitly has an 'any' type.
+a.ts(14,14): error TS7031: Binding element 'f' implicitly has an 'any' type.
+a.ts(14,20): error TS7031: Binding element 'g' implicitly has an 'any' type.
+a.ts(16,5): error TS1182: A destructuring declaration must have an initializer.
+a.ts(16,6): error TS7031: Binding element 'a1' implicitly has an 'any' type.

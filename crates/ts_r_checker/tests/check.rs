@@ -261,6 +261,7 @@ fn level_above_an_augmented_reexport() {
         roots: program.roots.clone(),
         missing_libs: Vec::new(),
         missing_types: Vec::new(),
+        missing_type_references: Vec::new(),
         ambiguous_roots: Vec::new(),
         deps: program.deps.clone(),
     };
@@ -277,7 +278,8 @@ fn level_above_an_augmented_reexport() {
 #[test]
 fn doubling_tuple_spreads_are_bounded() {
     // Each alias doubles the previous tuple: 2^30 elements without a limit. Like tsc, ts-r
-    // reports TS2799 at T14, the first past 10,000 elements.
+    // reports TS2799 at T14, the first past 10,000 elements. T15 spreads two errors, so it is
+    // a tuple with a rest element and each later alias spreads two rests (TS1265, as tsc).
     let mut src = String::from("type T0 = [0];\n");
     for n in 1..=30 {
         src.push_str(&format!("type T{n} = [...T{}, ...T{}];\n", n - 1, n - 1));
@@ -286,22 +288,30 @@ fn doubling_tuple_spreads_are_bounded() {
     let Some(out) = check(STRICT, &src) else {
         return;
     };
-    assert_eq!(
-        out,
-        vec!["15:12 TS2799: Type produces a tuple type that is too large to represent."]
-    );
+    let mut expected = vec![
+        "15:12 TS2799: Type produces a tuple type that is too large to represent.".to_string(),
+    ];
+    for line in 17..=31 {
+        expected.push(format!(
+            "{line}:21 TS1265: A rest element cannot follow another rest element."
+        ));
+    }
+    assert_eq!(out, expected);
 }
 
 #[test]
 fn circular_union_constraint_terminates() {
-    // tsc reports TS2313 and TS2339 here; ts-r gives up on the constraint instead.
+    // tsc also reports TS2339 for `x.foo`; ts-r gives up on the constraint instead.
     let Some(out) = check(
         STRICT,
         "function f<T extends T | string>(x: T) { x.foo; }\n",
     ) else {
         return;
     };
-    assert_eq!(out, Vec::<String>::new());
+    assert_eq!(
+        out,
+        vec!["1:22 TS2313: Type parameter 'T' has a circular constraint."]
+    );
 }
 
 #[test]
@@ -628,6 +638,271 @@ nullable?.inner.m();
         vec![
             "3:1 TS2684: The 'this' context of type 'I | undefined' is not assignable to method's 'this' of type 'I'.\n  Type 'undefined' is not assignable to type 'I'.",
             "5:1 TS2684: The 'this' context of type 'I | null' is not assignable to method's 'this' of type 'I'.\n  Type 'null' is not assignable to type 'I'.",
+        ]
+    );
+}
+
+/// Names the parser could not read print as `(Missing)` in implicit-any errors (tsc's
+/// conformance baselines; the tsc 7 CLI stops at the syntax error).
+#[test]
+fn implicit_any_missing_names() {
+    let Some(out) = check_through(
+        "a.ts",
+        STRICT,
+        "function f(`hello`);\nfunction f(x: string);\nfunction f(x: string) {\n    return x;\n}\n",
+    ) else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS7006")).collect();
+    assert_eq!(
+        ours,
+        ["1:12 TS7006: Parameter '(Missing)' implicitly has an 'any' type."]
+    );
+}
+
+/// A `,` where a parameter should start is no parameter: no implicit-any error for it.
+#[test]
+fn implicit_any_skips_comma_parameters() {
+    let Some(out) = check_through("a.ts", STRICT, "class X {\n    get x(,) { return 0; }\n}\n")
+    else {
+        return;
+    };
+    assert!(out.iter().all(|d| !d.contains("TS7006")), "{out:?}");
+    let Some(out) = check_through("a.ts", STRICT, "function t1(...) {}\n") else {
+        return;
+    };
+    assert!(
+        out.contains(
+            &"1:13 TS7019: Rest parameter '(Missing)' implicitly has an 'any[]' type.".to_owned()
+        ),
+        "{out:?}"
+    );
+}
+
+/// A function body the parser recovered from nothing (`function f() => 4;`) is no body:
+/// the declaration is TS7010 like an overload signature.
+#[test]
+fn implicit_any_return_of_recovered_body() {
+    let Some(out) = check_through("a.ts", STRICT, "function f() => 4;\nfunction g() {}\n") else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS7010")).collect();
+    assert_eq!(
+        ours,
+        [
+            "1:10 TS7010: 'f', which lacks return-type annotation, implicitly has an 'any' return type."
+        ]
+    );
+}
+
+/// `return e` in a constructor relates `e` to the instance type, then TS2409 on the statement.
+#[test]
+fn constructor_return_must_fit_the_instance_type() {
+    let Some(out) = check(
+        STRICT,
+        "class F {\n    foo: string = \"\";\n    constructor() {\n        return { foo: 1 };\n    }\n}\nclass B<T> {\n    constructor(x: T) {\n        return x;\n    }\n}\nclass C {\n    constructor() {\n        return this;\n    }\n}\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "4:9 TS2409: Return type of constructor signature must be assignable to the instance type of the class.",
+            "4:18 TS2322: Type 'number' is not assignable to type 'string'.",
+            "9:9 TS2322: Type 'T' is not assignable to type 'B<T>'.",
+            "9:9 TS2409: Return type of constructor signature must be assignable to the instance type of the class.",
+        ]
+    );
+}
+
+/// A class field repeated in one body, or after a getter/setter pair, must keep the earlier
+/// member's type (TS2717 beside the binder's TS2300); a method in between starts over.
+#[test]
+fn repeated_class_fields_keep_the_first_type() {
+    let Some(out) = check(
+        STRICT,
+        "class D {\n    c: number = 1;\n    c: string = \"\";\n    static s = 1;\n    static s: string;\n    get x() { return 10; }\n    set x(v: number) {}\n    x: string = \"\";\n    m(): void {}\n    m: number = 1;\n}\n",
+    ) else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS2717")).collect();
+    assert_eq!(
+        ours,
+        [
+            "3:5 TS2717: Subsequent property declarations must have the same type.  Property 'c' must be of type 'number', but here has type 'string'.",
+            "5:12 TS2717: Subsequent property declarations must have the same type.  Property 's' must be of type 'number', but here has type 'string'.",
+            "8:5 TS2717: Subsequent property declarations must have the same type.  Property 'x' must be of type 'number', but here has type 'string'.",
+        ]
+    );
+}
+
+/// [`check`] for a `.tsx` file.
+fn check_tsx(options: &str, src: &str) -> Option<Vec<String>> {
+    let libs = LibStore::locate()?;
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file("/p/a.tsx", src);
+    fs.add_file(
+        "/p/tsconfig.json",
+        &format!("{{\"compilerOptions\": {{{options}}}, \"files\": [\"a.tsx\"]}}"),
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let result = check_program(&program, CheckRun { threads: 1 });
+    Some(
+        result
+            .diagnostics
+            .iter()
+            .map(|d| {
+                let f = &program.files[d.file.0 as usize];
+                let lc = f.lines().line_col_utf16(&f.text, d.span.start);
+                format!("{}:{} TS{}: {}", lc.line + 1, lc.col + 1, d.code, d.message)
+            })
+            .collect(),
+    )
+}
+
+/// Attributes failing one member of `IntrinsicAttributes & P` are reported against that
+/// member alone; hyphenated names (also from a spread object literal) are never excess and
+/// don't trip weak type detection.
+#[test]
+fn jsx_attributes_fail_against_the_failing_member() {
+    let Some(out) = check_tsx(
+        "\"strict\": true, \"target\": \"es2022\", \"jsx\": \"preserve\"",
+        "declare namespace JSX {\n    interface Element {}\n    interface IntrinsicAttributes { key?: string }\n    interface IntrinsicClassAttributes<T> { ref?: T }\n}\ndeclare function F(p: { x: number }): JSX.Element;\ndeclare function W(p: { y?: number }): JSX.Element;\nconst a = <F data-extra=\"\" />;\nconst b = <W {...{ \"data-info\": \"hi\" }} />;\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "8:12 TS2741: Property 'x' is missing in type '{ \"data-extra\": string; }' but required in type '{ x: number; }'."
+        ]
+    );
+}
+
+/// An array literal's failing literal element is reported widened unless its target takes
+/// literals (`true` stays as it is); a binding pattern in a bodiless signature reports each
+/// binding as implicitly `any`.
+#[test]
+fn array_elements_widen_and_signature_patterns_are_implicit_any() {
+    let Some(out) = check(
+        STRICT,
+        "let a: null[] = [1, true, \"s\"];\nlet b: (1 | \"s\")[] = [1, \"s\", 2];\ninterface F {\n    m(x: number, [p, q]: any, { r, s: { t } });\n}\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "1:18 TS2322: Type 'number' is not assignable to type 'null'.",
+            "1:21 TS2322: Type 'true' is not assignable to type 'null'.",
+            "1:27 TS2322: Type 'string' is not assignable to type 'null'.",
+            "2:31 TS2322: Type '2' is not assignable to type '\"s\" | 1'.",
+            "4:5 TS7010: 'm', which lacks return-type annotation, implicitly has an 'any' return type.",
+            "4:33 TS7031: Binding element 'r' implicitly has an 'any' type.",
+            "4:41 TS7031: Binding element 't' implicitly has an 'any' type.",
+        ]
+    );
+}
+
+/// An object literal typed by a destructuring pattern (assignment patterns, nested pattern
+/// defaults, declarations) reports every property the pattern doesn't name.
+#[test]
+fn pattern_typed_literals_report_every_excess_property() {
+    let Some(out) = check(
+        STRICT,
+        "let x = 0, y = 0;\n({} = { x: 0, y: 0 });\n({ x } = { x: 0, y: 0, z: 1 });\nvar { f: { g } = { h: 1 } }: any = undefined;\nlet o: any, k: any;\nlet { a } = { a: 1, ...o, [k]: 1 };\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "2:9 TS2353: Object literal may only specify known properties, and 'x' does not exist in type '{}'.",
+            "2:15 TS2353: Object literal may only specify known properties, and 'y' does not exist in type '{}'.",
+            "3:18 TS2353: Object literal may only specify known properties, and 'y' does not exist in type '{ x: number; }'.",
+            "3:24 TS2353: Object literal may only specify known properties, and 'z' does not exist in type '{ x: number; }'.",
+            "4:20 TS2353: Object literal may only specify known properties, and 'h' does not exist in type '{ g: any; }'.",
+            "6:27 TS2353: Object literal may only specify known properties, and '[k]' does not exist in type '{ a: any; }'.",
+        ]
+    );
+}
+
+/// Ambient classes check their `implements` clauses too.
+#[test]
+fn ambient_classes_check_implements() {
+    let Some(out) = check(
+        STRICT,
+        "interface IBuffer {\n    [index: number]: number;\n}\ndeclare class Buffer implements IBuffer {\n}\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "4:15 TS2420: Class 'Buffer' incorrectly implements interface 'IBuffer'.\n  Index signature for type 'number' is missing in type 'Buffer'."
+        ]
+    );
+}
+
+/// A literal kept by its contextual type (a type parameter with a primitive constraint)
+/// is no longer fresh: a `let` reading it back keeps the literal.
+#[test]
+fn contextually_kept_literals_are_not_fresh() {
+    let Some(out) = check(
+        STRICT,
+        "const R = Object.freeze({ c: '10', f: 'latest' });\nlet p = R.c;\np = R.f;\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec!["3:1 TS2322: Type '\"latest\"' is not assignable to type '\"10\"'."]
+    );
+}
+
+/// `==` keeps the members that coerce to the compared value.
+#[test]
+fn loose_equality_keeps_coercible_members() {
+    let Some(out) = check(
+        STRICT,
+        "function test(level: number | string): number {\n    if (level == +level) {\n        const q: number = level;\n    }\n    if (level === +level) {\n        const r: number = level;\n    }\n    return 0;\n}\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "3:15 TS2322: Type 'string | number' is not assignable to type 'number'.\n  Type 'string' is not assignable to type 'number'."
+        ]
+    );
+}
+
+/// An empty binding pattern under `strictNullChecks` doesn't relate its initializer to the
+/// annotation; it only asks for a value that isn't nullish.
+#[test]
+fn empty_annotated_patterns_only_check_nullishness() {
+    let Some(out) = check(STRICT, "const {}: undefined = 1;\nconst {}: string = 1;\n") else {
+        return;
+    };
+    assert_eq!(out, vec!["1:7 TS2532: Object is possibly 'undefined'."]);
+}
+
+/// A weak type failure suggests the call when `new`-ing the source would fit (TS2560).
+#[test]
+fn weak_type_suggests_construct_call() {
+    let src = "interface S { timeout?: number }\n\
+               interface C { new (s: string): { timeout: 1000 } }\n\
+               declare const c: C;\n\
+               const s: S = c;\n";
+    let Some(out) = check(STRICT, src) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "4:14 TS2560: Value of type 'C' has no properties in common with type 'S'. Did you mean to call it?"
         ]
     );
 }

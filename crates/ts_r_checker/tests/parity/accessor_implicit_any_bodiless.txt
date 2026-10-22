@@ -1,0 +1,6 @@
+a.ts(2,18): error TS7033: Property 'a' implicitly has type 'any', because its get accessor lacks a return type annotation.
+a.ts(6,18): error TS7032: Property 'c' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(9,9): error TS7033: Property 'x' implicitly has type 'any', because its get accessor lacks a return type annotation.
+a.ts(11,9): error TS7032: Property 'y' implicitly has type 'any', because its set accessor lacks a parameter type annotation.
+a.ts(14,9): error TS7033: Property 'z' implicitly has type 'any', because its get accessor lacks a return type annotation.
+a.ts(16,16): error TS7033: Property 'w' implicitly has type 'any', because its get accessor lacks a return type annotation.

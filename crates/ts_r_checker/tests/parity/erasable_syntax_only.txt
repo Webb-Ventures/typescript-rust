@@ -1,0 +1,19 @@
+a.ts(1,11): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(1,13): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(1,15): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(2,11): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(3,11): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(3,15): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(4,1): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(7,16): error TS2664: Invalid module name in augmentation, module 'm' cannot be found.
+a.ts(9,12): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(10,1): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(11,23): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(11,43): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(13,11): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(13,20): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(14,26): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(15,15): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(16,24): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(17,11): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+a.ts(18,23): error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.

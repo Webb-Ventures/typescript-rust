@@ -7,7 +7,10 @@
 //! default (`interface I {}` next to `interface I<T = number> {}` is fine). A missing
 //! constraint or default, and variance modifiers, do not count.
 
+use ts_r_ast::visit::{Visitor, Walk, walk};
 use ts_r_ast::{Node, NodeId};
+use ts_r_binder::meaning;
+use ts_r_diagnostics::FileId;
 use ts_r_types::TypeId;
 
 use crate::checker::{Ck, Loc};
@@ -131,6 +134,74 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         ta == tb
+    }
+}
+
+impl<'c, 'a> Ck<'c, 'a> {
+    /// A type parameter list's defaults: a parameter without a default after one with a
+    /// default is TS2706 (at the parameter), and a default naming its own parameter or a
+    /// later one of the list is TS2744 (at the reference). Names are resolved, so a
+    /// parameter of a nested signature that shadows one is fine (tsc:
+    /// tsc/internal/checker/checker.go, checkTypeParameters).
+    pub(crate) fn check_type_param_defaults(&mut self, file: FileId, list: NodeId) {
+        let ast = self.ast(file);
+        let Node::TypeParams { params } = *ast.node(list) else {
+            return;
+        };
+        let params = ast.list(params).to_vec();
+        let syms: Vec<_> = params
+            .iter()
+            .map(|&p| self.c.sym_of_decl(Loc::new(file, p)))
+            .collect();
+        let mut seen_default = false;
+        for (i, &p) in params.iter().enumerate() {
+            let Node::TypeParam { default, .. } = *ast.node(p) else {
+                continue;
+            };
+            let Some(d) = default else {
+                if seen_default {
+                    self.error(
+                        Loc::new(file, p),
+                        dg::REQUIRED_TYPE_PARAMETERS_MAY_NOT_FOLLOW_OPTIONAL_TYPE_PARAMETERS_2706,
+                        &[],
+                    );
+                }
+                continue;
+            };
+            seen_default = true;
+            let mut refs = TypeRefs(Vec::new());
+            walk(ast, d, &mut refs);
+            for (r, name) in refs.0 {
+                let Some(text) = crate::nodes::ident_text(ast, name) else {
+                    continue;
+                };
+                let Some(s) = self.resolve_name_at(Loc::new(file, name), text, meaning::TYPE)
+                else {
+                    continue;
+                };
+                if syms[i..].contains(&Some(s)) {
+                    self.error(
+                        Loc::new(file, r),
+                        dg::TYPE_PARAMETER_DEFAULTS_CAN_ONLY_REFERENCE_PREVIOUSLY_DECLARED_TYPE_PARAMETERS_2744,
+                        &[],
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The type references under a node whose name is a plain identifier: `(reference, name)`.
+struct TypeRefs(Vec<(NodeId, NodeId)>);
+
+impl Visitor for TypeRefs {
+    fn enter(&mut self, ast: &ts_r_ast::Ast, id: NodeId) -> Walk {
+        if let Node::TypeRef { name, .. } = *ast.node(id)
+            && matches!(ast.node(name), Node::Ident { .. })
+        {
+            self.0.push((id, name));
+        }
+        Walk::Continue
     }
 }
 

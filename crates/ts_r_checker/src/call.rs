@@ -416,7 +416,82 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let cl = Loc::new(e.file, callee);
         let ft = self.check_expr(cl);
+        // An inaccessible constructor still makes an instance (observed: `c.constructor` is
+        // checked); its arguments are not checked against it.
+        if !self.constructor_accessible(e, ft) {
+            self.resolved_calls.insert(e, None);
+            self.check_args_plain(e, Args::List(args));
+            let sigs = self.signatures_of(ft, SigKind::Construct);
+            return match sigs.first() {
+                Some(&sig) if self.store().sig(sig).type_params == ListId::EMPTY => {
+                    self.return_type_of(sig)
+                }
+                _ => TypeId::ERROR,
+            };
+        }
         self.resolve_call_like(e, cl, ft, type_args, Args::List(args), SigKind::Construct)
+    }
+
+    /// The class of a `private` or `protected` constructor among `ft`'s construct
+    /// signatures, with whether it is private.
+    pub(crate) fn restricted_constructor(&mut self, ft: TypeId) -> Option<(Loc, bool)> {
+        if ft == TypeId::UNRESOLVED || self.store().is_error(ft) {
+            return None;
+        }
+        let sigs = self.signatures_of(ft, SigKind::Construct);
+        let &sig = sigs.first()?;
+        let d = self.store().sig(sig).decl.and_then(Loc::unpack)?;
+        if !matches!(
+            self.node(d),
+            Node::MethodDef {
+                kind: ts_r_ast::MethodKind::Constructor,
+                ..
+            }
+        ) {
+            return None;
+        }
+        let m = self.node(d).modifiers();
+        let private = m.contains(ts_r_ast::Modifiers::PRIVATE);
+        if !private && !m.contains(ts_r_ast::Modifiers::PROTECTED) {
+            return None;
+        }
+        Some((self.enclosing_class(d)?, private))
+    }
+
+    /// `new C()` of a class with a `private` constructor outside its declaration, or a
+    /// `protected` one outside it and its subclasses: TS2673/TS2674 at the expression.
+    fn constructor_accessible(&mut self, e: Loc, ft: TypeId) -> bool {
+        let Some((dc, private)) = self.restricted_constructor(ft) else {
+            return true;
+        };
+        let mut cur = self.enclosing_class(e);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+            if c == dc || (!private && self.class_derives_from(c, dc)) {
+                return true;
+            }
+            cur = self.enclosing_class(c);
+        }
+        if self.reporting(e.file) {
+            let name = match self.c.sym_of_decl(dc) {
+                Some(s) => {
+                    let t = self.declared_type_of_symbol(s);
+                    self.type_to_string(t)
+                }
+                None => String::new(),
+            };
+            let info = if private {
+                dg::CONSTRUCTOR_OF_CLASS_0_IS_PRIVATE_AND_ONLY_ACCESSIBLE_WITHIN_THE_CLASS_DECLARATI_2673
+            } else {
+                dg::CONSTRUCTOR_OF_CLASS_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_THE_CLASS_DECLARA_2674
+            };
+            self.error(e, info, &[&name]);
+        }
+        false
     }
 
     /// Whether the callee's root identifier is an unannotated parameter of a function
@@ -596,6 +671,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.resolved_calls.insert(e, None);
             return TypeId::ANY;
         }
+        // `new f()` of a value with call signatures only is resolved as a call (TS2350/TS2679,
+        // TS7009 under noImplicitAny).
+        if sigs.is_empty() && kind == SigKind::Construct {
+            let call_sigs = self.signatures_of(nt, SigKind::Call);
+            if !call_sigs.is_empty() {
+                return self.new_of_callable(e, cl, &call_sigs, type_args, args);
+            }
+        }
         if sigs.is_empty() {
             self.resolved_calls.insert(e, None);
             self.check_args_plain(e, args);
@@ -653,6 +736,54 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// `new f()` where `f` has call signatures but no construct signatures: the call is
+    /// resolved against the call signatures (arity and argument errors as for `f()`).
+    /// Without `noImplicitAny`, a declared signature returning something other than `void`
+    /// is TS2350 and a `this: void` signature TS2679; with it, TS7009. The result is `any`
+    /// when the chosen signature has a declaration, its return type otherwise.
+    fn new_of_callable(
+        &mut self,
+        e: Loc,
+        cl: Loc,
+        sigs: &[SigId],
+        type_args: Option<NodeId>,
+        args: Args,
+    ) -> TypeId {
+        let sigs = self.reorder_function_overloads(sigs.to_vec());
+        let (sig, _) = self.resolve_call(e, cl, &sigs, type_args, args, SigKind::Call);
+        let Some(sig) = sig else {
+            return TypeId::ANY;
+        };
+        let has_decl = self.store().sig(sig).decl.is_some();
+        if !self.c.opts.no_implicit_any {
+            if has_decl && self.return_type_of(sig) != TypeId::VOID {
+                self.error(
+                    e,
+                    dg::ONLY_A_VOID_FUNCTION_CAN_BE_CALLED_WITH_THE_NEW_KEYWORD_2350,
+                    &[],
+                );
+            }
+            if self.store().sig(sig).this_type == Some(TypeId::VOID) {
+                self.error(
+                    e,
+                    dg::A_FUNCTION_THAT_IS_CALLED_WITH_THE_NEW_KEYWORD_CANNOT_HAVE_A_THIS_TYPE_THAT_IS_V_2679,
+                    &[],
+                );
+            }
+        }
+        if !has_decl {
+            return self.return_type_of(sig);
+        }
+        if self.c.opts.no_implicit_any {
+            self.error(
+                e,
+                dg::NEW_EXPRESSION_WHOSE_TARGET_LACKS_A_CONSTRUCT_SIGNATURE_IMPLICITLY_HAS_AN_ANY_TY_7009,
+                &[],
+            );
+        }
+        TypeId::ANY
+    }
+
     /// A method of a union of array types whose signatures don't combine
     /// (`(string[] | number[]).filter(...)`): the method of an array of the union of the
     /// element types (`(string | number)[]`, readonly when some member is), as tsc does.
@@ -690,6 +821,10 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn check_non_null_callee(&mut self, cl: Loc, t: TypeId) -> TypeId {
         if !self.c.opts.strict_null_checks {
             return t;
+        }
+        // Calling an `unknown` value is TS18046 (TS2571 for a non-name callee).
+        if t == TypeId::UNKNOWN {
+            return self.check_non_null(cl, t);
         }
         let (u, n) = self.nullable_facts(t);
         if !u && !n {
@@ -935,7 +1070,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return TypeId::ANY;
                 }
                 let mut chain = Chain::new();
-                chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
+                // `o.getter()`: TS6234 suggests dropping the call.
+                let is_getter = !tagged
+                    && matches!(self.ast(cl.file).node(cl.node), Node::Member { .. })
+                    && self.property_symbol_of_access(cl).is_some_and(|p| {
+                        self.c
+                            .sym_flags(p)
+                            .contains(ts_r_binder::SymbolFlags::GET_ACCESSOR)
+                    });
+                if is_getter {
+                    chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_BECAUSE_IT_IS_A_GET_ACCESSOR_DID_YOU_MEAN_TO_USE_6234, &[]);
+                } else {
+                    chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
+                }
                 self.no_signatures_chain(&mut chain, t, kind);
                 // A property access callee reports at the name (`o.m()`).
                 let ast = self.ast(cl.file);
@@ -947,12 +1094,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 TypeId::ERROR
             }
             SigKind::Construct => {
-                if !self.signatures_of(t, SigKind::Call).is_empty() {
-                    if self.c.opts.no_implicit_any {
-                        self.error(e, dg::NEW_EXPRESSION_WHOSE_TARGET_LACKS_A_CONSTRUCT_SIGNATURE_IMPLICITLY_HAS_AN_ANY_TY_7009, &[]);
-                    }
-                    return TypeId::ANY;
-                }
+                // (Callees with call signatures are resolved by `new_of_callable`.)
                 let mut chain = Chain::new();
                 chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CONSTRUCTABLE_2351, &[]);
                 self.no_signatures_chain(&mut chain, t, kind);
@@ -1077,6 +1219,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         (min, count + len, open)
     }
 
+    /// Whether the rest parameter of `sig` has a generic type rather than an array type.
+    fn has_generic_rest(&self, sig: SigId) -> bool {
+        let s = self.store();
+        let d = s.sig(sig);
+        d.has_rest()
+            && d.params
+                .last()
+                .is_some_and(|p| s.flags(p.ty).intersects(TypeFlags::INSTANTIABLE))
+    }
+
     fn has_correct_arity(&self, sig: SigId, args: &[Arg]) -> bool {
         let (min, count, has_rest) = self.arity(sig, self.effective_min_args(sig));
         if let Some(pos) = args.iter().position(|a| matches!(a, Arg::Rest(..))) {
@@ -1147,79 +1299,51 @@ impl<'c, 'a> Ck<'c, 'a> {
         let explicit = self.explicit_type_args(type_args.map(|t| Loc::new(e.file, t)));
         // An unterminated tagged template may still get more arguments: too few is fine.
         let incomplete = matches!(args, Args::Tagged(q) if self.template_unterminated(e.file, q));
+        // An empty `<>` is a grammar error only: the call is resolved as if it had none.
+        let explicit = explicit.filter(|x| !x.is_empty());
         // Candidates: correct arity and type argument count.
         let mut candidates: Vec<SigId> = Vec::new();
-        let mut type_arg_mismatch = false;
+        let mut any_type_arity_fits = explicit.is_none();
         for &s in sigs {
+            let type_arity_fits = explicit
+                .as_ref()
+                .is_none_or(|ex| self.sig_takes_type_args(s, ex.len()));
+            any_type_arity_fits |= type_arity_fits;
+            if !type_arity_fits {
+                continue;
+            }
             let fits = self.has_correct_arity(s, &eff)
                 || (incomplete && {
                     let (_, count, has_rest) = self.arity(s, self.effective_min_args(s));
                     has_rest || eff.len() <= count
                 });
-            if !fits {
-                continue;
+            if fits {
+                candidates.push(s);
             }
-            if let Some(ex) = &explicit {
-                let tps = self
-                    .store()
-                    .list_items(self.store().sig(s).type_params)
-                    .to_vec();
-                let min = self.min_type_args(&tps);
-                if ex.len() < min || ex.len() > tps.len() {
-                    type_arg_mismatch = true;
-                    continue;
-                }
-            }
-            candidates.push(s);
         }
         if candidates.is_empty() {
-            if type_arg_mismatch && let Some(ta) = type_args {
-                let s = sigs[0];
-                let tps = self
-                    .store()
-                    .list_items(self.store().sig(s).type_params)
-                    .to_vec();
-                let min = self.min_type_args(&tps);
-                let n = explicit.as_ref().map_or(0, |x| x.len());
-                let expected = if min == tps.len() {
-                    min.to_string()
-                } else {
-                    format!("{min}-{}", tps.len())
-                };
-                // Reported over the type arguments themselves, not the brackets.
-                let ast = self.ast(e.file);
-                let span = match *ast.node(ta) {
-                    Node::TypeArgs { args } => {
-                        match (ast.list(args).first(), ast.list(args).last()) {
-                            (Some(&a), Some(&b)) => Some(Span::new(
-                                self.c.span(Loc::new(e.file, a)).start,
-                                self.c.span(Loc::new(e.file, b)).end,
-                            )),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                };
-                let args = [expected.as_str(), &n.to_string()];
-                match span {
-                    Some(sp) => self.error_span(
-                        e.file,
-                        sp,
-                        dg::EXPECTED_0_TYPE_ARGUMENTS_BUT_GOT_1_2558,
-                        &args,
-                    ),
-                    None => self.error(
-                        Loc::new(e.file, ta),
-                        dg::EXPECTED_0_TYPE_ARGUMENTS_BUT_GOT_1_2558,
-                        &args,
-                    ),
-                }
+            // No signature takes this many type arguments: that is the error, whatever the
+            // value arguments are.
+            if !any_type_arity_fits && let (Some(ta), Some(ex)) = (type_args, &explicit) {
+                self.report_type_arg_arity_error(e.file, ta, sigs, ex.len());
                 // The arguments are still checked against the first signature with the
                 // written type arguments (extra ones dropped, missing ones filled).
-                let ex = explicit.clone().unwrap_or_default();
-                return Some(self.instantiate_candidate(e, s, &eff, Some(&ex)));
+                let ex = ex.clone();
+                return Some(self.instantiate_candidate(e, sigs[0], &eff, Some(&ex)));
             }
-            self.report_arity_error(e, cl, sigs, &eff);
+            // Otherwise the argument count is wrong for every signature that takes the
+            // type arguments.
+            if explicit.is_some() {
+                let n = explicit.as_ref().map_or(0, |x| x.len());
+                let fitting: Vec<SigId> = sigs
+                    .iter()
+                    .copied()
+                    .filter(|&s| self.sig_takes_type_args(s, n))
+                    .collect();
+                self.report_arity_error(e, cl, &fitting, &eff);
+            } else {
+                self.report_arity_error(e, cl, sigs, &eff);
+            }
             self.overload_failed = true;
             return sigs.first().copied();
         }
@@ -1288,10 +1412,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         let mut last_failures: Vec<(SigId, Failure)> = Vec::new();
+        // An instance of a generic rest parameter (`...args: TS`) may take a different
+        // number of arguments: the first such instance that does not fit is the arity error
+        // reported if no candidate fits otherwise.
+        let mut arity_failure: Option<SigId> = None;
         for &rel in relations {
             last_failures.clear();
             for &cand in &candidates {
                 let inst = self.instantiate_candidate(e, cand, &eff, explicit.as_deref());
+                if inst != cand
+                    && self.has_generic_rest(cand)
+                    && !self.has_correct_arity(inst, &eff)
+                {
+                    arity_failure.get_or_insert(inst);
+                    continue;
+                }
                 let failure = if fixing {
                     match self.check_candidate_args_in(e, inst, &eff, rel, ArgPass::Skip(&sens)) {
                         Some(f) => Some(f),
@@ -1316,6 +1451,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // Report.
         self.overload_failed = true;
+        if last_failures.is_empty()
+            && let Some(inst) = arity_failure
+        {
+            self.report_arity_error(e, cl, &[inst], &eff);
+            return Some(inst);
+        }
         // When every overload fails and some is generic, the call stands for the overload
         // with the most parameters (the first of those), its type arguments inferred from
         // the arguments that are not context sensitive (observed: `unknown` for type
@@ -1616,26 +1757,120 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The arity error for a call with no candidate of the right arity.
+    /// Whether `s` accepts `n` explicit type arguments (between its required and total
+    /// type parameter counts).
+    fn sig_takes_type_args(&mut self, s: SigId, n: usize) -> bool {
+        let (min, max) = self.type_arg_bounds(s);
+        n >= min && n <= max
+    }
+
+    /// The fewest and most type arguments `s` takes.
+    fn type_arg_bounds(&mut self, s: SigId) -> (usize, usize) {
+        let tps = self
+            .store()
+            .list_items(self.store().sig(s).type_params)
+            .to_vec();
+        (self.min_type_args(&tps), tps.len())
+    }
+
+    /// TS2558 / TS2743 for a call whose `n` type arguments no signature takes. One signature:
+    /// its range. Overloads: the nearest counts below and above `n`; both present gives
+    /// TS2743, otherwise TS2558 names whichever exists.
+    fn report_type_arg_arity_error(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        ta: NodeId,
+        sigs: &[SigId],
+        n: usize,
+    ) {
+        let got = n.to_string();
+        let (code, first, second, third) = if let [s] = sigs {
+            let (min, max) = self.type_arg_bounds(*s);
+            let expected = if min == max {
+                min.to_string()
+            } else {
+                format!("{min}-{max}")
+            };
+            (
+                dg::EXPECTED_0_TYPE_ARGUMENTS_BUT_GOT_1_2558,
+                expected,
+                got,
+                None,
+            )
+        } else {
+            let mut below: Option<usize> = None;
+            let mut above: Option<usize> = None;
+            for &s in sigs {
+                let (min, max) = self.type_arg_bounds(s);
+                if min > n {
+                    above = Some(above.map_or(min, |a| a.min(min)));
+                } else if max < n {
+                    below = Some(below.map_or(max, |b| b.max(max)));
+                }
+            }
+            match (below, above) {
+                (Some(b), Some(a)) => (
+                    dg::NO_OVERLOAD_EXPECTS_0_TYPE_ARGUMENTS_BUT_OVERLOADS_DO_EXIST_THAT_EXPECT_EITHER_1_2743,
+                    got,
+                    b.to_string(),
+                    Some(a.to_string()),
+                ),
+                (b, a) => (
+                    dg::EXPECTED_0_TYPE_ARGUMENTS_BUT_GOT_1_2558,
+                    b.or(a).unwrap_or(0).to_string(),
+                    got,
+                    None,
+                ),
+            }
+        };
+        let args3;
+        let args: &[&str] = match &third {
+            Some(t) => {
+                args3 = [first.as_str(), second.as_str(), t.as_str()];
+                &args3
+            }
+            None => &[first.as_str(), second.as_str()],
+        };
+        // Reported over the type arguments themselves, not the brackets.
+        let ast = self.ast(file);
+        let span = match *ast.node(ta) {
+            Node::TypeArgs { args } => match (ast.list(args).first(), ast.list(args).last()) {
+                (Some(&a), Some(&b)) => Some(Span::new(
+                    self.c.span(Loc::new(file, a)).start,
+                    self.c.span(Loc::new(file, b)).end,
+                )),
+                _ => None,
+            },
+            _ => None,
+        };
+        match span {
+            Some(sp) => self.error_span(file, sp, code, args),
+            None => self.error(Loc::new(file, ta), code, args),
+        }
+    }
+
     fn report_arity_error(&mut self, e: Loc, cl: Loc, sigs: &[SigId], eff: &[Arg]) {
         if !self.reporting(e.file) {
             return;
         }
         let n = eff.len();
+        // Fewest required and most accepted arguments over the signatures; the largest
+        // required count under `n` and the smallest accepted count over it.
         let mut min_all = usize::MAX;
         let mut max_all = 0usize;
         let mut has_rest = false;
-        let mut below = usize::MAX;
-        let mut above = 0usize;
+        let mut largest_min_below: Option<usize> = None;
+        let mut smallest_count_above: Option<usize> = None;
         for &s in sigs {
             let (min, count, rest) = self.arity(s, self.store().sig(s).min_args as usize);
             min_all = min_all.min(min);
             max_all = max_all.max(count);
             has_rest |= rest;
-            if min > n {
-                below = below.min(min);
+            if min < n && largest_min_below.is_none_or(|b| min > b) {
+                largest_min_below = Some(min);
             }
-            if count < n && !rest {
-                above = above.max(count);
+            if count > n && smallest_count_above.is_none_or(|a| count < a) {
+                smallest_count_above = Some(count);
             }
         }
         if let Some(pos) = eff.iter().position(|a| matches!(a, Arg::Rest(..))) {
@@ -1643,16 +1878,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.error(Loc::new(e.file, node), dg::A_SPREAD_ARGUMENT_MUST_EITHER_HAVE_A_TUPLE_TYPE_OR_BE_PASSED_TO_A_REST_PARAMETER_2556, &[]);
             return;
         }
-        if n >= min_all && (has_rest || n <= max_all) && below != usize::MAX && above != 0 {
+        // Strictly inside the overall range but matching no overload.
+        if min_all < n
+            && n < max_all
+            && let (Some(below), Some(above)) = (largest_min_below, smallest_count_above)
+        {
             self.error_span(
                 e.file,
                 self.call_error_span(e, cl),
                 dg::NO_OVERLOAD_EXPECTS_0_ARGUMENTS_BUT_OVERLOADS_DO_EXIST_THAT_EXPECT_EITHER_1_OR_2_2575,
-                &[&n.to_string(), &above.to_string(), &below.to_string()],
+                &[&n.to_string(), &below.to_string(), &above.to_string()],
             );
             return;
         }
-        let expected = if has_rest && n < min_all {
+        let expected = if has_rest {
             None
         } else if min_all == max_all {
             Some(min_all.to_string())
@@ -1661,11 +1900,24 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let ast = self.ast(e.file);
         // Elements of a spread tuple are arguments too: the span starts at the spread.
-        let too_many = n > max_all && !has_rest;
+        let too_few = n < min_all;
+        let too_many = !too_few && n > max_all;
         let span = if too_many {
             let first = eff[max_all].node();
             let last = eff[n - 1].node();
-            Span::new(ast.span(first).start, ast.span(last).end)
+            let mut start = ast.span(first).start;
+            // A missing argument (`${ ` at the end of a broken template) is empty: its
+            // span starts at the next token, past the whitespace.
+            if ast.span(first).is_empty() {
+                let text = self.c.file(e.file).text.as_bytes();
+                while text
+                    .get(start as usize)
+                    .is_some_and(|b| b.is_ascii_whitespace())
+                {
+                    start += 1;
+                }
+            }
+            Span::new(start, ast.span(last).end.max(start))
         } else {
             self.call_error_span(e, cl)
         };
@@ -1684,7 +1936,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 &[&min_all.to_string(), &n.to_string()],
             ),
         }
-        if !too_many && below != usize::MAX {
+        if too_few {
             self.relate_missing_argument(mark, sigs, n);
         }
     }
@@ -2267,6 +2519,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                             let at = self.speculative_arg_type(arm, pt);
                             self.infer_types(&mut ctx, at, pt, 0);
                         }
+                        // So do the elements of an array literal that are not
+                        // (`[makeFooer(), { foo: (v) => v }]` infers `Fooer` for `T[]`).
+                        if let Some(at) = self.context_free_array_elements_type(l, pt) {
+                            self.infer_types(&mut ctx, at, pt, 0);
+                        }
                         deferred.push(i);
                         continue;
                     }
@@ -2295,9 +2552,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                         // A tuple-like constraint the context implies is an array (`T extends
                         // readonly unknown[] | []` with `T = Post[]`): no tuple.
-                        Some(m) if self.is_tuple_like_context(pt) => {
+                        // So is an array of tuples (`[string, number][]`): its elements
+                        // stay tuple contexts.
+                        Some(m) => {
+                            let tuple_like = self.is_tuple_like_context(pt);
                             let r = self.instantiate_return_context(pt, m, false);
-                            if r != pt && self.c.is_array_type(r) {
+                            if r != pt
+                                && self.c.is_array_type(r)
+                                && (tuple_like || self.is_array_of_tuples(r))
+                            {
                                 r
                             } else {
                                 pt
@@ -2374,12 +2637,57 @@ impl<'c, 'a> Ck<'c, 'a> {
             let tps = ctx.params.clone();
             let mut mentioned = vec![false; tps.len()];
             let ptn = self.non_nullable(pt);
-            let pt_calls = self.signatures_of(ptn, SigKind::Call);
+            let mut pt_calls = self.signatures_of(ptn, SigKind::Call);
             let callable = !pt_calls.is_empty();
+            // Functions nested in an array or object literal argument fix what their own
+            // contextual signatures mention (`[cb => cb(null, 1)]` against `Task<T>[]`).
+            let nested = !matches!(
+                self.ast(e.file)
+                    .node(crate::nodes::skip_parens(self.ast(e.file), n)),
+                Node::Arrow { .. } | Node::FunctionExpr { .. }
+            );
+            if nested {
+                pt_calls.clear();
+                // (A homomorphic mapped type infers by reversing it: nothing to fix.)
+                // (Only when every element or property is such a function: the others would
+                // infer first.)
+                if self.is_generic_mapped_type(ptn)
+                    || !self.nested_context_sigs(Loc::new(e.file, n), pt, 0, &mut pt_calls)
+                {
+                    pt_calls.clear();
+                }
+                // A function returning a type parameter that a later one's parameters mention
+                // infers it before that one is typed (intra-expression inference, not
+                // modelled here).
+                let mut returned = vec![false; tps.len()];
+                for &cs in &pt_calls.clone() {
+                    let d = self.store().sig(cs);
+                    let ptys: Vec<TypeId> = d.params.iter().map(|p| p.ty).collect();
+                    let rt = self.return_type_of(cs);
+                    for (j, &tp) in tps.iter().enumerate() {
+                        if returned[j] && ptys.iter().any(|&t| self.type_mentions(t, tp)) {
+                            pt_calls.clear();
+                            break;
+                        }
+                    }
+                    if pt_calls.is_empty() {
+                        break;
+                    }
+                    for (j, &tp) in tps.iter().enumerate() {
+                        if self.type_mentions(rt, tp) {
+                            returned[j] = true;
+                        }
+                    }
+                }
+            }
             // Only the positions where a function argument has a parameter without a type
             // annotation take a contextual type (`(set: string[], part) => ..` leaves the
             // `U` of `prev: U` to be inferred from the body as well).
-            let untyped = self.untyped_param_positions(Loc::new(e.file, n));
+            let untyped = if nested {
+                None
+            } else {
+                self.untyped_param_positions(Loc::new(e.file, n))
+            };
             for cs in pt_calls {
                 let n = self.store().sig(cs).params.len();
                 for k in 0..n {
@@ -2570,6 +2878,73 @@ impl<'c, 'a> Ck<'c, 'a> {
             .collect()
     }
 
+    /// Whether `t` is an array whose elements are tuples.
+    pub(crate) fn is_array_of_tuples(&self, t: TypeId) -> bool {
+        self.c.is_array_type(t)
+            && self.c.type_args_of(t).first().is_some_and(|&el| {
+                self.every_member(el, |m| self.store().tuple_shape_of(m).is_some())
+            })
+    }
+
+    /// The contextual call signatures of the context-sensitive functions in the array and
+    /// object literal `l` (the elements and property values of `l` typed by `ct`); `false`
+    /// when some element or property is not one of them (nor such a literal).
+    fn nested_context_sigs(
+        &mut self,
+        l: Loc,
+        ct: TypeId,
+        depth: u32,
+        out: &mut Vec<SigId>,
+    ) -> bool {
+        if depth > 8 || out.len() > 64 {
+            return false;
+        }
+        let ast = self.ast(l.file);
+        let n = crate::nodes::skip_parens(ast, l.node);
+        match *ast.node(n) {
+            Node::Arrow { .. } | Node::FunctionExpr { .. } => {
+                let t = self.non_nullable(ct);
+                out.extend(self.signatures_of(t, SigKind::Call));
+            }
+            Node::ArrayLit { elements } => {
+                for (i, &x) in ast.list(elements).to_vec().iter().enumerate() {
+                    let xl = Loc::new(l.file, x);
+                    if matches!(ast.node(x), Node::Spread { .. })
+                        || !self.is_context_sensitive_expr(xl)
+                    {
+                        return false;
+                    }
+                    if let Some(t) = self.contextual_element_type(ct, i, false, None)
+                        && !self.nested_context_sigs(xl, t, depth + 1, out)
+                    {
+                        return false;
+                    }
+                }
+            }
+            Node::ObjectLit { props } => {
+                for &p in ast.list(props).to_vec().iter() {
+                    let (key, value) = match *ast.node(p) {
+                        Node::Property { key, value, .. } | Node::MethodDef { key, value, .. } => {
+                            (key, value)
+                        }
+                        _ => return false,
+                    };
+                    let vl = Loc::new(l.file, value);
+                    if !self.is_context_sensitive_expr(vl) {
+                        return false;
+                    }
+                    if let Some(t) = self.contextual_member_type(ct, Loc::new(l.file, key))
+                        && !self.nested_context_sigs(vl, t, depth + 1, out)
+                    {
+                        return false;
+                    }
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     /// `at` has a single generic call signature and the parameter type `pt` has a call
     /// signature whose parameters mention one of `tps`.
     fn is_generic_function_for(&mut self, at: TypeId, pt: TypeId, tps: &[TypeId]) -> bool {
@@ -2653,6 +3028,36 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         false
+    }
+
+    /// For an array literal argument `l` of the array parameter type `pt`: the array of the
+    /// union of the types of its elements that are not context sensitive (none if all are,
+    /// or `l` has spreads).
+    fn context_free_array_elements_type(&mut self, l: Loc, pt: TypeId) -> Option<TypeId> {
+        let ast = self.ast(l.file);
+        let Node::ArrayLit { elements } = *ast.node(crate::nodes::skip_parens(ast, l.node)) else {
+            return None;
+        };
+        if !self.c.is_array_type(pt) {
+            return None;
+        }
+        let et = *self.c.type_args_of(pt).first()?;
+        let mut parts = Vec::new();
+        for &x in ast.list(elements).to_vec().iter() {
+            let xl = Loc::new(l.file, x);
+            if matches!(self.ast(l.file).node(x), Node::Spread { .. }) {
+                return None;
+            }
+            if self.is_context_sensitive_expr(xl) {
+                continue;
+            }
+            parts.push(self.speculative_arg_type(xl, et));
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        let u = self.union(&parts);
+        Some(self.create_array(u, false))
     }
 
     /// The arms of a (nested) conditional expression that are not context sensitive.
@@ -2860,13 +3265,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             None
         };
+        // A rest parameter whose type is neither an array nor a tuple (`never`, a union of
+        // tuples, an array subtype) takes its arguments as one tuple.
+        let spread_rest = if has_rest && rest_tuple.is_none() {
+            self.non_array_rest_type(sig)
+                .filter(|_| !eff.iter().skip(count).any(|a| matches!(a, Arg::Rest(..))))
+        } else {
+            None
+        };
         let mut tuple_els: Vec<TypeId> = Vec::new();
         for (i, &a) in eff.iter().enumerate() {
-            let rest_ctx = match &rest_tuple {
-                Some(r) if i >= count => Some(r.ctx[i - count]),
+            let rest_ctx = match (&rest_tuple, spread_rest) {
+                (Some(r), _) if i >= count => Some(r.ctx[i - count]),
+                // The element's contextual type is the union of each member's element,
+                // without `unknown` absorbing the others: `K` from `[K, number] | [unknown,
+                // string]` stays generic, so a `keyof T` argument keeps its type.
+                (None, Some(rt)) if i >= count => {
+                    let name = (i - count).to_string();
+                    Some(
+                        self.quietly(|ck| ck.contextual_property_type(rt, &name))
+                            .unwrap_or(TypeId::ANY),
+                    )
+                }
                 _ => None,
             };
-            let tuple_ctx = rest_ctx.filter(|_| rest_tuple.as_ref().is_some_and(|r| i >= r.start));
+            let tuple_ctx = rest_ctx.filter(|_| match &rest_tuple {
+                Some(r) => i >= r.start,
+                None => spread_rest.is_some(),
+            });
             let Some(pt) = rest_ctx.or_else(|| self.param_type_at(sig, i)) else {
                 if let Arg::Rest(n, _) = a {
                     return Some(Failure::Spread(n));
@@ -2955,7 +3381,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 break;
             }
         }
-        if let Some(RestTuple { start, param, .. }) = rest_tuple {
+        let spread = rest_tuple
+            .map(|r| (r.start, r.param))
+            .or(spread_rest.map(|rt| (count, rt)));
+        if let Some((start, param)) = spread {
             let els: Vec<crate::declared::TupleEl> = tuple_els
                 .iter()
                 .map(|&ty| crate::declared::TupleEl {
@@ -2975,6 +3404,29 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         None
+    }
+
+    /// The type of `sig`'s rest parameter when it is not an array or tuple (nor `any`, an
+    /// error, or still generic): such a rest parameter is related to its arguments as a
+    /// tuple.
+    fn non_array_rest_type(&self, sig: SigId) -> Option<TypeId> {
+        let s = self.store();
+        let d = s.sig(sig);
+        if !d.has_rest() {
+            return None;
+        }
+        let t = d.params.last()?.ty;
+        if self.c.is_array_like_type(t)
+            || s.is_error(t)
+            || t == TypeId::UNRESOLVED
+            || s.flags(t).intersects(TypeFlags::ANY | TypeFlags::INSTANTIABLE)
+            // (Combined signatures' intersected tuples are taken by position, like tsc's
+            // parameters of a union's call.)
+            || s.flags(t).contains(TypeFlags::INTERSECTION)
+        {
+            return None;
+        }
+        Some(t)
     }
 
     /// For a rest parameter whose tuple type has a rest element (`[...string[], number]`,
@@ -3181,9 +3633,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 param,
                 tuple,
             } => {
-                let node = Loc::new(e.file, eff[index].node());
-                let expr = match eff[index] {
-                    Arg::Expr(n) if !tuple => Some(Loc::new(e.file, n)),
+                // (A tuple of no arguments is reported at the call.)
+                let mut node = eff.get(index).map_or(e, |a| Loc::new(e.file, a.node()));
+                let expr = match eff.get(index) {
+                    Some(&Arg::Expr(n)) if !tuple => {
+                        let n = crate::nodes::effective_check_node(self.ast(e.file), n);
+                        node = Loc::new(e.file, n);
+                        Some(node)
+                    }
                     _ => None,
                 };
                 if let Some(x) = expr
@@ -3261,11 +3718,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 param,
                 tuple,
             } => {
-                let node = Loc::new(e.file, eff[index].node());
-                if let Arg::Expr(n) = eff[index]
+                let mut node = eff.get(index).map_or(e, |a| Loc::new(e.file, a.node()));
+                if let Some(&Arg::Expr(n)) = eff.get(index)
+                    && !tuple
+                {
+                    node = Loc::new(
+                        e.file,
+                        crate::nodes::effective_check_node(self.ast(e.file), n),
+                    );
+                }
+                if let Some(Arg::Expr(_)) = eff.get(index)
                     && !tuple
                     && self.reporting(e.file)
                 {
+                    let n = node.node;
                     let mark = self.diags.len();
                     if self.elaborate_argument(Loc::new(e.file, n), arg_type, param) {
                         // Re-head what the elaboration reported.
@@ -3289,7 +3755,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         info: dg::ARGUMENT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_PARAMETER_OF_TYPE_1_2345,
                     }),
                 );
-                if let Arg::Expr(n) = eff[index]
+                if let Some(&Arg::Expr(n)) = eff.get(index)
                     && !tuple
                 {
                     let x = crate::nodes::skip_parens(self.ast(e.file), n);

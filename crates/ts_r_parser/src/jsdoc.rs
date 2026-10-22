@@ -85,10 +85,12 @@ pub fn attach_jsdoc_with_syntax(ast: &mut Ast, src: &str) -> (Vec<Diagnostic>, V
     let kind = ast.source_kind;
     let taken = std::mem::replace(ast, Ast::new(kind, 0));
     let mut d = Doc::new(src, &masked, taken);
-    for (&span, &own_line) in docs.iter().zip(own_line.iter()) {
+    for (i, (&span, &own_line)) in docs.iter().zip(own_line.iter()).enumerate() {
         if d.p.halted {
             break;
         }
+        let next = next_token_pos(src.as_bytes(), span.end as usize) as u32;
+        d.shadowed = docs.get(i + 1).is_some_and(|n| n.start < next);
         d.comment(span, own_line);
     }
     d.finish();
@@ -232,6 +234,9 @@ struct Doc<'a> {
     /// Statements to insert: `(list owner, insert before this position, statement)`.
     inserts: Vec<(NodeId, u32, NodeId)>,
     desugar_work: usize,
+    /// Another JSDoc comment follows the current one before the code it documents: tsc 7
+    /// reads only the last, so the current one's empty `<>` lists are not reported.
+    shadowed: bool,
 }
 
 impl<'a> Doc<'a> {
@@ -262,6 +267,7 @@ impl<'a> Doc<'a> {
             syntax: Vec::new(),
             inserts: Vec::new(),
             desugar_work: src.len().saturating_mul(4).saturating_add(1024),
+            shadowed: false,
         }
     }
 
@@ -423,6 +429,7 @@ impl<'a> Doc<'a> {
         let names: Vec<&str> = raw.iter().map(|&r| self.tag_name(r)).collect();
         let has_typedef = names.iter().any(|n| matches!(*n, "typedef" | "callback"));
         let is_overload = names.contains(&"overload");
+        let nested = self.nested_templates(raw, &names);
         let record_host = t
             .func
             .or(t.class)
@@ -455,7 +462,7 @@ impl<'a> Doc<'a> {
                         j += 1;
                     }
                     let tpl = if typedefs.is_empty() {
-                        self.templates_in(raw, &names, i, j)
+                        self.templates_in(raw, &names, &nested)
                     } else {
                         Vec::new()
                     };
@@ -486,7 +493,7 @@ impl<'a> Doc<'a> {
                     i = j;
                     continue;
                 }
-                "template" if !has_typedef => {
+                "template" if !has_typedef && !nested[i] => {
                     template_at = template_at.or(Some(span));
                     templates.extend(self.template(r));
                 }
@@ -750,7 +757,19 @@ impl<'a> Doc<'a> {
             }
         }
         self.p.grammar_diags = self.p.grammar_diags.min(self.p.diags.len() as u32);
-        self.p.deferred.clear();
+        // Grammar errors are dropped in JSDoc types, except empty `<>` lists (TS1098,
+        // TS1099), which tsc reports there next to JSDoc syntax errors (in the last
+        // comment before the code only: syntaxErrors).
+        let shadowed = self.shadowed;
+        for d in self.p.deferred.drain(..) {
+            if !shadowed
+                && matches!(d.code, 1098 | 1099)
+                && d.span.start >= doc.start
+                && d.span.start <= doc.end
+            {
+                self.diags.push(d);
+            }
+        }
         any
     }
 
@@ -1047,6 +1066,12 @@ impl<'a> Doc<'a> {
                         default = Some(ty);
                     }
                     i = self.skip_ws(end, r.end);
+                } else if !self.diags.iter().any(|d| d.span.start == i) {
+                    // `[T]` without a default: `'=' expected` at what follows the name
+                    // (jsdocTemplateTagDefault).
+                    let span = Span::new(i, (i + 1).min(r.end));
+                    self.diags
+                        .push(Diagnostic::new(messages::EXPECTED, span, &["="]));
                 }
                 if self.bytes().get(i as usize) == Some(&b']') {
                     i += 1;
@@ -1118,20 +1143,50 @@ impl<'a> Doc<'a> {
         }
     }
 
-    fn templates_in(
-        &mut self,
-        raw: &[RawTag],
-        names: &[&str],
-        from: usize,
-        to: usize,
-    ) -> Vec<NodeId> {
-        // `@template` tags anywhere in a comment with a typedef belong to its first typedef.
-        let _ = (from, to);
+    fn templates_in(&mut self, raw: &[RawTag], names: &[&str], nested: &[bool]) -> Vec<NodeId> {
+        // `@template` tags anywhere in a comment with a typedef belong to its first typedef,
+        // except those among a typedef's or callback's own tags.
         let mut out = Vec::new();
         for (k, &r) in raw.iter().enumerate() {
-            if names[k] == "template" {
+            if names[k] == "template" && !nested.get(k).copied().unwrap_or(false) {
                 out.extend(self.template(r));
             }
+        }
+        out
+    }
+
+    /// Per tag, whether it is a `@template` among the tags that belong to a `@typedef` (its
+    /// `@property`/`@prop`/`@type` tags, when it takes them), `@callback` or `@overload`
+    /// (their `@param`/`@arg`/`@argument` tags), where tsc 7 reads it as their child: it
+    /// is TS8039 at the tag name and declares nothing. `@this` continues the run too.
+    fn nested_templates(&mut self, raw: &[RawTag], names: &[&str]) -> Vec<bool> {
+        let mut out = vec![false; raw.len()];
+        let mut i = 0;
+        while i < raw.len() {
+            let children: &[&str] = match names[i] {
+                "typedef" if self.typedef_takes_children(raw[i]) => {
+                    &["property", "prop", "type", "template", "this"]
+                }
+                "callback" | "overload" => &["param", "arg", "argument", "template", "this"],
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            };
+            let mut j = i + 1;
+            while j < raw.len() && children.contains(&names[j]) {
+                if names[j] == "template" {
+                    out[j] = true;
+                    let r = raw[j];
+                    self.diags.push(Diagnostic::new(
+                        messages::TEMPLATE_AFTER_TYPEDEF,
+                        Span::new(r.at + 1, r.name_end),
+                        &[],
+                    ));
+                }
+                j += 1;
+            }
+            i = j;
         }
         out
     }
@@ -2279,7 +2334,9 @@ impl<'a> Doc<'a> {
         self.p.lx.seek(start);
         self.p.lx.next_token();
         self.p.prev_end = start;
+        self.p.jsdoc_import = true;
         let imp = self.p.parse_import(start, Modifiers::NONE);
+        self.p.jsdoc_import = false;
         let lexed: Vec<Diagnostic> = self.p.lx.diagnostics.drain(..).collect();
         self.p.lx = saved_lx;
         self.p.src = saved_src;
@@ -2298,6 +2355,18 @@ impl<'a> Doc<'a> {
         };
         if last && source_missing {
             self.import_tag_specifier_errors(&mut new, start, r.end, source_end);
+        }
+        if source_missing
+            && let Some(from) = new
+                .iter()
+                .filter(|d| d.code == 1005 && d.message == "'from' expected.")
+                .map(|d| d.span.start)
+                .min()
+            && from < r.end
+        {
+            // `@import defer * as ns from "m"`: nothing after the missing `from` is an
+            // error (importDeferJsdoc).
+            new.retain(|d| d.span.start <= from);
         }
         // `@import x = require("m")`: no import-equals form; the token after `x` is where
         // `from` and the specifier are missing (observed tsc 7).
@@ -2563,7 +2632,12 @@ impl Parser<'_> {
             );
         }
         if self.eat(T::DotDotDot) {
-            let ty = self.parse_type();
+            let inner = self.start();
+            let mut ty = self.parse_type();
+            // `{...*=}`: an optional rest, which the checker reports (jsdocParseStarEquals).
+            if self.eat(T::Eq) {
+                ty = self.finish_node(inner, Node::OptionalType { ty });
+            }
             return self.finish_node(start, Node::RestType { ty });
         }
         let ty = self.parse_type_or_predicate();
@@ -2744,6 +2818,16 @@ mod tests {
         }
         let deep = format!("/** @type {{{}}} */ var x;", "Array<".repeat(20_000));
         let _ = run(&deep);
+    }
+
+    /// `@import defer`: no import phase in JSDoc; `defer` is a default import, then
+    /// `'from' expected` and nothing after it (importDeferJsdoc).
+    #[test]
+    fn import_tag_without_phase() {
+        let src = "/**\n * @import defer * as ns from \"./types\"\n */\nlet a = 2;\n";
+        let (_, d) = run(src);
+        let got: Vec<(u32, u32)> = d.iter().map(|d| (d.code, d.span.start)).collect();
+        assert_eq!(got, vec![(1005, 21), (1141, 21)], "{d:?}");
     }
 
     #[test]

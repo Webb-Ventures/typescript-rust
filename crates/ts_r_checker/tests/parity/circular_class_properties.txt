@@ -1,0 +1,7 @@
+a.ts(4,5): error TS7022: '#foo' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(4,17): error TS2729: Property '#bar' is used before its initialization.
+a.ts(5,5): error TS7022: '#bar' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(6,5): error TS7022: '["#baz"]' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(7,5): error TS7022: 'a' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(7,14): error TS2729: Property 'b' is used before its initialization.
+a.ts(8,5): error TS7022: 'b' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.

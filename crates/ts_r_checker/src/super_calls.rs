@@ -1,5 +1,5 @@
 //! `super` placement (TS2335, TS2336, TS2337, TS2660) and `super()` in constructors of
-//! derived classes (TS2377, TS17009, TS17011).
+//! derived classes (TS2377, TS17005, TS17009, TS17011).
 //!
 //! Rules observed from tsc 7.0.2, for the constructor (with a body) of a class whose
 //! `extends` expression is not `null`:
@@ -8,12 +8,21 @@
 //! - `this` (TS17009) or `super.x` (TS17011) where `super()` has not been called on every
 //!   path from the start of the constructor (parameter initializers included). Only `this`
 //!   whose container is the constructor itself counts: arrow and function bodies do not,
-//!   decorators of a class nested in the constructor do. Unreachable code is fine.
+//!   decorators of a class nested in the constructor (or of its members and parameters)
+//!   and the heritage clause of a nested class do. Unreachable code is fine.
+//! - Without native class fields (`useDefineForClassFields` and ES2022+), a class with an
+//!   initialized instance property, a `#private` member or a parameter property needs its
+//!   first `super(...)` call (source order, not inside functions) to be a statement directly
+//!   in the body, else TS2401 at the call; and no earlier body statement may mention `this`
+//!   or `super` outside functions and property declarations, else TS2376 at the
+//!   constructor (tsc: checker.go, constructor declaration check).
+//!
+//! - A class that `extends null`: the first `super(...)` call is TS17005.
 //!
 //! The flow graph records calls only as statements, so a constructor with a `super(...)`
 //! call inside a larger expression (`super() || this`) is not checked for TS17009/TS17011.
 
-use ts_r_ast::{MethodKind, Node, NodeId};
+use ts_r_ast::{Ast, MethodKind, Modifiers, Node, NodeId};
 use ts_r_binder::{FlowId, FlowKind};
 
 use crate::checker::{Ck, Loc};
@@ -84,12 +93,116 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         if !self.extends_non_null(Loc::new(m.file, class)) {
+            // A class that `extends null` has no base constructor to call: TS17005 at the
+            // first `super(...)` call.
+            if self.has_extends_clause(Loc::new(m.file, class))
+                && let Some(call) = self.first_super_call(Loc::new(m.file, value))
+            {
+                self.error(
+                    Loc::new(m.file, call),
+                    dg::A_CONSTRUCTOR_CANNOT_CONTAIN_A_SUPER_CALL_WHEN_ITS_CLASS_EXTENDS_NULL_17005,
+                    &[],
+                );
+            }
             return;
         }
         if self.super_calls(Loc::new(m.file, value)) == SuperCalls::None {
             self.error(
                 m,
                 dg::CONSTRUCTORS_FOR_DERIVED_CLASSES_MUST_CONTAIN_A_SUPER_CALL_2377,
+                &[],
+            );
+            return;
+        }
+        self.check_super_call_position(m, class, value);
+    }
+
+    /// TS2401/TS2376: without native class fields, a derived class with initialized instance
+    /// properties, private names or parameter properties needs its first `super(...)` call
+    /// as a statement directly in the constructor body, before any statement that touches
+    /// `this` or `super`.
+    fn check_super_call_position(&mut self, m: Loc, class: NodeId, func: NodeId) {
+        let native_fields = self.c.opts.use_define_for_class_fields
+            && self.c.opts.target >= ts_r_config::ScriptTarget::ES2022;
+        if native_fields {
+            return;
+        }
+        let ast = self.ast(m.file);
+        let (Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. }) = *ast.node(class)
+        else {
+            return;
+        };
+        let Node::FunctionExpr {
+            params,
+            body: Some(body),
+            ..
+        } = *ast.node(func)
+        else {
+            return;
+        };
+        let private = |key: NodeId| matches!(ast.node(key), Node::PrivateName { .. });
+        let fields = ast.list(members).iter().any(|&mm| match *ast.node(mm) {
+            Node::PropertyDef {
+                modifiers,
+                key,
+                value,
+                ..
+            } => private(key) || (value.is_some() && !modifiers.contains(Modifiers::STATIC)),
+            Node::MethodDef { key, .. } => private(key),
+            _ => false,
+        });
+        let param_props = ast.list(params).iter().any(|&p| {
+            matches!(*ast.node(p), Node::Param { modifiers, .. } if modifiers.intersects(
+                Modifiers::PUBLIC
+                    | Modifiers::PRIVATE
+                    | Modifiers::PROTECTED
+                    | Modifiers::READONLY
+                    | Modifiers::OVERRIDE
+            ))
+        });
+        if !fields && !param_props {
+            return;
+        }
+        let Some(call) = first_super_call(ast, body) else {
+            return;
+        };
+        let parents = self.c.file(m.file).parents();
+        let mut up = parents.parent(call);
+        while let Some(p) = up
+            && matches!(ast.node(p), Node::Paren { .. })
+        {
+            up = parents.parent(p);
+        }
+        let root_level = up.is_some_and(|s| {
+            matches!(ast.node(s), Node::ExprStmt { .. }) && parents.parent(s) == Some(body)
+        });
+        if !root_level {
+            self.error(
+                Loc::new(m.file, call),
+                dg::A_SUPER_CALL_MUST_BE_A_ROOT_LEVEL_STATEMENT_WITHIN_A_CONSTRUCTOR_OF_A_DERIVED_CL_2401,
+                &[],
+            );
+            return;
+        }
+        let Node::Block { stmts } = *ast.node(body) else {
+            return;
+        };
+        let mut first = false;
+        for &s in ast.list(stmts) {
+            if let Node::ExprStmt { expr } = *ast.node(s)
+                && is_super_call(ast, crate::nodes::skip_outer_expressions(ast, expr))
+            {
+                first = true;
+                break;
+            }
+            if touches_this_or_super(ast, s) {
+                break;
+            }
+        }
+        if !first {
+            self.error(
+                m,
+                dg::A_SUPER_CALL_MUST_BE_THE_FIRST_STATEMENT_IN_THE_CONSTRUCTOR_TO_REFER_TO_SUPER_OR_2376,
                 &[],
             );
         }
@@ -208,6 +321,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             match *ast.node(n) {
                 Node::Decorator { .. } => decorated = true,
                 Node::ClassDecl { .. } | Node::ClassExpr { .. } if decorated => decorated = false,
+                // A member or parameter decorator runs in the scope around its class.
+                Node::PropertyDef { .. }
+                | Node::MethodDef { .. }
+                | Node::FunctionExpr { .. }
+                | Node::Param { .. }
+                    if decorated => {}
                 Node::FunctionExpr { .. } => {
                     let m = parents.parent(n)?;
                     let Node::MethodDef {
@@ -222,10 +341,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .extends_non_null(Loc::new(e.file, class))
                         .then_some(Loc::new(e.file, n));
                 }
+                // A class is not a `this` boundary itself (its heritage clause and
+                // computed names see the outer `this`); its members are.
                 Node::Arrow { .. }
                 | Node::FunctionDecl { .. }
-                | Node::ClassDecl { .. }
-                | Node::ClassExpr { .. }
                 | Node::PropertyDef { .. }
                 | Node::StaticBlock { .. } => return None,
                 _ => {}
@@ -260,6 +379,57 @@ impl<'c, 'a> Ck<'c, 'a> {
         })
     }
 
+    /// Whether `class` has an `extends` clause.
+    fn has_extends_clause(&self, class: Loc) -> bool {
+        let ast = self.ast(class.file);
+        let heritage = match *ast.node(class.node) {
+            Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. } => heritage,
+            _ => return false,
+        };
+        ast.list(heritage).iter().any(|&h| {
+            matches!(
+                *ast.node(h),
+                Node::HeritageClause {
+                    kind: ts_r_ast::HeritageKind::Extends,
+                    ..
+                }
+            )
+        })
+    }
+
+    /// The first `super(...)` call in source order in a constructor function, outside
+    /// nested functions, arrows and classes.
+    fn first_super_call(&self, ctor: Loc) -> Option<NodeId> {
+        let ast = self.ast(ctor.file);
+        let mut best: Option<(u32, NodeId)> = None;
+        let mut stack: Vec<NodeId> = Vec::new();
+        ast.for_each_child(ctor.node, |c| stack.push(c));
+        let mut seen = 0usize;
+        while let Some(n) = stack.pop() {
+            seen += 1;
+            if seen > MAX_NODES {
+                break;
+            }
+            match *ast.node(n) {
+                Node::FunctionDecl { .. }
+                | Node::FunctionExpr { .. }
+                | Node::Arrow { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. }
+                | Node::Param { .. } => continue,
+                Node::Call { callee, .. } if matches!(ast.node(callee), Node::Super { .. }) => {
+                    let start = ast.span(n).start;
+                    if best.is_none_or(|(b, _)| start < b) {
+                        best = Some((start, n));
+                    }
+                }
+                _ => {}
+            }
+            ast.for_each_child(n, |c| stack.push(c));
+        }
+        best.map(|(_, n)| n)
+    }
+
     /// The `super(...)` calls of a constructor function (not those in nested functions,
     /// arrows or classes).
     pub(crate) fn super_calls(&self, ctor: Loc) -> SuperCalls {
@@ -283,9 +453,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 | Node::ClassExpr { .. }
                 | Node::Param { .. } => continue,
                 Node::Call { callee, .. } if matches!(ast.node(callee), Node::Super { .. }) => {
-                    let statement = parents
-                        .parent(n)
-                        .is_some_and(|p| matches!(ast.node(p), Node::ExprStmt { .. }));
+                    let mut up = parents.parent(n);
+                    while let Some(p) = up
+                        && matches!(ast.node(p), Node::Paren { .. })
+                    {
+                        up = parents.parent(p);
+                    }
+                    let statement =
+                        up.is_some_and(|p| matches!(ast.node(p), Node::ExprStmt { .. }));
                     if !statement {
                         return SuperCalls::Nested;
                     }
@@ -335,4 +510,57 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         false
     }
+}
+
+/// Whether `n` is a `super(...)` call.
+fn is_super_call(ast: &Ast, n: NodeId) -> bool {
+    matches!(*ast.node(n), Node::Call { callee, .. } if matches!(ast.node(callee), Node::Super { .. }))
+}
+
+/// The first `super(...)` call in source order under `root`, not looking into functions.
+fn first_super_call(ast: &Ast, root: NodeId) -> Option<NodeId> {
+    let mut stack = vec![root];
+    let mut kids: Vec<NodeId> = Vec::new();
+    let mut seen = 0usize;
+    while let Some(n) = stack.pop() {
+        seen += 1;
+        if seen > MAX_NODES {
+            return None;
+        }
+        if is_super_call(ast, n) {
+            return Some(n);
+        }
+        if matches!(
+            ast.node(n),
+            Node::FunctionDecl { .. } | Node::FunctionExpr { .. } | Node::Arrow { .. }
+        ) {
+            continue;
+        }
+        kids.clear();
+        ast.for_each_child(n, |c| kids.push(c));
+        stack.extend(kids.iter().rev());
+    }
+    None
+}
+
+/// Whether statement `s` mentions `this` or `super` outside nested functions and property
+/// declarations.
+fn touches_this_or_super(ast: &Ast, s: NodeId) -> bool {
+    let mut stack = vec![s];
+    let mut seen = 0usize;
+    while let Some(n) = stack.pop() {
+        seen += 1;
+        if seen > MAX_NODES {
+            return false;
+        }
+        match ast.node(n) {
+            Node::This { .. } | Node::Super { .. } => return true,
+            Node::FunctionDecl { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::PropertyDef { .. } => continue,
+            _ => ast.for_each_child(n, |c| stack.push(c)),
+        }
+    }
+    false
 }

@@ -28,6 +28,7 @@ use ts_r_diagnostics::Diagnostic;
 
 pub use flow::{FlowGraph, FlowId, FlowKind, FlowNode, FunctionFlow};
 pub use names::{Name, Names, js_number_to_string};
+pub use resolve::is_body_local;
 pub use symbols::{Symbol, SymbolFacts, SymbolFlags, SymbolId, TableId, TableRange};
 
 /// Bump when the layout or meaning of anything in [`BoundFile`] changes (cache keys).

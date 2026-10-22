@@ -20,8 +20,8 @@ slice or `Vec` of them indexed by `FileId`):
 ## Invariants
 
 - **tsc 7 is the spec.** A message that tsc also reports uses tsc's code, category and text
-  exactly. Check by running `npx -y -p typescript@7 tsc --noEmit` on a tiny file; never read
-  TypeScript's source.
+  exactly. Check by running `npx -y -p typescript@7 tsc --noEmit` on a tiny file. tsc's source
+  may be read to understand a rule, never translated (root AGENTS.md).
 - ts-r-only messages use codes 99000 and up (`MAXIMUM_NESTING_DEPTH` 99001, `FILE_TOO_LARGE`
   99002, `PARSER_NO_PROGRESS` 99003) so they cannot collide with tsc codes.
 - Sound-mode codes (design record 0007) are stored as `SOUND_CODE_BASE + n` (`100_000 + n`)

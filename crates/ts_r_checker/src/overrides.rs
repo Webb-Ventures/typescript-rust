@@ -10,16 +10,29 @@
 //!   TS4114 (TS4115 for parameter properties). Implementing an abstract member does not
 //!   need `override`. Ambient classes and `declare` fields are exempt.
 //! - The base class prints as its instance type (`'A'`, `'{ mx(): void; }'`).
+//! - Member kinds (tsc: checkKindsOfPropertyMemberOverrides in checker.go): a method
+//!   overrides a method and is overridden by a method or field; an accessor over a base
+//!   method is TS2423, a method over a base field TS2425, over a base accessor TS2426.
+//!   Private members on either side override nothing.
 //! - In JavaScript the modifier is a JSDoc `@override` tag, with the JSDoc messages
 //!   (TS4119-TS4123, TS4128) in place of TS4112-TS4117 and TS4127.
 
 use ts_r_ast::{HeritageKind, MethodKind, Modifiers, Node, NodeId};
+use ts_r_binder::SymbolFlags;
 use ts_r_diagnostics::FileId;
 use ts_r_types::{SymId, TypeFlags, TypeId};
 
 use crate::checker::{Ck, Loc};
 use crate::diag::dg;
 use crate::nodes::{fn_parts, key_text};
+
+/// The kind of an instance member for override kind checks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemberKind {
+    Property,
+    Accessor,
+    Method,
+}
 
 /// One member subject to override rules.
 struct Member {
@@ -170,7 +183,11 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// TS2610 (a property overriding a base accessor) and TS2611 (an accessor overriding a
     /// base property), for instance members whose base member is declared, non-abstract,
-    /// in a class. Accessors report at their first declaration.
+    /// in a class. Accessors report at their first declaration. A method may override a
+    /// method or be overridden by a property, but an accessor overriding a base method is
+    /// TS2423, and a method overriding a base accessor or property TS2426 / TS2425;
+    /// private members on either side are no override (tsc: checker.go,
+    /// checkKindsOfPropertyMemberOverrides).
     fn check_accessor_property_overrides(
         &mut self,
         file: FileId,
@@ -180,9 +197,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         class_name: &str,
     ) {
         let ast = self.ast(file);
-        // (error node, name, derived member is an accessor)
-        let mut derived: Vec<(NodeId, String, bool)> = Vec::new();
-        let mut push = |at: NodeId, key: NodeId, accessor: bool| {
+        // (error node, name, kind of the derived member, derived member is private)
+        let mut derived: Vec<(NodeId, String, MemberKind, bool)> = Vec::new();
+        let mut push = |at: NodeId, key: NodeId, kind: MemberKind, private: bool| {
             if matches!(
                 ast.node(key),
                 Node::ComputedKey { .. } | Node::PrivateName { .. }
@@ -190,9 +207,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return;
             }
             if let Some(name) = key_text(ast, key)
-                && !derived.iter().any(|(_, n, _)| *n == name)
+                && !derived.iter().any(|(_, n, _, _)| *n == name)
             {
-                derived.push((at, name, accessor));
+                derived.push((at, name, kind, private));
             }
         };
         for &m in ast.list(members) {
@@ -200,14 +217,26 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::PropertyDef { key, modifiers, .. }
                     if !modifiers.contains(Modifiers::STATIC) =>
                 {
-                    push(key, key, modifiers.contains(Modifiers::ACCESSOR));
+                    let kind = if modifiers.contains(Modifiers::ACCESSOR) {
+                        MemberKind::Accessor
+                    } else {
+                        MemberKind::Property
+                    };
+                    push(key, key, kind, modifiers.contains(Modifiers::PRIVATE));
                 }
                 Node::MethodDef {
                     key,
                     modifiers,
-                    kind: MethodKind::Get | MethodKind::Set,
+                    kind: kind @ (MethodKind::Get | MethodKind::Set | MethodKind::Method),
                     ..
-                } if !modifiers.contains(Modifiers::STATIC) => push(key, key, true),
+                } if !modifiers.contains(Modifiers::STATIC) => {
+                    let kind = if kind == MethodKind::Method {
+                        MemberKind::Method
+                    } else {
+                        MemberKind::Accessor
+                    };
+                    push(key, key, kind, modifiers.contains(Modifiers::PRIVATE));
+                }
                 Node::MethodDef {
                     kind: MethodKind::Constructor,
                     value,
@@ -217,21 +246,47 @@ impl<'c, 'a> Ck<'c, 'a> {
                         continue;
                     };
                     for &p in ast.list(parts.params) {
-                        if let Node::Param { pattern, .. } = *ast.node(p)
+                        if let Node::Param {
+                            pattern, modifiers, ..
+                        } = *ast.node(p)
                             && matches!(ast.node(pattern), Node::Ident { .. })
                             && self.is_parameter_property(Loc::new(file, p))
                         {
-                            push(pattern, pattern, false);
+                            let private = modifiers.contains(Modifiers::PRIVATE);
+                            push(pattern, pattern, MemberKind::Property, private);
                         }
                     }
                 }
                 _ => {}
             }
         }
-        for (at, name, accessor) in derived {
+        for (at, name, kind, private) in derived {
             let Some(bp) = self.property_of_type(base, &name) else {
                 continue;
             };
+            // A method on either side: methods override methods and are overridden by
+            // fields; any other pairing is TS2423 / TS2425 / TS2426. Private members on
+            // either side override nothing (tsc: checkKindsOfPropertyMemberOverrides).
+            let base_kind = self.overridden_member_kind(bp);
+            if kind == MemberKind::Method || base_kind == Some(MemberKind::Method) {
+                let info = match (base_kind, kind) {
+                    (Some(MemberKind::Method), MemberKind::Accessor) => {
+                        dg::CLASS_0_DEFINES_INSTANCE_MEMBER_FUNCTION_1_BUT_EXTENDED_CLASS_2_DEFINES_IT_AS_IN_2423
+                    }
+                    (Some(MemberKind::Accessor), MemberKind::Method) => {
+                        dg::CLASS_0_DEFINES_INSTANCE_MEMBER_ACCESSOR_1_BUT_EXTENDED_CLASS_2_DEFINES_IT_AS_IN_2426
+                    }
+                    (Some(MemberKind::Property), MemberKind::Method) => {
+                        dg::CLASS_0_DEFINES_INSTANCE_MEMBER_PROPERTY_1_BUT_EXTENDED_CLASS_2_DEFINES_IT_AS_IN_2425
+                    }
+                    _ => continue,
+                };
+                if !private {
+                    self.error(Loc::new(file, at), info, &[base_s, &name, class_name]);
+                }
+                continue;
+            }
+            let accessor = kind == MemberKind::Accessor;
             let Some(base_accessor) = self.class_member_kind(bp) else {
                 continue;
             };
@@ -247,13 +302,58 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// What a base member `p` is for override kind checks; `None` when it is private (or
+    /// not a property, method or accessor).
+    fn overridden_member_kind(&self, p: SymId) -> Option<MemberKind> {
+        let p = match self.c.synth_sym(p) {
+            Some(x) if x.origins.len() == 1 => x.origins[0],
+            Some(_) => return None,
+            None => p,
+        };
+        for d in self.c.decls(p) {
+            let private = match *self.ast(d.file).node(d.node) {
+                Node::PropertyDef { modifiers, .. }
+                | Node::MethodDef { modifiers, .. }
+                | Node::Param { modifiers, .. } => modifiers.contains(Modifiers::PRIVATE),
+                _ => false,
+            };
+            if private {
+                return None;
+            }
+        }
+        let f = self.c.sym_flags(p);
+        if f.intersects(SymbolFlags::METHOD) {
+            Some(MemberKind::Method)
+        } else if f.intersects(SymbolFlags::ACCESSOR) {
+            Some(MemberKind::Accessor)
+        } else if f.intersects(SymbolFlags::PROPERTY) {
+            Some(MemberKind::Property)
+        } else {
+            None
+        }
+    }
+
     /// For a member declared only in classes and not abstract: `Some(true)` for an accessor
     /// (get/set or `accessor` field), `Some(false)` for a property (field or parameter
     /// property). `None` for anything else (interface members, methods, mapped members).
     fn class_member_kind(&self, p: SymId) -> Option<bool> {
         let p = match self.c.synth_sym(p) {
             Some(x) if x.origins.len() == 1 => x.origins[0],
-            Some(_) => return None,
+            // A member combined from several constituents of an intersection (a mixin's
+            // base) is an accessor only when every part has the same getter/setter set, else
+            // a plain property; any exempt part exempts it (tsc: checker.go,
+            // createUnionOrIntersectionProperty, arePropertiesAbstractOrInterface).
+            Some(x) => {
+                let origins = x.origins.clone();
+                let mut sets = Vec::with_capacity(origins.len());
+                for &o in &origins {
+                    if o == p || self.class_member_kind(o).is_none() {
+                        return None;
+                    }
+                    sets.push(self.accessor_set(o));
+                }
+                return Some(sets[0] != 0 && sets.iter().all(|&b| b == sets[0]));
+            }
             None => p,
         };
         let decls = self.c.decls(p);
@@ -261,8 +361,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         for &d in decls.iter() {
             let ast = self.ast(d.file);
             let this = match *ast.node(d.node) {
-                Node::PropertyDef { modifiers, .. } => {
-                    if modifiers.contains(Modifiers::ABSTRACT) {
+                Node::PropertyDef {
+                    modifiers, value, ..
+                } => {
+                    // An abstract field with an initializer still counts.
+                    if modifiers.contains(Modifiers::ABSTRACT) && value.is_none() {
                         return None;
                     }
                     modifiers.contains(Modifiers::ACCESSOR)
@@ -286,6 +389,33 @@ impl<'c, 'a> Ck<'c, 'a> {
             kind = Some(this);
         }
         kind
+    }
+
+    /// The accessors a class member declares: bit 1 a getter, bit 2 a setter (both for an
+    /// `accessor` field), 0 for a plain property.
+    fn accessor_set(&self, p: SymId) -> u8 {
+        let p = match self.c.synth_sym(p) {
+            Some(x) if x.origins.len() == 1 && x.origins[0] != p => x.origins[0],
+            _ => p,
+        };
+        let mut bits = 0;
+        for d in self.c.decls(p) {
+            match *self.ast(d.file).node(d.node) {
+                Node::PropertyDef { modifiers, .. } if modifiers.contains(Modifiers::ACCESSOR) => {
+                    bits |= 3;
+                }
+                Node::MethodDef {
+                    kind: MethodKind::Get,
+                    ..
+                } => bits |= 1,
+                Node::MethodDef {
+                    kind: MethodKind::Set,
+                    ..
+                } => bits |= 2,
+                _ => {}
+            }
+        }
+        bits
     }
 
     fn usable_base(&self, t: TypeId) -> bool {
@@ -319,14 +449,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let at = Loc::new(file, m.at);
         let Some(name) = name else {
-            // Entity names (`[foo]`) may be unique symbols this layer does not track.
+            // Entity names (`[foo]`) may be unique symbols this layer does not track; one
+            // of the plain `symbol` type is not bindable (TS4127).
             let symbol_entity = match *ast.node(m.key) {
                 Node::ComputedKey { expr } => {
                     let e = crate::nodes::skip_parens(ast, expr);
                     matches!(ast.node(e), Node::Ident { .. } | Node::Member { .. }) && {
                         let t = self.quietly(|ck| ck.check_expr(Loc::new(file, e)));
-                        self.store().flags(t).intersects(TypeFlags::ES_SYMBOL_LIKE)
+                        self.store()
+                            .flags(t)
+                            .intersects(TypeFlags::UNIQUE_ES_SYMBOL)
                             || t == TypeId::UNRESOLVED
+                            || self.store().is_error(t)
                     }
                 }
                 _ => false,

@@ -72,6 +72,7 @@ pub struct CheckOptions {
     pub skip_lib_check: bool,
     pub isolated_modules: bool,
     pub verbatim_module_syntax: bool,
+    pub erasable_syntax_only: bool,
     pub es_module_interop: bool,
     pub allow_synthetic_default_imports: bool,
     pub resolve_json_module: bool,
@@ -83,6 +84,10 @@ pub struct CheckOptions {
     pub check_js: bool,
     /// `allowImportingTsExtensions` (or `rewriteRelativeImportExtensions`).
     pub allow_importing_ts_extensions: bool,
+    /// `rewriteRelativeImportExtensions`.
+    pub rewrite_relative_import_extensions: bool,
+    /// `noUncheckedSideEffectImports` (default on in TS 7).
+    pub no_unchecked_side_effect_imports: bool,
     pub use_define_for_class_fields: bool,
     pub experimental_decorators: bool,
     /// `jsx` is set (any mode).
@@ -140,6 +145,7 @@ impl CheckOptions {
             skip_lib_check: flag(o.skip_lib_check()),
             isolated_modules: e.isolated_modules(),
             verbatim_module_syntax: flag(o.verbatim_module_syntax()),
+            erasable_syntax_only: flag(o.erasable_syntax_only()),
             es_module_interop: e.es_module_interop(),
             allow_synthetic_default_imports: e.allow_synthetic_default_imports(),
             resolve_json_module: e.resolve_json_module(),
@@ -150,7 +156,12 @@ impl CheckOptions {
             jsx_set: o.jsx().is_some(),
             jsx_automatic: matches!(o.jsx(), Some(JsxEmit::ReactJsx | JsxEmit::ReactJsxDev)),
             check_js: flag(o.check_js()),
-            allow_importing_ts_extensions: e.allow_importing_ts_extensions(),
+            // tsc treats `rewriteRelativeImportExtensions` as allowing TS extensions even when
+            // `allowImportingTsExtensions` is explicitly false.
+            allow_importing_ts_extensions: e.allow_importing_ts_extensions()
+                || flag(o.rewrite_relative_import_extensions()),
+            rewrite_relative_import_extensions: flag(o.rewrite_relative_import_extensions()),
+            no_unchecked_side_effect_imports: e.no_unchecked_side_effect_imports(),
             use_define_for_class_fields: e.use_define_for_class_fields(),
             experimental_decorators: flag(o.experimental_decorators()),
             jsx_factory_roots: jsx_factory_roots(o),
@@ -599,6 +610,9 @@ pub struct Ck<'c, 'a> {
     /// The first resolution cycle found through each symbol's type (the stack from its
     /// `Resolving::Type` entry up), for TS2502 (`circular_annotations`).
     pub(crate) type_cycles: FxHashMap<SymId, Vec<Resolving>>,
+    /// The first cycle found through each inferred return type (as `type_cycles`), for
+    /// every return type on a cycle that closes at a return type.
+    pub(crate) return_cycles: FxHashMap<SigId, Vec<Resolving>>,
     /// Types whose base constraint is being computed (`Ck::base_constraint`).
     pub(crate) base_constraints: Vec<TypeId>,
     pub(crate) flow_cache: FxHashMap<crate::flow::FlowKey, TypeId>,
@@ -687,8 +701,14 @@ pub struct Ck<'c, 'a> {
     pub(crate) spec_node_types: FxHashMap<Loc, (u64, TypeId)>,
     /// Types of function expressions.
     pub(crate) fn_types: FxHashMap<Loc, TypeId>,
+    /// The property each name's first `undefined` stand-in was made from when a widened
+    /// object literal gained a sibling's missing property; later stand-ins of the name are
+    /// ordered by its declaration (tsc shares one stand-in per name).
+    pub(crate) undefined_prop_origin: FxHashMap<ts_r_types::StrId, SymId>,
     /// Widened object literal types.
     pub(crate) widened: FxHashMap<TypeId, TypeId>,
+    /// [`Ck::reduced_type`] results.
+    pub(crate) reduced: FxHashMap<TypeId, TypeId>,
     pub(crate) flow_depth: u32,
     pub(crate) depth: u32,
     /// Stack of contextual types for expressions being checked: `(expression, type)`.
@@ -712,6 +732,11 @@ pub struct Ck<'c, 'a> {
     /// Assumed types of parameters while checking a function expression under a contextual
     /// signature.
     pub(crate) param_types: FxHashMap<Loc, TypeId>,
+    /// Arguments of immediately invoked functions whose contextual type was needed while
+    /// the call was being resolved (`(f => f(1))(i => i)`): they have no contextual type.
+    pub(crate) circular_iife_args: FxHashSet<Loc>,
+    /// Arguments being checked to type an immediately invoked function's parameters.
+    pub(crate) iife_args: Vec<Loc>,
     /// Whether each function's parameter list contains syntax the target lowers.
     pub(crate) lowered_params: FxHashMap<Loc, bool>,
     /// Signatures resolved at call sites.
@@ -796,6 +821,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             inferring_params: Vec::new(),
             circular: FxHashSet::default(),
             type_cycles: FxHashMap::default(),
+            return_cycles: FxHashMap::default(),
             base_constraints: Vec::new(),
             flow_cache: FxHashMap::default(),
             flow_temp: FxHashMap::default(),
@@ -825,6 +851,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             speculative: 0,
             fn_types: FxHashMap::default(),
             widened: FxHashMap::default(),
+            undefined_prop_origin: FxHashMap::default(),
+            reduced: FxHashMap::default(),
             flow_depth: 0,
             depth: 0,
             context_overrides: Vec::new(),
@@ -835,6 +863,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             reported: FxHashSet::default(),
             rel: crate::relate::RelState::default(),
             param_types: FxHashMap::default(),
+            circular_iife_args: FxHashSet::default(),
+            iife_args: Vec::new(),
             lowered_params: FxHashMap::default(),
             resolved_calls: FxHashMap::default(),
             overload_failed: false,
@@ -1104,6 +1134,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 let path = self.resolving[i..].iter().take(256).map(|e| e.0).collect();
                 self.type_cycles.insert(s, path);
+            }
+            if let Resolving::Return(_) = r {
+                let path: Vec<Resolving> =
+                    self.resolving[i..].iter().take(256).map(|e| e.0).collect();
+                for e in &path {
+                    if let Resolving::Return(s) = *e {
+                        self.return_cycles.entry(s).or_insert_with(|| path.clone());
+                    }
+                }
             }
             return false;
         }

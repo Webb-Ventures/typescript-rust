@@ -1,0 +1,13 @@
+a.ts(6,29): error TS2638: Type '{}' may represent a primitive value, which is not permitted as the right operand of the 'in' operator.
+a.ts(8,25): error TS2322: Type 'number' is not assignable to type 'object'.
+a.ts(9,25): error TS2322: Type 'string | object' is not assignable to type 'object'.
+  Type 'string' is not assignable to type 'object'.
+a.ts(14,24): error TS2322: Type 'T' is not assignable to type 'object'.
+a.ts(15,24): error TS2322: Type 'T[keyof T]' is not assignable to type 'object'.
+  Type 'T[string] | T[number] | T[symbol]' is not assignable to type 'object'.
+    Type 'T[string]' is not assignable to type 'object'.
+a.ts(21,24): error TS2322: Type 'T' is not assignable to type 'object'.
+  Type 'string | object' is not assignable to type 'object'.
+    Type 'string' is not assignable to type 'object'.
+a.ts(27,24): error TS2322: Type 'number | { a: 1; }' is not assignable to type 'object'.
+  Type 'number' is not assignable to type 'object'.

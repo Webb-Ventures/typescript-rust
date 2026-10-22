@@ -13,6 +13,9 @@ use crate::members::SigKind;
 use crate::nodes::{fn_parts, is_this_param, key_text};
 use crate::unions::Reduction;
 
+/// Fixed parameters, and the rest parameter with its element type.
+type CombinableParams = (Vec<ts_r_types::Param>, Option<(ts_r_types::Param, TypeId)>);
+
 impl<'c, 'a> Ck<'c, 'a> {
     // ---------------------------------------------------------------------------------
     // Contextual types
@@ -211,8 +214,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let obj = self.c.parent(parent)?;
                 let ct = self.contextual_type(obj)?;
                 let ct = self.discriminate_object_context(obj, ct);
-                let name = self.member_key_name(Loc::new(f, key))?;
-                self.contextual_property_type(ct, &name)
+                self.contextual_member_type(ct, Loc::new(f, key))
             }
             // `{ type }`: the name is the value.
             Node::ShorthandProp {
@@ -237,8 +239,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 let ct = self.contextual_type(obj)?;
                 let ct = self.discriminate_object_context(obj, ct);
-                let name = self.member_key_name(Loc::new(f, key))?;
-                self.contextual_property_type(ct, &name)
+                self.contextual_member_type(ct, Loc::new(f, key))
             }
             Node::ArrayLit { elements } => {
                 let ct = self.contextual_type(parent)?;
@@ -420,7 +421,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                 open_ended = true;
                 continue;
             };
-            if let Node::Property { value, .. } = *ast.node(p)
+            // A shorthand `{ kind }` discriminates by the named value's type.
+            let value = match *ast.node(p) {
+                Node::Property { value, .. } => Some(value),
+                Node::ShorthandProp {
+                    name: n,
+                    init: None,
+                    ..
+                } => Some(n),
+                _ => None,
+            };
+            if let Some(value) = value
                 && let Some(vt) = self.discriminant_value_type(Loc::new(obj.file, value))
             {
                 items.push((name.clone(), Some(vt)));
@@ -591,6 +602,47 @@ impl<'c, 'a> Ck<'c, 'a> {
         None
     }
 
+    /// The contextual type of an object literal member keyed by `key`: the property of
+    /// that name, or for a computed key that is not a literal (`["" + 0]`, `[+"x"]`) the
+    /// index signatures applying to its type (number keys prefer a number index
+    /// signature, as in tsc 7).
+    pub(crate) fn contextual_member_type(&mut self, ct: TypeId, key: Loc) -> Option<TypeId> {
+        if let Some(name) = self.member_key_name(key) {
+            return self.contextual_property_type(ct, &name);
+        }
+        let Node::ComputedKey { expr } = *self.ast(key.file).node(key.node) else {
+            return None;
+        };
+        let t = self.quietly(|ck| ck.check_expr(Loc::new(key.file, expr)));
+        let tf = self.store().flags(t);
+        let index_key = if tf.intersects(TypeFlags::NUMBER_LIKE) {
+            TypeId::NUMBER
+        } else if tf.intersects(TypeFlags::STRING_LIKE) {
+            TypeId::STRING
+        } else if tf.intersects(TypeFlags::ES_SYMBOL_LIKE) {
+            TypeId::SYMBOL
+        } else {
+            return None;
+        };
+        let mut out = Vec::new();
+        for m in self.union_members(ct) {
+            let mf = self.store().flags(m);
+            if mf.intersects(TypeFlags::ANY) {
+                return None;
+            }
+            if mf.intersects(TypeFlags::PRIMITIVE | TypeFlags::INSTANTIABLE) {
+                continue;
+            }
+            if let Some(i) = self.index_info_of(m, index_key) {
+                out.push(i.value);
+            }
+        }
+        if out.is_empty() {
+            return None;
+        }
+        Some(self.contextual_union(out))
+    }
+
     /// The type of property `name` in a contextual type (mapped over unions).
     pub fn contextual_property_type(&mut self, ct: TypeId, name: &str) -> Option<TypeId> {
         let members = self.union_members(ct);
@@ -605,6 +657,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         for m in members {
             let mf = self.store().flags(m);
             if mf.intersects(TypeFlags::PRIMITIVE) && !mf.intersects(TypeFlags::INSTANTIABLE) {
+                // A primitive contributes the members of its apparent type (`normalize` of
+                // `string | { normalize?: (m: M) => void }` is two signatures, no context).
+                if mf.intersects(
+                    TypeFlags::STRING_LIKE
+                        | TypeFlags::NUMBER_LIKE
+                        | TypeFlags::BIGINT_LIKE
+                        | TypeFlags::BOOLEAN_LIKE
+                        | TypeFlags::ES_SYMBOL_LIKE,
+                ) {
+                    let a = self.apparent_type(m);
+                    if a != m
+                        && a != TypeId::UNRESOLVED
+                        && let Some(p) = self.property_of_type_id(a, nid)
+                    {
+                        out.push(self.type_of_symbol(p));
+                    }
+                }
                 continue;
             }
             if mf.intersects(TypeFlags::ANY) {
@@ -671,15 +740,19 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The union of per-member contextual types. An `any` member does not absorb the others
     /// (tsc keeps such a union unreduced): `"a"` stays a literal against `["a"] | { [i:
-    /// number]: any }`.
+    /// number]: any }`. Nor does an `unknown` member, which adds nothing to the context: `K
+    /// | unknown` from `[K, number] | [unknown, string]` stays generic.
     fn contextual_union(&mut self, mut out: Vec<TypeId>) -> TypeId {
         if out.contains(&TypeId::ANY) && out.iter().any(|&t| t != TypeId::ANY) {
             out.retain(|&t| t != TypeId::ANY);
         }
+        if out.contains(&TypeId::UNKNOWN) && out.iter().any(|&t| t != TypeId::UNKNOWN) {
+            out.retain(|&t| t != TypeId::UNKNOWN);
+        }
         self.union_with(&out, Reduction::None, AliasId::NONE)
     }
 
-    fn contextual_element_type(
+    pub(crate) fn contextual_element_type(
         &mut self,
         ct: TypeId,
         idx: usize,
@@ -756,6 +829,15 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// The contextual type of argument `idx` of a call: the parameter type of the resolved
     /// signature.
     fn contextual_arg_type(&mut self, call: Loc, idx: usize, arg: Loc) -> Option<TypeId> {
+        if self.circular_iife_args.contains(&arg) {
+            return None;
+        }
+        // An immediately invoked function's parameter typed by this argument is being
+        // resolved: the argument has no context, then or later.
+        if self.iife_args.contains(&arg) {
+            self.circular_iife_args.insert(arg);
+            return None;
+        }
         let sig = match self.resolved_calls.get(&call) {
             Some(s) => *s,
             None => {
@@ -799,10 +881,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     pub fn contextual_return_type(&mut self, func: Loc) -> Option<TypeId> {
         let ast = self.ast(func.file);
         let parts = fn_parts(ast, func.node)?;
-        if parts.flags.contains(FnFlags::GENERATOR) {
-            return self.generator_context(func).map(|(_, r)| r);
-        }
         let is_async = parts.flags.contains(FnFlags::ASYNC);
+        if parts.flags.contains(FnFlags::GENERATOR) {
+            // An async generator's `return` is awaited like an async function's.
+            let r = self.generator_context(func).map(|(_, r)| r)?;
+            return Some(if is_async && r != TypeId::UNRESOLVED {
+                self.async_return_context(r)
+            } else {
+                r
+            });
+        }
         if let Some(rt) = parts.return_type {
             let t = self.type_from_node(Loc::new(func.file, rt));
             if let Node::TypePredicate { .. } = ast.node(rt) {
@@ -814,8 +902,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 t
             });
         }
-        // Constructors and accessors have no contextual return type. An immediately invoked
-        // function returns into its call's context (`const x: T = (() => v)()`).
+        // A getter returns its setter's parameter type; constructors and other accessors
+        // have no contextual return type. An immediately invoked function returns into its
+        // call's context (`const x: T = (() => v)()`).
+        if let Some(t) = self.unannotated_getter_setter_type(func) {
+            return Some(t);
+        }
         let r = match self.iife_call(func) {
             Some(call) => self.contextual_type(call)?,
             None => {
@@ -1038,8 +1130,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             if sigs.is_empty() {
                 continue;
             }
+            // A member whose overloads give no one signature gives no context; the other
+            // members still do (`{ apply: (c) => {} }` against `I | ((c: C) => void)`:
+            // the function's `apply` overloads are generic).
             if sigs.len() > 1 {
-                found.push(self.intersected_contextual_signature(&sigs, f)?);
+                if let Some(s) = self.intersected_contextual_signature(&sigs, f) {
+                    found.push(s);
+                }
                 continue;
             }
             // A signature with fewer parameters than the function requires gives no
@@ -1135,31 +1232,44 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(acc)
     }
 
+    /// One contextual signature for two overloads (`(a: number) => void & (b: string) =>
+    /// void` types `(arg)` as `string | number`): per position the union of the
+    /// parameter types of the signatures that have it, rest elements included; a rest
+    /// parameter when either has one (`log(...data: any[])` with `log(message?: any,
+    /// ...rest: any[])` is `(message?: any, ...rest: any[])`). An empty tuple rest
+    /// (`...args: []`) is no parameter. Generic signatures and tuple rests do not combine.
     fn combine_intersection_signatures(&mut self, a: SigId, b: SigId) -> Option<SigId> {
         let (da, db) = (self.store().sig(a), self.store().sig(b));
         if da.type_params != ts_r_types::ListId::EMPTY
             || db.type_params != ts_r_types::ListId::EMPTY
-            || da.has_rest()
-            || db.has_rest()
         {
             return None;
         }
-        let (long, short) = if da.params.len() >= db.params.len() {
-            (a, b)
+        let ma = da.min_args;
+        let mb = db.min_args;
+        let (ta, tb) = (da.this_type, db.this_type);
+        let (fa, ra) = self.combinable_params(a)?;
+        let (fb, rb) = self.combinable_params(b)?;
+        let (long, short) = if fa.len() >= fb.len() {
+            ((&fa, ra), (&fb, rb))
         } else {
-            (b, a)
+            ((&fb, rb), (&fa, ra))
         };
-        let lp = self.store().sig(long).params.to_vec();
-        let sp = self.store().sig(short).params.to_vec();
-        let min_args = da.min_args.min(db.min_args);
-        let this_type = match (da.this_type, db.this_type) {
+        let min_args = ma.min(mb);
+        let this_type = match (ta, tb) {
             (Some(x), Some(y)) => Some(self.union(&[x, y])),
             (x, y) => x.or(y),
         };
-        let mut params = Vec::with_capacity(lp.len());
-        for (i, p) in lp.into_iter().enumerate() {
-            let other = sp.get(i).map_or(TypeId::UNKNOWN, |q| q.ty);
-            let ty = self.union(&[p.ty, other]);
+        let mut params = Vec::with_capacity(long.0.len() + 1);
+        for (i, p) in long.0.iter().enumerate() {
+            let other = match short.0.get(i) {
+                Some(q) => Some(q.ty),
+                None => short.1.map(|r| r.1),
+            };
+            let ty = match other {
+                Some(o) => self.union(&[p.ty, o]),
+                None => p.ty,
+            };
             params.push(ts_r_types::Param {
                 name: p.name,
                 ty,
@@ -1167,12 +1277,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                 sym: p.sym,
             });
         }
+        let mut flags = SigFlags::NONE;
+        let rest = match (long.1, short.1) {
+            (Some(x), Some(y)) => Some((x.0, self.union(&[x.1, y.1]))),
+            (x, y) => x.or(y),
+        };
+        if let Some((p, el)) = rest {
+            let ty = self.create_array(el, false);
+            params.push(ts_r_types::Param {
+                name: p.name,
+                ty,
+                optional: false,
+                sym: p.sym,
+            });
+            flags = SigFlags::HAS_REST;
+        }
         let ra = self.return_type_of(a);
         let rb = self.return_type_of(b);
         let ret = self.intersection(&[ra, rb]);
-        let decl = self.store().sig(long).decl;
+        let decl = if fa.len() >= fb.len() {
+            self.store().sig(a).decl
+        } else {
+            self.store().sig(b).decl
+        };
         let sig = ts_r_types::Signature::new(
-            SigFlags::NONE,
+            flags,
             decl,
             ts_r_types::ListId::EMPTY,
             params,
@@ -1181,6 +1310,23 @@ impl<'c, 'a> Ck<'c, 'a> {
             Some(ret),
         );
         Some(self.store().add_signature(sig))
+    }
+
+    /// A signature's fixed parameters and its rest parameter with the rest's element
+    /// type, for [`Self::combine_intersection_signatures`]; `None` for a tuple rest other
+    /// than `[]`.
+    fn combinable_params(&mut self, s: SigId) -> Option<CombinableParams> {
+        let d = self.store().sig(s);
+        let mut params = d.params.to_vec();
+        if !d.has_rest() {
+            return Some((params, None));
+        }
+        let rest = params.pop()?;
+        if let Some(shape) = self.store().tuple_shape_of(rest.ty) {
+            return shape.elements.is_empty().then_some((params, None));
+        }
+        let el = self.element_type_of_array_like(rest.ty)?;
+        Some((params, Some((rest, el))))
     }
 
     fn contextual_params_agree(&mut self, a: SigId, b: SigId) -> bool {
@@ -1269,7 +1415,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             .iter()
             .any(|&a| matches!(ast.node(a), Node::Spread { .. }));
         let arg_type = |ck: &mut Self, a: NodeId| {
-            let t = ck.quietly(|ck| ck.check_expr(Loc::new(func.file, a)));
+            let a = Loc::new(func.file, a);
+            ck.iife_args.push(a);
+            let t = ck.quietly(|ck| ck.check_expr(a));
+            ck.iife_args.pop();
             let t = ck.widen_literal(t);
             ck.widened_type(t)
         };
@@ -1371,6 +1520,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let t = widen(self, t);
                 slots.push((t, true));
                 last_array = Some(t);
+            } else if let Some(e) = self.iterated_type(t, false) {
+                // Another iterable spreads as an array of its elements (`...Iterable<number>`
+                // gives `number[]`).
+                let arr = self.create_array(e, false);
+                let arr = widen(self, arr);
+                slots.push((arr, true));
+                last_array = Some(arr);
             } else {
                 return None;
             }
@@ -1889,17 +2045,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let mut types: Vec<TypeId> = Vec::new();
         let mut has_empty_return = false;
+        // Returns of a bare call to the function itself (`return g()`), which add nothing.
+        let mut has_self_return = false;
         let expression_body = parts.is_arrow && parts.flags.contains(FnFlags::EXPRESSION_BODY);
         let end_reachable;
         if expression_body {
-            let t = self.check_expr(Loc::new(decl.file, body));
-            types.push(t);
+            if self.is_bare_self_call(Loc::new(decl.file, fnode), body, is_async) {
+                has_self_return = true;
+            } else {
+                let t = self.check_expr(Loc::new(decl.file, body));
+                types.push(t);
+            }
             end_reachable = false;
         } else {
             let mut returns = Vec::new();
             collect_returns(ast, body, &mut returns, 0);
             for r in returns {
                 match *ast.node(r) {
+                    Node::Return { arg: Some(a) }
+                        if self.is_bare_self_call(Loc::new(decl.file, fnode), a, is_async) =>
+                    {
+                        has_self_return = true;
+                    }
                     Node::Return { arg: Some(a) } => {
                         let t = self.check_expr(Loc::new(decl.file, a));
                         types.push(t);
@@ -1919,7 +2086,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             types = types.into_iter().map(|t| self.awaited_type(t)).collect();
         }
         let ret = if types.is_empty() {
-            if is_expr_fn && !end_reachable && !has_empty_return {
+            if (is_expr_fn || has_self_return) && !end_reachable && !has_empty_return {
                 TypeId::NEVER
             } else if is_expr_fn && self.contextual_return_has_undefined(decl.file, fnode, is_async)
             {
@@ -1968,6 +2135,69 @@ impl<'c, 'a> Ck<'c, 'a> {
             return self.promise_of(ret);
         }
         ret
+    }
+
+    /// Whether `e` (a returned expression of function `f`) is a bare call to `f` itself
+    /// (`return await f()` in an async function): a function declaration by its name, a
+    /// function expression by its own name or a `const` it initializes. Such returns
+    /// don't contribute to the inferred return type (`function g() { return g(); }`
+    /// returns `never`), as observed in tsc 7; a `var` may be reassigned, so its calls do.
+    fn is_bare_self_call(&mut self, f: Loc, e: NodeId, is_async: bool) -> bool {
+        let ast = self.ast(f.file);
+        let mut e = crate::nodes::skip_parens(ast, e);
+        if is_async && let Node::Await { arg } = *ast.node(e) {
+            e = crate::nodes::skip_parens(ast, arg);
+        }
+        let Node::Call {
+            callee,
+            optional: false,
+            ..
+        } = *ast.node(e)
+        else {
+            return false;
+        };
+        if !matches!(ast.node(callee), Node::Ident { .. }) {
+            return false;
+        }
+        let Some(target) = self
+            .c
+            .resolve_ident(Loc::new(f.file, callee), ts_r_binder::meaning::VALUE)
+        else {
+            return false;
+        };
+        match *ast.node(f.node) {
+            Node::FunctionDecl { .. } => self.c.sym_of_decl(f) == Some(target),
+            // The binder gives a named function expression's own symbol to the expression.
+            Node::FunctionExpr { name: Some(n), .. }
+                if self.c.sym_of_decl(Loc::new(f.file, n)) == Some(target)
+                    || self.c.sym_of_decl(f) == Some(target) =>
+            {
+                true
+            }
+            Node::FunctionExpr { .. } | Node::Arrow { .. } => {
+                let mut at = f;
+                while let Some(p) = self.c.parent(at)
+                    && matches!(ast.node(p.node), Node::Paren { .. })
+                {
+                    at = p;
+                }
+                let Some(p) = self.c.parent(at) else {
+                    return false;
+                };
+                match *ast.node(p.node) {
+                    Node::VarDeclarator {
+                        name,
+                        init: Some(i),
+                        ..
+                    } if i == at.node => {
+                        self.c.sym_of_decl(Loc::new(f.file, name)) == Some(target)
+                            && self.is_const_declaration(Loc::new(f.file, name))
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     /// Whether the contextual return type of the function expression `fnode` (awaited for

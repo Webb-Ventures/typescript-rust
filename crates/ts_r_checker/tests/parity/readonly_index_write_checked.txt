@@ -1,0 +1,14 @@
+a.ts(7,1): error TS2542: Index signature in type 'typeof C' only permits reading.
+a.ts(8,1): error TS2542: Index signature in type 'typeof C' only permits reading.
+a.ts(9,1): error TS2542: Index signature in type 'typeof C' only permits reading.
+a.ts(10,1): error TS2322: Type '2' is not assignable to type '42'.
+a.ts(10,1): error TS2542: Index signature in type 'typeof C' only permits reading.
+a.ts(12,1): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(12,1): error TS2542: Index signature in type 'readonly number[]' only permits reading.
+a.ts(12,8): error TS2532: Object is possibly 'undefined'.
+a.ts(13,1): error TS2532: Object is possibly 'undefined'.
+a.ts(13,1): error TS2542: Index signature in type 'readonly number[]' only permits reading.
+a.ts(15,1): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(15,1): error TS2542: Index signature in type '{ readonly [k: string]: string; }' only permits reading.
+a.ts(16,1): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(16,1): error TS2542: Index signature in type '{ readonly [k: string]: string; }' only permits reading.

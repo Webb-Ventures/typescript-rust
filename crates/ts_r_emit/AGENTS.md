@@ -4,7 +4,7 @@ Program emit for `ts-r-check` (design record 0012, phase E1): where outputs go, 
 contain beyond the per-file transform, source maps, and writing them safely. Root rules:
 [../../AGENTS.md](../../AGENTS.md). Spec:
 [../../docs/design/0012-tsc-emit.md](../../docs/design/0012-tsc-emit.md) (tsc 7.0.2's observed
-behaviour; never read or translate tsc's emitter).
+behaviour; tsc's emitter may be read to understand a rule, never translated).
 
 ## API in one breath
 

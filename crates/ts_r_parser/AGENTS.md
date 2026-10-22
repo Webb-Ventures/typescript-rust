@@ -17,6 +17,12 @@ Diagnostics are deduplicated as tsc does: scanner and parser errors form one str
 parse error at the position of the error just before it (scanner or parser) is dropped. So
 a stray `\` is TS1127 (scanner) only, not also TS1128. Scanner errors are always kept, so a
 position can carry a parser and a scanner error (`'}' expected` and TS1160 at end of file).
+The rule is about the order errors are reported in, not their sorted order: `finish` only
+merges same-position deferred and TS8xxx errors, so `x <` at the end of the file keeps
+`Type expected` and `Expression expected` at one position, with `'>' expected` reported
+between them. A missing expression or type (TS1109/TS1110) at the end of the file is
+reported just after the last token, before trailing trivia, as in tsc 7 (`'}' expected`
+stays at the end).
 
 `ts_r_parser::dump(src, kind)` returns the debug dump. `ts_r_parser::parse_json(src)` parses
 a `.json` source file as tsc does: a program with one expression statement holding the value,
@@ -53,10 +59,16 @@ Files:
   modifiers. Types are parsed by the normal type parser (with `Parser::jsdoc` set) over a
   masked copy of the source (`/**` and leading `*` blanked), so spans are source offsets.
   The returned diagnostics are tsc's JSDoc syntax errors (`'}' expected`, ...; one per
-  position, except `'from' expected` and `String literal expected` together), plus the tag checks tsc's checker makes that need only the comment
+  position, except `'from' expected` and `String literal expected` together), and the
+  empty `<>` list errors (TS1098 type parameters, TS1099 type arguments, spanning `<>`, or
+  `<` and the next character when unclosed: `{<}`) of the last JSDoc comment before the
+  code (tsc 7 reads only that one; other grammar errors are dropped in JSDoc types),
+  plus the tag checks tsc's checker makes that need only the comment
   (`check_param_names`: TS8024 a `@param` naming no parameter, TS8029 when the function
   uses `arguments`, TS8032 a nested name without its parent tag; TS8023 an `@augments`
-  whose rightmost name differs from the `extends` clause's). Tag names
+  whose rightmost name differs from the `extends` clause's; TS8039 a `@template` among the
+  child tags of a `@typedef` with children, a `@callback` or an `@overload`, which then
+  declares nothing; tsc: tsc/internal/parser/jsdoc.go). Tag names
   may use `\u` escapes; a type that stops early (`{function(number)}`) still types the name
   after its `}`; a comment before `return f` applies to the returned function, one before
   `a = b = function` to the innermost value. Parameter names may follow stray `*`s and be
@@ -115,8 +127,8 @@ Files:
   (TS99003 on exhaustion); qualified names become member expressions iteratively.
 
 - **tsc 7 is the spec.** What parses, and which error code is reported at which position, is
-  checked by running `npx -y -p typescript@7 tsc --noEmit` on a tiny file. Never read
-  TypeScript's source. `first_error_matches_tsc` in `src/tests.rs` pins observed codes and
+  checked by running `npx -y -p typescript@7 tsc --noEmit` on a tiny file. tsc's parser
+  may be read to understand a rule, never translated (root AGENTS.md). `first_error_matches_tsc` in `src/tests.rs` pins observed codes and
   positions; add a row when you fix one.
 - **Never panics, always terminates, always returns a tree.**
   - Missing pieces become zero-width `Missing` nodes.
@@ -147,7 +159,13 @@ Files:
     the depth flag.
   - `try_parse` keeps a result only if no error was reported. The exception is
     `grammar_error_at`, which reports a grammar error (e.g. TS1013) without failing the
-    attempt, so `(...a,) => a` still parses as an arrow.
+    attempt, so `(...a,) => a` still parses as an arrow. `soft_error` does the same for a
+    syntax error tsc keeps inside an arrow head (`async (a = await) => {}`).
+  - Regex pattern and flag errors from the lexer are moved to `regex_errs`
+    (`defer_regex_errors`): tsc 7 reports them from the checker, so they are kept only
+    without syntax errors, and are never merged with another error at their position.
+  - An escaped keyword consumed by `bump` as a keyword is TS1260; one read as a name goes
+    through `intern_token`, which marks it (`name_tok`).
 - **Context lives in `Ctx` bits** (`AWAIT`, `YIELD`, `DISALLOW_IN`, `AMBIENT`,
   `DISALLOW_CONDITIONAL_TYPES`, `IN_CONDITIONAL_TRUE`, `DECORATOR`, `TYPE`, ...). Set them with
   `with_ctx(add, remove, f)`. Function bodies, parameters and brackets clear the bits that do
@@ -196,10 +214,15 @@ Files:
   TS1049/1053/1051/1052 the `set` parameter (a `this` parameter does not count), and
   TS1092/TS1093 constructor type parameters (just after the `<`) / annotation; also
   TS1098/TS1099 empty `<>` lists, TS1492 `using {a} = x`, and an accessor without a body,
-  which is `'{' expected` at its last character (`;` included) and has no body.
+  which is `'{' expected` at its last character (`;` included) and has no body. So is an
+  object-literal method without a body before `;` or a possible semicolon (it gets an
+  empty body).
   `constructor<T>()` is a constructor. The kept ones are also listed in
   `ParseResult::grammar`, so a consumer that wants syntax errors only (the linter) can drop
-  them (`ParseResult::syntax_errors`).
+  them (`ParseResult::syntax_errors`). A checker grammar error tsc reports next to syntax
+  errors without stopping the check (TS18037, an `await` expression in a class static
+  block) goes to `kept_grammar` (`kept_grammar_error_at`): always in both lists, never
+  deduplicated.
   Statement grammar errors come from `grammar.rs`, checked as each statement is parsed
   (no extra tree walk: a walk cost 28% of parse time): jump targets
   (TS1104/1105/1107/1115/1116, from a `Jump` scope stack pushed around loop, switch and
@@ -213,7 +236,8 @@ Files:
   TS1172/1173/1174/1175), declarations without modifiers as `if`/loop bodies, through
   labels (TS1156), `import(T)` types (TS1141), and ambient rules: initializers (TS1039;
   TS1254 for a `const` or `readonly` without a type whose initializer is not a literal, a
-  literal enum reference or similar), bodies (TS1183, also accessor bodies in types) and
+  literal enum reference or similar), bodies (TS1183, also accessor bodies in types and
+  `declare` class method bodies, not `declare` accessors or constructors) and
   generators (TS1221). A decorated `declare` field skips TS1039 (tsc reports the decorator
   instead). Each statement list is checked once it is parsed (`check_statement_list`, by
   `Container`: file, namespace, external module, block): module elements in a block or
@@ -239,6 +263,10 @@ Files:
   needed (nothing consumed) and TS1144 `'{' or ';' expected` where it may be omitted;
   after either error the function gets an empty zero-width `Block` body, as in tsc (no
   TS7010/TS2391 for a missing implementation).
+- **A binary operator starts an expression** (`is_start_of_expression`), in statement
+  position too: `* 1;` and `>= 2;` are TS1109 at the operator, which then joins the
+  missing left operand (`<<<<<<<` is TS1109 at each `<<`). `=`, `,`, `?`, `:` and compound
+  assignments are not starts (TS1128); `as`/`satisfies` are names.
 - **A missing `;` after a lone name is about the name** (`semicolon.rs`, observed in tsc 7):
   `a b` is TS1434 at `a`, `asynd function f() {}` TS1435 "Did you mean 'async'?",
   `interface {` TS1438, and a typed class property followed by a token is TS1442 (TS1441 at
@@ -247,6 +275,9 @@ Files:
   Anything else is `';' expected` at the next token.
 - **A reserved word in type position is a type name** (`x: break`, `a: super()`): no syntax
   error, the checker reports TS2304, as in tsc.
+- **A function or constructor type after `|` or `&` is kept** but needs parentheses:
+  TS1385/TS1386 (union) or TS1387/TS1388 (intersection), from the end of the operator to
+  the end of the type, whose return type takes the rest of the union (`| () => a | b`).
 - **A reserved word where a name is needed is TS1359** "Identifier expected. 'void' is a
   reserved word that cannot be used here." (`enum void {}`, `function function() {}`,
   `{ while: while }`), not TS1003. After `class` there is no name error: the class has no
@@ -255,8 +286,17 @@ Files:
   function name is an identifier with no parse error (the binder reports TS1212-TS1214, as
   tsc 7 does). `await` as a name in an async context, and an async function expression
   named `await`, is a deferred TS1359 (tsc reports it from the checker, so it does not stop
-  semantic checking). A function expression's `yield` name ignores the enclosing
-  generator.
+  semantic checking); so is a class named `await` there. A function expression's `yield`
+  name ignores the enclosing generator. Where `await`/`yield` is an operator, `(await) =>`
+  is not an arrow function and `{ await }` is not a shorthand property (`':' expected`).
+  At the top level, `await` is an operator when an operand follows on its line. When one
+  follows on the next line (`await` + newline + `1`), the file is parsed again with
+  `module_await` if it has `import`/`export` syntax: in a module that `await` is an
+  operator too (topLevelAwait.1). The second parse only happens in that case.
+- **Class static blocks** are parsed with `Ctx::AWAIT | Ctx::STATIC_BLOCK`: `await` is an
+  operator (`await;` is TS1109) and each await expression is TS18037; `return` is a
+  deferred TS18041. Functions, arrows, field initializers and module blocks clear
+  `STATIC_BLOCK`.
 - **Decorators after modifiers are TS1436** at the `@` (`public @dec m() {}`); the
   decorators and any further modifiers still belong to the member. A same-line `@` after a
   property (`prop @dec` + newline + `m() {}`) is TS1436 too and decorates the next member.
@@ -276,6 +316,93 @@ Files:
     the first extra `default` of a switch, TS18016 for a private name as an object literal
     or type member key outside a class (not for `a.#x`, which the checker handles).
   - `await`/`yield` in type position are type names, even where they are operators.
+  - The class member name `constructor` (an identifier) always starts a constructor:
+    `constructor` + newline + `}` is `'(' expected` at the `}`.
+  - An object literal key that cannot be shorthand (`{ return 0; }`) is `':' expected`,
+    and the next expression is still its value.
+  - An imported binding that is a reserved word or a string (`import { default }`,
+    `import { a as if }`) is TS1003 at it.
+  - A module specifier that is not a string is parsed as an expression (dropped from the
+    tree); unless it is missing, it is TS1141 on its span, a checker error in tsc
+    (`checker_error_at`, kept in `checker_errs`, never merged or deduplicated against
+    syntax errors).
+  - Interface and type literal members use the list recovery (`List::TypeMembers`): a
+    member starts with a name followed by `(`, `<`, `?`, `:`, `,`, `;`, `}` or a line break
+    (`is_type_member_start`; a modifier keyword is one only before a name), so `var x: T`
+    and `a = 1` are TS1131 and end the list where a statement can start.
+  - A token that cannot start an array binding element is TS1181 and ends the pattern.
+  - A rest binding element's initializer (`[...x = a]`) is parsed and dropped, with a
+    deferred TS1186 at the `=`; `{ ...a: b }` binds `b`, with a deferred TS2566 at it. A
+    rest element that more elements follow is a deferred TS2462 at its target (at the
+    `...x` spread in an assignment pattern; tsc: `grammarchecks.go`, checkGrammarBindingElement).
+  - `export type` is a stray `export` (TS1128) unless `{`, `*` or a name on the same line
+    follows (`export type 100 {}`).
+  - `<<` opens type arguments after a type name (`ReturnType<<T>(x: T) => T>`), but not
+    after `typeof f`.
+  - An empty type argument (`f<a,,b>()`) is a grammar-level `Type expected.`: the list
+    still counts as type arguments in expression speculation.
+  - A legacy octal literal right after a `-` token (`-01`, `1 - 01`) is TS1121 from one
+    byte before the literal, suggesting `-0o1`.
+  - A generator object member with no name (`{ *() {} }`) is TS1003 after the `*`.
+  - A tagged template statement with no `;` after it (`module \`M\` {}`) is TS1443 at the
+    template (semicolon.rs).
+  - JSX: children that reach the end of the file get one `'</' expected.` there, plus
+    TS17008 per unclosed element; an unclosed fragment's TS17014 runs from the end of
+    the previous token to `<>`. A closing tag that names the direct parent
+    (`<a><b>x</a>`) is the parent's, and the child is TS17008. A fragment closed by a
+    named tag (`<>x</a>`) is TS17015 and ends after `</`; in children the rest is read
+    again as JSX text. A bad attribute value is TS1145; the first `attr={}` of an
+    element is a deferred TS17000. A token that cannot start an attribute gets the list
+    recovery (`List::JsxAttributes`), and a tag that then lacks `>` is `'/' expected.`
+    and has no children (in children, the rest is read again as JSX text). A conflict
+    marker in children is TS1185 plus `'</' expected.` over the marker line. Adjacent
+    elements outside children (`<a/><b/>`, not under a prefix operator) are TS2657 and a
+    `Seq` led by a zero-width `Missing` (tsc's synthesized comma: no TS2695).
+    `</` (no space between) is one closing-tag token as in tsc: never a `<` operator,
+    no expression (TS1109) and no statement start (TS1128, both characters skipped).
+    `<:` starts no tag (TS1109); other bad tag starts are tags with a missing name.
+  - `Identifier expected.` at the end of the file is reported after the last token,
+    except after `?.`.
+  - `throw` before a line break is TS1142 at the end of `throw`.
+  - `new.x` and `import.x` take any name; one other than `target`/`meta` is the
+    checker's TS17012 (TS18061 for `import.x(`), deferred.
+  - A tagged template in an optional chain (`a?.\`b\``, `a?.b\`c\``) is TS1358 at the
+    template.
+  - Decorators before an expression other than `class` are TS1109 just after them.
+  - `import defer` is a phase before `*`, `{` or a name; a default or named binding
+    is a deferred TS18058/TS18059 on the clause. A default binding followed by neither
+    `,` nor `from` is an `import x =` with `'=' expected.` (not in a JSDoc `@import`),
+    whose reference is read only if a name follows.
+  - `import` followed by a reserved word (`import class C {}`, `import\nimport ...`)
+    has no clause and no `from`: the module specifier is read as an expression, TS1141
+    on its span (a class expression's name).
+  - `new Z[]`: TS1011 is just after `[`.
+  - Deferred checker grammar errors: `get constructor()`/`*constructor()` (identifier
+    name, static or not) TS1341/TS1368; the first required tuple element after an
+    optional one TS1257; on an array or object literal assigned with `=`, a `,` after
+    a final spread TS1013 and `...x = a` TS1186. A rest parameter's trailing `,` is not
+    an error in an ambient context.
+  - `this is T` in any type position, and `asserts x`/`asserts this` before a name or
+    `this` on the same line, are type predicates. Outside a function or method's return
+    type (also a constructor's, accessor's or construct signature's) they are a deferred
+    TS1228 (the checker reports it in JSDoc).
+  - `super` not followed by `(`, `.` or `[` is TS1034 at the next token; type arguments
+    after it are parsed, dropped and TS2754.
+  - An `=` right after a `}` where a list cannot use it, or where `;`/`,` is expected,
+    is TS2809; in the latter case the `=` is skipped and the `;`/`,` is expected at the
+    next token (`() => {} = value;`). Only the `}` of a statement block or function body
+    counts (`last_block_end`).
+  - An object binding pattern skips a token that starts no property unless an enclosing
+    list uses it (TS1180, often hidden by an error at the same position); parameter lists
+    are a list context (`?` starts a type, so `f({a ?})` ends the pattern at `?`).
+  - `{ h?: 1 }` (TS1162) and `{ a! }` (TS1255) are deferred checker errors in TypeScript.
+  - Deferred too: a binding named `await` directly in a class static block TS1359;
+    `import<T>(...)` (type arguments dropped, still a module request) TS1326 on the
+    expression; a `,` after a rest parameter or element TS1013 (immediate in JavaScript).
+  - A shorthand initializer (`{ s = 5 }`) in an object literal that never becomes a
+    destructuring target (assigned with `=`, or a `for...in`/`for...of` head, nested
+    included) is TS1312 at the `=`, computed in `finish` from `shorthand_inits` and
+    `pattern_literals` (both rewound with speculation).
 - **Heritage types take their type arguments across a line break.** `extends A<T>` followed by
   a newline and `{` is `ExprWithTypeArgs { expr: A, type_args: <T> }`, as on one line; the
   instantiation expression the member tail builds there is unwrapped (and dropped from the

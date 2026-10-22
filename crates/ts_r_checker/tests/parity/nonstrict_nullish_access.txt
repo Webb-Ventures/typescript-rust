@@ -1,0 +1,4 @@
+a.ts(2,1): error TS18048: 'u' is possibly 'undefined'.
+a.ts(3,1): error TS18050: The value 'null' cannot be used here.
+a.ts(4,1): error TS18050: The value 'undefined' cannot be used here.
+a.ts(5,11): error TS2532: Object is possibly 'undefined'.

@@ -1,0 +1,5 @@
+a.ts(4,24): error TS2304: Cannot find name 'b'.
+a.ts(9,15): error TS2304: Cannot find name 'I'.
+a.ts(12,25): error TS2304: Cannot find name 'arguments'.
+a.ts(15,21): error TS2304: Cannot find name 'arguments'.
+d.ts(4,24): error TS2304: Cannot find name 'default'.

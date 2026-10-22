@@ -363,6 +363,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // A union that remembers how it was written prints its origin
                 // (`HeadersInit | undefined`).
                 let members = match s.union_origin(t) {
+                    // `T & (0 | 1)` distributed over its union, written as one intersection.
+                    Some(&[one]) => return self.print_type(one, depth, stack),
                     Some(o) => o.to_vec(),
                     None => s.list_items(list).to_vec(),
                 };
@@ -1548,7 +1550,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let written = match ann {
                 Some(a) if !self.names_outer_type_param(a) => {
-                    self.written_type_text(a.file, a.node, 0)
+                    self.written_type_text(a.file, a.node, 0).map(|w| {
+                        // A JSDoc `{T=}` is written `T | undefined` (observed tsc 7, with
+                        // or without `strictNullChecks`).
+                        if !self.is_jsdoc_optional_annotation(a) {
+                            return w;
+                        }
+                        if matches!(
+                            self.ast(a.file).node(a.node),
+                            Node::FunctionType { .. } | Node::ConstructorType { .. }
+                        ) {
+                            format!("({w}) | undefined")
+                        } else {
+                            format!("{w} | undefined")
+                        }
+                    })
                 }
                 _ => None,
             };

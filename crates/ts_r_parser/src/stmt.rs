@@ -14,11 +14,12 @@ use crate::{Ctx, Parser};
 /// Whether a function-like may omit its body (see `Parser::parse_function_rest`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BodyRule {
-    /// Object-literal methods: `'{' expected`.
+    /// Object-literal methods: `'{' expected` (see `Accessor`), with an empty body.
     Required,
     /// Declarations and overloads: `;` or TS1144.
     Optional,
-    /// Accessors outside ambient contexts.
+    /// Accessors outside ambient contexts: before `;` or where one could be inserted, a
+    /// grammar `'{' expected`; else a syntax error.
     Accessor,
 }
 
@@ -225,9 +226,18 @@ impl<'a> Parser<'a> {
             T::Break | T::Continue => {
                 let is_break = self.at(T::Break);
                 self.bump();
-                let label = if !self.can_insert_semicolon() && self.at_identifier() {
+                let label = if self.can_insert_semicolon() {
+                    None
+                } else if self.at_identifier() {
                     Some(self.parse_identifier())
                 } else {
+                    // `break 1;`, `break await;` in an async function: TS1003 (TS1359 for a
+                    // reserved word), and the token is left for the next statement.
+                    if self.kind().is_reserved() {
+                        self.reserved_word_error();
+                    } else {
+                        self.error(messages::IDENTIFIER_EXPECTED);
+                    }
                     None
                 };
                 self.semicolon();
@@ -243,7 +253,9 @@ impl<'a> Parser<'a> {
             T::Throw => {
                 self.bump();
                 if self.newline_before() {
-                    self.error(messages::LINE_BREAK_NOT_PERMITTED_HERE);
+                    // At the end of `throw`, as in tsc 7.
+                    let at = Span::at(self.prev_end);
+                    self.error_at(messages::LINE_BREAK_NOT_PERMITTED_HERE, at, &[]);
                 }
                 let arg = self.parse_expression();
                 self.semicolon();
@@ -264,7 +276,9 @@ impl<'a> Parser<'a> {
             }
             T::Import => {
                 let next = self.peek_kind();
-                if matches!(next, T::LParen | T::Dot) {
+                if matches!(next, T::LParen | T::Dot)
+                    || (self.ts && matches!(next, T::Lt | T::LtLt))
+                {
                     Some(self.parse_expression_statement())
                 } else {
                     Some(self.parse_import(start, Modifiers::NONE))
@@ -299,8 +313,18 @@ impl<'a> Parser<'a> {
                 self.error(messages::DECLARATION_OR_STATEMENT_EXPECTED);
                 None
             }
+            // `</` in JSX is one token for tsc, a closing tag that starts nothing: it is
+            // skipped whole (jsxInvalidEsprimaTestSuite `</>;`).
+            T::Lt if self.jsx && self.at_lt_slash() => {
+                self.error(messages::DECLARATION_OR_STATEMENT_EXPECTED);
+                self.bump();
+                self.bump();
+                None
+            }
             _ => {
-                if self.at_expression_start() {
+                // A binary operator starts an expression whose left operand is missing
+                // (`* b` is TS1109 at `*`), as in tsc.
+                if self.is_start_of_expression() {
                     Some(self.parse_expression_statement())
                 } else {
                     self.error(messages::DECLARATION_OR_STATEMENT_EXPECTED);
@@ -321,6 +345,19 @@ impl<'a> Parser<'a> {
     /// A labelled statement's body: as [`Self::parse_embedded_statement`], but a declaration
     /// is fine here unless the label itself is a substatement.
     fn parse_label_body(&mut self) -> NodeId {
+        // `if (a) }`, `if (a) else b`: tsc reads an expression statement here, so the token
+        // is `Expression expected` and is left to the enclosing construct
+        // (parserErrorRecoveryIfStatement4).
+        let ends_construct = match self.kind() {
+            T::RBrace | T::RParen | T::RBracket | T::Eof | T::Else | T::Case => true,
+            T::Default => !matches!(self.peek_kind(), T::Function | T::Class | T::Abstract),
+            _ => false,
+        };
+        if ends_construct {
+            self.error(messages::EXPRESSION_EXPECTED);
+            let pos = self.prev_end;
+            return self.add_node(Span::at(pos), Node::Empty {});
+        }
         match self.parse_statement() {
             Some(s) => s,
             None => {
@@ -378,7 +415,9 @@ impl<'a> Parser<'a> {
         }
         let stmts = self.parse_statements(false, directives);
         self.check_statement_list(stmts, Container::Block);
-        self.expect_closing(T::RBrace, T::LBrace, open);
+        if self.expect_closing(T::RBrace, T::LBrace, open) {
+            self.last_block_end = self.prev_end;
+        }
         self.finish_node(start, Node::Block { stmts })
     }
 
@@ -428,13 +467,10 @@ impl<'a> Parser<'a> {
             self.bump();
             true
         };
-        if is_await && self.ctx.has(Ctx::IN_FUNCTION) && !self.ctx.has(Ctx::AWAIT) {
-            let in_static_block = self
-                .jumps
-                .iter()
-                .rev()
-                .find(|j| matches!(j, Jump::Boundary | Jump::StaticBlock))
-                .is_some_and(|j| matches!(j, Jump::StaticBlock));
+        let in_static_block = self.ctx.has(Ctx::STATIC_BLOCK);
+        if is_await
+            && (in_static_block || self.ctx.has(Ctx::IN_FUNCTION) && !self.ctx.has(Ctx::AWAIT))
+        {
             let m = if in_static_block {
                 messages::FOR_AWAIT_IN_STATIC_BLOCK
             } else {
@@ -488,6 +524,7 @@ impl<'a> Parser<'a> {
                     self.grammar_error_at(messages::FOR_OF_ASYNC, span, &[]);
                 }
                 self.check_for_in_of_head(left, true);
+                self.check_assignment_pattern(left, 0);
                 self.bump();
                 let right = self.with_ctx(0, Ctx::DISALLOW_IN, |p| p.parse_assignment());
                 self.expect_closing(T::RParen, T::LParen, open);
@@ -503,7 +540,12 @@ impl<'a> Parser<'a> {
                 );
             }
             if self.at(T::In) {
+                // `for await (x in y)`: `'of' expected` at the `in` (parser.forAwait.es2018).
+                if is_await {
+                    self.error_expected("of");
+                }
                 self.check_for_in_of_head(left, false);
+                self.check_assignment_pattern(left, 0);
                 self.bump();
                 let right = self.with_ctx(0, Ctx::DISALLOW_IN, |p| p.parse_expression());
                 self.expect_closing(T::RParen, T::LParen, open);
@@ -653,6 +695,7 @@ impl<'a> Parser<'a> {
                         };
                         p.expect(T::Colon);
                         let body = p.parse_statement_list(List::SwitchClauseStatements, false);
+                        p.check_using_in_case(body);
                         let c = p.finish_node(cstart, Node::SwitchCase { test, body });
                         p.scratch.push(c);
                     }
@@ -703,8 +746,9 @@ impl<'a> Parser<'a> {
             }
             if p.at(T::Of) {
                 p.bump();
-                // `for (using of of x)` declares `of`; `for (using of x)` iterates `using`.
-                return matches!(p.kind(), T::Of | T::Eq | T::Semi);
+                // `for (using of = x;;)` and `for (using of: T ...)` declare `of`;
+                // `for (using of x)` and `for (using of of x)` iterate `using` (tsc 7).
+                return matches!(p.kind(), T::Colon | T::Eq | T::Semi);
             }
             true
         })
@@ -742,7 +786,12 @@ impl<'a> Parser<'a> {
                     !next.newline_before()
                         && (next.kind.is_identifier_like() || next.kind == T::String)
                 }
-                T::Global => next.kind == T::LBrace,
+                // `global x` is a global augmentation missing its body: `';' expected` at
+                // the `x` (nestedGlobalNamespaceInClass).
+                T::Global => {
+                    next.kind == T::LBrace
+                        || (!next.newline_before() && next.kind.is_identifier_like())
+                }
                 T::Abstract => {
                     !next.newline_before() && matches!(next.kind, T::Class | T::Abstract)
                 }
@@ -837,7 +886,9 @@ impl<'a> Parser<'a> {
                 self.bump();
                 self.parse_var_statement(start, modifiers, VarKind::Const)
             }
-            T::Using if self.is_using_declaration() => {
+            // After decorators, `using` always starts a declaration (`@dec using 1` is
+            // TS1134 at the `1`: decoratorOnUsing).
+            T::Using if !decorators.is_empty() || self.is_using_declaration() => {
                 self.bump();
                 self.parse_var_statement(start, modifiers, VarKind::Using)
             }
@@ -912,6 +963,7 @@ impl<'a> Parser<'a> {
         match self.kind() {
             T::Export => self.parse_export(start, decorators),
             T::Class => self.parse_class(start, decorators, Modifiers::NONE, false),
+            T::Using => self.parse_declaration_with_modifiers(start, decorators, Modifiers::NONE),
             // `@dec default class {}`: TS1029 at `default`, a checker grammar error
             // (defaultKeywordWithoutExport1).
             T::Default if self.peek_kind() == T::Class => {
@@ -938,6 +990,9 @@ impl<'a> Parser<'a> {
     fn parse_var_statement(&mut self, start: u32, modifiers: Modifiers, kind: VarKind) -> NodeId {
         let decls = self.parse_var_declarators(kind);
         self.check_var_initializers(kind, decls);
+        if matches!(kind, VarKind::Using | VarKind::AwaitUsing) {
+            self.check_using_statement(start, modifiers, kind);
+        }
         self.semicolon();
         self.finish_node(
             start,
@@ -1027,6 +1082,7 @@ impl<'a> Parser<'a> {
             );
             self.parse_private_name()
         } else {
+            self.check_await_binding_in_static_block();
             self.parse_binding_target()
         };
         let bang = self.tok().span();
@@ -1085,42 +1141,7 @@ impl<'a> Parser<'a> {
             );
         }
         let mark = self.scratch.len();
-        while !matches!(self.kind(), T::RBrace | T::Eof) && !self.aborting() {
-            let mstart = self.start();
-            let mname = match self.kind() {
-                T::String => self.parse_string_literal(),
-                T::Number => self.parse_numeric_literal(),
-                T::LBracket => {
-                    let key = self.parse_computed_key();
-                    self.check_enum_computed_name(key);
-                    key
-                }
-                T::PrivateName => self.parse_private_name(),
-                k if k.is_identifier_or_keyword() => self.parse_identifier_name(),
-                _ => {
-                    self.error(messages::ENUM_MEMBER_EXPECTED);
-                    if !matches!(self.kind(), T::Comma) {
-                        // Skip the bad token.
-                        self.bump();
-                        continue;
-                    }
-                    self.missing()
-                }
-            };
-            let init = if self.eat(T::Eq) {
-                Some(self.parse_assignment())
-            } else {
-                None
-            };
-            let m = self.finish_node(mstart, Node::EnumMember { name: mname, init });
-            self.scratch.push(m);
-            if !self.eat(T::Comma) && !matches!(self.kind(), T::RBrace | T::Eof) {
-                self.error_expected(",");
-                if !self.kind().is_identifier_or_keyword() && !matches!(self.kind(), T::String) {
-                    break;
-                }
-            }
-        }
+        self.in_list(List::EnumMembers, |p| p.parse_enum_members());
         let members = self.finish_list(mark);
         self.expect_closing(T::RBrace, T::LBrace, open);
         self.finish_node(
@@ -1133,6 +1154,49 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// The members of an enum body up to `}`. As in tsc, a token that is no member is
+    /// `Enum member expected` and is skipped unless an enclosing list uses it (`@dec` starts a
+    /// statement: decoratorOnEnum2), and a member followed by anything but `,` or `}` is
+    /// TS1357, after which the list goes on (parserEnum5: `a: 1` is two members).
+    fn parse_enum_members(&mut self) {
+        while !matches!(self.kind(), T::RBrace | T::Eof) && !self.aborting() {
+            let mstart = self.start();
+            let mname = match self.kind() {
+                T::String => self.parse_string_literal(),
+                T::Number => self.parse_numeric_literal(),
+                T::BigInt => self.parse_bigint_literal(),
+                T::LBracket => {
+                    let key = self.parse_computed_key();
+                    self.check_enum_computed_name(key);
+                    key
+                }
+                T::PrivateName => self.parse_private_name(),
+                k if k.is_identifier_or_keyword() => self.parse_identifier_name(),
+                T::Comma => {
+                    self.error(messages::ENUM_MEMBER_EXPECTED);
+                    self.missing()
+                }
+                _ => {
+                    if self.abort_list_or_skip(List::EnumMembers) {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            self.check_enum_member_name(mname);
+            let init = if self.eat(T::Eq) {
+                Some(self.parse_assignment())
+            } else {
+                None
+            };
+            let m = self.finish_node(mstart, Node::EnumMember { name: mname, init });
+            self.scratch.push(m);
+            if !self.eat(T::Comma) && !matches!(self.kind(), T::RBrace | T::Eof) {
+                self.error(messages::ENUM_MEMBER_SEPARATOR_EXPECTED);
+            }
+        }
+    }
+
     fn parse_interface(&mut self, start: u32, modifiers: Modifiers) -> NodeId {
         self.expect(T::Interface);
         let name = self.parse_identifier();
@@ -1140,6 +1204,14 @@ impl<'a> Parser<'a> {
         let mut extends = NodeList::EMPTY;
         if self.eat(T::Extends) {
             extends = self.parse_heritage_types("extends");
+        }
+        while self.at(T::Extends) {
+            // `interface I extends A extends B {}`: the checker's TS1172 at the second
+            // `extends`; that clause is parsed and dropped (parserInterfaceDeclaration1).
+            let span = self.tok().span();
+            self.deferred_grammar_error_at(messages::EXTENDS_CLAUSE_ALREADY_SEEN, span, &[]);
+            self.bump();
+            self.parse_heritage_types("extends");
         }
         if self.at(T::Implements) {
             // TS1176 at `implements`; the clause is parsed and dropped
@@ -1165,7 +1237,11 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_heritage_types(&mut self, keyword: &str) -> NodeList {
         // `class C extends {` starts the body unless it is an object literal such as
         // `extends {} {`; an empty list is reported.
-        if self.at(T::LBrace) && !self.is_heritage_object_literal() {
+        // Likewise `class C extends implements I {` (parserErrorRecovery_ExtendsOrImplements-
+        // Clause3).
+        if (self.at(T::LBrace) && !self.is_heritage_object_literal())
+            || (self.at(T::Implements) && keyword == "extends")
+        {
             let span = Span::at(self.prev_end);
             self.error_at(messages::LIST_CANNOT_BE_EMPTY, span, &[keyword]);
             return NodeList::EMPTY;
@@ -1191,8 +1267,11 @@ impl<'a> Parser<'a> {
             let comma = self.tok().span();
             if self.eat(T::Comma) {
                 // `extends C, {`: the `{` starts the body; TS1009 at the `,`, a checker
-                // grammar error (classHeritageWithTrailingSeparator).
-                if self.at(T::LBrace) && !self.is_heritage_object_literal() {
+                // grammar error (classHeritageWithTrailingSeparator). Likewise before
+                // another clause (parserErrorRecovery_ExtendsOrImplementsClause5).
+                if (self.at(T::LBrace) && !self.is_heritage_object_literal())
+                    || matches!(self.kind(), T::Extends | T::Implements)
+                {
                     self.deferred_grammar_error_at(
                         messages::TRAILING_COMMA_NOT_ALLOWED,
                         comma,
@@ -1257,8 +1336,10 @@ impl<'a> Parser<'a> {
     fn is_heritage_object_literal(&mut self) -> bool {
         self.lookahead(|p| {
             p.bump();
+            // `extends { foo: string; } {}` is an object literal (classExtendsEveryObjectType):
+            // only an empty `{}` that is not followed by the body is the body itself.
             if !p.eat(T::RBrace) {
-                return false;
+                return true;
             }
             matches!(p.kind(), T::Comma | T::LBrace | T::Extends | T::Implements)
         })
@@ -1342,9 +1423,8 @@ impl<'a> Parser<'a> {
         // Module bodies are not function bodies: `await` at their top level is not allowed,
         // and `return` is an error, but we only care about syntax here.
         let mark = self.deferred.len();
-        let stmts = self.with_ctx(0, Ctx::IN_FUNCTION | Ctx::AWAIT | Ctx::YIELD, |p| {
-            p.parse_statements(false, false)
-        });
+        let clear = Ctx::IN_FUNCTION | Ctx::AWAIT | Ctx::YIELD | Ctx::STATIC_BLOCK;
+        let stmts = self.with_ctx(0, clear, |p| p.parse_statements(false, false));
         self.check_ambient_statements(stmts, mark);
         self.check_statement_list(stmts, container);
         self.expect_closing(T::RBrace, T::LBrace, open);
@@ -1393,12 +1473,20 @@ impl<'a> Parser<'a> {
             }
         }
         let mut phase = ImportPhase::Evaluation;
-        if !type_only && (self.at_contextual(T::Defer) || self.at_contextual(T::Source)) {
+        let clause_start = self.start();
+        // A JSDoc `@import defer * as ns` has no phase: `defer` is a default import, and
+        // `'from' expected` follows at the `*` (importDeferJsdoc).
+        if !type_only
+            && !self.jsdoc_import
+            && (self.at_contextual(T::Defer) || self.at_contextual(T::Source))
+        {
             let is_phase = self.lookahead(|p| {
                 let k = p.kind();
                 p.bump();
-                if k == T::Defer {
-                    p.at(T::Star)
+                // `import defer * as ns`, and (invalid, TS18058/TS18059) `import defer x`,
+                // `import defer { a }`, `import defer from from "m"`.
+                if k == T::Defer && matches!(p.kind(), T::Star | T::LBrace) {
+                    true
                 } else if p.at(T::From) {
                     p.bump();
                     p.at(T::From)
@@ -1416,6 +1504,14 @@ impl<'a> Parser<'a> {
             }
         }
         let mark = self.scratch.len();
+        // `import class C {}`, `import\nimport ...`: no clause at all, so no `from` either;
+        // the module specifier is read as an expression (tsc 7).
+        let no_clause = !type_only
+            && phase == ImportPhase::Evaluation
+            && !self.kind().is_identifier_like()
+            && !matches!(self.kind(), T::LBrace | T::Star);
+        // Bindings after the default one need a `,` (`import a * as b` is `'from' expected`).
+        let mut more = true;
         // Default binding or `import x = ...`.
         if self.at_identifier()
             || (self.kind().is_identifier_like() && !self.at(T::From))
@@ -1427,13 +1523,39 @@ impl<'a> Parser<'a> {
                 self.scratch.truncate(mark);
                 return self.parse_import_equals(start, modifiers, type_only, name);
             }
+            // `import abstract class D {}`: a name followed by neither `,` nor `from` is an
+            // `import x =` missing its `=`; a reference is read only if a name follows (tsc 7).
+            if phase == ImportPhase::Evaluation
+                && !self.jsdoc_import
+                && !matches!(self.kind(), T::Comma | T::From)
+            {
+                self.scratch.truncate(mark);
+                self.error_expected("=");
+                let module_ref = if self.kind().is_identifier_like() {
+                    self.parse_entity_name(false)
+                } else {
+                    self.missing()
+                };
+                self.semicolon();
+                return self.finish_node(
+                    start,
+                    Node::ImportEquals {
+                        modifiers,
+                        type_only,
+                        name,
+                        module_ref,
+                    },
+                );
+            }
             let spec = self.finish_node(id_start, Node::ImportDefaultSpecifier { local: name });
             self.scratch.push(spec);
-            if self.eat(T::Comma) && !matches!(self.kind(), T::Star | T::LBrace) {
+            more = self.eat(T::Comma);
+            if more && !matches!(self.kind(), T::Star | T::LBrace) {
                 self.error_expected("{");
             }
         }
-        if self.at(T::Star) {
+        if !more {
+        } else if self.at(T::Star) {
             let s = self.start();
             self.bump();
             self.expect(T::As);
@@ -1444,13 +1566,31 @@ impl<'a> Parser<'a> {
             self.parse_named_specifiers(true);
         }
         let specifiers = self.finish_list(mark);
-        self.expect(T::From);
-        let source = if self.at(T::String) {
-            self.parse_string_literal()
-        } else {
-            self.error(messages::STRING_LITERAL_EXPECTED);
-            self.missing()
-        };
+        if phase == ImportPhase::Defer {
+            // Only `import defer * as ns` is valid: checker grammar errors on the clause.
+            let list = self.ast.list(specifiers);
+            let msg = if list
+                .iter()
+                .any(|&n| matches!(self.ast.node(n), Node::ImportDefaultSpecifier { .. }))
+            {
+                Some(messages::DEFERRED_DEFAULT_IMPORT)
+            } else if list
+                .iter()
+                .any(|&n| matches!(self.ast.node(n), Node::ImportSpecifier { .. }))
+            {
+                Some(messages::DEFERRED_NAMED_IMPORTS)
+            } else {
+                None
+            };
+            if let Some(msg) = msg {
+                let span = Span::new(clause_start, self.prev_end);
+                self.deferred_grammar_error_at(msg, span, &[]);
+            }
+        }
+        if !no_clause {
+            self.expect(T::From);
+        }
+        let source = self.parse_module_specifier();
         let attributes = self.parse_import_attributes_opt();
         self.semicolon();
         self.finish_node(
@@ -1458,12 +1598,35 @@ impl<'a> Parser<'a> {
             Node::ImportDecl {
                 type_only,
                 phase,
-                has_clause: true,
+                has_clause: !no_clause,
                 specifiers,
                 source,
                 attributes,
             },
         )
+    }
+
+    /// The module specifier after `from`. Anything but a string is parsed as an expression
+    /// (dropped from the tree) and is TS1141 on its span, a checker error in tsc, so it is
+    /// reported after the expression's own errors (`import { a }, from "m"` is `'from'
+    /// expected` and TS1141 at `,`, then `';' expected` at the string).
+    fn parse_module_specifier(&mut self) -> NodeId {
+        if self.at(T::String) {
+            return self.parse_string_literal();
+        }
+        let first = self.start();
+        let expr = self.parse_expression();
+        if !matches!(self.ast.node(expr), Node::Missing {}) {
+            let span = match *self.ast.node(expr) {
+                // A class expression's error span is its name.
+                Node::ClassExpr {
+                    name: Some(name), ..
+                } => self.ast.span(name),
+                _ => Span::new(first, self.prev_end.max(first)),
+            };
+            self.checker_error_at(messages::STRING_LITERAL_EXPECTED, span);
+        }
+        self.missing()
     }
 
     fn parse_import_equals(
@@ -1487,6 +1650,11 @@ impl<'a> Parser<'a> {
             };
             self.expect_closing(T::RParen, T::LParen, open);
             self.finish_node(s, Node::ExternalModuleRef { expr })
+        } else if self.kind().is_identifier_or_keyword() && !self.kind().is_identifier_like() {
+            // `import q = null;`: TS1359, and the word is left for the next statement
+            // (aliasErrors; `import t = void;` is then TS1109 at `;`).
+            self.reserved_word_error();
+            self.missing()
         } else {
             self.parse_entity_name(true)
         };
@@ -1507,6 +1675,11 @@ impl<'a> Parser<'a> {
         let open = self.start();
         self.expect(T::LBrace);
         while !matches!(self.kind(), T::RBrace | T::Eof) && !self.aborting() {
+            // `export { x, from "./a"`: `from` and a string end the list, so the `}` is
+            // missing at `from` (unclosedExportClause01).
+            if self.at(T::From) && self.peek_kind() == T::String {
+                break;
+            }
             let s = self.start();
             if !(self.kind().is_identifier_or_keyword() || self.at(T::String)) {
                 self.error(messages::IDENTIFIER_EXPECTED);
@@ -1547,9 +1720,11 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
             }
+            let mut local_tok = self.tok();
             let first = self.parse_module_export_name();
             let (imported, local) = if self.at_contextual(T::As) {
                 self.bump();
+                local_tok = self.tok();
                 let second = if is_import {
                     self.parse_identifier_name_as_binding()
                 } else {
@@ -1559,6 +1734,11 @@ impl<'a> Parser<'a> {
             } else {
                 (None, first)
             };
+            // An imported binding that is a reserved word or a string (`import { default }`,
+            // `import { a as if }`) is `Identifier expected.` at it, as in tsc.
+            if is_import && (local_tok.kind.is_reserved() || local_tok.kind == T::String) {
+                self.error_at(messages::IDENTIFIER_EXPECTED, local_tok.span(), &[]);
+            }
             let spec = if is_import {
                 self.finish_node(
                     s,
@@ -1802,12 +1982,7 @@ impl<'a> Parser<'a> {
             None
         };
         self.expect(T::From);
-        let source = if self.at(T::String) {
-            self.parse_string_literal()
-        } else {
-            self.error(messages::STRING_LITERAL_EXPECTED);
-            self.missing()
-        };
+        let source = self.parse_module_specifier();
         let attributes = self.parse_import_attributes_opt();
         self.semicolon();
         self.finish_node(
@@ -1827,12 +2002,7 @@ impl<'a> Parser<'a> {
         let specifiers = self.finish_list(mark);
         let (source, attributes) = if self.at(T::From) {
             self.bump();
-            let source = if self.at(T::String) {
-                self.parse_string_literal()
-            } else {
-                self.error(messages::STRING_LITERAL_EXPECTED);
-                self.missing()
-            };
+            let source = self.parse_module_specifier();
             (Some(source), self.parse_import_attributes_opt())
         } else {
             (None, None)
@@ -1881,6 +2051,7 @@ impl<'a> Parser<'a> {
                     &["await"],
                 );
             }
+            self.check_await_binding_in_static_block();
             if is_expr && self.at(T::Yield) {
                 Some(self.parse_identifier_unchecked())
             } else {
@@ -1945,7 +2116,11 @@ impl<'a> Parser<'a> {
         rule: BodyRule,
     ) -> (Option<NodeId>, NodeList, Option<NodeId>, Option<NodeId>) {
         let mut add = Ctx::IN_FUNCTION;
-        let mut remove = Ctx::DISALLOW_IN | Ctx::IN_CONDITIONAL_TRUE | Ctx::DECORATOR | Ctx::TYPE;
+        let mut remove = Ctx::DISALLOW_IN
+            | Ctx::IN_CONDITIONAL_TRUE
+            | Ctx::DECORATOR
+            | Ctx::TYPE
+            | Ctx::STATIC_BLOCK;
         if flags.contains(FnFlags::ASYNC) {
             add |= Ctx::AWAIT
         } else {
@@ -1966,20 +2141,23 @@ impl<'a> Parser<'a> {
             // After either error the body is there but empty, as in tsc: no TS7010 or
             // TS2391 for a missing implementation (objectLiteralMemberWithoutBlock1,
             // objectTypesWithOptionalProperties2).
-            // An accessor without a body is not a syntax error: tsc's checker reports
-            // `'{' expected` at its last character (accessorWithoutBody1).
+            // An accessor or object-literal method without a body before `;` (or where one
+            // could be inserted) is not a syntax error: tsc's checker reports `'{' expected`
+            // at its last character (accessorWithoutBody1, objectLiteralMemberWithoutBlock1).
             let body = if p.at(T::LBrace) {
                 Some(p.parse_function_body_block())
             } else {
                 let empty_body = match rule {
-                    BodyRule::Accessor if p.eat(T::Semi) || p.can_insert_semicolon() => {
+                    BodyRule::Accessor | BodyRule::Required
+                        if p.eat(T::Semi) || p.can_insert_semicolon() =>
+                    {
                         let end = p.prev_end;
                         p.deferred_grammar_error_at(
                             messages::EXPECTED,
                             Span::new(end.saturating_sub(1), end),
                             &["{"],
                         );
-                        false
+                        rule == BodyRule::Required
                     }
                     BodyRule::Required | BodyRule::Accessor => {
                         p.error_expected("{");

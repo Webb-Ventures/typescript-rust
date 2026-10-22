@@ -26,7 +26,7 @@ from the files listed under [Sources](#sources); `cargo xtask bench --repos` rep
 | | | Editor memory, 154 files open | 10.6 MB | 2,296 MB | | **217× less** |
 | `ts-r-build` | esbuild 0.28.2 | excalidraw: first build + 20 rebuilds | 1.36 s | 3.46 s | **2.5×** | |
 | | | excalidraw, minified, cached / no cache² | 132 / 255 ms | 201 ms | 1.5× / 0.8× | 2.0× less (no cache) |
-| | | three.js x10, cached / no cache | 241 / 378 ms | 225 ms | 0.93× / 0.6× | 1.5× less (no cache) |
+| | | three.js x10, cached / no cache⁵ | 132.2 / 255.0 ms | 246.2 ms | 1.9× / 0.97× | 1.6× less (no cache) |
 | `ts-r-lsp` | tsserver | tRPC: first errors on opening a file | 224 ms | 800 ms | 3.6× | |
 | | | tRPC: keystroke to errors (p50) | 9.4 ms | 24.3 ms | 2.6× | |
 | | | RxJS: memory, all 231 files open | 377 MB | 1,091 MB | | 2.9× less |
@@ -48,6 +48,9 @@ checks it doesn't implement yet; times will move as it grows.
 ⁴ Like-for-like: tRPC's ESLint config limited to the rules ts-r-lint implements, the same file
 for both tools, `lint-trpc-same-rules` in `bench/scenarios.toml` (2026-10-18). Both report 0
 problems from the rules. ESLint evaluates its config on every run; the cached row skips that.
+⁵ Measured again on 2026-10-21 at commit 2fb2555 (load average 11-14): the last of three
+invocations of 10 runs each. The other two gave 231.8 and 233.9 ms without the cache against
+esbuild's 262.7 and 238.5 ms; peak RSS 420-422 MB (cached 243-246 MB) against 695-696 MB.
 
 Read with these caveats:
 
@@ -79,7 +82,7 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Area | Result |
 |---|---|
-| Type checker vs tsc's conformance suite (exact diagnostics) | 66.1% of 12,769 compared test variants |
+| Type checker vs tsc's conformance suite (exact diagnostics) | 93.8% of 12,750 compared test variants |
 | private-app projects with exactly tsc's diagnostics | 25 of 25 |
 | private-app diagnostics: extra / missing vs tsc | 4 / 128 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
@@ -87,7 +90,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Lint on private-app, every configured rule (type-aware included) vs ESLint | 26,578 match, 0 missed, 0 extra; 23 of 23 projects pass the parity gate |
 | Parser + printer round trip over tsc's test files | 18,260 files, 0 mismatches |
 | Parse corpus (tsc's tests + private-app) | 0 errors where tsc accepts the file |
-| esbuild's bundler test cases | 652 / 746 |
+| esbuild's bundler test cases | 646 / 746 |
 | tsconfig error projects matching tsc | 114 / 118 |
 | Sound-mode spec cases | 221 / 221 |
 | Incremental vs full check | identical in all 25 projects; 18,000 random edits (seeds 1–60 × 300) |
@@ -106,8 +109,8 @@ private app before the switch to public repos and are not re-measured yet.
 
 Each number is recorded with its method in the crate or file that owns it:
 
-- Public-repo runs (check, lint, build, editor, 2026-10-16): [bench/README.md](../bench/README.md)
-  and `landing/data/bench.json`.
+- Public-repo runs (check, lint, build, editor, 2026-10-16; three.js x10 again 2026-10-21):
+  [bench/README.md](../bench/README.md) and `landing/data/bench.json`.
 - Dev server: `crates/ts_r_hmr/AGENTS.md` (excalidraw against Vite, `bench/dev/dev.mjs`).
 - Lint correctness: `docs/design/0006-lint.md`, `crates/ts_r_lsp/AGENTS.md`.
 - Build: `docs/design/0008-bundler.md`, `bench/esbuild-oracle/README.md`.

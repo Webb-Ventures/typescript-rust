@@ -1047,9 +1047,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             let mark = self.diags.len();
-            let target = self.jsx_report_target(ns, attrs_t, props);
+            let (source, target) = self.jsx_report_target(ns, attrs_t, props);
             self.check_assignable_with_elaboration(
-                attrs_t,
+                source,
                 target,
                 Loc::new(file, name),
                 Some(opening),
@@ -1070,36 +1070,43 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// The type a failed attributes check is reported against: with
-    /// `JSX.IntrinsicClassAttributes` declared, a failure that is not an excess attribute is
-    /// reported against the first member of the props intersection the attributes fail
-    /// (`Property 'x' is missing in type '{}' but required in type 'P'.` without the
-    /// intersection's head; observed tsc 7).
-    fn jsx_report_target(&mut self, ns: Option<SymId>, attrs: TypeId, props: TypeId) -> TypeId {
+    /// The source and target a failed attributes check is reported with. With
+    /// `JSX.IntrinsicAttributes` and `JSX.IntrinsicClassAttributes` declared, attributes (an
+    /// object, not a lone spread of a type parameter) that fail the props intersection for a
+    /// reason other than an excess or weak-type failure are reported against the first
+    /// member they fail, with no head for the intersection and no excess check against that
+    /// member (`Property 'x' is missing in type '{}' but required in type 'P'.`; tsc:
+    /// `reportErrorResults` in `tsc/internal/checker/relater.go`).
+    fn jsx_report_target(
+        &mut self,
+        ns: Option<SymId>,
+        attrs: TypeId,
+        props: TypeId,
+    ) -> (TypeId, TypeId) {
         if !self.store().flags(props).contains(TypeFlags::INTERSECTION)
+            || !self.store().flags(attrs).contains(TypeFlags::OBJECT)
+            || self.jsx_ns_type(ns, "IntrinsicAttributes").is_none()
             || self.jsx_ns_symbol(ns, "IntrinsicClassAttributes").is_none()
             || self.is_assignable(attrs, props)
         {
-            return props;
+            return (attrs, props);
         }
-        for (n, _) in self.properties_of(attrs) {
-            if !self.is_known_property(props, n) {
-                return props;
+        for (n, p) in self.properties_of(attrs) {
+            if !self.is_known_property(props, n) && !self.is_hyphenated_jsx_attr(p) {
+                return (attrs, props);
             }
         }
+        // Members are related without excess property checks; weak type detection applies
+        // to the whole intersection, not to its members.
+        let regular = self.regular_of(attrs);
         let members = self.store().members_of_union(props).to_vec();
-        // Weak type detection applies to the whole intersection, not to its members.
-        let Some(m) = members.into_iter().find(|&m| {
-            !self.is_assignable(attrs, m)
-                && !self.weak_type_violation(attrs, m, RelationKind::Assignable)
-        }) else {
-            return props;
-        };
-        // A failure against `IntrinsicAttributes` keeps the whole intersection.
-        if self.jsx_ns_type(ns, "IntrinsicAttributes") == Some(m) {
-            return props;
+        match members.into_iter().find(|&m| {
+            !self.is_assignable(regular, m)
+                && !self.weak_type_violation(regular, m, RelationKind::Assignable)
+        }) {
+            Some(m) => (regular, m),
+            None => (attrs, props),
         }
-        m
     }
 
     /// TS2604 for a value tag without call or construct signatures.

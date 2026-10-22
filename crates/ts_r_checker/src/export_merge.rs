@@ -2,7 +2,7 @@
 //! exports merged with other declarations (TS2652, see `check_default_merges`).
 //!
 //! Rules observed from tsc 7.0.2, per container (a module file, a namespace body, an
-//! ambient module body):
+//! ambient module body), in JavaScript files too:
 //! - Each top-level declaration has a name and the meanings it declares: interfaces and
 //!   type aliases a type; functions and variables a value; classes and enums a type and a
 //!   value; a namespace a namespace (and a value when instantiated); an `import x =` alias
@@ -37,7 +37,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Checks every container of `file` for TS2395.
     pub(crate) fn check_export_local_merges(&mut self, file: FileId) {
         let f = self.c.file(file);
-        if !self.reporting(file) || f.is_js() {
+        if !self.reporting(file) {
             return;
         }
         let ast = self.ast(file);

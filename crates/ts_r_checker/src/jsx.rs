@@ -200,13 +200,33 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Whether `p` is a hyphenated JSX attribute (`data-x`), which is never excess.
+    /// A hyphenated property of an object literal spread straight into the attributes
+    /// (`{...{ "data-x": 1 }}`) counts too.
     pub(crate) fn is_hyphenated_jsx_attr(&self, p: SymId) -> bool {
-        let Some(d) = self.c.synth_sym(p).and_then(|x| x.decl) else {
+        let Some(d) = self.c.first_decl(p) else {
             return false;
         };
         let ast = self.ast(d.file);
-        matches!(*ast.node(d.node), Node::JsxAttr { name, .. }
-            if matches!(*ast.node(name), Node::Ident { name: a } if ast.atom(a).contains('-')))
+        if let Node::JsxAttr { name, .. } = *ast.node(d.node) {
+            return matches!(*ast.node(name), Node::Ident { name: a } if ast.atom(a).contains('-'));
+        }
+        if !self.c.sym_name(p).contains('-') || !matches!(*ast.node(d.node), Node::Property { .. })
+        {
+            return false;
+        }
+        // The literal's own spread: property -> object literal (-> parentheses) -> spread.
+        let mut cur = d;
+        for _ in 0..16 {
+            let Some(up) = self.c.parent(cur) else {
+                return false;
+            };
+            match *ast.node(up.node) {
+                Node::ObjectLit { .. } | Node::Paren { .. } => cur = up,
+                Node::JsxSpreadAttr { .. } => return true,
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Whether the contextual type of the value of attribute `attr` (or of a child of the

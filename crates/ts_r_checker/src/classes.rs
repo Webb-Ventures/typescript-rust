@@ -84,11 +84,71 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => members,
             _ => return,
         };
+        self.check_setters_without_getters(l, members);
+        self.check_class_heritage(l);
         if self.is_ambient_node(l) {
             return;
         }
-        self.check_setters_without_getters(l, members);
-        self.check_class_heritage(l);
+        self.check_class_merged_with_functions(l);
+    }
+
+    /// A class declaration (not ambient) merged with function declarations: TS2813 at the
+    /// class name and TS2814 at each function's, with "Consider adding a 'declare'
+    /// modifier" related to the class.
+    fn check_class_merged_with_functions(&mut self, l: Loc) {
+        let Node::ClassDecl {
+            name: Some(name), ..
+        } = *self.node(l)
+        else {
+            return;
+        };
+        let Some(sym) = self.c.sym_of_decl(l) else {
+            return;
+        };
+        let functions: Vec<Loc> = self
+            .c
+            .decls(sym)
+            .iter()
+            .copied()
+            .filter(|&d| matches!(self.node(d), Node::FunctionDecl { name: Some(_), .. }))
+            .collect();
+        if functions.is_empty() || !self.reporting(l.file) {
+            return;
+        }
+        let nl = Loc::new(l.file, name);
+        let text = self.c.text(nl).to_owned();
+        let mark = self.diags.len();
+        self.error(
+            nl,
+            dg::CLASS_DECLARATION_CANNOT_IMPLEMENT_OVERLOAD_LIST_FOR_0_2813,
+            &[&text],
+        );
+        self.relate_last(
+            mark,
+            nl,
+            dg::CONSIDER_ADDING_A_DECLARE_MODIFIER_TO_THIS_CLASS_6506,
+            &[],
+        );
+        for f in functions {
+            let Node::FunctionDecl {
+                name: Some(fname), ..
+            } = *self.node(f)
+            else {
+                continue;
+            };
+            let mark = self.diags.len();
+            self.error(
+                Loc::new(f.file, fname),
+                dg::FUNCTION_WITH_BODIES_CAN_ONLY_MERGE_WITH_CLASSES_THAT_ARE_AMBIENT_2814,
+                &[],
+            );
+            self.relate_last(
+                mark,
+                nl,
+                dg::CONSIDER_ADDING_A_DECLARE_MODIFIER_TO_THIS_CLASS_6506,
+                &[],
+            );
+        }
     }
 
     /// Accessor rules for an object literal.
@@ -100,7 +160,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.check_setters_without_getters(l, props);
     }
 
-    /// TS7032: a set accessor without a getter whose parameter has no annotation.
+    /// TS7032: a set accessor whose parameter has no annotation, without a getter that
+    /// types the property (one with a body or a return type annotation); TS7033: a lone
+    /// getter with neither (`abstract get x();`).
     fn check_setters_without_getters(&mut self, l: Loc, members: NodeList) {
         if !self.c.opts.no_implicit_any || self.c.file(l.file).is_js() {
             return;
@@ -108,16 +170,30 @@ impl<'c, 'a> Ck<'c, 'a> {
         let file = l.file;
         let ast = self.ast(file);
         let list = ast.list(members);
+        let typing_getter = |ck: &Self, d: Loc| match *ck.node(d) {
+            Node::MethodDef {
+                kind: MethodKind::Get,
+                value,
+                ..
+            } => fn_parts(ck.ast(d.file), value)
+                .is_some_and(|p| p.body.is_some() || p.return_type.is_some()),
+            _ => false,
+        };
         for &m in list {
             let Node::MethodDef {
-                kind: MethodKind::Set,
+                kind: kind @ (MethodKind::Set | MethodKind::Get),
                 key,
                 value,
+                modifiers,
                 ..
             } = *ast.node(m)
             else {
                 continue;
             };
+            // Private members of ambient classes are not typed at all.
+            if modifiers.contains(ts_r_ast::Modifiers::PRIVATE) && self.is_ambient_node(l) {
+                continue;
+            }
             if !matches!(ast.node(key), Node::Ident { .. } | Node::PrivateName { .. }) {
                 continue;
             }
@@ -127,16 +203,27 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Some(sym) = self.c.sym_of_decl(Loc::new(file, m)) else {
                 continue;
             };
-            let has_getter = self.c.decls(sym).iter().any(|&d| {
-                matches!(
-                    self.node(d),
-                    Node::MethodDef {
-                        kind: MethodKind::Get,
-                        ..
-                    }
-                )
-            });
-            if has_getter {
+            if kind == MethodKind::Get {
+                let has_setter = self.c.decls(sym).iter().any(|&d| {
+                    matches!(
+                        self.node(d),
+                        Node::MethodDef {
+                            kind: MethodKind::Set,
+                            ..
+                        }
+                    )
+                });
+                if !has_setter && !typing_getter(self, Loc::new(file, m)) {
+                    self.error(
+                        Loc::new(file, key),
+                        dg::PROPERTY_0_IMPLICITLY_HAS_TYPE_ANY_BECAUSE_ITS_GET_ACCESSOR_LACKS_A_RETURN_TYPE_A_7033,
+                        &[&name],
+                    );
+                }
+                continue;
+            }
+            let decls = self.c.decls(sym).to_vec();
+            if decls.iter().any(|&d| typing_getter(self, d)) {
                 continue;
             }
             let Some(parts) = fn_parts(ast, value) else {

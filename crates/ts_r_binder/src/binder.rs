@@ -126,6 +126,11 @@ pub(crate) struct Binder<'a> {
     partners: FxHashMap<u32, TableId>,
     /// The function expression about to be bound as an immediately invoked one.
     iife: Option<NodeId>,
+    /// Members of a class expression are being bound (not of a class declaration).
+    in_class_expr: bool,
+    /// A method's function about to be bound whose flow does not continue the outer flow:
+    /// a constructor, or a member of a class declaration.
+    detached_function: Option<NodeId>,
     /// Binding the object or callee of a property access, element access or call (the
     /// spine of a possible optional chain).
     in_spine: bool,
@@ -245,6 +250,8 @@ impl<'a> Binder<'a> {
             iface_tables: FxHashMap::default(),
             partners: FxHashMap::default(),
             iife: None,
+            in_class_expr: false,
+            detached_function: None,
             in_spine: false,
             chain_skips: None,
             no_fold: 0,
@@ -2944,10 +2951,15 @@ impl<'a> Binder<'a> {
         if iife {
             self.jumps.exception = saved_jumps.exception;
         }
+        let detached = self.detached_function.take() == Some(id);
         let start = self.add_flow(
             FlowKind::Start,
             Some(id),
-            if is_expr { outer_current.0 } else { 0 },
+            if is_expr && !detached {
+                outer_current.0
+            } else {
+                0
+            },
             0,
         );
         self.current = if iife && outer_current.is_unreachable() {
@@ -2963,10 +2975,12 @@ impl<'a> Binder<'a> {
         for &p in ast.list(params) {
             self.bind_param(p, table);
         }
-        self.ctx.params_of = None;
+        // The return type sees what the parameters see (`function f(): typeof b { var b }`
+        // reads an outer `b`).
         if let Some(r) = ret {
             self.bind_type(r);
         }
+        self.ctx.params_of = None;
         if let Some(b) = body {
             match *ast.node(b) {
                 Node::Block { stmts } if !is_signature => {
@@ -3298,6 +3312,7 @@ impl<'a> Binder<'a> {
         // after the class (`let a; class C { [(a = 1, "m")]() {} } a;` is TS2454, while
         // a name sees a later static block's assignment).
         let is_block = |m: &NodeId| matches!(ast.node(*m), Node::StaticBlock { .. });
+        let saved_class_expr = std::mem::replace(&mut self.in_class_expr, is_expr);
         for &mem in ast.list(members).iter().filter(|m| is_block(m)) {
             self.bind_class_member(mem, sym, inst, stat);
         }
@@ -3305,6 +3320,7 @@ impl<'a> Binder<'a> {
         for &mem in ast.list(members).iter().filter(|m| !is_block(m)) {
             self.bind_class_member(mem, sym, inst, stat);
         }
+        self.in_class_expr = saved_class_expr;
         self.current = after_blocks;
         if !self.ast.source_kind.is_typescript() && !self.ctx.ambient {
             self.declare_this_properties(members, sym, inst, stat);
@@ -3542,6 +3558,12 @@ impl<'a> Binder<'a> {
                             );
                         }
                     }
+                }
+                // Only methods and accessors of class expressions continue the flow
+                // around them (observed: narrowing reaches them, not constructors or
+                // members of class declarations).
+                if kind == MethodKind::Constructor || !self.in_class_expr {
+                    self.detached_function = Some(value);
                 }
                 self.bind_function_like(value);
             }
@@ -4440,7 +4462,19 @@ impl<'a> Binder<'a> {
                         self.add_entity_ref(expr_name, meaning::VALUE);
                         self.record_flow(expr_name);
                     }
-                    Node::QualifiedName { .. } => self.add_entity_ref(expr_name, meaning::VALUE),
+                    // `typeof x.p` and `typeof this.a.b` narrow the reference: the name and
+                    // its leftmost identifier record where they stand.
+                    Node::QualifiedName { .. } => {
+                        self.add_entity_ref(expr_name, meaning::VALUE);
+                        self.record_flow(expr_name);
+                        let mut left = expr_name;
+                        while let Node::QualifiedName { left: l, .. } = *ast.node(left) {
+                            left = l;
+                        }
+                        if matches!(ast.node(left), Node::Ident { .. }) {
+                            self.record_flow(left);
+                        }
+                    }
                     _ => self.bind_type(expr_name),
                 }
                 if let Some(t) = type_args {

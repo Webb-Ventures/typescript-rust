@@ -12,6 +12,7 @@
 //!
 //! [`downlevel`] lowers syntax newer than the target (ES2021 down to ES2015, record 0012 E5).
 
+mod build_errors;
 mod builder;
 mod cjs;
 mod class;
@@ -35,6 +36,9 @@ use ts_r_ast::{Ast, NodeId, NodeKind, SourceKind, Span};
 use ts_r_codegen::{CodegenOptions, PrintHints, SourceMap, SpecifierSpan};
 use ts_r_diagnostics::Diagnostic;
 
+pub use build_errors::{
+    SloppyOnly, build_errors, has_module_syntax, parse_build_errors, sloppy_only_syntax,
+};
 pub use options::{JsxMode, ModuleFormat, TransformOptions};
 pub use resolver::{Answer, ConstValue, EmitResolver, MetadataType, SyntacticResolver};
 
@@ -116,6 +120,9 @@ pub struct TranspileOutput {
     pub map: Option<SourceMap>,
     /// Syntax errors (from the parser) followed by transform diagnostics.
     pub diagnostics: Vec<Diagnostic>,
+    /// The errors in `diagnostics` a build tool fails on (the dev server, as esbuild): the
+    /// parser's per [`build_errors`], then the transform's.
+    pub build_errors: Vec<Diagnostic>,
     /// Module specifiers in `code` (when `CodegenOptions::collect_specifiers` is set).
     pub specifiers: Vec<SpecifierSpan>,
 }
@@ -136,16 +143,19 @@ pub fn transpile(
 ) -> TranspileOutput {
     let kind = SourceKind::from_path(path);
     let mut parsed = ts_r_parser::parse(src, kind);
+    let mut build_errors: Vec<Diagnostic> = build_errors(&parsed).into_iter().cloned().collect();
     let mut diagnostics = std::mem::take(&mut parsed.diagnostics);
     let mut ast = parsed.ast;
     if kind == SourceKind::Dts {
         // Declaration files have no JavaScript.
         return TranspileOutput {
             diagnostics,
+            build_errors,
             ..TranspileOutput::default()
         };
     }
     let result = transform(&mut ast, src, opts);
+    build_errors.extend(result.diagnostics.iter().filter(|d| d.is_error()).cloned());
     diagnostics.extend(result.diagnostics);
     let hints = PrintHints {
         erased: &result.erased,
@@ -161,6 +171,7 @@ pub fn transpile(
         code: out.code,
         map: out.map,
         diagnostics,
+        build_errors,
         specifiers: out.specifiers,
     }
 }

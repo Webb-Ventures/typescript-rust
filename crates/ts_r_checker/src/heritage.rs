@@ -273,6 +273,69 @@ impl<'c, 'a> Ck<'c, 'a> {
         });
         if has_extends && let Some(&base) = self.base_types(sym).first() {
             let base = self.with_this_arg(base, this_t);
+            // A base intersection reduced to `never` (conflicting privates): TS2509 at the
+            // `extends` expression, saying why.
+            if self.reduced_type(base) == TypeId::NEVER
+                && let Some((info, ts, pname)) = self.never_reduction_reason(base)
+            {
+                let expr = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+                    Node::HeritageClause {
+                        kind: HeritageKind::Extends,
+                        types,
+                    } => ast.list(types).first().copied(),
+                    _ => None,
+                });
+                if let Some(x) = expr {
+                    let mut chain = Chain::new();
+                    chain.push_back(
+                        dg::BASE_CONSTRUCTOR_RETURN_TYPE_0_IS_NOT_AN_OBJECT_TYPE_OR_INTERSECTION_OF_OBJECT_T_2509,
+                        &["never"],
+                    );
+                    chain.push_back(info, &[&ts, &pname]);
+                    self.error_chain(Loc::new(l.file, x), &chain);
+                }
+                return;
+            }
+            // Extending a class whose constructor is `private` outside that class (TS2675).
+            let extends_node = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+                Node::HeritageClause {
+                    kind: HeritageKind::Extends,
+                    types,
+                } => ast.list(types).first().copied(),
+                _ => None,
+            });
+            if let Some(x) = extends_node
+                && let Node::ExprWithTypeArgs { expr, .. } = *ast.node(x)
+            {
+                let ct = self.quietly(|ck| ck.check_expr(Loc::new(l.file, expr)));
+                if let Some((dc, true)) = self.restricted_constructor(ct) {
+                    let mut inside = false;
+                    let mut cur = self.enclosing_class(l);
+                    let mut guard = 0;
+                    while let Some(c) = cur {
+                        guard += 1;
+                        if guard > 64 {
+                            break;
+                        }
+                        if c == dc {
+                            inside = true;
+                            break;
+                        }
+                        cur = self.enclosing_class(c);
+                    }
+                    if !inside && let Some(bs) = self.c.sym_of_decl(dc) {
+                        let bt = self.declared_type_of_symbol(bs);
+                        let saved = std::mem::replace(&mut self.print_qualified, true);
+                        let bn = self.type_to_string(bt);
+                        self.print_qualified = saved;
+                        self.error(
+                            Loc::new(l.file, x),
+                            dg::CANNOT_EXTEND_A_CLASS_0_CLASS_CONSTRUCTOR_IS_MARKED_AS_PRIVATE_2675,
+                            &[&bn],
+                        );
+                    }
+                }
+            }
             if !self.heritage_skip(base) {
                 let ok = self.check_heritage_pair(
                     sym,
@@ -420,6 +483,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let ds = self.type_to_string(derived);
             let bs = self.type_to_string(base);
+            let display = self.written_decl_name(dp).unwrap_or(display);
             chain.push_front(
                 dg::PROPERTY_0_IN_TYPE_1_IS_NOT_ASSIGNABLE_TO_THE_SAME_PROPERTY_IN_BASE_TYPE_2_2416,
                 &[&display, &ds, &bs],

@@ -1,0 +1,44 @@
+a.ts(1,25): error TS1005: 'symbol' expected.
+a.ts(2,8): error TS1335: 'unique symbol' types are not allowed here.
+a.ts(3,17): error TS1005: 'symbol' expected.
+a.ts(4,17): error TS1005: 'symbol' expected.
+a.ts(4,23): error TS2304: Cannot find name 'X'.
+a.ts(5,25): error TS1005: 'symbol' expected.
+a.ts(6,17): error TS1005: 'symbol' expected.
+a.ts(6,17): error TS1335: 'unique symbol' types are not allowed here.
+a.ts(8,104): error TS2304: Cannot find name 'x'.
+a.ts(9,64): error TS1335: 'unique symbol' types are not allowed here.
+a.ts(9,79): error TS2411: Property 'm' of type '() => symbol' is not assignable to 'string' index type 'symbol'.
+a.ts(9,84): error TS1335: 'unique symbol' types are not allowed here.
+a.ts(10,12): error TS2483: The left-hand side of a 'for...of' statement cannot use a type annotation.
+a.ts(10,15): error TS1334: 'unique symbol' types are only allowed on variables in a variable statement.
+a.ts(13,29): error TS1335: 'unique symbol' types are not allowed here.
+a.ts(14,8): error TS2339: Property 'i' does not exist on type 'Symbol'.
+a.ts(14,12): error TS1333: 'unique symbol' types may not be used on a variable declaration with a binding name.
+a.ts(16,7): error TS1332: A variable whose type is a 'unique symbol' type must be 'const'.
+a.ts(17,33): error TS1335: 'unique symbol' types are not allowed here.
+a.ts(18,27): error TS1243: 'accessor' modifier cannot be used with 'readonly' modifier.
+a.ts(18,63): error TS1029: 'static' modifier must precede 'readonly' modifier.
+b.ts(2,6): error TS2339: Property 'b' does not exist on type 'Symbol'.
+b.ts(2,10): error TS1333: 'unique symbol' types may not be used on a variable declaration with a binding name.
+b.ts(3,13): error TS1334: 'unique symbol' types are only allowed on variables in a variable statement.
+b.ts(4,15): error TS1334: 'unique symbol' types are only allowed on variables in a variable statement.
+b.ts(5,53): error TS1331: A property of a class whose type is a 'unique symbol' type must be both 'static' and 'readonly'.
+b.ts(5,80): error TS1331: A property of a class whose type is a 'unique symbol' type must be both 'static' and 'readonly'.
+b.ts(5,80): error TS2564: Property 'g' has no initializer and is not definitely assigned in the constructor.
+b.ts(5,98): error TS1331: A property of a class whose type is a 'unique symbol' type must be both 'static' and 'readonly'.
+b.ts(5,98): error TS2564: Property 'h' has no initializer and is not definitely assigned in the constructor.
+b.ts(6,47): error TS1330: A property of an interface or type literal whose type is a 'unique symbol' type must be 'readonly'.
+b.ts(8,61): error TS1332: A variable whose type is a 'unique symbol' type must be 'const'.
+b.ts(9,22): error TS2488: Type 'symbol' must have a '[Symbol.iterator]()' method that returns an iterator.
+b.ts(9,27): error TS1333: 'unique symbol' types may not be used on a variable declaration with a binding name.
+b.ts(10,13): error TS1332: A variable whose type is a 'unique symbol' type must be 'const'.
+b.ts(10,41): error TS1005: 'symbol' expected.
+b.ts(11,33): error TS1335: 'unique symbol' types are not allowed here.
+b.ts(12,18): error TS1335: 'unique symbol' types are not allowed here.
+b.ts(14,12): error TS2483: The left-hand side of a 'for...of' statement cannot use a type annotation.
+b.ts(15,10): error TS2483: The left-hand side of a 'for...of' statement cannot use a type annotation.
+b.ts(16,10): error TS2483: The left-hand side of a 'for...of' statement cannot use a type annotation.
+b.ts(17,12): error TS1190: The variable declaration of a 'for...of' statement cannot have an initializer.
+b.ts(18,40): error TS2483: The left-hand side of a 'for...of' statement cannot use a type annotation.
+b.ts(19,20): error TS1188: Only a single variable declaration is allowed in a 'for...of' statement.

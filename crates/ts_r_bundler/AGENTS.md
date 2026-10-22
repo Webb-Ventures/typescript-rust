@@ -6,8 +6,9 @@ metafile, and incremental rebuilds. Driven by `ts-r-build` (crate `ts_r_build`) 
 server's dependency pre-bundler (feature `hmr`). Root rules: [../../AGENTS.md](../../AGENTS.md).
 Design: [../../docs/design/0008-bundler.md](../../docs/design/0008-bundler.md).
 
-Written from scratch. Never read or port esbuild, Rollup, Rolldown, webpack, swc or oxc source.
-esbuild's docs, its end-to-end test cases (as data) and its observed output are the oracles.
+Written from scratch. esbuild's docs, its end-to-end test cases (as data) and its observed output
+are the oracles. esbuild's, Rollup's and other bundlers' source may be read to understand a rule,
+never translated (root AGENTS.md).
 
 ## API in one breath
 
@@ -36,15 +37,31 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 
 ## Invariants
 
+- **A build fails where esbuild fails.** Parse errors go through
+  `ts_r_transform::build_errors`: tsc's checker grammar errors that esbuild accepts
+  (`if (x) ;`, `a?.#x`, `declare function f() {}`, `module M {}`, sloppy
+  `for (var x = 1 in o)`) are not build errors; ECMAScript early errors (`const x;`) are.
+- **esbuild's strict-mode and binding errors** (`prepare.rs`): `with` and `delete x` fail in
+  strict code (a `"use strict"` prologue or class body, an ES module, ESM output, or a
+  TypeScript file under a tsconfig that sets `alwaysStrict` or `strict`); writes to `const`
+  and `using` bindings fail when bundling or minifying syntax, writes to imports when
+  bundling; a top-level `return` fails in a file with top-level `await`.
+- **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
+  esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
+- **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:
+  `.jsx`, `.js`, then `.tsx`, `.ts`, then the rest), as esbuild does; elsewhere the
+  configured `resolveExtensions` order applies.
 - **Deterministic output**: module order is DFS pre-order from the entries; every hash map is
   either keyed lookup only or sorted before it affects output. No absolute paths in output
   except where the user asked (none today); cached data holds no absolute paths or times.
+  Colliding output paths are rejected before any files are written in parallel.
 - **Fragments are pure functions of `(prep_key, ModulePlan)`**: that is the cache key, in
   memory and in `ts_r_cache` (namespace `build`). Anything a fragment depends on must be in
   `ModulePlan` (it derives `Hash`).
 - Module preparation depends only on the file, its loader, the tsconfig-derived transform
-  options and the defines (`prep_key`). Resolution and the tsconfig-derived transform
-  options are never cached across a structural change.
+  options, the defines, annotation handling and the effective output format (`prep_key`).
+  Resolution and the tsconfig-derived transform options are never cached across a
+  structural change.
 - A CommonJS entry of a single-entry CommonJS build runs unwrapped (Node's own `module`,
   `exports`, `require`) only when that is safe (`plan::unwrapped_entry`: nothing requires
   it, no top-level `return`/`arguments`, no direct `eval`, its `"use strict"` suits the whole
@@ -52,8 +69,19 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   saves). It then names its own top-level bindings around every other top-level name.
 - Compact (minified whitespace) output puts fragments and chunk code on one line; the chunk
   source map shifts each fragment's first-line columns by where it starts.
+- A chunk source map is built in parallel: each fragment's mappings are re-encoded on the
+  pool relative to its first segment (`encode_fragment`), then stitched in order with only
+  that first segment patched (`ChunkMap::add_encoded`). The result is byte-identical to
+  adding the fragments one by one (`add_fragment`); a unit test holds them equal.
 - Never panic on user input; every problem is a `Message` (esbuild-style text).
-- At most `TS_R_THREADS` worker threads (default: cores, capped at 8).
+- At most `TS_R_THREADS` worker threads (default: cores, capped at 8). While a fresh graph
+  loads, one more thread reads module files ahead of the workers (`CachedFs::read_ahead`)
+  as the calling thread waits: opening files is costly and contended in the kernel on
+  macOS, and one reader beats every worker opening its own (three.js x10: graph 110 to
+  75 ms). Each file is still read once through the inner file system; nothing read ahead
+  outlives the graph phase.
+- A one-shot CLI build ends with `BuildContext::finish_and_leak` (flush the disk cache,
+  leak the rest): never call it where the context or process lives on.
 
 ## Testing
 

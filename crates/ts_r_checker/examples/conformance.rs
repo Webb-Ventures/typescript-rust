@@ -17,7 +17,9 @@
 //! without `allowJs` (left out of the program; not for a test that is itself a `.js` file).
 //! Under `@noImplicitReferences` only
 //! the last file is a root. A test with its own `tsconfig.json` uses its options (the
-//! directives on top, through `extends`) and its `files`/`include` as the roots. Results per
+//! directives on top, through `extends`) and its `files`/`include` as the roots; its own
+//! diagnostics, and option errors about what it sets, are reported at their place in it.
+//! Results per
 //! area go to
 //! stdout; mismatches to `target/checker-conformance.txt`.
 //!
@@ -105,6 +107,13 @@ fn split_test(text: &str, default_name: &str) -> (Pairs, Pairs) {
                     cur.clear();
                 }
                 cur_name = Some(v);
+            } else if k == "symlink"
+                && let Some(n) = &cur_name
+            {
+                // `// @symlink: a,b` under `@filename: f` makes `a` and `b` symlinks to `f`.
+                for link in v.split(',') {
+                    options.push(("link".to_owned(), format!("{n} -> {}", link.trim())));
+                }
             } else {
                 options.push((k, v));
             }
@@ -247,7 +256,7 @@ fn load(path: &Path, root: &Path, baselines: &Path, names: &BTreeSet<String>) ->
     let Ok(raw) = std::fs::read(path) else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&raw).into_owned();
+    let text = ts_r_config::fs::decode_text(raw);
     let (Some(stem), Some(file_name)) = (
         path.file_stem().and_then(|s| s.to_str()),
         path.file_name().and_then(|s| s.to_str()),
@@ -456,8 +465,13 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
         }
     };
     let mut cfg = load_tsconfig(&fs, &wrapper);
+    // Errors in the test's own `tsconfig.json` (TS5024 and the like) are reported at their
+    // place in it, as tsc reports a config file's diagnostics.
+    let mut own_diagnostics = Vec::new();
     if let Some(own) = &own_config {
-        roots = load_tsconfig(&fs, own).file_names;
+        let parsed = load_tsconfig(&fs, own);
+        roots = parsed.file_names;
+        own_diagnostics = parsed.diagnostics;
     } else {
         // tsc's harness passes the directives as options, not as a config file: there is no
         // tsconfig directory to stand in for `rootDir` (TS2209/TS2210).
@@ -490,14 +504,38 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
     let mut out = BTreeSet::new();
     // Option checks: the directives are not a config file, so tsc reports them without a
     // location.
-    for d in ts_r_config::verify::verify_options(&cfg.options, None) {
+    // Options from the test's own config are reported where it sets them.
+    let located = |d: &ts_r_config::ConfigDiagnostic| -> Option<(String, u32, u32)> {
+        let (file, span) = (d.file.as_deref()?, d.span?);
+        if file == wrapper || own_config.is_none() {
+            return None;
+        }
+        let text = ts_r_config::FileSystem::read_file(&fs, file)?;
+        let lc = ts_r_span::LineIndex::new(&text).line_col_utf16(&text, span.0);
+        Some((shown(file), lc.line + 1, lc.col + 1))
+    };
+    let own_errors = own_diagnostics
+        .iter()
+        .filter(|d| d.file.as_deref().is_some_and(|f| f != wrapper));
+    // The test's own config is the leaf for the option checks: what it sets is located
+    // there, the directives (the wrapper's options) stay global.
+    let verified = match &own_config {
+        Some(own) => {
+            let mut o = cfg.options.clone();
+            o.config_file_path = Some(own.clone());
+            ts_r_config::verify::verify_options(&o, None)
+        }
+        None => ts_r_config::verify::verify_options(&cfg.options, None),
+    };
+    for d in verified.iter().chain(own_errors) {
         if d.severity == ts_r_config::Severity::Error {
             let mut message = d.message.clone();
             for r in &d.related {
                 message.push_str("\n  ");
                 message.push_str(r);
             }
-            out.insert((String::new(), 0, 0, d.code, message));
+            let (file, line, col) = located(d).unwrap_or_default();
+            out.insert((file, line, col, d.code, message));
         }
     }
     for r in &js_roots {
@@ -566,10 +604,15 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
                 // tsc's harness keeps test file names relative, and a source file's module
                 // symbol is named by its file name (TS1192 `Module '"server"'`,
                 // `typeof import("server")`).
-                let message = if d.message.contains("\"/.src/") {
+                // TS6263, TS2306 and TS7016 name the resolved file as the harness gave it too.
+                let message = if d.message.contains("\"/.src/") || d.message.contains("'/.src/") {
                     d.message
                         .replace("'\"/.src/", "'\"")
                         .replace("import(\"/.src/", "import(\"")
+                        .replace("resolved to '/.src/", "resolved to '")
+                        .replace("File '/.src/", "File '")
+                        .replace(". '/.src/", ". '")
+                        .replace("from \"/.src/", "from \"")
                 } else {
                     d.message.clone()
                 };

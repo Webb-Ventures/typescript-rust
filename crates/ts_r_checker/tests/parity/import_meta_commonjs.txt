@@ -1,0 +1,3 @@
+a.ts(1,18): error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+a.ts(2,18): error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+a.ts(2,25): error TS17012: 'metal' is not a valid meta-property for keyword 'import'. Did you mean 'meta'?

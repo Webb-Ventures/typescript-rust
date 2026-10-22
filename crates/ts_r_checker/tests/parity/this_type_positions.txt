@@ -1,0 +1,19 @@
+a.ts(2,9): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(3,11): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(6,13): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(12,23): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(13,5): error TS2564: Property 'a' has no initializer and is not definitely assigned in the constructor.
+a.ts(15,5): error TS2564: Property 'c' has no initializer and is not definitely assigned in the constructor.
+a.ts(15,13): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(17,15): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(20,16): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(21,5): error TS2377: Constructors for derived classes must contain a 'super' call.
+a.ts(21,27): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(23,20): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(24,27): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(25,18): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(26,26): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(29,20): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(32,49): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(35,23): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
+a.ts(35,30): error TS2526: A 'this' type is available only in a non-static member of a class or interface.

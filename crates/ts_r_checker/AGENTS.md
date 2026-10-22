@@ -115,8 +115,12 @@ Files, by layer:
   observed rules are in its module doc), `jsx.rs` (the attributes type,
   attribute and child contextual types with discriminated union props, spreads (TS2698,
   TS2783; a lone spread of a type parameter is the attributes type), elaboration of
-  attributes and children TS2745/TS2746/TS2747; hyphenated attributes the target lacks
-  are ignored by excess, weak-type and index-signature checks in `relate.rs`), `jsx_runtime.rs` (which files import a
+  attributes and children TS2745/TS2746/TS2747; hyphenated attributes the target lacks,
+  written as attributes or as keys of an object literal spread straight into them, are
+  ignored by excess, weak-type and index-signature checks in `relate.rs`; with both
+  `IntrinsicAttributes` and `IntrinsicClassAttributes` declared, a non-excess failure
+  against the props intersection is reported against the first member it fails, with no
+  head and no excess check (tsc: `reportErrorResults` in `relater.go`)), `jsx_runtime.rs` (which files import a
   JSX runtime: `react-jsx`/`react-jsxdev`, `@jsxRuntime automatic`, or any `@jsxImportSource`
   pragma, even under `preserve`; `@jsxRuntime classic` turns it off; pragmas match without
   case; `program.rs` loads it like an import). `unused.rs` counts no JSX factory as used
@@ -128,7 +132,9 @@ Files, by layer:
   assignable to into it (`{ toString(): string }` is `string`); intersections with a
   primitive are that primitive (`string & { __brand }`). `x === v` with `x` `unknown` or
   holding `{}` (`!!u`) is `v`'s type for a primitive or `object` `v`, `object` for another
-  object type. A reference read in unreachable code (after a `never`-returning call, also
+  object type. `x == v` also keeps the `string`/`number`/boolean-literal members of `x` that
+  coerce to a `string`, `number` or `boolean` `v` (tsc: `isCoercibleUnderDoubleEquals` in
+  `tsc/internal/checker/flow.go`). A reference read in unreachable code (after a `never`-returning call, also
   from a closure created there) has its declared type, not `never`. `instanceof` keeps members that
   derive from the instance type (classes nominally, other objects by assignability, arrays
   and tuples for `Array`), else uses instance types that are subtypes of members, else the
@@ -276,8 +282,10 @@ Files, by layer:
   parameter type (`late_bound_setter`; the members table keeps only the getter).
 - TS2507 (`check_base_constructor_type`): the first `extends` expression of a class must
   be `any`, `null`, a type with construct signatures, a type parameter constrained to one,
-  or a union of those. Other instantiable types are accepted, as are functions declared in
-  JavaScript files (constructor functions); JavaScript classes are not checked.
+  or a union of those. Other instantiable types are accepted. JavaScript classes are
+  checked too, and a JavaScript function (`@constructor` or not) is not a constructor in
+  tsc 7. A parameter's JSDoc `{T=}` prints as `T | undefined` (tsc:
+  tsc/internal/checker/nodecopy.go; `is_jsdoc_optional_annotation`).
 - TS2774 (`uncalled.rs`): identifiers and property chains in a tested position (`if` or
   `?:` test, left of `&&`, through `&&`/`||`/`??`) whose type is a callable, never-nullish
   function, unless the same reference appears in its region (rules at the top of the
@@ -287,6 +295,7 @@ Files, by layer:
   (rules at the top of the file). TS2652 lives there too: a named `export default`
   declaration and the declarations of its name in the same body that share a meaning with
   it (a namespace means a value only when its own body is instantiated); those skip TS2395.
+  Both run in JavaScript files as well.
 - TS2323 (`export_redeclare.rs`): a module file's export symbol that merged two or more
   counted declarations (not interfaces, not overload signatures; never namespaces or
   enums) is reported at each declaration. Only the file's own export table is checked,
@@ -330,7 +339,9 @@ Files, by layer:
   there is TS2713/TS2702/TS2503/TS2749, decided by the rules at the top of that file. A
   missing member is TS2694, or TS2724 with a suggestion among exports of the needed meaning;
   a missing name is TS2503, or TS2833 with a namespace suggestion. TS2694 names an aliased
-  namespace by its symbol. `import x = A.B` entities are checked the same way
+  namespace by its symbol; a namespace exported from a module file is led by the quoted file
+  path, as tsc qualifies it up to the file (tsc: `checker.go`, getFullyQualifiedName;
+  `namespace_in_module_named_by_file`). `import x = A.B` entities are checked the same way
   (`check_import_equals_entity`). JavaScript files and symbols are left alone.
 - Use before declaration (`check_use_before_declaration` in `expr.rs`, TS2448/2449/2450):
   a block-scoped variable read in its own initializer is reported unless deferred; IIFEs,
@@ -345,7 +356,12 @@ Files, by layer:
 - Predefined type names: `decl_names.rs` (classes, interfaces, type aliases, enums and
   type parameters named `any`, `string`, ...: TS2414/2427/2457/2431/2368).
 - Merged type parameters: `type_param_merge.rs` (class and interface declarations of one
-  symbol: TS2428; observed rules in the module doc).
+  symbol: TS2428; observed rules in the module doc). The same file checks every type
+  parameter list's defaults, JSDoc `@template [T=X]` included: a required parameter after
+  an optional one is TS2706 at the parameter; a default whose type reference resolves to
+  its own parameter or a later one of the list is TS2744 at the reference (resolved, so a
+  shadowing parameter of a nested signature is fine; tsc: tsc/internal/checker/checker.go,
+  checkTypeParameters).
 - Merge placement: `merge_order.rs` (namespaces before or in another file than the class
   or function they merge with: TS2434/2433; enum declarations starting without an
   initializer: TS2432).
@@ -382,12 +398,91 @@ Files, by layer:
   ten core global types no file declares, observed with `noLib`). Global diagnostics; the
   driver adds them, and ts-r-check also reports them next to option errors.
 - Walk and driver: `check.rs` (statements, classes, type references, modifiers, imports,
-  `@ts-ignore`/`@ts-expect-error`, matched as prefixes: `// @ts-ignore-line` is one),
+  `@ts-ignore`/`@ts-expect-error`, matched as prefixes: `// @ts-ignore-line` is one; they
+  cover a checked JavaScript file's JSDoc syntax errors too, which tsc 7 reports with the
+  semantic errors: `tsc: tsc/internal/compiler/program.go`),
   `driver.rs` (threads, ordering).
 - A property missing on a global lib type that a later lib adds is TS2550 naming that lib
   (`lib_hint.rs`: `[].at` without es2022). The table holds the container/member pairs
   observed hinted by probing every member the bundled lib files add after es5; tuples,
   unions, intersections, subclasses, `ReadonlyArray` and element accesses get TS2339.
+- A property missing on a class instance (or `this`) is TS2576 only when the class's
+  constructor type has it and its declaration carries `static`: a merged namespace's export
+  and the synthetic `prototype` stay TS2339. The suggestion is the printed receiver type and
+  the name (`'C<number, string>.foo'`, `'List[k]'` for element access)
+  (`Ck::class_has_static_member`; tsc: `typeHasStaticProperty` in
+  tsc/internal/checker/checker.go; `calls_members.rs::static_member_through_an_instance`).
+- Explicit type arguments are counted before value arguments. A candidate must take both
+  counts. When none does: if no signature takes that many type arguments, the error is about
+  them (one signature: TS2558 with its `min-max` range; overloads: the largest count below
+  and the smallest above, TS2743 when both exist, else TS2558 with the one that does);
+  otherwise the argument-count error (TS2554/2575) is computed over only the signatures
+  that take the type arguments. An empty `<>` counts as none (TS1099 alone). `new f()` of a
+  value with call signatures only is resolved as a call of them (argument and type-argument
+  errors as usual) and is `any`; without noImplicitAny a declared signature that does not
+  return `void` is TS2350, a `this: void` one TS2679 (`resolve_call_inner`,
+  `report_type_arg_arity_error`; tsc: `reportCallResolutionErrors`,
+  `getTypeArgumentArityError` and `resolveNewExpression` in tsc/internal/checker/checker.go;
+  `calls_members.rs::type_argument_count_is_checked_before_argument_count`).
+- Argument-count errors over overloads: TS2575 when the count lies strictly between the
+  fewest required and the most accepted arguments, naming the largest required count below
+  it and the smallest accepted count above it (0 is a real count: `f()` next to `f(a, b)`);
+  otherwise TS2554 (TS2555 when any signature has a rest parameter), with the missing
+  parameter as related information only when there are too few. An array literal spread
+  straight into call or `new` arguments (parentheses allowed) is a tuple, so its elements
+  are counted as arguments (`is_spread_into_call`; tsc: `getArgumentArityError`,
+  `isSpreadIntoCallOrNew` in tsc/internal/checker/checker.go;
+  `calls_members.rs::argument_count_errors_over_overloads`).
+- A missing key on a fresh object literal reads as `undefined` with TS2339 only for a plain
+  read; a written access (`=`, compound or logical assignment, `++`/`--`) or a callee indexes
+  the widened literal and takes the implicit-any path. On that path, after the static (TS2576),
+  number-index (TS7015) and spelling (TS2551) cases, TS7052 suggests calling `get` (or `set`
+  for any write) when the object has that member as a plain one-signature function taking at
+  least one argument whose first parameter accepts the key; the hint is prefixed by the
+  receiver when it is a name or property path (`m.prop.get`). A union key is reported through
+  its first member that names no property (the head still prints the whole key); an enum
+  member key is shown as `[E.a]` (`index_method_suggestion`, `access_path_text`; tsc:
+  `getPropertyTypeForIndexType`, `getSuggestionForNonexistentIndexSignature` in
+  tsc/internal/checker/checker.go, `tryGetPropertyAccessOrIdentifierToString` in
+  tsc/internal/checker/utilities.go; `calls_members.rs::index_signature_method_hint`).
+- A catch variable is `unknown` or `any` (`useUnknownInCatchVariables`), or its annotation
+  when that is `any`/`unknown`; any other annotation is TS1196 and the variable is an error
+  type. A destructured catch variable is checked like a variable's pattern (TS2339 per
+  missing key, `{}` for `unknown` without strict null checks; TS2488 for array patterns).
+  A `let`/`const`/`using` directly in the catch block named like the catch variable is
+  TS2492. Calling an `unknown` value is TS18046 (`catch_variable_type`,
+  `check_catch_redeclaration`; tsc: `getTypeForVariableLikeDeclaration`, `checkCatchClause`
+  in tsc/internal/checker/checker.go; `calls_members.rs::destructured_catch_variables`).
+- A type parameter constrained by `any` (`T extends any`, `T extends Tree<any>` that
+  reduces to `any`) is constrained by `unknown`, a mapped type's key by `string | number |
+  symbol`; an unresolved constraint stays an error type. A declared `unknown` constraint is
+  named in TS5075 ("assignable to the constraint ... 'unknown'"); no constraint gives TS5082
+  (`type_param_constraint`; tsc: `getConstraintFromTypeParameter` and
+  `reportRelationError` in tsc/internal/checker/checker.go;
+  `calls_members.rs::extends_any_constrains_like_unknown`).
+- A sync iterator whose `next()` has call signatures but whose result has no `value`
+  still iterates, as `any`, and is TS2490 at the iterated expression instead of TS2488. A
+  `return` or `throw` member that is present but not callable (after dropping
+  `null`/`undefined`) is TS2767; iteration still succeeds (`IterNotes`, filled by
+  `iterated_type_noting`; tsc: `getIterationTypesOfMethod` in
+  tsc/internal/checker/checker.go; `calls_members.rs::iterator_result_without_value_and_non_method_return`).
+- An unannotated rest parameter with a binding pattern takes the pattern's implied type,
+  not `any[]`: `...[a, b]` is `[any, any]` and needs two arguments, `...[a, b = 1]` one or
+  two, `...[a, ...b]` at least one (`param_type`; tsc: `getTypeForVariableLikeDeclaration`
+  in tsc/internal/checker/checker.go; `calls_members.rs::rest_parameter_pattern_counts_its_elements`).
+- In a class whose `extends` expression is the `null` literal, `super` (static or instance,
+  not a `super()` callee) is `null`, so `super.x` is TS2531; the first `super(...)` call in
+  its constructor is TS17005 (`check_super`, `check_derived_constructor_super`; tsc:
+  `checkSuperExpression`, `checkConstructorDeclaration` in tsc/internal/checker/checker.go;
+  `calls_members.rs::super_in_a_class_extending_null`).
+- A rest parameter whose type is not an array or tuple (`never`, a union of tuples) takes
+  the arguments at and after it as one tuple: each is checked against the contextual
+  type of that element in each member (an `unknown` member does not absorb a generic one,
+  so `keyof T` is not read through its constraint), literals stay literal where the
+  context is primitive, and the tuple is related to the rest type, TS2345 at the first
+  rest argument or at the call when there is none (`non_array_rest_type`,
+  `check_candidate_args_in`; tsc: `getSignatureApplicabilityError`, `getSpreadArgumentType`
+  in tsc/internal/checker/checker.go; `calls_members.rs::non_array_rest_parameter_takes_a_tuple`).
 - Declaration checks (run once per file after the walk, entry point `decls.rs`):
   `unused.rs` (`noUnusedLocals`/`noUnusedParameters`: TS6133/6138/6192/6196/6198/6199/6205,
   a syntactic pass over the binder's resolved references; its observed rules are listed in
@@ -395,7 +490,7 @@ Files, by layer:
   its `@`, top-level `@typedef`/`@callback`s are never reported, and TS6205 for `@template`
   lists starts just before the first tag's `@`), `classes.rs` (accessors and class members), `heritage.rs` (class
   `extends`/`implements` and interface `extends` compatibility, `extends` cycles TS2506: TS2415/2416/2417/2420/2422/
-  2430/2720/2320; observed rules in the module doc), `indexes.rs` (members against index
+  2430/2720/2320, ambient `declare class`es included; observed rules in the module doc), `indexes.rs` (members against index
   signatures: TS2411/2413), `redeclare.rs` (`var` and merged property redeclarations
   must have identical types: TS2403/2717; JavaScript `var`s too, a JSDoc `@type` being
   their annotation; a redeclared `var`'s initializer is checked against its own
@@ -419,8 +514,11 @@ Files, by layer:
 
 ## Invariants
 
-- **tsc 7.0.2 is the spec; never read tsc's or any other checker's source.** Expected output
-  comes from running tsc (`npx -y -p typescript@7.0.2 tsc --pretty false ...`).
+- **tsc 7.0.2 is the spec.** Expected output comes from running tsc
+  (`npx -y -p typescript@7.0.2 tsc --pretty false ...`). tsc's source may be read to understand
+  how a rule works (which error it picks, check order, how it prints types), but the code here
+  is our own: never translated, never shaped like tsc's, and never from a Rust port of
+  TypeScript (root AGENTS.md).
 - **No false positives first.** Anything not implemented yields `TypeId::UNRESOLVED` (any-like,
   never reported). An extra diagnostic is worse than a missing one. `TypeId::ERROR` is
   different: it is tsc's error type (a reported unresolved name or import) and behaves as
@@ -454,6 +552,51 @@ Files, by layer:
   overloads. `super.m()` is not checked. A union's combined signature intersects the
   members' `this` types. In signature relations a strict function type's `this` is
   contravariant (methods either way), and a source `this: void` asks nothing.
+- **Constructor returns** (`check_constructor_return`; tsc: `checkReturnStatement` in
+  `tsc/internal/checker/checker.go`). `return e` in a constructor relates `e` to the class's
+  instance type (its own type parameters as arguments: `B<T>`), elaborated into `e` like any
+  assignment, else on the statement; a failure adds TS2409 on the statement. A bare
+  `return;` asks nothing.
+- **Repeated class fields** (`class_member_merged_into`; tsc: `declareSymbol` in
+  `tsc/internal/binder/binder.go`, `checkVariableLikeDeclaration` in `checker.go`). In tsc a
+  class field merges into the earlier same-named member of the same staticness when that
+  symbol holds only fields and accessors (a method only merges with methods, a getter only
+  with a setter, an `accessor` field with nothing); our binder reports the repeat (TS2300)
+  and keeps it in its own symbol, so the checker replays that merge order and compares the
+  field's type with the first member's (getter type for accessors): TS2717 at the key.
+- **Array literal elements in elaborations** (`elaborate_array`; tsc: `elaborateArrayLiteral`
+  in `tsc/internal/checker/relater.go`, `getWidenedLiteralLikeTypeForContextualType` in
+  `checker.go`). The failing element's type is the element checked in the context of its
+  target: a fresh literal is widened (`[1]` against `null[]` reports `number`) unless the
+  target holds literals of its kind or the literal sits in a const context; a literal that
+  is still a literal of its widened type (`true` of `boolean`) is kept.
+- **Literals kept by context are regular** (`widen_for_mutable_location`; tsc:
+  `getWidenedLiteralLikeTypeForContextualType` in `tsc/internal/checker/checker.go`). In a
+  mutable location a literal either widens or, when its contextual type takes literals, stays
+  a literal without freshness, so `let p = Object.freeze({ c: "1" }).c` is `"1"`.
+- **Literals typed by a pattern** (`pattern_literal_excess`,
+  `check_assignment_pattern_excess`; tsc: `checkObjectLiteral` and
+  `getContextualTypeForBindingElement` in `tsc/internal/checker/checker.go`). An object
+  literal whose contextual type is a pattern's implied type (an unannotated declaration's
+  initializer, a destructuring assignment's right side, the default of a nested pattern whose
+  parent type has no such property) reports TS2353 for every property the pattern doesn't
+  name, against the pattern's type. Spreads are skipped; a computed name of a non-literal
+  type prints as `[expr]`. Assignment patterns with a spread or computed name accept
+  anything; an empty assignment pattern `{}` rejects every property (an empty binding
+  pattern accepts all).
+- **Patterns in bodiless signatures** (`report_signature_binding_elements`). A binding
+  pattern parameter of a method signature, call/construct signature or function type
+  declares no symbols, so under `noImplicitAny` every binding without a default is TS7031
+  `any` at its name (tsc 7 reports them the same way; observed in
+  destructuringParameterDeclaration1ES5).
+- **Where `satisfies` errors go** (`report_satisfies`, `nodes::effective_check_node`; tsc:
+  `checkSatisfiesExpression` in `checker.go`, `elaborateError` in `relater.go`). A failed
+  `e satisfies T` is first elaborated into `e` (property and element errors keep their own
+  TS2322/TS2741/TS2353 messages); otherwise it is TS1360 at the `satisfies` keyword (the tag
+  name for JSDoc `@satisfies`). An argument, a returned expression and an arrow's expression
+  body are reported at and elaborated into the expression inside parentheses and
+  `satisfies` (`fn1({ a: 1 } satisfies unknown)` reports at `a`); a `return` statement
+  that is not elaborated keeps the statement's position.
 - **Overloads fix function arguments' contexts** (`fixed_arg_contexts`, observed). With
   several candidates, a candidate first checks the arguments that are not context-sensitive
   functions (a function only needs a parameter type it could fit: `function_may_fit`); if
@@ -507,7 +650,9 @@ Files, by layer:
 - Syntax errors suppress semantic diagnostics (tsc behaviour). tsc's test harness reports both,
   and so does `check_program_through_syntax_errors` (used by the conformance example): every
   file is checked, but a file with syntax errors gets no checker grammar errors (TS1xxx; tsc's
-  checker reports those only in clean files). Recovered trees must not produce semantic
+  checker reports those only in clean files; TS1294 for `erasableSyntaxOnly` and TS1141
+  for a non-literal `import(x)` type are semantic and stay, as do the import checks TS1192,
+  TS1205, TS1361, TS1362, TS1484 and TS1485, which tsc's checker reports with `error`). Recovered trees must not produce semantic
   errors tsc does not: a `return` outside a function does not check its expression, an empty
   `for (var in X)` / `for (var of X)` head is not checked, a missing operand is not TS2357,
   and in JavaScript `require("m")` (one string argument) is not a use of a `require` value.
@@ -577,6 +722,45 @@ Files, by layer:
   elements that would print alike, and an enum type widened from one of its members.
   Under `print_qualified`, `Ck::print_scope` (set only by declaration checks) still drops
   the namespaces that enclose the error location.
+- **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
+  declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
+  the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
+  A property symbol in a message is its first declaration's name as written
+  (`Ck::written_name`: `'2.0'`, `"e"`, `1.0`, `[c0]`; tsc: `nodebuilderimpl.go`,
+  getNameOfSymbolAsWritten) in TS2416, TS2325/TS2442/TS2443/TS2444, TS2327 and TS2326;
+  TS2717 names the redeclaration as it writes the key (`literal_property_names_in_messages`).
+- **Operator and operand positions** (tsc: `checker.go`, checkDeleteExpression and the
+  arithmetic operator checks, read as a reference). TS2447 sits on the operator token and
+  names it as written (`^=` for a compound assignment, `Ck::operator_token_span`); TS2703
+  sits on the operand with its parentheses skipped; a bad parameter default is reported at
+  the parameter, so a parameter property's span starts at its modifier. Too many arguments
+  start at the first excess one; an empty (missing) argument starts at the next token
+  (`operator_and_operand_positions`).
+- **Member order of normalized literals** (tsc: `checker.go`, getWidenedTypeOfObjectLiteral
+  and getNamedMembers; `utilities.go`, compareSymbolsWorker, read as a reference). An
+  object literal widened next to its union siblings lists its members, the `undefined`
+  stand-ins for missing ones included, by where they were declared (file order, then
+  position). tsc makes one stand-in per property name and reuses it, so a name is placed by
+  the property its first stand-in came from (`Ck::undefined_prop_origin`;
+  `normalized_literal_member_order`).
+- **Object types in union order; spread member order** (tsc: `utilities.go`, CompareTypes,
+  compareTypeNames and compareSymbolsWorker; `checker.go`, getNamedMembers and
+  getSpreadType, read as a reference). Among object members of a union, named types
+  (declared, referenced, aliased) come first by name; unnamed ones (type literals, object
+  literals, `typeof` types) follow by declaration position, interleaved; a written `{}` is a
+  single shared type with no declaration, so it sorts after them (with mapped types); tuples
+  last (`Checker::object_sort_key`). A spread's result lists its properties by where each
+  was declared, ones with no declaration last by name, not left-then-right
+  (`Ck::sort_props_by_declaration`; `spread_member_and_empty_literal_order`).
+- **`extends any` reads as `unknown`** (tsc: `checker.go`, getConstraintFromTypeParameter,
+  read as a reference). The "could be instantiated with a different subtype of constraint"
+  hint names a declared `any` constraint `unknown` (`constraint_extends_any_named_unknown`).
+- **An intersection spread over a union prints as written** (tsc: `checker.go`,
+  getIntersectionTypeEx and getConstituentCount, read as a reference). `T & (0 | 1 | 2)`
+  becomes the union `(T & 0) | (T & 1) | (T & 2)`; when that union is a single union
+  distributed, has no alias, holds an intersection and spells more pieces than the written
+  intersection, its origin is that one intersection, so it prints `T & (0 | 1 | 2)`
+  without parentheses (`Ck::constituent_count_of`; `intersection_over_union_as_written`).
 - Identifiers the binder could not resolve fall back to the exports of other declarations
   of each enclosing namespace, innermost first, before globals; `namespace A.B { }`
   encloses B, then A (`dotted_namespace_outer_exports`). Class statics and enum members
@@ -611,7 +795,7 @@ Files, by layer:
   `Outer` (an expando container) has no namespace meaning: TS2503 at `Outer` (tsc 7), unless
   it is a `require` binding or the root of a dotted `@typedef` name in a file declaring it.
 - **`// @ts-check`** (`SourceFile::has_ts_check`, before the first token, `@ts-nocheck`
-  wins) checks a JavaScript file without `checkJs` (`should_check`). ts_r_history's lazy
+  wins; the pragma name ends at whitespace or `:`, so `// @ts-nocheck: why` counts) checks a JavaScript file without `checkJs` (`should_check`). ts_r_history's lazy
   `checks` and ts_r_lsp's `semantic` still look at `checkJs` only.
 - **Plain JavaScript** (`driver.rs` `is_plain_js`): a JavaScript file with `checkJs` unset
   (not `false`), no `// @ts-check`/`// @ts-nocheck` and outside `node_modules` is checked
@@ -723,7 +907,10 @@ Files, by layer:
     and TS8030 when `F` has no call signature (`any` and the error type included), several,
     or one with fewer parameters than the function. A function declaration's single non-generic `F` signature
     (`jsdoc_declared_signature`) types its parameters and is its declared return type
-    (`return` statements are checked against it).
+    (`return` statements are checked against it). A function (declaration, expression or
+    arrow) whose `@type` has a single call signature gets the missing-return checks
+    (TS2355/2366/2534/7030) against that signature's return type, reported at the tag's
+    type (`check_jsdoc_typed_function_returns`).
   - `C.prototype.m ??= function () {}` (also `||=`, `&&=`) types `this` like `=`.
   - `o.f = function () {}`: `this` is `o`'s type (silent `any` when it isn't a known object
     type); `exports.f = function` and `module.exports.f = function` leave `this` untyped
@@ -746,7 +933,11 @@ Files, by layer:
   - TS7053 on an element access of `this` prints the class (the `this` type's constraint).
 - **Implicit any in JavaScript**: TS7006/TS7019 as in TypeScript; a parameter is exempt only
   when its function has a JSDoc `@type` or follows `@overload` comments (`has_jsdoc_type`).
-  JSDoc syntax errors (`SourceFile::jsdoc`) are part of each checked file's `check_files`
+  An `@overload` comment without `@returns`/`@return` is TS7012 at the tag name
+  (`check_jsdoc_overload_returns`; overload signatures themselves are not modelled). A
+  binding-pattern parameter made optional (`{ a }?`, or JSDoc `@param [o]` / `{T=}`) with
+  no default in a function with a body is TS2463 at the parameter (`check_param`; tsc:
+  tsc/internal/checker/checker.go, checkParameter). JSDoc syntax errors (`SourceFile::jsdoc`) are part of each checked file's `check_files`
   result, so the history paths report them too.
 - **Untyped JavaScript signatures** (`is_untyped_js_signature`): a JavaScript function,
   method or constructor with no parameter type (no typed `@param`, no `@type` on it, no
@@ -781,6 +972,13 @@ Files, by layer:
   kinds (a CommonJS file takes the `require` condition) unless `resolution-mode` is given
   (`SourceFile::references` kinds `types-import`/`types-require`;
   `type_reference_resolution_mode`, `types_wildcard`, `types_entry_missing`).
+  A `/// <reference types="x" />` that does not resolve (the loader records it in
+  `ProgramFiles::missing_type_references`, not under `noResolve`) is TS2688 at the name as
+  written, a program diagnostic beside the path-reference ones
+  (`references::type_reference_diagnostics`). A package whose `exports` gives `.` no
+  types is not found through its `types` field. History's lazy loader does not record
+  these yet. The conformance harness turns `// @symlink: a,b` under `@filename: f` into
+  symlinks `a` and `b` to `f`.
 - Call, construct and method signatures merged from several interface declarations list
   the later declaration's signatures first (outside lib files).
 - The printer shows the `undefined` an optional property adds (`a?: string | undefined`)
@@ -899,7 +1097,55 @@ Files, by layer:
 - **Spreads of unions.** `{ ...(X | {}) }` and `{ ...(X | undefined) }` spread `X`'s
   properties as optional (optional on both sides stays optional); other unions of object
   types distribute, and the parts are not normalized as object literals. Union identity
-  is member-wise both ways, not by count.
+  is member-wise both ways, not by count. This holds for any union with exactly one member
+  that is not nullish or an empty object, not only two-member ones.
+- **Circular type aliases** (TS2456; tsc: `checker.go`, isDeferredTypeReferenceNode,
+  isResolvedByTypeAlias and mayResolveTypeAlias, read as a reference). An alias is
+  circular when building its body needs its own type at once. Built at once: alias
+  references (and their type arguments), `typeof v` of an annotated variable (then its
+  annotation, with nothing lazy but object literals, functions and mapped types), and
+  the parts of unions, intersections, parentheses, type operators, indexed accesses,
+  template literals, rest/optional elements, and a conditional's check and extends types.
+  Built lazily: object literal, function and mapped types; an array, a tuple without a
+  variadic `...T`, or a generic class/interface reference that is the alias's whole body
+  (through parentheses and `readonly`), or that sits only inside the constructs above
+  and has an element/type argument that may name an alias (or omits a defaulted type
+  argument). So `type A = A[]`, `type B = [number, B]`, `type C = Array<C>` are fine and
+  `type D = Box<D>` (an alias), `type E = [...E]`, `type F = typeof v; var v: F[]` are
+  not. `circular_annotations.rs` walks the syntax for this; not yet followed: a
+  conditional's branches when its check type is not generic, mapped type constraints,
+  unannotated variables, functions' return types and interface members.
+- **Rest parameter and rest element types** (tsc: `checker.go`, checkParameter and
+  checkTupleType, read as a reference). A rest parameter's type must be assignable to
+  `readonly any[]` (TS2370), also in function types, call/construct signatures and method
+  signatures without a body. In a tuple type, `...X[]` (through parentheses or a lone
+  `[...X[]]`) is a rest element by its syntax; any other `...T` is checked by its type: an
+  array or a tuple with a rest is a rest, anything else that is nullable or not assignable
+  to `readonly any[]` is TS2574, and the rest are neither. A second rest is TS1265, an
+  optional element after a rest TS1266 (both grammar errors, skipped in files with syntax
+  errors); the first error stops the walk. `infer X` in a rest position, and references to
+  such an `X`, are implicitly array-constrained, so they are never checked.
+- **Object rest in an assignment pattern.** `({ a, ...r } = o)` assigns `o` without the
+  named properties (`object_rest_type`) to a plain target `r`, so an incompatible target
+  is TS2322 at `r`. Only a last rest with statically known names is typed.
+- **Which spreads are valid** (tsc: `checker.go`, isValidSpreadType, read as a reference).
+  Take each union member's base constraint (an unconstrained type parameter stays itself;
+  an unresolved type is accepted), drop the members that are always falsy, then the spread
+  is valid when what is left is `any`, `object`, an object type or a non-primitive
+  instantiable type, or a union or intersection whose members all are. Otherwise TS2698 at
+  the spread and the literal's type is the error type (`can_spread`). So `{ ...12 }`,
+  `{ ...nullOrUndefined }` and `{ ...t }` with `T extends number` fail; `{ ...t }` with
+  an unconstrained `T` is fine.
+- **Overwritten properties** (tsc: `checker.go`, checkSpreadPropOverrides). Under
+  `strictNullChecks`, a property written before a spread that the spread always sets is
+  TS2783 at the written property: the name must be a required property of every union
+  member of the spread, and no member may be nullish, primitive-like, `object`, an index
+  type or an empty object (`report_spread_overwrites`).
+- **What a spread copies** (tsc: `checker.go`, getSpreadType and isSpreadableProperty).
+  Private and protected properties are not copied and remove the same name from the left
+  side; `#names` are not copied; methods and accessors are skipped when the spread is a
+  class instance or the member is declared in a class; a set-only accessor of an object
+  literal copies as `undefined` (`spread_types`, `optional_spread_of`).
 - **Constant element keys.** `o[key]` is a narrowable reference when `key` is a `const`,
   a parameter, or a `let`/`var` that is never assigned after its declaration; its flow
   key is the literal property name for a unit-typed key, otherwise the key's symbol.
@@ -1020,10 +1266,17 @@ Files, by layer:
   `optional_chain_generic_equality`). Optional chain arguments see the `?.` objects
   non-nullish (binder flow; `optional_chain_arguments`).
 - **Untyped imports and type-only names.** A side-effect import (`import "pkg/mode"`) of
-  untyped JavaScript is never TS7016 (`side_effect_import_untyped`). A relative import of a
-  JavaScript file outside the program is TS7016 like a package's; the `@types` hint
-  (TS7035/TS7040) needs a package id (`Resolution::package`: a `package.json` with `name`
-  and `version`; observed). An automatic JSX runtime (`react/jsx-runtime`) resolving to
+  untyped JavaScript is never TS7016 (`side_effect_import_untyped`). An unresolved one is
+  TS2882; with `noUncheckedSideEffectImports: false` (default on in TS 7) side-effect imports
+  are not checked at all (tsc: tsc/internal/checker/checker.go checkImportDeclaration). A relative import of a
+  JavaScript file outside the program is TS7016 like a package's; the hint under it needs
+  a package id (`Resolution::package`: a `package.json` with `name` and `version`;
+  observed) and a bare specifier. It is, in order: TS6278 naming the declarations the
+  resolver found ignoring `exports` (`Resolution::alternate`; the library is `@types/x`
+  when they are there); TS7040 when some module resolution of the program entered the
+  `@types` package; TS7058 (`declare module`) when one found a `.d.ts` in the package
+  itself; else TS7035 (`untyped_package_hint`; tsc: tsc/internal/checker/utilities.go
+  CreateModuleNotFoundChain, tsc/internal/compiler/program.go GetPackagesMap). An automatic JSX runtime (`react/jsx-runtime`) resolving to
   untyped JavaScript is TS7016 at the first JSX element (whole element), whatever
   `noImplicitAny` says (observed; `jsx_check.rs`). An imported type alias
   or interface used as a namespace (`CM.Editor`) falls back to a global namespace of that
@@ -1043,8 +1296,11 @@ Files, by layer:
   (an export); the value type is still used. Not reported in declaration files, ambient
   declarations, type positions, `export =`/`export default` of the name, computed names of
   abstract members, when a link merges with a local value or the target merges across files
-  (`type_only_value_use`). Property access through type-only namespaces and `export type *`
-  are not modelled.
+  (`type_only_value_use`). A named import or re-export of a name the module provides only
+  through `export type *` is TS1362 too (`Program::star_export_is_type_only`: one plain
+  `export *` of the name makes it a value). `import * as ns` of a module whose `export =`
+  names a type-only alias follows that alias's chain too. Property access through type-only namespaces is
+  not modelled.
 - **`await` at the top level of a module** is reserved: declarations named `await` outside
   functions, namespaces and ambient declarations are TS1262, reported with the semantic
   diagnostics (tsc does not treat it as a syntax error; `top_level_await_names`).
@@ -1085,6 +1341,28 @@ Files, by layer:
   TS2305 unless a default can be synthesized, as for a default import (TS1192): synthetic
   defaults allowed and the module has `export =` or may have a synthetic default
   (`reexport_missing_default`).
+- **`type` specifiers in a type-only list** (`import type { type a }`, `export type { type a
+  }`) are TS2206/TS2207 at the first such specifier's `type` keyword, a grammar error (clean
+  files only; `check_type_modifier_in_type_only_list`; tsc: grammarchecks.go
+  checkGrammarTypeOnlyNamedImportsOrExports).
+- **`export *` collisions** are TS2308 at each later `export *` of a module (or namespace)
+  that brings a name an earlier one brought for a different entity (after resolving aliases),
+  naming the first one's specifier as written; not when the module exports the name itself,
+  nor for `default` (`check_export_star_collisions`; tsc: checker.go
+  getExportsOfModuleWorker).
+- **Default imports without a default** are TS1192, or TS2613 ("did you mean `import { x }`")
+  when the module's own export table (not `export *`) holds the local's name (`has_own_export`;
+  tsc: tsc/internal/checker/checker.go reportNonDefaultExport). Under `node16`..`nodenext` an
+  ES module importing an ES module (`.d.mts`, `"type": "module"`) gets no synthetic default,
+  not even from an `export =` (`esm_imports_esm`; canHaveSyntheticDefault).
+- **Named imports of an `export =` module** (`import { a } from "m"`, `export { a } from
+  "m"`) find the entity's exports, or, for a value entity, its value's own properties:
+  `Object`'s and `Function`'s members do not count, a union needs the property in every
+  member (`has_own_property`; tsc: tsc/internal/checker/checker.go getExternalModuleMember).
+  An interface, function or class without such a member is TS2305. Importing the entity by
+  its own local name is TS2595 (ES module output), TS2597 (JavaScript) or TS2616
+  (`import x = require`; reportNonExportedMember). `export * from "m"` of such a module is
+  TS2498 at the specifier (`check_export_star_of_export_equals`).
 - **`export =` with other exports** is TS2309 at each `export =` of a module file or
   `declare module "x"` body whose own export table (not `export *`) holds a value: a value
   symbol, or an alias resolving to a value or to nothing. Types, interfaces, uninstantiated
@@ -1115,6 +1393,29 @@ Files, by layer:
   its specifier's first request in the file (`import x = require("./")` after
   `import "./"` in an ES module) is kept in `ProgramFiles::mode_resolutions`
   (`program::request_mode`).
+- **TypeScript extensions in specifiers** (`check_ts_extension_import`;
+  `Resolution::ts_extension` is the resolver's `resolved_using_ts_extension`). When the
+  extension written in the specifier is what found a program file (`./a.ts` → `a.ts`), an
+  emitted import (declaration with a value clause, value `export ... from`, `import x =
+  require()`, `import()`; not side-effect imports, import types or JS `require`) needs
+  `allowImportingTsExtensions` or `rewriteRelativeImportExtensions` (either allows it), or a
+  declaration-file importer: else TS5097 naming the extension. A `.d.ts` specifier is TS2846
+  instead. Under `rewriteRelativeImportExtensions` (outside ambient code, type-only imports,
+  import types and `.d.ts` specifiers): a relative TS-extension specifier the extension did
+  not find (`./foo.ts` → `./foo.ts/index.ts`) is TS2876 with the importer-relative real path;
+  a non-relative one it did find (`#internal/foo.ts`), to an emitted file, is TS2877
+  (tsc: tsc/internal/checker/checker.go resolveExternalModule, tsc/internal/ast/utilities.go
+  IsEmittableImport, tsc/internal/core/core.go ShouldRewriteModuleSpecifier).
+- **Arbitrary-extension declarations** (`Resolution::arbitrary_extension`,
+  `program::needs_arbitrary_extensions`): `./x.html` resolving to `x.d.html.ts` from a
+  non-declaration file without `allowArbitraryExtensions` is TS6263 and the module is not
+  linked (the import is untyped; the file is not loaded through it) (tsc:
+  tsc/internal/module/util.go GetResolutionDiagnostic).
+- **Imports of scripts** (`check_script_import`): `import x = require("./s")` and
+  `export * from "./s"` of a program file that is not a module (no `import`/`export`, not a
+  JavaScript CommonJS module, not JSON) are TS2306 at the specifier, and the alias resolves to
+  nothing (`Program::is_script_target` in the binder), so uses of `x` are not checked further
+  (tsc: tsc/internal/checker/checker.go resolveExternalModule).
 - **CommonJS output under `node16`..`nodenext`** (`builds_into_node_commonjs`: a
   non-declaration module whose format is not ESM): a top-level `await` is TS1309 at the
   keyword, but only when its operand starts with a word or string literal (tsc 7 skips
@@ -1150,7 +1451,9 @@ Files, by layer:
   parameter property cannot be a binding pattern (TS1187, at the parameter); parameters of
   signatures in types (function and constructor types, interface and type-literal
   members) without a type are TS7006/TS7019 under `noImplicitAny`, `this` included
-  (`signature_param_grammar`).
+  (`signature_param_grammar`). An untyped binding-pattern parameter there reports TS7031
+  on each name without a default instead (`m([, a], {p, q: {r}})`: a, p, r; tsc:
+  checker.go, implicit-any reporting for binding elements).
 - **JSON modules** (`resolveJsonModule`): `.json` resolutions are part of the program,
   bound as modules, never checked; the module's type is its value widened like a `let`
   initializer, and a default import is that value (`resolve_json_module_types`). Under the
@@ -1213,7 +1516,8 @@ Files, by layer:
   literal methods stay at their name; arguments use `elaborate_literal_error` (no hint). TS2558 spans the
   type arguments, not the brackets. A type parameter source reports its constraints one at
   a time (`error_anchors`).
-- **`globalThis`.** A script's top-level `this` is `typeof globalThis`. A missing name read
+- **`globalThis`.** A script's top-level `this` is `typeof globalThis`, in JavaScript too (a CommonJS
+  module is a script for this: tsc 7 gives it no external-module indicator). A missing name read
   or written through it is `any` (TS7017 under noImplicitAny), except a global `let`/`const`,
   which is a missing property (TS2339) (`global_this_access`).
 - **Predicates, `#private` and `?` parameters in messages.** A type predicate mismatch
@@ -1235,9 +1539,13 @@ Files, by layer:
   (`written_constraints_object_subtype`).
 - **Pattern initializers.** An object literal (parenthesized or `as const` too)
   initializing an unannotated object binding pattern, a variable's or a parameter
-  default, gets only the excess property check against the pattern's type (TS2353, first
-  excess only, through nested object and array patterns; none with a rest element).
-  Computed pattern keys of literal type name their property (`pattern_literal_excess`).
+  default, gets only the excess property check against the pattern's type (TS2353 for each
+  excess property, through nested object and array patterns; none with a rest element; see
+  "Literals typed by a pattern"). Computed pattern keys of literal type name their property
+  (`pattern_literal_excess`). An annotated empty pattern (`{}`, `[]` or holes only) under
+  strictNullChecks doesn't relate its initializer to the annotation: `const {}: undefined = 1`
+  is only TS2532 for the nullish annotation (tsc: `checkVariableLikeDeclaration` in
+  `tsc/internal/checker/checker.go`).
 - **Object literal `this`.** Without a contextual type (or `ThisType` marker), `this` in an
   object literal's method or function-valued property is the literal's own widened type,
   under noImplicitThis in TS files (a cycle through the literal gives the silent
@@ -1264,6 +1572,10 @@ Files, by layer:
   head (no member line), and `{ x: { b } }` is assignable to `{ x: { a? } } & { x: { b? } }`.
   In that state only cached successes are read and successes are not cached
   (`intersection_target_deferred_checks`).
+- **Weak type message.** A weak type failure is TS2560 ("Did you mean to call it?") when
+  the return type of the source's first call signature, or else of its first construct
+  signature, is related to the target; TS2559 otherwise (tsc: `structuredTypeRelatedTo` in
+  `tsc/internal/checker/relater.go`).
 - **`keyof` origins.** `keyof A` of a class, interface, reference or aliased type is the
   union of its keys with the index type `keyof A` as its origin, so it prints as `keyof A`
   (and `keyof A | undefined` in a union). An origin item that is not a member (this one) is
@@ -1353,6 +1665,13 @@ Files, by layer:
   typed as argument `1 + i`; an unterminated template accepts too few arguments. A
   constructable tag is TS2349 (no TS2348, no untyped `Function` call); two templates in an
   array literal are TS2796; a `super` tag is not resolved (`tagged_template_calls`).
+- **`new` of a callable.** A callee with call signatures but no construct signatures is
+  resolved against its call signatures, so `new f()` gets the same arity and argument
+  errors as `f()` (JS functions, `@constructor` ones too, are never constructable in tsc 7).
+  Without `noImplicitAny` a declared signature that doesn't return `void` is TS2350 and a
+  `this: void` one TS2679; with it the call is TS7009. The result is `any`, or the return
+  type of a signature without a declaration (`call::new_of_callable`; tsc:
+  tsc/internal/checker/checker.go, resolveNewExpression and checkCallExpression).
 - **Identity.** Identical object types have as many properties (`identity_property_count`).
 - **Spread arguments.** A spread of unknown length fits a signature when it starts at or past
   the required parameters and before the last parameter or into a rest one (else TS2556);
@@ -1568,6 +1887,147 @@ Files, by layer:
   `ReturnType<typeof make<T>>` aliases resolve. These names are published before the type
   escapes, in the type's `Layer`, so cached symbol types keep their names across workers
   and checkers sharing a level.
+- **Arithmetic with a `null`/`undefined` operand** (`check_arithmetic`). When one operand
+  is literally `null` or `undefined` (TS18050, its type becomes the error type), the other
+  operand is still checked against `number | bigint`: TS2362 on the left, TS2363 on the
+  right. The result stays the error type (tsc: checker.go, the arithmetic branch of the
+  binary-expression check, which checks both operands before giving up).
+- **`super.field`** (`check_property_accessibility`). Reading an instance property of the
+  base class through `super` when every declaration is a plain field (not an `accessor`)
+  is TS2855 at the name instead of any private/protected error; methods and accessors
+  stay readable (tsc: checker.go, property accessibility at a location).
+- **Private methods and setter-only private accessors** (`check_private_method_write`,
+  `check_private_setter_read`, `write_kind`). `write_kind` walks parents from an access to
+  classify it: a plain write (`=`, a destructuring target through array/object literals,
+  spreads, properties and parentheses, a `for-in`/`for-of` head), a compound write
+  (`op=`, `++`, `--`), or a read. Writing to `#m` where the innermost class declaring `#m`
+  has it as a method is TS2803 at the name. Reading (including the read half of a compound
+  write) a private accessor with a setter and no getter is TS2806 at the whole access
+  (tsc: checker.go, property access checks for private identifiers).
+- **Protected access through the wrong instance** (`check_protected_instance`). Inside class
+  `C`, `obj.p` where `p` is a protected instance member reached from `C` or a class `C`
+  derives from must have `obj` typed as `C` or a subclass of `C` (a type parameter is read
+  through its constraint); otherwise TS2446 names `p`, `C` and the object type. `super.p`,
+  statics, `#names`, and object types that are not class/interface references are skipped,
+  and so is anything with an intersection (mixin) base on either side, whose combined
+  modifiers are not modelled (tsc: checker.go, property accessibility and the
+  enclosing-class base type walk).
+- **Symbol operands** (`maybe_symbol_like`, `symbol_operand_error`). A type is symbol-like
+  when it, a union or intersection member, or the base constraint of a type parameter is
+  `symbol` or a unique symbol. When `+` (or `+=`) has a valid result, and for `<`, `<=`, `>`,
+  `>=`, the first symbol-like operand gets TS2469 naming the operator (`+=` for the compound
+  form, which then skips the write check); comparisons report it before the null checks.
+  Unary `+`, `-` and `~` report TS2469 on a symbol-like operand. A `${...}` span in an
+  untagged template whose type is symbol-like is TS2731; tagged templates are exempt
+  (tsc: checker.go, the ES symbol operand check in binary and prefix-unary checks, and the
+  template expression check).
+- **Template constants come first.** A template whose parts evaluate to constants is that
+  string literal type before the const-context / template-literal-context rules apply; a
+  tagged template is never evaluated (tsc: checker.go, template expression check).
+- **delete** of a readonly property (including an enum member) is TS2704 at the access; the
+  TS2703 "must be a property reference" error points at the operand with parentheses
+  stripped (tsc: checker.go, delete expression check).
+- **Dynamic import specifier.** `import(x)` where `x` (not a spread, not an error type) may be
+  `null`/`undefined` or is not assignable to `string` is TS7036 naming the type
+  (tsc: checker.go, import call check).
+- **Enum initializers** (`check_enum_initializer`). A const enum member evaluating to NaN is
+  TS2478, to an infinity TS2477. An initializer with no constant value that is a bare name
+  of an enum member declared later in the same file is TS2651; otherwise in a const enum
+  it is TS2474, and in a non-ambient regular enum it must be assignable to `number`
+  (TS2322 headed by TS18033). The evaluator reads an unannotated `const` with an initializer
+  declared earlier in the same file (not from inside its own initializer), follows import
+  aliases, takes earlier members of the enum being evaluated through `E.a` / `E["a"]` /
+  ``E[`a`]`` (tsc: checker.go, enum member constant computation and entity evaluation).
+- **super() position** (`check_super_call_position` in `super_calls.rs`). Without native
+  class fields, a derived class with an initialized instance property, any `#private` member
+  or a parameter property: the first `super(...)` call in source order (functions skipped)
+  must be an expression statement (parentheses allowed) directly in the constructor body,
+  else TS2401 at the call; the body statements before it must not mention `this`/`super`
+  outside functions and property declarations, else TS2376 at the constructor. For TS17009,
+  a nested class's heritage clause and decorators on its members or parameters use the
+  constructor's `this`; a parenthesized `(super())` statement counts as a call statement
+  (tsc: checker.go, constructor declaration check and the `this` container walk).
+- **Private names shared by static and instance members** (`check_private_name_static_clash`).
+  Once a class has `#x` both as a static and as an instance member (any kind), every member
+  named `#x` gets TS2804 at its name (tsc: checker.go, duplicate declarations of class
+  members).
+- **Static names of Function's own properties** (`check_static_function_name_conflicts`). In a
+  non-ambient class, a static property, method or accessor named `prototype` (also through
+  a computed key with a literal value) is TS2699 at the name with the class display name;
+  `name`, `length`, `caller` and `arguments` are TS2699 too unless `useDefineForClassFields`
+  is in effect. A static method or accessor whose computed key late-binds to `prototype`
+  is also TS2300 with the key text, since it collides with the class's `prototype` symbol
+  (tsc: checker.go, static property name conflicts and late-bound member binding).
+- **Where `await using` may stand** (`check_await_using_context`, statements and `for`-`of`
+  heads). It follows the rules for a top-level `await`, at the `await` keyword: TS2852 in a
+  function that is not async; at the top level TS2853 when the file is not a module, and
+  then TS1309 for a file node16..nodenext emit as CommonJS, or TS2854 when `module` is not
+  es2022/esnext/system/node16+/preserve or `target` is below es2017. Nothing in an ambient
+  context (TS1546 covers it) or in a file with syntax errors (tsc: grammar.go, grammar
+  checks for `await` and `await using`).
+- **`using` initializers must be disposable** (`check_disposable_initializer`). The widened
+  initializer type of a `using x = e` must be assignable to `Disposable | null | undefined`
+  (TS2850 at `e`), of an `await using` to `AsyncDisposable | Disposable | null | undefined`
+  (TS2851); nothing when the lib lacks those interfaces. As for the default head, a single
+  missing property between the same two types replaces the head (without
+  strictNullChecks `using x = {}` is TS2741), while a union target keeps it (tsc:
+  checker.go, variable-like declaration checks; relater.go, relation error reporting).
+- **Parameter shapes** (`check_param_shape`, every parameter, signatures in types too). An
+  optional binding-pattern parameter without a default in a function that has a body is
+  TS2463. A rest parameter named by an identifier must have a type assignable to
+  `readonly any[]`, else TS2370 at the parameter; generic types are skipped. Under
+  strictNullChecks an optional rest parameter is `T | undefined` when annotated, and when
+  unannotated only in a function expression, arrow or object-literal method (their
+  parameters are typed with the expression, which adds the optionality; a declaration's
+  unannotated rest parameter stays `any[]`: destructuringParameterDeclaration4 vs
+  parserParameterList11) (tsc: checker.go, parameter checks and parameter type
+  assignment).
+- **Type parameters in a member's computed name** (static_refs.rs). A class's or
+  interface's own type parameter is out of scope inside the computed name of one of its
+  members (`class C<T> { [foo<T>()]() {} }`): the reference is TS2467 and the error type,
+  never TS2304. A computed name of a nested type literal or class is not covered (tsc:
+  binder/nameresolver.go, the computed property name step of the scope walk).
+- **`instanceof` operands** (expr.rs `has_instance_method`). When the right side is an
+  object type with a callable `[Symbol.hasInstance]` (classes and functions get
+  `Function`'s from the ES2015 lib), the expression is the call
+  `r[Symbol.hasInstance](l)`: with one non-generic signature, `l` must be assignable to
+  its first parameter (TS2860 at `l`, elaborated), and its return type to `boolean`
+  (TS2861 at `r`). Only without such a method is a right side that is neither callable,
+  constructable nor a `Function` TS2359 (tsc: checker.go, instanceof resolution; flow.go
+  for the property lookup).
+- `new f()` on a type with call signatures but no construct signatures: with
+  `noImplicitAny` TS7009; without it TS2350 at the `new` expression when the call's
+  signature has a declaration and does not return `void` (we require every overload to
+  qualify, the call is not resolved) (tsc: checker.go, resolveNewExpression).
+- A class reached through a namespace (`N.E`) before its declaration runs gets TS2449 at the
+  property name under the same timing rules as a plain identifier (tsc: checker.go,
+  checkPropertyNotUsedBeforeDeclaration).
+- TS2610/2611 (accessor overriding a property and back): an abstract base field with an
+  initializer is not exempt; a base member combined from several intersection constituents
+  (a mixin's base) is an accessor only when every constituent has the same getter/setter
+  set, else a property (tsc: checker.go, createUnionOrIntersectionProperty,
+  isPropertyAbstractOrInterface).
+- `for (x in o)` with an expression head: TS2405 (the head's type must accept
+  `Extract<keyof O, string>`, `string` when `o` is unresolved) is decided before and
+  regardless of other errors in the head (`for (a = 1 in b)` with `a` undeclared); only a
+  read-only member head (TS2540, an error type) skips it. The reference check (TS2406) runs
+  only when TS2405 did not fire (tsc: checker.go, checkForInStatement).
+- TS2403 compares an inferred generic type when the declaration sees no type parameters
+  but its initializer's own (`var v = <T>() => 1; var v = <T>(a) => 1;` outside any generic
+  function, class, interface or alias, and not in JavaScript). A named function
+  expression's `return f()` of itself adds nothing to its inferred return type, like a
+  function declaration's (the binder puts the name's symbol on the expression)
+  (tsc: checker.go, checkVariableLikeDeclaration, checkAndAggregateReturnExpressionTypes).
+- `arguments` inside a class nested in a function (not an arrow) is still that function's;
+  read in a field initializer or a static block (arrows transparent, another function's
+  body ending the search) it is TS2815 and an error type. Unresolved at the top level it
+  gets the TS2662 static-member suggestion like any name (`Function.arguments`)
+  (tsc: checker.go, checkIdentifier, isInPropertyInitializerOrClassStaticBlock).
+- Kinds of overriding members: a base method may be overridden by a method or a property,
+  but an accessor overriding it is TS2423; a method overriding a base accessor is TS2426 and
+  one overriding a base property TS2425 (base type, member name, derived type). Private
+  members on either side are no override. Only bases declared as class members are judged
+  (tsc: checker.go, checkKindsOfPropertyMemberOverrides).
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 
@@ -1733,13 +2193,12 @@ shares levels; the driver takes any checker (`check_program_with`, `check_files`
   (and without a `tsconfig.json` unit), JavaScript roots are left out of the program and
   reported as global TS6504 with tsc's "Root file specified for compilation" chain, except
   in a test that is itself a `.js` file.
-  Current (2026-10-16, 12769 compared variants, 9 s on 4 threads, after conformance
-  round 4, merged with `m1/transform-run`, and the bench-parity fixes): 8444 exact (66.1%; all
-  diagnostics and chains), 8516 (66.7%) exact on first lines; 1698 variants with a diagnostic
-  tsc does not report, 320 of them tests where tsc reports nothing (round 3 ended at 7879
-  exact, 2319 and 573).
-  The example checks through syntax errors as tsc's harness does (2026-10-19, m8/parser-diagnostics:
-  8642 exact, 306 tests with false positives).
+  Current (2026-10-22, 7c73600 after the alpha.4 checker tracks: checks, printer,
+  assignability, calls, types, JS, modules; 12750 compared variants, 17 s on 4 threads):
+  11965 exact (93.8%; all diagnostics and chains), 11986 (94.0%) exact on first lines; 328
+  variants with a diagnostic tsc does not report, 43 of them tests where tsc reports nothing.
+  Earlier: 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
 - private-app (`ts-r-check -p . --no-history` vs tsc 7 `tsc -p .`): over all 25
@@ -1784,7 +2243,7 @@ shares levels; the driver takes any checker (`check_program_with`, `check_files`
   their original identity (`<K extends keyof T, U extends K>` instantiated by a receiver).
 - Calls and patterns: TS2769 for tagged-template overloads (only call, `new` and JSX
   arguments are elaborated), object rest of a generic type (`Omit<T, "a">` is not built;
-  the rest is `UNRESOLVED`), TS7031 for the array rest of an implied binding pattern, TS2671
+  the rest is `UNRESOLVED`), TS2671
   for an `export =` that is only a function, TS2300 for duplicate late-bound methods and
   accessors in object literals, TS2465 (`this` in a computed name), implied index signatures merged across
   several declarations of one interface (the first declaration's win).

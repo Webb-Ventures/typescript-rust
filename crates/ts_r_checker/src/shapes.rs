@@ -12,7 +12,9 @@
 //!   are all free of side effects. Reported at the left side. `(0, o.m)()`, ``(0, o.m)`x` ``
 //!   and `(0, eval)()` (a numeric literal with value 0, then a property or element access or
 //!   `eval`, parenthesized as a callee or tag) are the indirect-call idiom and are fine.
-//!   Not reported at all under `allowUnreachableCode: true`.
+//!   Not reported at all under `allowUnreachableCode: true`. A missing operand (`(, x)`)
+//!   counts as a name; a left side starting inside the parser's TS2657 (adjacent JSX
+//!   elements joined by recovery) is not reported (tsc: checker.go, comma operator case).
 //! - **TS2872/TS2873** on a condition (`if`, loops, `?:`, the left of `&&`/`||`, the operand
 //!   of `!`), classified through outer wrappers and reported at the condition as written
 //!   (`satisfies` at its keyword; a named function or class expression at its name, here
@@ -184,7 +186,9 @@ fn side_effect_free(ast: &Ast, e: NodeId, depth: u32) -> bool {
         return false;
     }
     match *ast.node(e) {
+        // A missing operand is tsc's empty identifier (`(, x)`).
         Node::Ident { .. }
+        | Node::Missing {}
         | Node::StringLit { .. }
         | Node::NumberLit { .. }
         | Node::BigIntLit { .. }
@@ -243,6 +247,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else {
                 Span::new(start, ast.span(x).end)
             };
+            // Adjacent JSX elements the parser joined with a comma (TS2657 there).
+            if self
+                .c
+                .file(e.file)
+                .syntax
+                .iter()
+                .any(|d| d.code == 2657 && d.span.start <= span.start && span.start < d.span.end)
+            {
+                continue;
+            }
             self.error_span(
                 e.file,
                 span,

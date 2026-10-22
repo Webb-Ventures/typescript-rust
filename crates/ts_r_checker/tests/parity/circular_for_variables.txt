@@ -1,0 +1,6 @@
+a.ts(3,10): error TS7022: 'v' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(5,10): error TS7022: 'w' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(5,15): error TS2448: Block-scoped variable 'w' used before its declaration.
+a.ts(6,36): error TS7022: 'y' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(10,12): error TS7022: 'o' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(10,17): error TS2448: Block-scoped variable 'o' used before its declaration.

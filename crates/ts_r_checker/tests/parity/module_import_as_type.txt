@@ -1,0 +1,2 @@
+a.ts(3,14): error TS2709: Cannot use namespace 'W' as a type.
+a.ts(4,16): error TS2709: Cannot use namespace 'N' as a type.

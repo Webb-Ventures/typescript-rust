@@ -5,8 +5,11 @@
 //!   access: an identifier, `a.b`, `a[b]`, any of them parenthesized or wrapped in `!`,
 //!   `as`, `satisfies` or `<T>`. Anything else (`f()`, `new y`, `this`, a literal,
 //!   `obj.fn<number>`) is TS2364 at the whole left side, parentheses included, and the
-//!   assignment is not checked further. An object or array literal with a compound
-//!   operator is not (`[a, b] += 1` is an operator error).
+//!   assignment is not checked further. With a compound operator an object or array
+//!   literal is such a value too (`[a, b] += ""`: TS2364 at the literal, after the
+//!   operator check; `[a, b] *= 1` is only the operator error). A lone `super` there is
+//!   an error type (no operator error). A parenthesized literal is never a pattern:
+//!   `([]) = v` is TS2364 too.
 //! - A property access in an optional chain (`a?.b = 1`, not `(a?.b).c = 1`) is TS2779.
 //! - The same holds for each target inside a destructuring assignment pattern (`[""] =`,
 //!   `{ a: 1 } =`, `for ([""] of ...)`); nested patterns are walked, `[a = v]` checks `a`.
@@ -50,6 +53,18 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2364/TS2779 when the assignment target `l` is not a reference; returns whether it
     /// is.
     pub(crate) fn check_assignment_target_shape(&mut self, l: Loc) -> bool {
+        let ast = self.ast(l.file);
+        if matches!(
+            ast.node(crate::nodes::skip_parens(ast, l.node)),
+            Node::ObjectLit { .. } | Node::ArrayLit { .. }
+        ) {
+            self.error(
+                l,
+                dg::THE_LEFT_HAND_SIDE_OF_AN_ASSIGNMENT_EXPRESSION_MUST_BE_A_VARIABLE_OR_A_PROPERTY_A_2364,
+                &[],
+            );
+            return false;
+        }
         self.check_target_shape(
             l,
             dg::THE_LEFT_HAND_SIDE_OF_AN_ASSIGNMENT_EXPRESSION_MUST_BE_A_VARIABLE_OR_A_PROPERTY_A_2364,

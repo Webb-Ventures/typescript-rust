@@ -15,6 +15,18 @@ use ts_r_guard::vfs::GuardFs;
 use crate::args::{Cli, LogLevel};
 
 fn main() -> ExitCode {
+    let started = Instant::now();
+    let code = run();
+    if std::env::var_os("TS_R_BUILD_TIMING").is_some() {
+        eprintln!(
+            "[timing] main {:.1}ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    code
+}
+
+fn run() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let cli = match args::parse(&argv) {
         Ok(args::Parsed::Run(c)) => *c,
@@ -50,8 +62,12 @@ fn main() -> ExitCode {
     };
     let start = Instant::now();
     let mut r = ctx.build();
+    ctx.finish_and_leak();
     add_guard_errors(&mut r, &guard, &cli.options.working_dir);
-    finish(&cli, &r, start)
+    let code = finish(&cli, &r, start);
+    // The process exits next: freeing the outputs one by one would only cost time.
+    std::mem::forget(r);
+    code
 }
 
 /// The file system builds read through: `parse<T>` call sites are expanded as files are

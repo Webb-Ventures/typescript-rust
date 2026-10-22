@@ -47,9 +47,9 @@ Files:
 
 ## Invariants
 
-- **From scratch.** Never read or port ESLint, typescript-eslint, oxlint or Biome source.
-  Behaviour comes from their docs, their published rule *tests* (as data, via
-  `tests/oracle/gen/gen-rule-oracle.mjs`) and observed output.
+- **From scratch.** Behaviour comes from ESLint's and typescript-eslint's docs, their published
+  rule *tests* (as data, via `tests/oracle/gen/gen-rule-oracle.mjs`) and observed output. Their
+  source (and oxlint's or Biome's) may be read to understand a rule, never ported (root AGENTS.md).
 - **Typed lint of a JavaScript file sees the source as written**: `lint_program_file` lints a
   clone of the checker's tree without its JSDoc-desugared types (`Ast::strip_jsdoc`; node ids
   are unchanged, so type queries still work). ESLint never sees JSDoc as syntax.
