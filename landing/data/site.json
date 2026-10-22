@@ -1,0 +1,21 @@
+{
+  "about": "Site mode, the donate link and sponsor tiers. donate.url is a Stripe choose-what-to-pay Payment Link; each tier opens it with ?prefilled_amount=<cents>. A tier with its own `url` uses that instead.",
+  "mode": "launched",
+  "donate": {
+    "label": "Donate to TS-R's development",
+    "platform": "Stripe",
+    "url": "https://donate.stripe.com/3cIbJ00IN4wU79zbVw5J600"
+  },
+  "tiers": [
+    { "amount": 10, "name": "Coffee", "perks": ["A thank-you from the team", "Your name on the supporters list on ts-r.dev"] },
+    { "amount": 25, "name": "Supporter", "perks": ["Everything in Coffee", "Your name in the README's supporters section"] },
+    { "amount": 50, "name": "Backer", "perks": ["Everything in Supporter", "Early access to preview builds before they're public"] },
+    { "amount": 100, "name": "Bronze sponsor", "perks": ["Everything in Backer", "Small logo or avatar in the README"] },
+    { "amount": 250, "name": "Silver sponsor", "perks": ["Everything in Bronze", "Logo and link in the sponsors section on ts-r.dev"], "featured": true },
+    { "amount": 500, "name": "Gold sponsor", "perks": ["Everything in Silver", "Larger logo on ts-r.dev and in the README", "Priority triage for issues you report"] },
+    { "amount": 1000, "name": "Platinum sponsor", "perks": ["Everything in Gold", "Thanks in the release notes for a year", "A vote on the roadmap's next priorities"] },
+    { "amount": 2500, "name": "Diamond sponsor", "perks": ["Everything in Platinum", "Logo in the docs sidebar", "A private channel to the maintainers"] },
+    { "amount": 5000, "orMore": true, "name": "Founding sponsor", "perks": ["Everything in Diamond", "Top placement on the ts-r.dev home page", "Named in the launch announcement", "An onboarding call to move your team's toolchain to ts-r"] }
+  ],
+  "sponsors": []
+}

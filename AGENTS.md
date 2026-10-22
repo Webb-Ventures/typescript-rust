@@ -50,7 +50,7 @@ minifier, resolver, bundler, linter, dev server, language server.
 | `ecosystem/` | Top-npm-packages harness (M7): pinned list, STATUS.md, repros ([ecosystem/README.md](ecosystem/README.md)) |
 | `upstream/UPSTREAM.json` | Pinned TypeScript / esbuild / Vite / typescript-eslint / test262 versions |
 | `docs/design/` | Design records. Agents must follow them; people review changes to them |
-| `landing/` | The website, ts-r.dev: one Next.js static export with the home, tool and sponsor pages and, once launched, the docs (sources in `landing/content/`), error-code pages and benchmarks (`landing/AGENTS.md`). Only in the development repo, not the public one |
+| `landing/` | The website, ts-r.dev: one Next.js static export with the home, tool and sponsor pages and, once launched, the docs (sources in `landing/content/`), error-code pages and benchmarks ([landing/AGENTS.md](landing/AGENTS.md)) |
 | `.public/` | Files only the public repo has (its release and AI-policy workflows), laid over its root by the sync (`.github/public-sync/README.md`, development repo only) |
 | `.agents/skills/` | Task playbooks (SKILL.md) for recurring agent work (`.claude/skills` links here); `.agents/plugins/` holds the code-review plugin |
 
@@ -93,7 +93,7 @@ moves when a person merges a reviewed branch.
   line that records it (the crate's `AGENTS.md` "Current" line, or the oracle's README) and the
   matching row in `landing/data/conformance.json` or `landing/data/bench.json` in the same PR.
   The website quotes those lines, and its build fails when a quote goes stale
-  (`landing/AGENTS.md`, "The rule for numbers"; `landing/` is only in the development repo).
+  ([landing/AGENTS.md](landing/AGENTS.md), "The rule for numbers").
 - Commit only the paths you own. Never commit `target/`, benchmark results, caches or binaries.
   `node_modules` inside `crates/*/tests/fixtures/` is committed on purpose.
 - If you were started in your own git worktree, commit and push your branch there

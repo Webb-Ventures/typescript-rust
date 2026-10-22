@@ -1,0 +1,1504 @@
+{
+ "method": "This pass picks the codes that turn up most: first those ts-r-check reports on private-app (all 25 tsconfig projects, run on 2026-10-15 at commit 6deaf01) and those behind failure causes in the ecosystem run of the top 1,000 npm packages (2026-10-14), then the rest by how often tsc 7.0.2's own test baselines report them. All TS8xxx and TS99xxx codes are included.",
+ "inputs": {
+  "privateApp": "ts-r-check -p tsconfig.json --pretty false in each of the 25 tsconfig projects of a private-app checkout without node_modules installed (so TS2307 and the JSX codes are frequent); count of reported diagnostics per code",
+  "ecosystemItems": "items per code in the failure causes of ecosystem/results/2026-10-14.json (cargo xtask ecosystem, top 1,000 packages)",
+  "tscBaselines": "number of error lines per code in tests/baselines/reference/*.errors.txt of TypeScript 7.0.2 (cargo xtask upstream sync)"
+ },
+ "codes": [
+  {
+   "code": "TS1002",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS1003",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 224
+  },
+  {
+   "code": "TS1005",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 1612
+  },
+  {
+   "code": "TS1011",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 63
+  },
+  {
+   "code": "TS1013",
+   "privateApp": 0,
+   "ecosystemItems": 2,
+   "tscBaselines": 2
+  },
+  {
+   "code": "TS1028",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 27
+  },
+  {
+   "code": "TS1029",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 128
+  },
+  {
+   "code": "TS1030",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 44
+  },
+  {
+   "code": "TS1042",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 58
+  },
+  {
+   "code": "TS1044",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 63
+  },
+  {
+   "code": "TS1068",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 39
+  },
+  {
+   "code": "TS1070",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 20
+  },
+  {
+   "code": "TS1090",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 10
+  },
+  {
+   "code": "TS1097",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS1100",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 343
+  },
+  {
+   "code": "TS1101",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 42
+  },
+  {
+   "code": "TS1102",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 90
+  },
+  {
+   "code": "TS1109",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 511
+  },
+  {
+   "code": "TS1110",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 19
+  },
+  {
+   "code": "TS1114",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS1117",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 145
+  },
+  {
+   "code": "TS1118",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 12
+  },
+  {
+   "code": "TS1119",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 72
+  },
+  {
+   "code": "TS1121",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 149
+  },
+  {
+   "code": "TS1124",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 31
+  },
+  {
+   "code": "TS1125",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 100
+  },
+  {
+   "code": "TS1127",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 83
+  },
+  {
+   "code": "TS1128",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 471
+  },
+  {
+   "code": "TS1131",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 20
+  },
+  {
+   "code": "TS1134",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 57
+  },
+  {
+   "code": "TS1135",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 21
+  },
+  {
+   "code": "TS1136",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 15
+  },
+  {
+   "code": "TS1138",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS1141",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 28
+  },
+  {
+   "code": "TS1146",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 12
+  },
+  {
+   "code": "TS1160",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS1162",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS1163",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 18
+  },
+  {
+   "code": "TS1181",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS1184",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 42
+  },
+  {
+   "code": "TS1192",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 66
+  },
+  {
+   "code": "TS1196",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 18
+  },
+  {
+   "code": "TS1199",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 23
+  },
+  {
+   "code": "TS1200",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 39
+  },
+  {
+   "code": "TS1206",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 313
+  },
+  {
+   "code": "TS1210",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 203
+  },
+  {
+   "code": "TS1212",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 260
+  },
+  {
+   "code": "TS1213",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 67
+  },
+  {
+   "code": "TS1214",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 21
+  },
+  {
+   "code": "TS1215",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS1243",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 30
+  },
+  {
+   "code": "TS1244",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS1249",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 24
+  },
+  {
+   "code": "TS1253",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS1344",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 145
+  },
+  {
+   "code": "TS1345",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 80
+  },
+  {
+   "code": "TS1351",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 34
+  },
+  {
+   "code": "TS1359",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 141
+  },
+  {
+   "code": "TS1360",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 17
+  },
+  {
+   "code": "TS1381",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 24
+  },
+  {
+   "code": "TS1382",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 24
+  },
+  {
+   "code": "TS1433",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 10
+  },
+  {
+   "code": "TS1477",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 14
+  },
+  {
+   "code": "TS1489",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 38
+  },
+  {
+   "code": "TS1497",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 86
+  },
+  {
+   "code": "TS1499",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 61
+  },
+  {
+   "code": "TS1500",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 24
+  },
+  {
+   "code": "TS1502",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 11
+  },
+  {
+   "code": "TS2300",
+   "privateApp": 0,
+   "ecosystemItems": 33,
+   "tscBaselines": 1432
+  },
+  {
+   "code": "TS2304",
+   "privateApp": 2,
+   "ecosystemItems": 101,
+   "tscBaselines": 6159
+  },
+  {
+   "code": "TS2305",
+   "privateApp": 0,
+   "ecosystemItems": 503,
+   "tscBaselines": 120
+  },
+  {
+   "code": "TS2307",
+   "privateApp": 884,
+   "ecosystemItems": 0,
+   "tscBaselines": 831
+  },
+  {
+   "code": "TS2314",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 342
+  },
+  {
+   "code": "TS2315",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 39
+  },
+  {
+   "code": "TS2320",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 68
+  },
+  {
+   "code": "TS2322",
+   "privateApp": 7,
+   "ecosystemItems": 0,
+   "tscBaselines": 6781
+  },
+  {
+   "code": "TS2339",
+   "privateApp": 10,
+   "ecosystemItems": 89,
+   "tscBaselines": 1726
+  },
+  {
+   "code": "TS2341",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 215
+  },
+  {
+   "code": "TS2344",
+   "privateApp": 15,
+   "ecosystemItems": 2868,
+   "tscBaselines": 240
+  },
+  {
+   "code": "TS2345",
+   "privateApp": 9,
+   "ecosystemItems": 1,
+   "tscBaselines": 1410
+  },
+  {
+   "code": "TS2348",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 20
+  },
+  {
+   "code": "TS2349",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 179
+  },
+  {
+   "code": "TS2351",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 94
+  },
+  {
+   "code": "TS2352",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 193
+  },
+  {
+   "code": "TS2353",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 273
+  },
+  {
+   "code": "TS2355",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 90
+  },
+  {
+   "code": "TS2356",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 387
+  },
+  {
+   "code": "TS2357",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 127
+  },
+  {
+   "code": "TS2358",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 55
+  },
+  {
+   "code": "TS2359",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 68
+  },
+  {
+   "code": "TS2362",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 1754
+  },
+  {
+   "code": "TS2363",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 1316
+  },
+  {
+   "code": "TS2365",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 859
+  },
+  {
+   "code": "TS2366",
+   "privateApp": 5,
+   "ecosystemItems": 0,
+   "tscBaselines": 26
+  },
+  {
+   "code": "TS2367",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 626
+  },
+  {
+   "code": "TS2369",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 189
+  },
+  {
+   "code": "TS2383",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS2384",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 9
+  },
+  {
+   "code": "TS2385",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 37
+  },
+  {
+   "code": "TS2386",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 24
+  },
+  {
+   "code": "TS2387",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 14
+  },
+  {
+   "code": "TS2388",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 10
+  },
+  {
+   "code": "TS2389",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 27
+  },
+  {
+   "code": "TS2390",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 18
+  },
+  {
+   "code": "TS2391",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 128
+  },
+  {
+   "code": "TS2392",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 32
+  },
+  {
+   "code": "TS2393",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 126
+  },
+  {
+   "code": "TS2394",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 39
+  },
+  {
+   "code": "TS2403",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 206
+  },
+  {
+   "code": "TS2407",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 34
+  },
+  {
+   "code": "TS2411",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 247
+  },
+  {
+   "code": "TS2413",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 33
+  },
+  {
+   "code": "TS2415",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 100
+  },
+  {
+   "code": "TS2416",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 271
+  },
+  {
+   "code": "TS2417",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 73
+  },
+  {
+   "code": "TS2420",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 145
+  },
+  {
+   "code": "TS2430",
+   "privateApp": 0,
+   "ecosystemItems": 3,
+   "tscBaselines": 406
+  },
+  {
+   "code": "TS2435",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 32
+  },
+  {
+   "code": "TS2445",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 200
+  },
+  {
+   "code": "TS2447",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 13
+  },
+  {
+   "code": "TS2448",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 216
+  },
+  {
+   "code": "TS2449",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 106
+  },
+  {
+   "code": "TS2450",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 50
+  },
+  {
+   "code": "TS2451",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 167
+  },
+  {
+   "code": "TS2454",
+   "privateApp": 5,
+   "ecosystemItems": 0,
+   "tscBaselines": 7407
+  },
+  {
+   "code": "TS2464",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 165
+  },
+  {
+   "code": "TS2469",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS2488",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 140
+  },
+  {
+   "code": "TS2493",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 100
+  },
+  {
+   "code": "TS2503",
+   "privateApp": 8,
+   "ecosystemItems": 1,
+   "tscBaselines": 156
+  },
+  {
+   "code": "TS2511",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 52
+  },
+  {
+   "code": "TS2512",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 7
+  },
+  {
+   "code": "TS2515",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 27
+  },
+  {
+   "code": "TS2528",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 88
+  },
+  {
+   "code": "TS2531",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 13
+  },
+  {
+   "code": "TS2532",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 135
+  },
+  {
+   "code": "TS2534",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS2538",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 183
+  },
+  {
+   "code": "TS2540",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 300
+  },
+  {
+   "code": "TS2542",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 43
+  },
+  {
+   "code": "TS2551",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 35
+  },
+  {
+   "code": "TS2552",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 179
+  },
+  {
+   "code": "TS2554",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 367
+  },
+  {
+   "code": "TS2555",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS2556",
+   "privateApp": 1,
+   "ecosystemItems": 0,
+   "tscBaselines": 36
+  },
+  {
+   "code": "TS2558",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 158
+  },
+  {
+   "code": "TS2559",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 52
+  },
+  {
+   "code": "TS2561",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 10
+  },
+  {
+   "code": "TS2564",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 2287
+  },
+  {
+   "code": "TS2567",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 83
+  },
+  {
+   "code": "TS2575",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS2576",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 20
+  },
+  {
+   "code": "TS2578",
+   "privateApp": 0,
+   "ecosystemItems": 4,
+   "tscBaselines": 2
+  },
+  {
+   "code": "TS2584",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS2588",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 40
+  },
+  {
+   "code": "TS2589",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 22
+  },
+  {
+   "code": "TS2591",
+   "privateApp": 71,
+   "ecosystemItems": 0,
+   "tscBaselines": 87
+  },
+  {
+   "code": "TS2592",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 15
+  },
+  {
+   "code": "TS2593",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS2610",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 17
+  },
+  {
+   "code": "TS2611",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS2628",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 61
+  },
+  {
+   "code": "TS2629",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 60
+  },
+  {
+   "code": "TS2630",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 49
+  },
+  {
+   "code": "TS2631",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 42
+  },
+  {
+   "code": "TS2654",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS2664",
+   "privateApp": 12,
+   "ecosystemItems": 0,
+   "tscBaselines": 18
+  },
+  {
+   "code": "TS2669",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 15
+  },
+  {
+   "code": "TS2678",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 25
+  },
+  {
+   "code": "TS2683",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 46
+  },
+  {
+   "code": "TS2688",
+   "privateApp": 0,
+   "ecosystemItems": 1,
+   "tscBaselines": 2
+  },
+  {
+   "code": "TS2693",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 149
+  },
+  {
+   "code": "TS2694",
+   "privateApp": 0,
+   "ecosystemItems": 3874,
+   "tscBaselines": 286
+  },
+  {
+   "code": "TS2703",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 295
+  },
+  {
+   "code": "TS2707",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS2708",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 32
+  },
+  {
+   "code": "TS2717",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 25
+  },
+  {
+   "code": "TS2720",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 27
+  },
+  {
+   "code": "TS2722",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 25
+  },
+  {
+   "code": "TS2729",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 121
+  },
+  {
+   "code": "TS2739",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 55
+  },
+  {
+   "code": "TS2740",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 41
+  },
+  {
+   "code": "TS2741",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 299
+  },
+  {
+   "code": "TS2749",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 24
+  },
+  {
+   "code": "TS2769",
+   "privateApp": 5,
+   "ecosystemItems": 1,
+   "tscBaselines": 1132
+  },
+  {
+   "code": "TS2790",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 66
+  },
+  {
+   "code": "TS2882",
+   "privateApp": 2,
+   "ecosystemItems": 0,
+   "tscBaselines": 41
+  },
+  {
+   "code": "TS4104",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS4112",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 15
+  },
+  {
+   "code": "TS4113",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 29
+  },
+  {
+   "code": "TS4114",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 28
+  },
+  {
+   "code": "TS4115",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS4127",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 12
+  },
+  {
+   "code": "TS5052",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 7
+  },
+  {
+   "code": "TS5053",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 17
+  },
+  {
+   "code": "TS5055",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 90
+  },
+  {
+   "code": "TS5061",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 9
+  },
+  {
+   "code": "TS5062",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS5069",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 9
+  },
+  {
+   "code": "TS5076",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 11
+  },
+  {
+   "code": "TS5090",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 13
+  },
+  {
+   "code": "TS5095",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 21
+  },
+  {
+   "code": "TS5102",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 87
+  },
+  {
+   "code": "TS5110",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 28
+  },
+  {
+   "code": "TS6053",
+   "privateApp": 23,
+   "ecosystemItems": 0,
+   "tscBaselines": 30
+  },
+  {
+   "code": "TS6133",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 43
+  },
+  {
+   "code": "TS6142",
+   "privateApp": 100,
+   "ecosystemItems": 0,
+   "tscBaselines": 13
+  },
+  {
+   "code": "TS6188",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 159
+  },
+  {
+   "code": "TS6189",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 44
+  },
+  {
+   "code": "TS6196",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS7006",
+   "privateApp": 530,
+   "ecosystemItems": 6,
+   "tscBaselines": 813
+  },
+  {
+   "code": "TS7009",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 12
+  },
+  {
+   "code": "TS7010",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 132
+  },
+  {
+   "code": "TS7013",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 9
+  },
+  {
+   "code": "TS7015",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 7
+  },
+  {
+   "code": "TS7016",
+   "privateApp": 0,
+   "ecosystemItems": 4,
+   "tscBaselines": 43
+  },
+  {
+   "code": "TS7026",
+   "privateApp": 1025,
+   "ecosystemItems": 0,
+   "tscBaselines": 655
+  },
+  {
+   "code": "TS7027",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 109
+  },
+  {
+   "code": "TS7028",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 9
+  },
+  {
+   "code": "TS7032",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 16
+  },
+  {
+   "code": "TS7053",
+   "privateApp": 2,
+   "ecosystemItems": 0,
+   "tscBaselines": 255
+  },
+  {
+   "code": "TS8002",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 341
+  },
+  {
+   "code": "TS8003",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 22
+  },
+  {
+   "code": "TS8004",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 14
+  },
+  {
+   "code": "TS8005",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 2
+  },
+  {
+   "code": "TS8006",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 167
+  },
+  {
+   "code": "TS8008",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 4
+  },
+  {
+   "code": "TS8009",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 29
+  },
+  {
+   "code": "TS8010",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 100
+  },
+  {
+   "code": "TS8011",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 6
+  },
+  {
+   "code": "TS8012",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 8
+  },
+  {
+   "code": "TS8013",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 2
+  },
+  {
+   "code": "TS8016",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 2
+  },
+  {
+   "code": "TS8017",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 4
+  },
+  {
+   "code": "TS8037",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 0
+  },
+  {
+   "code": "TS17002",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 12
+  },
+  {
+   "code": "TS17004",
+   "privateApp": 810,
+   "ecosystemItems": 0,
+   "tscBaselines": 11
+  },
+  {
+   "code": "TS17006",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 675
+  },
+  {
+   "code": "TS17007",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 20
+  },
+  {
+   "code": "TS17008",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 57
+  },
+  {
+   "code": "TS18013",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 45
+  },
+  {
+   "code": "TS18046",
+   "privateApp": 58,
+   "ecosystemItems": 0,
+   "tscBaselines": 21
+  },
+  {
+   "code": "TS18047",
+   "privateApp": 5,
+   "ecosystemItems": 0,
+   "tscBaselines": 27
+  },
+  {
+   "code": "TS18048",
+   "privateApp": 2,
+   "ecosystemItems": 0,
+   "tscBaselines": 370
+  },
+  {
+   "code": "TS18049",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 7
+  },
+  {
+   "code": "TS18050",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 1524
+  },
+  {
+   "code": "TS99001",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 0
+  },
+  {
+   "code": "TS99002",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 0
+  },
+  {
+   "code": "TS99003",
+   "privateApp": 0,
+   "ecosystemItems": 0,
+   "tscBaselines": 0
+  }
+ ]
+}

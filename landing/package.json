@@ -1,0 +1,29 @@
+{
+  "name": "ts-r-landing",
+  "private": true,
+  "description": "ts-r.dev: home, tool, sponsor, docs, error-code and benchmark pages. Next.js, statically exported.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && npm run check",
+    "check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check.mjs",
+    "start": "npx serve@14 out",
+    "typecheck": "tsc --noEmit",
+    "verify-examples": "node scripts/verify-examples.mjs"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "next": "16.4.1",
+    "posthog-js": "1.438.12",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2"
+  }
+}

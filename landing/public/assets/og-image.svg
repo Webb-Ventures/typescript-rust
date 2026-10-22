@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f0814a"/><stop offset="1" stop-color="#7aa2ff"/></linearGradient>
+    <linearGradient id="t" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f0814a"/><stop offset=".45" stop-color="#ffb37a"/><stop offset="1" stop-color="#7aa2ff"/></linearGradient>
+    <radialGradient id="glow1" cx=".15" cy="-.1" r=".8"><stop offset="0" stop-color="#f0814a" stop-opacity=".22"/><stop offset="1" stop-color="#f0814a" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glow2" cx=".95" cy="0" r=".7"><stop offset="0" stop-color="#7aa2ff" stop-opacity=".18"/><stop offset="1" stop-color="#7aa2ff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#0d0f13"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+  <g transform="translate(80 72)">
+    <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#g)"/>
+    <path d="M24.75 22.5 L13.5 36 L24.75 49.5 M47.25 22.5 L58.5 36 L47.25 49.5 M40.5 20.25 L31.5 51.75" stroke="#0d0f13" stroke-width="5.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="96" y="52" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="46" font-weight="800" fill="#e6e8ec">ts-r</text>
+    <rect x="210" y="16" width="150" height="40" rx="20" fill="#fbbf24" fill-opacity=".12" stroke="#fbbf24" stroke-opacity=".5"/>
+    <text x="285" y="43" text-anchor="middle" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="20" font-weight="600" fill="#fbbf24">pre-alpha</text>
+  </g>
+  <g font-family="Inter, Helvetica Neue, Arial, sans-serif" font-weight="800" font-size="68">
+    <text x="80" y="268" fill="#e6e8ec">TypeScript tooling that's</text>
+    <text x="80" y="350" fill="url(#t)">fast at any size, written in Rust.</text>
+  </g>
+  <text x="80" y="420" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="28" fill="#a9b0bd">Six separate tools: dev · build · check · lint · run · lsp</text>
+  <g font-family="Inter, Helvetica Neue, Arial, sans-serif">
+    <rect x="80" y="468" width="1040" height="96" rx="16" fill="#14171d" stroke="#e6e8ec" stroke-opacity=".12"/>
+    <text x="112" y="527" font-size="40" font-weight="700" fill="#f0814a">5.4 ms</text>
+    <text x="270" y="514" font-size="22" font-weight="600" fill="#e6e8ec">hot reload, save to browser, p50, measured</text>
+    <text x="270" y="544" font-size="20" fill="#a9b0bd">generated 50,000-module app · Apple M-series · headless Chrome</text>
+  </g>
+</svg>
