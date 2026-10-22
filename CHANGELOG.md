@@ -7,6 +7,32 @@ pull requests merged since the previous release (also on the
 
 <!-- releases -->
 
+## [v0.1.0-alpha.3](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.3) - 2026-10-22
+
+### From the core team
+
+- Checker tests: NoInfer fixtures that reproduce the trpc lazy() regression
+- Checker: a4 round 3, conformance 12116 -> 12316 of 12750 exact (96.6%)
+- Checker: indexed-access, mapped-tuple and enum relations; alpha.4 checker 95.0% exact
+- Checker: declaration-emit diagnostics, output-path and option checks (11965 -> 12032 exact on its own)
+- Checker: grammar and single missing checks round 2 (11965 -> 12018 exact on its own)
+- Checker: calls, inference and contextual typing round 2 (11965 -> 11987 exact on its own)
+- Checker: module resolution and import checks (11665 -> 11736 exact on its own)
+- Checker: missing semantic checks (11615 -> 11735 exact on its own)
+- Checker: JS, JSDoc and salsa checks (11726 -> 11751 exact on its own)
+- Checker: object spread, rest elements, circular aliases (11692 -> 11714 exact on its own)
+- Checker: call resolution and property access (11615 -> 11655 exact on its own)
+- Checker: relation and elaboration fixes (11615 -> 11648 exact on its own)
+- Checker: type printer and positions (11615 -> 11642 exact on its own)
+- Checker: missing compiler checks (11615 -> 11665 exact on its own)
+- Parser: syntax-error recovery parity; alpha.3 checker 91.1% exact
+- Checker: inference and name resolution parity, 11,291 exact
+- Checker: relations parity, 11,241 exact
+- Bundler: esbuild's errors only, oracle 667 of 746, cold build at esbuild parity
+- Site: correctness numbers from one quote-checked source, re-measured
+- Remove the sync-back workflow to the private repo in #22
+- Site: move ts-r.dev and its deploys here from the private repo in #23
+
 ## [v0.1.0-alpha.2](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.2) - 2026-10-21
 
 ### From the core team

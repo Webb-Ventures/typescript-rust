@@ -103,7 +103,7 @@ of the latest release, and is updated by each release pull request.
 ### Latest release
 
 <!-- bench:release:start -->
-Release **v0.1.0-alpha.2**:
+Release **v0.1.0-alpha.3**:
 
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
