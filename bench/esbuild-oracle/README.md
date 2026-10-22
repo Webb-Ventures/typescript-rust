@@ -29,18 +29,18 @@ reason; cases that print `Math.random()` results are skipped as nondeterministic
 
 ## Results
 
-2a59fe3 (2026-10-21, macOS arm64, esbuild 0.28.2, `--jobs 4`): **667 of 746 compared cases
-pass (89.4%)**; 324 of the 1070 cases are skipped. The esbuild test files come from
+52b87b3 (2026-10-22, macOS arm64, esbuild 0.28.2, `--jobs 4`): **666 of 746 compared cases
+pass (89.3%)**; 324 of the 1070 cases are skipped. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-Down from 651: the parser's tsc grammar errors (m8/parser-diagnostics) now fail six inputs
-esbuild accepts (`if (x) ;`, `?.#private`, `for (var x = 1 in o)`, a body on a `declare
-function`), in `bundler_dce`, `bundler_lower` and `bundler_ts`.
+Down from 667: `DuplicateEntryPoint` passes the same entry point twice, and the check that
+two outputs never share a path (added with parallel output writes) now fails the build, where
+esbuild writes the one output.
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
 | bundler_css_test.go | 1 | 4 | 57 |
 | bundler_dce_test.go | 108 | 3 | 10 |
-| bundler_default_test.go | 189 | 18 | 96 |
+| bundler_default_test.go | 188 | 19 | 96 |
 | bundler_glob_test.go | 0 | 1 | 9 |
 | bundler_importphase_test.go | 0 | 12 | 0 |
 | bundler_importstar_test.go | 77 | 3 | 0 |
@@ -88,3 +88,4 @@ Remaining failures by cause:
 | main at 9f23c9d (parser grammar errors fail six inputs) | 1070 | 746 | 646 | 100 | 324 | 86.6% |
 | build parity: only esbuild's errors fail a build (`ts_r_transform::build_errors`), `.js` before `.ts` inside `node_modules`, dead `catch` of an empty `try` | 1070 | 746 | 655 | 91 | 324 | 87.8% |
 | strict-mode errors (`with`, `delete x` in strict code, ESM files and ESM output; tsconfig `alwaysStrict` only when set), assignments to constants and imports when bundling, top-level `return` with top-level `await` | 1070 | 746 | 667 | 79 | 324 | 89.4% |
+| parallel output writes: `DuplicateEntryPoint` (one entry point given twice) now fails with "Two output files share the same path"; esbuild writes it once | 1070 | 746 | 666 | 80 | 324 | 89.3% |
