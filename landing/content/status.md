@@ -22,7 +22,7 @@ number disappears from its source, so the table can't silently go stale).
 | [`ts-r-run`](tools/ts-r-run.md) | Runs TypeScript on Node 22.15+; output matches tsc 7 on 339 of 339 private-app files | Only the entry's tsconfig is used; Windows untested |
 | [`ts-r-dev`](tools/ts-r-dev.md) | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling | No `vite.config`, no HTTPS, no `--open` |
 | [`ts-r-build`](tools/ts-r-build.md) | esbuild's CLI flags, ESM/CJS/IIFE, splitting, minify, source maps, `--watch` | No plugins, no CSS bundling, no lowering below ES2022 |
-| [`ts-r-check`](tools/ts-r-check.md) | tsc's codes and messages; 96.6% of conformance tests exact; all 25 private-app projects match | JSX types, some inference; never writes output |
+| [`ts-r-check`](tools/ts-r-check.md) | tsc's codes and messages; 96.6% of conformance tests exact; all 25 private-app projects match | JSX types, some inference; emits like tsc unless `--noEmit` |
 | [`ts-r-lint`](tools/ts-r-lint.md) | 154 rules (51 type-aware) matching 15,471 of 15,517 of ESLint's own tests; ESLint flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint unsupported |
 | [`ts-r-lsp`](tools/ts-r-lsp.md) | Shared server per workspace; lint; our checker or your TypeScript as the type backend | 587 MB with every file open against a 500 MB target; most projects fall back to tsserver for diagnostics |
 

@@ -115,7 +115,7 @@ Usage: ts-r-dev [root] [options]
     replaces: 'tsc',
     body: 'A type checker that aims for the same errors, codes and messages as TypeScript 7, and keeps a history so it re-checks only what changed.',
     intro:
-      'ts-r-check type-checks a TypeScript project and prints diagnostics in tsc’s format, with tsc’s error codes. It never writes JavaScript or declaration files: it is the tsc --noEmit step of a build. It is the least finished part of ts-r, and it follows one rule: no false positives first.',
+      'ts-r-check type-checks a TypeScript project and prints diagnostics in tsc’s format, with tsc’s error codes. Like tsc, it writes JavaScript, source maps and declarations unless noEmit is set; --noEmit only checks. It is the least finished part of ts-r, and it follows one rule: no false positives first.',
     works: [
       'Loading the project from tsconfig.json, including extends, with tsc’s config diagnostics',
       'Module resolution that matches tsc’s on every resolution of the reference app',
@@ -130,7 +130,7 @@ Usage: ts-r-dev [root] [options]
       'Reverse mapped types',
       'TypeScript syntax errors in .js files (TS8xxx)',
     ],
-    usage: `usage: ts-r-check -p tsconfig.json [--noEmit] [--pretty false] [--threads N]`,
+    usage: `usage: ts-r-check [-p tsconfig.json] [options]`,
     diff: { file: 'package.json', before: ['"scripts": {'], changes: [['"typecheck": "tsc --noEmit -p tsconfig.json",', '"typecheck": "ts-r-check --noEmit -p tsconfig.json",']], after: ['}'] },
     nextTo: {
       title: 'Next to tsc',

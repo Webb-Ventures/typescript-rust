@@ -98,7 +98,7 @@ ts-r-run src/main.ts                     # instead of tsx src/main.ts
 ts-r-run --watch src/server.ts           # restart when a file of the module graph changes
 ts-r-dev .                               # dev server on http://127.0.0.1:5173/
 ts-r-build src/index.ts --bundle --outfile=dist/index.js --sourcemap
-ts-r-check -p tsconfig.json              # type check, tsc's output format
+ts-r-check -p tsconfig.json --noEmit     # type check, tsc's output format
 ts-r-lint src                            # lint with your eslint.config.*, .oxlintrc.json or biome.json
 ts-r-lsp status                          # the editor daemon for this workspace, as JSON
 ```

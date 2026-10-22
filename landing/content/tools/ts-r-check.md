@@ -8,8 +8,9 @@ badges: ["warn:Alpha", "ok:On npm: @ts-r.dev/check"]
 ---
 
 `ts-r-check` type-checks a TypeScript project and prints diagnostics in tsc's format, with
-tsc's error codes. It never writes JavaScript or declaration files; it is the `tsc --noEmit`
-step of a build, not the emit step.
+tsc's error codes. Like tsc, it also writes the project's JavaScript, source maps and
+declaration files unless `noEmit` is set; pass `--noEmit` to only check, as with
+`tsc --noEmit`.
 
 The checker is the least finished part of ts-r. Read [Status](../status.md) before you rely
 on it.
@@ -57,15 +58,16 @@ The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.m
 ## Command line
 
 ```text
-usage: ts-r-check -p tsconfig.json [--noEmit] [--pretty false] [--threads N]
+usage: ts-r-check [-p tsconfig.json] [options]
 ```
 
-That one line is all `--help` prints (and it exits with code 1).
+`--help` lists every option. It accepts tsc 7's command line; the flags below are the common
+ones.
 
 | Flag | What it does |
 |---|---|
 | `-p <path>` | The project's `tsconfig.json`. Without it, the nearest `tsconfig.json` above the current directory (TS5058 or TS5057 when there is none). |
-| `--noEmit` | Accepted for tsc compatibility. ts-r-check never writes outputs either way; the flag changes the exit code (below). |
+| `--noEmit` | Only check: write no JavaScript, source maps or declarations. Without it (and without `noEmit` in the tsconfig), ts-r-check writes them as tsc does; syntax it cannot lower for the target yet is reported as TSR2003. |
 | `--pretty false` | Plain output: `path(line,col): error TSxxxx: message`, chain lines indented two spaces per level, no summary. |
 | `--threads N` | Checker threads. Default 4, clamped to 1 to 4. |
 
@@ -97,9 +99,9 @@ See [Getting started](../getting-started.md) for the source setup.
 ## Next to tsc
 
 ts-r-check reads the same `tsconfig.json` and prints the same format, so editor problem
-matchers and CI annotations that parse tsc's output work unchanged. It has no `--build` mode,
-no watch mode and no emit, so keep tsc (or [ts-r-build](ts-r-build.md) for bundles) for
-output files. Running both and comparing their output is a good way to try it.
+matchers and CI annotations that parse tsc's output work unchanged. It also takes tsc's
+`--build` and `--watch`, and writes the same output files. Running both and comparing their
+output is a good way to try it; [ts-r-build](ts-r-build.md) makes bundles.
 
 For stricter checks than tsc's, see [Sound mode](../sound-mode.md).
 
