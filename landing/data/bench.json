@@ -1,0 +1,527 @@
+{
+  "updated": "2026-10-18",
+  "about": "Every number here was measured by the ts-r project and recorded in a commit message, a crate's AGENTS.md or a design record. Each section says what was measured, on what machine and project, how many runs, the command that reproduces it and the commit that recorded it. Pre-alpha: only the pieces that exist today are measured, and the numbers that miss their targets are shown too. Lower is better unless a chart says otherwise.",
+  "machines": {
+    "mac": "Apple M-series Mac, macOS arm64, release build (the exact chip was not recorded)",
+    "unrecorded": "Not recorded with the result. ts-r's measured runs so far are on the project's Apple M-series development Mac (macOS arm64, release build).",
+    "laptop": "Apple M-series MacBook (macOS arm64, 16 cores, 48 GB), shared with other jobs while measuring; release build, 4 threads"
+  },
+  "projects": {
+    "excalidraw": "excalidraw/excalidraw, the whiteboard app: a Vite + React app of about 500 TypeScript modules plus its own packages, pinned in bench/repos.toml",
+    "trpc": "trpc/trpc, pinned in bench/repos.toml",
+    "date-fns": "date-fns/date-fns, pinned in bench/repos.toml",
+    "rxjs": "ReactiveX/rxjs, pinned in bench/repos.toml",
+    "typeorm": "typeorm/typeorm, pinned in bench/repos.toml",
+    "playwright": "microsoft/playwright, pinned in bench/repos.toml",
+    "three-x10": "mrdoob/three.js src copied ten times (the bundler benchmark esbuild and Bun publish), pinned in bench/repos.toml"
+  },
+  "sections": [
+    {
+      "id": "dev-vs-vite",
+      "nav": "Dev server vs Vite",
+      "title": "ts-r-dev against Vite 8 on excalidraw",
+      "intro": "excalidraw (about 500 TypeScript modules served from source, 47 dependency entries) served by ts-r-dev and by Vite 8.3.4 with @vitejs/plugin-react 6.1.2. Start is process spawn until the canvas and welcome screen are in the page; cold means an empty ts-r cache and no Vite dependency cache. Both kept React state through all 53 edits with 0 full reloads. SCSS is replaced by an empty stylesheet for both servers (ts-r-dev does not compile it yet).",
+      "charts": [
+        {
+          "id": "start",
+          "title": "Start to first render, median",
+          "unit": "ms",
+          "rows": [
+            { "label": "ts-r-dev, warm", "value": 538, "kind": "ours" },
+            { "label": "ts-r-dev, cold", "value": 939, "kind": "ours", "note": "includes pre-bundling 47 dependency entries into 133 files" },
+            { "label": "Vite 8.3.4, warm", "value": 1032, "kind": "other" },
+            { "label": "Vite 8.3.4, cold", "value": 1107, "kind": "other" }
+          ],
+          "valueLabel": "Median"
+        },
+        {
+          "id": "save",
+          "title": "Save to page updated, p50",
+          "unit": "ms",
+          "target": { "value": 30, "label": "target < 30 ms" },
+          "columns": ["p95"],
+          "rows": [
+            { "label": "ts-r-dev", "value": 8.6, "kind": "ours", "extra": ["9.0 ms"] },
+            { "label": "Vite 8.3.4", "value": 35.0, "kind": "other", "extra": ["37.2 ms"] }
+          ],
+          "valueLabel": "p50"
+        },
+        {
+          "id": "rss",
+          "title": "Dev server memory after the edits",
+          "unit": "MB",
+          "columns": ["After first load"],
+          "rows": [
+            { "label": "ts-r-dev", "value": 153, "kind": "ours", "note": "includes the Node process that runs vite.config", "extra": ["151 MB"] },
+            { "label": "Vite 8.3.4", "value": 364, "kind": "other", "extra": ["371 MB"] }
+          ],
+          "valueLabel": "RSS after 50 edits"
+        }
+      ],
+      "method": {
+        "measured": "Headless Chrome (a fresh one per page load) drives both servers: 5 cold and 5 warm starts (median), then 50 measured edits of the welcome-screen heading after 3 warm-ups, timed in the browser. RSS is the whole server process group.",
+        "machine": "laptop",
+        "software": "ts-r-dev release build; Vite 8.3.4 with @vitejs/plugin-react 6.1.2 pinned in bench/package.json; both servers capped at 4 threads",
+        "input": "excalidraw at the commit pinned in bench/repos.toml, with the harness in bench/dev/excalidraw (index.html, main.tsx rendering excalidraw-app/App, vite.config.mjs with its source aliases)",
+        "command": "cargo xtask bench --fetch-repos --repos excalidraw && scripts/limit.sh --mem-mb 1024 --time-s 1800 -- node bench/dev/dev.mjs --app excalidraw --server both --mode bench",
+        "commit": "9c3a371",
+        "sources": ["crates/ts_r_hmr/AGENTS.md", "bench/dev/dev.mjs"]
+      }
+    },
+    {
+      "id": "hmr",
+      "nav": "Hot reload at scale",
+      "title": "ts-r-dev: hot reload latency as the app grows",
+      "intro": "Time from saving a file to the browser having re-imported the changed module and run its callbacks, on generated apps. The plan's target is under 30 ms at p50, staying flat as the project grows. Vite has not been measured on these generated apps yet.",
+      "charts": [
+        {
+          "id": "hmr-p50",
+          "title": "Save to browser updated, p50",
+          "unit": "ms",
+          "target": { "value": 30, "label": "target < 30 ms" },
+          "columns": ["p95", "First save of a file", "Initial page load"],
+          "rows": [
+            { "label": "1,000 modules", "value": 4.9, "kind": "ours", "extra": ["5.9–6.9 ms", "7–17 ms", "0.3 s"] },
+            { "label": "10,000 modules", "value": 5.0, "display": "4.8–5.0 ms", "kind": "ours", "extra": ["5.3–6.4 ms", "7–17 ms", "1.7 s"] },
+            { "label": "50,000 modules", "value": 5.4, "kind": "ours", "extra": ["8.3 ms", "16 ms", "13.5 s"] }
+          ],
+          "valueLabel": "p50"
+        }
+      ],
+      "method": {
+        "measured": "Browser-side timing in headless Chrome: 47 measured edits per size after 3 warm-up edits. Ranges are across runs; the bar shows the upper end.",
+        "machine": "mac",
+        "software": "ts-r-dev release build, headless Chrome",
+        "input": "Generated JavaScript apps of 1,000, 10,000 and 50,000 modules; one self-accepting module under a 100-wide import tree is edited. The first save of a file goes through FSEvents, later saves through the kqueue fast path.",
+        "command": "TS_R_LATENCY_SIZES=1000,10000,50000 cargo test --release -p ts_r_dev --test latency -- --ignored --nocapture",
+        "commit": "9ed299f",
+        "sources": ["crates/ts_r_hmr/AGENTS.md"]
+      }
+    },
+    {
+      "id": "build",
+      "nav": "Build vs esbuild",
+      "title": "ts-r-build against esbuild 0.28.2",
+      "intro": "Bundling two public projects: three.js x10 (ten copies of three.js, minified IIFE with source maps) and the excalidraw app (minified ESM). Only three.js x10 is drawn as bars: both bundlers produce the same exports from the same input. Without its persistent cache ts-r-build is about as fast as esbuild there: three invocations of 10 runs each gave medians of 231.8, 233.9 and 255.0 ms against esbuild's 262.7, 238.5 and 246.2 ms, so esbuild was faster in the last one, which the bars show. On excalidraw ts-r-build does less work than esbuild: it does not bundle template-literal import() yet, so it leaves out the 61 locale chunks esbuild emits (7.2 MB of output against 9.3 MB). Those runs, the single bundle and the 20 rebuilds, are in the table with that note, not drawn next to esbuild. Rolldown and Vite's production build have not been measured.",
+      "charts": [
+        {
+          "id": "three-x10",
+          "title": "Bundle three.js x10, minified",
+          "unit": "ms",
+          "rows": [
+            { "label": "esbuild 0.28.2", "value": 246.2, "kind": "other" },
+            { "label": "ts-r-build, persistent cache", "value": 132.2, "kind": "ours" },
+            { "label": "ts-r-build, no cache", "value": 255.0, "kind": "ours" }
+          ],
+          "valueLabel": "Median of 10 runs"
+        }
+      ],
+      "table": {
+        "columns": ["What", "ts-r-build", "esbuild 0.28.2", "Notes"],
+        "rows": [
+          ["Bundle excalidraw, minified: no cache / persistent cache", "255 / 132 ms", "201 ms", "Median of 10 runs. Not like-for-like: ts-r-build leaves out the 61 locale chunks esbuild emits (7.2 MB of output against 9.3 MB)"],
+          ["excalidraw: first build plus 20 edit-and-rebuild cycles, one process", "1,358 ms", "3,457 ms (context.rebuild)", "Median of 5 runs. Not like-for-like: every build leaves out the 61 locale chunks"],
+          ["Peak memory, excalidraw, no cache / cached", "317 / 152 MB", "624 MB", "Without the 61 locale chunks"],
+          ["Peak memory, three.js x10, no cache / cached", "422 / 244 MB", "695 MB", "Last of the three invocations"],
+          ["three.js x10 output", "7.88 MB (+2.2%), same exports", "7.71 MB", ""],
+          ["esbuild's own bundler tests (oracle)", "667 of 746 compared cases pass (89.4%)", "reference", "Commit 2a59fe3"]
+        ]
+      },
+      "tableTitle": "excalidraw (not like-for-like), memory, output and the oracle",
+      "method": {
+        "measured": "Wall time of whole processes with hyperfine (cargo xtask bench --repos), median; peak RSS of one extra run (--memory). Rebuilds: examples/build_loop.rs --edit against bench/js/esbuild-rebuild.mjs, editing excalidraw-app/components/AppWelcomeScreen.tsx",
+        "machine": "laptop",
+        "software": "ts-r-build release build with 4 threads; esbuild 0.28.2 pinned in bench/package.json. The three.js x10 rows were measured again on 2026-10-21 at commit 2fb2555 (load average 11-14); excalidraw rows are from commit 9c3a371",
+        "input": "excalidraw (bench/dev/excalidraw/main.tsx, .woff2 as files, .scss empty) and three.js x10 at the commits pinned in bench/repos.toml",
+        "command": "cargo xtask bench --fetch-repos --repos excalidraw,three-x10 && cargo xtask bench --repos excalidraw,three-x10 --memory",
+        "commit": "9c3a371",
+        "sources": ["bench/README.md", "bench/scenarios.toml"]
+      }
+    },
+    {
+      "id": "lint-same-rules",
+      "nav": "Lint, same rules",
+      "title": "ts-r-lint against ESLint with the same rules",
+      "intro": "tRPC's own ESLint config with every rule ts-r-lint does not implement removed, given to both tools as the same file, on the same 147 files: 48 rules, without type information on either side. Both report 0 problems from those rules. The bars are the run where ts-r-lint evaluates the config in Node every time, as ESLint does; most of its time is that Node process. By default ts-r-lint caches the evaluated config and then takes 15.5 ms, but ESLint has no such step to skip, so that run is in the table, not drawn next to ESLint. With type-aware rules the runs are not comparable yet: on tRPC ts-r-lint's parity gate turns those rules off (its type check reports one error tsc 7 does not), and with the gate off it reports 11 problems ESLint does not.",
+      "charts": [
+        {
+          "id": "same-rules-trpc",
+          "title": "tRPC, same 48 rules, config evaluated each run",
+          "unit": "ms",
+          "rows": [
+            { "label": "ts-r-lint, config not cached", "value": 733, "kind": "ours", "note": "Node evaluates eslint.config.js on every run" },
+            { "label": "ESLint 10.10.0", "value": 1015, "display": "1,015 ms", "kind": "other" }
+          ],
+          "valueLabel": "Median of 5 runs"
+        }
+      ],
+      "table": {
+        "columns": ["Run", "Time", "Peak memory", "Notes"],
+        "rows": [
+          ["ts-r-lint, same 48 rules, config cached (its default)", "15.5 ms", "9 MB", "Skips evaluating the config, which ESLint does on every run, so not drawn next to ESLint"],
+          ["ts-r-lint, same 48 rules, config not cached", "733 ms", "336 MB", "Peak is the Node process that evaluates the config"],
+          ["ESLint, same 48 rules", "1,015 ms", "515 MB", "0 problems from the rules, like ts-r-lint"],
+          ["ts-r-lint, same 80 rules with the 32 type-aware ones, parity gate off, empty cache", "952 ms", "335 MB", "Not like-for-like: 11 problems ESLint does not report (unbound-method 4, no-unnecessary-type-assertion 4, switch-exhaustiveness-check 2, dot-notation 1). By default the parity gate turns these rules off on tRPC"],
+          ["ESLint, same 80 rules (typescript-eslint projectService)", "2,605 ms", "973 MB", "0 problems from the rules"]
+        ]
+      },
+      "tableTitle": "Cached config, memory, and the type-aware rules",
+      "method": {
+        "measured": "Wall time of the whole command with hyperfine (cargo xtask bench --repos trpc lint-trpc-same-rules), median of 5 runs after 1 warm-up; peak RSS of the largest process in one extra run. Before each tool's runs, bench/js/eslint-same-rules.mjs writes the restricted configs from the binary's --list-rules. Untyped runs: ts-r-lint --no-type-check, ESLint with parserOptions project and projectService off. Problems compared once from each tool's JSON output by file, rule, line and column",
+        "machine": "laptop",
+        "software": "ts-r-lint release build (crates as of a7210058) with 4 threads; ESLint 10.10.0 and typescript-eslint 8.70.0 from tRPC's lockfile; Node 24.21.0",
+        "input": "tRPC packages/server/src and packages/client/src (147 files) at the commit pinned in bench/repos.toml; tRPC's eslint.config.js limited to the 80 of its 126 configured rules ts-r-lint implements (48 without the type-aware ones)",
+        "command": "cargo xtask bench --fetch-repos --repos trpc && RAYON_NUM_THREADS=4 cargo xtask bench --repos trpc lint-trpc-same-rules --memory",
+        "commit": "a6bb4b48",
+        "sources": ["bench/js/eslint-same-rules.mjs", "bench/scenarios.toml", "bench/README.md"]
+      }
+    },
+    {
+      "id": "lint",
+      "nav": "Lint vs ESLint",
+      "title": "ts-r-lint against ESLint and oxlint",
+      "intro": "Each project linted with its own config. Not like-for-like: ESLint also runs plugin rules ts-r-lint does not have (on TypeORM most of its problems come from jsdoc rules), and where ts-r-check's diagnostics differ from tsc's, ts-r-lint runs without type information (its parity gate), so its type-aware column is a type check plus the untyped rules. Because ESLint does more work, these runs are only in the table, with no bars and no totals. The rules themselves match ESLint's and typescript-eslint's test suites (see Correctness).",
+      "table": {
+        "columns": ["Run", "Time", "Peak memory", "Notes"],
+        "rows": [
+          ["tRPC server and client sources: ts-r-lint / no type check", "186 / 20 ms", "148 / 9 MB", "Median of 3 runs"],
+          ["tRPC: ESLint, type-aware", "2,566 ms", "992 MB", "Also runs plugin rules ts-r-lint lacks, so not a like-for-like comparison"],
+          ["TypeORM packages/typeorm/src: ts-r-lint / no type check", "810 / 194 ms", "380 / 26 MB", "Median of 3 runs"],
+          ["TypeORM: ESLint, type-aware", "6,718 ms", "1,748 MB", "Most of its problems come from jsdoc rules ts-r-lint lacks, so not a like-for-like comparison"],
+          ["Playwright core sources: ts-r-lint / no type check", "725 / 59 ms", "465 / 17 MB", ""],
+          ["Playwright core sources: ESLint", "5,441 ms", "2,341 MB", "Also runs plugin rules ts-r-lint lacks, so not a like-for-like comparison"],
+          ["date-fns pkgs/core/src: ts-r-lint", "76 ms", "14 MB", ""],
+          ["date-fns pkgs/core/src: oxlint (its own config)", "348 ms", "301 MB", "Different rule set, so not a like-for-like comparison"]
+        ]
+      },
+      "tableTitle": "Each project with its own config, and memory (not like-for-like)",
+      "method": {
+        "measured": "Wall time of the whole command with hyperfine (cargo xtask bench --repos), median of 3 to 5 runs; peak RSS of one extra run",
+        "machine": "laptop",
+        "software": "ts-r-lint release build with 4 threads; each repo's own ESLint or oxlint from its lockfile",
+        "input": "tRPC, TypeORM, Playwright and date-fns at the commits pinned in bench/repos.toml, with their own lint configs",
+        "command": "cargo xtask bench --fetch-repos --repos trpc,typeorm,playwright,date-fns && cargo xtask bench --repos trpc,typeorm,playwright,date-fns --memory lint-",
+        "commit": "9c3a371",
+        "sources": ["bench/README.md", "bench/scenarios.toml"]
+      }
+    },
+    {
+      "id": "check",
+      "nav": "Check vs tsc 7",
+      "title": "ts-r-check against tsc 7.0.2",
+      "intro": "Type checking five public projects from the command line, cold (no saved history), against TypeScript 7.0.2's native tsc. These repos do not type-check cleanly under TypeScript 7, and ts-r-check does not report the same diagnostics as tsc on them yet: it reports extra ones on all five (27 on date-fns to 1,333 on RxJS in the last comparison) and misses some of tsc's. It also skips checks it does not implement yet, so these times will move as the checker grows.",
+      "charts": [
+        {
+          "id": "total",
+          "title": "Check all five projects, total wall time",
+          "unit": "ms",
+          "rows": [
+            { "label": "ts-r-check", "value": 1936, "display": "1,936 ms", "kind": "ours" },
+            { "label": "tsc 7.0.2", "value": 3044, "display": "3,044 ms", "kind": "other" }
+          ],
+          "valueLabel": "Sum of the medians"
+        },
+        {
+          "id": "time",
+          "title": "Cold check, wall time",
+          "unit": "ms",
+          "columns": ["tsc 7.0.2"],
+          "rows": [
+            { "label": "tRPC packages/server", "value": 108, "kind": "ours", "extra": ["189 ms"] },
+            { "label": "date-fns pkgs/core", "value": 226, "kind": "ours", "extra": ["323 ms"] },
+            { "label": "RxJS packages/rxjs", "value": 462, "kind": "ours", "extra": ["1,280 ms"] },
+            { "label": "TypeORM packages/typeorm", "value": 548, "kind": "ours", "extra": ["567 ms"] },
+            { "label": "Playwright", "value": 592, "kind": "ours", "extra": ["685 ms"] }
+          ],
+          "valueLabel": "ts-r-check, median of 5"
+        },
+        {
+          "id": "memory",
+          "title": "Cold check, peak memory",
+          "unit": "MB",
+          "columns": ["tsc 7.0.2"],
+          "rows": [
+            { "label": "tRPC packages/server", "value": 117, "kind": "ours", "extra": ["294 MB"] },
+            { "label": "date-fns pkgs/core", "value": 216, "kind": "ours", "extra": ["558 MB"] },
+            { "label": "RxJS packages/rxjs", "value": 458, "kind": "ours", "extra": ["1,168 MB"] },
+            { "label": "TypeORM packages/typeorm", "value": 377, "kind": "ours", "extra": ["826 MB"] },
+            { "label": "Playwright", "value": 463, "kind": "ours", "extra": ["1,094 MB"] }
+          ],
+          "valueLabel": "ts-r-check, one run"
+        }
+      ],
+      "method": {
+        "measured": "Wall time with hyperfine (cargo xtask bench --repos), median of 5 runs; peak RSS of one extra run. Every tool checks the same wrapper tsconfig (noEmit, not incremental)",
+        "machine": "laptop",
+        "software": "ts-r-check release build; TypeScript 7.0.2 (native tsc) pinned in bench/package.json; each repo's own TypeScript",
+        "input": "tRPC, date-fns, RxJS, TypeORM and Playwright at the commits pinned in bench/repos.toml",
+        "command": "cargo xtask bench --fetch-repos --repos trpc,date-fns,rxjs,typeorm,playwright && cargo xtask bench --repos trpc,date-fns,rxjs,typeorm,playwright --memory check-",
+        "commit": "9c3a371",
+        "sources": ["bench/README.md", "bench/scenarios.toml"]
+      },
+      "table": {
+        "columns": ["Project", "ts-r-check, saved history, nothing changed", "The repo's own tsc"],
+        "rows": [
+          ["tRPC", "23 ms", "1,130 ms"],
+          ["date-fns", "78 ms", "324 ms"],
+          ["RxJS", "57 ms", "2,468 ms"],
+          ["TypeORM", "126 ms", "3,915 ms"],
+          ["Playwright", "40 ms", "4,754 ms"]
+        ]
+      },
+      "tableTitle": "Warm runs, and each repo's own TypeScript"
+    },
+    {
+      "id": "editor",
+      "nav": "Editor vs tsserver",
+      "title": "ts-r-lsp with our checker against tsserver and TypeScript 7's LSP",
+      "intro": "A scripted LSP client on three public projects: date-fns (1,641 sources), RxJS (231) and tRPC (154). ts-r-lsp uses far less memory than tsserver and TypeScript 7's native LSP, with every source open too, but it is slower than TypeScript 7's LSP to first diagnostics on all three and per keystroke on two of them (it re-checks each edit on a fresh checker). It also reports a few diagnostics tsc does not on the opened RxJS and tRPC files. These are medium projects: the 500 MB target is for large ones, which have not been measured.",
+      "status": { "ok": true, "text": "Under 500 MB on these projects; large ones not measured" },
+      "charts": [
+        {
+          "id": "rss-all",
+          "title": "RxJS: memory with all 231 sources open",
+          "unit": "MB",
+          "target": { "value": 500, "label": "target ≤ 500 MB" },
+          "rows": [
+            { "label": "ts-r-lsp", "value": 377, "kind": "ours" },
+            { "label": "TypeScript 7 LSP (tsc --lsp)", "value": 820, "kind": "other" },
+            { "label": "tsserver (the repo's TypeScript)", "value": 1091, "kind": "other" }
+          ],
+          "valueLabel": "RSS"
+        },
+        {
+          "id": "rss-datefns",
+          "title": "date-fns: memory with all 1,641 sources open",
+          "unit": "MB",
+          "rows": [
+            { "label": "ts-r-lsp", "value": 232, "kind": "ours" },
+            { "label": "TypeScript 7 LSP (tsc --lsp)", "value": 710, "kind": "other", "note": "tsserver did not publish diagnostics within the harness's 120 s" }
+          ],
+          "valueLabel": "RSS"
+        },
+        {
+          "id": "keystroke",
+          "title": "tRPC router.ts: keystroke to diagnostics, p50",
+          "unit": "ms",
+          "verdict": { "ok": false, "text": "TypeScript 7 is faster here" },
+          "columns": ["p95"],
+          "rows": [
+            { "label": "TypeScript 7 LSP", "value": 6.2, "kind": "other", "extra": ["7.4 ms"] },
+            { "label": "ts-r-lsp", "value": 9.4, "kind": "ours", "extra": ["10.5 ms"] },
+            { "label": "tsserver", "value": 24.3, "kind": "other", "extra": ["29.3 ms"] }
+          ],
+          "valueLabel": "p50"
+        },
+        {
+          "id": "first-diag",
+          "title": "tRPC router.ts: first diagnostics",
+          "unit": "ms",
+          "verdict": { "ok": false, "text": "TypeScript 7 is faster here" },
+          "rows": [
+            { "label": "TypeScript 7 LSP", "value": 58, "kind": "other" },
+            { "label": "ts-r-lsp", "value": 224, "kind": "ours" },
+            { "label": "tsserver", "value": 800, "kind": "other" }
+          ],
+          "valueLabel": "Time"
+        }
+      ],
+      "table": {
+        "columns": ["Measure", "ts-r-lsp", "tsserver", "TypeScript 7 LSP"],
+        "rows": [
+          ["date-fns format/index.ts: first diagnostics", "416 ms", "timed out", "168 ms"],
+          ["date-fns: keystroke to diagnostics p50 / p95", "14.1 / 14.7 ms", "timed out", "5.0 / 5.8 ms"],
+          ["date-fns: memory, one file / all 1,641 open", "164 / 232 MB", "timed out", "469 / 710 MB"],
+          ["RxJS merge-map.ts: first diagnostics", "155 ms", "953 ms", "108 ms"],
+          ["RxJS: keystroke to diagnostics p50 / p95", "12.2 / 12.8 ms", "28.6 / 35.1 ms", "13.3 / 17.2 ms"],
+          ["RxJS: memory, one file / all 231 open", "138 / 377 MB", "840 / 1,091 MB", "397 / 820 MB"],
+          ["tRPC router.ts: memory, one file / all 154 open", "95 / 165 MB", "571 / 757 MB", "477 / 480 MB"],
+          ["tRPC: hover p50 / p95", "0.08 / 3.77 ms", "0.75 / 9.66 ms", "0.32 / 5.68 ms"],
+          ["tRPC: completion p50 / p95", "0.08 / 0.25 ms", "0.38 / 12.53 ms", "0.22 / 0.40 ms"],
+          ["Diagnostics on the opened file (date-fns / RxJS / tRPC)", "0 / 2 / 3", "– / 0 / 0", "0 / 0 / 2"]
+        ]
+      },
+      "tableTitle": "Per project",
+      "method": {
+        "measured": "A scripted LSP client: first diagnostics, hover, definition and completion latency (20 sampled positions), keystroke to diagnostics (30 keys, 150 ms apart) on one file, then memory with that file open and with every source of the project open (5 s settle); one run per tool",
+        "machine": "laptop",
+        "software": "ts-r-lsp release build with the ts-r backend and the tsc parity check off; each repo's own tsserver; TypeScript 7.0.2's native LSP (tsc --lsp) pinned in bench/package.json",
+        "input": "date-fns, RxJS and tRPC at the commits pinned in bench/repos.toml; the files and source directories are each repo's [repo.editor] set",
+        "command": "cargo xtask bench --fetch-repos --repos date-fns,rxjs,trpc && cargo xtask bench --editor --repos date-fns,rxjs,trpc (prints the commands; the editor-latency.js ones were run)",
+        "commit": "9c3a371",
+        "sources": ["bench/README.md", "editors/vscode/bench/editor-latency.js"]
+      }
+    },
+    {
+      "id": "editor-lint",
+      "nav": "Editor lint vs ESLint",
+      "title": "Lint in the editor: ts-r-lsp against the ESLint extension's server",
+      "intro": "Time from a keystroke to new lint diagnostics, and server memory, in tRPC's largest server source (22 KB, resolveResponse.ts) with the repo's own ESLint config and all 154 sources open. ts-r runs the rules it implements: 35 of the config's rules are not run in the editor (17 not implemented yet, 17 from plugins, 1 type-aware), so the ESLint server does more work and this is shown as a table rather than as bars.",
+      "table": {
+        "columns": ["Server", "Keystroke to diagnostics, p50 / p95", "RSS, all 154 sources open"],
+        "rows": [
+          ["ts-r-lsp --lint-only", "15.6 / 15.8 ms (includes the default 10 ms debounce)", "10.6 MB"],
+          ["ESLint server 3.0.34 (also runs the 35 rules ts-r skips)", "53.3 / 58.6 ms", "2,296 MB"]
+        ]
+      },
+      "tableTitle": "Lint in the editor (not like-for-like: the ESLint server runs 35 rules ts-r skips)",
+      "method": {
+        "measured": "A scripted LSP client opens every source, then types 300 keystrokes 100 ms apart into a comment and times didChange to diagnostics; RSS of the server at the end; one run each",
+        "machine": "laptop",
+        "software": "ts-r-lsp release build; the ESLint VS Code extension's server 3.0.34 run headlessly with pull diagnostics; the repo's own ESLint",
+        "input": "tRPC at the commit pinned in bench/repos.toml: packages/server/src/unstable-core-do-not-import/http/resolveResponse.ts, with packages/server/src and packages/client/src open",
+        "command": "scripts/limit.sh -- node editors/vscode/bench/lint-keystrokes.js ts-r target/release/ts-r-lsp target/bench-repos/trpc <file> --open-all --src-dirs packages/server/src,packages/client/src (eslint mode with eslintServer.js for the other)",
+        "commit": "9c3a371",
+        "sources": ["bench/README.md", "editors/vscode/bench/lint-keystrokes.js"]
+      }
+    },
+    {
+      "id": "editor-memory",
+      "nav": "Shared editor server",
+      "title": "ts-r-lsp: two editor windows on your own TypeScript",
+      "intro": "ts-r-lsp can also run your project's own TypeScript behind one shared server per workspace, instead of our checker. This measures total memory for two editor windows on tRPC in that mode (two files open in each, one window in packages/server and one in packages/client). The shared server holds both windows' projects, so it is larger than one plain tsserver but smaller than two.",
+      "charts": [
+        {
+          "id": "lsp-memory",
+          "title": "Memory for two editor windows",
+          "unit": "MB",
+          "rows": [
+            { "label": "ts-r-lsp, one shared server", "value": 698, "kind": "ours", "note": "2 editor fronts of 3 MB each, plus one daemon with one tsserver (692 MB)" },
+            { "label": "Two plain tsservers", "value": 838, "kind": "other", "note": "one tsserver per window" },
+            { "label": "VS Code default setup", "value": 1451, "kind": "other", "note": "per window: semantic tsserver with automatic type acquisition, plus a syntax server" }
+          ],
+          "valueLabel": "Total memory"
+        }
+      ],
+      "method": {
+        "measured": "Total resident memory (RSS) of every process in each setup, summed with their children, after both windows have diagnostics for every open file; one run",
+        "machine": "laptop",
+        "software": "TypeScript 6.0.3 (tRPC's tsserver) as the type backend",
+        "input": "tRPC at the commit pinned in bench/repos.toml; window A opens packages/server/src/unstable-core-do-not-import/router.ts and packages/server/src/index.ts, window B packages/client/src/index.ts and packages/client/src/links/httpBatchLink.ts",
+        "command": "cargo build --release -p ts_r_lsp --example two_windows && scripts/limit.sh -- target/release/examples/two_windows target/bench-repos/trpc",
+        "commit": "9c3a371",
+        "sources": ["bench/README.md", "crates/ts_r_lsp/examples/two_windows.rs"]
+      },
+      "notes": "Time to first diagnostics in the same run: first window 1,252 ms (plain tsserver 856 ms), second window 5 ms (plain tsserver 548 ms)."
+    },
+    {
+      "id": "run",
+      "nav": "Run vs tsx",
+      "title": "ts-r-run: running a TypeScript file",
+      "intro": "Time from starting the command to the program exiting, against tsx and Node's own type stripping. node -e 0 is the floor: starting Node with no TypeScript at all.",
+      "charts": [
+        {
+          "id": "run-hello",
+          "title": "Run hello.ts",
+          "unit": "ms",
+          "rows": [
+            { "label": "node -e 0 (floor)", "value": 23, "kind": "floor" },
+            { "label": "ts-r-run, warm cache", "value": 29, "kind": "ours" },
+            { "label": "ts-r-run, empty cache", "value": 32, "kind": "ours" },
+            { "label": "node --experimental-strip-types", "value": 50, "kind": "other" },
+            { "label": "tsx 4.23", "value": 79, "kind": "other" }
+          ],
+          "valueLabel": "Median time"
+        },
+        {
+          "id": "run-1000",
+          "title": "Run a 1,000-module program",
+          "unit": "ms",
+          "rows": [
+            { "label": "node -e 0 (floor)", "value": 24, "kind": "floor" },
+            { "label": "ts-r-run, warm cache", "value": 101, "kind": "ours" },
+            { "label": "ts-r-run, empty cache", "value": 137, "kind": "ours" },
+            { "label": "node --experimental-strip-types", "value": 215, "kind": "other" },
+            { "label": "tsx 4.23", "value": 270, "kind": "other" }
+          ],
+          "valueLabel": "Median time"
+        }
+      ],
+      "method": {
+        "measured": "Wall time, median of 15 runs",
+        "machine": "mac",
+        "software": "Node 24.21.0; tsx 4.23 run as its binary (npx tsx adds about 400 ms); ts-r-run with 4 compile threads and source maps on",
+        "input": "A generated project of 1,000 TypeScript modules (interfaces, classes, typed functions, .ts imports so Node type stripping can run it too), and hello.ts",
+        "command": "cargo build --release -p ts_r_run --bin ts-r-run --example bench && TS_R_RUN_THREADS=4 scripts/limit.sh -- target/release/examples/bench --runs 15",
+        "commit": "e92e486",
+        "sources": ["crates/ts_r_run/AGENTS.md", "docs/design/0002-transform-and-codegen.md"]
+      }
+    },
+    {
+      "id": "ecosystem",
+      "nav": "Top 1,000 npm packages",
+      "title": "Ecosystem: the top 1,000 npm packages",
+      "intro": "cargo xtask ecosystem runs each stage that applies to a package and compares it with the reference tool. Pass rate is pass / (pass + fail + error); skipped packages have nothing to compare. The check stage imports each package with skipLibCheck off and passes it when ts-r-check prints the same diagnostics (file, line, column, code) as tsc 7; in the 159 packages that fail, most diagnostics differ: 7,540 of the 8,339 compared differ. No package's own test suite passes with ts-r swapped in yet (0 of 4 selected).",
+      "charts": [
+        {
+          "id": "stages",
+          "title": "Packages passing each stage",
+          "unit": "%",
+          "better": "higher",
+          "max": 100,
+          "columns": ["Pass / compared"],
+          "rows": [
+            { "label": "Parse every file", "value": 99.9, "kind": "ours", "extra": ["988 / 989"] },
+            { "label": "Bundle and run (vs esbuild)", "value": 92.2, "kind": "ours", "extra": ["844 / 915"] },
+            { "label": "Transform TypeScript (vs tsc)", "value": 87.5, "kind": "ours", "extra": ["42 / 48"] },
+            { "label": "Check an import of it (vs tsc 7)", "value": 77.6, "kind": "ours", "extra": ["550 / 709"] },
+            { "label": "Own test suite", "value": 0, "kind": "ours", "extra": ["0 / 4"] }
+          ],
+          "valueLabel": "Pass rate"
+        }
+      ],
+      "table": {
+        "columns": ["Stage", "Items compared", "Items failing"],
+        "rows": [
+          ["parse (files)", "39,101", "1"],
+          ["transform (files)", "1,156", "6"],
+          ["bundle (entries)", "1,217", "77"],
+          ["check (diagnostics, ours and tsc's)", "8,339", "7,540"],
+          ["tests (suites)", "4", "4"],
+          ["Bundle size, 909 packages, minified", "ts-r-build 102,531.6 KiB", "esbuild 99,466.0 KiB (ts-r +3.1%)"]
+        ]
+      },
+      "tableTitle": "Items inside the packages, and bundle size",
+      "method": {
+        "measured": "Pass, fail, error or skip per package per stage, compared against the reference tool's output",
+        "machine": "unrecorded",
+        "software": "ts-r at commit cfbbe41; esbuild 0.28.2, Node 24.21.0, tsc 7.0.2",
+        "input": "The top 1,000 packages of ecosystem/packages.toml (list of 2026-10-14); one run of 546 s",
+        "command": "cargo xtask ecosystem (see ecosystem/README.md)",
+        "commit": "b26d73c",
+        "sources": ["ecosystem/STATUS.md", "ecosystem/README.md"]
+      }
+    },
+    {
+      "id": "front-end",
+      "nav": "Parser and engine",
+      "title": "Parser, binder, cache and launcher",
+      "intro": "Throughput of the shared engine parts, on public code. These have no comparison bars yet: the side-by-side parser benchmark against Oxc and esbuild is set up in bench/scenarios.toml but ts-r has no parse-only command for it yet.",
+      "table": {
+        "columns": ["What", "Result", "Measured on"],
+        "rows": [
+          ["Parse, single thread", "about 225 MB/s (30,000 files/s)", "tRPC including node_modules: 60,419 files, 456.5 MB; 4 files report syntax errors (not yet compared with tsc). Apple M-series shared laptop, 2026-10-16; command in crates/ts_r_parser/AGENTS.md."],
+          ["Parse and bind, 4 threads", "about 44,600 files/s (279 MB/s); bind alone about 85,000 files/s per thread", "tRPC: 1,050 project files + 10,887 node_modules declaration files (74.7 MB), 0 panics. Apple M-series shared laptop, 2026-10-16; command in crates/ts_r_binder/AGENTS.md."],
+          ["Shared cache, warm lookup of 10,000 entries (4 KiB each)", "27 ms on one thread, 9.5 ms on all cores", "cargo run --release -p ts_r_cache --example bench. Apple M-series. Commit 8d32516."],
+          ["ts-r launcher overhead", "about 0.5 ms (ts-r --version: 2.1 ms)", "500 runs via Python subprocess, whose own spawn of /usr/bin/true is 1.6 ms median. Apple M-series. Commit 8d32516."]
+        ]
+      }
+    },
+    {
+      "id": "correctness",
+      "nav": "Correctness",
+      "title": "Correctness against tsc 7.0.2, esbuild and ESLint",
+      "intro": "Speed only counts if the output is right. These compare ts-r with the tool it replaces as the reference. The rows come from data/conformance.json: the same numbers as the Compatibility and status page, each quoting the file that records it.",
+      "tableFrom": "conformance"
+    }
+  ],
+  "notMeasured": [
+    "ts-r-build against Rolldown and Vite's production build.",
+    "ts-r-check against ts-rust, and on the 60-repository corpus the plan describes.",
+    "ts-r-lint against Biome.",
+    "ts-r-dev against Vite 8 on the generated 1,000 to 50,000-module apps.",
+    "The large public repos in bench/repos.toml (VS Code, Sentry, Grafana, Supabase, Backstage, n8n, cal.com, Next.js, React): they need a dedicated machine.",
+    "The VS Code editor-memory runs (stock VS Code against the ts-r extension) on the public repos.",
+    "Linux and Windows runs, and runs on a dedicated benchmark machine."
+  ]
+}

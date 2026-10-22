@@ -1,0 +1,1898 @@
+{
+  "TS1002": {
+    "hash": "bada2211d7bf4d93",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,25): error TS1002: Unterminated string literal.\n"
+  },
+  "TS1003": {
+    "hash": "49ca83ce4a3fc865",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,15): error TS1003: Identifier expected.\n"
+  },
+  "TS1005": {
+    "hash": "04e29e81f2339e19",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,22): error TS1005: ',' expected.\n"
+  },
+  "TS1011": {
+    "hash": "8b99c7c35a820126",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,21): error TS1011: An element access expression should take an argument.\n"
+  },
+  "TS1013": {
+    "hash": "c9abc3f1d0936de9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,35): error TS1013: A rest parameter or binding pattern may not have a trailing comma.\n"
+  },
+  "TS1028": {
+    "hash": "686ad532e6ec689e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS1028: Accessibility modifier already seen.\n"
+  },
+  "TS1029": {
+    "hash": "1041c28be44b00e9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS1029: 'public' modifier must precede 'static' modifier.\n"
+  },
+  "TS1030": {
+    "hash": "788cf9075e15963a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,12): error TS1030: 'readonly' modifier already seen.\n"
+  },
+  "TS1042": {
+    "hash": "c6110cef9ca2bc31",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS1042: 'public' modifier cannot be used here.\n"
+  },
+  "TS1044": {
+    "hash": "acb2a04576feafef",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS1044: 'public' modifier cannot appear on a module or namespace element.\n"
+  },
+  "TS1068": {
+    "hash": "2f35b9cedf69efb6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS1068: Unexpected token. A constructor, method, accessor, or property was expected.\n"
+  },
+  "TS1070": {
+    "hash": "d1bd43bfe77af548",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS1070: 'public' modifier cannot appear on a type member.\n"
+  },
+  "TS1090": {
+    "hash": "369243917cc2beac",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,15): error TS1090: 'export' modifier cannot appear on a parameter.\n"
+  },
+  "TS1097": {
+    "hash": "19a8b7e14f332b1b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,30): error TS1097: 'implements' list cannot be empty.\n"
+  },
+  "TS1100": {
+    "hash": "f04e7a9009dbff78",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,5): error TS1100: Invalid use of 'arguments' in strict mode.\n"
+  },
+  "TS1101": {
+    "hash": "15c63fcfe9a4cbde",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS1101: 'with' statements are not allowed in strict mode.\n"
+  },
+  "TS1102": {
+    "hash": "860a49f5ad3683a6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,8): error TS1102: 'delete' cannot be called on an identifier in strict mode.\nindex.ts(2,8): error TS2703: The operand of a 'delete' operator must be a property reference.\n"
+  },
+  "TS1109": {
+    "hash": "6229f7041384c2b3",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,19): error TS1109: Expression expected.\n"
+  },
+  "TS1110": {
+    "hash": "bf9f4fb54227a967",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,12): error TS1110: Type expected.\n"
+  },
+  "TS1114": {
+    "hash": "bcbf5dd2589878b4",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS1114: Duplicate label 'outer'.\n"
+  },
+  "TS1117": {
+    "hash": "f1e3600ac2f4eef8",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,19): error TS1117: An object literal cannot have multiple properties with the same name.\n"
+  },
+  "TS1118": {
+    "hash": "8976086fdbb83774",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,7): error TS2300: Duplicate identifier 'a'.\nindex.ts(3,7): error TS1118: An object literal cannot have multiple get/set accessors with the same name.\nindex.ts(3,7): error TS2300: Duplicate identifier 'a'.\n"
+  },
+  "TS1119": {
+    "hash": "c133a52d969e4df6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,7): error TS1119: An object literal cannot have property and accessor with the same name.\n"
+  },
+  "TS1121": {
+    "hash": "23e373fad1130fcd",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,14): error TS1121: Octal literals are not allowed. Use the syntax '0o755'.\n"
+  },
+  "TS1124": {
+    "hash": "20214ed52ae10a65",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,13): error TS1124: Digit expected.\n"
+  },
+  "TS1125": {
+    "hash": "a78ca18f8150b046",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,13): error TS1125: Hexadecimal digit expected.\n"
+  },
+  "TS1127": {
+    "hash": "5c2e1febee9803e4",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,8): error TS1127: Invalid character.\n"
+  },
+  "TS1128": {
+    "hash": "e6cdea44f6c79153",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS1128: Declaration or statement expected.\n"
+  },
+  "TS1131": {
+    "hash": "f71f1231ed89e8bf",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS1131: Property or signature expected.\n"
+  },
+  "TS1134": {
+    "hash": "0ece04d580d662f9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,5): error TS1134: Variable declaration expected.\n"
+  },
+  "TS1135": {
+    "hash": "f2c7b0c98f8520f5",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,6): error TS1135: Argument expression expected.\n"
+  },
+  "TS1136": {
+    "hash": "0aaae8e56963434c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,26): error TS1136: Property assignment expected.\n"
+  },
+  "TS1138": {
+    "hash": "1e562d66ff4d6eac",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,30): error TS1138: Parameter declaration expected.\n"
+  },
+  "TS1141": {
+    "hash": "0187b5d01a0c797f",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,15): error TS1141: String literal expected.\n"
+  },
+  "TS1146": {
+    "hash": "221145ba00f539c1",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,28): error TS1146: Declaration expected.\n"
+  },
+  "TS1160": {
+    "hash": "23859f01da2d70f2",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,1): error TS1160: Unterminated template literal.\n"
+  },
+  "TS1162": {
+    "hash": "7f2b9eaff815f19d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,21): error TS1162: An object member cannot be declared optional.\n"
+  },
+  "TS1163": {
+    "hash": "290da4b3333d94e8",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,5): error TS1163: A 'yield' expression is only allowed in a generator body.\n"
+  },
+  "TS1181": {
+    "hash": "140df536a97a2048",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,8): error TS1181: Array element destructuring pattern expected.\nindex.ts(1,16): error TS1005: ';' expected.\nindex.ts(1,18): error TS1128: Declaration or statement expected.\n"
+  },
+  "TS1184": {
+    "hash": "901358398a4e3354",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,26): error TS1042: 'static' modifier cannot be used here.\nindex.ts(1,26): error TS1184: Modifiers cannot appear here.\n"
+  },
+  "TS1192": {
+    "hash": "6711e1e571fda13c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,8): error TS1192: Module '\"./config\"' has no default export.\n"
+  },
+  "TS1196": {
+    "hash": "71ad954002429290",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,13): error TS1196: Catch clause variable type annotation must be 'any' or 'unknown' if specified.\n"
+  },
+  "TS1199": {
+    "hash": "46970b7912d08e4b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,12): error TS1199: Unterminated Unicode escape sequence.\n"
+  },
+  "TS1200": {
+    "hash": "9a69f86a61d5dca5",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS1200: Line terminator not permitted before arrow.\n"
+  },
+  "TS1206": {
+    "hash": "54d0f0ca078a8897",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS1206: Decorators are not valid here.\n"
+  },
+  "TS1210": {
+    "hash": "3b71ae5b164af994",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,9): error TS1210: Code contained in a class is evaluated in JavaScript's strict mode which does not allow this use of 'arguments'. For more information, see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Strict_mode.\n"
+  },
+  "TS1212": {
+    "hash": "30575e8a6920fd8c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,5): error TS1212: Identifier expected. 'interface' is a reserved word in strict mode.\n"
+  },
+  "TS1213": {
+    "hash": "3950ba7752377d82",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,9): error TS1213: Identifier expected. 'private' is a reserved word in strict mode. Class definitions are automatically in strict mode.\n"
+  },
+  "TS1214": {
+    "hash": "d3b9768a49e72745",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,7): error TS1214: Identifier expected. 'yield' is a reserved word in strict mode. Modules are automatically in strict mode.\n"
+  },
+  "TS1215": {
+    "hash": "9b5306c29c4854a0",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,5): error TS1215: Invalid use of 'eval'. Modules are automatically in strict mode.\n"
+  },
+  "TS1243": {
+    "hash": "24f9709ed8a632ca",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,11): error TS1243: 'private' modifier cannot be used with 'abstract' modifier.\n"
+  },
+  "TS1244": {
+    "hash": "54e1cdbfe934fe12",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS1244: Abstract methods can only appear within an abstract class.\n"
+  },
+  "TS1249": {
+    "hash": "1840b74d49f8d77c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,3): error TS1249: A decorator can only decorate a method implementation, not an overload.\n"
+  },
+  "TS1253": {
+    "hash": "94e548fe377d4cdc",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS1253: Abstract properties can only appear within an abstract class.\n"
+  },
+  "TS1344": {
+    "hash": "15decf21604f3b52",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS1344: A label is not allowed here.\n"
+  },
+  "TS1345": {
+    "hash": "b82410244dc7c9d4",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,5): error TS1345: An expression of type 'void' cannot be tested for truthiness.\n"
+  },
+  "TS1351": {
+    "hash": "cfb9bbc0add3c8f1",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS1351: An identifier or keyword cannot immediately follow a numeric literal.\n"
+  },
+  "TS1359": {
+    "hash": "a94da04b31633f90",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS1359: Identifier expected. 'null' is a reserved word that cannot be used here.\n"
+  },
+  "TS1360": {
+    "hash": "e21b7055a36eed12",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,22): error TS1360: Type '{ primary: \"blue\"; }' does not satisfy the expected type 'Record<string, Color>'.\n  Property 'primary' is incompatible with index signature.\n    Type '\"blue\"' is not assignable to type 'Color'.\n"
+  },
+  "TS1381": {
+    "hash": "12236a760650f945",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.tsx(1,23): error TS1381: Unexpected token. Did you mean `{'}'}` or `&rbrace;`?\n"
+  },
+  "TS1382": {
+    "hash": "f74b8da7ff4f9d4e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.tsx(1,23): error TS1382: Unexpected token. Did you mean `{'>'}` or `&gt;`?\n"
+  },
+  "TS1433": {
+    "hash": "62730e2f4f62502a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,13): error TS1433: Neither decorators nor modifiers may be applied to 'this' parameters.\n"
+  },
+  "TS1477": {
+    "hash": "4038689137dc4591",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,20): error TS1477: An instantiation expression cannot be followed by a property access.\n"
+  },
+  "TS1489": {
+    "hash": "d5a8de1b738ff1f8",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,22): error TS1489: Decimals with leading zeros are not allowed.\n"
+  },
+  "TS1497": {
+    "hash": "f80e1e7fc6cb99ee",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,2): error TS1497: Expression must be enclosed in parentheses to be used as a decorator.\n"
+  },
+  "TS1499": {
+    "hash": "707f66e7a37a9672",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS1499: Unknown regular expression flag.\n"
+  },
+  "TS1500": {
+    "hash": "bc2b2799ae205a82",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,26): error TS1500: Duplicate regular expression flag.\n"
+  },
+  "TS1502": {
+    "hash": "f71f87017585aa05",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,27): error TS1502: The Unicode (u) flag and the Unicode Sets (v) flag cannot be set simultaneously.\n"
+  },
+  "TS17002": {
+    "hash": "9c20c38dc2763f04",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.tsx(1,30): error TS17002: Expected corresponding JSX closing tag for 'div'.\n"
+  },
+  "TS17004": {
+    "hash": "a5c85ea213fc18c6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.tsx(1,19): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\nindex.tsx(1,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.\n"
+  },
+  "TS17006": {
+    "hash": "c284840125ee7113",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,18): error TS17006: An unary expression with the '-' operator is not allowed in the left-hand side of an exponentiation expression. Consider enclosing the expression in parentheses.\n"
+  },
+  "TS17007": {
+    "hash": "421aac81e7a18295",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,18): error TS17007: A type assertion expression is not allowed in the left-hand side of an exponentiation expression. Consider enclosing the expression in parentheses.\n"
+  },
+  "TS17008": {
+    "hash": "dffc162be1f41012",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.tsx(1,20): error TS17008: JSX element 'div' has no corresponding closing tag.\nindex.tsx(1,36): error TS17002: Expected corresponding JSX closing tag for 'span'.\n"
+  },
+  "TS18013": {
+    "hash": "43f18c30f7c4e3ca",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,12): error TS18013: Property '#count' is not accessible outside class 'Counter' because it has a private identifier.\n"
+  },
+  "TS18046": {
+    "hash": "5651b435b4e93d71",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS18046: 'err' is of type 'unknown'.\n"
+  },
+  "TS18047": {
+    "hash": "5fc6cb7b674ba162",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS18047: 's' is possibly 'null'.\n"
+  },
+  "TS18048": {
+    "hash": "3da72ad9a42d6daa",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,10): error TS18048: 'u.address' is possibly 'undefined'.\n"
+  },
+  "TS18049": {
+    "hash": "136c96ba52ecd174",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS18049: 's' is possibly 'null' or 'undefined'.\n"
+  },
+  "TS18050": {
+    "hash": "cc1f9b1e25741f3d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,18): error TS18050: The value 'null' cannot be used here.\n"
+  },
+  "TS2300": {
+    "hash": "fc4ce9d02cd797bf",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS2300: Duplicate identifier 'id'.\nindex.ts(3,3): error TS2300: Duplicate identifier 'id'.\n"
+  },
+  "TS2304": {
+    "hash": "8f001d3b67a98658",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,22): error TS2304: Cannot find name 'subtotal'.\n"
+  },
+  "TS2305": {
+    "hash": "379f9d387045f5d1",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,10): error TS2305: Module '\"./math\"' has no exported member 'sum'.\n"
+  },
+  "TS2307": {
+    "hash": "4a2d74a6d6b3ec9c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS2307: Cannot find module './utils/date' or its corresponding type declarations.\n"
+  },
+  "TS2314": {
+    "hash": "c6e31e1732a91605",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,17): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).\n"
+  },
+  "TS2315": {
+    "hash": "f90029f7dadd52ce",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,17): error TS2315: Type 'User' is not generic.\n"
+  },
+  "TS2320": {
+    "hash": "68cb992b5b9c83a2",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(8,18): error TS2320: Interface 'C' cannot simultaneously extend types 'A' and 'B'.\n  Named property 'id' of types 'A' and 'B' are not identical.\n"
+  },
+  "TS2322": {
+    "hash": "b2288d94c751f5e5",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2322: Type 'string' is not assignable to type 'number'.\n"
+  },
+  "TS2339": {
+    "hash": "1cf4bf5b317b538b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,27): error TS2339: Property 'email' does not exist on type '{ name: string; }'.\n"
+  },
+  "TS2341": {
+    "hash": "7fea1e067119b333",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,32): error TS2341: Property 'balance' is private and only accessible within class 'Account'.\n"
+  },
+  "TS2344": {
+    "hash": "32d663de38a24952",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,22): error TS2344: Type 'string' does not satisfy the constraint 'object'.\n"
+  },
+  "TS2345": {
+    "hash": "63aec17b0e958ccc",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,25): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.\n"
+  },
+  "TS2349": {
+    "hash": "6e35e6065f03da20",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,18): error TS2349: This expression is not callable.\n  Type 'string' has no call signatures.\n"
+  },
+  "TS2351": {
+    "hash": "5510a998fe548f83",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,22): error TS2351: This expression is not constructable.\n  Type '{ theme: string; }' has no construct signatures.\n"
+  },
+  "TS2352": {
+    "hash": "a4fe106acc0d636e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,18): error TS2352: Conversion of type 'number' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n"
+  },
+  "TS2353": {
+    "hash": "9116e51d8696e86e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,29): error TS2353: Object literal may only specify known properties, and 'colour' does not exist in type 'Options'.\n"
+  },
+  "TS2355": {
+    "hash": "3aa8c46587bcf14c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,42): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.\n"
+  },
+  "TS2356": {
+    "hash": "f007b6d97363e4a2",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.\n"
+  },
+  "TS2357": {
+    "hash": "1d1a6f51319a5688",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,1): error TS2357: The operand of an increment or decrement operator must be a variable or a property access.\n"
+  },
+  "TS2358": {
+    "hash": "513c03da2c5883e7",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,25): error TS2358: The left-hand side of an 'instanceof' expression must be of type 'any', an object type or a type parameter.\n"
+  },
+  "TS2359": {
+    "hash": "536fe45ddc9720a3",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,33): error TS2359: The right-hand side of an 'instanceof' expression must be either of type 'any', a class, function, or other type assignable to the 'Function' interface type, or an object type with a 'Symbol.hasInstance' method.\n"
+  },
+  "TS2362": {
+    "hash": "5519625bb44af61f",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,24): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.\n"
+  },
+  "TS2363": {
+    "hash": "3266b705b20690d9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,27): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.\n"
+  },
+  "TS2365": {
+    "hash": "85319f06a7653296",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,18): error TS2365: Operator '+' cannot be applied to types '1' and '{ value: number; }'.\n"
+  },
+  "TS2366": {
+    "hash": "8b0d0f8c439e6d96",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,34): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.\n"
+  },
+  "TS2367": {
+    "hash": "8997ca4993320c9e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,10): error TS2367: This comparison appears to be unintentional because the types 'Status' and '\"done\"' have no overlap.\n"
+  },
+  "TS2369": {
+    "hash": "c62aec3a862de48c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,9): error TS2369: A parameter property is only allowed in a constructor implementation.\n"
+  },
+  "TS2383": {
+    "hash": "f257834306a5e8f0",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS2383: Overload signatures must all be exported or non-exported.\n"
+  },
+  "TS2384": {
+    "hash": "88407ce7516abe23",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,18): error TS2384: Overload signatures must all be ambient or non-ambient.\n"
+  },
+  "TS2385": {
+    "hash": "1343936a21d3575b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,11): error TS2385: Overload signatures must all be public, private or protected.\n"
+  },
+  "TS2386": {
+    "hash": "c81103b33b2defc9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS2386: Overload signatures must all be optional or required.\n"
+  },
+  "TS2387": {
+    "hash": "22c908ae649c133a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS2387: Function overload must be static.\n"
+  },
+  "TS2388": {
+    "hash": "77af5971f41eef0d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,10): error TS2388: Function overload must not be static.\n"
+  },
+  "TS2389": {
+    "hash": "5fc47834928a4bbf",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,17): error TS2389: Function implementation name must be 'format'.\n"
+  },
+  "TS2390": {
+    "hash": "832e97ab09d100bc",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS2390: Constructor implementation is missing.\n"
+  },
+  "TS2391": {
+    "hash": "b5b02fc04d3bd39f",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,17): error TS2391: Function implementation is missing or not immediately following the declaration.\n"
+  },
+  "TS2392": {
+    "hash": "4fe61357088a7383",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS2392: Multiple constructor implementations are not allowed.\nindex.ts(3,3): error TS2392: Multiple constructor implementations are not allowed.\n"
+  },
+  "TS2393": {
+    "hash": "3fd50fd462f99e5a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,17): error TS2393: Duplicate function implementation.\nindex.ts(4,17): error TS2393: Duplicate function implementation.\n"
+  },
+  "TS2394": {
+    "hash": "c82f0178f42a7633",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,17): error TS2394: This overload signature is not compatible with its implementation signature.\n"
+  },
+  "TS2403": {
+    "hash": "4ebcfb1bc1e0a1cc",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'limit' must be of type 'number', but here has type 'string'.\n"
+  },
+  "TS2407": {
+    "hash": "88879ef7d0fca24c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,19): error TS2407: The right-hand side of a 'for...in' statement must be of type 'any', an object type or a type parameter, but here has type '3'.\n"
+  },
+  "TS2411": {
+    "hash": "b66b5589d67ff685",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS2411: Property 'label' of type 'string' is not assignable to 'string' index type 'number'.\n"
+  },
+  "TS2413": {
+    "hash": "b42a0e5e08dda1b6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS2413: 'number' index type 'string' is not assignable to 'string' index type 'number'.\n"
+  },
+  "TS2415": {
+    "hash": "f7c18223f3e48167",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,14): error TS2415: Class 'Child' incorrectly extends base class 'Base'.\n  Property 'id' is private in type 'Child' but not in type 'Base'.\n"
+  },
+  "TS2416": {
+    "hash": "52fbc40c5c0ef41e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(7,3): error TS2416: Property 'area' in type 'Square' is not assignable to the same property in base type 'Shape'.\n  Type '() => string' is not assignable to type '() => number'.\n    Type 'string' is not assignable to type 'number'.\n"
+  },
+  "TS2417": {
+    "hash": "57f726d9cfdbcb2a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,14): error TS2417: Class static side 'typeof User' incorrectly extends base class static side 'typeof Model'.\n  Types of property 'table' are incompatible.\n    Type 'number' is not assignable to type 'string'.\n"
+  },
+  "TS2420": {
+    "hash": "3ca917d080f7d798",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,14): error TS2420: Class 'Robot' incorrectly implements interface 'Named'.\n  Property 'name' is missing in type 'Robot' but required in type 'Named'.\n"
+  },
+  "TS2430": {
+    "hash": "5d7aa0a347915c06",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,18): error TS2430: Interface 'Order' incorrectly extends interface 'Entity'.\n  Types of property 'id' are incompatible.\n    Type 'number' is not assignable to type 'string'.\n"
+  },
+  "TS2435": {
+    "hash": "eac6dda58194c8fc",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,18): error TS2435: Ambient modules cannot be nested in other modules or namespaces.\n"
+  },
+  "TS2445": {
+    "hash": "f9d447a459afc12d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,21): error TS2445: Property 'balance' is protected and only accessible within class 'Account' and its subclasses.\n"
+  },
+  "TS2447": {
+    "hash": "75cb2d44dfb99838",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,19): error TS2447: The '|' operator is not allowed for boolean types. Consider using '||' instead.\n"
+  },
+  "TS2448": {
+    "hash": "8dd90af27f5f9d9e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,13): error TS2448: Block-scoped variable 'total' used before its declaration.\n"
+  },
+  "TS2449": {
+    "hash": "9b7a8159ca6e7f7a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,26): error TS2449: Class 'Store' used before its declaration.\n"
+  },
+  "TS2450": {
+    "hash": "d604e79c336e013e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS2450: Enum 'Level' used before its declaration.\n"
+  },
+  "TS2451": {
+    "hash": "f5fa59132b6b0a9c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,5): error TS2451: Cannot redeclare block-scoped variable 'user'.\nindex.ts(3,5): error TS2451: Cannot redeclare block-scoped variable 'user'.\n"
+  },
+  "TS2454": {
+    "hash": "01325f39ab3c6cb2",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(6,13): error TS2454: Variable 'message' is used before being assigned.\n"
+  },
+  "TS2464": {
+    "hash": "f89d0540460706f8",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,24): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.\n"
+  },
+  "TS2469": {
+    "hash": "5657034409c1e221",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,19): error TS2469: The '+' operator cannot be applied to type 'symbol'.\n"
+  },
+  "TS2488": {
+    "hash": "f9ef0ce67e5f8112",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,17): error TS2488: Type '{ a: number; b: number; }' must have a '[Symbol.iterator]()' method that returns an iterator.\n"
+  },
+  "TS2493": {
+    "hash": "49c32458ad5fea42",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,24): error TS2493: Tuple type '[number, number]' of length '2' has no element at index '2'.\n"
+  },
+  "TS2503": {
+    "hash": "4e0a5a4715fc71d2",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,19): error TS2503: Cannot find namespace 'Timers'.\n"
+  },
+  "TS2511": {
+    "hash": "59dc552bb7bc3ec6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,18): error TS2511: Cannot create an instance of an abstract class.\n"
+  },
+  "TS2512": {
+    "hash": "e43492632d25827d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS2512: Overload signatures must all be abstract or non-abstract.\n"
+  },
+  "TS2515": {
+    "hash": "a853eaf318288e02",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,14): error TS2515: Non-abstract class 'Circle' does not implement inherited abstract member area from class 'Shape'.\n"
+  },
+  "TS2528": {
+    "hash": "0559c622330a3a9e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,16): error TS2528: A module cannot have multiple default exports.\nindex.ts(4,16): error TS2528: A module cannot have multiple default exports.\n"
+  },
+  "TS2531": {
+    "hash": "76d68f9c0741ce8d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,18): error TS2531: Object is possibly 'null'.\n"
+  },
+  "TS2532": {
+    "hash": "3081fd1870ae431a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,18): error TS2532: Object is possibly 'undefined'.\n"
+  },
+  "TS2534": {
+    "hash": "ad839c9b8f59efc9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,40): error TS2534: A function returning 'never' cannot have a reachable end point.\n"
+  },
+  "TS2538": {
+    "hash": "8425395d0f1518a9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,25): error TS2538: Type '{ id: string; }' cannot be used as an index type.\n"
+  },
+  "TS2540": {
+    "hash": "73af45eb5fae9c4c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,8): error TS2540: Cannot assign to 'port' because it is a read-only property.\n"
+  },
+  "TS2542": {
+    "hash": "5b8e9247ac162e07",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2542: Index signature in type 'readonly string[]' only permits reading.\n"
+  },
+  "TS2551": {
+    "hash": "ea324f5ce096935f",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,23): error TS2551: Property 'firstname' does not exist on type '{ firstName: string; }'. Did you mean 'firstName'?\n"
+  },
+  "TS2552": {
+    "hash": "cb0ee9c37d231579",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,33): error TS2552: Cannot find name 'username'. Did you mean 'userName'?\n"
+  },
+  "TS2554": {
+    "hash": "8194733580cbeac4",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,20): error TS2554: Expected 2 arguments, but got 1.\n"
+  },
+  "TS2555": {
+    "hash": "384acc959171d73b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,18): error TS2555: Expected at least 2 arguments, but got 1.\n"
+  },
+  "TS2556": {
+    "hash": "392d9a68e319e7b5",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,6): error TS2556: A spread argument must either have a tuple type or be passed to a rest parameter.\n"
+  },
+  "TS2558": {
+    "hash": "642f5df2dfc77e33",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,23): error TS2558: Expected 1 type arguments, but got 2.\n"
+  },
+  "TS2559": {
+    "hash": "c47aff09bc0d1ca7",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(6,14): error TS2559: Type '{ colour: boolean; }' has no properties in common with type 'Options'.\n"
+  },
+  "TS2561": {
+    "hash": "dd8d5db72a54c194",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,26): error TS2561: Object literal may only specify known properties, but 'firstname' does not exist in type 'User'. Did you mean to write 'firstName'?\n"
+  },
+  "TS2564": {
+    "hash": "4bdf892ac3c37753",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS2564: Property 'token' has no initializer and is not definitely assigned in the constructor.\n"
+  },
+  "TS2567": {
+    "hash": "c06b8b00cdf2fddf",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.\nindex.ts(2,10): error TS2567: Enum declarations can only merge with namespace or other enum declarations.\n"
+  },
+  "TS2575": {
+    "hash": "1eb94b0ea225e2c6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,1): error TS2575: No overload expects 2 arguments, but overloads do exist that expect either 1 or 3 arguments.\n"
+  },
+  "TS2576": {
+    "hash": "65044cbe3bdd9cb0",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,3): error TS2576: Property 'max' does not exist on type 'Counter'. Did you mean to access the static member 'Counter.max' instead?\n"
+  },
+  "TS2578": {
+    "hash": "48bef876b20ea9bd",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,1): error TS2578: Unused '@ts-expect-error' directive.\n"
+  },
+  "TS2584": {
+    "hash": "427324c04cc4d318",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,1): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.\n"
+  },
+  "TS2588": {
+    "hash": "99bdecea086c57bb",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2588: Cannot assign to 'total' because it is a constant.\n"
+  },
+  "TS2589": {
+    "hash": "fb03fdd2c63027d3",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS2589: Type instantiation is excessively deep and possibly infinite.\n"
+  },
+  "TS2591": {
+    "hash": "6e48f4468b39cca2",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,13): error TS2591: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node` and then add 'node' to the types field in your tsconfig.\n"
+  },
+  "TS2592": {
+    "hash": "987cf120a17766a1",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,1): error TS2592: Cannot find name '$'. Do you need to install type definitions for jQuery? Try `npm i --save-dev @types/jquery` and then add 'jquery' to the types field in your tsconfig.\n"
+  },
+  "TS2593": {
+    "hash": "902c676e3ba50405",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,1): error TS2593: Cannot find name 'describe'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.\n"
+  },
+  "TS2610": {
+    "hash": "396a1a4a47f08d85",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,3): error TS2610: 'size' is defined as an accessor in class 'Base', but is overridden here in 'Child' as an instance property.\n"
+  },
+  "TS2611": {
+    "hash": "3f56582b0f885d69",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,7): error TS2611: 'size' is defined as a property in class 'Base', but is overridden here in 'Child' as an accessor.\n"
+  },
+  "TS2628": {
+    "hash": "5198ab995c3af21f",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2628: Cannot assign to 'Mode' because it is an enum.\n"
+  },
+  "TS2629": {
+    "hash": "56bde79abdd36d09",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2629: Cannot assign to 'Store' because it is a class.\n"
+  },
+  "TS2630": {
+    "hash": "e4eb1d510de2e3d6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2630: Cannot assign to 'log' because it is a function.\n"
+  },
+  "TS2631": {
+    "hash": "3c4db440a8564020",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,1): error TS2631: Cannot assign to 'Config' because it is a namespace.\n"
+  },
+  "TS2654": {
+    "hash": "1bcd275b5c13df85",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,7): error TS2654: Non-abstract class 'Square' is missing implementations for the following members of 'Shape': 'area', 'name'.\n"
+  },
+  "TS2664": {
+    "hash": "f89dde2e78148299",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,16): error TS2664: Invalid module name in augmentation, module 'missing-lib' cannot be found.\n"
+  },
+  "TS2669": {
+    "hash": "5e35301da0b8ab0e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,9): error TS2669: Augmentations for the global scope can only be directly nested in external modules or ambient module declarations.\n"
+  },
+  "TS2678": {
+    "hash": "d44c98f8250151e6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,10): error TS2678: Type '\"c\"' is not comparable to type '\"a\" | \"b\"'.\n"
+  },
+  "TS2683": {
+    "hash": "63b17c7e4d394285",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,10): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.\n"
+  },
+  "TS2688": {
+    "hash": "f6dfc900a9c3e96e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "error TS2688: Cannot find type definition file for 'not-installed'.\n"
+  },
+  "TS2693": {
+    "hash": "8d3b7693a20b44cc",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,11): error TS2693: 'User' only refers to a type, but is being used as a value here.\n"
+  },
+  "TS2694": {
+    "hash": "5f5bfccef13f2afa",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,15): error TS2694: Namespace 'Shapes' has no exported member 'Square'.\n"
+  },
+  "TS2703": {
+    "hash": "824d65fbad694461",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,8): error TS2703: The operand of a 'delete' operator must be a property reference.\n"
+  },
+  "TS2707": {
+    "hash": "6513aceb751ad475",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,8): error TS2707: Generic type 'Pair<A, B>' requires between 1 and 2 type arguments.\n"
+  },
+  "TS2708": {
+    "hash": "77bdcda5938aba19",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,11): error TS2708: Cannot use namespace 'Api' as a value.\n"
+  },
+  "TS2717": {
+    "hash": "8f04e9e67beae447",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,21): error TS2717: Subsequent property declarations must have the same type.  Property 'timeout' must be of type 'number', but here has type 'string'.\n"
+  },
+  "TS2720": {
+    "hash": "eb125fef7729fac4",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,7): error TS2720: Class 'Dog' incorrectly implements class 'Animal'. Did you mean to extend 'Animal' and inherit its members as a subclass?\n  Property 'move' is missing in type 'Dog' but required in type 'Animal'.\n"
+  },
+  "TS2722": {
+    "hash": "5a0370ceb3733bf6",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS2722: Cannot invoke an object which is possibly 'undefined'.\n"
+  },
+  "TS2729": {
+    "hash": "14216d48bcbe4b2a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,15): error TS2729: Property 'side' is used before its initialization.\n"
+  },
+  "TS2739": {
+    "hash": "7cde810a33b322bf",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,7): error TS2739: Type '{ x: number; }' is missing the following properties from type 'Point': y, z\n"
+  },
+  "TS2740": {
+    "hash": "956f9c225c910aec",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,7): error TS2740: Type '{}' is missing the following properties from type 'string[]': length, pop, push, concat, and 29 more.\n"
+  },
+  "TS2741": {
+    "hash": "51cc78b1848a7750",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,7): error TS2741: Property 'name' is missing in type '{ id: number; }' but required in type 'User'.\n"
+  },
+  "TS2749": {
+    "hash": "613f7819b2ff13bf",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,13): error TS2749: 'defaults' refers to a value, but is being used as a type here. Did you mean 'typeof defaults'?\n"
+  },
+  "TS2769": {
+    "hash": "6959e7ce731cd00d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,7): error TS2769: No overload matches this call.\n  Overload 1 of 2, '(x: string): number', gave the following error.\n    Argument of type 'boolean' is not assignable to parameter of type 'string'.\n  Overload 2 of 2, '(x: number): string', gave the following error.\n    Argument of type 'boolean' is not assignable to parameter of type 'number'.\n"
+  },
+  "TS2790": {
+    "hash": "bc258fa835af45ff",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,10): error TS2790: The operand of a 'delete' operator must be optional.\n"
+  },
+  "TS2882": {
+    "hash": "933cfc9b210f604c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,8): error TS2882: Cannot find module or type declarations for side-effect import of './missing-setup'.\n"
+  },
+  "TS4112": {
+    "hash": "29881a0803c58695",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,12): error TS4112: This member cannot have an 'override' modifier because its containing class 'Logger' does not extend another class.\n"
+  },
+  "TS4113": {
+    "hash": "eb4ebb34182d851e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,12): error TS4113: This member cannot have an 'override' modifier because it is not declared in the base class 'Base'.\n"
+  },
+  "TS4114": {
+    "hash": "6f893563c0baf527",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,3): error TS4114: This member must have an 'override' modifier because it overrides a member in the base class 'Base'.\n"
+  },
+  "TS4115": {
+    "hash": "90d97ea3748745d5",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(5,15): error TS4115: This parameter property must have an 'override' modifier because it overrides a member in base class 'Base'.\n"
+  },
+  "TS4127": {
+    "hash": "1b3d005a98c3dd21",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(4,12): error TS4127: This member cannot have an 'override' modifier because its name is dynamic.\n"
+  },
+  "TS5061": {
+    "hash": "9eada7aae1e6599b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "tsconfig.json(9,7): error TS5061: Pattern '@app/*/*' can have at most one '*' character.\n"
+  },
+  "TS5062": {
+    "hash": "2e8f1a4b49aec20e",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "tsconfig.json(10,9): error TS5062: Substitution './src/*/*' in pattern '@app/*' can have at most one '*' character.\n"
+  },
+  "TS5076": {
+    "hash": "fa7f778bb98179d9",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,22): error TS5076: '??' and '||' operations cannot be mixed without parentheses.\n"
+  },
+  "TS5090": {
+    "hash": "e93677bb9d32e1f5",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "tsconfig.json(10,9): error TS5090: Non-relative paths are not allowed. Did you forget a leading './'?\n"
+  },
+  "TS6053": {
+    "hash": "60541a99de6268ab",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "tsconfig.json(2,14): error TS6053: File '@tsconfig/strictest/tsconfig.json' not found.\n"
+  },
+  "TS6133": {
+    "hash": "4ba9bf5337cbe142",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,9): error TS6133: 'tax' is declared but its value is never read.\n"
+  },
+  "TS6142": {
+    "hash": "a08771a4223b9eff",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS6142: Module './button' was resolved to 'button.tsx', but '--jsx' is not set.\n"
+  },
+  "TS6188": {
+    "hash": "82d3cff26a5e116a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,25): error TS6188: Numeric separators are not allowed here.\n"
+  },
+  "TS6189": {
+    "hash": "5d1674dfd7601a0a",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,22): error TS6189: Multiple consecutive numeric separators are not permitted.\n"
+  },
+  "TS6196": {
+    "hash": "61799362ab0005d4",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,11): error TS6196: 'Draft' is declared but never used.\n"
+  },
+  "TS7006": {
+    "hash": "57f195d8176815ec",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,24): error TS7006: Parameter 'n' implicitly has an 'any' type.\n"
+  },
+  "TS7009": {
+    "hash": "09628ca282e10221",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,18): error TS7009: 'new' expression, whose target lacks a construct signature, implicitly has an 'any' type.\n"
+  },
+  "TS7010": {
+    "hash": "f7fe3dbb23a4f16c",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,18): error TS7010: 'load', which lacks return-type annotation, implicitly has an 'any' return type.\n"
+  },
+  "TS7013": {
+    "hash": "eaffadf8f2721522",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS7013: Construct signature, which lacks return-type annotation, implicitly has an 'any' return type.\n"
+  },
+  "TS7015": {
+    "hash": "ce156e05a3a847bb",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,24): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.\n"
+  },
+  "TS7016": {
+    "hash": "439d1554a5a48041",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(1,25): error TS7016: Could not find a declaration file for module 'slugger'. 'node_modules/slugger/index.js' implicitly has an 'any' type.\n"
+  },
+  "TS7026": {
+    "hash": "42f84e142d7e089d",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.tsx(1,19): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\nindex.tsx(1,19): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.\nindex.tsx(1,29): error TS7026: JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\n"
+  },
+  "TS7027": {
+    "hash": "e16a253eccfc88fb",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,3): error TS7027: Unreachable code detected.\n"
+  },
+  "TS7028": {
+    "hash": "3230c1adea40743b",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,3): error TS7028: Unused label.\n"
+  },
+  "TS7032": {
+    "hash": "144ed3034ed1bc73",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(2,7): error TS7032: Property 'value' implicitly has type 'any', because its set accessor lacks a parameter type annotation.\nindex.ts(2,13): error TS7006: Parameter 'v' implicitly has an 'any' type.\n"
+  },
+  "TS7053": {
+    "hash": "89abcb50c53873e8",
+    "triggered": true,
+    "tool": "ts-r-check",
+    "command": "ts-r-check -p tsconfig.json --pretty false",
+    "commit": "6deaf01",
+    "output": "index.ts(3,18): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ apple: number; pear: number; }'.\n  No index signature with a parameter of type 'string' was found on type '{ apple: number; pear: number; }'.\n"
+  },
+  "TS8002": {
+    "hash": "0abbfa9173ee1b40",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,1): error TS8002: 'import ... =' can only be used in TypeScript files.\n"
+  },
+  "TS8003": {
+    "hash": "5fd739a21849b9b6",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(2,1): error TS8003: 'export =' can only be used in TypeScript files.\n"
+  },
+  "TS8004": {
+    "hash": "aff498f178b2809b",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,16): error TS8004: Type parameter declarations can only be used in TypeScript files.\n"
+  },
+  "TS8005": {
+    "hash": "06d93e2fc4faf500",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,14): error TS8005: 'implements' clauses can only be used in TypeScript files.\n"
+  },
+  "TS8006": {
+    "hash": "3bd150ddb55f81e4",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,6): error TS8006: 'enum' declarations can only be used in TypeScript files.\n"
+  },
+  "TS8008": {
+    "hash": "93666a95c985d6e6",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,6): error TS8008: Type aliases can only be used in TypeScript files.\n"
+  },
+  "TS8009": {
+    "hash": "a542a238ea861b0e",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(2,3): error TS8009: The 'private' modifier can only be used in TypeScript files.\n"
+  },
+  "TS8010": {
+    "hash": "fd89a60128709b7e",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,12): error TS8010: Type annotations can only be used in TypeScript files.\n"
+  },
+  "TS8011": {
+    "hash": "c0f6220762df4c07",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,25): error TS8011: Type arguments can only be used in TypeScript files.\n"
+  },
+  "TS8012": {
+    "hash": "81f52f76abfce684",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(2,15): error TS8012: Parameter modifiers can only be used in TypeScript files.\n"
+  },
+  "TS8013": {
+    "hash": "04eaa1143bc1687f",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,12): error TS8013: Non-null assertions can only be used in TypeScript files.\n"
+  },
+  "TS8016": {
+    "hash": "f29c6da5615432d6",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,50): error TS8016: Type assertion expressions can only be used in TypeScript files.\n"
+  },
+  "TS8017": {
+    "hash": "6d7a443583f6668a",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,1): error TS8017: Signature declarations can only be used in TypeScript files.\n"
+  },
+  "TS8037": {
+    "hash": "5e26273c36104ed1",
+    "triggered": true,
+    "tool": "ts_r_parser",
+    "command": "cargo run -p ts_r_parser --example dump -- index.js --ts-in-js report",
+    "commit": "6deaf01",
+    "output": "index.js(1,41): error TS8037: Type satisfaction expressions can only be used in TypeScript files.\n"
+  }
+}
