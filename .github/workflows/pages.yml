@@ -41,10 +41,11 @@ concurrency:
 
 jobs:
   # Stacked PRs: only the top PR of a stack runs CI (a PR is the top when no open PR is based
-  # on its branch). Pushes to main always run. A PR also skips the build (and so the preview)
-  # when the same site inputs already built in a PR: a pass-marker artifact named after a hash
-  # of landing/, ecosystem/STATUS.md, this workflow and the files that
-  # landing/data/conformance.json quotes.
+  # on its branch). Pushes to main always run. A PR also skips the build when the same site
+  # inputs already built in a PR: a pass-marker artifact named after a hash of landing/,
+  # ecosystem/STATUS.md, this workflow and the files that landing/data/conformance.json quotes.
+  # A PR that gets a preview always builds: its preview must show its head, and a marker from
+  # another PR (or an earlier commit of this one) says nothing about what that preview shows.
   stack:
     name: top of stack?
     if: github.event_name == 'pull_request'
@@ -109,16 +110,21 @@ jobs:
         if: steps.check.outputs.top == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # The preview job's condition.
+          PREVIEWED: >-
+            ${{ github.event.pull_request.head.repo.full_name == github.repository
+            && contains(format(',{0},', vars.PREVIEW_AUTHORS || 'riley-wv'), format(',{0},', github.event.pull_request.user.login)) }}
         run: |
           mapfile -t quoted < <(node -e 'try { for (const r of require("./landing/data/conformance.json").rows) if (r.source) console.log(r.source) } catch {}')
           hash=$({ git ls-files -s -- landing ecosystem/STATUS.md .github/workflows/pages.yml
                    [ "${#quoted[@]}" -eq 0 ] || git ls-files -s -- "${quoted[@]}"; } | sha256sum | cut -c1-40)
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          [ "$PREVIEWED" != true ] || exit 0
           n=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=pages-pass-$hash&per_page=5" \
             --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_repository_id == .workflow_run.repository_id)] | length' || echo 0)
           if [ "$n" -gt 0 ]; then
             echo "hit=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipped: these site inputs already built (and were previewed) in another run."
+            echo "::notice::Skipped: these site inputs already built in another run."
           fi
 
   build:
@@ -140,6 +146,8 @@ jobs:
     steps:
       # PRs: the head commit, not the merge ref (in a GitHub stack the merge ref can pull in
       # another stack's branches).
+      # The full history: the site links a measurement's commit only when this repository has
+      # it (landing/lib/commits.mjs).
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
