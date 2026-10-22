@@ -1,0 +1,2 @@
+a.ts(6,9): error TS18048: 'foo' is possibly 'undefined'.
+a.ts(25,18): error TS18048: 'a' is possibly 'undefined'.

@@ -39,6 +39,7 @@ impl Ck<'_, '_> {
             initial: declared,
             cross_functions: false,
             file: cond.file,
+            at: None,
         };
         self.narrow(&w, t, cond, assume_true, 0)
     }

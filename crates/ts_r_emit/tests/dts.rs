@@ -247,6 +247,97 @@ fn isolated_declarations() {
     );
 }
 
+/// isolatedDeclarationErrorsExpandoFunctions / isolatedDeclarationLazySymbols: TS9023 once
+/// per expando property, at its first assignment; an element access whose key is neither
+/// a literal nor an entity name declares nothing.
+#[test]
+fn isolated_expando_properties_once_each() {
+    let config = r#"{"compilerOptions":{"target":"es2022","module":"commonjs","declaration":true,"isolatedDeclarations":true,"emitDeclarationOnly":true,"outDir":"out","types":[]},"files":["index.ts"]}"#;
+    let src = "export function foo(): void {}\nconst o = { k: { j: \"b\" } } as const;\n\
+        foo.a = 1;\nfoo.a = 2;\nfoo[\"b\"] = 1;\nfoo[o[\"k\"].j] = 1;\nfoo[o.k.j] = 1;\n";
+    let r = emit(config, &[("index.ts", src)]);
+    let lines: Vec<u32> = r
+        .diagnostics
+        .iter()
+        .map(|d| src[..d.span.start as usize].matches('\n').count() as u32 + 1)
+        .collect();
+    assert_eq!(codes(&r), vec![9023, 9023, 9023], "{:?}", r.diagnostics);
+    assert_eq!(lines, vec![3, 5, 7]);
+}
+
+/// isolatedDeclarationErrorsAugmentation: an import kept only because the imported file
+/// augments this module needs that other file, so isolatedDeclarations refuses it (TS9026).
+#[test]
+fn isolated_import_kept_for_augmentation() {
+    let config = r#"{"compilerOptions":{"target":"es2022","module":"commonjs","declaration":true,"isolatedDeclarations":true,"emitDeclarationOnly":true,"outDir":"out","types":[]},"files":["parent.ts","child.ts"]}"#;
+    let parent = "import { child } from './child';\nexport class P {}\nchild();\n";
+    let child = "import { P } from './parent';\ndeclare module './parent' {\n    interface P { x: number }\n}\nexport function child(): void {}\n";
+    let r = emit(config, &[("parent.ts", parent), ("child.ts", child)]);
+    let d: Vec<_> = r.diagnostics.iter().filter(|d| d.code == 9026).collect();
+    assert_eq!(d.len(), 1, "{:?}", r.diagnostics);
+    assert_eq!(d[0].span.start, 0);
+}
+
+/// isolatedDeclarationErrorsClasses: a method with a computed name that is no literal is
+/// TS9038 at the name and still TS9008 for its missing return annotation.
+#[test]
+fn isolated_unbindable_method_needs_return_type() {
+    let config = r#"{"compilerOptions":{"target":"es2022","module":"commonjs","declaration":true,"isolatedDeclarations":true,"emitDeclarationOnly":true,"outDir":"out","types":[]},"files":["index.ts"]}"#;
+    let src =
+        "let k: string = \"k\";\nexport class C {\n    [k]() { }\n    [k + \"1\"](): void { }\n}\n";
+    let r = emit(config, &[("index.ts", src)]);
+    let mut c = codes(&r);
+    c.sort();
+    assert_eq!(c, vec![9008, 9038, 9038], "{:?}", r.diagnostics);
+}
+
+/// declarationEmitComputedPropertyNameSymbol1: a symbol key of another module that cannot
+/// be named is TS4023 naming the first name of its chain (`Foo` of `Foo.sym`).
+#[test]
+fn unnameable_symbol_key_names_its_outer_container() {
+    let config = r#"{"compilerOptions":{"target":"es2022","module":"commonjs","strict":true,"declaration":true,"emitDeclarationOnly":true,"outDir":"out","types":[]},"files":["type.ts","index.ts"]}"#;
+    let r = emit(
+        config,
+        &[
+            (
+                "type.ts",
+                "export namespace Foo {\n  export declare const sym: unique symbol;\n}\nexport type Type = { x?: { [Foo.sym]: 0 } };\n",
+            ),
+            (
+                "index.ts",
+                "import { type Type } from \"./type\";\nexport const foo = { ...({} as Type) };\n",
+            ),
+        ],
+    );
+    let d = r.diagnostics.iter().find(|d| d.code == 4023);
+    assert!(
+        d.is_some_and(|d| d.message.contains("using name 'Foo' from external module")),
+        "{:?}",
+        r.diagnostics
+    );
+}
+
+/// computedPropertiesNarrowed: a signed number is a literal name; an object literal's
+/// computed name naming a local is TS9038, and the local it names is printed too, so its
+/// own missing annotation is TS9010.
+#[test]
+fn isolated_object_computed_names() {
+    let config = r#"{"compilerOptions":{"target":"es2022","module":"commonjs","declaration":true,"isolatedDeclarations":true,"emitDeclarationOnly":true,"outDir":"out","types":[]},"files":["index.ts"]}"#;
+    let src = "declare function mk(): symbol;\nexport let a = { [-1]: 1 };\nlet u = mk();\nexport let b = {\n    [u]: 1\n};\n";
+    let r = emit(config, &[("index.ts", src)]);
+    let found: Vec<(u32, u32)> = r
+        .diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d.code,
+                src[..d.span.start as usize].matches('\n').count() as u32 + 1,
+            )
+        })
+        .collect();
+    assert_eq!(found, vec![(9010, 3), (9038, 5)], "{:?}", r.diagnostics);
+}
+
 /// declarationEmitUsingTypeAlias1: a type only reachable through a `node_modules` path
 /// that the package's `exports` block is TS2883, not a deep import.
 #[test]
@@ -344,10 +435,19 @@ fn anonymous_class_private_member() {
         CONFIG,
         &[(
             "index.ts",
-            "export var noPrivates = class { static getTags() { } private p = 1; };\n",
+            "export var noPrivates = class { static getTags() { } private static ps = -1; private p = 1; };\n",
         )],
     );
-    assert_eq!(codes(&r), vec![4094], "{:?}", r.diagnostics);
+    let mut msgs: Vec<&str> = r.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    msgs.sort();
+    // The static side's private members too.
+    assert_eq!(
+        msgs,
+        vec![
+            "Property 'p' of exported anonymous class type may not be private or protected.",
+            "Property 'ps' of exported anonymous class type may not be private or protected.",
+        ]
+    );
 }
 
 /// declarationEmitFunctionKeywordProp / declarationEmitDefaultExportWithStaticAssignment:
@@ -922,5 +1022,35 @@ fn unresolved_symbol_constructor_key() {
     assert!(
         out.contains("export interface I {\n    [Symbol.species]: 1;\n    b: 3;\n}\n"),
         "{out}"
+    );
+}
+
+/// declarationEmitVarInElidedBlock / declarationEmitInvalidExport: a declaration in a block
+/// cannot be printed, so names written from the source that refer to it are private names.
+#[test]
+fn names_declared_in_blocks_are_private() {
+    let src = "{\n    var a = \"\";\n}\nif (true) {\n    var c = 1;\n}\n\
+        export let b: typeof a;\nexport type T = typeof c;\n\
+        export function f(p: typeof a): typeof c { return 1; }\n\
+        export class K { static s: typeof a; i: typeof c; }\n\
+        export interface I { m: typeof a }\nvar top = 1;\nexport let ok: typeof top;\n";
+    let r = emit(CONFIG, &[("index.ts", src)]);
+    let got: Vec<String> = r
+        .diagnostics
+        .iter()
+        .map(|d| format!("{} {}: {}", d.span.start, d.code, d.message))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            "70 4025: Exported variable 'b' has or is using private name 'a'.",
+            "96 4081: Exported type alias 'T' has or is using private name 'c'.",
+            "127 4078: Parameter 'p' of exported function has or is using private name 'a'.",
+            "138 4060: Return type of exported function has or is using private name 'c'.",
+            "188 4028: Public static property 's' of exported class has or is using private name 'a'.",
+            "201 4031: Public property 'i' of exported class has or is using private name 'c'.",
+            "237 4033: Property 'm' of exported interface has or is using private name 'a'.",
+        ],
+        "{got:#?}"
     );
 }

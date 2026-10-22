@@ -1,0 +1,3 @@
+a.ts(4,10): error TS2700: Rest types may only be created from object types.
+a.ts(6,10): error TS2700: Rest types may only be created from object types.
+a.ts(8,12): error TS2700: Rest types may only be created from object types.

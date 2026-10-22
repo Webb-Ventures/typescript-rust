@@ -956,7 +956,7 @@ fn render_diff(
     );
     let _ = writeln!(
         md,
-        "The merged PRs' descriptions and tests are the spec. Read them; never copy compiler source.\n"
+        "The merged PRs' descriptions and tests are the spec. Read them, and the compiler source to understand them; never copy or translate it.\n"
     );
     let _ = writeln!(md, "## Summary\n");
     let _ = writeln!(md, "| Area | Added | Removed | Changed | Moved |");

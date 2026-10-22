@@ -696,12 +696,12 @@ impl Printer<'_> {
         match self.node(id) {
             Node::Ident { name } => {
                 let text = self.ast.atom(name);
+                // The source text outlives the printer: no copy of the original name.
                 let renamed = self
                     .raw(id)
-                    .is_some_and(|raw| raw != text && !raw.contains('\\'));
-                if renamed {
-                    let raw = self.raw(id).unwrap_or("").to_owned();
-                    self.map_span_named(self.span(id), Some(&raw));
+                    .filter(|raw| *raw != text && !raw.contains('\\'));
+                if let Some(raw) = renamed {
+                    self.map_span_named(self.span(id), Some(raw));
                 } else {
                     self.map_node(id);
                 }

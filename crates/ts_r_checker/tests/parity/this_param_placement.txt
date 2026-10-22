@@ -1,0 +1,8 @@
+a.ts(5,17): error TS2681: A constructor cannot have a 'this' parameter.
+a.ts(6,11): error TS2784: 'get' and 'set' accessors cannot declare 'this' parameters.
+a.ts(7,11): error TS2784: 'get' and 'set' accessors cannot declare 'this' parameters.
+a.ts(10,9): error TS2681: A constructor cannot have a 'this' parameter.
+a.ts(11,11): error TS2784: 'get' and 'set' accessors cannot declare 'this' parameters.
+a.ts(13,21): error TS2681: A constructor cannot have a 'this' parameter.
+a.ts(14,30): error TS2680: A 'this' parameter must be the first parameter.
+a.ts(15,22): error TS2680: A 'this' parameter must be the first parameter.

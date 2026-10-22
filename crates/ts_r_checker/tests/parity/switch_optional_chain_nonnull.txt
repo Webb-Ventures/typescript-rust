@@ -1,0 +1,5 @@
+a.ts(12,13): error TS18048: 'o' is possibly 'undefined'.
+a.ts(15,13): error TS18048: 'o' is possibly 'undefined'.
+a.ts(29,13): error TS18048: 'o' is possibly 'undefined'.
+a.ts(32,13): error TS18048: 'o' is possibly 'undefined'.
+a.ts(45,13): error TS18048: 'o' is possibly 'undefined'.

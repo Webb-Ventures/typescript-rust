@@ -1,0 +1,5 @@
+a.ts(2,28): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<number>'?
+a.ts(5,28): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<void>'?
+a.ts(6,28): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<number>'?
+a.ts(6,28): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(11,21): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<T>'?

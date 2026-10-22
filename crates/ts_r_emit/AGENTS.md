@@ -4,7 +4,7 @@ Program emit for `ts-r-check` (design record 0012, phase E1): where outputs go, 
 contain beyond the per-file transform, source maps, and writing them safely. Root rules:
 [../../AGENTS.md](../../AGENTS.md). Spec:
 [../../docs/design/0012-tsc-emit.md](../../docs/design/0012-tsc-emit.md) (tsc 7.0.2's observed
-behaviour; never read or translate tsc's emitter).
+behaviour; tsc's emitter may be read to understand a rule, never translated).
 
 ## API in one breath
 
@@ -13,7 +13,8 @@ let checker = Checker::new(&program);
 let resolver = CheckerResolver::new(&checker, &options);
 let host = ts_r_checker::typenode::specifier_host(&fs, &options);
 let cfg = EmitConfig { options: &options, config: Some(&parsed), threads: 4, case_sensitive, specifiers: Some(&host) };
-let (located, global) = ts_r_emit::root_dir_diagnostics(&program, &cfg); // TS6059, TS5011
+let (located, global) = ts_r_emit::root_dir_diagnostics(&program, &cfg); // TS6059, TS5011, TS5009
+let clashes = ts_r_emit::output_path_conflicts(&program, &cfg); // (5055 | 5056, output path)
 let result = ts_r_emit::emit(&program, &resolver, &cfg);  // everything in memory
 // all diagnostics known (noEmitOnError) -> then:
 let (written, ts5033) = ts_r_emit::write_outputs(&result, &mut FsWriter::protecting(inputs));
@@ -41,7 +42,13 @@ cost both. It never mutates the checker's AST.
   a type that is only reachable through a non-portable `node_modules` path (TS2883), an
   exported anonymous class type with private or protected members (TS4094), a type that
   does not follow from syntax under `isolatedDeclarations` (TS9xxx; tsc writes no `.d.ts`
-  for such a file either),
+  for such a file either; TS9023 once per expando property at its first assignment, where
+  an element access key must be a literal or an entity name to declare one; a method
+  with a non-literal computed name is TS9038 and still TS9008 without a return type; a
+  literal name is a string, number, boolean, substitution-free template or signed number
+  (`[-1]`); an object literal's TS9038 name that is an entity name is printed as written,
+  so the local it names is printed too and may be TS9010 itself
+  (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
   declarations of JavaScript inputs (TSR2006, JSDoc declaration emit is not implemented).
   `EmitResult::skipped` then makes the exit code 1. Declarations do not depend on the target:
   a file refused with TSR2003 still gets its `.d.ts`.
@@ -74,6 +81,11 @@ cost both. It never mutates the checker's AST.
 
 - `rootDir`: explicit, else the tsconfig's directory, else (no tsconfig: the emit oracle) the
   common source directory. A source outside `rootDir` is emitted next to itself.
+- No common source directory when two emitted files have different roots (drives,
+  compared with the file system's case sensitivity): TS5009 (global, or at the `outDir`
+  key) when `outDir` is set without `rootDir` or a tsconfig and some program file has a
+  drive or URL root (`tsc: tsc/internal/compiler/program.go`,
+  `tsc/internal/outputpaths/commonsourcedirectory.go`); TS5011 is then not reported.
 - TS5011: `outDir` or `declarationDir` set, no `rootDir`, not `composite`, a tsconfig, and
   the common source directory differs from the config directory; anchored at the `outDir`
   key; not under `noEmit`. TS6059: explicit `rootDir` (or `composite` with a tsconfig, whose
@@ -81,6 +93,12 @@ cost both. It never mutates the checker's AST.
   with the "The file is in the program because:" chain; imported files: at the import
   specifier); default `rootDir` with `outDir`/`declarationDir` — roots only. Both are option
   errors: no syntactic or semantic diagnostics are reported, emit still happens.
+- TS5055 / TS5056 (`output_path_conflicts`; `tsc/internal/compiler/program.go`, the output
+  path check): not under `noEmit`; for each emitted source in program order, its outputs
+  (`.js`, its map, `.d.ts`, its map; JSON: the copy) are TS5055 when the path is a non-lib
+  program file and TS5056 when an earlier output had it. Both can fire for one path, and
+  repeats are kept (diagnostic sorting deduplicates). JavaScript counts only with `allowJs`;
+  a non-root file under `node_modules/` (even reached by a relative import) never counts.
 - JSON modules are written only into `outDir`, reprinted (`{ "x": 1 }`). One that is only
   imported (not a root) and lies outside `rootDir` (explicit, else the config directory) is
   not written and is no source of the layout: no TS6059, not in the common source directory
@@ -92,7 +110,9 @@ cost both. It never mutates the checker's AST.
   line) contains `@internal`; a comment on the line the previous token ends on is that
   token's trailing comment and does not count. An import whose bindings are all elided
   stays as `import "m";` only when `m` augments the importing module
-  (`declare module "./this"`); `declare global` does not keep it. Kept imports and
+  (`declare module "./this"`); `declare global` does not keep it. Under
+  isolatedDeclarations such a kept import is TS9026 at the import, since keeping it needs
+  the other file (tsc: tsc/internal/transformers/declarations/transform.go). Kept imports and
   parameter properties carry their own JSDoc. A hashbang line is kept at the top.
   `export default`/`export =` of a function or arrow expression is written as the export
   first, then `declare function <name or _default>(…)` with the statement's comments; only
@@ -114,12 +134,20 @@ cost both. It never mutates the checker's AST.
   - a private method is written as a new property: no end mark, and a start mark only when
     the source's modifiers are all kept (`private async m()` has none).
 - Output order per file: `.js.map`, `.js`, `.d.ts.map`, `.d.ts` (`--listEmittedFiles`).
-- Refusals: TS4094 once per private or protected member of an anonymous class type, with a
+- Refusals: TS4094 once per private or protected member of an anonymous class type (its
+  static side's too, `#names` included), with a
   related TS9027 "Add a type annotation to the variable x." on a variable; TS4023 on a
   variable whose type recurs through another module's unexported alias
   (`NotNameable::CannotBeNamed`; other declaration kinds still print `/*elided*/ any`);
   TS7056 at the declaration's name when the type written from its structure passes tsc's
   serialization length (`NotNameable::TooLong`, `typenode::MAX_SERIALIZED_LENGTH`).
+  A name written from the source that resolves to a declaration whose statement is not
+  directly in a file or namespace body (`{ var a; }`, `if (x) { export var b; }`, a loop
+  head) is a private name: such a statement is never printed (tsc's emit resolver never
+  treats its container as visible, `tsc: tsc/internal/checker/emitresolver.go`). The error
+  is at the name, worded by the declaration it is written in: variable TS4025, type alias
+  TS4081, function parameter TS4078 / return type TS4060, class property TS4031 (static
+  TS4028), interface property TS4033 (`Emitter::private_name`; other kinds print as before).
 - An initialized `const` or `readonly` property whose annotated type is still a fresh
   literal (an alias of `typeof import("./m").default` for `export default 1`) is written
   `= 1` instead of its annotation (`Emitter::fresh_literal_of`). Only a `typeof import()`

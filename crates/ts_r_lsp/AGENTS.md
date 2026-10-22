@@ -74,7 +74,8 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
 - **No syntax server, no typings installer:** tsserver gets
   `--disableAutomaticTypingAcquisition`, and the stand-in refuses `--serverMode` other than
   semantic.
-- Never read TypeScript's source: behaviour comes from its CLI help, package layout and protocol.
+- Behaviour comes from TypeScript's CLI help, package layout, protocol and tests. Its source may
+  be read to understand a feature, never translated (root AGENTS.md).
 
 ## Lint (L2)
 

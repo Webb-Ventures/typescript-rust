@@ -1,0 +1,5 @@
+a.ts(6,14): error TS4116: This member must have an 'override' modifier because it overrides an abstract method that is declared in the base class 'Base'.
+a.ts(18,11): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(19,22): error TS2766: Cannot delegate iteration to value because the 'next' method of its iterator expects type 'boolean', but the containing generator will always send 'string'.
+a.ts(20,11): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(22,11): error TS2322: Type 'string' is not assignable to type 'boolean'.

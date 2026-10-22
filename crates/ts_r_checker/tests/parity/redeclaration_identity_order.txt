@@ -1,0 +1,6 @@
+a.ts(20,13): error TS2403: Subsequent variable declarations must have the same type.  Variable 'w' must be of type 'A', but here has type 'C'.
+a.ts(26,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'b' must be of type 'this[]', but here has type '(this | null | undefined)[]'.
+a.ts(35,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x3' must be of type 'P | Q | undefined', but here has type 'P'.
+a.ts(43,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'r4' must be of type 'E', but here has type 'Object'.
+a.ts(48,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'n' must be of type 'number', but here has type 'string'.
+a.ts(53,7): error TS2403: Subsequent variable declarations must have the same type.  Variable 'd' must be of type 'Deep<any>', but here has type 'Deep<T>'.

@@ -1,0 +1,4 @@
+a.tsx(4,15): error TS2608: The global type 'JSX.ElementAttributesProperty' may not have more than one property.
+a.tsx(5,15): error TS2608: The global type 'JSX.ElementChildrenAttribute' may not have more than one property.
+a.tsx(12,12): error TS2322: Type '{ x: number; }' is not assignable to type 'string'.
+a.tsx(13,12): error TS2322: Type '{ x: number; }' is not assignable to type 'string'.

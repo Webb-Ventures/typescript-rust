@@ -1,0 +1,19 @@
+a.ts(6,5): error TS2322: Type 'number[]' is not assignable to type '[string, string]'.
+  Target requires 2 element(s) but source may have fewer.
+a.ts(7,5): error TS2322: Type 'number[]' is not assignable to type 'string[]'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(8,5): error TS2322: Type 'string[]' is not assignable to type 'XY[]'.
+  Type 'string' is not assignable to type 'XY'.
+a.ts(9,17): error TS2322: Type 'string' is not assignable to type 'XY'.
+a.ts(10,17): error TS2322: Type 'string' is not assignable to type 'XY'.
+a.ts(11,5): error TS2322: Type 'string[]' is not assignable to type '[XY]'.
+  Target requires 1 element(s) but source may have fewer.
+a.ts(12,5): error TS2322: Type 'string[]' is not assignable to type 'XY[]'.
+  Type 'string' is not assignable to type 'XY'.
+a.ts(13,17): error TS2322: Type 'string' is not assignable to type 'XY'.
+a.ts(13,27): error TS2322: Type 'string' is not assignable to type 'XY'.
+a.ts(14,22): error TS2322: Type 'string' is not assignable to type 'XY'.
+a.ts(16,18): error TS2322: Type 'string' is not assignable to type 'XY'.
+a.ts(17,5): error TS2322: Type 'string[]' is not assignable to type 'MyArr'.
+  Type 'string' is not assignable to type 'XY'.
+a.ts(24,5): error TS2322: Type 'undefined' is not assignable to type 'Errors<T>[keyof T]'.

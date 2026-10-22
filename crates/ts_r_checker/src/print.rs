@@ -3,7 +3,7 @@
 //! collapsed to the enum name, arrays as `T[]`, object literal types as
 //! `{ a: number; m(): void; }`, single-signature types as arrow types.
 
-use ts_r_binder::SymbolFlags;
+use ts_r_binder::{SymbolFlags, meaning};
 use ts_r_types::{
     ObjectFlags, ObjectKind, SigFlags, SigId, SymId, TupleElement, TypeFlags, TypeId, TypeKind,
     TypeTraits,
@@ -112,6 +112,57 @@ fn is_identifier_name(s: &str) -> bool {
 }
 
 impl<'c, 'a> Ck<'c, 'a> {
+    /// For `sym`, a member of a global interface `I`, the global variable declared as an
+    /// `I` that reaches it (`Symbol` for `SymbolConstructor.toPrimitive`): tsc names a
+    /// unique symbol through the value that holds it (`typeof Symbol.toPrimitive`).
+    fn interface_member_holder(&mut self, sym: SymId) -> Option<String> {
+        let parent = self.c.sym_parent(sym)?;
+        // An interface that is also a value (`interface I` + `declare var I: I`) is its
+        // own container: tsc prints `I["key"]` then.
+        if !self.c.sym_flags(parent).intersects(SymbolFlags::INTERFACE)
+            || self.c.sym_flags(parent).intersects(SymbolFlags::VALUE)
+        {
+            return None;
+        }
+        let iname = self.c.sym_name(parent).to_owned();
+        let declared = self.declared_type_of_symbol(parent);
+        if self
+            .c
+            .global_symbol(&iname, meaning::TYPE)
+            .is_none_or(|g| self.declared_type_of_symbol(g) != declared)
+        {
+            return None;
+        }
+        let names: Vec<Box<str>> = self.c.link.globals.iter().map(|(n, _)| n.clone()).collect();
+        for n in names {
+            let Some(g) = self.c.global_symbol(&n, meaning::VALUE) else {
+                continue;
+            };
+            if !self.c.sym_flags(g).intersects(SymbolFlags::VARIABLE) {
+                continue;
+            }
+            let decls: Vec<Loc> = self.c.decls(g).to_vec();
+            let annotated = decls.iter().any(|&d| {
+                let ast = self.ast(d.file);
+                let d = match ast.node(d.node) {
+                    Node::Ident { .. } => self.c.parent(d).unwrap_or(d),
+                    _ => d,
+                };
+                match *ast.node(d.node) {
+                    Node::VarDeclarator {
+                        type_ann: Some(ta), ..
+                    } => matches!(*ast.node(ta), Node::TypeRef { name, type_args: None }
+                        if crate::nodes::ident_text(ast, name) == Some(iname.as_str())),
+                    _ => false,
+                }
+            });
+            if annotated {
+                return Some(n.into());
+            }
+        }
+        None
+    }
+
     /// The printed form of a type.
     pub fn type_to_string(&mut self, t: TypeId) -> String {
         let mut stack = Vec::new();
@@ -340,7 +391,23 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let n = self.c.sym_name(sym).to_owned();
                 self.qualified_name(sym, n)
             }
-            TypeKind::UniqueSymbol(sym) => format!("typeof {}", self.c.sym_name(sym)),
+            // A unique symbol declared as an interface member prints through the global
+            // variable holding that interface, else as an indexed access on the interface
+            // (`typeof Symbol.iterator`, `Holder["tag"]`; observed tsc 7).
+            TypeKind::UniqueSymbol(sym) => {
+                let name = self.c.sym_name(sym).to_owned();
+                match self.interface_member_holder(sym) {
+                    Some(v) => format!("typeof {v}.{name}"),
+                    None => match self.c.sym_parent(sym) {
+                        Some(p) if self.c.sym_flags(p).intersects(SymbolFlags::INTERFACE) => {
+                            let iname = self.c.sym_name(p).to_owned();
+                            let iname = self.qualified_name(p, iname);
+                            format!("{iname}[\"{name}\"]")
+                        }
+                        _ => format!("typeof {name}"),
+                    },
+                }
+            }
             TypeKind::TypeParameter(_) => {
                 let d = s.type_param_data(t);
                 match d {
@@ -363,6 +430,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // A union that remembers how it was written prints its origin
                 // (`HeadersInit | undefined`).
                 let members = match s.union_origin(t) {
+                    // `T & (0 | 1)` distributed over its union, written as one intersection.
+                    Some(&[one]) => return self.print_type(one, depth, stack),
                     Some(o) => o.to_vec(),
                     None => s.list_items(list).to_vec(),
                 };
@@ -599,6 +668,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 break;
             }
             let f = self.c.sym_flags(p);
+            // A module's export, told apart from a same-named one: `import("a").F`.
+            if self.print_module_qualified
+                && f.intersects(SymbolFlags::MODULE_FILE)
+                && let Some(d) = self.c.first_decl(p)
+            {
+                let name = self.c.sym_name(p);
+                let path = if !name.starts_with('"') {
+                    strip_ts_ext(&self.c.file(d.file).path)
+                } else {
+                    name.trim_matches('"').to_owned()
+                };
+                out = format!("import(\"{path}\").{out}");
+                break;
+            }
             // `declare global { interface Response {} }` prints `Response`.
             if f.intersects(SymbolFlags::MODULE_FILE)
                 || !f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
@@ -608,11 +691,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if let Some(scope) = self.print_scope {
                 let span = self.c.span(scope);
+                // Only a namespace or enum body has the exports in scope: inside a class
+                // merged with a namespace, its members stay qualified (`typeof Path.Utils`).
                 let inside = self.c.decls(p).iter().any(|d| {
-                    d.file == scope.file && {
-                        let ds = self.c.span(*d);
-                        ds.start <= span.start && span.end <= ds.end
-                    }
+                    d.file == scope.file
+                        && matches!(
+                            self.c.ast(d.file).node(d.node),
+                            Node::Module { .. } | Node::Enum { .. }
+                        )
+                        && {
+                            let ds = self.c.span(*d);
+                            ds.start <= span.start && span.end <= ds.end
+                        }
                 });
                 if inside {
                     break;
@@ -1548,7 +1638,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let written = match ann {
                 Some(a) if !self.names_outer_type_param(a) => {
-                    self.written_type_text(a.file, a.node, 0)
+                    self.written_type_text(a.file, a.node, 0).map(|w| {
+                        // A JSDoc `{T=}` is written `T | undefined` (observed tsc 7, with
+                        // or without `strictNullChecks`).
+                        if !self.is_jsdoc_optional_annotation(a) {
+                            return w;
+                        }
+                        if matches!(
+                            self.ast(a.file).node(a.node),
+                            Node::FunctionType { .. } | Node::ConstructorType { .. }
+                        ) {
+                            format!("({w}) | undefined")
+                        } else {
+                            format!("{w} | undefined")
+                        }
+                    })
                 }
                 _ => None,
             };

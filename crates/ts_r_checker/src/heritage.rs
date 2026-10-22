@@ -273,6 +273,69 @@ impl<'c, 'a> Ck<'c, 'a> {
         });
         if has_extends && let Some(&base) = self.base_types(sym).first() {
             let base = self.with_this_arg(base, this_t);
+            // A base intersection reduced to `never` (conflicting privates): TS2509 at the
+            // `extends` expression, saying why.
+            if self.reduced_type(base) == TypeId::NEVER
+                && let Some((info, ts, pname)) = self.never_reduction_reason(base)
+            {
+                let expr = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+                    Node::HeritageClause {
+                        kind: HeritageKind::Extends,
+                        types,
+                    } => ast.list(types).first().copied(),
+                    _ => None,
+                });
+                if let Some(x) = expr {
+                    let mut chain = Chain::new();
+                    chain.push_back(
+                        dg::BASE_CONSTRUCTOR_RETURN_TYPE_0_IS_NOT_AN_OBJECT_TYPE_OR_INTERSECTION_OF_OBJECT_T_2509,
+                        &["never"],
+                    );
+                    chain.push_back(info, &[&ts, &pname]);
+                    self.error_chain(Loc::new(l.file, x), &chain);
+                }
+                return;
+            }
+            // Extending a class whose constructor is `private` outside that class (TS2675).
+            let extends_node = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+                Node::HeritageClause {
+                    kind: HeritageKind::Extends,
+                    types,
+                } => ast.list(types).first().copied(),
+                _ => None,
+            });
+            if let Some(x) = extends_node
+                && let Node::ExprWithTypeArgs { expr, .. } = *ast.node(x)
+            {
+                let ct = self.quietly(|ck| ck.check_expr(Loc::new(l.file, expr)));
+                if let Some((dc, true)) = self.restricted_constructor(ct) {
+                    let mut inside = false;
+                    let mut cur = self.enclosing_class(l);
+                    let mut guard = 0;
+                    while let Some(c) = cur {
+                        guard += 1;
+                        if guard > 64 {
+                            break;
+                        }
+                        if c == dc {
+                            inside = true;
+                            break;
+                        }
+                        cur = self.enclosing_class(c);
+                    }
+                    if !inside && let Some(bs) = self.c.sym_of_decl(dc) {
+                        let bt = self.declared_type_of_symbol(bs);
+                        let saved = std::mem::replace(&mut self.print_qualified, true);
+                        let bn = self.type_to_string(bt);
+                        self.print_qualified = saved;
+                        self.error(
+                            Loc::new(l.file, x),
+                            dg::CANNOT_EXTEND_A_CLASS_0_CLASS_CONSTRUCTOR_IS_MARKED_AS_PRIVATE_2675,
+                            &[&bn],
+                        );
+                    }
+                }
+            }
             if !self.heritage_skip(base) {
                 let ok = self.check_heritage_pair(
                     sym,
@@ -287,6 +350,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_static_side(sym, at);
                 }
             }
+        }
+        // (A base whose instances are `any` has no base type here, but tsc's checks still
+        // run for it.)
+        if has_extends {
+            self.check_mixin_class(l, sym, at);
         }
         // `implements`.
         for &h in ast.list(heritage) {
@@ -420,6 +488,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let ds = self.type_to_string(derived);
             let bs = self.type_to_string(base);
+            let display = self.written_decl_name(dp).unwrap_or(display);
             chain.push_front(
                 dg::PROPERTY_0_IN_TYPE_1_IS_NOT_ASSIGNABLE_TO_THE_SAME_PROPERTY_IN_BASE_TYPE_2_2416,
                 &[&display, &ds, &bs],
@@ -450,9 +519,86 @@ impl<'c, 'a> Ck<'c, 'a> {
         true
     }
 
+    /// A class extending a value typed by a type variable is a mixin: its constructor must
+    /// take a single `...args: any[]` (TS2545), and it must be `abstract` when the base
+    /// can construct abstractly (TS2797) (tsc: checker.go, checkClassLikeDeclarationWorker).
+    fn check_mixin_class(&mut self, l: Loc, sym: SymId, at: Loc) {
+        let Some(bc) = self.extends_expression_type(sym) else {
+            return;
+        };
+        if !self
+            .store()
+            .flags(bc)
+            .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS)
+            || !self.reporting(at.file)
+        {
+            return;
+        }
+        // A type variable without construct signatures is no base constructor at all (TS2507
+        // instead), and tsc has no base type to check then.
+        let apparent_bc = self.apparent_type(bc);
+        let base_sigs = self.signatures_of(apparent_bc, SigKind::Construct);
+        if base_sigs.is_empty() {
+            return;
+        }
+        let static_t = self.type_of_symbol(sym);
+        let sigs = self.signatures_of(static_t, SigKind::Construct);
+        // An optional rest (`...args?: any[]`) is `any[] | undefined` under
+        // strictNullChecks, which is no array of `any`.
+        let optional_rest = |ck: &Self, s: ts_r_types::SigId| {
+            let Some(p) = ck.store().sig(s).params.first() else {
+                return false;
+            };
+            ck.c.opts.strict_null_checks
+                && p.ty != TypeId::ANY
+                && ck
+                    .c
+                    .decls(p.sym)
+                    .into_iter()
+                    .any(|d| matches!(ck.node(d), Node::Param { optional: true, .. }))
+        };
+        let mixin = matches!(sigs[..], [s] if self.is_mixin_construct_signature(s) && !optional_rest(self, s));
+        if !mixin {
+            self.error(
+                at,
+                dg::A_MIXIN_CLASS_MUST_HAVE_A_CONSTRUCTOR_WITH_A_SINGLE_REST_PARAMETER_OF_TYPE_ANY_2545,
+                &[],
+            );
+            return;
+        }
+        let abstract_base = base_sigs.into_iter().any(|s| {
+            self.store()
+                .sig(s)
+                .flags
+                .contains(ts_r_types::SigFlags::ABSTRACT)
+        });
+        if abstract_base && !self.node(l).modifiers().contains(Modifiers::ABSTRACT) {
+            self.error(
+                at,
+                dg::A_MIXIN_CLASS_THAT_EXTENDS_FROM_A_TYPE_VARIABLE_CONTAINING_AN_ABSTRACT_CONSTRUCT_2797,
+                &[],
+            );
+        }
+    }
+
     /// TS2417: the static side against the base constructor's properties.
     fn check_static_side(&mut self, sym: SymId, at: Loc) {
         let Some(base_ctor) = self.base_constructor_type(sym) else {
+            // `class C extends null` that still has a base type (from a merged `interface C
+            // extends Base`): tsc compares the static side with `null` itself, which never
+            // fits (tsc 7.0.2, classExtendsNull2).
+            if let Some(t) = self.extends_expression_type(sym)
+                && self.store().flags(t).contains(TypeFlags::NULL)
+                && self.reporting(at.file)
+            {
+                let static_t = self.type_of_symbol(sym);
+                let ss = self.type_to_string(static_t);
+                self.error(
+                    at,
+                    dg::CLASS_STATIC_SIDE_0_INCORRECTLY_EXTENDS_BASE_CLASS_STATIC_SIDE_1_2417,
+                    &[&ss, "null"],
+                );
+            }
             return;
         };
         if self.heritage_skip(base_ctor) {
@@ -539,9 +685,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             .copied()
             .find(|d| matches!(self.node(*d), Node::Interface { .. }));
         if first != Some(l) {
-            return;
-        }
-        if self.c.sym_flags(sym).intersects(SymbolFlags::CLASS) {
             return;
         }
         let any_extends = decls.iter().any(
@@ -673,6 +816,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let s1 = self.type_to_string(prev_base);
                     let s2 = self.type_to_string(b);
                     let pn = self.store().str(n).to_owned();
+                    let pn = self.property_name_for_print(&pn);
                     let mut chain = Chain::new();
                     chain.push_back(
                         dg::INTERFACE_0_CANNOT_SIMULTANEOUSLY_EXTEND_TYPES_1_AND_2_2320,

@@ -749,6 +749,8 @@ impl<'a> Program<'a> {
                                 )
                                 .with_file(FileId(fi as u32)),
                             );
+                            // Once per augmented name in a file (observed with tsc 7).
+                            break;
                         }
                     }
                 }
@@ -790,6 +792,18 @@ impl<'a> Program<'a> {
 
     /// The module symbols of a target (one per file for an ambient module; augmentations
     /// included).
+    /// Whether `target` is a program file that is not a module (no `import`/`export`, not a
+    /// JavaScript CommonJS module, not JSON): importing it as a whole resolves to nothing.
+    pub fn is_script_target(&self, target: ModuleTarget) -> bool {
+        let ModuleTarget::File(f) = target else {
+            return false;
+        };
+        let file = self.file(f);
+        let json = file.path.len() >= 5
+            && file.path.as_bytes()[file.path.len() - 5..].eq_ignore_ascii_case(b".json");
+        !file.bound.is_module && !file.bound.commonjs && !json
+    }
+
     pub fn module_symbols(&self, target: ModuleTarget) -> Vec<SymbolRef> {
         let mut out = match target {
             ModuleTarget::File(f) => vec![SymbolRef {
@@ -937,6 +951,81 @@ impl<'a> Program<'a> {
         None
     }
 
+    /// Whether export `name` of a module is found only through `export type *` (at any depth
+    /// of `export *` declarations), so that it can only be used as a type. One plain
+    /// `export *` providing the name too makes it a value.
+    /// (tsc: tsc/internal/checker/checker.go getExportsOfModuleWorker, its type-only star map.)
+    pub fn star_export_is_type_only(&self, target: ModuleTarget, name: &str) -> bool {
+        // Every path counts (the same module may be re-exported both ways), so `path` holds
+        // only the modules being visited, and `budget` bounds the total work.
+        let mut budget = MAX_STAR_MODULES;
+        self.star_type_only_inner(target, name, &mut Vec::new(), &mut budget) == Some(true)
+    }
+
+    /// `Some(type_only)` when `name` resolves in `target`, `None` when it doesn't.
+    fn star_type_only_inner(
+        &self,
+        target: ModuleTarget,
+        name: &str,
+        path: &mut Vec<(u32, u32)>,
+        budget: &mut usize,
+    ) -> Option<bool> {
+        let key = match target {
+            ModuleTarget::File(f) => (0, f.0),
+            ModuleTarget::Ambient(i) => (1, i),
+            ModuleTarget::Unresolved => return None,
+        };
+        if *budget == 0 || path.len() > MAX_CHAIN || path.contains(&key) {
+            return None;
+        }
+        *budget -= 1;
+        path.push(key);
+        let r = self.star_type_only_step(target, name, path, budget);
+        path.pop();
+        r
+    }
+
+    fn star_type_only_step(
+        &self,
+        target: ModuleTarget,
+        name: &str,
+        path: &mut Vec<(u32, u32)>,
+        budget: &mut usize,
+    ) -> Option<bool> {
+        let mods = self.module_symbols(target);
+        for &m in &mods {
+            let t = self.exports_table(m);
+            if self.lookup_in(m, |_| t, name).is_some() {
+                return Some(false);
+            }
+        }
+        if name == "default" {
+            return None;
+        }
+        let mut found = None;
+        for &m in &mods {
+            let f = self.file(m.file);
+            for star in &f.bound.export_stars {
+                if star.container != m.symbol {
+                    continue;
+                }
+                let t = self.module_target(m.file, star.request);
+                if let Some(inner) = self.star_type_only_inner(t, name, path, budget) {
+                    let here = f
+                        .bound
+                        .module_requests
+                        .get(star.request as usize)
+                        .is_some_and(|r| r.type_only);
+                    if !(inner || here) {
+                        return Some(false);
+                    }
+                    found = Some(true);
+                }
+            }
+        }
+        found
+    }
+
     /// Every export name of a module target (own, augmentations, and `export *`), sorted.
     pub fn export_names(&self, target: ModuleTarget) -> Vec<(Box<str>, SymbolRef)> {
         let mut out: FxHashMap<Box<str>, SymbolRef> = FxHashMap::default();
@@ -1014,7 +1103,24 @@ impl<'a> Program<'a> {
         r
     }
 
+    /// Whether resolving alias `sym` comes back to `sym` itself (`import A = B; import B =
+    /// A;`, a module re-exporting from itself); not an alias that only leads into a cycle.
+    pub fn is_circular_alias(&self, sym: SymbolRef) -> bool {
+        let mut cycle = false;
+        let _ = self.follow_alias_ext(sym, &mut Vec::new(), &mut cycle);
+        cycle
+    }
+
     fn follow_alias(&self, sym: SymbolRef, active: &mut Vec<SymbolRef>) -> Option<SymbolRef> {
+        self.follow_alias_ext(sym, active, &mut false)
+    }
+
+    fn follow_alias_ext(
+        &self,
+        sym: SymbolRef,
+        active: &mut Vec<SymbolRef>,
+        cycle: &mut bool,
+    ) -> Option<SymbolRef> {
         let mut cur = sym;
         loop {
             let f = self.file(cur.file);
@@ -1022,7 +1128,11 @@ impl<'a> Program<'a> {
             if !s.flags.intersects(SymbolFlags::ALIAS) {
                 return Some(cur);
             }
-            if active.contains(&cur) || active.len() >= MAX_CHAIN {
+            if active.contains(&cur) {
+                *cycle = active.first() == Some(&cur);
+                return None;
+            }
+            if active.len() >= MAX_CHAIN {
                 return None;
             }
             active.push(cur);
@@ -1030,6 +1140,11 @@ impl<'a> Program<'a> {
             cur = match info.target {
                 AliasTarget::Module { request, import } => {
                     let target = self.module_target(cur.file, request);
+                    if matches!(import, ImportName::Namespace | ImportName::ExportEquals)
+                        && self.is_script_target(target)
+                    {
+                        return None;
+                    }
                     match import {
                         ImportName::Namespace => {
                             return self.module_symbols(target).first().copied();

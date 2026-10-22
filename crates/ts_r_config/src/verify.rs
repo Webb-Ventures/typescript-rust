@@ -266,6 +266,18 @@ pub fn verify_options(
             );
         }
     }
+    // An explicit `incremental` (not one implied by `composite`) needs somewhere to put
+    // its build info: a config file, or `tsBuildInfoFile`.
+    if c.truthy(OptionId::Incremental)
+        && !c.set(OptionId::TsBuildInfoFile)
+        && o.config_file_path.as_deref().is_none_or(str::is_empty)
+    {
+        c.out.push(ConfigDiagnostic::global(
+            5074,
+            "Option '--incremental' is only valid with a known configuration file (like \
+             'tsconfig.json') or when '--tsBuildInfoFile' is explicitly provided.",
+        ));
+    }
     if explicit_false(&c, OptionId::PreserveConstEnums) {
         let by = if c.truthy(OptionId::VerbatimModuleSyntax) {
             Some(OptionId::VerbatimModuleSyntax)
@@ -494,6 +506,27 @@ mod tests {
             .collect();
         v.sort();
         v
+    }
+
+    #[test]
+    fn incremental_needs_a_config_or_build_info_path() {
+        let json = |o: &str| format!(r#"{{"compilerOptions":{o}}}"#);
+        assert!(codes(&json(r#"{"incremental":true}"#)).is_empty());
+        let without_config = |o: &str| {
+            let mut fs = crate::fs::MemoryFs::new();
+            fs.add_file("/p/tsconfig.json", &json(o));
+            let mut cfg = crate::tsconfig::load_tsconfig(&fs, "/p/tsconfig.json");
+            cfg.options.config_file_path = None;
+            verify_options(&cfg.options, None)
+                .iter()
+                .map(|d| d.code)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(without_config(r#"{"incremental":true}"#), [5074]);
+        assert!(
+            without_config(r#"{"incremental":true,"tsBuildInfoFile":"x.tsbuildinfo"}"#).is_empty()
+        );
+        assert!(without_config(r#"{"composite":true}"#).is_empty());
     }
 
     #[test]

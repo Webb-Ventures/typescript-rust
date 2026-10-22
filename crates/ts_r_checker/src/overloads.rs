@@ -1,16 +1,23 @@
 //! Overload sets of functions, methods and constructors (TS2383-TS2394, TS2512).
 //!
-//! Rules observed from tsc 7.0.2, per statement list or class body:
+//! Rules observed from tsc 7.0.2, per statement list or class body. Members are named by
+//! their key text, or for a computed key by the literal or unique symbol its type denotes
+//! (`[Symbol.iterator]`); computed keys of wider types (`[s]` for `s: symbol`) form no group.
 //! - Consecutive body-less declarations of one name form an overload group. The next
 //!   declaration must be the implementation (same name, with a body):
-//!   - none follows (outside ambient contexts and abstract groups): TS2391 at the last
-//!     overload (TS2390 for constructors);
+//!   - none follows (outside ambient contexts): TS2391 at the last overload (TS2390 for
+//!     constructors), unless that last overload is abstract or optional and no later
+//!     declaration of the member follows in the list; when one does, an abstract last
+//!     overload gets TS2516 instead (tsc: checker.go, checkFunctionOrConstructorSymbol);
 //!   - a function or method with another name and a body follows: TS2389 at it ("must be
 //!     'f'");
 //!   - the same method name with different `static`-ness follows: TS2387/TS2388 at it.
 //! - Each declaration whose `export`, `declare`, visibility, `?` or `abstract` differs from
 //!   the implementation's (else the first declaration's): TS2383/2384/2385/2386/2512 at its
 //!   name.
+//! - Method signatures of one interface or type literal symbol (merged declarations
+//!   included) take the first one's `?` as canonical: TS2386 at each deviating name
+//!   (tsc: checkFunctionOrConstructorSymbol in checker.go).
 //! - Each overload must be compatible with the implementation (TS2394 at the overload
 //!   name): the overload's parameter types are assignable to the implementation's (optional
 //!   parameters include `undefined`, rest parameters expand), the implementation does not
@@ -121,10 +128,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                 || group
                     .iter()
                     .any(|d| d.modifiers.contains(Modifiers::DECLARE));
-            // Abstract and optional (`m?(): T;`) methods need no implementation.
-            let abstract_group = group
-                .iter()
-                .any(|d| d.modifiers.contains(Modifiers::ABSTRACT) || d.optional);
+            // Abstract and optional (`m?(): T;`) methods need no implementation; what
+            // counts is the group's last declaration. A later, non-adjacent declaration of
+            // the same member still makes the group's end an error (TS2516 when abstract).
+            let last = group[group.len() - 1];
+            let last_abstract = last.modifiers.contains(Modifiers::ABSTRACT);
+            let continued_later = !ambient
+                && items[j..]
+                    .iter()
+                    .flatten()
+                    .any(|d| d.name == a.name && d.kind == a.kind && d.is_static == a.is_static);
+            let abstract_group = (last_abstract || last.optional) && !continued_later;
             let mut implementation: Option<&FnDecl> = None;
             match next {
                 Some(b)
@@ -161,13 +175,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 _ => {
                     if !ambient && !abstract_group {
-                        let last = group[group.len() - 1];
                         if a.kind == Kind::Constructor {
                             let span = self.decl_name_span(file, last);
                             self.error_span(
                                 file,
                                 span,
                                 dg::CONSTRUCTOR_IMPLEMENTATION_IS_MISSING_2390,
+                                &[],
+                            );
+                        } else if last_abstract {
+                            self.error(
+                                Loc::new(file, last.name_node),
+                                dg::ALL_DECLARATIONS_OF_AN_ABSTRACT_METHOD_MUST_BE_CONSECUTIVE_2516,
                                 &[],
                             );
                         } else {
@@ -202,12 +221,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ast = self.ast(file);
         let name = match *ast.node(n) {
+            // A body the parser recovered from nothing (`function f() => 4`) is none.
             Node::FunctionDecl {
                 name: Some(name),
-                body: None,
+                body,
                 return_type: None,
                 ..
-            } => name,
+            } if body.is_none_or(|b| ast.span(b).is_empty()) => name,
             // Private methods are exempt (their types are not part of declarations).
             Node::MethodDef {
                 kind: MethodKind::Method,
@@ -250,7 +270,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => return,
         };
-        let text = self.c.text(Loc::new(file, name)).to_owned();
+        let mut text = self.c.text(Loc::new(file, name)).to_owned();
+        // A name the parser recovered as missing prints as tsc's `(Missing)`.
+        if text.is_empty() {
+            text = "(Missing)".to_owned();
+        }
         self.error(
             Loc::new(file, name),
             dg::_0_WHICH_LACKS_RETURN_TYPE_ANNOTATION_IMPLICITLY_HAS_AN_1_RETURN_TYPE_7010,
@@ -258,7 +282,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         );
     }
 
-    fn fn_decl_info(&self, file: FileId, n: NodeId) -> Option<FnDecl> {
+    fn fn_decl_info(&mut self, file: FileId, n: NodeId) -> Option<FnDecl> {
         let ast = self.ast(file);
         match *ast.node(n) {
             Node::FunctionDecl {
@@ -299,7 +323,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let name = if k == Kind::Constructor {
                     "constructor".to_owned()
                 } else {
-                    key_text(ast, key)?
+                    match key_text(ast, key) {
+                        Some(t) => t,
+                        // A computed name of a literal or unique symbol type (`[Symbol.iterator]`).
+                        None => match *ast.node(key) {
+                            Node::ComputedKey { expr } => {
+                                self.late_bound_name(Loc::new(file, expr))?
+                            }
+                            _ => return None,
+                        },
+                    }
                 };
                 Some(FnDecl {
                     node: n,
@@ -364,6 +397,53 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// TS2383/2384/2385/2386/2512: modifiers that must agree across an overload set.
+    /// TS2386 at the method signature `n` (interface or type literal) when its `?` differs
+    /// from the first method signature of the same symbol, merged declarations included.
+    pub(crate) fn check_method_signature_optionality(&mut self, file: FileId, n: NodeId) {
+        if !self.reporting(file) {
+            return;
+        }
+        let Node::MethodSignature {
+            kind: MethodKind::Method,
+            key,
+            optional,
+            ..
+        } = *self.ast(file).node(n)
+        else {
+            return;
+        };
+        let here = Loc::new(file, n);
+        let Some(sym) = self.c.sym_of_decl(here) else {
+            return;
+        };
+        let first = self.c.decls(sym).into_iter().find(|d| {
+            matches!(
+                self.c.file(d.file).ast.node(d.node),
+                Node::MethodSignature {
+                    kind: MethodKind::Method,
+                    ..
+                }
+            )
+        });
+        let Some(first) = first else {
+            return;
+        };
+        let Node::MethodSignature {
+            optional: canonical,
+            ..
+        } = *self.c.file(first.file).ast.node(first.node)
+        else {
+            return;
+        };
+        if first != here && optional != canonical {
+            self.error(
+                Loc::new(file, key),
+                dg::OVERLOAD_SIGNATURES_MUST_ALL_BE_OPTIONAL_OR_REQUIRED_2386,
+                &[],
+            );
+        }
+    }
+
     fn check_overload_modifiers(
         &mut self,
         file: FileId,
@@ -545,14 +625,63 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 op = self.add_optionality(op);
             }
-            if skip(self, op) || skip(self, ip) {
+            // Two callback parameters compare their signatures, the overload's callback
+            // against the implementation's, with parameters only contravariant (their own
+            // types are skipped one by one: a method's callback type may mention `this`).
+            let unknown = |ck: &Self, t: TypeId| t == TypeId::UNRESOLVED || ck.store().is_error(t);
+            let callbacks = if unknown(self, op) || unknown(self, ip) {
+                None
+            } else {
+                self.callback_pair(ip, op)
+            };
+            let related = if let Some((icb, ocb)) = callbacks {
+                self.overload_callback_compatible(ocb, icb)
+            } else if skip(self, op) || skip(self, ip) {
                 continue;
-            }
-            let related = self.is_assignable(op, ip) || (bivariant && self.is_assignable(ip, op));
+            } else {
+                self.is_assignable(op, ip) || (bivariant && self.is_assignable(ip, op))
+            };
             if !related {
                 return false;
             }
         }
         true
+    }
+
+    /// Callback `s` (the overload's) against callback `t` (the implementation's): `s` may
+    /// not require more arguments than `t` takes, each parameter of `t` is assignable to
+    /// the one of `s`, and `s` returns something assignable to `t`'s return unless that is
+    /// `void` (tsc: checker/relater.go, compareSignaturesRelated in callback mode).
+    fn overload_callback_compatible(&mut self, s: SigId, t: SigId) -> bool {
+        let skip = |ck: &Self, t: TypeId| {
+            t == TypeId::UNRESOLVED
+                || ck.store().is_error(t)
+                || ck.could_contain_type_params(t)
+                || ck.mentions_enum(t)
+        };
+        let (s_count, s_rest) = self.param_count(s);
+        let (t_count, t_rest) = self.param_count(t);
+        if !t_rest && self.store().sig(s).min_args as usize > t_count {
+            return false;
+        }
+        let n = if s_rest || t_rest {
+            s_count.min(t_count) + 1
+        } else {
+            s_count.max(t_count)
+        };
+        for k in 0..n {
+            let (Some(sp), Some(tp)) = (self.param_type_at(s, k), self.param_type_at(t, k)) else {
+                continue;
+            };
+            if !skip(self, sp) && !skip(self, tp) && !self.is_assignable(tp, sp) {
+                return false;
+            }
+        }
+        let tr = self.return_type_of(t);
+        if tr == TypeId::VOID || skip(self, tr) {
+            return true;
+        }
+        let sr = self.return_type_of(s);
+        skip(self, sr) || self.is_assignable(sr, tr)
     }
 }

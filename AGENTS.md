@@ -12,9 +12,18 @@ minifier, resolver, bundler, linter, dev server, language server.
 
 - Do not depend on another compiler, bundler or linter (no swc, oxc, biome, tree-sitter,
   rolldown, esbuild, typescript, ts-rust/tsc-rs crates or WASM builds).
-- Do not copy or translate source code from tsc, ts-rust, esbuild or any other tool. Work from
-  our design records and from observed behaviour. Their *test suites* and *outputs* are oracles:
-  run them, compare against them, but don't port their implementation.
+- Never read Rust ports of TypeScript (ts-rust/tsc-rs, stc, ezno): not their source, not their
+  design notes. Their outputs and timings are fine as benchmarks.
+- Other tools' source (tsc 7, esbuild, ESLint, typescript-eslint, Vite, terser, swc, oxc,
+  Biome, ...) may be read to understand how a rule works and to compare our behaviour with
+  theirs. It is a reference, not something to port: write our own code on our own data model,
+  never copy or translate code line by line, and don't carry over their identifiers or comments.
+  Write the rule you learned in your own words in the crate's AGENTS.md or the design record,
+  and cite the upstream file you read (`tsc: tsc/internal/checker/relater.go`).
+- Their *test suites* and *outputs* stay the oracles: the tests decide what is right, the source
+  only explains why. tsc's source is in a clone of microsoft/TypeScript next to the main
+  checkout (`../TypeScript`); read it at the tag pinned in `upstream/UPSTREAM.json`, without
+  checking it out: `git -C ../TypeScript show v7.0.2:tsc/internal/checker/relater.go`.
 - Small general-purpose crates are fine when they save real work and are well maintained
   (for example `rustc-hash`, `memchr`, `smallvec`, `bumpalo`, `rkyv`, `memmap2`, `blake3`,
   `serde`/`serde_json`, `notify`, `rayon`, `crossbeam`). Say why in the crate's AGENTS.md.
@@ -80,6 +89,11 @@ moves when a person merges a reviewed branch.
 - Commit at every milestone: when a coherent piece works and `cargo test`, `cargo clippy -D warnings`
   and `cargo xtask agents-check` pass for your crates. Small, reviewable commits beat one huge one.
   Commit messages say what works and the measured results (speed, oracle match counts).
+- A change that moves a measured number (an oracle or conformance count, a benchmark) updates the
+  line that records it (the crate's `AGENTS.md` "Current" line, or the oracle's README) and the
+  matching row in `landing/data/conformance.json` or `landing/data/bench.json` in the same PR.
+  The website quotes those lines, and its build fails when a quote goes stale
+  (`landing/AGENTS.md`, "The rule for numbers"; `landing/` is only in the development repo).
 - Commit only the paths you own. Never commit `target/`, benchmark results, caches or binaries.
   `node_modules` inside `crates/*/tests/fixtures/` is committed on purpose.
 - If you were started in your own git worktree, commit and push your branch there

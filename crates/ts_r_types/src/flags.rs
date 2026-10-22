@@ -239,5 +239,8 @@ bitset! {
         const GENERATOR = 1 << 10;
         /// Signature created for an arrow/function expression.
         const EXPRESSION = 1 << 11;
+        /// A union's signature that stands for several members' signatures, one of them
+        /// abstract (`new` of `typeof Concrete | typeof Abstract` is TS2511).
+        const UNION_OF_ABSTRACT = 1 << 12;
     }
 }

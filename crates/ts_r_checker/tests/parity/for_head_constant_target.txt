@@ -1,0 +1,4 @@
+a.ts(2,6): error TS2588: Cannot assign to 'v' because it is a constant.
+a.ts(3,6): error TS2588: Cannot assign to 'v' because it is a constant.
+a.ts(5,6): error TS2630: Cannot assign to 'f' because it is a function.
+a.ts(7,6): error TS2629: Cannot assign to 'C' because it is a class.

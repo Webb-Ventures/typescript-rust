@@ -212,7 +212,9 @@ impl EmitConfig<'_> {
 /// root, also for `composite` projects; the default `rootDir` with `outDir`/
 /// `declarationDir`: the roots), and, when the
 /// program emits, TS5011 when `outDir`/`declarationDir` is set without `rootDir` and the
-/// common source directory is not the tsconfig's directory. Observed in tsc 7.0.2.
+/// common source directory is not the tsconfig's directory; TS5009 when `outDir` has no
+/// common source directory to mirror (files on different drives, no tsconfig or `rootDir`).
+/// Observed in tsc 7.0.2.
 pub fn root_dir_diagnostics(
     program: &ProgramFiles,
     cfg: &EmitConfig,
@@ -224,6 +226,21 @@ pub fn root_dir_diagnostics(
     // and files outside it are TS6059 as with an explicit `rootDir`.
     let explicit = o.root_dir().is_some() || (o.composite() == Some(true) && cfg.config.is_some());
     let dirs = o.out_dir().is_some() || o.declaration_dir().is_some();
+    // TS5009: `outDir` with no common source directory (no `rootDir`, no config file, and
+    // emitted files on different roots), when some file sits under a drive or URL root.
+    if o.out_dir().is_some()
+        && !explicit
+        && cfg.config.is_none()
+        && cfg.emitted_paths(program).next().is_some()
+        && paths::common_source_dir(cfg.emitted_paths(program), cfg.case_sensitive).is_none()
+        && program.files.iter().any(|f| path::root_length(&f.path) > 1)
+    {
+        let message = "Cannot find the common subdirectory path for the input files.".to_owned();
+        config.push(match o.origin(ts_r_config::OptionId::OutDir) {
+            Some(origin) => ConfigDiagnostic::at(5009, message, &origin.file, origin.key_span),
+            None => ConfigDiagnostic::global(5009, message),
+        });
+    }
     if !(explicit || (dirs && cfg.config.is_some())) {
         return (located, config);
     }
@@ -298,6 +315,81 @@ pub fn root_dir_diagnostics(
         config.push(d);
     }
     (located, config)
+}
+
+/// tsc's output-path check, a program diagnostic (reported whether or not anything is
+/// written; not under `noEmit`, nor under tsc's internal `suppressOutputPathCheck`, which
+/// the caller handles): every output path of every
+/// emitted source, in program order (`.js`, its map, `.d.ts`, its map), is TS5055 when it is
+/// a program file and TS5056 when an earlier source already writes it. Returns
+/// `(code, output path)` pairs; the caller words them (tsc adds the "Adding a tsconfig.json
+/// file" hint to TS5055 when there is no config file). Rule from
+/// `tsc/internal/compiler/program.go` (`verifyEmitFilePath`) and
+/// `tsc/internal/outputpaths/outputpaths.go`.
+pub fn output_path_conflicts(program: &ProgramFiles, cfg: &EmitConfig) -> Vec<(u32, String)> {
+    let o = cfg.options;
+    let mut out = Vec::new();
+    if o.effective().no_emit() {
+        return out;
+    }
+    let cs = cfg.case_sensitive;
+    let rules = cfg.path_rules(program);
+    let declaration_only = o.emit_declaration_only() == Some(true);
+    let declarations = o.effective().declaration();
+    let map = o.source_map() == Some(true) && o.inline_source_map() != Some(true);
+    let declaration_map = declarations && o.declaration_map() == Some(true);
+    let inputs: std::collections::HashSet<String> = program
+        .files
+        .iter()
+        .filter(|f| !f.is_lib)
+        .map(|f| path::key(&f.path, cs))
+        .collect();
+    let emitted: std::collections::HashSet<&str> = cfg.emitted_paths(program).collect();
+    let mut seen = std::collections::HashSet::new();
+    let allow_js = o.effective().allow_js();
+    for f in &program.files {
+        // A file reached through `node_modules` (also by a relative import) is a library's,
+        // not emitted; JavaScript is only emitted with `allowJs`.
+        if !emitted.contains(f.path.as_str())
+            || (f.path.contains("/node_modules/") && !is_root(program, &f.path, cs))
+            || (!allow_js && !f.kind.is_typescript() && !f.is_json())
+        {
+            continue;
+        }
+        let mut outputs: Vec<String> = Vec::new();
+        if f.is_json() {
+            if !declaration_only && let Some(js) = rules.json_output(&f.path) {
+                outputs.push(js);
+            }
+        } else {
+            if !declaration_only && let Some(js) = rules.js_output(&f.path) {
+                if map {
+                    outputs.push(js.clone());
+                    outputs.push(format!("{js}.map"));
+                } else {
+                    outputs.push(js);
+                }
+            }
+            if declarations && let Some(dts) = rules.dts_output(&f.path) {
+                if declaration_map {
+                    outputs.push(dts.clone());
+                    outputs.push(format!("{dts}.map"));
+                } else {
+                    outputs.push(dts);
+                }
+            }
+        }
+        for p in outputs {
+            let key = path::key(&p, cs);
+            if inputs.contains(&key) {
+                out.push((5055, p.clone()));
+            }
+            if !seen.insert(key) {
+                out.push((5056, p));
+            }
+        }
+    }
+    out
 }
 
 /// Why a root file is in the program (tsc's `--explainFiles` wording).

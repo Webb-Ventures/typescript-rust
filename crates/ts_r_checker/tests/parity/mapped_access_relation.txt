@@ -1,0 +1,18 @@
+a.ts(5,11): error TS2322: Type 'T[K] | undefined' is not assignable to type '[]'.
+  Type 'undefined' is not assignable to type '[]'.
+a.ts(6,5): error TS2322: Type 'T[K] | undefined' is not assignable to type 'T[K]'.
+  'T[K]' could be instantiated with an arbitrary type which could be unrelated to 'T[K] | undefined'.
+a.ts(9,5): error TS2322: Type 'T[K]' is not assignable to type 'U[K] | undefined'.
+  Type 'T[keyof T]' is not assignable to type 'U[K] | undefined'.
+    Type 'T[string] | T[number] | T[symbol]' is not assignable to type 'U[K] | undefined'.
+      Type 'T[string]' is not assignable to type 'U[K] | undefined'.
+a.ts(16,9): error TS2322: Type 'T[K]' is not assignable to type 'U[K] | undefined'.
+  Type 'T[keyof T]' is not assignable to type 'U[K] | undefined'.
+    Type 'T[string] | T[number] | T[symbol]' is not assignable to type 'U[K] | undefined'.
+      Type 'T[string]' is not assignable to type 'U[K] | undefined'.
+a.ts(17,9): error TS2322: Type 'T[K]' is not assignable to type 'string | U[K]'.
+  Type 'T[keyof T]' is not assignable to type 'string | U[K]'.
+    Type 'T[string] | T[number] | T[symbol]' is not assignable to type 'string | U[K]'.
+      Type 'T[string]' is not assignable to type 'string | U[K]'.
+a.ts(22,5): error TS2536: Type 'keyof U' cannot be used to index type 'T'.
+a.ts(23,5): error TS2542: Index signature in type 'Readonly<T>' only permits reading.

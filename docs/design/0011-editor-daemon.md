@@ -282,7 +282,7 @@ stops.
   that was linted.
 - VS Code's TypeScript extension stays the only TS/JS UI. ts-r reaches it only by standing in
   for tsserver, and whatever ts-r can't answer goes to a real tsserver.
-- Never read TypeScript's source.
+- TypeScript's source may be read to understand a feature, never translated.
 
 ## Known gaps
 

@@ -346,6 +346,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .map(|s| self.declared_type_of_symbol(s))
                     .filter(|&d| d != TypeId::UNRESOLVED && !self.store().is_error(d))
                     .map(|d| self.make_reference(d, &[value]));
+                // tsc's descriptor type lookup reports a missing global (TS2318).
+                if desc.is_none() && self.reporting(file) {
+                    self.report_missing_global_type("TypedPropertyDescriptor");
+                }
                 let desc = match desc {
                     Some(d) if value != TypeId::UNRESOLVED => d,
                     _ => {

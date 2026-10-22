@@ -1,0 +1,5 @@
+a.ts(4,5): error TS2764: Cannot iterate value because the 'next' method of its iterator expects type 'string', but array spread will always send 'undefined'.
+a.ts(6,5): error TS2765: Cannot iterate value because the 'next' method of its iterator expects type 'string', but array destructuring will always send 'undefined'.
+a.ts(8,1): error TS2765: Cannot iterate value because the 'next' method of its iterator expects type 'string', but array destructuring will always send 'undefined'.
+a.ts(9,11): error TS2763: Cannot iterate value because the 'next' method of its iterator expects type 'string', but for-of will always send 'undefined'.
+a.ts(14,21): error TS2763: Cannot iterate value because the 'next' method of its iterator expects type 'string', but for-of will always send 'undefined'.

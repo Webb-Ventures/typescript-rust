@@ -1,0 +1,8 @@
+a.ts(4,1): error TS18048: 'u' is possibly 'undefined'.
+a.ts(6,1): error TS18047: 'n' is possibly 'null'.
+a.ts(7,1): error TS2532: Object is possibly 'undefined'.
+a.ts(8,17): error TS2532: Object is possibly 'undefined'.
+a.ts(9,1): error TS18050: The value 'undefined' cannot be used here.
+a.ts(10,1): error TS18050: The value 'null' cannot be used here.
+a.ts(11,1): error TS2531: Object is possibly 'null'.
+a.ts(12,3): error TS2539: Cannot assign to 'undefined' because it is not a variable.

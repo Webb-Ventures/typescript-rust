@@ -1,0 +1,2 @@
+a.ts(16,25): error TS2322: Type '[boolean, string]' is not assignable to type '[string]'.
+  Source has 2 element(s) but target allows only 1.

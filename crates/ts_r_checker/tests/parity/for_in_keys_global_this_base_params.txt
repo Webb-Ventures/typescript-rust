@@ -1,0 +1,6 @@
+a.ts(6,12): error TS7017: Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.
+a.ts(13,13): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(16,13): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(27,27): error TS2562: Base class expressions cannot reference class type parameters.

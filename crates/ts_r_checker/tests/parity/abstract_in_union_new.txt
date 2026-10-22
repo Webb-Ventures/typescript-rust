@@ -1,0 +1,2 @@
+a.ts(8,1): error TS2511: Cannot create an instance of an abstract class.
+a.ts(10,35): error TS2511: Cannot create an instance of an abstract class.

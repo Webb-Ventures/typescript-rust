@@ -1,0 +1,2 @@
+a.ts(4,13): error TS2514: A tuple type cannot be indexed with a negative value.
+a.ts(5,27): error TS2514: A tuple type cannot be indexed with a negative value.

@@ -1,6 +1,6 @@
 //! Repeats a cold (or warm) bundle in one process, for profiling and in-process timing.
 //!
-//! `cargo run --release -p ts_r_bundler --example build_loop -- <working-dir> <entry> [runs] [--warm] [--minify] [--edit FILE] [--format=esm|cjs|iife] [--loader:.EXT=LOADER]...`
+//! `cargo run --release -p ts_r_bundler --example build_loop -- <working-dir> <entry> [runs] [--warm] [--minify] [--sourcemap] [--threads=N] [--global-name=NAME] [--edit FILE] [--format=esm|cjs|iife] [--loader:.EXT=LOADER]...`
 //!
 //! `--edit FILE` (relative to the working directory) is the incremental benchmark: one
 //! initial build, then `runs` times append a comment to FILE, `invalidate` it and rebuild,
@@ -30,7 +30,15 @@ fn main() {
     // esbuild's spelling: `--loader:.woff2=file`, `--format=esm`.
     let mut loaders = rustc_hash::FxHashMap::default();
     let mut format = None;
+    let mut threads = 0;
+    let mut global_name = None;
     for a in &args {
+        if let Some(g) = a.strip_prefix("--global-name=") {
+            global_name = Some(g.to_owned());
+        }
+        if let Some(n) = a.strip_prefix("--threads=") {
+            threads = n.parse().unwrap_or(0);
+        }
         if let Some((ext, loader)) = a.strip_prefix("--loader:").and_then(|l| l.split_once('=')) {
             let Some(loader) = Loader::parse(loader) else {
                 eprintln!("unknown loader {loader}");
@@ -59,6 +67,13 @@ fn main() {
         minify_syntax: minify,
         loaders,
         format,
+        threads,
+        global_name,
+        sourcemap: if args.iter().any(|a| a == "--sourcemap") {
+            ts_r_bundler::SourceMapMode::Linked
+        } else {
+            ts_r_bundler::SourceMapMode::None
+        },
         jsx: ts_r_bundler::JsxOptions {
             mode: Some("automatic".into()),
             ..Default::default()

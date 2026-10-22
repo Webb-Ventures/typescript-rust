@@ -22,3 +22,6 @@ rustc-hash = "2"
 
 [dev-dependencies]
 ts_r_testing = { path = "../ts_r_testing" }
+# The conformance example reports declaration diagnostics through declaration emit, as
+# tsc's harness does (a dev-dependency cycle: examples link the one library build).
+ts_r_emit = { path = "../ts_r_emit" }

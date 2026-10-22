@@ -1,0 +1,5 @@
+a.d.ts(1,1): error TS1314: Global module exports may only appear in module files.
+b.d.ts(2,1): error TS1184: Modifiers cannot appear here.
+c.ts(2,1): error TS1315: Global module exports may only appear in declaration files.
+d.d.ts(2,5): error TS1316: Global module exports may only appear at top level.
+d.d.ts(5,5): error TS1316: Global module exports may only appear at top level.

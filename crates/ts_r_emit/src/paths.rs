@@ -63,7 +63,8 @@ fn strip_extension(source: &str) -> &str {
 }
 
 /// The longest directory containing every path in `files` (absolute, normalised). One file:
-/// its directory.
+/// its directory. None without files, and when two files have different roots (drives):
+/// tsc then has no common directory at all (`tsc: tsc/internal/outputpaths/commonsourcedirectory.go`).
 pub fn common_source_dir<'a>(
     files: impl IntoIterator<Item = &'a str>,
     case_sensitive: bool,
@@ -81,9 +82,7 @@ pub fn common_source_dir<'a>(
             }
             Some((r, c)) => {
                 if !path::eq(r, root, case_sensitive) {
-                    // Different roots (drives): no common directory below the roots.
-                    c.clear();
-                    continue;
+                    return None;
                 }
                 let n = c
                     .iter()
@@ -212,5 +211,9 @@ mod tests {
         assert_eq!(c(&["/p/src/a.ts", "/p/b.ts"]).as_deref(), Some("/p"));
         assert_eq!(c(&["/p/a.ts", "/q/b.ts"]).as_deref(), Some("/"));
         assert_eq!(c(&[]), None);
+        assert_eq!(c(&["A:/foo/a.ts", "B:/foo/b.ts"]), None);
+        assert_eq!(c(&["A:/foo/a.ts", "a:/foo/b.ts"]), None);
+        let insensitive = common_source_dir(["A:/foo/a.ts", "a:/foo/b.ts"], false);
+        assert_eq!(insensitive.as_deref(), Some("A:/foo"));
     }
 }

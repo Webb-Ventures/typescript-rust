@@ -1,0 +1,10 @@
+let foo = "bar";
+let bar = "";
+let n = 0;
+({ [foo]: bar } = { bar: "bar" });
+[{ [foo]: bar }] = [{ bar: "bar" }];
+let x: boolean = false;
+({ ["x" + ""]: x } = 0 as any);
+({ [foo]: x } = 1);
+({ [foo]: bar } = "s");
+export { bar, x };

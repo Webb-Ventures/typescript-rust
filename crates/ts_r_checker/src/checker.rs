@@ -63,6 +63,8 @@ pub struct CheckOptions {
     pub no_implicit_returns: bool,
     pub no_implicit_override: bool,
     pub no_property_access_from_index_signature: bool,
+    /// `allowUmdGlobalAccess`: a module may read a UMD global as a value (no TS2686).
+    pub allow_umd_global_access: bool,
     pub no_fallthrough_cases_in_switch: bool,
     /// Types print untruncated (cycles as `any`, not `...`).
     pub no_error_truncation: bool,
@@ -71,7 +73,10 @@ pub struct CheckOptions {
     pub allow_unreachable_code: Option<bool>,
     pub skip_lib_check: bool,
     pub isolated_modules: bool,
+    /// `isolatedModules` set to true in the options (not implied by `verbatimModuleSyntax`).
+    pub isolated_modules_explicit: bool,
     pub verbatim_module_syntax: bool,
+    pub erasable_syntax_only: bool,
     pub es_module_interop: bool,
     pub allow_synthetic_default_imports: bool,
     pub resolve_json_module: bool,
@@ -83,8 +88,13 @@ pub struct CheckOptions {
     pub check_js: bool,
     /// `allowImportingTsExtensions` (or `rewriteRelativeImportExtensions`).
     pub allow_importing_ts_extensions: bool,
+    /// `rewriteRelativeImportExtensions`.
+    pub rewrite_relative_import_extensions: bool,
+    /// `noUncheckedSideEffectImports` (default on in TS 7).
+    pub no_unchecked_side_effect_imports: bool,
     pub use_define_for_class_fields: bool,
     pub experimental_decorators: bool,
+    pub emit_decorator_metadata: bool,
     /// `jsx` is set (any mode).
     pub jsx_set: bool,
     /// `jsx` is `react-jsx` or `react-jsxdev` (the JSX namespace may come from the
@@ -101,6 +111,9 @@ pub struct CheckOptions {
     pub jsx_factory_custom: bool,
     /// `jsxFragmentFactory` is set.
     pub jsx_fragment_factory_set: bool,
+    /// The JSX factory entity: a valid `jsxFactory`, else `<reactNamespace>.createElement`,
+    /// else `React.createElement`.
+    pub jsx_factory_entity: String,
     /// `importHelpers`.
     pub import_helpers: bool,
     /// `noEmit`.
@@ -129,6 +142,7 @@ impl CheckOptions {
             no_unchecked_indexed_access: flag(o.no_unchecked_indexed_access()),
             no_implicit_returns: flag(o.no_implicit_returns()),
             no_implicit_override: flag(o.no_implicit_override()),
+            allow_umd_global_access: flag(o.allow_umd_global_access()),
             no_property_access_from_index_signature: flag(
                 o.no_property_access_from_index_signature(),
             ),
@@ -138,8 +152,10 @@ impl CheckOptions {
             no_unused_parameters: flag(o.no_unused_parameters()),
             allow_unreachable_code: o.allow_unreachable_code(),
             skip_lib_check: flag(o.skip_lib_check()),
-            isolated_modules: e.isolated_modules(),
+            isolated_modules: e.isolated_modules() || flag(o.verbatim_module_syntax()),
+            isolated_modules_explicit: flag(o.isolated_modules()),
             verbatim_module_syntax: flag(o.verbatim_module_syntax()),
+            erasable_syntax_only: flag(o.erasable_syntax_only()),
             es_module_interop: e.es_module_interop(),
             allow_synthetic_default_imports: e.allow_synthetic_default_imports(),
             resolve_json_module: e.resolve_json_module(),
@@ -151,13 +167,24 @@ impl CheckOptions {
             jsx_automatic: matches!(o.jsx(), Some(JsxEmit::ReactJsx | JsxEmit::ReactJsxDev)),
             check_js: flag(o.check_js()),
             allow_importing_ts_extensions: e.allow_importing_ts_extensions(),
+            rewrite_relative_import_extensions: flag(o.rewrite_relative_import_extensions()),
+            no_unchecked_side_effect_imports: e.no_unchecked_side_effect_imports(),
             use_define_for_class_fields: e.use_define_for_class_fields(),
             experimental_decorators: flag(o.experimental_decorators()),
+            emit_decorator_metadata: flag(o.emit_decorator_metadata()),
             jsx_factory_roots: jsx_factory_roots(o),
             jsx: o.jsx(),
             jsx_import_source: e.jsx_import_source().to_owned(),
             jsx_factory_custom: o.jsx_factory().is_some_and(is_qualified_name),
             jsx_fragment_factory_set: o.jsx_fragment_factory().is_some(),
+            jsx_factory_entity: match (
+                o.jsx_factory().filter(|f| is_qualified_name(f)),
+                o.react_namespace(),
+            ) {
+                (Some(f), _) => f.trim().to_owned(),
+                (None, Some(ns)) => format!("{}.createElement", ns.trim()),
+                (None, None) => "React.createElement".to_owned(),
+            },
             import_helpers: flag(o.import_helpers()),
             no_emit: e.no_emit(),
             node_resolution: matches!(
@@ -231,10 +258,12 @@ pub enum GlobalType {
     Awaited,
     Disposable,
     AsyncDisposable,
+    ImportAttributes,
+    ImportCallOptions,
 }
 
 impl GlobalType {
-    pub const COUNT: usize = 30;
+    pub const COUNT: usize = 32;
 
     pub fn name(self) -> &'static str {
         match self {
@@ -268,6 +297,8 @@ impl GlobalType {
             GlobalType::Awaited => "Awaited",
             GlobalType::Disposable => "Disposable",
             GlobalType::AsyncDisposable => "AsyncDisposable",
+            GlobalType::ImportAttributes => "ImportAttributes",
+            GlobalType::ImportCallOptions => "ImportCallOptions",
         }
     }
 }
@@ -592,13 +623,22 @@ pub struct Ck<'c, 'a> {
     pub(crate) resolving: Vec<(Resolving, bool)>,
     /// Conditional constraints being computed (nested; bounded, see `conditional_constraint`).
     pub(crate) cond_constraint_depth: u32,
+    /// Lower bounds of generic mapped types' key types (`Ck::mapped_lower_bound_keys`;
+    /// `None` while one is being computed, so a cycle reads as no bound).
+    pub(crate) mapped_key_bounds: FxHashMap<TypeId, Option<TypeId>>,
     /// Type parameters of the calls whose type arguments are being inferred (outermost
     /// first): an inner call's contextual type mentions them before they are known.
     pub(crate) inferring_params: Vec<TypeId>,
+    /// Type parameters whose declared default is being resolved: a default that needs
+    /// itself (`interface I<T = I> {}`) is circular and reads as no default.
+    pub(crate) resolving_defaults: Vec<(TypeId, bool)>,
     pub(crate) circular: FxHashSet<Resolving>,
     /// The first resolution cycle found through each symbol's type (the stack from its
     /// `Resolving::Type` entry up), for TS2502 (`circular_annotations`).
     pub(crate) type_cycles: FxHashMap<SymId, Vec<Resolving>>,
+    /// The first cycle found through each inferred return type (as `type_cycles`), for
+    /// every return type on a cycle that closes at a return type.
+    pub(crate) return_cycles: FxHashMap<SigId, Vec<Resolving>>,
     /// Types whose base constraint is being computed (`Ck::base_constraint`).
     pub(crate) base_constraints: Vec<TypeId>,
     pub(crate) flow_cache: FxHashMap<crate::flow::FlowKey, TypeId>,
@@ -632,9 +672,16 @@ pub struct Ck<'c, 'a> {
     /// (and linked) once no type alias is being resolved.
     pub(crate) pending_forwards: Vec<SymId>,
     pub(crate) assigned_syms: FxHashSet<SymId>,
+    /// Assigned symbols with at least one non-compound assignment (`x = ...`, not `x++`).
+    pub(crate) definitely_assigned_syms: FxHashSet<SymId>,
     /// The start of the last assignment (not declaration) to each assigned symbol.
     pub(crate) last_assignment: FxHashMap<SymId, u32>,
     pub(crate) assigned_syms_files: FxHashSet<FileId>,
+    /// Symbols with a plain `x = []` assignment (filled with `assigned_syms`).
+    pub(crate) empty_array_assigned_syms: FxHashSet<SymId>,
+    /// Loop labels an evolving-array walk is iterating, so a read re-entered from inside
+    /// the loop sees the value so far.
+    pub(crate) ev_pending: Vec<crate::flow::EvPending>,
     pub(crate) call_kinds: FxHashMap<Loc, crate::flow::CallKindCache>,
     /// Final reachability of statement flows (with exhaustive switches, within a function).
     pub(crate) reachable_flows: FxHashMap<(FileId, ts_r_binder::FlowId), bool>,
@@ -646,7 +693,7 @@ pub struct Ck<'c, 'a> {
     /// `typeof globalThis`, built on first use.
     pub(crate) global_this: Option<TypeId>,
     /// Whether a `switch` (without `default`) covers every value of its discriminant.
-    pub(crate) exhaustive_switches: FxHashMap<Loc, bool>,
+    pub(crate) exhaustive_switches: FxHashMap<Loc, Option<bool>>,
     /// Expressions already checked with reporting on.
     pub(crate) checked: FxHashSet<Loc>,
     /// Function and class bodies to check after the current statement walk.
@@ -687,8 +734,14 @@ pub struct Ck<'c, 'a> {
     pub(crate) spec_node_types: FxHashMap<Loc, (u64, TypeId)>,
     /// Types of function expressions.
     pub(crate) fn_types: FxHashMap<Loc, TypeId>,
+    /// The property each name's first `undefined` stand-in was made from when a widened
+    /// object literal gained a sibling's missing property; later stand-ins of the name are
+    /// ordered by its declaration (tsc shares one stand-in per name).
+    pub(crate) undefined_prop_origin: FxHashMap<ts_r_types::StrId, SymId>,
     /// Widened object literal types.
     pub(crate) widened: FxHashMap<TypeId, TypeId>,
+    /// [`Ck::reduced_type`] results.
+    pub(crate) reduced: FxHashMap<TypeId, TypeId>,
     pub(crate) flow_depth: u32,
     pub(crate) depth: u32,
     /// Stack of contextual types for expressions being checked: `(expression, type)`.
@@ -712,6 +765,11 @@ pub struct Ck<'c, 'a> {
     /// Assumed types of parameters while checking a function expression under a contextual
     /// signature.
     pub(crate) param_types: FxHashMap<Loc, TypeId>,
+    /// Arguments of immediately invoked functions whose contextual type was needed while
+    /// the call was being resolved (`(f => f(1))(i => i)`): they have no contextual type.
+    pub(crate) circular_iife_args: FxHashSet<Loc>,
+    /// Arguments being checked to type an immediately invoked function's parameters.
+    pub(crate) iife_args: Vec<Loc>,
     /// Whether each function's parameter list contains syntax the target lowers.
     pub(crate) lowered_params: FxHashMap<Loc, bool>,
     /// Signatures resolved at call sites.
@@ -748,6 +806,9 @@ pub struct Ck<'c, 'a> {
     /// sorting big member lists is the expensive part, and the same lists come back
     /// (constraints of indexed accesses). Pure in its key, so kept across files.
     pub(crate) union_cache: crate::unions::UnionCache,
+    /// Whether one enum's members all exist with the same values in another enum
+    /// (`relate.rs`), by the two enum symbols. Pure in its key, so kept across files.
+    pub(crate) enum_relation: FxHashMap<(SymId, SymId), bool>,
     /// Per union contextual type: what discriminating object literals against it needs
     /// (`func.rs`). Pure in the type, so kept across files.
     pub(crate) discriminants: Discriminants,
@@ -758,6 +819,9 @@ pub struct Ck<'c, 'a> {
     /// bare names except to tell apart two types that would print alike, and for an enum
     /// type widened from one of its members.
     pub(crate) print_qualified: bool,
+    /// With `print_qualified`, also name the module a type comes from
+    /// (`import("a").F`): only to tell apart two relation operands that print alike.
+    pub(crate) print_module_qualified: bool,
     /// Types printed so far by the outermost `print_type` call (a budget against nested
     /// generic instantiations that double at each level).
     pub(crate) print_nodes: u32,
@@ -793,9 +857,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             type_nodes: FxHashMap::default(),
             resolving: Vec::new(),
             cond_constraint_depth: 0,
+            mapped_key_bounds: FxHashMap::default(),
             inferring_params: Vec::new(),
+            resolving_defaults: Vec::new(),
             circular: FxHashSet::default(),
             type_cycles: FxHashMap::default(),
+            return_cycles: FxHashMap::default(),
             base_constraints: Vec::new(),
             flow_cache: FxHashMap::default(),
             flow_temp: FxHashMap::default(),
@@ -811,8 +878,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             deferred_alias_ref: false,
             pending_forwards: Vec::new(),
             assigned_syms: FxHashSet::default(),
+            definitely_assigned_syms: FxHashSet::default(),
             last_assignment: FxHashMap::default(),
             assigned_syms_files: FxHashSet::default(),
+            empty_array_assigned_syms: FxHashSet::default(),
+            ev_pending: Vec::new(),
             call_kinds: FxHashMap::default(),
             reachable_flows: FxHashMap::default(),
             unreachable_runs: Vec::new(),
@@ -825,6 +895,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             speculative: 0,
             fn_types: FxHashMap::default(),
             widened: FxHashMap::default(),
+            undefined_prop_origin: FxHashMap::default(),
+            reduced: FxHashMap::default(),
             flow_depth: 0,
             depth: 0,
             context_overrides: Vec::new(),
@@ -835,6 +907,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             reported: FxHashSet::default(),
             rel: crate::relate::RelState::default(),
             param_types: FxHashMap::default(),
+            circular_iife_args: FxHashSet::default(),
+            iife_args: Vec::new(),
             lowered_params: FxHashMap::default(),
             resolved_calls: FxHashMap::default(),
             overload_failed: false,
@@ -866,11 +940,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             union_props: FxHashMap::default(),
             print_scope: None,
             print_qualified: false,
+            print_module_qualified: false,
             print_nodes: 0,
             compound_assigned: FxHashMap::default(),
             reverse_mapping: Vec::new(),
             spread_literals: FxHashMap::default(),
             union_cache: Default::default(),
+            enum_relation: FxHashMap::default(),
             discriminants: Default::default(),
             jsx: Default::default(),
         }
@@ -941,6 +1017,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         self.diags
             .push(Diagnostic::new(msg(info), span, args).with_file(file));
+    }
+
+    /// [`Ck::global_type`], reporting a missing one as global TS2318 (tsc's global type
+    /// lookups that report errors). Call it only from a reporting check: the diagnostic goes
+    /// out unconditionally (deduplicated with the program's diagnostics).
+    pub fn global_type_reported(&mut self, g: GlobalType) -> Option<TypeId> {
+        let t = self.global_type(g);
+        if t.is_none() {
+            self.report_missing_global_type(g.name());
+        }
+        t
+    }
+
+    /// Global TS2318 for the global type `name`.
+    pub fn report_missing_global_type(&mut self, name: &str) {
+        let mut d = Diagnostic::new(
+            msg(dg::CANNOT_FIND_GLOBAL_TYPE_0_2318),
+            Span::new(0, 0),
+            &[name],
+        );
+        d.file = FileId(u32::MAX);
+        self.diags.push(d);
     }
 
     /// Reports at the span of node `l`.
@@ -1104,6 +1202,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 let path = self.resolving[i..].iter().take(256).map(|e| e.0).collect();
                 self.type_cycles.insert(s, path);
+            }
+            if let Resolving::Return(_) = r {
+                let path: Vec<Resolving> =
+                    self.resolving[i..].iter().take(256).map(|e| e.0).collect();
+                for e in &path {
+                    if let Resolving::Return(s) = *e {
+                        self.return_cycles.entry(s).or_insert_with(|| path.clone());
+                    }
+                }
             }
             return false;
         }

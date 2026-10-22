@@ -221,6 +221,163 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_decorator_call(file, d, n, t);
             }
         }
+        if !ast.list(decorators).is_empty() {
+            self.check_decorator_metadata_imports(file, n);
+        }
+    }
+
+    /// Under `isolatedModules` with `emitDecoratorMetadata` and ES module emit, the types
+    /// a decorated node's metadata names (a class's constructor parameters, a method's
+    /// parameters and return type, an accessor's or property's type, a decorated
+    /// parameter's whole signature) must not be plain imports of types: the emitted
+    /// metadata reads them as values. TS1272 at the type name (tsc: checker.go
+    /// markDecoratorAliasReferenced). `verbatimModuleSyntax` turns the check off.
+    fn check_decorator_metadata_imports(&mut self, file: FileId, n: NodeId) {
+        use ts_r_config::ModuleKind as M;
+        let o = &self.c.opts;
+        if !o.emit_decorator_metadata
+            || !o.isolated_modules
+            || o.verbatim_module_syntax
+            || matches!(o.module, M::CommonJS | M::AMD | M::UMD | M::System)
+        {
+            return;
+        }
+        let ast = self.ast(file);
+        if !matches!(ast.node(n), Node::PropertyDef { .. })
+            && self.is_ambient_node(Loc::new(file, n))
+        {
+            return;
+        }
+        let mut types: Vec<Option<NodeId>> = Vec::new();
+        let sig_types = |f: NodeId, types: &mut Vec<Option<NodeId>>, ret: bool| {
+            if let Node::FunctionExpr {
+                params,
+                return_type,
+                ..
+            } = *ast.node(f)
+            {
+                types.extend(
+                    ast.list(params)
+                        .iter()
+                        .map(|&p| param_metadata_type(ast, p)),
+                );
+                if ret {
+                    types.push(return_type);
+                }
+            }
+        };
+        match *ast.node(n) {
+            Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => {
+                let ctor = ast.list(members).iter().find_map(|&m| match *ast.node(m) {
+                    Node::MethodDef {
+                        kind: MethodKind::Constructor,
+                        value,
+                        ..
+                    } if matches!(ast.node(value), Node::FunctionExpr { body: Some(_), .. }) => {
+                        Some(value)
+                    }
+                    _ => None,
+                });
+                if let Some(f) = ctor {
+                    sig_types(f, &mut types, false);
+                }
+            }
+            Node::MethodDef {
+                kind: kind @ (MethodKind::Get | MethodKind::Set),
+                key,
+                modifiers,
+                value,
+                ..
+            } => {
+                let mut t = accessor_annotation(ast, kind, value);
+                if t.is_none()
+                    && let Some(class) = self.c.parent(Loc::new(file, n))
+                    && let Some(members) = match *ast.node(class.node) {
+                        Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => {
+                            Some(members)
+                        }
+                        _ => None,
+                    }
+                {
+                    let name = crate::nodes::key_text(ast, key);
+                    let other_kind = if kind == MethodKind::Get {
+                        MethodKind::Set
+                    } else {
+                        MethodKind::Get
+                    };
+                    let is_static = modifiers.contains(Modifiers::STATIC);
+                    t = ast.list(members).iter().find_map(|&m| match *ast.node(m) {
+                        Node::MethodDef {
+                            kind: k,
+                            key: k2,
+                            modifiers: m2,
+                            value: v2,
+                            ..
+                        } if k == other_kind
+                            && m2.contains(Modifiers::STATIC) == is_static
+                            && name.is_some()
+                            && crate::nodes::key_text(ast, k2) == name =>
+                        {
+                            accessor_annotation(ast, k, v2)
+                        }
+                        _ => None,
+                    });
+                }
+                types.push(t);
+            }
+            Node::MethodDef { value, .. } => sig_types(value, &mut types, true),
+            Node::PropertyDef { type_ann, .. } => types.push(type_ann),
+            Node::Param { .. } => {
+                types.push(param_metadata_type(ast, n));
+                if let Some(f) = self.c.parent(Loc::new(file, n)) {
+                    sig_types(f.node, &mut types, true);
+                }
+            }
+            _ => {}
+        }
+        let strict_null = self.c.opts.strict_null_checks;
+        for t in types.into_iter().flatten() {
+            let Some(name) = metadata_entity_name(ast, t, strict_null, 0) else {
+                continue;
+            };
+            let mut root = name;
+            let mut guard = 0;
+            while let Node::QualifiedName { left, .. } = *ast.node(root) {
+                root = left;
+                guard += 1;
+                if guard > 10_000 {
+                    break;
+                }
+            }
+            let m = if root == name {
+                ts_r_binder::meaning::TYPE
+            } else {
+                ts_r_binder::meaning::NAMESPACE
+            };
+            let Some(s) = self.c.resolve_ident(Loc::new(file, root), m) else {
+                continue;
+            };
+            if !self
+                .c
+                .sym_flags(s)
+                .intersects(ts_r_binder::SymbolFlags::ALIAS)
+                || self
+                    .c
+                    .sym_facts(s)
+                    .intersects(ts_r_binder::SymbolFacts::TYPE_ONLY)
+            {
+                continue;
+            }
+            if self.c.alias_lacks_meaning(s, ts_r_binder::meaning::VALUE)
+                || self.type_only_alias_file(s).is_some()
+            {
+                self.error(
+                    Loc::new(file, name),
+                    dg::A_TYPE_REFERENCED_IN_A_DECORATED_SIGNATURE_MUST_BE_IMPORTED_WITH_IMPORT_TYPE_OR_A_1272,
+                    &[],
+                );
+            }
+        }
     }
 
     /// `experimentalDecorators`: parameter `p` belongs to a class constructor, method or
@@ -274,5 +431,100 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     fn decorator_error(&mut self, file: FileId, start: u32, info: dg::DiagnosticInfo) {
         self.error_span(file, Span::new(start, start + 1), info, &[]);
+    }
+}
+
+/// The annotated type of an accessor: a getter's return type, a setter's parameter type.
+fn accessor_annotation(ast: &ts_r_ast::Ast, kind: MethodKind, f: NodeId) -> Option<NodeId> {
+    let Node::FunctionExpr {
+        params,
+        return_type,
+        ..
+    } = *ast.node(f)
+    else {
+        return None;
+    };
+    match kind {
+        MethodKind::Get => return_type,
+        _ => match ast.list(params).first().map(|&p| ast.node(p)) {
+            Some(Node::Param { type_ann, .. }) => *type_ann,
+            _ => None,
+        },
+    }
+}
+
+/// The type of parameter `p` its metadata describes: the element type of a rest
+/// parameter's array type.
+fn param_metadata_type(ast: &ts_r_ast::Ast, p: NodeId) -> Option<NodeId> {
+    let Node::Param { rest, type_ann, .. } = *ast.node(p) else {
+        return None;
+    };
+    let t = type_ann?;
+    if !rest {
+        return Some(t);
+    }
+    match *ast.node(t) {
+        Node::ArrayType { elem } => Some(elem),
+        Node::TypeRef {
+            type_args: Some(a), ..
+        } => match *ast.node(a) {
+            Node::TypeArgs { args } => ast.list(args).first().copied(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The entity name decorator metadata serializes type node `t` as: a type reference's
+/// name, or the one name every member of a union or intersection (or both branches of a
+/// conditional) shares, skipping `never` and, without `strictNullChecks`, `null` and
+/// `undefined`.
+fn metadata_entity_name(
+    ast: &ts_r_ast::Ast,
+    t: NodeId,
+    strict_null: bool,
+    depth: u32,
+) -> Option<NodeId> {
+    if depth > 64 {
+        return None;
+    }
+    let from_list = |types: &[NodeId]| -> Option<NodeId> {
+        let mut common: Option<NodeId> = None;
+        for &m in types {
+            match *ast.node(m) {
+                Node::KeywordType {
+                    kind: ts_r_ast::KeywordTypeKind::Never,
+                } => continue,
+                Node::KeywordType {
+                    kind: ts_r_ast::KeywordTypeKind::Null | ts_r_ast::KeywordTypeKind::Undefined,
+                } if !strict_null => continue,
+                _ => {}
+            }
+            let one = metadata_entity_name(ast, m, strict_null, depth + 1)?;
+            match common {
+                None => common = Some(one),
+                Some(c) => {
+                    let same = matches!(
+                        (ast.node(c), ast.node(one)),
+                        (Node::Ident { name: a }, Node::Ident { name: b }) if a == b
+                    );
+                    if !same {
+                        return None;
+                    }
+                }
+            }
+        }
+        common
+    };
+    match *ast.node(t) {
+        Node::UnionType { types } | Node::IntersectionType { types } => from_list(ast.list(types)),
+        Node::ConditionalType {
+            true_ty, false_ty, ..
+        } => from_list(&[true_ty, false_ty]),
+        Node::ParenType { ty } | Node::NamedTupleMember { ty, .. } => {
+            metadata_entity_name(ast, ty, strict_null, depth + 1)
+        }
+        Node::TypeRef { name, .. } => Some(name),
+        _ => None,
     }
 }

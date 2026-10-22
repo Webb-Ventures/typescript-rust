@@ -308,11 +308,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.c.opts.exact_optional_property_types {
                 pt = self.remove_missing(pt);
             }
-            if self.mentions_enum(pt)
-                || self
-                    .store()
-                    .flags(pt)
-                    .intersects(TypeFlags::ANY | TypeFlags::UNKNOWN)
+            if self
+                .store()
+                .flags(pt)
+                .intersects(TypeFlags::ANY | TypeFlags::UNKNOWN)
                 || pt == TypeId::UNRESOLVED
                 || self.store().is_error(pt)
             {
@@ -321,7 +320,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             for info in &index {
                 if !self.index_applies(info.key, &name)
                     || info.value == TypeId::UNRESOLVED
-                    || self.mentions_enum(info.value)
                     || self.is_assignable(pt, info.value)
                 {
                     continue;
@@ -515,13 +513,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             || self.store().is_error(pt)
     }
 
-    /// Whether a member of type `pt` satisfies `info` (or can't be judged: index value
-    /// types that mention enums aren't modelled precisely enough, `number` to numeric
-    /// enums).
+    /// Whether a member of type `pt` satisfies `info` (or can't be judged).
     fn index_value_holds(&mut self, pt: TypeId, info: &IndexInfo) -> bool {
-        info.value == TypeId::UNRESOLVED
-            || self.mentions_enum(info.value)
-            || self.is_assignable(pt, info.value)
+        info.value == TypeId::UNRESOLVED || self.is_assignable(pt, info.value)
     }
 
     fn report_member_index(

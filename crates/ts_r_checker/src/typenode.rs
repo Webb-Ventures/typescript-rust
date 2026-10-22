@@ -452,6 +452,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             TypeKind::Union { list, .. } => {
                 let members = match s.union_origin(t) {
+                    Some(&[one]) => return self.tn(one, cx),
                     Some(o) => o.to_vec(),
                     None => s.list_items(list).to_vec(),
                 };
@@ -1445,9 +1446,26 @@ impl<'c, 'a> Ck<'c, 'a> {
             && d.file != cx.enclosing.file
             && self.c.file(d.file).bound.is_module
         {
+            // The name is the first one of its entity chain (`Foo` for `Foo.sym`): its
+            // outermost container below the file's module (observed).
+            let mut top = sym;
+            for _ in 0..64 {
+                let Some(p) = self.c.sym_parent(top) else {
+                    break;
+                };
+                match self.c.first_decl(p) {
+                    Some(pd) if pd.node != self.c.file(pd.file).ast.root => top = p,
+                    _ => break,
+                }
+            }
+            let name = if top == sym {
+                base.to_owned()
+            } else {
+                self.c.sym_name(top).to_owned()
+            };
             let path = &self.c.file(d.file).path;
             return NotNameable::CannotBeNamed {
-                name: base.to_owned(),
+                name,
                 module: format!("\"{}\"", crate::print::strip_ts_ext(path)),
             };
         }
@@ -2346,6 +2364,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         r
     }
 
+    /// The declared property a (possibly synthesized) property stands for.
+    fn private_origin(&self, p: SymId) -> SymId {
+        match self.c.synth_sym(p) {
+            Some(x) => x.origins.first().copied().unwrap_or(p),
+            None => p,
+        }
+    }
+
     fn structure_inner(&mut self, t: TypeId, cx: &mut TypeNodeCx, collapse: bool) -> Built {
         // Keys of an object literal written from its syntax map to the literal's keys.
         let literal_keys = cx.literal_keys.take();
@@ -2381,11 +2407,28 @@ impl<'c, 'a> Ck<'c, 'a> {
             return self.signature_node(construct[0], SigShape::Constructor, None, cx);
         }
         let mut members = Vec::new();
-        for &c in &call {
-            members.push(self.signature_node(c, SigShape::Call, None, cx)?);
-        }
-        for &c in &construct {
-            members.push(self.signature_node(c, SigShape::Construct, None, cx)?);
+        for (&c, shape) in call
+            .iter()
+            .map(|c| (c, SigShape::Call))
+            .chain(construct.iter().map(|c| (c, SigShape::Construct)))
+        {
+            match self.signature_node(c, shape, None, cx) {
+                Ok(n) => members.push(n),
+                // A class's static side: its own private members are reported with the
+                // instance side's (observed: one TS4094 for each).
+                Err(NotNameable::PrivateMember(mut names)) => {
+                    for &(n, p) in &props {
+                        if self.is_private_like(self.private_origin(p)).is_some() {
+                            let name = self.store().str(n).to_owned();
+                            if !names.contains(&name) {
+                                names.push(name);
+                            }
+                        }
+                    }
+                    return Err(NotNameable::PrivateMember(names));
+                }
+                Err(e) => return Err(e),
+            }
         }
         for i in &index {
             let key = self.tn(i.key, cx)?;
@@ -2440,19 +2483,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 pending = Some((members.len(), d));
             }
             let name = self.store().str(n).to_owned();
-            let origin = match self.c.synth_sym(p) {
-                Some(x) if !x.origins.is_empty() => x.origins[0],
-                _ => p,
-            };
+            let origin = self.private_origin(p);
             if self.is_private_like(origin).is_some() {
                 // tsc reports every such member (observed).
                 let mut names = vec![name];
                 for &(n2, p2) in rest_props.iter().skip(index + 1) {
-                    let o2 = match self.c.synth_sym(p2) {
-                        Some(x) if !x.origins.is_empty() => x.origins[0],
-                        _ => p2,
-                    };
-                    if self.is_private_like(o2).is_some() {
+                    if self.is_private_like(self.private_origin(p2)).is_some() {
                         names.push(self.store().str(n2).to_owned());
                     }
                 }
@@ -2831,10 +2867,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     ty = t2;
                 }
             }
-            let tnode = match self
-                .param_annotation(p.sym)
-                .and_then(|a| self.reuse_type_node(a, ty, cx))
-            {
+            let ann = self.param_annotation(p.sym);
+            let tnode = match ann.and_then(|a| self.reuse_type_node(a, ty, cx)) {
+                // A JSDoc `{T=}` is written `T | undefined` (observed tsc 7, with or
+                // without `strictNullChecks`).
+                Some(r) if ann.is_some_and(|a| self.is_jsdoc_optional_annotation(a)) => {
+                    with_undefined_node(cx, r)
+                }
                 Some(r) => r,
                 // A `x?: T` written from its type (an instantiated signature) says
                 // `| undefined`, with or without `strictNullChecks` (observed:
@@ -2850,6 +2889,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             out.push(param_node(cx, pat, rest, optional, Some(tnode)));
         }
         Ok(out)
+    }
+
+    /// Whether parameter annotation `a` is the `T` of a JSDoc `{T=}` (the parser keeps `T`
+    /// and makes the parameter optional; the `=` follows it in the comment).
+    pub(crate) fn is_jsdoc_optional_annotation(&self, a: Loc) -> bool {
+        let ast = self.ast(a.file);
+        ast.is_jsdoc(a.node)
+            && self
+                .c
+                .file(a.file)
+                .text
+                .as_bytes()
+                .get(ast.span(a.node).end as usize)
+                == Some(&b'=')
     }
 
     /// Whether the type of annotation `t` includes `undefined` (or is `any`/`unknown`).

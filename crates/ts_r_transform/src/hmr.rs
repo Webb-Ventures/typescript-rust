@@ -119,7 +119,7 @@ impl Transform for TsTransform {
             ..CodegenOptions::default()
         };
         let out = transpile(&path, input.source, &opts, &codegen);
-        if let Some(d) = out.diagnostics.iter().find(|d| d.is_error()) {
+        if let Some(d) = out.build_errors.first() {
             let src = SourceText::new(path.to_string(), input.source);
             let lc = src.line_col_utf16(d.span.start);
             return Err(TransformError::at(

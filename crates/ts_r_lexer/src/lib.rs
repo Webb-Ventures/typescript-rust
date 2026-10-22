@@ -15,6 +15,7 @@
 
 mod chars;
 mod cook;
+mod regex;
 mod token;
 
 use std::borrow::Cow;
@@ -261,6 +262,9 @@ impl<'a> Lexer<'a> {
                     }
                     _ => break,
                 },
+                b'<' | b'=' | b'>' | b'|' if self.is_conflict_marker(self.pos) => {
+                    self.skip_conflict_marker();
+                }
                 0xC2 | 0xE1 | 0xE2 | 0xE3 | 0xEF => {
                     let Some(c) = self.char_at(self.pos) else {
                         break;
@@ -278,6 +282,60 @@ impl<'a> Lexer<'a> {
             }
         }
         flags
+    }
+
+    /// A merge conflict marker starts at `i` (observed in tsc 7): seven `<`, `|`, `=` or `>`
+    /// with only whitespace before them on their line, followed by a space (`=======` by any
+    /// character).
+    fn is_conflict_marker(&self, i: usize) -> bool {
+        let b = self.bytes;
+        let Some(&c) = b.get(i) else {
+            return false;
+        };
+        if b.get(i + 1) != Some(&c) || b.get(i..i + 7).is_none_or(|m| m.iter().any(|&x| x != c)) {
+            return false;
+        }
+        let next_ok = match b.get(i + 7) {
+            None => false,
+            Some(&n) => c == b'=' || n == b' ',
+        };
+        if !next_ok {
+            return false;
+        }
+        let mut j = i;
+        while j > 0 && matches!(b[j - 1], b' ' | b'\t' | 0x0B | 0x0C) {
+            j -= 1;
+        }
+        j == 0 || matches!(b[j - 1], b'\n' | b'\r')
+    }
+
+    /// Skips a conflict marker at `self.pos` (TS1185 on its seven characters): the rest of
+    /// a `<<<<<<<` or `>>>>>>>` line, and everything after `|||||||` up to the next
+    /// `=======` or `>>>>>>>` marker, or after `=======` up to the next `>>>>>>>` marker.
+    fn skip_conflict_marker(&mut self) {
+        let start = self.pos;
+        let c = self.bytes[start];
+        self.error(messages::MERGE_CONFLICT_MARKER, start, start + 7, &[]);
+        let len = self.bytes.len();
+        if c == b'<' || c == b'>' {
+            self.pos = self.find_line_end(start + 7);
+            return;
+        }
+        let mut i = self.find_line_end(start + 7);
+        while i < len {
+            // `i` is at a line terminator; look at the next line's first non-blank.
+            i += 1;
+            while i < len && matches!(self.bytes[i], b' ' | b'\t' | 0x0B | 0x0C) {
+                i += 1;
+            }
+            let m = self.bytes.get(i).copied().unwrap_or(0);
+            if (m == b'>' || (c == b'|' && m == b'=')) && self.is_conflict_marker(i) {
+                self.pos = i;
+                return;
+            }
+            i = self.find_line_end(i);
+        }
+        self.pos = len;
     }
 
     /// Scans one token starting at `self.pos` (trivia already skipped).
@@ -388,8 +446,10 @@ impl<'a> Lexer<'a> {
             },
             b'#' => {
                 if p1 == b'!' {
+                    // Only the `#` is skipped: the rest of the line is scanned as usual
+                    // (shebangError: `!/usr/bin/env node` is an expression).
                     self.error(messages::INVALID_HASHBANG, self.pos, self.pos + 2, &[]);
-                    self.pos = self.find_line_end(self.pos);
+                    self.pos += 1;
                     return T::Unknown;
                 }
                 self.pos += 1;
@@ -397,7 +457,10 @@ impl<'a> Lexer<'a> {
                     self.scan_identifier_rest(flags, true);
                     T::PrivateName
                 } else {
-                    T::Hash
+                    // A lone `#` is TS1127 and still a (nameless) private name, as in tsc 7:
+                    // `class C { # m() {} }` is a property `#`, then `';' expected`.
+                    self.error(messages::INVALID_CHARACTER, self.pos - 1, self.pos, &[]);
+                    T::PrivateName
                 }
             }
             b'\\' => {
@@ -417,12 +480,28 @@ impl<'a> Lexer<'a> {
                     } else {
                         T::Ident
                     }
+                } else if c == '\u{FFFD}' {
+                    self.binary_rest()
                 } else {
                     self.invalid_char()
                 }
             }
             _ => self.invalid_char(),
         }
+    }
+
+    /// U+FFFD outside a string, comment or template: as in tsc, the file is binary (TS1490
+    /// at its start) and the rest of it is one unknown token, with no TS1127.
+    fn binary_rest(&mut self) -> TokenKind {
+        if !self.diagnostics.iter().any(|d| d.code == 1490) {
+            self.diagnostics.push(Diagnostic::new(
+                messages::FILE_APPEARS_TO_BE_BINARY,
+                Span::at(0),
+                &[],
+            ));
+        }
+        self.pos = self.bytes.len();
+        TokenKind::Unknown
     }
 
     fn invalid_char(&mut self) -> TokenKind {
@@ -536,10 +615,13 @@ impl<'a> Lexer<'a> {
     fn finish_escaped_identifier(&mut self, flags: &mut u8) -> TokenKind {
         let text = &self.src[self.scan_start..self.pos];
         let decoded = cook::decode_identifier(text);
-        if keyword_kind(decoded.as_bytes()) != TokenKind::Ident {
+        // An escaped keyword (`v\u0061r`) is still the keyword, flagged: tsc reads it as the
+        // keyword and reports TS1260 where it is used as one (not as a name).
+        let kind = keyword_kind(decoded.as_bytes());
+        if kind != TokenKind::Ident {
             *flags |= TokenFlags::ESCAPED_KEYWORD;
         }
-        TokenKind::Ident
+        kind
     }
 
     fn scan_number(&mut self, flags: &mut u8) -> TokenKind {
@@ -557,10 +639,10 @@ impl<'a> Lexer<'a> {
             self.pos += 2;
             let n = self.scan_digits(radix, flags);
             if n == 0 {
-                let msg = if radix == 16 {
-                    messages::HEXADECIMAL_DIGIT_EXPECTED
-                } else {
-                    messages::DIGIT_EXPECTED
+                let msg = match radix {
+                    16 => messages::HEXADECIMAL_DIGIT_EXPECTED,
+                    8 => messages::OCTAL_DIGIT_EXPECTED,
+                    _ => messages::BINARY_DIGIT_EXPECTED,
                 };
                 self.error(msg, self.pos, self.pos, &[]);
             }
@@ -581,21 +663,50 @@ impl<'a> Lexer<'a> {
                 self.scan_fraction_and_exponent(flags);
             }
         } else {
+            if b[start] == b'0' && self.peek_byte(1) == b'_' {
+                // `0_1`: no separator after a leading zero (once; the rest scans as a
+                // decimal literal, as in tsc 7).
+                self.error(
+                    messages::NUMERIC_SEPARATORS_NOT_ALLOWED_HERE,
+                    start + 1,
+                    start + 2,
+                    &[],
+                );
+            }
             if b[start] != b'.' {
                 self.scan_digits(10, flags);
             }
             let fractional = self.scan_fraction_and_exponent(flags);
-            if !fractional && self.peek_byte(0) == b'n' {
+            if self.peek_byte(0) == b'n' {
                 self.pos += 1;
-                kind = TokenKind::BigInt;
+                if fractional {
+                    // `1e2n`, `4.1n`: the `n` belongs to the (still numeric) literal, which
+                    // is TS1352 or TS1353 on its whole span, as in tsc 7.
+                    let msg = if b[start..self.pos].iter().any(|&c| matches!(c, b'e' | b'E')) {
+                        messages::BIGINT_EXPONENTIAL
+                    } else {
+                        messages::BIGINT_NOT_INTEGER
+                    };
+                    self.error(msg, start, self.pos, &[]);
+                } else {
+                    kind = TokenKind::BigInt;
+                }
             }
         }
-        // An identifier may not directly follow a numeric literal.
-        if self.at_identifier_start() {
+        // An identifier may not directly follow a decimal literal (TS1351 on it, as in
+        // tsc 7). It stays a token of its own: `3in x` is `3 in x`. Hex, octal, binary and
+        // leading-zero literals are not checked (`0x1g` is `0x1`, then `g`).
+        // A name starting with an escape is not checked: tsc 7 reports `';' expected` at it.
+        if *flags & (TokenFlags::NON_DECIMAL | TokenFlags::LEGACY_OCTAL) == 0
+            && self.peek_byte(0) != b'\\'
+            && self.at_identifier_start()
+        {
             let s = self.pos;
             let mut f = 0;
             self.scan_identifier_rest(&mut f, true);
-            self.error(messages::IDENTIFIER_AFTER_NUMERIC_LITERAL, s, self.pos, &[]);
+            let end = self.pos;
+            self.pos = s;
+            self.error(messages::IDENTIFIER_AFTER_NUMERIC_LITERAL, s, end, &[]);
         }
         kind
     }
@@ -642,16 +753,17 @@ impl<'a> Lexer<'a> {
             let c = self.peek_byte(0);
             if c == b'_' {
                 *flags |= TokenFlags::SEPARATOR;
-                if prev_sep {
+                // Before the first digit every `_` is TS6188 (`0x___1`, tsc 7).
+                if count == 0 {
                     self.error(
-                        messages::MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS,
+                        messages::NUMERIC_SEPARATORS_NOT_ALLOWED_HERE,
                         self.pos,
                         self.pos + 1,
                         &[],
                     );
-                } else if count == 0 {
+                } else if prev_sep {
                     self.error(
-                        messages::NUMERIC_SEPARATORS_NOT_ALLOWED_HERE,
+                        messages::MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS,
                         self.pos,
                         self.pos + 1,
                         &[],
@@ -717,7 +829,12 @@ impl<'a> Lexer<'a> {
                     *flags |= TokenFlags::ESCAPED;
                     self.pos += 1;
                     match b.get(self.pos) {
-                        None => {}
+                        None => {
+                            // `"\` at the end of the file: TS1126, not TS1002 (tsc 7).
+                            *flags |= TokenFlags::UNTERMINATED;
+                            self.error(messages::UNEXPECTED_END_OF_TEXT, self.pos, self.pos, &[]);
+                            break;
+                        }
                         Some(b'\r') if b.get(self.pos + 1) == Some(&b'\n') => self.pos += 2,
                         Some(&c) => self.pos += utf8_len(c),
                     }
@@ -784,9 +901,17 @@ impl<'a> Lexer<'a> {
                 _ => {
                     *flags |= TokenFlags::ESCAPED;
                     self.pos += 1;
-                    if let Some(&c) = b.get(self.pos) {
-                        self.pos += utf8_len(c);
-                    }
+                    let Some(&c) = b.get(self.pos) else {
+                        // `\`\` at the end of the file: TS1126, not TS1160 (tsc 7).
+                        *flags |= TokenFlags::UNTERMINATED;
+                        self.error(messages::UNEXPECTED_END_OF_TEXT, self.pos, self.pos, &[]);
+                        return if head {
+                            TokenKind::NoSubstTemplate
+                        } else {
+                            TokenKind::TemplateTail
+                        };
+                    };
+                    self.pos += utf8_len(c);
                 }
             }
         }
@@ -824,6 +949,15 @@ impl<'a> Lexer<'a> {
             TokenKind::LtLt | TokenKind::LtLtEq | TokenKind::LtEq
         ) {
             self.tok.kind = TokenKind::Lt;
+            self.tok.end = self.tok.start + 1;
+            self.pos = self.tok.end as usize;
+        }
+    }
+
+    /// Splits a `*=` token so the current token is `*` (the JSDoc type `*=`: any, optional).
+    pub fn split_star_eq(&mut self) {
+        if self.tok.kind == TokenKind::StarEq {
+            self.tok.kind = TokenKind::Star;
             self.tok.end = self.tok.start + 1;
             self.pos = self.tok.end as usize;
         }
@@ -867,11 +1001,23 @@ impl<'a> Lexer<'a> {
         if !terminated {
             flags |= TokenFlags::UNTERMINATED;
             self.error(messages::UNTERMINATED_REGEX_LITERAL, start, i, &[]);
+            i = unterminated_regex_end(b, start + 1, i);
         } else {
+            let pattern_end = i - 1;
             let mut seen = 0u32;
             while i < b.len() && chars::is_ascii_ident_part(b[i]) {
                 self.check_regex_flag(b[i], i, &mut seen);
                 i += 1;
+            }
+            let flags = &b[pattern_end + 1..i];
+            let (unicode, sets) = (flags.contains(&b'u'), flags.contains(&b'v'));
+            for (s, e, msg, arg) in regex::validate(self.src, start + 1, pattern_end, unicode, sets)
+            {
+                // Not merged with an error at the same position (TS1538 and TS1517 at
+                // one escape: regularExpressionCharacterClassRangeOrder).
+                let args: &[&str] = if arg.is_empty() { &[] } else { &[arg] };
+                self.diagnostics
+                    .push(Diagnostic::new(msg, Span::new(s as u32, e as u32), args));
             }
         }
         self.pos = i;
@@ -912,6 +1058,12 @@ impl<'a> Lexer<'a> {
         let b = self.bytes;
         let kind = match b.get(start) {
             None => TokenKind::Eof,
+            // A `<<<<<<<` conflict marker in JSX children: TS1185, and the marker line is
+            // one `Unknown` token (the parser reports the missing closing tag on it).
+            Some(b'<') if self.is_conflict_marker(start) => {
+                self.skip_conflict_marker();
+                TokenKind::Unknown
+            }
             Some(b'<') => {
                 self.pos += 1;
                 TokenKind::Lt
@@ -1124,6 +1276,23 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Every invalid escape of a template part (TS1125, TS1198, ...): an untagged
+    /// template reports them all (unicodeExtendedEscapesInTemplates17).
+    pub fn template_escape_errors(&self, tok: Token) -> Vec<(Span, DiagnosticMessage)> {
+        let span = self.template_raw_span(tok);
+        let raw = self.text(span);
+        match cook::cook(raw, true) {
+            Ok(_) => Vec::new(),
+            Err((_, errors)) => errors
+                .into_iter()
+                .map(|(off, msg)| {
+                    let at = (span.start + off as u32).min(span.end);
+                    (Span::new(at, (at + 1).min(span.end.max(at))), msg)
+                })
+                .collect(),
+        }
+    }
+
     /// The numeric value of a `Number` token.
     pub fn number_value(&self, tok: Token) -> f64 {
         parse_number(self.text(tok.span()))
@@ -1157,6 +1326,52 @@ fn utf8_len(first: u8) -> usize {
         0xE0..=0xEF => 3,
         0xF0..=0xFF => 4,
         _ => 1,
+    }
+}
+
+/// Where an unterminated regular expression literal starting before `from` ends, as in
+/// tsc: at the first `)`, `]` or `}` that closes nothing the pattern opened (outside a
+/// character class), so `foo(/a);` keeps its `)` (parserRegularExpressionDivideAmbiguity4).
+/// Otherwise at the end of the line.
+fn unterminated_regex_end(b: &[u8], from: usize, line_end: usize) -> usize {
+    let mut i = from;
+    let (mut parens, mut braces) = (0u32, 0u32);
+    let mut in_class = false;
+    while i < line_end {
+        match b[i] {
+            b'\\' => i += 1,
+            b']' if in_class => in_class = false,
+            _ if in_class => {}
+            b'[' => in_class = true,
+            b'(' => parens += 1,
+            b'{' => braces += 1,
+            b')' if braces == 0 => {
+                if parens == 0 {
+                    return i;
+                }
+                parens -= 1;
+            }
+            b'}' => {
+                if braces == 0 {
+                    return i;
+                }
+                braces -= 1;
+            }
+            b']' => return i,
+            _ => {}
+        }
+        i += 1;
+    }
+    // A trailing run of `;` (and blanks) is left out: `foo(/a b;` is `')' expected` at
+    // the `;`.
+    let mut end = line_end;
+    while end > from && matches!(b[end - 1], b';' | b' ' | b'\t') {
+        end -= 1;
+    }
+    if end < line_end && b[end..line_end].contains(&b';') {
+        end
+    } else {
+        line_end
     }
 }
 

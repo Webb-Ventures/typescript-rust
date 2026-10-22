@@ -452,17 +452,149 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// The source and target type strings for an error message.
     /// Source and target names for a relation message: qualified (`M.I`, `N.I`) when they
     /// would otherwise print alike.
-    fn type_names_for_error(&mut self, s: TypeId, t: TypeId) -> (String, String) {
+    pub(crate) fn type_names_for_error(&mut self, s: TypeId, t: TypeId) -> (String, String) {
         let ss = self.type_to_string(s);
         let ts = self.type_to_string(t);
         if ss == ts && s != t {
             let saved = std::mem::replace(&mut self.print_qualified, true);
+            let saved_m = std::mem::replace(&mut self.print_module_qualified, true);
             let qs = self.type_to_string(s);
             let qt = self.type_to_string(t);
             self.print_qualified = saved;
+            self.print_module_qualified = saved_m;
             return (qs, qt);
         }
         (ss, ts)
+    }
+
+    /// The type tsc compares in place of `t`: a non-generic class or interface that adds
+    /// no instance members to its single base (`class E extends Foo {}`, the base named by
+    /// an identifier or a property access) stands for that base, repeatedly. Missing
+    /// property messages name it (`Property 'y' is missing in type 'Foo'`) under a head
+    /// that names `t` (tsc: checker.go, getSingleBaseForNonAugmentingSubtype and
+    /// getNormalizedType).
+    pub(crate) fn non_augmenting_base(&mut self, t: TypeId) -> TypeId {
+        let mut cur = t;
+        for _ in 0..32 {
+            // (A class with its `this` type bound, as in an `implements` check.)
+            let declared = match self.store().object_of(cur).map(|o| o.kind) {
+                Some(ts_r_types::ObjectKind::Reference { target, args })
+                    if self.store().list_items(args).len() == 1 =>
+                {
+                    target
+                }
+                _ => cur,
+            };
+            let Some(ts_r_types::ObjectKind::Declared {
+                sym, type_params, ..
+            }) = self.store().object_of(declared).map(|o| o.kind)
+            else {
+                break;
+            };
+            let f = self.c.sym_flags(sym);
+            if !f.intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE)
+                || !self.store().list_items(type_params).is_empty()
+            {
+                break;
+            }
+            if f.intersects(SymbolFlags::CLASS) {
+                if !self.extends_names_entity(sym) {
+                    break;
+                }
+            } else if self.is_thisless_interface(sym, 0) {
+                // Its type is no reference (it has no `this` type): compared as is.
+                break;
+            }
+            let bases = self.base_types(sym);
+            if bases.len() != 1 || self.has_instance_member_entries(sym) {
+                break;
+            }
+            cur = bases[0];
+        }
+        cur
+    }
+
+    /// An interface whose bases are all non-generic interfaces without a `this` type
+    /// of their own (tsc: checker.go, isThislessInterface).
+    fn is_thisless_interface(&mut self, sym: SymId, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        let bases = self.base_types(sym);
+        bases.iter().all(|&b| {
+            let target = match self.store().object_of(b).map(|o| o.kind) {
+                Some(ts_r_types::ObjectKind::Reference { target, args })
+                    if self.store().list_items(args).len() == 1 =>
+                {
+                    target
+                }
+                _ => b,
+            };
+            match self.store().object_of(target).map(|o| o.kind) {
+                Some(ts_r_types::ObjectKind::Declared {
+                    sym: bs,
+                    type_params,
+                    ..
+                }) => {
+                    let bf = self.c.sym_flags(bs);
+                    bf.intersects(SymbolFlags::INTERFACE)
+                        && !bf.intersects(SymbolFlags::CLASS)
+                        && self.store().list_items(type_params).is_empty()
+                        && self.is_thisless_interface(bs, depth + 1)
+                }
+                _ => false,
+            }
+        })
+    }
+
+    /// Every class declaration of `sym` extends a plain name (`extends A`, `extends N.A`);
+    /// a call or other expression may refer back to the class.
+    fn extends_names_entity(&self, sym: SymId) -> bool {
+        self.c.decls(sym).iter().all(|d| {
+            let ast = self.ast(d.file);
+            let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) =
+                *ast.node(d.node)
+            else {
+                return true;
+            };
+            ast.list(heritage).iter().all(|&h| match *ast.node(h) {
+                Node::HeritageClause {
+                    kind: ts_r_ast::HeritageKind::Extends,
+                    types,
+                } => ast.list(types).iter().all(|&e| match *ast.node(e) {
+                    Node::ExprWithTypeArgs { expr, .. } => matches!(
+                        ast.node(crate::nodes::skip_parens(ast, expr)),
+                        Node::Ident { .. } | Node::Member { .. }
+                    ),
+                    _ => false,
+                }),
+                _ => true,
+            })
+        })
+    }
+
+    /// `sym`'s declarations declare an instance member, constructor or signature (static
+    /// members live elsewhere).
+    fn has_instance_member_entries(&self, sym: SymId) -> bool {
+        self.c.member_tables(sym).into_iter().any(|(file, table)| {
+            let ff = self.c.file(file);
+            ff.bound.table(table).iter().any(|&(_, m)| {
+                ff.bound.decls(m).iter().any(|&d| {
+                    !ff.ast
+                        .node(d)
+                        .modifiers()
+                        .contains(ts_r_ast::Modifiers::STATIC)
+                })
+            })
+        })
+    }
+
+    /// The constraint of the type parameter `tp` declares an index signature.
+    fn constraint_has_index(&mut self, tp: TypeId) -> bool {
+        let oc = self.base_constraint(tp);
+        let oc = self.apparent_type(oc);
+        self.store().flags(oc).contains(TypeFlags::OBJECT)
+            && !self.resolved_members(oc).index.is_empty()
     }
 
     fn report_error_results(
@@ -482,11 +614,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         let suppress = owner.is_some();
         // A missing-property error stands in for the default head, and (tsc 7) for an
         // argument's TS2345 head, a type argument's TS2344 head and a `this` argument's
-        // TS2684 head too.
+        // TS2684 head too, and for a `using` initializer's TS2850/TS2851 head.
         let replaceable = head.is_none_or(|h| {
             (h.info.code
                 == dg::ARGUMENT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_PARAMETER_OF_TYPE_1_2345.code
                 || h.info.code == dg::TYPE_0_DOES_NOT_SATISFY_THE_CONSTRAINT_1_2344.code
+                || h.info.code
+                    == dg::THE_INITIALIZER_OF_A_USING_DECLARATION_MUST_BE_EITHER_AN_OBJECT_WITH_A_SYMBOL_DI_2850
+                        .code
+                || h.info.code
+                    == dg::THE_INITIALIZER_OF_AN_AWAIT_USING_DECLARATION_MUST_BE_EITHER_AN_OBJECT_WITH_A_SY_2851
+                        .code
                 || h.info.code
                     == dg::THE_THIS_CONTEXT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_METHOD_S_THIS_OF_TYPE_1_2684
                         .code)
@@ -523,6 +661,178 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// The type a value must have to be written to the generic indexed access `t`: the
+    /// object's and the key's base constraints indexed together, a union key giving the
+    /// intersection of what each key accepts. Through a constrained object only declared
+    /// properties count, not index signatures. `Some(None)` when there is no such type (the
+    /// object or key stays generic, a key names no property), `None` for forms we don't
+    /// model (mapped or distributive objects, unresolved constraints).
+    /// Whether the object of an indexed access is one whose access we relate by parts: a
+    /// type parameter other than `this`, or a non-generic object that isn't a union or
+    /// intersection.
+    fn plain_indexed_object(&mut self, obj: TypeId) -> bool {
+        let f = self.store().flags(obj);
+        if f.contains(TypeFlags::TYPE_PARAMETER) {
+            return !self.store().type_param_data(obj).is_some_and(|d| d.is_this);
+        }
+        f.contains(TypeFlags::OBJECT) && !self.is_generic_object_type(obj)
+    }
+
+    /// A generic mapped type without a name clause indexed by any key is its template with the
+    /// key substituted (`Partial<T>[K]` is `T[K] | undefined`). An intersection of such an access
+    /// with a nullable or empty object type normalizes its members the same way, so
+    /// `Partial<T>[K] & {}` becomes `T[K] & {}`.
+    fn substitute_mapped_access(&mut self, t: TypeId) -> TypeId {
+        let f = self.store().flags(t);
+        if f.contains(TypeFlags::INDEXED_ACCESS) {
+            return self.indexed_mapped_substitution_ext(t, true).unwrap_or(t);
+        }
+        if !f.contains(TypeFlags::INTERSECTION) {
+            return t;
+        }
+        let ms = self.store().members_of_union(t).to_vec();
+        let mut instantiable = false;
+        let mut nullable_or_empty = false;
+        for &m in &ms {
+            let mf = self.store().flags(m);
+            instantiable |= mf.intersects(TypeFlags::INSTANTIABLE);
+            nullable_or_empty |=
+                mf.intersects(TypeFlags::NULLABLE) || self.is_empty_anonymous_object(m);
+        }
+        if !(instantiable && nullable_or_empty) {
+            return t;
+        }
+        let mut changed = false;
+        let mut parts = Vec::with_capacity(ms.len());
+        for m in ms {
+            let n = if self.store().flags(m).contains(TypeFlags::INDEXED_ACCESS) {
+                self.indexed_mapped_substitution_ext(m, true).unwrap_or(m)
+            } else {
+                m
+            };
+            changed |= n != m;
+            parts.push(n);
+        }
+        if changed {
+            self.intersection(&parts)
+        } else {
+            t
+        }
+    }
+
+    /// The next type an unconstrained `T[K]` relates (and is reported) through, as tsc's
+    /// elaboration shows it: `T[K]` with `K extends keyof T` is `T[keyof T]`, and
+    /// `T[keyof T]` (no index signature in `T`'s constraint) is `T[string] | T[number] |
+    /// T[symbol]`.
+    fn unconstrained_access_step(&mut self, s: TypeId) -> Option<TypeId> {
+        let TypeKind::IndexedAccess { obj, index } = self.store().kind(s) else {
+            return None;
+        };
+        if !self.store().flags(obj).contains(TypeFlags::TYPE_PARAMETER) {
+            return None;
+        }
+        if matches!(self.store().kind(index), TypeKind::Index(x) if x == obj) {
+            if self.constraint_has_index(obj) {
+                return None;
+            }
+            let parts: Vec<TypeId> = [TypeId::STRING, TypeId::NUMBER, TypeId::SYMBOL]
+                .iter()
+                .map(|&k| self.store().indexed_access(obj, k))
+                .collect();
+            return Some(self.union(&parts));
+        }
+        if self
+            .store()
+            .flags(index)
+            .contains(TypeFlags::TYPE_PARAMETER)
+            && let Some(kc) = self.type_param_constraint(index)
+            && matches!(self.store().kind(kc), TypeKind::Index(x) if x == obj)
+        {
+            return Some(self.store().indexed_access(obj, kc));
+        }
+        None
+    }
+
+    fn indexed_access_write_constraint(&mut self, t: TypeId) -> Option<Option<TypeId>> {
+        let TypeKind::IndexedAccess { obj, index } = self.store().kind(t) else {
+            return None;
+        };
+        let of = self.store().flags(obj);
+        if of.contains(TypeFlags::TYPE_PARAMETER) {
+            // Only a type parameter; `this` and other instantiable objects are not modelled.
+            if self.store().type_param_data(obj).is_some_and(|d| d.is_this) {
+                return None;
+            }
+        } else if of.intersects(TypeFlags::INSTANTIABLE | TypeFlags::UNION_OR_INTERSECTION)
+            || self.is_generic_object_type(obj)
+        {
+            return None;
+        }
+        let constraint_or_self = |this: &mut Self, x: TypeId| -> Option<TypeId> {
+            if !this.store().flags(x).intersects(TypeFlags::INSTANTIABLE) {
+                return Some(x);
+            }
+            if this.store().flags(x).contains(TypeFlags::TYPE_PARAMETER)
+                && this.type_param_constraint(x).is_none()
+            {
+                return Some(x);
+            }
+            let c = this.base_constraint(x);
+            (c != TypeId::UNRESOLVED && !this.store().is_error(c)).then_some(c)
+        };
+        let bo = constraint_or_self(self, obj)?;
+        let bi = constraint_or_self(self, index)?;
+        if self.is_generic_object_type(bo) || self.is_generic_index_type(bi) {
+            return Some(None);
+        }
+        if self.store().flags(bo).intersects(TypeFlags::ANY) {
+            return None;
+        }
+        if bo == TypeId::UNKNOWN
+            || (self.store().flags(bo).contains(TypeFlags::OBJECT)
+                && self.is_generic_mapped_type(bo))
+        {
+            return Some(None);
+        }
+        let declared_only = bo != obj;
+        let keys: Vec<TypeId> = if self.store().flags(bi).contains(TypeFlags::UNION) {
+            self.store().members_of_union(bi).to_vec()
+        } else {
+            vec![bi]
+        };
+        let mut parts = Vec::with_capacity(keys.len());
+        for k in keys {
+            if declared_only {
+                // A declared property, or a number index signature for a numeric key; string
+                // index signatures don't count.
+                let name = self.property_name_of_type(k);
+                let declared = name
+                    .as_deref()
+                    .is_some_and(|n| self.property_of_type(bo, n).is_some());
+                let numeric = self.store().flags(k).intersects(TypeFlags::NUMBER_LIKE)
+                    || (self.store().flags(k).contains(TypeFlags::STRING_LITERAL)
+                        && name.as_deref().is_some_and(crate::expr::is_numeric_name));
+                let number_index = numeric
+                    && self
+                        .index_info_of(bo, TypeId::NUMBER)
+                        .is_some_and(|i| i.key == TypeId::NUMBER);
+                if !declared && !number_index {
+                    return Some(None);
+                }
+            }
+            match self.indexed_access_type(bo, k, None) {
+                Some(x) if x == TypeId::UNRESOLVED || self.store().is_error(x) => return None,
+                Some(x) => parts.push(x),
+                None => return Some(None),
+            }
+        }
+        Some(Some(if parts.len() == 1 {
+            parts[0]
+        } else {
+            self.intersection(&parts)
+        }))
+    }
+
     fn report_relation_error(
         &mut self,
         head: Option<Head>,
@@ -554,7 +864,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             gs = self.type_to_string(generalized);
             self.print_qualified = saved;
         }
-        let type_param = st.flags(t).contains(TypeFlags::TYPE_PARAMETER);
+        // An indexed access target (of a source that isn't one) hints by its object: `T[K]`
+        // could be instantiated with an arbitrary type.
+        let type_param = match st.kind(t) {
+            TypeKind::IndexedAccess { obj, .. }
+                if !st.flags(s).contains(TypeFlags::INDEXED_ACCESS) =>
+            {
+                st.flags(obj).contains(TypeFlags::TYPE_PARAMETER)
+            }
+            _ => st.flags(t).contains(TypeFlags::TYPE_PARAMETER),
+        };
         if rel != RelationKind::Comparable && !type_param {
             self.report_wrapper_hints(s, t);
         }
@@ -564,10 +883,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             // before the head because the chain is built inside out.
             let saved = self.rel.report.take();
             let c = self.base_constraint(t);
-            let fits = c != TypeId::UNKNOWN
+            // A declared `unknown` (or `any`) constraint counts; no constraint does not.
+            let declared_unknown = self.type_param_constraint(t) == Some(TypeId::UNKNOWN);
+            let fits = (c != TypeId::UNKNOWN || declared_unknown)
                 && c != TypeId::UNRESOLVED
                 && self.is_type_related(generalized, c, rel);
-            let cs = fits.then(|| self.type_to_string(c));
+            // tsc reads a declared `extends any` as `unknown` (checker.go,
+            // getConstraintFromTypeParameter), so the constraint is named `unknown`.
+            let cs = fits.then(|| {
+                if c == TypeId::ANY && self.store().flags(t).contains(TypeFlags::TYPE_PARAMETER) {
+                    "unknown".to_owned()
+                } else {
+                    self.type_to_string(c)
+                }
+            });
             self.rel.report = saved;
             if fits {
                 self.report_wrapper_hints(s, c);
@@ -577,10 +906,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                     dg::_0_IS_ASSIGNABLE_TO_THE_CONSTRAINT_OF_TYPE_1_BUT_1_COULD_BE_INSTANTIATED_WITH_A_D_5075,
                     &[&gs, &ts, &cs],
                 ),
-                None => self.report_error(
-                    dg::_0_COULD_BE_INSTANTIATED_WITH_AN_ARBITRARY_TYPE_WHICH_COULD_BE_UNRELATED_TO_1_5082,
-                    &[&ts, &gs],
-                ),
+                None => {
+                    // This hint is reported once: what was said inside it is dropped.
+                    if let Some(r) = self.rel.report.as_mut() {
+                        r.chain.clear();
+                        r.incompatible.clear();
+                        r.suppress.clear();
+                    }
+                    self.report_error(
+                        dg::_0_COULD_BE_INSTANTIATED_WITH_AN_ARBITRARY_TYPE_WHICH_COULD_BE_UNRELATED_TO_1_5082,
+                        &[&ts, &gs],
+                    )
+                }
             }
         }
         let info = match head {
@@ -765,6 +1102,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         if sf.contains(TypeFlags::ENUM)
             && tf.contains(TypeFlags::ENUM)
             && self.c.sym_name(enum_sym(st, s)) == self.c.sym_name(enum_sym(st, t))
+            && self.enum_types_related(enum_sym(st, s), enum_sym(st, t), false)
+        {
+            return true;
+        }
+        // Two enums' literal unions relate as enums, before member by member.
+        if st.traits(s).contains(TypeTraits::ENUM_UNION)
+            && st.traits(t).contains(TypeTraits::ENUM_UNION)
+            && let (Some(a), Some(b)) = (self.enum_symbol_of(s), self.enum_symbol_of(t))
+            && self.enum_types_related(a, b, false)
         {
             return true;
         }
@@ -803,8 +1149,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             if p1 == p2
                 || (p1.is_some()
                     && p2.is_some()
-                    && self.c.sym_name(p1.unwrap_or(SymId::NONE))
-                        == self.c.sym_name(p2.unwrap_or(SymId::NONE)))
+                    && self.enum_types_related(
+                        p1.unwrap_or(SymId::NONE),
+                        p2.unwrap_or(SymId::NONE),
+                        false,
+                    ))
             {
                 return true;
             }
@@ -851,6 +1200,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 return true;
             }
+            // Anything is assignable to `{} | null | undefined` (tsc: `relater.go`,
+            // isSimpleTypeRelatedTo with isUnknownLikeUnionType, read as a reference).
+            if strict && self.is_unknown_like_union(t) {
+                return true;
+            }
         }
         false
     }
@@ -873,18 +1227,36 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A linked forward reference to an alias is its target (`object`, not a copy).
         let s = fresh_literal_regular(self, st.unforward(s));
         let t = fresh_literal_regular(self, st.unforward(t));
-        // A source `{ [K in C]: X }[C]` relates (and is reported) as `X` with `K` replaced by
-        // `C`.
-        let s = if rel != RelationKind::Identity
-            && st.flags(s).contains(TypeFlags::INDEXED_ACCESS)
-            && let Some(sub) = self.indexed_mapped_substitution(s)
-        {
-            sub
+        // `{ [K in C]: X }[I]` relates (and is reported) as `X` with `K` replaced by `I`.
+        let (s, t) = if rel == RelationKind::Identity {
+            (s, t)
         } else {
-            s
+            (
+                self.substitute_mapped_access(s),
+                self.substitute_mapped_access(t),
+            )
+        };
+        // Members emptied by conflicting discriminants are gone (`reduced_type`); the
+        // head names the reduced source.
+        let t0 = t;
+        let (s, t) = if rel == RelationKind::Identity {
+            (s, t)
+        } else {
+            (self.reduced_type(s), self.reduced_type(t))
         };
         if s == t {
             return true;
+        }
+        // A target intersection reduced to `never` says why under the head.
+        if report
+            && t == TypeId::NEVER
+            && t0 != t
+            && s != TypeId::NEVER
+            && let Some((info, ts, pname)) = self.never_reduction_reason(t0)
+        {
+            self.report_error(info, &[&ts, &pname]);
+            self.report_error_results(s, t, head, rel);
+            return false;
         }
         // A reference named by an alias relates as the plain reference: a missing property
         // below it names the plain reference and leaves the head (`Type 'NB' is not
@@ -968,6 +1340,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return true;
         }
+        if report {
+            self.report_enum_mismatch(s, t);
+        }
         // Reporting against `X | undefined` (or `| null`) with a source that has neither:
         // tsc reports against `X` when that is a single type. A union source keeps the
         // whole target in its head; its members are reported against `X`. So does
@@ -976,6 +1351,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             && tf.contains(TypeFlags::UNION)
             && s != TypeId::UNKNOWN
             && (!sf.contains(TypeFlags::UNION) || s == TypeId::BOOLEAN)
+            && !sf.intersects(TypeFlags::INSTANTIABLE)
             && rel != RelationKind::Comparable
             && !self.some_member(s, |m| {
                 self.store()
@@ -1022,14 +1398,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else if weak {
                 if report {
                     let (ss, ts) = self.type_names_for_error(os, ot);
-                    let calls = self.signatures_of(s, SigKind::Call);
-                    let callable = match calls.first() {
-                        Some(&sig) => {
+                    // Calling (or `new`-ing) the value would give a related type:
+                    // suggest the call.
+                    let mut callable = false;
+                    for kind in [SigKind::Call, SigKind::Construct] {
+                        let first = self.signatures_of(s, kind).first().copied();
+                        if let Some(sig) = first {
                             let r = self.return_type_of(sig);
-                            self.is_type_related(r, t, rel)
+                            if self.is_type_related(r, t, rel) {
+                                callable = true;
+                                break;
+                            }
                         }
-                        None => false,
-                    };
+                    }
                     if callable {
                         self.report_error(dg::VALUE_OF_TYPE_0_HAS_NO_PROPERTIES_IN_COMMON_WITH_TYPE_1_DID_YOU_MEAN_TO_CALL_IT_2560, &[&ss, &ts]);
                     } else {
@@ -1252,11 +1633,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         // below `X[][]` to the union `Style` is not a third nesting).
         let id = |ck: &Self, t: TypeId| ck.recursion_identity(t).unwrap_or((u32::MAX, t.0));
         let (si, ti) = (id(self, s), id(self, t));
+        // Only levels whose types were made no earlier than the previous level's count: a
+        // finite nesting of existing instantiations (`Cb<Cb<Cb<Cb<number>>>>`, whose
+        // inner types are older) is compared in full (observed).
         let mut n = 0;
+        let (mut last_a, mut last_b) = (0u32, 0u32);
         for &(a, b, _) in &self.rel.stack {
-            if id(self, a) == si && id(self, b) == ti {
+            if id(self, a) == si && id(self, b) == ti && (a.0 >= last_a || b.0 >= last_b) {
                 n += 1;
-                if n >= 3 {
+                last_a = a.0;
+                last_b = b.0;
+                if n >= 3 && (s.0 >= last_a || t.0 >= last_b) {
                     return true;
                 }
             }
@@ -1267,6 +1654,15 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn recursion_identity(&self, t: TypeId) -> Option<(u32, u32)> {
         let s = self.store();
         match s.object_of(t).map(|o| o.kind) {
+            // An array of object literals is an array literal's type: literals can't
+            // recurse, so it is its own identity (tsc: relater.go, getRecursionIdentity).
+            Some(ObjectKind::Reference { args, .. })
+                if s.list_items(args)
+                    .iter()
+                    .any(|&a| s.traits(a).contains(TypeTraits::CONTAINS_OBJECT_LITERAL)) =>
+            {
+                None
+            }
             Some(ObjectKind::Reference { target, .. }) => Some((0, target.0)),
             Some(ObjectKind::Anonymous { decl, kind, .. }) => {
                 Some((1 + kind as u32, decl.0 ^ decl.1.rotate_left(7)))
@@ -1301,22 +1697,36 @@ impl<'c, 'a> Ck<'c, 'a> {
                         return true;
                     }
                 }
-                // tsc elaborates against the last member.
-                if report && let Some(&m) = members.last() {
+                // tsc elaborates against the last member (`boolean` is reported whole).
+                if report
+                    && s != TypeId::BOOLEAN
+                    && let Some(&m) = members.last()
+                {
                     self.related_to(m, t, rel, true, None);
                 }
                 return false;
             }
             // `boolean` and an enum type are reported whole, not by member.
             // So is any union against a type parameter (only `'T' could be instantiated ...`).
-            let whole = s == TypeId::BOOLEAN
-                || st.traits(s).contains(TypeTraits::ENUM_UNION)
-                || tf.contains(TypeFlags::TYPE_PARAMETER);
+            let whole = s == TypeId::BOOLEAN || st.traits(s).contains(TypeTraits::ENUM_UNION);
             for &m in &members {
                 if !self.related_to(m, t, rel, report && !whole, None) {
                     return false;
                 }
             }
+            return true;
+        }
+        // `{} | null | undefined` is `unknown` to a generic source with no constraint (`T`,
+        // `T[keyof T]`), which no single member accepts.
+        if tf.contains(TypeFlags::UNION)
+            && sf.intersects(TypeFlags::INSTANTIABLE)
+            && rel != RelationKind::Identity
+            && self.is_unknown_like_union(t)
+            && matches!(
+                self.base_constraint(s),
+                TypeId::UNKNOWN | TypeId::UNRESOLVED
+            )
+        {
             return true;
         }
         if tf.contains(TypeFlags::UNION) {
@@ -1358,6 +1768,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         if sf.contains(TypeFlags::INTERSECTION) {
+            // A generic intersection is comparable as its constraint (observed: `T & number`
+            // with `T extends string | number` has no overlap with `"hello"`).
+            if rel == RelationKind::Comparable
+                && self.is_generic_type(s)
+                && !self.is_generic_type(t)
+            {
+                let c = self.base_constraint(s);
+                if c != s
+                    && c != TypeId::UNRESOLVED
+                    && c != TypeId::UNKNOWN
+                    && !self.store().is_error(c)
+                    && !self.is_generic_type(c)
+                {
+                    return self.related_to(c, t, rel, false, None);
+                }
+            }
             let members = st.members_of_union(s).to_vec();
             // A member does not get an implicit index signature on its own (the whole
             // intersection is compared structurally next): `{ a: R } & { [x: string]: true }`
@@ -1389,6 +1815,25 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let r = self.related_to(m, t, rel, false, None);
                 self.rel.in_target_member = in_member;
                 if r {
+                    // The other members' properties still meet the target's (observed:
+                    // `{ a: null } & { b: string }` is not a `{ a?: number; b: string }`).
+                    // A nullable member leaves no properties to check (observed: `T & undefined`
+                    // with `T extends R` is an `R`).
+                    if tf.contains(TypeFlags::OBJECT)
+                        && rel != RelationKind::Comparable
+                        && !self.is_generic_object_type(t)
+                        && !members.iter().any(|&m| {
+                            self.store().flags(m).intersects(
+                                TypeFlags::NULL | TypeFlags::UNDEFINED | TypeFlags::VOID,
+                            )
+                        })
+                        && !self.properties_related(s, t, rel, false)
+                    {
+                        if report {
+                            self.properties_related(s, t, rel, true);
+                        }
+                        return false;
+                    }
                     return true;
                 }
             }
@@ -1919,6 +2364,187 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(false)
     }
 
+    /// A generic source against a union of intersections that mention it relates when each
+    /// member of its constraint `c`, intersected with the source, does (`T extends 1 | 2`
+    /// is assignable to `(1 & T) | (2 & T)`, that is `A & T` distributed).
+    fn distributed_constraint_related(
+        &mut self,
+        s: TypeId,
+        c: TypeId,
+        t: TypeId,
+        rel: RelationKind,
+    ) -> bool {
+        let st = self.store();
+        if c == s
+            || c == TypeId::UNRESOLVED
+            || st.is_error(c)
+            || st
+                .flags(c)
+                .intersects(TypeFlags::ANY_OR_UNKNOWN | TypeFlags::NEVER)
+            || !st.flags(t).contains(TypeFlags::UNION)
+            || !st.traits(t).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+        {
+            return false;
+        }
+        let parts: Vec<TypeId> = if st.flags(s).contains(TypeFlags::INTERSECTION) {
+            st.members_of_union(s).to_vec()
+        } else {
+            vec![s]
+        };
+        let mentions = st.members_of_union(t).iter().any(|&m| {
+            st.flags(m).contains(TypeFlags::INTERSECTION)
+                && parts.iter().all(|p| st.members_of_union(m).contains(p))
+        });
+        if !mentions {
+            return false;
+        }
+        let members: Vec<TypeId> = if st.flags(c).contains(TypeFlags::UNION) {
+            st.members_of_union(c).to_vec()
+        } else {
+            vec![c]
+        };
+        for m in members {
+            let mut ps = parts.clone();
+            ps.push(m);
+            let x = self.intersection(&ps);
+            if x == s || !self.related_to(x, t, rel, false, None) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The constraint of `O[K]` read through `O`: `O`'s own constraint for a type
+    /// parameter, `O` itself for an object, recursively for `O` an indexed access (`Q[K]["0"]`
+    /// with `Q extends { [k: string]: [keyof T] }` reads `keyof T`).
+    fn indexed_access_key_constraint(&mut self, s: TypeId, depth: u32) -> Option<TypeId> {
+        let TypeKind::IndexedAccess { obj, index } = self.store().kind(s) else {
+            return None;
+        };
+        let f = self.store().flags(obj);
+        let oc = if f.contains(TypeFlags::TYPE_PARAMETER) {
+            self.type_param_constraint(obj).filter(|&c| c != obj)?
+        } else if f.contains(TypeFlags::OBJECT) {
+            obj
+        } else if f.contains(TypeFlags::INDEXED_ACCESS) && depth < 4 {
+            let c = self.indexed_access_key_constraint(obj, depth + 1)?;
+            match self.indexed_mapped_substitution(c) {
+                Some(x) if x != c => x,
+                _ => c,
+            }
+        } else {
+            return None;
+        };
+        self.constraint_indexed_by(oc, index)
+    }
+
+    /// `C[K]` for the constraint `C` of an indexed access object: a generic key into an
+    /// object with a string index signature reads the signature's type (`Q[K]` with
+    /// `Q extends { [k: string]: keyof T }` reads `keyof T`).
+    fn constraint_indexed_by(&mut self, oc: TypeId, index: TypeId) -> Option<TypeId> {
+        if self.is_generic_type(index)
+            && self.store().flags(oc).contains(TypeFlags::OBJECT)
+            && let Some(i) = self.index_info_of(oc, TypeId::STRING)
+        {
+            return Some(i.value);
+        }
+        self.indexed_access_type(oc, index, None)
+    }
+
+    /// `{ [P in A]: X }` against `{ [Q in B]: Y }`, both generic: the source may not add
+    /// `?` where the target doesn't, `B` relates to `A`, the `as` types agree, and `X` with
+    /// `P` read as `Q` relates to `Y`.
+    fn generic_mapped_pair_related(
+        &mut self,
+        s: TypeId,
+        t: TypeId,
+        rel: RelationKind,
+        report: bool,
+    ) -> bool {
+        let (Some(si), Some(ti)) = (self.mapped_info(s), self.mapped_info(t)) else {
+            return true;
+        };
+        if rel != RelationKind::Comparable
+            && self.combined_mapped_optionality(s) > self.combined_mapped_optionality(t)
+        {
+            return false;
+        }
+        let sc = self.mapped_constraint(&si);
+        let tc = self.mapped_constraint(&ti);
+        if sc == TypeId::UNRESOLVED || tc == TypeId::UNRESOLVED {
+            return true;
+        }
+        if !self.related_to(tc, sc, rel, report, None) {
+            return false;
+        }
+        let (stpl, sname) = self.mapped_template_and_name_for_key(&si, ti.k);
+        let (ttpl, tname) = self.mapped_template_and_name_for_key(&ti, ti.k);
+        if sname != tname {
+            return false;
+        }
+        self.related_to(stpl, ttpl, rel, report, None)
+    }
+
+    /// A concrete object `S` against a generic `{ [P in Q]: X[P] }` (never one with `-?`): `Q` must relate
+    /// to the known keys of `S` (with `?`, only overlap with them) and `S` to `X`; failing
+    /// that, only an empty object matches a `?` mapped type. `None` for templates of other
+    /// shapes (treated as related by the caller). The failure is not elaborated.
+    fn concrete_to_generic_mapped(
+        &mut self,
+        s: TypeId,
+        t: TypeId,
+        rel: RelationKind,
+    ) -> Option<bool> {
+        let ti = self.mapped_info(t)?;
+        // A `-?` mapped type only accepts another generic mapped type.
+        if ti.optional == ts_r_ast::MappedModifier::Remove {
+            return Some(false);
+        }
+        let (tpl, name) = self.mapped_template_and_name_for_key(&ti, ti.k);
+        if name.is_some() {
+            return None;
+        }
+        let core = self.filter_type(tpl, |ck, m| {
+            !ck.store().flags(m).intersects(TypeFlags::NULLABLE)
+        });
+        let TypeKind::IndexedAccess { obj, index } = self.store().kind(core) else {
+            return None;
+        };
+        if index != ti.k {
+            return None;
+        }
+        let tc = self.mapped_constraint(&ti);
+        if tc == TypeId::UNRESOLVED {
+            return None;
+        }
+        let all_keys = self.keyof_type(s);
+        if all_keys == TypeId::UNRESOLVED {
+            return None;
+        }
+        let sk = self.filter_type(all_keys, |ck, m| {
+            !matches!(m, TypeId::STRING | TypeId::NUMBER | TypeId::SYMBOL)
+                && !ck.store().flags(m).contains(TypeFlags::TEMPLATE_LITERAL)
+        });
+        let include_optional = matches!(
+            ti.optional,
+            ts_r_ast::MappedModifier::Present | ts_r_ast::MappedModifier::Add
+        );
+        let keys_ok = if include_optional {
+            let both = self.intersection(&[tc, sk]);
+            !self.store().flags(both).contains(TypeFlags::NEVER)
+        } else {
+            self.related_to(tc, sk, rel, false, None)
+        };
+        if keys_ok && self.related_to(s, obj, rel, false, None) {
+            return Some(true);
+        }
+        Some(
+            !matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
+                && include_optional
+                && self.is_empty_object_type(s),
+        )
+    }
+
     fn structured_related(
         &mut self,
         s: TypeId,
@@ -1931,6 +2557,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         let tf = st.flags(t);
         if rel == RelationKind::Identity {
             return self.identity_structured(s, t);
+        }
+        // Under the strict subtype relation nothing but an empty object is a subtype of a
+        // fresh `{}` literal (observed: `c ? {} : dict` is the dictionary type).
+        if rel == RelationKind::StrictSubtype
+            && tf.contains(TypeFlags::OBJECT)
+            && sf.contains(TypeFlags::OBJECT)
+            && st
+                .object_of(t)
+                .is_some_and(|o| o.flags.contains(ObjectFlags::FRESH_LITERAL))
+            && self.is_empty_object_type(t)
+            && !self.is_empty_object_type(s)
+        {
+            return false;
         }
         if tf.contains(TypeFlags::UNION)
             && let Some(r) = self.conditional_source_related(s, t, rel, report)
@@ -1954,6 +2593,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 && self.related_to(c, t, rel, false, None)
             {
                 return true;
+            }
+            if self.distributed_constraint_related(s, c, t, rel) {
+                return true;
+            }
+            // An unconstrained `T[K]` is explained through `T[keyof T]`.
+            if c == TypeId::UNRESOLVED
+                && let Some(next) = self.unconstrained_access_step(s)
+            {
+                return self.related_to(next, t, rel, report, None);
             }
             // The failure is explained by the constraint (`Type 'string' is not assignable
             // to type 'number | boolean'` under `Type 'V' ...`), a type parameter's by its
@@ -2022,6 +2670,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     return true;
                 }
+                if self.distributed_constraint_related(s, c, t, rel) {
+                    return true;
+                }
             }
             // A source intersection may still be structurally related to an object target.
             if !(sf.contains(TypeFlags::INTERSECTION) && tf.contains(TypeFlags::OBJECT)) {
@@ -2036,6 +2687,65 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.report_pattern_source_constraint(s, t, rel);
             }
             return r;
+        }
+        // A generic string mapping target (`Uppercase<T>`): another mapping relates when it
+        // is the same intrinsic over related types; anything else must be left unchanged by
+        // the mapping and fit the inner type, or relate through its own constraint.
+        if tf.contains(TypeFlags::STRING_MAPPING)
+            && !sf.intersects(TypeFlags::CONDITIONAL | TypeFlags::SUBSTITUTION)
+            && let TypeKind::StringMapping { sym: b, ty: y } = st.kind(t)
+        {
+            if let TypeKind::StringMapping { sym: a, ty: x } = st.kind(s) {
+                return a == b && self.related_to(x, y, rel, report, None);
+            }
+            if self.is_member_of_string_mapping(s, t) {
+                return true;
+            }
+            if sf.intersects(TypeFlags::INSTANTIABLE) {
+                let c = self.base_constraint(s);
+                return c != s
+                    && c != TypeId::UNRESOLVED
+                    && c != TypeId::UNKNOWN
+                    && !self.store().is_error(c)
+                    && self.related_to(c, t, rel, report, None);
+            }
+            return false;
+        }
+        // A generic template literal target (`${T}`) matches by pattern too; a type parameter,
+        // indexed access or string mapping source may also relate through its constraint.
+        if tf.contains(TypeFlags::TEMPLATE_LITERAL)
+            && !sf.intersects(TypeFlags::CONDITIONAL | TypeFlags::SUBSTITUTION)
+        {
+            if sf.intersects(TypeFlags::STRING_LITERAL | TypeFlags::TEMPLATE_LITERAL)
+                && self.is_matched_by_template(s, t)
+            {
+                return true;
+            }
+            if sf.intersects(
+                TypeFlags::TYPE_PARAMETER
+                    | TypeFlags::INDEXED_ACCESS
+                    | TypeFlags::INDEX
+                    | TypeFlags::STRING_MAPPING,
+            ) {
+                let c = self.base_constraint(s);
+                return c != s
+                    && c != TypeId::UNRESOLVED
+                    && c != TypeId::UNKNOWN
+                    && !self.store().is_error(c)
+                    && self.related_to(c, t, rel, report, None);
+            }
+            if !sf.intersects(TypeFlags::INSTANTIABLE) {
+                return false;
+            }
+        }
+        // A generic template literal source against a type parameter relates only through
+        // its constraint (`${T}` is not a `T`).
+        if sf.contains(TypeFlags::TEMPLATE_LITERAL) && tf.contains(TypeFlags::TYPE_PARAMETER) {
+            let c = self.base_constraint(s);
+            return c != s
+                && c != TypeId::UNRESOLVED
+                && !self.store().is_error(c)
+                && self.related_to(c, t, rel, report, None);
         }
         // Non-generic template literal and string mapping sources relate as `string`.
         if sf.intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
@@ -2088,6 +2798,79 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return self.related_to(b, t, rel, report, None);
         }
+        // `(M & O)[K]` with a generic mapped `M` and a generic `K` is not simplified, and its
+        // object has no concrete constraint to index for writing: no concrete type is
+        // assignable to it (tsc: relater.go, structuredTypeRelatedTo on indexed access targets).
+        if tf.contains(TypeFlags::INDEXED_ACCESS)
+            && !st.traits(s).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+            && !sf.intersects(TypeFlags::INSTANTIABLE | TypeFlags::ANY | TypeFlags::NEVER)
+            && let TypeKind::IndexedAccess { obj, index } = st.kind(t)
+            && st.flags(index).intersects(TypeFlags::INSTANTIABLE)
+            && st.flags(obj).contains(TypeFlags::INTERSECTION)
+        {
+            let members = st.members_of_union(obj).to_vec();
+            if members.iter().any(|&m| {
+                self.store().flags(m).contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(m)
+            }) {
+                return false;
+            }
+        }
+        // A concrete source relates to a generic `T[K]` only through the constraint of `T[K]`
+        // for writing (tsc: relater.go, structuredTypeRelatedToWorker).
+        if tf.contains(TypeFlags::INDEXED_ACCESS)
+            && matches!(rel, RelationKind::Assignable | RelationKind::Comparable)
+            && !sf.intersects(
+                TypeFlags::INSTANTIABLE
+                    | TypeFlags::ANY
+                    | TypeFlags::NEVER
+                    | TypeFlags::UNION_OR_INTERSECTION,
+            )
+            && !st.traits(s).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+            && let Some(c) = self.indexed_access_write_constraint(t)
+        {
+            return c.is_some_and(|c| self.related_to(s, c, rel, report, None));
+        }
+        // `S[K]` relates to `T[J]` when `S` relates to `T` and `K` to `J`, or through the
+        // target's constraint for writing; the source's own constraint is not tried (tsc:
+        // relater.go, structuredTypeRelatedToWorker). Errors elaborate the direct comparison.
+        if tf.contains(TypeFlags::INDEXED_ACCESS)
+            && sf.contains(TypeFlags::INDEXED_ACCESS)
+            && let TypeKind::IndexedAccess { obj: so, index: si } = st.kind(s)
+            && let TypeKind::IndexedAccess { obj: to, index: ti } = st.kind(t)
+            && self.plain_indexed_object(so)
+            && self.plain_indexed_object(to)
+        {
+            if self.related_to(so, to, rel, false, None)
+                && self.related_to(si, ti, rel, false, None)
+            {
+                return true;
+            }
+            let wc = if matches!(rel, RelationKind::Assignable | RelationKind::Comparable) {
+                self.indexed_access_write_constraint(t)
+            } else {
+                Some(None)
+            };
+            match wc {
+                None => return true,
+                Some(Some(c)) if self.related_to(s, c, rel, false, None) => return true,
+                _ => {}
+            }
+            // tsc narrows `S[K] | undefined` by `!== undefined` to `S[K] & ({} | null)`,
+            // which relates through its constraint; we keep `S[K]`, so one constrained to
+            // `any` (or a constrained one we can't compute) stays permissive.
+            let sc = self.base_constraint(s);
+            if sc == TypeId::ANY
+                || ((sc == TypeId::UNRESOLVED || (sc != s && self.is_generic_type(sc)))
+                    && (!self.store().flags(so).contains(TypeFlags::TYPE_PARAMETER)
+                        || self.type_param_constraint(so).is_some()))
+            {
+                return true;
+            }
+            if report && self.related_to(so, to, rel, true, None) {
+                self.related_to(si, ti, rel, true, None);
+            }
+            return false;
+        }
         // Deferred generic forms we do not model: be permissive.
         if tf.intersects(
             TypeFlags::INDEXED_ACCESS
@@ -2123,10 +2906,79 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return false;
             }
         }
-        // Generic mapped types are opaque.
-        if (sf.contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(s))
-            || (tf.contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(t))
+        // A generic homomorphic mapped source over arrays and tuples only relates as the
+        // mapped type applied to that constraint (`{ [P in keyof T]: X }` with `T extends
+        // [number] | readonly [string]` is not an `any[]`). A type parameter target relates
+        // through its keys instead.
+        if sf.contains(TypeFlags::OBJECT)
+            && !tf.intersects(TypeFlags::INSTANTIABLE)
+            && self.is_generic_mapped_type(s)
+            && !(tf.contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(t))
+            && self.mapped_info(s).is_some_and(|i| i.name_node.is_none())
+            && let Some(app) = self.mapped_apparent_type(s)
+            && app != s
+            && self.every_array_or_tuple(app)
         {
+            return self.related_to(app, t, rel, false, None);
+        }
+        // Two generic mapped types relate by their parts; other generic mapped types are
+        // opaque.
+        let s_generic_mapped = sf.contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(s);
+        let t_generic_mapped = tf.contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(t);
+        if s_generic_mapped && t_generic_mapped && rel != RelationKind::Identity {
+            return self.generic_mapped_pair_related(s, t, rel, report);
+        }
+        // `{ [P in Q]: X }` (no `as`, no `?`) is a `T` when `keyof T` relates to `Q` and `X`
+        // to `T[P]`.
+        if s_generic_mapped
+            && tf.contains(TypeFlags::TYPE_PARAMETER)
+            && rel != RelationKind::Identity
+            && let Some(si) = self.mapped_info(s)
+            && si.name_node.is_none()
+        {
+            let q = self.mapped_constraint(&si);
+            if q == TypeId::UNRESOLVED {
+                return true;
+            }
+            let kt = self.keyof_type(t);
+            if matches!(
+                si.optional,
+                ts_r_ast::MappedModifier::Present | ts_r_ast::MappedModifier::Add
+            ) || !self.related_to(kt, q, rel, false, None)
+            {
+                return false;
+            }
+            let (tpl, _) = self.mapped_template_and_name_for_key(&si, si.k);
+            let Some(ia) = self.indexed_access_type(t, si.k, None) else {
+                return true;
+            };
+            if ia == TypeId::UNRESOLVED || self.store().is_error(ia) {
+                return true;
+            }
+            return self.related_to(tpl, ia, rel, report, None);
+        }
+        // An unconstrained `T` reads as `{}` against a generic mapped type, and `{}` is no
+        // `-?` mapped type.
+        if t_generic_mapped
+            && sf.contains(TypeFlags::TYPE_PARAMETER)
+            && rel != RelationKind::Identity
+            && self
+                .mapped_info(t)
+                .is_some_and(|i| i.optional == ts_r_ast::MappedModifier::Remove)
+            && self.base_constraint(s) == TypeId::UNKNOWN
+        {
+            return false;
+        }
+        if t_generic_mapped
+            && !s_generic_mapped
+            && rel != RelationKind::Identity
+            && sf.contains(TypeFlags::OBJECT)
+            && !self.could_contain_type_params(s)
+            && let Some(r) = self.concrete_to_generic_mapped(s, t, rel)
+        {
+            return r;
+        }
+        if s_generic_mapped || t_generic_mapped {
             return true;
         }
         // `{ [K in C]: X }[C]` relates through `X` with `K` replaced by `C`.
@@ -2137,6 +2989,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return true;
         }
+        // `(A & B)[K]` is `A[K] & B[K]`: it relates when one member's access does
+        // (`({ [P in keyof U]: P } & { [x: string]: never })[keyof U]` to `keyof U`).
+        if sf.contains(TypeFlags::INDEXED_ACCESS)
+            && let TypeKind::IndexedAccess { obj, index } = st.kind(s)
+            && st.flags(obj).contains(TypeFlags::INTERSECTION)
+        {
+            for m in st.members_of_union(obj).to_vec() {
+                if let Some(x) = self.indexed_access_type(m, index, None)
+                    && x != s
+                    && x != TypeId::UNRESOLVED
+                    && !self.store().is_error(x)
+                    && self.related_to(x, t, rel, false, None)
+                {
+                    return true;
+                }
+            }
+        }
         if tf.contains(TypeFlags::INDEX) {
             // A type parameter constrained (through other parameters) to the target:
             // `K in Keys` with `Keys extends keyof T` against `keyof T`, also through a
@@ -2144,12 +3013,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             if sf.contains(TypeFlags::TYPE_PARAMETER)
                 && let Some(c) = self.type_param_constraint(s)
                 && c != s
-                && self.store().flags(c).intersects(
+                && (self.store().flags(c).intersects(
                     TypeFlags::TYPE_PARAMETER
                         | TypeFlags::INDEX
                         | TypeFlags::CONDITIONAL
                         | TypeFlags::INDEXED_ACCESS,
-                )
+                ) || (self
+                    .store()
+                    .flags(c)
+                    .intersects(TypeFlags::UNION_OR_INTERSECTION)
+                    && self
+                        .store()
+                        .traits(c)
+                        .contains(TypeTraits::CONTAINS_TYPE_PARAMETER)))
                 && self.related_to(c, t, rel, false, None)
             {
                 return true;
@@ -2157,14 +3033,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             // `U[number]` with `U extends readonly (keyof T)[]` against `keyof T`: the element
             // of the object's own constraint.
             if sf.contains(TypeFlags::INDEXED_ACCESS)
-                && let TypeKind::IndexedAccess { obj, index } = st.kind(s)
-                && self.store().flags(obj).contains(TypeFlags::TYPE_PARAMETER)
-                && let Some(oc) = self.type_param_constraint(obj)
-                && oc != obj
-                && let Some(c) = self.indexed_access_type(oc, index, None)
+                && let Some(c) = self.indexed_access_key_constraint(s, 0)
                 && c != s
                 && c != TypeId::UNRESOLVED
                 && self.related_to(c, t, rel, false, None)
+            {
+                return true;
+            }
+            // `keyof S` is related to `keyof T` when `T` is related to `S` (tsc: relater.go,
+            // structuredTypeRelatedToWorker).
+            if let (TypeKind::Index(x), TypeKind::Index(y)) = (st.kind(t), st.kind(s))
+                && self.related_to(x, y, rel, false, None)
             {
                 return true;
             }
@@ -2177,8 +3056,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return true;
                 }
                 if c == TypeId::UNKNOWN {
-                    return sf.contains(TypeFlags::INDEX)
-                        && matches!(st.kind(s), TypeKind::Index(y) if y == x);
+                    // Another `keyof U` relates through `string | number | symbol`, which
+                    // elaborates down to the first key kind that fails.
+                    if sf.contains(TypeFlags::INDEX) {
+                        if matches!(st.kind(s), TypeKind::Index(y) if y == x) {
+                            return true;
+                        }
+                        let kc = self.keyof_constraint();
+                        return kc != s && self.related_to(kc, t, rel, report, None);
+                    }
+                    // An indexed access source relates through its constraint.
+                    if sf.contains(TypeFlags::INDEXED_ACCESS) {
+                        let sc = self.base_constraint(s);
+                        return sc != s
+                            && sc != TypeId::UNKNOWN
+                            && sc != TypeId::UNRESOLVED
+                            && self.related_to(sc, t, rel, false, None);
+                    }
+                    return false;
                 }
                 if sf.contains(TypeFlags::INDEX) {
                     return true;
@@ -2229,14 +3124,52 @@ impl<'c, 'a> Ck<'c, 'a> {
                         _ => break,
                     }
                 }
+                // A union or intersection constraint mentioning type parameters relates
+                // whole (`U extends T | string` is comparable to `T`).
+                if let Some(dc) = self.type_param_constraint(s)
+                    && dc != s
+                    && self
+                        .store()
+                        .flags(dc)
+                        .intersects(TypeFlags::UNION_OR_INTERSECTION)
+                    && self
+                        .store()
+                        .traits(dc)
+                        .contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+                    && self.related_to(dc, t, rel, false, None)
+                {
+                    return true;
+                }
             }
             if sf.contains(TypeFlags::INDEXED_ACCESS) {
                 return true;
+            }
+            // `keyof X` relates through `string | number | symbol` (which fails, but
+            // elaborates down to `string`).
+            if sf.contains(TypeFlags::INDEX) && report {
+                let kc = self.keyof_constraint();
+                return kc != s && self.related_to(kc, t, rel, report, None);
             }
             return false;
         }
         if sf.intersects(TypeFlags::INSTANTIABLE) {
             let c = self.base_constraint(s);
+            if c == TypeId::UNRESOLVED
+                && let Some(next) = self.unconstrained_access_step(s)
+            {
+                return self.related_to(next, t, rel, report, None);
+            }
+            // `T[string]` (of `T[keyof T]`) whose `T` has no index signature relates to
+            // nothing but itself and `unknown`-like types (observed).
+            if c == TypeId::UNRESOLVED
+                && let TypeKind::IndexedAccess { obj, index } = self.store().kind(s)
+                && self.store().flags(obj).contains(TypeFlags::TYPE_PARAMETER)
+                && matches!(index, TypeId::STRING | TypeId::NUMBER | TypeId::SYMBOL)
+                && !self.is_unknown_like_union(t)
+                && !self.constraint_has_index(obj)
+            {
+                return false;
+            }
             if c == TypeId::UNRESOLVED {
                 return true;
             }
@@ -2634,6 +3567,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             });
         }
         if sf.contains(TypeFlags::OBJECT) && tf.contains(TypeFlags::OBJECT) {
+            // A generic mapped type is identical only to another generic mapped type
+            // (tsc: relater.go, structuredTypeRelatedToWorker).
+            if self.is_generic_mapped_type(s) != self.is_generic_mapped_type(t) {
+                return false;
+            }
             return self.structural_related(s, t, RelationKind::Identity, false);
         }
         false
@@ -2684,6 +3622,9 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     fn tuple_related(&mut self, s: TypeId, t: TypeId, rel: RelationKind, report: bool) -> bool {
+        // Elements already related as discriminants (`["a" | "b", number]` against each of
+        // `["a", number] | ["b", number]`) are skipped.
+        let excluded = std::mem::take(&mut self.rel.excluded_props);
         let st = self.store();
         let tshape = st
             .tuple_shape_of(t)
@@ -2833,6 +3774,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Some(tel) = tshape.elements.get(tidx) else {
                 break;
             };
+            if tidx == i
+                && !excluded.is_empty()
+                && excluded.contains(&self.store().intern_str(&i.to_string()))
+            {
+                continue;
+            }
             let mut te = targs.get(tidx).copied().unwrap_or(TypeId::ANY);
             if sk == TupleElement::OPTIONAL
                 && tel.kind != TupleElement::OPTIONAL
@@ -2882,6 +3829,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let st = self.store();
         if !st.flags(t).contains(TypeFlags::OBJECT) {
+            return false;
+        }
+        // A generic mapped type is not empty, whatever members it resolves to so far.
+        if st
+            .object_of(t)
+            .is_some_and(|o| matches!(o.kind, ObjectKind::Mapped { .. }))
+            && self.is_generic_mapped_type(t)
+        {
             return false;
         }
         let m = self.resolved_members(t);
@@ -2942,6 +3897,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
                 if self.property_of_type_id(s, n).is_none() {
+                    // A class's static `#private` fields are not required of another
+                    // constructor type (observed: `const c: typeof A = class {}` is OK).
+                    if self.store().str(n).starts_with('#')
+                        && self.c.value_decl(tp).is_some_and(|d| {
+                            self.node(d)
+                                .modifiers()
+                                .contains(ts_r_ast::Modifiers::STATIC)
+                        })
+                    {
+                        continue;
+                    }
                     // Index signatures don't satisfy required properties.
                     missing.push((n, tp));
                 }
@@ -2962,9 +3928,22 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .iter()
                         .any(|&(n, _)| !self.store().str(n).bytes().all(|b| b.is_ascii_digit()));
                 if report && !plain_fn && !non_array_to_tuple {
-                    let (ss, ts) = self.type_names_for_error(s, t);
+                    let ns = self.non_augmenting_base(s);
+                    let nt = self.non_augmenting_base(t);
+                    let (ss, mut ts) = self.type_names_for_error(ns, nt);
+                    // Named after the base, the message keeps the head naming the operands.
+                    let mut keep_head = ns != s || nt != t;
                     if missing.len() == 1 {
                         let pn = self.written_name(missing[0].1, missing[0].0);
+                        // A private or protected property names the class declaring it,
+                        // under the head when that is not the target (`C2 extends A`).
+                        if self.is_private_like(missing[0].1).is_some()
+                            && let Some(dn) = self.declaring_type_name(missing[0].1, t)
+                            && dn != ts
+                        {
+                            ts = dn;
+                            keep_head = true;
+                        }
                         self.report_error(
                             dg::PROPERTY_0_IS_MISSING_IN_TYPE_1_BUT_REQUIRED_IN_TYPE_2_2741,
                             &[&pn, &ss, &ts],
@@ -2987,7 +3966,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                             );
                         }
                     }
-                    self.suppress_next_head();
+                    if !keep_head {
+                        self.suppress_next_head();
+                    }
                 }
                 return false;
             }
@@ -3017,6 +3998,12 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// A property's name as tsc writes a symbol: a string literal name keeps its quotes
     /// as declared (`'a'`, `"b-c"`), a numeric one its spelling (`2.0`).
     pub(crate) fn written_name(&self, sym: SymId, n: StrId) -> String {
+        self.written_decl_name(sym)
+            .unwrap_or_else(|| self.symbol_display_name(n))
+    }
+
+    /// [`Self::written_name`] when the declaration writes a literal or late-bound key.
+    pub(crate) fn written_decl_name(&self, sym: SymId) -> Option<String> {
         let d = self
             .c
             .synth_sym(sym)
@@ -3037,7 +4024,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 && let Node::ComputedKey { expr } = *ast.node(k)
                 && crate::nodes::is_entity_name_expr(ast, expr)
             {
-                return format!("[{}]", self.c.text(Loc::new(d.file, expr)));
+                return Some(format!("[{}]", self.c.text(Loc::new(d.file, expr))));
             }
             if let Some(k) = key
                 && matches!(ast.node(k), Node::StringLit { .. } | Node::NumberLit { .. })
@@ -3049,11 +4036,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .text
                     .get(sp.start as usize..sp.end as usize)
                 {
-                    return text.to_owned();
+                    return Some(text.to_owned());
                 }
             }
         }
-        self.symbol_display_name(n)
+        None
     }
 
     fn symbol_display_name(&self, n: StrId) -> String {
@@ -3096,7 +4083,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             if !same && t_priv == Some(false) && s_priv != Some(true) && !derived {
                 // A protected target needs a declaration in a class derived from its class.
                 if report {
-                    let pn = self.symbol_display_name(name);
+                    let pn = self.written_name(tp, name);
                     let ss = self.type_to_string(s);
                     let cn = self.declaring_class_name(tp);
                     self.report_error(
@@ -3109,7 +4096,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             let allowed = same || (derived && t_priv == Some(false) && s_priv != Some(true));
             if !allowed {
                 if report {
-                    let pn = self.symbol_display_name(name);
+                    let pn = self.written_name(tp, name);
                     match (s_priv, t_priv) {
                         (Some(true), Some(true)) if hash => {
                             // `#x` names the classes declaring each member.
@@ -3180,9 +4167,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return false;
         }
-        if rel != RelationKind::Comparable && s_opt && !t_opt {
+        // Only a member target (not a global `var` of `typeof globalThis`) must be required.
+        let t_member = !self.c.sym_flags(tp).intersects(
+            SymbolFlags::VARIABLE | SymbolFlags::FUNCTION | SymbolFlags::CLASS | SymbolFlags::ENUM,
+        ) || self
+            .c
+            .sym_flags(tp)
+            .intersects(SymbolFlags::PROPERTY | SymbolFlags::METHOD | SymbolFlags::ACCESSOR);
+        if rel != RelationKind::Comparable && s_opt && !t_opt && t_member {
             if report {
-                let pn = self.symbol_display_name(name);
+                let pn = self.written_name(tp, name);
                 let (ss, ts) = self.type_names_for_error(s, t);
                 self.report_error(
                     dg::PROPERTY_0_IS_OPTIONAL_IN_TYPE_1_BUT_REQUIRED_IN_TYPE_2_2327,
@@ -3296,6 +4290,31 @@ impl<'c, 'a> Ck<'c, 'a> {
             .unwrap_or_default()
     }
 
+    /// 0 for a public construct signature, 1 for a `protected` and 2 for a `private`
+    /// class constructor.
+    fn constructor_visibility(&self, sig: SigId) -> u8 {
+        let Some(d) = self.store().sig(sig).decl.and_then(Loc::unpack) else {
+            return 0;
+        };
+        if !matches!(
+            self.node(d),
+            Node::MethodDef {
+                kind: ts_r_ast::MethodKind::Constructor,
+                ..
+            }
+        ) {
+            return 0;
+        }
+        let m = self.node(d).modifiers();
+        if m.contains(ts_r_ast::Modifiers::PRIVATE) {
+            2
+        } else if m.contains(ts_r_ast::Modifiers::PROTECTED) {
+            1
+        } else {
+            0
+        }
+    }
+
     /// Whether `sp` is declared in a class derived from the class declaring `tp`.
     fn declared_in_derived_class(&mut self, sp: SymId, tp: SymId) -> bool {
         match (self.declaring_class(sp), self.declaring_class(tp)) {
@@ -3304,7 +4323,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    fn same_declaration(&self, a: SymId, b: SymId) -> bool {
+    pub(crate) fn same_declaration(&self, a: SymId, b: SymId) -> bool {
         let da = self.c.value_decl(a).or_else(|| self.c.first_decl(a));
         let db = self.c.value_decl(b).or_else(|| self.c.first_decl(b));
         da.is_some() && da == db
@@ -3319,6 +4338,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         report: bool,
     ) -> bool {
         let tsigs = self.signatures_of(t, kind);
+        // Identity pairs the signatures by position: overload order matters
+        // (tsc: relater.go, signaturesIdenticalTo).
+        if rel == RelationKind::Identity {
+            let ssigs = self.signatures_of(s, kind);
+            if ssigs.len() != tsigs.len() {
+                return false;
+            }
+            let pairs: Vec<(SigId, SigId)> =
+                ssigs.iter().copied().zip(tsigs.iter().copied()).collect();
+            return pairs
+                .into_iter()
+                .all(|(ss, ts)| self.signature_related(ss, ts, kind, rel, false));
+        }
         if tsigs.is_empty() {
             return true;
         }
@@ -3349,6 +4381,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.report_error(dg::CANNOT_ASSIGN_AN_ABSTRACT_CONSTRUCTOR_TYPE_TO_A_NON_ABSTRACT_CONSTRUCTOR_TYPE_2517, &[]);
                 }
                 return false;
+            }
+            // A `protected` or `private` constructor is not a less restricted one (TS2672).
+            if rel != RelationKind::Identity {
+                let sv = self.constructor_visibility(ssigs[0]);
+                let tv = self.constructor_visibility(tsigs[0]);
+                if sv > tv {
+                    if report {
+                        let names = ["public", "protected", "private"];
+                        self.report_error(
+                            dg::CANNOT_ASSIGN_A_0_CONSTRUCTOR_TYPE_TO_A_1_CONSTRUCTOR_TYPE_2672,
+                            &[names[sv as usize], names[tv as usize]],
+                        );
+                    }
+                    return false;
+                }
             }
         }
         // Two instantiations of one type literal (or one generic interface) relate their
@@ -3604,6 +4651,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return false;
         }
+        // Strict subtypes (subtype reduction) count every parameter, optional ones too:
+        // `() => void` is a strict subtype of `(x?: string) => void`, not the reverse
+        // (tsc: `compareSignaturesRelated` with StrictArity in tsc/internal/checker/relater.go).
+        let strict_arity = rel == RelationKind::StrictSubtype;
+        if strict_arity && !t_rest && (s_rest || s_count > t_count) {
+            return false;
+        }
+        let t_min = if strict_arity {
+            self.effective_min_args(tsig)
+        } else {
+            0
+        };
         // `this` types: contravariant for a strict function type, else either way. A source
         // `this: void` asks nothing of the target's.
         if let (Some(st_), Some(tt_)) = (sd.this_type, td.this_type)
@@ -3633,7 +4692,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Some(tp) = self.param_type_at(tsig, i) else {
                 continue;
             };
+            // With strict arity, an optional source parameter where the target's is required
+            // makes the source no subtype when its type fits the target's:
+            // `(x?: number) => void` is not a strict subtype of `(x: number | undefined) => void`.
+            let optional_for_required = strict_arity && i >= s_min && i < t_min;
             if sp == tp {
+                if optional_for_required {
+                    return false;
+                }
                 continue;
             }
             // Callback parameters are compared covariantly-ish (tsc's callback check). Like
@@ -3661,6 +4727,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.related_to(sp, tp, rel, false, None)
                     || self.related_to(tp, sp, rel, false, None)
             };
+            if ok && optional_for_required && self.related_to(sp, tp, rel, false, None) {
+                return false;
+            }
             if !ok {
                 if report {
                     // A strict function type's callback parameters are explained by their
@@ -3902,7 +4971,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The single call signatures of two callback parameter types (function types with
     /// no other members, alike in nullability, without type predicates).
-    fn callback_pair(&mut self, sp: TypeId, tp: TypeId) -> Option<(SigId, SigId)> {
+    pub(crate) fn callback_pair(&mut self, sp: TypeId, tp: TypeId) -> Option<(SigId, SigId)> {
         let nullish = |ck: &mut Self, t: TypeId| {
             ck.some_member(t, |m| {
                 ck.store()
@@ -4015,8 +5084,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 None => {
                     // A string index of `any` accepts any object type (`Record<string, any>`
-                    // takes interfaces and class instances).
-                    if ti.key == TypeId::STRING && ti.value == TypeId::ANY {
+                    // takes interfaces and class instances), except under the strict subtype
+                    // relation (`any[]` is not a strict subtype of `Record<string, any>`).
+                    if ti.key == TypeId::STRING
+                        && ti.value == TypeId::ANY
+                        && rel != RelationKind::StrictSubtype
+                    {
                         continue;
                     }
                     // Under the strict subtype relation only fresh object literals get
@@ -4307,7 +5380,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn written_in(&self, p: SymId, owner: Option<Loc>) -> bool {
         let Some(lit) = owner else { return true };
         let decl = self.c.synth_sym(p).and_then(|x| x.decl);
-        decl.is_some_and(|d| self.c.parent(d).is_some_and(|pd| pd == lit))
+        // (A JSX element's children prop is declared by the element itself.)
+        decl.is_some_and(|d| {
+            self.c.parent(d).is_some_and(|pd| pd == lit)
+                || (d == lit && matches!(self.ast(d.file).node(d.node), Node::JsxOpening { .. }))
+        })
     }
 
     fn has_excess_properties(
@@ -4423,7 +5500,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                         dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_BUT_0_DOES_NOT_EXIST_IN_TYPE_1_D_2561,
                         &[&pn, &ts, &sug],
                     ),
-                    _ => self.report_error(dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_AND_0_DOES_NOT_EXIST_IN_TYPE_1_2353, &[&pn, &ts]),
+                    _ => {
+                        // A name that is neither an identifier, a number nor a computed
+                        // symbol shows quoted (`'"resolution-mode"'`).
+                        let plain = !pn.is_empty()
+                            && (pn.starts_with('[')
+                                || pn.parse::<f64>().is_ok()
+                                || pn.chars().enumerate().all(|(i, c)| {
+                                    c == '_' || c == '$' || c.is_alphabetic() || (i > 0 && c.is_numeric())
+                                }));
+                        let pn = if plain { pn } else { format!("\"{pn}\"") };
+                        self.report_error(dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_AND_0_DOES_NOT_EXIST_IN_TYPE_1_2353, &[&pn, &ts])
+                    }
                 }
                 self.suppress_next_head();
             }
@@ -4662,6 +5750,139 @@ impl<'c, 'a> Ck<'c, 'a> {
                     res[i] = c;
                 }
             }
+        }
+    }
+}
+
+impl Ck<'_, '_> {
+    /// The enum symbol behind an enum type, an enum's literal union or a member's literal.
+    fn enum_symbol_of(&self, t: TypeId) -> Option<SymId> {
+        let st = self.store();
+        match st.kind(t) {
+            TypeKind::Enum(s) => Some(s),
+            TypeKind::EnumLiteral { member, .. } => self.c.sym_parent(member),
+            TypeKind::Union { alias, .. } if st.traits(t).contains(TypeTraits::ENUM_UNION) => {
+                st.alias_info(alias).map(|i| i.sym)
+            }
+            _ => None,
+        }
+    }
+
+    /// Two different enums relate when both are regular (not `const`) enums of one name and
+    /// every member of the source exists in the target with the same value; a member whose
+    /// value is unknown (computed, or an ambient enum's member without initializer) only
+    /// clashes with a string value. The verdict is cached per pair; with `report`, the
+    /// reason is added to the relation's chain.
+    fn enum_types_related(&mut self, s: SymId, t: SymId, report: bool) -> bool {
+        if s == t {
+            return true;
+        }
+        if self.c.sym_name(s) != self.c.sym_name(t)
+            || !self.c.sym_flags(s).contains(SymbolFlags::REGULAR_ENUM)
+            || !self.c.sym_flags(t).contains(SymbolFlags::REGULAR_ENUM)
+        {
+            return false;
+        }
+        let reporting = report && self.reporting_rel();
+        if let Some(&r) = self.enum_relation.get(&(s, t))
+            && (r || !reporting)
+        {
+            return r;
+        }
+        let sm = self.enum_members(s);
+        let tm = self.enum_members(t);
+        let mut ok = true;
+        for &(m, sv) in &sm {
+            let name = self.c.sym_name(m);
+            let Some(&(tmem, tv)) = tm.iter().find(|x| self.c.sym_name(x.0) == name) else {
+                if reporting {
+                    let pname = name.to_owned();
+                    let declared = self.declared_type_of_symbol(t);
+                    let saved = std::mem::replace(&mut self.print_qualified, true);
+                    let ts = self.type_to_string(declared);
+                    self.print_qualified = saved;
+                    self.report_error(dg::PROPERTY_0_IS_MISSING_IN_TYPE_1_2324, &[&pname, &ts]);
+                }
+                ok = false;
+                break;
+            };
+            let sv = sv.filter(|_| !self.ambient_auto_member(m));
+            let tv = tv.filter(|_| !self.ambient_auto_member(tmem));
+            if sv == tv {
+                continue;
+            }
+            let st = self.store();
+            match (sv, tv) {
+                (Some(a), Some(b)) => {
+                    if reporting {
+                        let (en, mn) = (self.c.sym_name(t).to_owned(), name.to_owned());
+                        let (bs, as_) = (self.type_to_string(b), self.type_to_string(a));
+                        self.report_error(
+                            dg::EACH_DECLARATION_OF_0_1_DIFFERS_IN_ITS_VALUE_WHERE_2_WAS_EXPECTED_BUT_3_WAS_GIVE_4125,
+                            &[&en, &mn, &bs, &as_],
+                        );
+                    }
+                    ok = false;
+                    break;
+                }
+                (Some(v), None) | (None, Some(v)) if st.string_value(v).is_some() => {
+                    if reporting {
+                        let (en, mn) = (self.c.sym_name(t).to_owned(), name.to_owned());
+                        let vs = self.type_to_string(v);
+                        self.report_error(
+                            dg::ONE_VALUE_OF_0_1_IS_THE_STRING_2_AND_THE_OTHER_IS_ASSUMED_TO_BE_AN_UNKNOWN_NUMER_4126,
+                            &[&en, &mn, &vs],
+                        );
+                    }
+                    ok = false;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        self.enum_relation.insert((s, t), ok);
+        ok
+    }
+
+    /// A member without initializer of an ambient, non-`const` enum: its value is unknown.
+    fn ambient_auto_member(&mut self, m: SymId) -> bool {
+        let Some(d) = self.c.decls(m).first().copied() else {
+            return false;
+        };
+        if !matches!(self.node(d), Node::EnumMember { init: None, .. }) {
+            return false;
+        }
+        let Some(e) = self.c.parent(d) else {
+            return false;
+        };
+        matches!(self.node(e), Node::Enum { modifiers, .. } if !modifiers.contains(ts_r_ast::Modifiers::CONST))
+            && self.is_ambient_node(e)
+    }
+
+    /// The enum pair `simple_related` compares member by member for `s` and `t`, if any.
+    fn enum_relation_pair(&self, s: TypeId, t: TypeId) -> Option<(SymId, SymId)> {
+        let st = self.store();
+        let (sf, tf) = (st.flags(s), st.flags(t));
+        let both_enum = sf.contains(TypeFlags::ENUM) && tf.contains(TypeFlags::ENUM);
+        let both_union = st.traits(s).contains(TypeTraits::ENUM_UNION)
+            && st.traits(t).contains(TypeTraits::ENUM_UNION);
+        let same_literal = match (st.kind(s), st.kind(t)) {
+            (TypeKind::EnumLiteral { value: a, .. }, TypeKind::EnumLiteral { value: b, .. }) => {
+                a == b
+            }
+            _ => false,
+        };
+        if !(both_enum || both_union || same_literal) {
+            return None;
+        }
+        let (a, b) = (self.enum_symbol_of(s)?, self.enum_symbol_of(t)?);
+        (a != b && self.c.sym_name(a) == self.c.sym_name(b)).then_some((a, b))
+    }
+
+    /// After a failed simple relation: the reason two same-named enums differ.
+    fn report_enum_mismatch(&mut self, s: TypeId, t: TypeId) {
+        if let Some((a, b)) = self.enum_relation_pair(s, t) {
+            self.enum_types_related(a, b, true);
         }
     }
 }

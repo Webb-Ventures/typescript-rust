@@ -26,14 +26,16 @@ texts), `dump.rs`.
 
 ## Invariants
 
-- **tsc 7.0.2 is the spec; never read tsc's or any other checker's source.** Every
+- **tsc 7.0.2 is the spec.** tsc's source may be read to understand a rule (never translated,
+  and never a Rust port of TypeScript; root AGENTS.md). Every
   conflict/message rule came from a probe (`npx -y -p typescript@7.0.2 tsc` on a tiny file;
   the observed facts are listed in the design record). Changing a rule needs a probe and an
   update to 0003.
 - **Never panics, always terminates.** Recursion goes through the depth guard (`MAX_DEPTH`
   3000 plus a native stack budget); past it the binder reports TS99001 and stops descending
   (`tests/limits.rs` builds a 200k-deep AST). Alias / `export *` chains are bounded
-  (`MAX_CHAIN` deep, `MAX_STAR_MODULES` modules per `export *` search) and cycle-checked; program merging recursion is depth-limited (32). Every
+  (`MAX_CHAIN` deep, `MAX_STAR_MODULES` modules per `export *` search; the all-paths
+  `star_export_is_type_only` walk spends a `MAX_STAR_MODULES` call budget) and cycle-checked; program merging recursion is depth-limited (32). Every
   loop walks a finite list or moves strictly up a scope/parent chain.
 - **Plain data out.** `BoundFile` holds ids into its own arrays (no pointers, no hash maps);
   identical input gives a byte-identical dump. Cross-file facts live only in `Program`.
@@ -66,6 +68,10 @@ texts), `dump.rs`.
   the file's (custom `link` callbacks get the whole request). Other imports ignore it.
 - **Module detection** (`file_is_module`): a JSDoc `@import` (`Ast::is_jsdoc`) does not
   make a file a module; its names are global in a script, as in tsc 7.
+- **Whole-module aliases of scripts** (`Program::is_script_target`): `import * as ns` and
+  `import x = require(...)` of a program file that is not a module (not `is_module`, not
+  `commonjs`, not `.json`) resolve to nothing, so the alias is unknown (the checker reports
+  TS2306).
 - **JSDoc type aliases** (`@typedef`/`@callback`, `Ast::is_jsdoc`): at the top level of a
   JavaScript ES module they are exported; in a CommonJS module or a script they stay local.
   A JSDoc `@typedef default` that clashes with a default export is TS2300 under each
@@ -106,6 +112,11 @@ texts), `dump.rs`.
   order); the other members follow from the last block's end, and the flow after the
   class drops their effects (assignments in computed names do not reach it), as tsc 7
   behaves.
+- **Which closures continue the outer flow.** The start node of a function expression,
+  arrow, object literal method or accessor, or a method or accessor of a class
+  *expression* links to the flow where it is created (the checker narrows captured
+  variables through it). Constructors and members of class declarations start unlinked,
+  as tsc 7 narrows (fixture `closure_narrowing_containers.ts` in the checker).
 - Parameter properties (`constructor(readonly x: T)`) are instance members with
   `SymbolFacts::READONLY` when `readonly`, like property declarations.
 - **Optional chains branch.** In `a?.b.c(x)` the rest after each `?.` (keys, arguments,
@@ -118,7 +129,15 @@ texts), `dump.rs`.
   `x ||= y` is read, then assigned) keeps the first record: `node_flow` is sorted stably.
 - **Type queries read the flow.** The identifier of `typeof x` in a type gets the flow
   where the type is bound, so the checker narrows it there (`(b as typeof a).x` after
-  `a.kind === "a"`, observed tsc 7). A qualified `typeof a.b` gets none.
+  `a.kind === "a"`, observed tsc 7). A qualified `typeof a.b` records the flow on its
+  `QualifiedName` node (`typeof x.p` after `x.p === "A"` is `"A"`) and on its leftmost
+  identifier, which the checker uses for the whole name when the node has none
+  (`typeof this.a.b` inside `if (this.a)`).
+- **Array mutations.** Every `xs.push(..)` / `xs.unshift(..)` call (not only a statement)
+  gets an `ArrayMutation` node after its arguments, with an exception edge like a call;
+  its object is a reference through parentheses, the last expression of a comma list and
+  an assignment's target (`(xs = [], xs).push(1)`; tsc: binder/binder.go,
+  bindCallExpressionFlow). Statement calls that are not mutations get a `Call` node.
 - **Switch fallthrough.** `FlowGraph::fallthroughs` lists each non-empty clause but a
   switch's last whose end is reachable in the binder's graph, with the flow at its end
   (empty clauses group with the next). The checker reports TS7029 for those still
@@ -130,7 +149,15 @@ texts), `dump.rs`.
 - **Binder diagnostics ⊆ tsc's.** An extra diagnostic is a bug; a missing one may be the
   checker's job (see the gaps below). TS2669 (misplaced `declare global`) is only reported
   for a declaration directly in a file or module body; in a block or function body the
-  checker reports TS1234 instead.
+  checker reports TS1234 instead. `export` on a quoted module or `declare global` is TS2668
+  at the first modifier (tsc: binder/binder.go, bindModuleDeclaration). A quoted module at
+  a script's top level whose name is relative (`.`, `..`, `./`, `../`, backslash forms) or
+  rooted (`/`, `\`, `c:`, `c:/`, `^/`, a URL with a path) is TS2436 at the name; tsc
+  reports it from checkModuleDeclaration (tsc: checker/checker.go, tspath/path.go
+  IsExternalModuleNameRelative), but it needs nothing beyond the binder's context.
+  TS5061: an ambient module that is not an augmentation
+  (a script's, or one not at a module file's top level) whose name has more than one `*`,
+  at the name (`tsc: tsc/internal/binder/binder.go`, module declarations).
 - Front-end crates are read-only for this crate; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 
@@ -149,11 +176,11 @@ texts), `dump.rs`.
 - Conformance (needs `cargo xtask upstream sync`):
   `cargo build --release -j 4 -p ts_r_binder --example conformance` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- target/release/examples/conformance [filter]`.
-  Compares the binder's codes (2300, 2451, 2567, 2528, 2397, 2435, 2664, 2669, 2671, 1100-1215 strict
+  Compares the binder's codes (2300, 2451, 2567, 2528, 2397, 2435, 2436, 2664, 2668, 2669, 2671, 5061, 1100-1215 strict
   mode, 1101, 1102, 1114, 1117, 1344, 7027, 7028) per test variant with the baselines and
   writes mismatches to `target/binder-conformance.txt`.
-  Current: 12783 variants; 445 expect binder diagnostics, 399 match exactly; 1684 of 1792
-  expected diagnostics matched (108 missing, 88 extra).
+  Current (2026-10-21, 0bc6c71): 12783 variants; 445 expect binder diagnostics, 406 match exactly; 1694 of 1792
+  expected diagnostics matched (98 missing, 75 extra).
 - Corpus: `cargo build --release -j 4 -p ts_r_binder --example corpus` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- /usr/bin/time -l target/release/examples/corpus ../private-app`.
   private-app (691 project files + 5219 `node_modules` declaration files, 48 MB):
@@ -162,11 +189,20 @@ texts), `dump.rs`.
 - Debugging: `cargo run -p ts_r_binder --example binddump -- [--flow] [--unreachable] f.ts`,
   `--example astdump`.
 
+- `delete` of a missing operand (`delete ;`) is TS1102 in strict code: a missing
+  expression is an identifier to tsc.
+- `export as namespace N` (tsc: binder.go, the namespace-export binding): modifiers on it
+  are TS1184; then it is TS1316 below the top level (inside a namespace or an ambient
+  module), TS1314 in a script, TS1315 in an implementation file, and only otherwise does
+  it declare the UMD global (`umd_name`; `umd_export_placement`).
+
 ## Known gaps (where the remaining mismatches are)
 
-- Extra TS1212/1213/1214 in files with syntax errors: tsc appears not to report
-  strict-mode reserved words in a file that has parse errors (`function a1({public}) {}`
-  next to a syntax error gets none).
+- TS1212/1213/1214 in files with syntax errors: tsc's binder reports strict-mode reserved
+  words only in a file without parse errors; the checker's driver drops them. Its other
+  TS1xxx errors (TS1100, TS1101, TS1102, TS1184, TS1210, TS1215, TS1314-TS1316, TS1344)
+  stay whatever the parser found (tsc: tsc/internal/binder/binder.go, the contextual
+  identifier check is the one guarded by the file's diagnostics).
 - Late-bound names (`[sym]`, `[E.member]`, unique symbols: TS1117/TS2300) need types.
 - TS7027 after never-returning calls, assertion functions and exhaustive switches needs
   types (checker).

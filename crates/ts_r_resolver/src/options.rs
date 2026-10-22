@@ -47,6 +47,9 @@ pub struct ResolverOptions {
     pub root_dir: Option<String>,
     /// `allowJs` (or `checkJs`): JavaScript sources count when mapping outputs back.
     pub allow_js: bool,
+    /// `allowArbitraryExtensions`: the resolver finds `x.d.html.ts` for `./x.html` either
+    /// way; the program only links it with this set (or from a declaration file).
+    pub allow_arbitrary_extensions: bool,
 }
 
 impl Default for ResolverOptions {
@@ -87,6 +90,7 @@ impl ResolverOptions {
             declaration_dir: o.declaration_dir().map(str::to_owned),
             root_dir,
             allow_js: e.allow_js(),
+            allow_arbitrary_extensions: e.allow_arbitrary_extensions(),
         }
     }
 

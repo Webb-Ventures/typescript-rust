@@ -1,0 +1,3 @@
+c.ts(2,13): error TS2339: Property 'A' does not exist on type 'typeof import("/p/b")'.
+c.ts(3,13): error TS2339: Property 'v' does not exist on type 'typeof import("/p/b")'.
+d.ts(1,29): error TS2307: Cannot find module './missing' or its corresponding type declarations.

@@ -1,0 +1,4 @@
+a.ts(3,9): error TS2539: Cannot assign to 'undefined' because it is not a variable.
+a.ts(4,1): error TS2539: Cannot assign to 'undefined' because it is not a variable.
+a.ts(5,2): error TS2539: Cannot assign to 'undefined' because it is not a variable.
+a.ts(7,3): error TS2539: Cannot assign to 'undefined' because it is not a variable.

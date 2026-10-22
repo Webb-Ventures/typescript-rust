@@ -1,0 +1,5 @@
+a.ts(14,10): error TS2446: Property 'tag' is protected and only accessible through an instance of class 'Left'. This is an instance of class 'Right'.
+a.ts(17,11): error TS2446: Property 'left' is protected and only accessible through an instance of class 'Mixed'. This is an instance of class 'Left'.
+a.ts(18,10): error TS2445: Property 'make' is protected and only accessible within class 'Base' and its subclasses.
+a.ts(25,11): error TS2445: Property 'left' is protected and only accessible within class 'Left' and its subclasses.
+a.ts(28,11): error TS2445: Property 'tag' is protected and only accessible within class 'Base' and its subclasses.

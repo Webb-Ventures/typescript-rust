@@ -1,0 +1,2 @@
+a.ts(2,12): error TS2322: Type 'T & (0 | 1 | 2)' is not assignable to type 'object'.
+  Type 'T & 0' is not assignable to type 'object'.

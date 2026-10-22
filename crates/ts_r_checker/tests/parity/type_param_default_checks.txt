@@ -1,0 +1,15 @@
+a.ts(3,41): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+a.ts(4,59): error TS2344: Type 'T' does not satisfy the constraint 'number'.
+  Type 'string' is not assignable to type 'number'.
+a.ts(5,44): error TS2344: Type 'T' does not satisfy the constraint 'number'.
+a.ts(6,39): error TS2344: Type 'number' does not satisfy the constraint 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+a.ts(7,34): error TS2344: Type 'number' does not satisfy the constraint 'string'.
+a.ts(8,32): error TS2344: Type 'number' does not satisfy the constraint 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+a.ts(9,35): error TS2344: Type '{ a: string; }' does not satisfy the constraint '{ a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(18,29): error TS2716: Type parameter 'T' has a circular default.
+a.ts(19,16): error TS2716: Type parameter 'T' has a circular default.
+a.ts(20,24): error TS2744: Type parameter defaults can only reference previously declared type parameters.

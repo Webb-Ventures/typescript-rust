@@ -746,13 +746,12 @@ impl Effective<'_> {
             .unwrap_or_else(|| self.flag(OptionId::CheckJs).unwrap_or(false))
     }
 
-    /// `allowImportingTsExtensions`, implied by `rewriteRelativeImportExtensions`.
+    /// `allowImportingTsExtensions`, or `rewriteRelativeImportExtensions`: tsc ORs the two,
+    /// so the rewrite option allows `.ts` imports even when `allowImportingTsExtensions` is
+    /// explicitly `false` (`tsc/internal/core/compileroptions.go`).
     pub fn allow_importing_ts_extensions(&self) -> bool {
-        self.flag(OptionId::AllowImportingTsExtensions)
-            .unwrap_or_else(|| {
-                self.flag(OptionId::RewriteRelativeImportExtensions)
-                    .unwrap_or(false)
-            })
+        self.flag(OptionId::AllowImportingTsExtensions) == Some(true)
+            || self.flag(OptionId::RewriteRelativeImportExtensions) == Some(true)
     }
 
     /// `strict`, default `true` in TS 7.
@@ -897,6 +896,26 @@ mod tests {
             Some("sourceMap")
         );
         assert!(find_option_ignore_case("watch").is_none());
+    }
+
+    #[test]
+    fn rewrite_extensions_allows_ts_imports_even_when_disallowed() {
+        let a = |pairs: &[(OptionId, OptionValue)]| {
+            with(pairs).effective().allow_importing_ts_extensions()
+        };
+        let allow = OptionId::AllowImportingTsExtensions;
+        let rewrite = OptionId::RewriteRelativeImportExtensions;
+        assert!(!a(&[]));
+        assert!(a(&[(allow, OptionValue::Bool(true))]));
+        assert!(a(&[(rewrite, OptionValue::Bool(true))]));
+        assert!(a(&[
+            (allow, OptionValue::Bool(false)),
+            (rewrite, OptionValue::Bool(true))
+        ]));
+        assert!(!a(&[
+            (allow, OptionValue::Bool(false)),
+            (rewrite, OptionValue::Bool(false))
+        ]));
     }
 
     #[test]

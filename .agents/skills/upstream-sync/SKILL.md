@@ -9,7 +9,7 @@ ts-r supports the latest TypeScript 7 stable within 7 days of release. A bump PR
 [`upstream/UPSTREAM.json`](../../../upstream/UPSTREAM.json) and nothing is merged until every
 gate is back where it was. Upstream tests, baselines, `lib.*.d.ts` files and diagnostic messages
 are inputs; the merged TypeScript PRs' descriptions and tests are the spec. **Never copy or
-translate compiler source.**
+translate compiler source**; reading it to understand a change is fine.
 
 Command reference: [xtask/AGENTS.md](../../../xtask/AGENTS.md).
 
