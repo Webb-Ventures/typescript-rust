@@ -136,8 +136,8 @@ agree: both load in Node with the same exports; ts-r's is 2.2% larger.
 
 Correctness:
 
-- esbuild's end-to-end bundler tests, run against ts-r-build: 667 of 746 compared cases
-  pass (89.4%).
+- esbuild's end-to-end bundler tests, run against ts-r-build: 666 of 746 compared cases
+  pass (89.3%).
 - Ecosystem bundle stage: 844 packages pass and 71 fail (92.2%). Minified output is 3.1%
   larger than esbuild's in total, with a median per-package ratio of 1.048.
 
