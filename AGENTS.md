@@ -93,7 +93,7 @@ moves when a person merges a reviewed branch.
   line that records it (the crate's `AGENTS.md` "Current" line, or the oracle's README) and the
   matching row in `landing/data/conformance.json` or `landing/data/bench.json` in the same PR.
   The website quotes those lines, and its build fails when a quote goes stale
-  ([landing/AGENTS.md](landing/AGENTS.md), "The rule for numbers").
+  (`landing/AGENTS.md`, "The rule for numbers"; `landing/` is only in the development repo).
 - Commit only the paths you own. Never commit `target/`, benchmark results, caches or binaries.
   `node_modules` inside `crates/*/tests/fixtures/` is committed on purpose.
 - If you were started in your own git worktree, commit and push your branch there
