@@ -14,6 +14,8 @@
 //!   - Any other name is TS1434 at the name.
 //! - After a class property with a type and no initialiser: TS1441 at a `(`, which is
 //!   skipped, otherwise TS1442 "Expected '=' for property initializer." at the next token.
+//! - After a tagged template (`module \`M\` {}`, templateStringInModuleName): TS1443 at the
+//!   template.
 //! - Anything else is `';' expected` at the next token.
 //!
 //! Apart from that `(`, the next token is left for the next statement or member.
@@ -41,6 +43,13 @@ impl Parser<'_> {
     /// The `;` after an expression statement.
     pub(crate) fn expression_statement_semicolon(&mut self, expr: NodeId) {
         if self.eat(T::Semi) || self.can_insert_semicolon() {
+            return;
+        }
+        // `module \`M\` {}`, `foo \`x\` bar` (templateStringInModuleName): a tagged template
+        // statement with no `;` after it is TS1443 at the template, as in tsc 7.
+        if let Node::TaggedTemplate { quasi, .. } = *self.ast.node(expr) {
+            let span = self.ast.span(quasi);
+            self.error_at(messages::MODULE_NAME_QUOTED_STRINGS, span, &[]);
             return;
         }
         // Before an invalid character the error is `';' expected` at it, which gives way to

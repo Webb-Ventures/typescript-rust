@@ -1,0 +1,2 @@
+a.ts(8,6): error TS2741: Property 'foo' is missing in type '{ foob: string; }' but required in type 'IFoo'.
+a.ts(9,7): error TS2741: Property 'foo' is missing in type '{ foob: string; }' but required in type 'IFoo'.

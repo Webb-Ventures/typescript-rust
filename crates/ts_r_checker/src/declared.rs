@@ -345,6 +345,57 @@ impl<'c, 'a> Ck<'c, 'a> {
         Vec::new()
     }
 
+    /// The type parameter declarations at the same position as `tp`'s in the other
+    /// declarations of a merged interface or class (`interface F<T>` and `interface
+    /// F<T extends X>`).
+    fn merged_type_param_decls(&self, tp: SymId) -> Vec<Loc> {
+        let mut out = Vec::new();
+        let Some(decl) = self.c.decls(tp).first().copied() else {
+            return out;
+        };
+        let Some(list) = self.c.parent(decl) else {
+            return out;
+        };
+        let Some(owner) = self.c.parent(list) else {
+            return out;
+        };
+        let ast = self.ast(decl.file);
+        if !matches!(
+            ast.node(owner.node),
+            Node::Interface { .. } | Node::ClassDecl { .. }
+        ) {
+            return out;
+        }
+        let Node::TypeParams { params } = *ast.node(list.node) else {
+            return out;
+        };
+        let Some(index) = ast.list(params).iter().position(|&p| p == decl.node) else {
+            return out;
+        };
+        let Some(owner_sym) = self.c.sym_of_decl(owner) else {
+            return out;
+        };
+        for d in self.c.decls(owner_sym) {
+            if d == owner {
+                continue;
+            }
+            let dast = self.ast(d.file);
+            if !matches!(
+                dast.node(d.node),
+                Node::ClassDecl { .. } | Node::Interface { .. }
+            ) {
+                continue;
+            }
+            if let Some(tps) = type_params_of(dast, d.node)
+                && let Node::TypeParams { params } = *dast.node(tps)
+                && let Some(&p) = dast.list(params).get(index)
+            {
+                out.push(Loc::new(d.file, p));
+            }
+        }
+        out
+    }
+
     /// Merged class/interface declarations each declare their own type parameter symbols;
     /// they all denote the parameter at the same position in the declaration that
     /// `local_type_params` uses (the first one with type parameters).
@@ -735,6 +786,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 break;
             }
         }
+        // A merged declaration may declare the constraint (observed: either order).
+        if res.is_none() {
+            for d in self.merged_type_param_decls(sym) {
+                if let Node::TypeParam {
+                    constraint: Some(c),
+                    ..
+                } = *self.node(d)
+                {
+                    res = Some(self.type_from_node(Loc::new(d.file, c)));
+                    break;
+                }
+            }
+        }
         if res.is_none()
             && let Some(d) = self.c.decls(sym).first().copied()
         {
@@ -885,8 +949,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         out
     }
 
-    /// Evaluates an enum initializer or constant expression.
-    fn eval_constant(
+    /// Evaluates an enum initializer or constant expression (`enum_sym` is `SymId::NONE`
+    /// outside enums).
+    pub(crate) fn eval_constant(
         &mut self,
         e: Loc,
         enum_sym: SymId,
@@ -1014,6 +1079,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             return members.iter().find(|m| m.0 == sym).and_then(|m| m.1);
         }
         if flags.intersects(SymbolFlags::BLOCK_SCOPED_VARIABLE) {
+            // In an expression (no enum), only a variable with an initializer is a constant:
+            // `${lit}` of `declare const lit: "a"` is a `string` (observed, tsc 7).
+            if enum_sym == SymId::NONE
+                && !self
+                    .c
+                    .value_decl(sym)
+                    .and_then(|d| self.declarator_of(d))
+                    .is_some_and(|d| {
+                        matches!(self.node(d), Node::VarDeclarator { init: Some(_), .. })
+                    })
+            {
+                return None;
+            }
             let t = self.type_of_symbol(sym);
             let s = self.store();
             if s.flags(t)
@@ -1276,7 +1354,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .iter()
                     .map(|&t| self.type_from_node(at(t)))
                     .collect();
-                self.intersection_with(&parts, alias)
+                match self.written_primitive_and_empty_object(&parts, alias) {
+                    Some(t) => t,
+                    None => self.intersection_with(&parts, alias),
+                }
             }
             Node::FunctionType { .. } | Node::ConstructorType { .. } => {
                 let outer = !self.referenced_outer_type_params(l).is_empty();
@@ -1514,6 +1595,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return TypeId::ERROR;
                 }
             }
+        }
+        if self
+            .c
+            .sym_flags(sym)
+            .intersects(SymbolFlags::TYPE_PARAMETER)
+            && self.is_static_type_parameter_use(name, sym)
+        {
+            return TypeId::ERROR;
         }
         let t = self.type_from_symbol_reference(sym, &args);
         // A generic class or interface reference written as an alias's type is named by the
@@ -1771,8 +1860,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(l.file);
         match *ast.node(l.node) {
             Node::Ident { name } => {
+                // `typeof this` is the `this` expression there (narrowed, and checked as one).
                 if ast.atom(name) == "this" {
-                    return self.this_type_at(l).unwrap_or(TypeId::UNRESOLVED);
+                    return self.check_this(l);
                 }
                 match self.c.resolve_ident(l, meaning::VALUE) {
                     Some(s) => {
@@ -1803,39 +1893,97 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if matches!(lt, TypeId::ANY | TypeId::IMPLICIT_ANY) {
                     return TypeId::ANY;
                 }
+                // A possibly nullish value has no members (`typeof v.a`, TS18048).
+                let lt = self.check_non_null(Loc::new(l.file, left), lt);
+                if self.store().is_error(lt) {
+                    return TypeId::ERROR;
+                }
                 let Some(name) = crate::nodes::ident_text(ast, right) else {
                     return TypeId::ERROR;
                 };
                 match self.property_of_type(lt, name) {
-                    Some(p) => self.type_of_symbol(p),
+                    // Narrowed as the reference it names, where the type stands (`typeof x.p`
+                    // after `x.p === "A"`, `if (this.a) { let b: typeof this.a.b }`).
+                    Some(p) => {
+                        let t = self.type_of_symbol(p);
+                        self.quietly(|ck| ck.flow_type_of_reference(l, t, t))
+                    }
                     None => TypeId::UNRESOLVED,
                 }
             }
             Node::ImportType { .. } => self.type_from_node(l),
-            Node::This {} => self.this_type_at(l).unwrap_or(TypeId::UNRESOLVED),
+            // `typeof this` is the `this` expression there (narrowed, and checked as one).
+            Node::This {} => self.check_this(l),
             _ => TypeId::UNRESOLVED,
         }
     }
 
-    /// The polymorphic `this` type at a location (enclosing class or interface).
+    /// The polymorphic `this` type at a location (enclosing class or interface), if the
+    /// `this` type is available there ([`Self::this_type_container`]).
     pub fn this_type_at(&mut self, l: Loc) -> Option<TypeId> {
+        let c = self.this_type_container(l)?;
+        let s = self.c.sym_of_decl(c)?;
+        Some(self.store().type_param(s, true))
+    }
+
+    /// The class or interface whose `this` type a `this` type node at `l` names. It is only
+    /// available in a non-static member of a class or interface (observed tsc 7): not in
+    /// type literals, object literal methods, functions, constructor parameters, static
+    /// members, heritage clauses or type parameters. Arrow functions and function types are
+    /// transparent.
+    pub(crate) fn this_type_container(&self, l: Loc) -> Option<Loc> {
         let ast = self.ast(l.file);
         let parents = self.c.file(l.file).parents();
+        let mut prev = l.node;
         let mut cur = parents.parent(l.node);
-        let mut guard = 0;
-        while let Some(n) = cur {
-            guard += 1;
-            if guard > 100_000 {
-                break;
-            }
-            match ast.node(n) {
-                Node::ClassDecl { .. } | Node::ClassExpr { .. } | Node::Interface { .. } => {
-                    let s = self.c.sym_of_decl(Loc::new(l.file, n))?;
-                    return Some(self.store().type_param(s, true));
+        let mut in_params = false;
+        for _ in 0..1000 {
+            let n = cur?;
+            match *ast.node(n) {
+                Node::TypeLiteral { .. }
+                | Node::ObjectLit { .. }
+                | Node::FunctionDecl { .. }
+                | Node::Module { .. }
+                | Node::Program { .. } => return None,
+                Node::FunctionExpr { params, .. } => {
+                    let is_method = parents
+                        .parent(n)
+                        .is_some_and(|m| matches!(ast.node(m), Node::MethodDef { .. }));
+                    if !is_method {
+                        return None;
+                    }
+                    in_params = ast.list(params).contains(&prev);
                 }
-                Node::TypeLiteral { .. } | Node::ObjectLit { .. } => return None,
+                Node::MethodDef {
+                    modifiers, kind, ..
+                } => {
+                    // A constructor's body sees the class's `this`, its parameters do not.
+                    if (kind == ts_r_ast::MethodKind::Constructor && in_params)
+                        || modifiers.contains(ts_r_ast::Modifiers::STATIC)
+                    {
+                        return None;
+                    }
+                }
+                Node::PropertyDef { modifiers, .. } => {
+                    if modifiers.contains(ts_r_ast::Modifiers::STATIC) {
+                        return None;
+                    }
+                }
+                Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => {
+                    return ast
+                        .list(members)
+                        .contains(&prev)
+                        .then_some(Loc::new(l.file, n));
+                }
+                Node::Interface { body, .. } => {
+                    return ast
+                        .list(body)
+                        .contains(&prev)
+                        .then_some(Loc::new(l.file, n));
+                }
                 _ => {}
             }
+            prev = n;
             cur = parents.parent(n);
         }
         None

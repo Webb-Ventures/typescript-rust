@@ -1,0 +1,4 @@
+a.ts(8,7): error TS2322: Type '["a" | "b", number, boolean]' is not assignable to type 'A'.
+  Type '["a" | "b", number, boolean]' is not assignable to type '["a", number] | ["b", number]'.
+    Type '["a" | "b", number, boolean]' is not assignable to type '["b", number]'.
+      Source has 3 element(s) but target allows only 2.

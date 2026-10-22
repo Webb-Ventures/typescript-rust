@@ -295,6 +295,27 @@ On this run ts-r-lint's parity gate turned the type-aware rules off in both tRPC
 (ts-r-check reports a TS2322 at `stream/sse.ts:279` that tsc 7 does not), so `lint-trpc`'s
 ts-r-lint row is a type check plus the untyped rules.
 
+## three.js x10 bundler run (2026-10-21)
+
+After the `a3/build-parity` speed work (parallel source-map assembly, interned export names in
+the linker, reading module files ahead on one extra thread, fewer copies in codegen's source
+maps). `RAYON_NUM_THREADS=4 cargo xtask bench --repos three-x10 --memory`, three invocations in
+a row on the same shared laptop (Apple M4 Max, load average 11-14), ts-r-build release build at
+`2fb25557` with `--threads=4`, esbuild 0.28.2 with its default threads. Median of 10 runs each,
+peak RSS of one extra run:
+
+| Invocation | ts-r-build, no cache | ts-r-build, cached | esbuild |
+|---|---:|---:|---:|
+| 1 | 231.8 ms, 422 MB | 128.1 ms, 246 MB | 262.7 ms, 696 MB |
+| 2 | 233.9 ms, 420 MB | 134.2 ms, 243 MB | 238.5 ms, 695 MB |
+| 3 | 255.0 ms, 422 MB | 132.2 ms, 244 MB | 246.2 ms, 695 MB |
+
+Without the cache ts-r-build was faster in two invocations and slower in the third; the site
+shows the third. The headline run above had 378 / 241 ms against 225 ms. Besides its 4 worker
+threads ts-r-build runs one file-reading thread while the module graph loads. The outputs
+still agree: both IIFEs load in Node with 10 copies x 443 exports, and ts-r's is 7,877,810
+bytes against esbuild's 7,705,245 (+2.2%).
+
 ## Smoke runs (2026-10-15)
 
 Shared macOS arm64 machine (16 cores, other agents running), `--memory`, hyperfine medians.

@@ -1,7 +1,12 @@
-a.ts(15,12): error TS18048: 'err' is possibly 'undefined'.
-a.ts(19,7): error TS7034: Variable 'recent' implicitly has type 'any' in some locations where its type cannot be determined.
-a.ts(24,14): error TS7005: Variable 'recent' implicitly has an 'any' type.
-a.ts(26,12): error TS18048: 'recent' is possibly 'undefined'.
-a.ts(27,13): error TS7005: Variable 'recent' implicitly has an 'any' type.
-a.ts(31,7): error TS7034: Variable 'sink' implicitly has type 'any' in some locations where its type cannot be determined.
-a.ts(36,5): error TS7005: Variable 'sink' implicitly has an 'any' type.
+a.ts(3,21): error TS7034: Variable 'y' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(3,39): error TS7005: Variable 'y' implicitly has an 'any' type.
+a.ts(8,21): error TS7034: Variable 'y' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(8,40): error TS7005: Variable 'y' implicitly has an 'any' type.
+a.ts(9,21): error TS7034: Variable 'y' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(9,40): error TS7005: Variable 'y' implicitly has an 'any' type.
+a.ts(11,26): error TS7034: Variable 'x' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(11,45): error TS7005: Variable 'x' implicitly has an 'any' type.
+a.ts(12,31): error TS7034: Variable 'y' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(12,64): error TS7005: Variable 'y' implicitly has an 'any' type.
+a.ts(14,21): error TS7034: Variable 'y' implicitly has type 'any' in some locations where its type cannot be determined.
+a.ts(14,53): error TS7005: Variable 'y' implicitly has an 'any' type.

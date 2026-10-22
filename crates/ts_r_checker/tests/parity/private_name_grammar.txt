@@ -1,0 +1,12 @@
+a.ts(2,10): error TS18024: An enum member cannot be named with a private identifier.
+a.ts(3,19): error TS2300: Duplicate identifier '#constructor'.
+a.ts(3,19): error TS18012: '#constructor' is a reserved word.
+a.ts(3,41): error TS2300: Duplicate identifier '#constructor'.
+a.ts(3,41): error TS18012: '#constructor' is a reserved word.
+a.ts(3,82): error TS2790: The operand of a 'delete' operator must be optional.
+a.ts(3,82): error TS18011: The operand of a 'delete' operator cannot be a private identifier.
+a.ts(3,99): error TS2790: The operand of a 'delete' operator must be optional.
+a.ts(3,99): error TS18011: The operand of a 'delete' operator cannot be a private identifier.
+a.ts(3,124): error TS2339: Property 'x' does not exist on type 'number'.
+a.ts(4,11): error TS18012: '#constructor' is a reserved word.
+a.ts(5,18): error TS18012: '#constructor' is a reserved word.

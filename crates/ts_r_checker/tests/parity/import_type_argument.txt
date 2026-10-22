@@ -1,0 +1,6 @@
+a.ts(2,17): error TS1141: String literal expected.
+a.ts(2,17): error TS2304: Cannot find name 'x'.
+a.ts(3,17): error TS1141: String literal expected.
+a.ts(4,17): error TS1141: String literal expected.
+a.ts(5,24): error TS1141: String literal expected.
+a.ts(5,24): error TS2304: Cannot find name 'x'.

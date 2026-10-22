@@ -1,0 +1,6 @@
+a.ts(7,51): error TS2344: Type 'Set<unknown> & Set<A>' does not satisfy the constraint 'Set<unknown[]>'.
+  Types of property 'forEach' are incompatible.
+    Type '((callbackfn: (value: unknown, value2: unknown, set: Set<unknown>) => void, thisArg?: any) => void) & ((callbackfn: (value: A, value2: A, set: Set<A>) => void, thisArg?: any) => void)' is not assignable to type '(callbackfn: (value: unknown[], value2: unknown[], set: Set<unknown[]>) => void, thisArg?: any) => void'.
+      Types of parameters 'callbackfn' and 'callbackfn' are incompatible.
+        Types of parameters 'value' and 'value' are incompatible.
+          Type 'unknown' is not assignable to type 'unknown[]'.

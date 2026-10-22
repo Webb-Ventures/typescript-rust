@@ -106,6 +106,11 @@ texts), `dump.rs`.
   order); the other members follow from the last block's end, and the flow after the
   class drops their effects (assignments in computed names do not reach it), as tsc 7
   behaves.
+- **Which closures continue the outer flow.** The start node of a function expression,
+  arrow, object literal method or accessor, or a method or accessor of a class
+  *expression* links to the flow where it is created (the checker narrows captured
+  variables through it). Constructors and members of class declarations start unlinked,
+  as tsc 7 narrows (fixture `closure_narrowing_containers.ts` in the checker).
 - Parameter properties (`constructor(readonly x: T)`) are instance members with
   `SymbolFacts::READONLY` when `readonly`, like property declarations.
 - **Optional chains branch.** In `a?.b.c(x)` the rest after each `?.` (keys, arguments,
@@ -118,7 +123,10 @@ texts), `dump.rs`.
   `x ||= y` is read, then assigned) keeps the first record: `node_flow` is sorted stably.
 - **Type queries read the flow.** The identifier of `typeof x` in a type gets the flow
   where the type is bound, so the checker narrows it there (`(b as typeof a).x` after
-  `a.kind === "a"`, observed tsc 7). A qualified `typeof a.b` gets none.
+  `a.kind === "a"`, observed tsc 7). A qualified `typeof a.b` records the flow on its
+  `QualifiedName` node (`typeof x.p` after `x.p === "A"` is `"A"`) and on its leftmost
+  identifier, which the checker uses for the whole name when the node has none
+  (`typeof this.a.b` inside `if (this.a)`).
 - **Switch fallthrough.** `FlowGraph::fallthroughs` lists each non-empty clause but a
   switch's last whose end is reachable in the binder's graph, with the flow at its end
   (empty clauses group with the next). The checker reports TS7029 for those still
@@ -152,8 +160,8 @@ texts), `dump.rs`.
   Compares the binder's codes (2300, 2451, 2567, 2528, 2397, 2435, 2664, 2669, 2671, 1100-1215 strict
   mode, 1101, 1102, 1114, 1117, 1344, 7027, 7028) per test variant with the baselines and
   writes mismatches to `target/binder-conformance.txt`.
-  Current: 12783 variants; 445 expect binder diagnostics, 399 match exactly; 1684 of 1792
-  expected diagnostics matched (108 missing, 88 extra).
+  Current (2026-10-21, 0bc6c71): 12783 variants; 445 expect binder diagnostics, 406 match exactly; 1694 of 1792
+  expected diagnostics matched (98 missing, 75 extra).
 - Corpus: `cargo build --release -j 4 -p ts_r_binder --example corpus` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- /usr/bin/time -l target/release/examples/corpus ../private-app`.
   private-app (691 project files + 5219 `node_modules` declaration files, 48 MB):

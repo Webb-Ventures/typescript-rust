@@ -206,8 +206,8 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
   source-map positions and data URLs).
 - Corpus round trip (both layouts):
   `scripts/limit.sh -- cargo run --release -p ts_r_codegen --example roundtrip_corpus -- <dir>... [--show N]`.
-  Last run: private-app 357/357; TypeScript `tests/cases` 18,079 ok, 0 mismatches,
-  1,133 skipped (syntax errors).
+  Last run: private-app 357/357; TypeScript `tests/cases` 17,744 ok, 0 mismatches,
+  1,468 skipped (syntax errors; the parser reports more of tsc's since alpha.3).
 - `cargo run -p ts_r_codegen --example print -- <file> [--compact]` prints a file back.
 - `tests/tsc_layout.rs`: each `tests/tsc_layout/<name>.ts(x)` prints byte-for-byte as the
   `.js(x)` next to it under `Layout::Tsc`; the expected files are tsc 7 output at

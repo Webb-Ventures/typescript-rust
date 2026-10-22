@@ -264,7 +264,10 @@ fn check_program_impl<'a>(
         out.retain(|d| {
             i += 1;
             i <= n_syntax
-                || !((1000..2000).contains(&d.code) || matches!(d.code, 8020 | 17019 | 17020))
+                // (TS1294, `erasableSyntaxOnly`, and TS1141 for `import(x)` types are
+                // semantic errors to tsc 7.)
+                || !((1000..2000).contains(&d.code) && !matches!(d.code, 1141 | 1294)
+                    || matches!(d.code, 8020 | 17019 | 17020))
                 || !broken.get(d.file.0 as usize).copied().unwrap_or(false)
                 // JSDoc syntax errors stay (tsc 7 parses JSDoc apart from the file).
                 || program.files.get(d.file.0 as usize).is_some_and(|f| {

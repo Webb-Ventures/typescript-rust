@@ -25,7 +25,7 @@ rename::apply(&mut ast, &scopes, &names);
 
 Files: `scope.rs` (scopes, symbols, references, hoisting, `eval`/`with` detection),
 `purity.rs` (side-effect analysis, `/*#__PURE__*/`), `fold.rs` (constant folding,
-dead branches), `compress.rs` (size rewrites), `rename.rs` (mangle/deconflict), `private.rs`
+dead branches, the handler of an empty `try`), `compress.rs` (size rewrites), `rename.rs` (mangle/deconflict), `private.rs`
 (`#private` member names, per class; untouched when a direct `eval` exists), `names.rs`
 (short-name sequence, reserved words, sanitising), `build.rs` (synthesized node helpers).
 

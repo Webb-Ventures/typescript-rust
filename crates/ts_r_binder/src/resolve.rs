@@ -23,11 +23,12 @@ pub(crate) fn symbol_meaning(flags: SymbolFlags) -> u8 {
     m
 }
 
-/// A function-scope symbol that parameters cannot see: anything but the parameters, type
-/// parameters and the body's hoisted functions and namespaces (observed with tsc 7.0.2:
+/// A function-scope symbol that parameters and the return type cannot see: anything but
+/// the parameters, type parameters and the body's hoisted functions and namespaces
+/// (observed with tsc 7.0.2: `function f(): typeof b { var b }` is TS2304;
 /// `function f(a = x) { var x }` reads the outer `x`; a body function or namespace is found
 /// and the checker reports TS2373).
-fn is_body_local(flags: SymbolFlags) -> bool {
+pub fn is_body_local(flags: SymbolFlags) -> bool {
     !flags.intersects(
         SymbolFlags::PARAMETER
             | SymbolFlags::TYPE_PARAMETER

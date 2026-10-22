@@ -507,7 +507,8 @@ Files, by layer:
 - Syntax errors suppress semantic diagnostics (tsc behaviour). tsc's test harness reports both,
   and so does `check_program_through_syntax_errors` (used by the conformance example): every
   file is checked, but a file with syntax errors gets no checker grammar errors (TS1xxx; tsc's
-  checker reports those only in clean files). Recovered trees must not produce semantic
+  checker reports those only in clean files; TS1294 for `erasableSyntaxOnly` and TS1141
+  for a non-literal `import(x)` type are semantic and stay). Recovered trees must not produce semantic
   errors tsc does not: a `return` outside a function does not check its expression, an empty
   `for (var in X)` / `for (var of X)` head is not checked, a missing operand is not TS2357,
   and in JavaScript `require("m")` (one string argument) is not a use of a `require` value.
@@ -1733,13 +1734,12 @@ shares levels; the driver takes any checker (`check_program_with`, `check_files`
   (and without a `tsconfig.json` unit), JavaScript roots are left out of the program and
   reported as global TS6504 with tsc's "Root file specified for compilation" chain, except
   in a test that is itself a `.js` file.
-  Current (2026-10-16, 12769 compared variants, 9 s on 4 threads, after conformance
-  round 4, merged with `m1/transform-run`, and the bench-parity fixes): 8444 exact (66.1%; all
-  diagnostics and chains), 8516 (66.7%) exact on first lines; 1698 variants with a diagnostic
-  tsc does not report, 320 of them tests where tsc reports nothing (round 3 ended at 7879
-  exact, 2319 and 573).
-  The example checks through syntax errors as tsc's harness does (2026-10-19, m8/parser-diagnostics:
-  8642 exact, 306 tests with false positives).
+  Current (2026-10-21, 0bc6c71 after the alpha.3 relations, inference and parser-recovery
+  tracks, 12750 compared variants, 21 s on 4 threads): 11615 exact (91.1%; all diagnostics and
+  chains), 11640 (91.3%) exact on first lines; 454 variants with a diagnostic tsc does not
+  report, 54 of them tests where tsc reports nothing. Earlier: 11111, 703 and 92 (main at
+  9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
 - private-app (`ts-r-check -p . --no-history` vs tsc 7 `tsc -p .`): over all 25
@@ -1784,7 +1784,7 @@ shares levels; the driver takes any checker (`check_program_with`, `check_files`
   their original identity (`<K extends keyof T, U extends K>` instantiated by a receiver).
 - Calls and patterns: TS2769 for tagged-template overloads (only call, `new` and JSX
   arguments are elaborated), object rest of a generic type (`Omit<T, "a">` is not built;
-  the rest is `UNRESOLVED`), TS7031 for the array rest of an implied binding pattern, TS2671
+  the rest is `UNRESOLVED`), TS2671
   for an `export =` that is only a function, TS2300 for duplicate late-bound methods and
   accessors in object literals, TS2465 (`this` in a computed name), implied index signatures merged across
   several declarations of one interface (the first declaration's win).

@@ -1,0 +1,8 @@
+a.ts(3,7): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(7,9): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(8,16): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(9,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(12,9): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.
+a.ts(18,5): error TS1166: A computed property name in a class property declaration must have a simple literal type or a 'unique symbol' type.
+a.ts(18,17): error TS1163: A 'yield' expression is only allowed in a generator body.
+a.ts(25,10): error TS1308: 'await' expressions are only allowed within async functions and at the top levels of modules.

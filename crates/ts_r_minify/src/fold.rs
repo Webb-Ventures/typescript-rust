@@ -376,6 +376,29 @@ impl Folder<'_> {
                     self.changed = true;
                 }
             }
+            // `try {} catch { C } finally { F }`: the handler can never run.
+            Node::Try {
+                block,
+                handler: Some(handler),
+                finalizer,
+            } if matches!(*ast.node(block), Node::Block { stmts } if stmts.is_empty()) => {
+                let mut hoisted = Vec::new();
+                self.hoisted_names(ast, handler, &mut hoisted);
+                let at = ast.span(id).start;
+                let mut stmts = Vec::new();
+                if !hoisted.is_empty() {
+                    let decls: Vec<_> = hoisted.into_iter().map(|n| (n, None)).collect();
+                    stmts.push(build::var_decl_many(ast, VarKind::Var, &decls, at));
+                }
+                stmts.extend(finalizer);
+                let new = match stmts[..] {
+                    [] => build::empty(ast, at),
+                    [one] => one,
+                    _ => build::block(ast, &stmts, at),
+                };
+                build::replace(ast, id, new);
+                self.changed = true;
+            }
             Node::Conditional { test, cons, alt } => {
                 if let Some(t) = self.known(ast, test) {
                     let keep = self.as_value(ast, if t { cons } else { alt }, use_);
@@ -563,6 +586,10 @@ mod tests {
             "if(typeof x==='undefined')a();"
         );
         assert_eq!(run("if (typeof 1 === 'number') a();"), "a();");
+        assert_eq!(run("try {} catch { a(); } finally { b(); }"), "{b()}");
+        assert_eq!(run("try {} catch (e) { var v = e; }"), "var v;");
+        assert_eq!(run("try {} catch { a() }"), ";");
+        assert_eq!(run("try { f() } catch { a() }"), "try{f()}catch{a()}");
     }
 
     #[test]

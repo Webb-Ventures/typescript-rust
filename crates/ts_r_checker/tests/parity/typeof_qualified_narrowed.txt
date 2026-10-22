@@ -1,0 +1,2 @@
+a.ts(9,9): error TS2322: Type '"A" | "B"' is not assignable to type '"A"'.
+  Type '"B"' is not assignable to type '"A"'.

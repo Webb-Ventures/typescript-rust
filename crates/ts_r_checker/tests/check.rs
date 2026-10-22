@@ -631,3 +631,56 @@ nullable?.inner.m();
         ]
     );
 }
+
+/// Names the parser could not read print as `(Missing)` in implicit-any errors (tsc's
+/// conformance baselines; the tsc 7 CLI stops at the syntax error).
+#[test]
+fn implicit_any_missing_names() {
+    let Some(out) = check_through(
+        "a.ts",
+        STRICT,
+        "function f(`hello`);\nfunction f(x: string);\nfunction f(x: string) {\n    return x;\n}\n",
+    ) else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS7006")).collect();
+    assert_eq!(
+        ours,
+        ["1:12 TS7006: Parameter '(Missing)' implicitly has an 'any' type."]
+    );
+}
+
+/// A `,` where a parameter should start is no parameter: no implicit-any error for it.
+#[test]
+fn implicit_any_skips_comma_parameters() {
+    let Some(out) = check_through("a.ts", STRICT, "class X {\n    get x(,) { return 0; }\n}\n")
+    else {
+        return;
+    };
+    assert!(out.iter().all(|d| !d.contains("TS7006")), "{out:?}");
+    let Some(out) = check_through("a.ts", STRICT, "function t1(...) {}\n") else {
+        return;
+    };
+    assert!(
+        out.contains(
+            &"1:13 TS7019: Rest parameter '(Missing)' implicitly has an 'any[]' type.".to_owned()
+        ),
+        "{out:?}"
+    );
+}
+
+/// A function body the parser recovered from nothing (`function f() => 4;`) is no body:
+/// the declaration is TS7010 like an overload signature.
+#[test]
+fn implicit_any_return_of_recovered_body() {
+    let Some(out) = check_through("a.ts", STRICT, "function f() => 4;\nfunction g() {}\n") else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS7010")).collect();
+    assert_eq!(
+        ours,
+        [
+            "1:10 TS7010: 'f', which lacks return-type annotation, implicitly has an 'any' return type."
+        ]
+    );
+}

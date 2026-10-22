@@ -57,7 +57,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if matches!(
                 ast.node(n),
-                Node::FunctionDecl { body: None, .. }
+                Node::FunctionDecl { .. }
                     | Node::MethodDef { .. }
                     | Node::MethodSignature { .. }
                     | Node::ConstructSignature { .. }

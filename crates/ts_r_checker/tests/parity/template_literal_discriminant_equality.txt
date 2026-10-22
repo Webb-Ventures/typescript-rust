@@ -1,0 +1,3 @@
+a.ts(10,11): error TS2339: Property 'property' does not exist on type 'Err'.
+a.ts(19,7): error TS2339: Property 'property' does not exist on type 'Correct | { err: `${T}!`; }'.
+  Property 'property' does not exist on type '{ err: `${T}!`; }'.

@@ -293,48 +293,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// A spelling suggestion for `name` among the names of meaning `m` in scope at `e`:
-    /// locals of the enclosing scopes, then globals.
+    /// A spelling suggestion for `name` among the names of meaning `m` in scope at `e`
+    /// (`Ck::scope_name_candidates`), not the alias being declared (`import v = V`).
     fn meaning_name_suggestion(&mut self, e: Loc, name: &str, m: u8) -> Option<String> {
-        let b = self.c.bound(e.file);
-        let ast = self.ast(e.file);
-        let parents = self.c.file(e.file).parents();
-        let mut cur = Some(e.node);
-        let mut scope = None;
-        while let Some(n) = cur {
-            if let Some(sc) = b.scope_of(n) {
-                scope = Some(sc);
-                break;
-            }
-            cur = parents.parent(n);
-        }
-        let at = self.c.span(e);
-        // Not the alias being declared (`import v = V`).
-        let declaring = |s: SymId| {
-            self.c.decls(s).iter().any(|d| {
-                let ds = self.c.span(*d);
-                d.file == e.file && ds.start <= at.start && at.end <= ds.end
-            })
-        };
-        let mut names: Vec<String> = Vec::new();
-        for _ in 0..1000 {
-            let Some(sc) = scope else { break };
-            let Some(data) = b.scopes.get(sc.0 as usize) else {
-                break;
-            };
-            for (n, sym) in b.table(data.locals) {
-                let s = self.c.sym(e.file, *sym);
-                if self.c.has_meaning(s, m) && !declaring(s) {
-                    names.push(b.names.text(ast, *n).to_owned());
-                }
-            }
-            scope = data.parent;
-        }
-        for (g, _) in self.c.link.globals.iter() {
-            if self.c.global_symbol(g, m).is_some_and(|s| !declaring(s)) {
-                names.push(g.to_string());
-            }
-        }
+        let names = self.scope_name_candidates(e, m, true);
         crate::relate::spelling_suggestion(name, names.iter().map(String::as_str))
     }
 }

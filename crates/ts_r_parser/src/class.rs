@@ -20,7 +20,13 @@ impl<'a> Parser<'a> {
         is_expr: bool,
     ) -> NodeId {
         self.expect(T::Class);
-        let name = if self.at_identifier() && !self.at(T::Implements) {
+        // `class await {}` where `await` is an operator is still the name, with the
+        // checker's TS1359 (from `parse_identifier`).
+        // `class implements {}` in strict code: `implements` is the (reserved) name.
+        let implements_clause =
+            self.at(T::Implements) && self.peek_kind().is_identifier_or_keyword();
+        let name = if (self.at_identifier() || self.at(T::Await)) && !implements_clause {
+            self.check_await_binding_in_static_block();
             Some(self.parse_identifier())
         } else {
             if !is_expr && !modifiers.contains(Modifiers::DEFAULT) {
@@ -154,8 +160,9 @@ impl<'a> Parser<'a> {
             let more = self.parse_modifiers(ModCtx::ClassMember);
             modifiers.insert(more);
         }
-        // `public var x`: TS1440 at `var`, which is skipped (ClassDeclaration26).
-        if !modifiers.is_empty() && self.at(T::Var) {
+        // `public var x`: TS1440 at `var`, which is skipped (ClassDeclaration26); in
+        // `public var = 0`, `var` is the name (convertKeywordsYes).
+        if !modifiers.is_empty() && self.at(T::Var) && self.peek_kind().is_identifier_or_keyword() {
             self.error(messages::VARIABLE_DECLARATION_NOT_ALLOWED_HERE);
             self.bump();
             let more = self.parse_modifiers(ModCtx::ClassMember);
@@ -165,7 +172,10 @@ impl<'a> Parser<'a> {
             self.bump();
             let open = self.start();
             self.bump();
-            let body = self.with_ctx(Ctx::IN_FUNCTION, Ctx::AWAIT | Ctx::YIELD, |p| {
+            // `await` is an operator in a static block (`await;` is TS1109 at the `;`), and
+            // TS18037 wherever it is one (classStaticBlock26).
+            let add = Ctx::IN_FUNCTION | Ctx::AWAIT | Ctx::STATIC_BLOCK;
+            let body = self.with_ctx(add, Ctx::YIELD, |p| {
                 p.with_jump(crate::grammar::Jump::StaticBlock, |p| {
                     p.parse_statements(false, false)
                 })
@@ -187,6 +197,7 @@ impl<'a> Parser<'a> {
         }
         if !is_method
             && matches!(self.kind(), T::Get | T::Set)
+            && self.peek_kind() != T::Star
             && self.next_can_follow_member_modifier(false)
         {
             kind = if self.at(T::Get) {
@@ -231,21 +242,28 @@ impl<'a> Parser<'a> {
                 &["const"],
             );
         }
-        // `async constructor()` is still a constructor (the checker rejects `async`).
+        // `async constructor()` is still a constructor (the checker rejects `async`). So is
+        // the name `constructor` before any other token: `'(' expected` there, as in tsc.
+        let bare_constructor = kind == MethodKind::Method
+            && flags.is_empty()
+            && !matches!(self.kind(), T::LParen | T::Lt)
+            && matches!(*self.ast.node(key), Node::Ident { .. })
+            && self.is_constructor_key(key);
         if kind == MethodKind::Method
             && flags.is_empty()
             && self.is_constructor_key(key)
-            && matches!(self.kind(), T::LParen | T::Lt)
+            && (bare_constructor || matches!(self.kind(), T::LParen | T::Lt))
         {
             kind = MethodKind::Constructor;
         }
-        let optional = self.eat(T::Question);
+        let optional = !bare_constructor && self.eat(T::Question);
         let bang = self.tok().span();
-        let definite = !optional && self.at(T::Bang) && !self.newline_before() && {
-            self.bump();
-            true
-        };
-        if is_method || matches!(self.kind(), T::LParen | T::Lt) {
+        let definite =
+            !bare_constructor && !optional && self.at(T::Bang) && !self.newline_before() && {
+                self.bump();
+                true
+            };
+        if is_method || bare_constructor || matches!(self.kind(), T::LParen | T::Lt) {
             if modifiers.contains(Modifiers::ASYNC) {
                 modifiers.remove(Modifiers::ASYNC);
                 flags |= FnFlags::ASYNC;
@@ -263,7 +281,32 @@ impl<'a> Parser<'a> {
             };
             let (type_params, params, return_type, body) = self.parse_function_rest(flags, rule);
             self.method_grammar(kind, key, type_params, params, return_type);
+            // `get constructor()`, `*constructor()`, static or not, but not with a string
+            // name (constructorNameInAccessor/Generator).
+            if matches!(*self.ast.node(key), Node::Ident { .. }) && self.is_constructor_key(key) {
+                let msg = if accessor {
+                    Some(messages::CONSTRUCTOR_ACCESSOR)
+                } else if flags.contains(FnFlags::GENERATOR) {
+                    Some(messages::CONSTRUCTOR_GENERATOR)
+                } else {
+                    None
+                };
+                if let Some(msg) = msg {
+                    let span = self.ast.span(key);
+                    self.deferred_grammar_error_at(msg, span, &[]);
+                }
+            }
             self.check_ambient_function(star, body);
+            // `declare m() {}`: the body is TS1183 too (next to TS1031; not for accessors
+            // or constructors).
+            if kind == MethodKind::Method
+                && modifiers.contains(Modifiers::DECLARE)
+                && !self.ctx.has(Ctx::AMBIENT)
+                && let Some(body) = body
+            {
+                let span = self.ast.span(body);
+                self.deferred_grammar_error_at(messages::AMBIENT_IMPLEMENTATION, span, &[]);
+            }
             if matches!(kind, MethodKind::Get | MethodKind::Set)
                 && modifiers.contains(Modifiers::ABSTRACT)
                 && body.is_some()
@@ -301,11 +344,11 @@ impl<'a> Parser<'a> {
             None
         };
         let value = if self.eat(T::Eq) {
-            Some(
-                self.with_ctx(Ctx::IN_FUNCTION, Ctx::AWAIT | Ctx::YIELD, |p| {
-                    p.parse_assignment()
-                }),
-            )
+            Some(self.with_ctx(
+                Ctx::IN_FUNCTION,
+                Ctx::AWAIT | Ctx::YIELD | Ctx::STATIC_BLOCK,
+                |p| p.parse_assignment(),
+            ))
         } else {
             None
         };
@@ -323,6 +366,20 @@ impl<'a> Parser<'a> {
                 || modifiers
                     .intersects(Modifiers::DECLARE | Modifiers::STATIC | Modifiers::ABSTRACT);
             self.check_definite(bang, not_permitted, type_ann.is_some(), value.is_some());
+        }
+        // The checker's TS18006 for a field named `constructor` (propertyNamedConstructor)
+        // and TS1267 for an initialized abstract field (abstractPropertyInitializer).
+        let key_span = self.ast.span(key);
+        if self.is_constructor_key(key) {
+            self.checker_grammar_error(messages::CONSTRUCTOR_FIELD, key_span);
+        }
+        if modifiers.contains(Modifiers::ABSTRACT) && value.is_some() {
+            let name = key_span.text(self.src).to_owned();
+            self.deferred_grammar_error_at(
+                messages::ABSTRACT_PROPERTY_INITIALIZER,
+                key_span,
+                &[&name],
+            );
         }
         let bare = !optional && !definite && type_ann.is_none() && value.is_none();
         self.property_semicolon(key, bare, type_ann.is_some() && value.is_none());
@@ -369,6 +426,10 @@ impl<'a> Parser<'a> {
         let at_key = self.ast.span(key);
         if kind == MethodKind::Constructor {
             self.check_constructor_params(params);
+        }
+        // `constructor(): x is T`, `get a(): this is T`: TS1228 instead of the errors below.
+        if kind != MethodKind::Method && self.check_predicate_return(return_type) {
+            return;
         }
         let error = match kind {
             MethodKind::Constructor => match (type_params, return_type) {
@@ -476,8 +537,9 @@ impl<'a> Parser<'a> {
             p.bump();
             matches!(p.kind(), T::Colon | T::Comma)
                 || (p.at(T::Question) && {
+                    // `[a?]` too: TS1019 (parserIndexSignature3).
                     p.bump();
-                    p.at(T::Colon)
+                    matches!(p.kind(), T::Colon | T::Comma | T::RBracket)
                 })
         })
     }
@@ -542,51 +604,56 @@ impl<'a> Parser<'a> {
                 | Ctx::TYPE
                 | Ctx::DISALLOW_CONDITIONAL_TYPES,
             |p| {
-                while !matches!(p.kind(), T::RParen | T::Eof) && !p.aborting() {
-                    let before = p.tok().start;
-                    if p.at_skipped_in_params() {
-                        p.error(messages::PARAMETER_DECLARATION_EXPECTED);
-                        p.bump();
-                        continue;
-                    }
-                    if reserved_word_ends_params(p.kind()) {
-                        // `function f(enum) {}`: the list ends; `enum` starts a statement.
-                        p.error(messages::PARAMETER_DECLARATION_EXPECTED);
-                        break;
-                    }
-                    let nameless = p.at_nameless_param_start();
-                    let param = p.parse_param();
-                    p.scratch.push(param);
-                    if nameless {
-                        // tsc reads the next parameter straight away (`f(! b)` is two), and
-                        // skips a comma there with TS1138.
-                        if p.at(T::Comma) {
+                p.in_list(List::Parameters, |p| {
+                    while !matches!(p.kind(), T::RParen | T::Eof) && !p.aborting() {
+                        let before = p.tok().start;
+                        if p.at_skipped_in_params() {
                             p.error(messages::PARAMETER_DECLARATION_EXPECTED);
                             p.bump();
+                            continue;
                         }
-                        continue;
-                    }
-                    if matches!(p.ast.node(param), Node::Param { rest: true, .. }) {
-                        p.check_rest_trailing_comma(T::RParen);
-                    }
-                    if !p.eat(T::Comma) && !matches!(p.kind(), T::RParen | T::Eof) {
-                        p.error_expected(",");
-                        // As in tsc, the list goes on at anything that starts a parameter
-                        // (or a type, which becomes a parameter with a missing name) and
-                        // skips a few tokens that cannot end it; other tokens end it.
-                        if p.tok().start == before
-                            || !(p.at_identifier()
-                                || matches!(
-                                    p.kind(),
-                                    T::LBrace | T::LBracket | T::DotDotDot | T::At
-                                )
-                                || p.at_nameless_param_start()
-                                || p.at_skipped_in_params())
-                        {
+                        if reserved_word_ends_params(p.kind()) {
+                            // `function f(enum) {}`: TS1390, and the list ends; `enum` starts
+                            // a statement (reservedWords3).
+                            let span = p.error_span();
+                            let word = p.lx.ident_value(p.tok());
+                            p.error_at(messages::NOT_ALLOWED_AS_PARAMETER_NAME, span, &[&word]);
                             break;
                         }
+                        let nameless = p.at_nameless_param_start();
+                        let param = p.parse_param();
+                        p.scratch.push(param);
+                        if nameless {
+                            // tsc reads the next parameter straight away (`f(! b)` is two), and
+                            // skips a comma there with TS1138.
+                            if p.at(T::Comma) {
+                                p.error(messages::PARAMETER_DECLARATION_EXPECTED);
+                                p.bump();
+                            }
+                            continue;
+                        }
+                        if matches!(p.ast.node(param), Node::Param { rest: true, .. }) {
+                            p.check_rest_trailing_comma(T::RParen);
+                        }
+                        if !p.eat(T::Comma) && !matches!(p.kind(), T::RParen | T::Eof) {
+                            p.error_expected(",");
+                            // As in tsc, the list goes on at anything that starts a parameter
+                            // (or a type, which becomes a parameter with a missing name) and
+                            // skips a few tokens that cannot end it; other tokens end it.
+                            if p.tok().start == before
+                                || !(p.at_identifier()
+                                    || matches!(
+                                        p.kind(),
+                                        T::LBrace | T::LBracket | T::DotDotDot | T::At
+                                    )
+                                    || p.at_nameless_param_start()
+                                    || p.at_skipped_in_params())
+                            {
+                                break;
+                            }
+                        }
                     }
-                }
+                })
             },
         );
         let params = self.finish_list(mark);
@@ -630,6 +697,14 @@ impl<'a> Parser<'a> {
             let name = self.intern_token();
             self.bump();
             self.finish_node(s, Node::Ident { name })
+        } else if self.at(T::PrivateName) {
+            // `m(#foo: string)`: TS18009, and the parameter goes on with that name
+            // (privateNamesNotAllowedAsParameters).
+            self.error(messages::PRIVATE_NAME_PARAMETER);
+            let s = self.start();
+            let name = self.intern_token();
+            self.bump();
+            self.finish_node(s, Node::Ident { name })
         } else if self.at_identifier()
             || matches!(self.kind(), T::Await | T::Yield | T::LBrace | T::LBracket)
         {
@@ -657,8 +732,13 @@ impl<'a> Parser<'a> {
                 self.bump();
                 self.finish_node(s, Node::Ident { name })
             } else if rest {
-                // `f(...)`: a missing name after `...` is TS1003 (restArgMissingName).
-                self.error(messages::IDENTIFIER_EXPECTED);
+                // `f(...)`: a missing name after `...` is TS1003 (restArgMissingName);
+                // `f(...while)` TS1359 at the word, which is left for the next statement.
+                if k.is_reserved() {
+                    self.reserved_word_error();
+                } else {
+                    self.error(messages::IDENTIFIER_EXPECTED);
+                }
                 self.missing()
             } else {
                 self.error(messages::PARAMETER_DECLARATION_EXPECTED);
@@ -711,7 +791,7 @@ impl<'a> Parser<'a> {
     fn at_skipped_in_params(&self) -> bool {
         matches!(
             self.kind(),
-            T::Colon | T::Semi | T::Dot | T::Arrow | T::RBrace
+            T::Colon | T::Semi | T::Dot | T::Arrow | T::RBrace | T::Unknown
         )
     }
 

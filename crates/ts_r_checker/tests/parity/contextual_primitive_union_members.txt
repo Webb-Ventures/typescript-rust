@@ -1,0 +1,2 @@
+a.ts(3,51): error TS7006: Parameter 'm' implicitly has an 'any' type.
+a.ts(6,73): error TS7006: Parameter 'm' implicitly has an 'any' type.

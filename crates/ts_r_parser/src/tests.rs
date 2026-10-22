@@ -93,6 +93,16 @@ fn statements() {
     assert_eq!(d.matches("Directive").count(), 2, "{d}");
 }
 
+/// A top-level `await` before a line break: a name in a script, an operator in a module
+/// (topLevelAwait.1).
+#[test]
+fn top_level_await_before_newline() {
+    let d = ok("let y = await\n 1;");
+    has(&d, "init: Ident 8..13");
+    let d = ok("export {};\nlet y = await\n 1;");
+    has(&d, "init: Await 19..27");
+}
+
 #[test]
 fn asi() {
     let d = ok("a\n++b");
@@ -1039,6 +1049,64 @@ fn jsx() {
     assert!(!err_codes("<a>}</a>", SourceKind::Tsx).is_empty());
 }
 
+/// JSX recovery observed in tsc 7 (errorSpanForUnclosedJsxTag, jsxAttributeInitializer,
+/// parseUnaryExpressionNoTypeAssertionInJsx*, jsxAttributeWithoutExpressionReact).
+#[test]
+fn jsx_recovery_matches_tsc() {
+    let cases: &[(&str, &[(u32, u32)])] = &[
+        // Unclosed elements at the end of the file: one `'</' expected.` there.
+        ("let y = <Baz>Hello\n", &[(17008, 9), (1005, 19)]),
+        (
+            "let x = <A>a\nlet y = <B>b\n",
+            &[(17008, 9), (17008, 22), (1005, 26)],
+        ),
+        // An unclosed fragment: TS17014 from the end of the previous token to `<>`.
+        ("let f = <>Hello\n", &[(17014, 7), (1005, 16)]),
+        // `</a>` closing the parent: the child is the unclosed one.
+        ("let a = <a><b>x</a>;", &[(17008, 12)]),
+        (
+            "let a = <a><b><c>x</a>;\n",
+            &[(17008, 9), (17008, 12), (17002, 20), (1005, 24)],
+        ),
+        // A fragment closed by a named tag: what follows `</` is the parent's text again.
+        (
+            "let a = <a><>x</a>;\n",
+            &[(17008, 9), (17015, 16), (1382, 17), (1005, 20)],
+        ),
+        // `<:` starts no tag (jsxNamespacePrefixInName); `</` is a closing tag, never a
+        // `<` operator (tsxErrorRecovery1), and starts no statement (jsxInvalidEsprimaTestSuite).
+        (
+            "x = <:a />;",
+            &[(1109, 4), (1109, 5), (1109, 9), (1109, 10)],
+        ),
+        ("x = <div>{ </div>;", &[(1109, 11)]),
+        ("</>;", &[(1128, 0), (1109, 2), (1109, 3)]),
+        // Attribute values.
+        ("let a = <div foo= ></div>;", &[(1145, 18)]),
+        ("let a = <div x={} y={} />;", &[(17000, 15)]),
+        // Adjacent elements outside children: TS2657 (not under a prefix operator).
+        ("let x = <a/><b/>;", &[(2657, 8)]),
+        ("x = ~<a/> <\n", &[(1109, 11)]),
+        // A tag that ends with neither `>` nor `/>`: `'/' expected.`; a token an enclosing
+        // list can use ends the attributes, any other is skipped.
+        ("x = <div ;\n", &[(1003, 9), (1005, 11)]),
+        ("x = <b><1 >y</b>;", &[(1003, 8), (1382, 10)]),
+        ("x = <this.#p />;", &[(1003, 12)]),
+        // A conflict marker in children.
+        ("x = <div>\n<<<<<<< HEAD\n", &[(1005, 9), (1185, 10)]),
+    ];
+    for &(src, want) in cases {
+        let r = parse(src, SourceKind::Tsx);
+        let mut got: Vec<(u32, u32)> = r
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect();
+        got.sort_by_key(|&(_, start)| start);
+        assert_eq!(got, want, "for {src:?}");
+    }
+}
+
 #[test]
 fn js_files_disable_ts_syntax() {
     let d = ok_js("x = a < b > (c);");
@@ -1930,7 +1998,81 @@ fn recovery_matches_tsc() {
         ("var x = import { foo } from \"m\";", &[(1109, 1, 9)]),
         (
             "import { * } from \"m\";",
-            &[(1003, 1, 10), (1128, 1, 12), (1434, 1, 14)],
+            &[(1003, 1, 10), (1141, 1, 10), (1109, 1, 12), (1434, 1, 14)],
+        ),
+        // A binary operator starts an expression statement with a missing left operand.
+        ("let a = 1;\n* 1;\n>= 2;", &[(1109, 2, 1), (1109, 3, 1)]),
+        (
+            "<<<<<<<<\n",
+            &[
+                (1109, 1, 1),
+                (1109, 1, 3),
+                (1109, 1, 5),
+                (1109, 1, 7),
+                (1109, 1, 9),
+            ],
+        ),
+        // A missing expression or type at the end of the file is reported just after the
+        // last token; `'}' expected` is at the end.
+        ("let a = 1 +\n  // c\n", &[(1109, 1, 12)]),
+        ("class C {\n  x = \n\n", &[(1109, 2, 6), (1005, 4, 1)]),
+        ("let a: \n\n", &[(1110, 1, 7)]),
+        // Merge conflict markers are trivia (TS1185); the other side is skipped.
+        (
+            "class C {\n<<<<<<< HEAD\n  v = 1;\n=======\n  v = 2;\n>>>>>>> b\n}",
+            &[(1185, 2, 1), (1185, 4, 1), (1185, 6, 1)],
+        ),
+        (
+            "a();\n  ||||||| base\nb c;\n=======\nd e;\n>>>>>>> x\nf g;",
+            &[(1185, 2, 3), (1185, 4, 1), (1185, 6, 1), (1434, 7, 1)],
+        ),
+        (
+            "x;\n<<<<<<<\n",
+            &[
+                (1109, 2, 1),
+                (1109, 2, 3),
+                (1109, 2, 5),
+                (1110, 2, 8),
+                (1109, 2, 8),
+                (1005, 3, 1),
+            ],
+        ),
+        // An empty type argument is `Type expected.` and the list stays type arguments.
+        ("Foo<a,,b>();", &[(1110, 1, 7)]),
+        // The name `constructor` always starts a constructor.
+        ("class C {\n  prop = 42;\n  constructor\n}", &[(1005, 4, 1)]),
+        ("class C { constructor! }", &[(1005, 1, 22), (1109, 1, 24)]),
+        // A keyword key without `:` still takes the value after it.
+        ("x = {return 0;};", &[(1005, 1, 13), (1005, 1, 14)]),
+        // An imported binding that is a reserved word or a string.
+        (
+            "import { default } from \"m\";\nimport { a as if } from \"m\";",
+            &[(1003, 1, 10), (1003, 2, 15)],
+        ),
+        // A module specifier that is not a string is an expression, then TS1141 on it.
+        (
+            "import { a }, from \"m\";",
+            &[(1005, 1, 13), (1141, 1, 13), (1005, 1, 20)],
+        ),
+        ("import x from 1 + 2;", &[(1141, 1, 15)]),
+        ("import x from;", &[(1109, 1, 14)]),
+        // A type member must be a name followed by `(`, `<`, `?`, `:`, `,`, `;`, `}` or a
+        // line break; otherwise TS1131 ends the list where a statement can start.
+        (
+            "interface I {\n    var x: T<>;\n}",
+            &[(1131, 2, 5), (1128, 3, 1)],
+        ),
+        (
+            "interface I { x y z }\nlet q;",
+            &[(1131, 1, 15), (1434, 1, 17), (1128, 1, 21)],
+        ),
+        ("interface I { async?: boolean; readonly x }", &[]),
+        // A token that cannot start an array binding element is TS1181 and ends the list.
+        ("let [1] = x;", &[(1181, 1, 6), (1005, 1, 7), (1128, 1, 9)]),
+        // U+FFFD outside a string or comment: the file is binary, the rest is skipped.
+        (
+            "let a = 1; \u{FFFD} foo bar;",
+            &[(1490, 1, 1), (1128, 1, 12)],
         ),
         ("var y = x:number => x*x;", &[(1005, 1, 10), (1005, 1, 18)]),
         ("class A { static const H = 1; }", &[(1248, 1, 24)]),
@@ -2124,7 +2266,7 @@ fn recovery_matches_tsc() {
         ("return;", &[(1108, 1, 1)]),
         (
             "function f() { return 1; }\nclass C { static { return; } }",
-            &[],
+            &[(18041, 2, 20)],
         ),
         ("with (1)\n  return;", &[]),
         // Ambient blocks and labelled declarations (ambientWithStatements, letDeclarations-scopes).
@@ -2183,6 +2325,11 @@ fn recovery_matches_tsc() {
             &[(1183, 2, 15)],
         ),
         ("class D { declare foo = 1; }", &[(1039, 1, 25)]),
+        // A `declare` method body (not an accessor's or a constructor's).
+        (
+            "class D {\n    declare m() { }\n    declare *g() { }\n    declare get x() { return 1 }\n    declare constructor() { }\n}",
+            &[(1183, 2, 17), (1183, 3, 18)],
+        ),
         ("class D { @dec static declare foo = 1; }", &[]),
         // Parameter lists, one error each (optionalArgsWithDefaultValues,
         // fatarrowfunctionsOptionalArgsErrors1, restParamAsOptional, restParamModifier2).
@@ -2242,7 +2389,7 @@ fn recovery_matches_tsc() {
         // Enum computed names: reported next to syntax errors (parserComputedPropertyName30).
         (
             "enum E {\n  [e] = 1, [\"4\"] = 4, [2] = 2\n}",
-            &[(1164, 2, 3)],
+            &[(1164, 2, 3), (2452, 2, 12), (2452, 2, 23)],
         ),
         // Import types (importTypeGeneric, importTypeNonString).
         (
@@ -2311,6 +2458,370 @@ fn recovery_matches_tsc() {
             &[(1318, 3, 18)],
         ),
         ("type A = { [key: string,]: string };", &[(1025, 1, 24)]),
+        // `<<` opens type arguments whose first type is generic (`F<<T>(x: T) => T>`).
+        ("type R = ReturnType<<T>(x: T) => number>;", &[]),
+        // `export type` not followed by a name: a stray `export` (parseInvalidNames).
+        (
+            "export type 100 {}",
+            &[(1128, 1, 1), (2457, 1, 13), (1005, 1, 17)],
+        ),
+        // Rest elements in binding patterns: checker grammar errors, kept in clean files.
+        ("const { ...a: b } = {};", &[(2566, 1, 15)]),
+        ("var [...x = a] = a;", &[(1186, 1, 11)]),
+        ("var { ...x = a } = a;", &[(1186, 1, 12)]),
+        // Numeric literals followed by a name (parseErrorIncorrectReturnToken,
+        // identifierStartAfterNumericLiteral).
+        ("1.toString();", &[(1351, 1, 3)]),
+        ("let c = 3xy + 1;", &[(1351, 1, 10), (1005, 1, 13)]),
+        // Octal literals after `-` (literals, es5-oldStyleOctalLiteralInEnums).
+        ("var n = -003;", &[(1121, 1, 9)]),
+        ("var n = 1 - 01;", &[(1121, 1, 12)]),
+        // A generator member without a name (FunctionPropertyAssignments*_es6).
+        ("var v = { *() { } }", &[(1003, 1, 12)]),
+        ("var v = { * }", &[(1003, 1, 13)]),
+        // A tagged template statement without `;` (templateStringInModuleName).
+        ("declare module `M1` {\n}", &[(1443, 1, 16)]),
+        ("foo `y` {}", &[(1443, 1, 5)]),
+        // `Identifier expected.` at the end of the file is reported after the last token.
+        ("function\n", &[(1003, 1, 9), (1005, 2, 1)]),
+        ("x = a?.\n", &[(1003, 2, 1)]),
+        // A line break after `throw`: TS1142 at the end of `throw`.
+        ("throw\na;", &[(1142, 1, 6)]),
+        // Meta-property names: the checker's grammar errors (misspelledNewMetaProperty).
+        ("function foo(){new.targ}", &[(17012, 1, 20)]),
+        ("import.foo();", &[(18061, 1, 8)]),
+        ("function g(){new.}", &[(1003, 1, 18)]),
+        // A tagged template in an optional chain (taggedTemplateChain).
+        ("a?.`b`;\na?.b`c${1}`;", &[(1358, 1, 4), (1358, 2, 5)]),
+        // A decorator on an expression other than a class (decoratorOnArrowFunction).
+        ("var F = @dec () => {\n}", &[(1109, 1, 16), (1005, 1, 17)]),
+        // A lone `#` is an invalid character but still a private name.
+        ("class D { # m() {} }", &[(1127, 1, 11), (1005, 1, 13)]),
+        // `import defer` takes only a namespace import; a name not followed by `,` or
+        // `from` makes an `import x =` (classAbstractManyKeywords).
+        ("import defer x from \"a\";", &[(18058, 1, 8)]),
+        ("import defer { a } from \"a\";", &[(18059, 1, 8)]),
+        ("import abstract class D {}", &[(1005, 1, 17)]),
+        ("import y\nlet z = 1;", &[(1005, 2, 1), (1005, 2, 5)]),
+        // `import` followed by a keyword: no clause, so no `from`; the specifier is an
+        // expression (importCallExpressionIncorrect1).
+        ("import\nimport { foo } from './0';", &[(1109, 2, 1)]),
+        ("import class C {}", &[(1141, 1, 14)]),
+        // TS1011 just after `[` (badArraySyntax).
+        ("var a = new Z[   ];", &[(1011, 1, 15)]),
+        // `import q = null;`: TS1359, the word is left for the next statement.
+        ("import t = void;", &[(1359, 1, 12), (1109, 1, 16)]),
+        // `using` grammar errors (usingDeclarations.13/16/17, awaitUsingDeclarations.14).
+        (
+            "export using x = null;\ndeclare using y: null;",
+            &[(1491, 1, 1), (1491, 2, 1)],
+        ),
+        (
+            "declare namespace N {\n    using x: null;\n}",
+            &[(1545, 2, 5)],
+        ),
+        (
+            "switch (0) {\n  case 0:\n    using d = null;\n}",
+            &[(1547, 3, 5)],
+        ),
+        ("for (using x in {}) {}", &[(1493, 1, 6)]),
+        (
+            "class C { static { await using x = null; } }",
+            &[(18054, 1, 20)],
+        ),
+        // `for (using of of [])` iterates `using` (usingDeclarationsInForOf.2).
+        ("for (using of of []) {}", &[(1011, 1, 19)]),
+        // Constructor accessors and generators (constructorNameInAccessor/Generator).
+        (
+            "class C { get constructor() { return 1 } *constructor() {} }",
+            &[(1341, 1, 15), (1368, 1, 43)],
+        ),
+        ("class C { get \"constructor\"() { return 1 } }", &[]),
+        // A required tuple element after an optional one (optionalTupleElements1).
+        (
+            "type A = [string?, ...number[], string, number];",
+            &[(1257, 1, 33)],
+        ),
+        // Assignment patterns (trailingCommasInBindingPatterns, restElementWithInitializer2).
+        (
+            "let c, d;\n([...c,] = []);\n({...d,} = {});",
+            &[(1013, 2, 7), (1013, 3, 7)],
+        ),
+        ("[...x = a] = a;", &[(1186, 1, 7)]),
+        // No TS1013 in an ambient context.
+        ("declare function f25(...args,): void;", &[]),
+        // Type predicates outside a function's return type (assertionTypePredicates1).
+        ("var x: this is string;", &[(1228, 1, 8)]),
+        (
+            "declare let Q: new (x: unknown) => x is string;",
+            &[(1228, 1, 36)],
+        ),
+        (
+            "declare function f(x: asserts this): void;",
+            &[(1228, 1, 23)],
+        ),
+        (
+            "declare class W { get p(): asserts this is string; }",
+            &[(1228, 1, 28)],
+        ),
+        ("type A = asserts;\ntype B = asserts[];", &[]),
+        // `super` needs `(`, `.` or `[`; type arguments on it are TS2754 (superErrors).
+        (
+            "class A extends B { m() { var x = super; var y = super?.x; } }",
+            &[(1034, 1, 40), (1034, 1, 55)],
+        ),
+        (
+            "class A extends B { m() { super<T>(0); } }",
+            &[(2754, 1, 32)],
+        ),
+        // `=` right after a `}` (assignmentLHSIsValue, destructionAssignmentError).
+        ("{ a: 0} = value;", &[(2809, 1, 9)]),
+        ("() => { } = value;", &[(2809, 1, 11), (1005, 1, 13)]),
+        ("class A { m() {} = 1 }", &[(2809, 1, 18)]),
+        ("x;\n= value;", &[(1128, 2, 1)]),
+        // Only a block's `}` makes TS2809 (`var {a, %} = x;` is TS1128 at the `=`).
+        (
+            "var {a, %} = x;",
+            &[(1180, 1, 9), (1109, 1, 10), (1128, 1, 12)],
+        ),
+        // Object binding patterns skip tokens no enclosing list uses
+        // (destructuringObjectBindingPatternAndAssignment3).
+        ("var {h?} = { h?: 1 };", &[(1005, 1, 7)]),
+        (
+            "var {a ) = x;",
+            &[(1005, 1, 8), (1180, 1, 10), (1005, 1, 13)],
+        ),
+        ("function f({a ?}) {}", &[(1005, 1, 15), (1005, 1, 16)]),
+        ("function f({ a; b }) {}", &[(1005, 1, 15)]),
+        // Checker grammar errors in object literals.
+        ("var q = { h?: 1 };", &[(1162, 1, 12)]),
+        ("const foo = { a! }", &[(1255, 1, 16)]),
+        // `await` bindings directly in a class static block (classStaticBlock22).
+        ("class C { static { let await: any; } }", &[(1359, 1, 24)]),
+        (
+            "class C { static { let { await } = x; let { await: o } = x; } }",
+            &[(1359, 1, 26)],
+        ),
+        (
+            "class C { static { (function await() {}); (() => await); } }",
+            &[(1359, 1, 30)],
+        ),
+        // `import<T>(...)` (importCallExpressionWithTypeArgument).
+        (
+            "var p1 = import<Promise<any>>(\"./0\");\nvar p2 = import<>(\"./0\");",
+            &[(1326, 1, 10), (1326, 2, 10)],
+        ),
+        // TS1013 is the checker's: not with syntax errors.
+        (
+            "const [...a,] = [];\nlet c;\n([...c,] = []);",
+            &[(1013, 1, 12), (1013, 3, 7)],
+        ),
+        ("const [...a,] = [];\nlet = ;", &[(1109, 2, 7)]),
+        // `{ s = 5 }` only in a destructuring target (shorthandPropertyAssignmentsIn-
+        // Destructuring).
+        (
+            "let a = { s = 5 };\nlet g = { h: { k = 1 } };",
+            &[(1312, 1, 13), (1312, 2, 18)],
+        ),
+        (
+            "({ z = 1 } = {});\n({ q: { r = 2 } = {} } = {});\nfor ({ w = 3 } of []) {}\nlet f = ({ u = 4 }) => u;",
+            &[],
+        ),
+        // `async (a = await)` stays an arrow function (asyncArrowFunction6).
+        (
+            "var foo = async (a = await): Promise<void> => {\n}",
+            &[(1109, 1, 27)],
+        ),
+        // Object literals in heritage clauses (classExtendsEveryObjectType).
+        ("class C2 extends { foo: string; } { }", &[(1005, 1, 31)]),
+        ("interface I extends { a: number }", &[(1005, 1, 34)]),
+        // Private names as parameters (privateNamesNotAllowedAsParameters).
+        (
+            "class A { setFoo(#foo: string) {} }\nfunction f(#a?) {}",
+            &[(18009, 1, 18), (18009, 2, 12)],
+        ),
+        // `C[)]`: an array type missing `]` (privateNamesAndIndexedAccess).
+        ("type T = C[)];", &[(1005, 1, 12), (1128, 1, 13)]),
+        // `*` cannot follow `get`/`set` (canFollowGetSetKeyword).
+        (
+            "class A {\n    get\n    *x() {}\n}\nconst c = {\n    get\n    *x() {}\n};",
+            &[(1005, 7, 5)],
+        ),
+        // A decorated `using` is a declaration (decoratorOnUsing).
+        (
+            "declare function dec<T>(target: T): T;\n@dec\nusing 1\n\n@dec\nusing x",
+            &[(1134, 3, 7)],
+        ),
+        // Enum member recovery (decoratorOnEnum2, parserEnum5).
+        (
+            "enum E {\n    @dec A\n}",
+            &[(1132, 2, 5), (1146, 2, 9), (1128, 3, 1)],
+        ),
+        (
+            "enum E1 { a, b: 1, c, d: 2 = 3 }",
+            &[(1357, 1, 15), (2452, 1, 17), (1357, 1, 24), (2452, 1, 26)],
+        ),
+        (
+            "enum X { 1 = 1, [2] = 2, \"3\" = 3, \"01\" = 4, 5n = 5, \"NaN\" = 6 }",
+            &[(2452, 1, 10), (2452, 1, 17), (2452, 1, 26), (2452, 1, 45)],
+        ),
+        // A misplaced `#!` skips only the `#`; regex flag errors are the checker's
+        // (shebangError).
+        (
+            "var foo = 1;\n#!/usr/bin/env node",
+            &[(18026, 2, 1), (1005, 2, 16)],
+        ),
+        ("var x = /usr/bin;", &[(1499, 1, 14), (1499, 1, 16)]),
+        // Regular expression patterns (unicodeExtendedEscapesInRegularExpressions*,
+        // regularExpressionCharacterClassRangeOrder); kept only without syntax errors.
+        ("var x = /\\u{110000}/gu;", &[(1198, 1, 13)]),
+        (
+            "var x = /\\u{r}\\u{n}/gu;",
+            &[(1125, 1, 13), (1508, 1, 14), (1125, 1, 18), (1508, 1, 19)],
+        ),
+        ("var x = /\\u{}/gu;", &[(1125, 1, 13)]),
+        (
+            "/[\\u{1D621}-\\u{1D608}]/;",
+            &[(1538, 1, 3), (1517, 1, 3), (1538, 1, 13)],
+        ),
+        ("/[b-a]/; /[\\d-a]/; /a{2}\\p{L}/u;", &[(1517, 1, 3)]),
+        ("/[b-a]/;\nlet = ;", &[(1109, 2, 7)]),
+        // An unterminated regex ends at a closer it did not open (parserRegularExpression-
+        // DivideAmbiguity4) and is dropped at the position of the error before it
+        // (parser645086_1).
+        ("foo(/a)b);", &[(1161, 1, 5), (1005, 1, 8), (1128, 1, 9)]),
+        ("foo(/notregexp);", &[(1161, 1, 5)]),
+        ("var v = /[]/]/", &[(1005, 1, 13), (1134, 1, 14)]),
+        // Every invalid escape of an untagged template (unicodeExtendedEscapesInTemplates17).
+        ("var x = `\\u{r}\\u{n}`;", &[(1125, 1, 13), (1125, 1, 18)]),
+        // Unbalanced groups and `v`-mode classes in a regex (parser579071,
+        // regExpWithOpenBracketInCharClass).
+        (
+            "var x = /fo(o/;\nvar y = /a)/;",
+            &[(1005, 1, 14), (1508, 2, 11)],
+        ),
+        ("/[[]/; /[[]/u; /[[]/v;", &[(1005, 1, 20)]),
+        // A substatement at a token that ends its construct is `Expression expected`
+        // (parserErrorRecoveryIfStatement4).
+        ("function f() {\n  if (a)\n}", &[(1109, 3, 1)]),
+        ("if (a) else b;", &[(1109, 1, 8)]),
+        (
+            "switch (x) { case 1: if (a) case 2: break; }",
+            &[(1109, 1, 29)],
+        ),
+        // An invalid character in a parameter list is skipped (parserErrorRecovery_
+        // ParameterList4).
+        ("function f(a,\u{ac} b) {\n}", &[(1127, 1, 14)]),
+        // `.foo` as a type: a name missing its first part (typeofImportDefer).
+        (
+            "export type X = typeof import.defer(\"./a\").Foo;\nlet x: .foo;",
+            &[(1005, 1, 30), (1005, 1, 36), (1110, 2, 8)],
+        ),
+        // Escaped keywords are keywords: TS1260 where used as one, not as a name
+        // (scannerUnicodeEscapeInKeyword1, switchStatementsWithMultipleDefaults).
+        (
+            "\\u{0076}ar x = 1;\nvar \\u0061wait = 1;\nvar o = { def\\u0061ult: 1 };",
+            &[(1260, 1, 1)],
+        ),
+        (
+            "switch (x) { def\\u0061ult: break; }\nclass C { \\u0073tatic y = 1 }",
+            &[(1260, 1, 14), (1260, 2, 11)],
+        ),
+        // `from` and a string end an export list (unclosedExportClause01).
+        ("export { x, from \"./a\"", &[(1005, 1, 13)]),
+        ("export { x as a from \"./a\"", &[(1005, 1, 17)]),
+        // A misplaced modifier before `export as namespace` (umd-errors).
+        ("static export as namespace N;", &[]),
+        // A reserved word as a parameter name (reservedWords3,
+        // destructuringParameterDeclaration6).
+        ("function f(enum) {}", &[(1390, 1, 12), (1003, 1, 16)]),
+        ("function f(...while) {}", &[(1359, 1, 15), (1005, 1, 20)]),
+        // A non-name after `break` on its line.
+        ("while (1) { break 1; }", &[(1003, 1, 19)]),
+        // `await` is an operator in a class static block: TS18037 even next to syntax
+        // errors (classStaticBlock26); likewise where it is one in an async function.
+        (
+            "class C { static { await; } }",
+            &[(18037, 1, 20), (1109, 1, 25)],
+        ),
+        (
+            "class C { static { ({ await }); class await {} } }",
+            &[(1005, 1, 29)],
+        ),
+        (
+            "async function f() { const ff = (await) => {}; }",
+            &[(1109, 1, 39), (1005, 1, 41)],
+        ),
+        ("0_1;", &[(6188, 1, 2)]),
+        // `[a?]` is an index signature (parserIndexSignature3).
+        ("interface I {\n  [a?]\n}", &[(1019, 2, 5)]),
+        // `<in in>`: the second `in` is a missing name (varianceAnnotationsWith-
+        // CircularlyReferencesError).
+        (
+            "type T1<in in> = 1;\ntype T2<in> = 1;",
+            &[(1359, 1, 12), (1359, 2, 9)],
+        ),
+        // Heritage clauses (parserErrorRecovery_ExtendsOrImplementsClause3/5,
+        // parserInterfaceDeclaration1).
+        ("class C extends implements A {\n}", &[(1097, 1, 16)]),
+        (
+            "class C extends A, implements B, {\n}",
+            &[(1009, 1, 18), (1009, 1, 32)],
+        ),
+        ("interface I extends A extends B {\n}", &[(1172, 1, 23)]),
+        // The false branch of a conditional in a true branch keeps the `:` rule for
+        // arrows with a return type (parserArrowFunctionExpression11).
+        ("a ? b ? c : (d) : e => f;", &[]),
+        // A comma expression as a computed name (parserComputedPropertyName35).
+        ("var x = { [0, 1]: {} };", &[(1171, 1, 12)]),
+        // `global x`: a global augmentation without a body (nestedGlobalNamespaceInClass).
+        ("global x\nglobal\nx", &[(1005, 1, 8)]),
+        // `(this: T)` starts an arrow head (jsdocDisallowedInTypescript).
+        (
+            "function g(f: x(this: number, string): string) {}",
+            &[(1005, 1, 16), (1005, 1, 46)],
+        ),
+        // Labelled tuple members (namedTupleMembersErrors).
+        (
+            "type A = [a: string?];\ntype B = [b: ...string[]];\ntype C = [...c?: string[]];",
+            &[(5086, 1, 14), (5087, 2, 14), (5085, 3, 11)],
+        ),
+        // Numeric separators before the first digit, and an escape after a number
+        // (parser.numericSeparators.hexNegative, decmialNegative).
+        ("0x___1;", &[(6188, 1, 3), (6188, 1, 4), (6188, 1, 5)]),
+        // An object-literal method without a body before `;` is the checker's `'{' expected`
+        // (objectLiteralMemberWithoutBlock1, parser.asyncGenerators.objectLiteralMethods).
+        ("var v = { foo(): number; };", &[(1005, 1, 24)]),
+        ("var v = { foo(); bar() {} };", &[(1005, 1, 18)]),
+        ("var v = { async * x: 1; };", &[(1005, 1, 20)]),
+        // Function and constructor types after `|` or `&` need parentheses, from the end of
+        // the operator (unparenthesizedFunctionTypeInUnionOrIntersection).
+        ("type U = string | () => void;", &[(1385, 1, 18)]),
+        ("type I = & new () => any;", &[(1388, 1, 11)]),
+        ("type F = () => void | string;", &[]),
+        // `in` in a `for await` head (parser.forAwait.es2018).
+        (
+            "async function f() { for await (const x in y) {} }",
+            &[(1005, 1, 41)],
+        ),
+        // `var` and `implements` as member and class names (convertKeywordsYes); the
+        // checker reports the reserved word.
+        (
+            "class C {\n  public var = 0;\n  public var x = 0;\n}",
+            &[(1440, 3, 10)],
+        ),
+        ("class implements { }", &[]),
+        // A field named `constructor` (propertyNamedConstructor) and an initialized
+        // abstract field (abstractPropertyInitializer).
+        (
+            "abstract class C {\n  \"constructor\" = 3;\n  abstract x = 1;\n  abstract z: number;\n}",
+            &[(18006, 2, 3), (1267, 3, 12)],
+        ),
+        // `return` in a class static block (classStaticBlock7).
+        (
+            "class C { static { return; } }\nclass D { static { () => { return; }; } }",
+            &[(18041, 1, 20)],
+        ),
     ];
     for &(src, want) in cases {
         let r = parse(src, SourceKind::Ts);

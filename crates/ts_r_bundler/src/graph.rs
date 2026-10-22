@@ -75,6 +75,8 @@ impl Graph {
 #[derive(Debug)]
 pub struct Loaded {
     pub path: String,
+    /// `path` relative to the working directory ([`pretty_path`]), for messages and comments.
+    pub pretty: String,
     pub loader: Loader,
     pub source: Source,
     pub meta: Arc<ModuleMeta>,
@@ -120,6 +122,8 @@ pub struct GraphContext<'a> {
     pub changed: Option<&'a FxHashSet<String>>,
     /// Counts modules parsed (not served from a cache) by this build.
     pub parsed: std::sync::atomic::AtomicUsize,
+    /// Read module files ahead on one extra thread (when every module will be read).
+    pub read_ahead: Option<&'a crate::fscache::CachedFs>,
 }
 
 /// Loads everything reachable from `entries` (absolute paths).
@@ -127,24 +131,33 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
     let seen: Mutex<FxHashSet<String>> = Mutex::new(entries.iter().cloned().collect());
     let nodes: Mutex<FxHashMap<String, Node>> = Mutex::default();
     let wd = ctx.prep.opts.working_dir.clone();
-    pool::run_dynamic(ctx.threads, entries.to_vec(), |p: String, sp| {
-        let node = process(ctx, &p, &wd);
-        for t in &node.targets {
-            if let RawTarget::Path(q) = t {
-                let new = seen
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(q.clone());
-                if new {
-                    sp.spawn(q.clone());
+    let load_all = |queue: &(dyn Fn(String) + Sync)| {
+        pool::run_dynamic(ctx.threads, entries.to_vec(), |p: String, sp| {
+            let node = process(ctx, &p, &wd);
+            for t in &node.targets {
+                if let RawTarget::Path(q) = t {
+                    let new = seen
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(q.clone());
+                    if new {
+                        if !q.starts_with(DISABLED_PREFIX) {
+                            queue(q.clone());
+                        }
+                        sp.spawn(q.clone());
+                    }
                 }
             }
-        }
-        nodes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(p, node);
-    });
+            nodes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(p, node);
+        })
+    };
+    match ctx.read_ahead {
+        Some(fs) => fs.read_ahead(load_all),
+        None => load_all(&|_| {}),
+    }
     let mut nodes = nodes.into_inner().unwrap_or_else(|e| e.into_inner());
     // A package imported through `module` and also `require`d uses `main` for both.
     let dual = ctx.prep.resolver.dual_package_entries();
@@ -217,7 +230,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
         let l = &n.loaded;
         g.modules.push(Module {
             path: l.path.clone(),
-            pretty: pretty_path(&wd, &l.path),
+            pretty: l.pretty.clone(),
             loader: l.loader,
             source: l.source.clone(),
             meta: Arc::clone(&l.meta),
@@ -252,7 +265,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     let dir = path::directory_of(p).to_owned();
     let mut messages = Vec::new();
     let mut targets = Vec::with_capacity(loaded.meta.records.len());
-    let pretty = pretty_path(wd, p);
+    let pretty = &loaded.pretty;
     let mut lines: Option<LineIndex> = None;
     for r in &loaded.meta.records {
         let kind = match r.kind {
@@ -281,7 +294,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
                 } else {
                     msg
                 };
-                messages.push(lines.message(sev, &pretty, r.start, text));
+                messages.push(lines.message(sev, pretty, r.start, text));
                 if soft {
                     RawTarget::External(r.spec.clone())
                 } else {
@@ -344,12 +357,12 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
     };
     let fs = ctx.prep.resolver.fs();
     let mut messages = Vec::new();
+    let pretty = pretty_path(wd, p);
     let loaded = if !disabled && !opts.has_loader(p) {
         let name = p.rsplit('/').next().unwrap_or(p);
         let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
         Err(format!(
-            "No loader is configured for \".{ext}\" files: {}",
-            pretty_path(wd, p)
+            "No loader is configured for \".{ext}\" files: {pretty}"
         ))
     } else {
         prepare::load(fs.as_ref(), p, loader, opts)
@@ -357,7 +370,7 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
     let source = match loaded {
         Ok(s) => s,
         Err(e) => {
-            messages.push(Message::new(Severity::Error, Some(pretty_path(wd, p)), e));
+            messages.push(Message::new(Severity::Error, Some(pretty.clone()), e));
             Source {
                 js: Arc::from(""),
                 css: None,
@@ -385,6 +398,7 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
     {
         return Arc::new(Loaded {
             path: p.to_owned(),
+            pretty,
             loader,
             source,
             meta: Arc::new(meta),
@@ -393,7 +407,6 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
             messages,
         });
     }
-    let pretty = pretty_path(wd, p);
     ctx.parsed
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prepared = prepare::prepare(ctx.prep, p, &pretty, Arc::clone(&source.js), loader);
@@ -406,6 +419,7 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
     }
     Arc::new(Loaded {
         path: p.to_owned(),
+        pretty,
         loader,
         source,
         meta: Arc::new(meta),
