@@ -13,9 +13,7 @@ issues.
 The core team develops ts-r in a private repo and publishes it here. Every change merged there
 arrives as a pull request from a `sync/tsc-rust-<sha>` branch, labelled `sync`.
 
-Your pull requests are merged here, into `main`. A workflow then carries each merged pull request
-back to the development repo, with you as the commit's author, so your change stays in every
-later sync. You don't need to do anything for that.
+Your pull requests are merged here, into `main`.
 
 ## Before you start
 
@@ -82,8 +80,7 @@ files are plain text, so diffs stay readable.
    asks. A change to the code or the bench is also benchmarked against `main` on GitHub's Linux
    runners (the Bench (Actions) workflow, once its run is approved): the job summary has the
    tables, and the job fails on a slowdown beyond the gate.
-4. **Merge.** A maintainer merges once CI, the review and any benchmark pass. Your change is then
-   carried to the development repo automatically and comes back in the next sync.
+4. **Merge.** A maintainer merges once CI, the review and any benchmark pass.
 
 Commit messages say what changed and what it measured (an oracle count, a timing), in the
 imperative: `Checker: report TS2322 for readonly tuple spreads (conformance +4)`. Small,
