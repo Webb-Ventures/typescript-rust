@@ -1,0 +1,7 @@
+a.tsx(18,14): error TS2322: Type '{}' is not assignable to type 'IntrinsicAttributes & { someKey: string; }'.
+  Property 'someKey' is missing in type '{}' but required in type '{ someKey: string; }'.
+a.tsx(20,21): error TS2322: Type 'number' is not assignable to type 'string'.
+a.tsx(24,17): error TS2604: JSX element type 'NotOne' does not have any construct or call signatures.
+a.tsx(28,20): error TS2786: 'Bad' cannot be used as a JSX component.
+  Its return type 'number | Element | null' is not a valid JSX element.
+    Type 'number' is not assignable to type 'Element'.

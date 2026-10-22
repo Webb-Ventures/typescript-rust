@@ -1,0 +1,4 @@
+a.ts(3,5): error TS1100: Invalid use of 'arguments' in strict mode.
+a.ts(5,5): error TS1100: Invalid use of 'arguments' in strict mode.
+a.ts(5,5): error TS2322: Type 'number' is not assignable to type 'IArguments'.
+a.ts(6,11): error TS2322: Type 'IArguments' is not assignable to type 'string'.

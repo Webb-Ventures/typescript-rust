@@ -1,0 +1,11 @@
+a.ts(2,12): error TS2304: Cannot find name 'Missing'.
+a.ts(2,23): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(3,12): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(3,19): error TS2304: Cannot find name 'Missing'.
+a.ts(5,1): error TS2304: Cannot find name 'kj'.
+a.ts(5,8): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(6,12): error TS2304: Cannot find name 'Missing'.
+a.ts(7,20): error TS2304: Cannot find name 'Missing2'.
+a.ts(7,31): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(8,12): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+a.ts(8,17): error TS2304: Cannot find name 'Missing3'.

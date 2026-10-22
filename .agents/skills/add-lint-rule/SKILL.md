@@ -9,8 +9,9 @@ ts-r-lint rules must behave exactly like ESLint's: same id, messages, message id
 options, fixes and suggestions. Read [crates/ts_r_lint/AGENTS.md](../../../crates/ts_r_lint/AGENTS.md)
 and [docs/design/0006-lint.md](../../../docs/design/0006-lint.md) first.
 
-**Never read or port the rule's implementation** (ESLint, typescript-eslint, oxlint, Biome).
-Use the docs page, the rule's test file (valid/invalid cases only) and observed output.
+Use the docs page, the rule's test file (valid/invalid cases) and observed output. The rule's
+implementation (ESLint, typescript-eslint, oxlint, Biome) may be read to understand an edge
+case; **never port it**: write our own on our semantic model.
 
 ## 1. Get the oracle data
 

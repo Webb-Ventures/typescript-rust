@@ -1,0 +1,2 @@
+a.ts(19,7): error TS2339: Property 'method' does not exist on type '{}'.
+a.ts(34,11): error TS2339: Property 'method' does not exist on type 'Object'.

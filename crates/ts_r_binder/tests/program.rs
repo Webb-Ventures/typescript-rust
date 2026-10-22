@@ -171,6 +171,35 @@ fn export_star_cycles_terminate() {
     assert!(p.resolve_export(t, "missing").is_none());
 }
 
+/// A name re-exported only through `export type *` is type-only; one plain `export *` of the
+/// same name (even from the same module) makes it a value.
+#[test]
+fn type_only_export_stars() {
+    let f = build(&[
+        ("a.ts", "export class A {}\nexport class B {}\n"),
+        (
+            "b.ts",
+            "export type * from \"./a\";\nexport { B } from \"./a\";\n",
+        ),
+        ("c.ts", "export * from \"./b\";\n"),
+        (
+            "d.ts",
+            "export type * from \"./a\";\nexport * from \"./a\";\n",
+        ),
+    ]);
+    let p = link(&f);
+    let (b, c, d) = (
+        ModuleTarget::File(FileId(1)),
+        ModuleTarget::File(FileId(2)),
+        ModuleTarget::File(FileId(3)),
+    );
+    assert!(p.star_export_is_type_only(b, "A"));
+    assert!(!p.star_export_is_type_only(b, "B"));
+    assert!(p.star_export_is_type_only(c, "A"));
+    assert!(!p.star_export_is_type_only(d, "A"));
+    assert!(!p.star_export_is_type_only(b, "missing"));
+}
+
 /// A chain of `export *` far deeper than any real program stops at a depth limit instead of
 /// overflowing the stack, while a wide barrel still re-exports every module it reaches.
 #[test]

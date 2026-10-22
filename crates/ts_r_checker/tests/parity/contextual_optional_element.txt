@@ -1,0 +1,2 @@
+a.ts(5,21): error TS18048: 'y' is possibly 'undefined'.
+a.ts(7,18): error TS18048: 'y' is possibly 'undefined'.

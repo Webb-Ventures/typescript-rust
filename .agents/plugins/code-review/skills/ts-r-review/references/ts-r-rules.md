@@ -13,11 +13,13 @@ repo's file wins; quote it, not this one. Each rule lists how a breach shows up 
   `Cargo.toml` and `package.json` change, and `build.rs` / scripts that shell out to these at
   run time. Using them as *oracles* in tests, benches and `xtask` is allowed (that is how
   parity is measured: `bench/package.json` pins tsc, esbuild, oxc-parser, tsx).
-- **No copied or translated source** from tsc, ts-rust, esbuild or any other tool. Signs:
-  comments naming upstream functions as the source ("port of `checkTypeRelatedTo`"), upstream
+- **No copied or translated source** from tsc, esbuild or any other tool. Reading their source
+  to understand a rule is allowed, and citing the file read (`tsc: tsc/internal/checker/relater.go`)
+  is fine. Signs of porting: comments claiming a port ("port of `checkTypeRelatedTo`"), upstream
   identifier spellings (`getTypeOfSymbol`, `isTypeAssignableTo` in camelCase), license headers,
-  structure that mirrors an upstream file line by line. Work must come from design records and
-  observed behaviour.
+  structure that mirrors an upstream file line by line.
+- **Nothing from Rust ports of TypeScript** (ts-rust/tsc-rs, stc, ezno): any sign their source
+  or design notes were used is a finding.
 - **Small general-purpose crates** are fine (rustc-hash, memchr, smallvec, bumpalo, rkyv,
   memmap2, blake3, serde/serde_json, notify, rayon, crossbeam) **with a reason in the crate's
   AGENTS.md**. A new dependency without that note is a finding.

@@ -10,6 +10,9 @@
 //!   prop at the tag name. Hyphenated names (`data-x`, `aria-x`) are never excess.
 //! - Attribute values are contextually typed by the prop's type; child expressions by the
 //!   children prop's type (its element type when there are several children).
+//! - With a spread, the attributes type is fresh only when an attribute or child was also
+//!   written: those are checked for excess, the spread's own properties are not
+//!   (`<A {...props} zzz />` reports `zzz`; `<A {...props} />` reports nothing).
 //! - Without a `JSX` namespace (React's types not installed) a component is checked like a
 //!   call against its first parameter, and children are not attributes, so a required
 //!   `children` prop is reported missing even when the element has children.
@@ -200,13 +203,33 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Whether `p` is a hyphenated JSX attribute (`data-x`), which is never excess.
+    /// A hyphenated property of an object literal spread straight into the attributes
+    /// (`{...{ "data-x": 1 }}`) counts too.
     pub(crate) fn is_hyphenated_jsx_attr(&self, p: SymId) -> bool {
-        let Some(d) = self.c.synth_sym(p).and_then(|x| x.decl) else {
+        let Some(d) = self.c.first_decl(p) else {
             return false;
         };
         let ast = self.ast(d.file);
-        matches!(*ast.node(d.node), Node::JsxAttr { name, .. }
-            if matches!(*ast.node(name), Node::Ident { name: a } if ast.atom(a).contains('-')))
+        if let Node::JsxAttr { name, .. } = *ast.node(d.node) {
+            return matches!(*ast.node(name), Node::Ident { name: a } if ast.atom(a).contains('-'));
+        }
+        if !self.c.sym_name(p).contains('-') || !matches!(*ast.node(d.node), Node::Property { .. })
+        {
+            return false;
+        }
+        // The literal's own spread: property -> object literal (-> parentheses) -> spread.
+        let mut cur = d;
+        for _ in 0..16 {
+            let Some(up) = self.c.parent(cur) else {
+                return false;
+            };
+            match *ast.node(up.node) {
+                Node::ObjectLit { .. } | Node::Paren { .. } => cur = up,
+                Node::JsxSpreadAttr { .. } => return true,
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Whether the contextual type of the value of attribute `attr` (or of a child of the
@@ -315,6 +338,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         // Explicit attributes a later spread may overwrite (TS2783).
         let mut overwritable: Vec<(StrId, NodeId)> = Vec::new();
         let mut lone_spread: Option<TypeId> = None;
+        // An explicit attribute was written.
+        let mut written = false;
         for &a in ast.list(attrs) {
             match *ast.node(a) {
                 Node::JsxAttr { name: an, value } => {
@@ -344,6 +369,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                             .with_decl(Some(Loc::new(file, a))),
                     );
                     members.push((nid, s));
+                    written = true;
                 }
                 Node::JsxSpreadAttr { arg } => {
                     let t = self.check_expr(Loc::new(file, arg));
@@ -478,7 +504,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if self.store().flags(sp).intersects(TypeFlags::ANY) {
                     return None;
                 }
-                self.spread_types(sp, lit)
+                let r = self.spread_types(sp, lit);
+                // With an explicit attribute the result is fresh: the explicit attributes
+                // and children are checked for excess, the spread properties not.
+                if written {
+                    self.fresh_spread_literal(r, ol)
+                } else {
+                    r
+                }
             }
             None => lit,
         };
@@ -620,6 +653,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // Several children are checked one by one against the element types of the array
         // members, or against `string` when every member is a string; otherwise TS2746.
+        // Other iterable object members (`Iterable<ReactNode>`) take their iterated type.
         let mut elems = Vec::new();
         for &m in &members {
             if self.c.is_array_like_type(m) {
@@ -627,6 +661,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     Some(e) => elems.push(e),
                     None => return false,
                 }
+            } else if self.store().flags(m).intersects(TypeFlags::OBJECT)
+                && self
+                    .global_type(crate::checker::GlobalType::Iterable)
+                    .is_some()
+                && let Some(e) = self.iterated_type(m, false)
+            {
+                elems.push(e);
             }
         }
         if elems.is_empty() {

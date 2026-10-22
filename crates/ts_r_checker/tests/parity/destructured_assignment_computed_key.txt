@@ -1,0 +1,4 @@
+a.ts(4,5): error TS2537: Type '{ bar: string; }' has no matching index signature for type 'string'.
+a.ts(5,5): error TS2537: Type '{ bar: string; }' has no matching index signature for type 'string'.
+a.ts(8,5): error TS2537: Type 'Number' has no matching index signature for type 'string'.
+a.ts(9,5): error TS2537: Type 'String' has no matching index signature for type 'string'.

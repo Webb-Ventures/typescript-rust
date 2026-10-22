@@ -27,10 +27,16 @@
 //!   declarationWithNoInitializer, usingDeclarations.8). In a `for...in`/`for...of` head a
 //!   second declarator is TS1091/TS1188, else an initializer TS1189/TS1190
 //!   (parserForInStatement3/4, parserForOfStatement3/4), at the declarator.
+//! - A `using`/`await using` statement: a modifier (`export`, `declare`) is TS1491/TS1495
+//!   on the first modifier; otherwise an ambient context is TS1545/TS1546, and directly in
+//!   a `case`/`default` clause TS1547/TS1548, and `await using` in a class static block
+//!   TS18054, on the declaration list. As a `for...in` head
+//!   it is TS1493/TS1494 (usingDeclarations.13/16/17, usingDeclarationsInForIn).
 //! - A rest parameter before the last parameter is TS1014 (restParameterNotLast).
 //! - In an ambient context: a function, method, accessor or constructor body is TS1183
 //!   "An implementation cannot be declared in ambient contexts." at the body (also an
-//!   accessor body in a type literal or interface), a generator TS1221 at the `*`, and an
+//!   accessor body in a type literal or interface, and a `declare` class method's body, but
+//!   not a `declare` accessor's or constructor's), a generator TS1221 at the `*`, and an
 //!   initializer TS1039 "Initializers are not allowed in ambient contexts." at the
 //!   initializer, except on a `const` (or `readonly` property) without a type: a string or
 //!   number literal is fine there, `null`, `true`, objects and the like are TS1254
@@ -157,6 +163,11 @@ impl Parser<'_> {
         if self.with_depth == 0 && !self.ctx.has(Ctx::IN_FUNCTION) {
             let span = self.ast.span(stmt);
             self.deferred_grammar_error_at(messages::RETURN_OUTSIDE_FUNCTION, span, &[]);
+        } else if self.ctx.has(Ctx::STATIC_BLOCK) {
+            // TS18041 at the `return` keyword (classStaticBlock7).
+            let start = self.ast.span(stmt).start;
+            let span = Span::new(start, start + "return".len() as u32);
+            self.deferred_grammar_error_at(messages::RETURN_IN_STATIC_BLOCK, span, &[]);
         }
     }
 
@@ -250,9 +261,20 @@ impl Parser<'_> {
 
     /// The left side `left` of a `for...in` (`is_of` false) or `for...of` statement.
     pub(crate) fn check_for_in_of_head(&mut self, left: NodeId, is_of: bool) {
-        let Node::VarDecl { decls, .. } = *self.ast.node(left) else {
+        let Node::VarDecl { decls, kind, .. } = *self.ast.node(left) else {
             return;
         };
+        if !is_of && matches!(kind, VarKind::Using | VarKind::AwaitUsing) {
+            // `for (using x in o)`: TS1493/TS1494 on the declaration list.
+            let msg = if kind == VarKind::Using {
+                messages::FOR_IN_USING
+            } else {
+                messages::FOR_IN_AWAIT_USING
+            };
+            let span = self.ast.span(left);
+            self.deferred_grammar_error_at(msg, span, &[]);
+            return;
+        }
         let list = self.ast.list(decls);
         let (msg, at) = if list.len() > 1 {
             let msg = if is_of {
@@ -278,6 +300,89 @@ impl Parser<'_> {
         };
         let span = self.ast.span(at);
         self.deferred_grammar_error_at(msg, span, &[]);
+    }
+
+    /// A `using`/`await using` statement from `start` (its first modifier, if any) to the
+    /// end of its declarators: a modifier is TS1491/TS1495 on the first one, and an
+    /// ambient context TS1545/TS1546 on the declaration list.
+    pub(crate) fn check_using_statement(
+        &mut self,
+        start: u32,
+        modifiers: Modifiers,
+        kind: VarKind,
+    ) {
+        let using = kind == VarKind::Using;
+        if modifiers != Modifiers::NONE {
+            let word_len = self.src.as_bytes()[start as usize..]
+                .iter()
+                .take_while(|b| b.is_ascii_alphabetic())
+                .count();
+            let span = Span::new(start, start + word_len as u32);
+            let word = span.text(self.src).to_owned();
+            let msg = if using {
+                messages::USING_MODIFIER
+            } else {
+                messages::AWAIT_USING_MODIFIER
+            };
+            self.deferred_grammar_error_at(msg, span, &[&word]);
+        } else if self.ctx.has(Ctx::AMBIENT) {
+            let msg = if using {
+                messages::USING_AMBIENT
+            } else {
+                messages::AWAIT_USING_AMBIENT
+            };
+            self.deferred_grammar_error_at(msg, Span::new(start, self.prev_end), &[]);
+        } else if !using && self.ctx.has(Ctx::STATIC_BLOCK) {
+            // awaitUsingDeclarations.14.
+            let span = Span::new(start, self.prev_end);
+            self.deferred_grammar_error_at(messages::AWAIT_USING_IN_STATIC_BLOCK, span, &[]);
+        }
+    }
+
+    /// A binding named `await` directly in a class static block (`let await`, `let {
+    /// await }`, `function await() {}`, `class await {}`, also function and class
+    /// expression names): the checker's TS1359 at the name (classStaticBlock22). Call at
+    /// the name token.
+    pub(crate) fn check_await_binding_in_static_block(&mut self) {
+        if self.at(T::Await)
+            && self
+                .jumps
+                .iter()
+                .rev()
+                .find(|j| matches!(j, Jump::Boundary | Jump::StaticBlock))
+                .is_some_and(|j| matches!(j, Jump::StaticBlock))
+        {
+            let span = self.tok().span();
+            self.deferred_grammar_error_at(
+                messages::RESERVED_WORD_CANNOT_BE_USED_HERE,
+                span,
+                &["await"],
+            );
+        }
+    }
+
+    /// `using` statements directly in a `case`/`default` clause: TS1547/TS1548 on the
+    /// declaration list (without the `;`).
+    pub(crate) fn check_using_in_case(&mut self, body: NodeList) {
+        for i in 0..self.ast.list(body).len() {
+            let stmt = self.ast.list(body)[i];
+            let Node::VarDecl { kind, decls, .. } = *self.ast.node(stmt) else {
+                continue;
+            };
+            if !matches!(kind, VarKind::Using | VarKind::AwaitUsing) {
+                continue;
+            }
+            let Some(&last) = self.ast.list(decls).last() else {
+                continue;
+            };
+            let span = Span::new(self.ast.span(stmt).start, self.ast.span(last).end);
+            let msg = if kind == VarKind::Using {
+                messages::USING_IN_CASE
+            } else {
+                messages::AWAIT_USING_IN_CASE
+            };
+            self.deferred_grammar_error_at(msg, span, &[]);
+        }
     }
 
     /// The initializer `init` of an ambient variable or property; `const_like`: a `const` or
@@ -596,6 +701,27 @@ impl Parser<'_> {
 
     /// A computed enum member name other than a string or number literal: TS1164, which
     /// tsc's checker reports even in a file with syntax errors.
+    /// An enum member named by a number, a bigint, a string that is a number written the
+    /// way a number prints (`"1"`, `"-1.5"`; not `"01"`, `"1e400"`, `"NaN"`), or such a
+    /// literal in brackets: the checker's TS2452, also in a file with syntax errors
+    /// (parserEnum5, literalsInComputedProperties1).
+    pub(crate) fn check_enum_member_name(&mut self, name: NodeId) {
+        let inner = match *self.ast.node(name) {
+            Node::ComputedKey { expr } => expr,
+            _ => name,
+        };
+        let numeric = match *self.ast.node(inner) {
+            Node::NumberLit { .. } => true,
+            Node::BigIntLit { .. } => inner == name,
+            Node::StringLit { value } => is_canonical_number(self.ast.atom(value)),
+            _ => false,
+        };
+        if numeric {
+            let span = self.ast.span(name);
+            self.checker_error_at(messages::ENUM_MEMBER_NUMERIC_NAME, span);
+        }
+    }
+
     pub(crate) fn check_enum_computed_name(&mut self, key: NodeId) {
         let Node::ComputedKey { expr } = *self.ast.node(key) else {
             return;
@@ -772,4 +898,30 @@ fn is_declaration(node: &Node) -> bool {
             | Node::NamespaceExport { .. }
             | Node::Directive { .. }
     )
+}
+
+/// Whether `text` is a finite number spelled exactly as it prints: digits with an optional
+/// `-` and fraction, no leading zeros, no trailing fraction zeros, no exponent form.
+fn is_canonical_number(text: &str) -> bool {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    let (int, frac) = match digits.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (digits, None),
+    };
+    let int_ok = !int.is_empty()
+        && int.bytes().all(|b| b.is_ascii_digit())
+        && (int == "0" || !int.starts_with('0'))
+        && int.len() <= 21;
+    let frac_ok = frac.is_none_or(|f| {
+        !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()) && !f.ends_with('0')
+    });
+    if !int_ok || !frac_ok || text == "-0" {
+        return false;
+    }
+    // Shortest round trip, and no exponent when printed (1e-7 > |v| or |v| >= 1e21).
+    let Ok(v) = text.parse::<f64>() else {
+        return false;
+    };
+    let a = v.abs();
+    v.is_finite() && (a == 0.0 || (1e-6..1e21).contains(&a)) && format!("{v}") == text
 }

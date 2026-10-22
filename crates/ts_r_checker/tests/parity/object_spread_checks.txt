@@ -1,0 +1,13 @@
+a.ts(3,12): error TS2783: 'b' is specified more than once, so this usage will be overwritten.
+a.ts(7,14): error TS2783: 'x' is specified more than once, so this usage will be overwritten.
+a.ts(12,11): error TS2698: Spread types may only be created from object types.
+a.ts(14,11): error TS2698: Spread types may only be created from object types.
+a.ts(15,11): error TS2698: Spread types may only be created from object types.
+a.ts(17,11): error TS2698: Spread types may only be created from object types.
+a.ts(19,14): error TS2698: Spread types may only be created from object types.
+a.ts(22,27): error TS2698: Spread types may only be created from object types.
+a.ts(28,4): error TS2339: Property 'x' does not exist on type '{}'.
+a.ts(30,1): error TS2322: Type '12' is not assignable to type 'undefined'.
+a.ts(33,4): error TS2339: Property 'g' does not exist on type '{ p: number; }'.
+a.ts(37,9): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.

@@ -11,7 +11,8 @@ flags, start, end }` (8 bytes), and `token_text()` / `text(span)` return the sli
 
 - Parser-driven re-scans:
   - `rescan_greater` merges `>` into `>=`, `>>`, `>>=`, `>>>`, `>>>=`.
-  - `split_less_than` turns `<<` into `<` in type arguments.
+  - `split_less_than` turns `<<` into `<` in type arguments; `split_star_eq` turns `*=`
+    into `*` (the JSDoc type `*=`).
   - `rescan_slash_as_regex`, `rescan_template_continuation` (after `}` in `${}`).
   - `next_jsx_child`, `rescan_jsx_identifier` (dashed names), `next_jsx_attribute_value`.
 - Values are decoded on demand:
@@ -36,11 +37,13 @@ flags, start, end }` (8 bytes), and `token_text()` / `text(span)` return the sli
   - `is_identifier_like()` is `Ident` or `>= Implements`.
   - Assignment operators are `Eq..=QuestionQuestionEq`.
   - Keep these ranges when adding tokens.
-- Escaped keywords (`const`) scan as `Ident` with `ESCAPED_KEYWORD`, never as the
-  keyword.
+- Escaped keywords (`const`) scan as the keyword with `ESCAPED_KEYWORD` (and
+  `ESCAPED`), as tsc reads them. The parser reports TS1260 when it consumes one as a keyword
+  rather than reading it as a name (`intern_token`).
 - `NEWLINE_BEFORE` is set when a line terminator (or a multi-line block comment) precedes the
   token. ASI, `async`/arrow and modifier rules depend on it.
-- A leading BOM is skipped and `#!` on the first line becomes a `Hashbang` comment.
+- A leading BOM is skipped and `#!` on the first line becomes a `Hashbang` comment. Elsewhere
+  `#!` is TS18026 and only the `#` is skipped (an `Unknown` token).
 - U+0085 (NEXT LINE) is whitespace, not a line break, as in tsc (`chars::is_unicode_whitespace`).
   A keyword directly followed by a non-ASCII character that ends the word (`return` + U+0085)
   is still the keyword.
@@ -53,6 +56,24 @@ flags, start, end }` (8 bytes), and `token_text()` / `text(span)` return the sli
   - In an identifier, a backslash that starts no valid escape ends the identifier and is an
     invalid character (TS1127): `arg\u003` is `arg`, TS1127, `u003`.
   - Regex flags: unknown TS1499, duplicate TS1500, `u` with `v` TS1502.
+  - Numbers: a name right after a plain decimal literal is TS1351 on the name, which stays
+    its own token (`3in x` is `3 in x`); hex, octal, binary and leading-zero literals are not
+    checked, nor a name starting with an escape (the parser's `';' expected`). `0_1` is
+    TS6188 at the `_`, once; every `_` before the first digit is TS6188 (`0x___1`), later
+    repeats TS6189. An empty `0b`/`0o`/`0x` is TS1177/TS1178/
+    TS1125. `1e2n` and `4.1n` take the `n` but stay `Number`, with TS1352/TS1353 on the
+    whole literal.
+- A backslash at the end of the file ends a string or template with TS1126 (not
+  TS1002/TS1160). A lone `#` is TS1127 and still a `PrivateName` token (`Hash` is
+  never produced).
+- In JSX children a `<<<<<<<` conflict marker is TS1185 and its line one `Unknown` token.
+- Merge conflict markers are trivia (`is_conflict_marker`, observed in tsc 7): seven `<`,
+  `|`, `=` or `>` with only blanks before them on the line, then a space (`=======` takes
+  any next character), are TS1185 on the seven characters. `<<<<<<<` and `>>>>>>>` skip
+  their line; `|||||||` skips to the next `=======` or `>>>>>>>` marker, `=======` to the
+  next `>>>>>>>` marker (or the end of the file).
+- U+FFFD where a token starts means a binary file: TS1490 at offset 0 (once), and the rest
+  of the file is one `Unknown` token (no TS1127), so the parser reports one error at it.
 - Never panics on any input; slicing uses `get`.
 - Every scanning loop advances or stops at end of input. As a backstop, `next_token` turns a
   zero-width non-EOF token into a one-character `Unknown`, so the parser can never stall on
@@ -81,7 +102,11 @@ turns the sequence into the character. Build it with `concat!("\\", "u0061")`.
 
 ## Gaps
 
-- Regex *patterns* are not validated (tsc 7 reports e.g. unbalanced groups, TS1005 `')'
-  expected` inside a regex); only termination and flags are checked.
+- Regex *patterns* are only partly validated (`regex.rs`): hex and `\u{}` escapes, a lone `}`
+  or `]` with `u`/`v`, and class ranges out of order. Groups, quantifiers, named groups and
+  property names are not (tsc 7 reports e.g. TS1005 `')' expected` inside a regex). Report
+  only what valid code can never produce; the parser defers all pattern and flag errors.
+- An unterminated regex ends at the first `)`, `]` or `}` it did not open, or before a
+  trailing run of `;`, as observed in tsc.
 - Flag availability by `target` (TS1501) is not reported; the lexer does not know the target.
 - No JSX HTML entity decoding (left to codegen).

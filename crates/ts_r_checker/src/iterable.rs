@@ -11,7 +11,7 @@
 //!   at the operand. `never` is fine there, `unknown` is not.
 //! - `for...of` over a non-iterable is checked with the statement (check.rs).
 
-use ts_r_ast::Node;
+use ts_r_ast::{Node, NodeId};
 use ts_r_binder::meaning;
 use ts_r_types::{TypeFlags, TypeId};
 
@@ -109,6 +109,41 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// for-of, spread and array destructuring call `next()` with no argument: TS2763,
+    /// TS2764 or TS2765 (`info`) at `at` when the iterator of `t` needs one that
+    /// `undefined` does not satisfy (tsc: checker.go, getIteratedTypeOrElementType).
+    pub(crate) fn check_iterator_takes_undefined(
+        &mut self,
+        t: TypeId,
+        at: Loc,
+        is_await: bool,
+        info: crate::diagnostics_generated::DiagnosticInfo,
+    ) {
+        if t == TypeId::UNRESOLVED
+            || self.store().is_error(t)
+            || self.store().flags(t).intersects(TypeFlags::ANY)
+            || self.c.is_array_like_type(t)
+            || self.store().flags(t).intersects(TypeFlags::STRING_LIKE)
+        {
+            return;
+        }
+        let next = self.delegated_next_type(t, is_await);
+        if self
+            .store()
+            .flags(next)
+            .intersects(TypeFlags::ANY_OR_UNKNOWN)
+        {
+            return;
+        }
+        self.check_type_related(
+            TypeId::UNDEFINED,
+            next,
+            ts_r_types::RelationKind::Assignable,
+            Some(at),
+            Some(crate::relate::Head { info }),
+        );
+    }
+
     /// The element type of spreading `t` (a spread element or argument, or `yield*`),
     /// reporting `t` at `at` when it is not iterable.
     pub(crate) fn spread_element_type(&mut self, at: Loc, t: TypeId) -> TypeId {
@@ -116,12 +151,66 @@ impl<'c, 'a> Ck<'c, 'a> {
             return t;
         }
         if let Some(e) = self.iterated_or_constraint(t) {
+            self.check_iterator_takes_undefined(
+                t,
+                at,
+                false,
+                dg::CANNOT_ITERATE_VALUE_BECAUSE_THE_NEXT_METHOD_OF_ITS_ITERATOR_EXPECTS_TYPE_1_BUT_A_2764,
+            );
             return e;
         }
         if t != TypeId::NEVER {
             self.check_iterable_value(at, t);
         }
         TypeId::UNRESOLVED
+    }
+
+    /// TS2493 at `at` when `t` is a tuple without a rest element and `index` is past its
+    /// end.
+    pub(crate) fn check_tuple_element_in_range(&mut self, at: Loc, t: TypeId, index: f64) {
+        if !self.reporting(at.file) {
+            return;
+        }
+        let Some(shape) = self.store().tuple_shape_of(t) else {
+            // A union of tuples none of which has the element: TS2339 naming the union.
+            if self.union_tuples_out_of_range(t, index) {
+                let ts = self.type_to_string(t);
+                let is = ts_r_binder::js_number_to_string(index);
+                self.error(
+                    at,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&is, &ts],
+                );
+            }
+            return;
+        };
+        if shape.has_rest() {
+            return;
+        }
+        let len = shape.elements.len();
+        if index < len as f64 || index.fract() != 0.0 {
+            return;
+        }
+        let ts = self.type_to_string(t);
+        let is = ts_r_binder::js_number_to_string(index);
+        self.error(
+            at,
+            dg::TUPLE_TYPE_0_OF_LENGTH_1_HAS_NO_ELEMENT_AT_INDEX_2_2493,
+            &[&ts, &len.to_string(), &is],
+        );
+    }
+
+    /// Whether `t` is a union of tuples without rest elements none of which has an element
+    /// at `index`.
+    pub(crate) fn union_tuples_out_of_range(&self, t: TypeId, index: f64) -> bool {
+        let s = self.store();
+        if !s.flags(t).contains(TypeFlags::UNION) || index < 0.0 || index.fract() != 0.0 {
+            return false;
+        }
+        s.members_of_union(t).iter().all(|&m| {
+            s.tuple_shape_of(m)
+                .is_some_and(|sh| !sh.has_rest() && index >= sh.elements.len() as f64)
+        })
     }
 
     /// The array patterns in the binding pattern of variable or parameter `decl` must
@@ -141,6 +230,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 init,
                 ..
             } => (pattern, type_ann, init),
+            Node::CatchClause {
+                param: Some(param),
+                type_ann,
+                ..
+            } => (param, type_ann, None),
             _ => return,
         };
         if !matches!(
@@ -195,10 +289,68 @@ impl<'c, 'a> Ck<'c, 'a> {
                         && self.store().flags(t).contains(TypeFlags::UNKNOWN);
                     if !contextual_unknown {
                         self.check_iterable_value(pl, t);
+                        self.check_iterator_takes_undefined(
+                            t,
+                            pl,
+                            false,
+                            dg::CANNOT_ITERATE_VALUE_BECAUSE_THE_NEXT_METHOD_OF_ITS_ITERATOR_EXPECTS_TYPE_1_BUT_A_2765,
+                        );
+                    }
+                    // Elements past the end of a tuple without a rest (TS2493); one with a
+                    // default is fine, and so is any of a parameter's own default (`([x,
+                    // y] = [])`: the default is typed by the pattern).
+                    let param_default = is_param && p == pattern && init.is_some();
+                    for (i, &el) in ast.list(elements).iter().enumerate() {
+                        if param_default {
+                            break;
+                        }
+                        if !matches!(
+                            ast.node(el),
+                            Node::Hole {} | Node::Rest { .. } | Node::AssignPattern { .. }
+                        ) {
+                            self.check_tuple_element_in_range(Loc::new(decl.file, el), t, i as f64);
+                        }
                     }
                     stack.extend(ast.list(elements).iter().rev());
                 }
-                Node::ObjectPattern { props } => stack.extend(ast.list(props).iter().rev()),
+                Node::ObjectPattern { props } => {
+                    // A numeric property past the end of a tuple (`{ 3: d }` of a pair).
+                    let numeric: Vec<(NodeId, f64)> = ast
+                        .list(props)
+                        .iter()
+                        .filter_map(|&pr| match *ast.node(pr) {
+                            Node::BindingProperty { key, value, init } => {
+                                let defaulted = init.is_some()
+                                    || value.is_some_and(|v| {
+                                        matches!(ast.node(v), Node::AssignPattern { .. })
+                                    });
+                                match *ast.node(key) {
+                                    Node::NumberLit { value } if !defaulted => {
+                                        Some((key, value.get()))
+                                    }
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let param_default = is_param && p == pattern && init.is_some();
+                    if !numeric.is_empty() && !param_default {
+                        let t = match (type_ann, init) {
+                            (Some(ta), _) if p == pattern => {
+                                self.type_from_node(Loc::new(decl.file, ta))
+                            }
+                            (None, Some(i)) if p == pattern && !in_for => {
+                                self.quietly(|ck| ck.check_expr(Loc::new(decl.file, i)))
+                            }
+                            _ => self.pattern_parent_type(pl),
+                        };
+                        for (key, v) in numeric {
+                            self.check_tuple_element_in_range(Loc::new(decl.file, key), t, v);
+                        }
+                    }
+                    stack.extend(ast.list(props).iter().rev())
+                }
                 Node::BindingProperty { value: Some(v), .. } => stack.push(v),
                 Node::AssignPattern { left, .. } => stack.push(left),
                 Node::Rest { arg } => stack.push(arg),

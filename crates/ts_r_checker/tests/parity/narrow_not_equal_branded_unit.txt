@@ -1,0 +1,2 @@
+a.ts(19,15): error TS2322: Type '1 | (string & { brand: 1; })' is not assignable to type '1'.
+  Type 'string & { brand: 1; }' is not assignable to type '1'.

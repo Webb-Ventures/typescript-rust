@@ -1,0 +1,1 @@
+a.ts(9,11): error TS2322: Type 'Hom<T>' is not assignable to type 'any[]'.

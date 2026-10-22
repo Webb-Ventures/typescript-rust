@@ -153,6 +153,43 @@ export {};
 }
 
 #[test]
+fn unused_type_parameter_merged_with_parameter() {
+    // `T` names both a type parameter and a parameter (one symbol): a read as a type only
+    // uses the type parameter, any other read only the parameter.
+    let Some(out) = check(
+        UNUSED,
+        "export function a<T>(T: number) { return T; }\nexport function b<T>(T: T) {}\nexport function c<T>(T: T) { return T; }\n",
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "a.ts:1:19 TS6196: 'T' is declared but never used.",
+            "a.ts:2:22 TS6133: 'T' is declared but its value is never read.",
+        ]
+    );
+}
+
+#[test]
+fn unused_import_of_unresolved_module() {
+    // An unused import is reported even when its module does not resolve.
+    let Some(out) = check(
+        UNUSED,
+        "import Foo from \"nope\";\nimport Bar from \"nope2\";\nexport const x: typeof Foo = 1;\n",
+    ) else {
+        return;
+    };
+    assert!(
+        out.contains(
+            &"a.ts:2:8 TS6133: 'Bar' is declared but its value is never read.".to_string()
+        ),
+        "{out:?}"
+    );
+    assert!(!out.iter().any(|d| d.contains("'Foo'")), "{out:?}");
+}
+
+#[test]
 fn private_members_read_through_literal_element_access() {
     let Some(out) = check(
         UNUSED,
@@ -184,6 +221,35 @@ o["q"];
 }
 
 #[test]
+fn private_members_read_through_typed_element_keys() {
+    let Some(out) = check(
+        UNUSED,
+        r#"export class C {
+  private a = 1; private b = 2; private c = 3;
+  m(k: "a" | "b") { return this[k]; }
+}
+export class D { private e = 1; m(k: any) { return this[k]; } }
+const x: unique symbol = Symbol();
+const y: unique symbol = Symbol();
+export class E {
+  private [x]!: number; private [y]!: number;
+  m() { this[x] = 0; return this[y]; }
+}
+"#,
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "a.ts:2:41 TS6133: 'c' is declared but its value is never read.",
+            "a.ts:5:52 TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'D'.",
+            "a.ts:9:11 TS6133: '[x]' is declared but its value is never read.",
+        ]
+    );
+}
+
+#[test]
 fn setter_parameter_typed_from_getter() {
     let Some(out) = check(
         "\"strict\": true, \"target\": \"es2022\"",
@@ -199,6 +265,28 @@ export {};
         vec![
             "a.ts:2:15 TS7032: Property 's' implicitly has type 'any', because its set accessor lacks a parameter type annotation.",
             "a.ts:2:17 TS7006: Parameter 'v' implicitly has an 'any' type.",
+        ]
+    );
+}
+
+/// isolatedDeclarationErrorsClasses: a setter with a computed name that is no literal is
+/// an accessor of its own, named by its source text; a getter elsewhere does not type it.
+#[test]
+fn setter_with_unbindable_computed_name() {
+    let Some(out) = check(
+        "\"strict\": true, \"target\": \"es2022\"",
+        r#"let k: string = "k";
+class A { get [k]() { return 0; } set [k](v) { } }
+export {};
+"#,
+    ) else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "a.ts:2:39 TS7032: Property '[k]' implicitly has type 'any', because its set accessor lacks a parameter type annotation.",
+            "a.ts:2:43 TS7006: Parameter 'v' implicitly has an 'any' type.",
         ]
     );
 }
@@ -861,5 +949,52 @@ a.ts(11,14): error TS1030: 'readonly' modifier already seen.
 a.ts(12,23): error TS1029: 'static' modifier must precede 'readonly' modifier.
 a.ts(12,30): error TS4113: This member cannot have an 'override' modifier because it is not declared in the base class 'B'.
 a.ts(15,5): error TS1029: 'public' modifier must precede 'static' modifier."#
+    );
+}
+
+/// TS2814 at a function merged with a non-ambient class in another file, TS2320 naming a
+/// symbol-keyed property `[Symbol.toStringTag]` and checking an interface merged with a
+/// class against the class's base too, and TS2844 for a constructor local read by a
+/// `typeof` in a property type. tsc 7.0.2 output.
+#[test]
+fn class_merges_and_property_type_queries() {
+    let Some(out) = check_files(
+        "\"strict\": true, \"target\": \"es2015\"",
+        &[
+            (
+                "a.ts",
+                r#"class C2 { }
+function f() { }
+interface I1 { [Symbol.toStringTag]: string; bar: number; }
+interface I2 { [Symbol.toStringTag]: "x"; }
+interface I3 extends I1, I2 { }
+abstract class Base { abstract bar: number; }
+class Merged extends Base { }
+interface Other { bar: string; }
+interface Merged extends Other { }
+class K {
+    a: typeof x;
+    b: typeof y;
+    constructor(x: number, public y: string) { }
+}
+"#,
+            ),
+            ("b.ts", "function C2() { }\nclass f { }\n"),
+        ],
+    ) else {
+        return;
+    };
+    assert_eq!(
+        tsc_format(&out),
+        r#"a.ts(1,7): error TS2813: Class declaration cannot implement overload list for 'C2'.
+a.ts(2,10): error TS2814: Function with bodies can only merge with classes that are ambient.
+a.ts(5,11): error TS2320: Interface 'I3' cannot simultaneously extend types 'I1' and 'I2'.
+  Named property '[Symbol.toStringTag]' of types 'I1' and 'I2' are not identical.
+a.ts(9,11): error TS2320: Interface 'Merged' cannot simultaneously extend types 'Base' and 'Other'.
+  Named property 'bar' of types 'Base' and 'Other' are not identical.
+a.ts(11,15): error TS2844: Type of instance member variable 'a' cannot reference identifier 'x' declared in the constructor.
+a.ts(12,15): error TS2844: Type of instance member variable 'b' cannot reference identifier 'y' declared in the constructor.
+b.ts(1,10): error TS2814: Function with bodies can only merge with classes that are ambient.
+b.ts(2,7): error TS2813: Class declaration cannot implement overload list for 'f'."#
     );
 }

@@ -1,0 +1,13 @@
+a.ts(6,9): error TS2322: Type 'T[K]' is not assignable to type 'U[K]'.
+  Type 'T' is not assignable to type 'U'.
+    'U' could be instantiated with an arbitrary type which could be unrelated to 'T'.
+a.ts(7,9): error TS2322: Type 'T[K]' is not assignable to type 'T[J]'.
+  Type 'K' is not assignable to type 'J'.
+    'K' is assignable to the constraint of type 'J', but 'J' could be instantiated with a different subtype of constraint 'string | number | symbol'.
+a.ts(9,9): error TS2322: Type 'T[K]' is not assignable to type 'U[J]'.
+  Type 'T' is not assignable to type 'U'.
+    'U' could be instantiated with an arbitrary type which could be unrelated to 'T'.
+a.ts(12,5): error TS2322: Type 'number' is not assignable to type 'T[K]'.
+  'number' is assignable to the constraint of type 'T[K]', but 'T[K]' could be instantiated with a different subtype of constraint 'any'.
+a.ts(15,5): error TS2322: Type 'number' is not assignable to type 'T[K]'.
+  'number' is assignable to the constraint of type 'T[K]', but 'T[K]' could be instantiated with a different subtype of constraint 'number'.

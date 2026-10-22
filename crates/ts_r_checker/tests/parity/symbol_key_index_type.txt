@@ -1,0 +1,21 @@
+a.ts(8,7): error TS2538: Type 'unique symbol' cannot be used as an index type.
+a.ts(9,7): error TS2538: Type 'unique symbol' cannot be used as an index type.
+a.ts(10,7): error TS2538: Type 'symbol' cannot be used as an index type.
+a.ts(11,7): error TS2538: Type 'symbol' cannot be used as an index type.
+a.ts(12,7): error TS2538: Type 'symbol' cannot be used as an index type.
+a.ts(13,21): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(14,21): error TS2538: Type 'symbol' cannot be used as an index type.
+a.ts(16,6): error TS2464: A computed property name must be of type 'string', 'number', 'symbol', or 'any'.
+a.ts(16,7): error TS2538: Type 'object' cannot be used as an index type.
+a.ts(18,4): error TS2538: Type 'unique symbol' cannot be used as an index type.
+a.ts(18,12): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(19,21): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(20,21): error TS2538: Type 'symbol' cannot be used as an index type.
+a.ts(21,21): error TS2538: Type 'unique symbol' cannot be used as an index type.
+a.ts(22,10): error TS7053: Element implicitly has an 'any' type because expression of type 'symbol' can't be used to index type '{ a: string; }'.
+a.ts(23,10): error TS7053: Element implicitly has an 'any' type because expression of type 'unique symbol' can't be used to index type '{ a: string; }'.
+  Property '[symed]' does not exist on type '{ a: string; }'.
+a.ts(24,21): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(25,7): error TS2538: Type 'unique symbol' cannot be used as an index type.
+a.ts(26,7): error TS2538: Type 'symbol' cannot be used as an index type.

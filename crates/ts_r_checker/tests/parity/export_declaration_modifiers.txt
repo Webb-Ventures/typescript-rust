@@ -1,0 +1,4 @@
+a.ts(3,1): error TS1275: 'accessor' modifier can only appear on a property declaration.
+a.ts(4,1): error TS1275: 'accessor' modifier can only appear on a property declaration.
+a.ts(5,1): error TS1193: An export declaration cannot have modifiers.
+a.ts(6,1): error TS1193: An export declaration cannot have modifiers.

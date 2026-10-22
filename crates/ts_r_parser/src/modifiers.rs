@@ -17,7 +17,7 @@
 //!   `type` without a parameter start after it; then it is a reserved word (TS1359).
 
 use ts_r_ast::{ModifierToken, Modifiers};
-use ts_r_lexer::{TokenFlags, TokenKind as T};
+use ts_r_lexer::TokenKind as T;
 
 use crate::Parser;
 
@@ -71,9 +71,6 @@ pub(crate) const MAX_MODIFIER_CHAIN: u32 = 16;
 impl<'a> Parser<'a> {
     /// The modifier the current token is in `ctx`, if it is a modifier keyword there.
     pub(crate) fn modifier_keyword(&self, ctx: ModCtx) -> Option<Modifiers> {
-        if self.tok().flags.has(TokenFlags::ESCAPED) {
-            return None;
-        }
         let flag = match self.kind() {
             T::Public => Modifiers::PUBLIC,
             T::Private => Modifiers::PRIVATE,
@@ -142,7 +139,13 @@ impl<'a> Parser<'a> {
         }
         let k = next.kind;
         match ctx {
-            ModCtx::Statement => k.is_identifier_or_keyword(),
+            // `static export as namespace N;` is a namespace export with a misplaced
+            // modifier (umd-errors), not `export` as a modifier; so is `accessor export
+            // default x` an export assignment (autoAccessorDisallowedModifiers).
+            ModCtx::Statement => {
+                k.is_identifier_or_keyword()
+                    && !(flag == Modifiers::EXPORT && matches!(k, T::As | T::Default))
+            }
             ModCtx::ClassMember => {
                 matches!(
                     k,
@@ -198,9 +201,6 @@ impl<'a> Parser<'a> {
     pub(crate) fn declaration_follows_modifiers(&mut self) -> bool {
         self.lookahead(|p| {
             for _ in 0..MAX_MODIFIER_CHAIN {
-                if p.tok().flags.has(TokenFlags::ESCAPED) {
-                    return false;
-                }
                 match p.kind() {
                     T::Public
                     | T::Private
@@ -247,12 +247,10 @@ impl<'a> Parser<'a> {
     /// on its line by a name (`public x = 1;`, `static test()`). tsc reports TS1128 at the
     /// keyword and skips it rather than reading it as an identifier.
     pub(crate) fn is_stray_statement_modifier(&mut self) -> bool {
-        if self.tok().flags.has(TokenFlags::ESCAPED)
-            || !matches!(
-                self.kind(),
-                T::Public | T::Private | T::Protected | T::Static | T::Readonly | T::Accessor
-            )
-        {
+        if !matches!(
+            self.kind(),
+            T::Public | T::Private | T::Protected | T::Static | T::Readonly | T::Accessor
+        ) {
             return false;
         }
         let next = self.peek();
@@ -266,9 +264,16 @@ impl<'a> Parser<'a> {
             p.bump();
             if p.newline_before()
                 || !p.kind().is_identifier_or_keyword()
-                || matches!(p.kind(), T::Default | T::As | T::Import | T::Type)
+                || matches!(p.kind(), T::Default | T::As | T::Import)
             {
                 return false;
+            }
+            // `export type { a }`, `export type * from`, `export type A = ...`; but
+            // `export type 100 {}` is a stray `export` (parseInvalidNames).
+            if p.at(T::Type) {
+                let next = p.peek();
+                return !(matches!(next.kind, T::LBrace | T::Star)
+                    || (next.kind.is_identifier_or_keyword() && !next.newline_before()));
             }
             !p.declaration_follows_modifiers()
         })

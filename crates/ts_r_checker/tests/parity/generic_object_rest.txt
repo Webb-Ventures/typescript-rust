@@ -1,0 +1,5 @@
+a.ts(8,11): error TS2339: Property 'method' does not exist on type 'Omit<this, "method">'.
+a.ts(9,11): error TS2339: Property 'privateProp' does not exist on type 'Omit<this, "method">'.
+a.ts(14,9): error TS2322: Type 'Omit<T, "a">' is not assignable to type 'number'.
+a.ts(15,5): error TS2339: Property 'a' does not exist on type 'Omit<T, "a">'.
+a.ts(17,5): error TS2339: Property 'zzz' does not exist on type 'Pick<T, Exclude<keyof T, "a">>'.

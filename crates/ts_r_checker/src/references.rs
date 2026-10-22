@@ -117,6 +117,41 @@ pub fn reference_diagnostics(
     out
 }
 
+/// TS2688 for each `/// <reference types="..." />` of `f` whose name is in `missing` (the
+/// names the loader could not resolve from `f`), at the name.
+pub fn type_reference_diagnostics(f: &SourceFile, missing: &[&str]) -> Vec<Diagnostic> {
+    if missing.is_empty() {
+        return Vec::new();
+    }
+    let ast = &f.ast;
+    let first_stmt = match ast.node(ast.root) {
+        Node::Program { stmts } => ast.list(*stmts).first().map(|&s| ast.span(s).start),
+        _ => None,
+    }
+    .unwrap_or(u32::MAX);
+    let mut out = Vec::new();
+    for c in &ast.comments {
+        if c.span.start >= first_stmt {
+            break;
+        }
+        if c.kind != CommentKind::Line {
+            continue;
+        }
+        let t = c.span.text(&f.text);
+        if let Some((at, v)) = attribute_value(t, "types")
+            && missing.contains(&v)
+        {
+            let start = c.span.start + at as u32;
+            out.push(Diagnostic::new(
+                msg(dg::CANNOT_FIND_TYPE_DEFINITION_FILE_FOR_0_2688),
+                Span::new(start, start + v.len() as u32),
+                &[v],
+            ));
+        }
+    }
+    out
+}
+
 /// The `/// <reference lib="..." />` directives in the leading comments of `f`: the span
 /// of each value (between the quotes) and the value.
 fn lib_references(f: &SourceFile) -> Vec<(Span, &str)> {

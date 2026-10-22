@@ -256,7 +256,11 @@ pub fn ts_check_pragma(text: &str) -> Option<bool> {
             let line = &rest[..end];
             let body = line.strip_prefix('/').unwrap_or(line).trim_start();
             if let Some(p) = body.strip_prefix('@') {
-                let name = p.split(char::is_whitespace).next().unwrap_or("");
+                // A `:` ends the name too (`// @ts-nocheck: why`).
+                let name = p
+                    .split(|c: char| c.is_whitespace() || c == ':')
+                    .next()
+                    .unwrap_or("");
                 if name.eq_ignore_ascii_case("ts-nocheck") {
                     return Some(false);
                 } else if name.eq_ignore_ascii_case("ts-check") {
@@ -553,9 +557,21 @@ pub struct Resolution {
     /// The resolved file is inside a package with a `name` and `version` (tsc's package
     /// id): an untyped import of it gets the `@types` hint.
     pub package: bool,
+    /// That package's name, when known (history's lazy loader does not keep it).
+    pub package_name: Option<String>,
+    /// Declarations found ignoring `exports` for an `import` whose `exports` lead to
+    /// JavaScript only ([`ts_r_resolver::ResolvedModule::alternate_result`]).
+    pub alternate: Option<String>,
     /// `resolved` is the declaration output of this source of a referenced project
     /// (`references`; it may not exist yet: TS6305).
     pub reference_source: Option<String>,
+    /// The TypeScript extension the specifier was written with found the file
+    /// ([`ts_r_resolver::ResolvedModule::resolved_using_ts_extension`]: TS5097, TS2876).
+    pub ts_extension: bool,
+    /// The module resolved to an arbitrary-extension declaration (`x.d.html.ts` for
+    /// `./x.html`) from a non-declaration file without `allowArbitraryExtensions`: it is
+    /// not linked (`included` is false) and the import is TS6263.
+    pub arbitrary_extension: bool,
 }
 
 /// The loaded program: files in check order (lib files first) and how every module
@@ -581,6 +597,9 @@ pub struct ProgramFiles {
     pub missing_libs: Vec<String>,
     /// `types` entries that could not be resolved.
     pub missing_types: Vec<String>,
+    /// `/// <reference types="..." />` directives that could not be resolved: `(containing
+    /// file path, name as written)`, in load order (TS2688 at the name).
+    pub missing_type_references: Vec<(String, String)>,
     /// `exports`/`imports` entries of the program's own package left unresolved for want
     /// of a project root (TS2209/TS2210, global diagnostics).
     pub ambiguous_roots: Vec<ts_r_resolver::AmbiguousRoot>,
@@ -966,6 +985,8 @@ fn load<F: FileSystem>(
     let mut queue: Vec<Pending> = Vec::new();
     let mut queued: FxHashMap<String, u32> = FxHashMap::default();
     let mut missing_types = Vec::new();
+    let mut missing_type_references = Vec::new();
+    let no_resolve = options.no_resolve() == Some(true);
     for r in roots {
         Pending {
             path: r.clone(),
@@ -1106,6 +1127,8 @@ fn load<F: FileSystem>(
                         js_depth: p.js_depth,
                     }
                     .enqueue(&mut queue, &mut queued);
+                } else if kind.starts_with("types") && !no_resolve && !f.is_lib {
+                    missing_type_references.push((f.path.clone(), v.clone()));
                 }
             }
             order_edges.insert(f.path.clone(), deps);
@@ -1165,6 +1188,7 @@ fn load<F: FileSystem>(
         roots: roots.to_vec(),
         missing_libs,
         missing_types,
+        missing_type_references,
         ambiguous_roots: resolver.ambiguous_roots(),
         deps: order_edges,
     }
@@ -1203,16 +1227,34 @@ pub fn resolve_request_in<R: FileSystem>(
         // (`../../node_modules/eslint/lib/linter`), unless within `maxNodeModuleJsDepth`
         // (the program loader admits it).
         let js_library = r.resolved_file_name.contains("/node_modules/");
-        let included = includable(r.extension, allow_js && !js_library);
+        let arbitrary_extension = !resolver.options().allow_arbitrary_extensions
+            && needs_arbitrary_extensions(&r.resolved_file_name, from);
+        let included = includable(r.extension, allow_js && !js_library) && !arbitrary_extension;
         Resolution {
             resolved: r.resolved_file_name.clone(),
             extension: r.extension,
             external: r.is_external_library_import,
             included,
             package: r.package_id.is_some(),
+            package_name: r.package_id.as_ref().map(|p| p.name.clone()),
+            alternate: r.alternate_result.clone(),
             reference_source: r.project_reference_source.clone(),
+            ts_extension: r.resolved_using_ts_extension,
+            arbitrary_extension,
         }
     })
+}
+
+/// Whether linking `resolved` from `from` needs `allowArbitraryExtensions`: `resolved` is
+/// an arbitrary-extension declaration (`x.d.html.ts`, not `.d.ts`/`.d.mts`/`.d.cts`) and
+/// `from` is not a declaration file (tsc: tsc/internal/module/util.go GetResolutionDiagnostic).
+pub fn needs_arbitrary_extensions(resolved: &str, from: &str) -> bool {
+    let lower = resolved.to_ascii_lowercase();
+    is_declaration_file_name(&lower)
+        && ![".d.ts", ".d.mts", ".d.cts"]
+            .iter()
+            .any(|e| lower.ends_with(e))
+        && !is_declaration_file_name(&from.to_ascii_lowercase())
 }
 
 /// `types: ["*"]` stands for every package directory in the type roots (`typeRoots`, else

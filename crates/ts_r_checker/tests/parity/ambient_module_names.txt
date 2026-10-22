@@ -1,0 +1,9 @@
+a.ts(2,16): error TS2436: Ambient module declaration cannot specify relative module name.
+a.ts(3,16): error TS2436: Ambient module declaration cannot specify relative module name.
+a.ts(4,16): error TS2436: Ambient module declaration cannot specify relative module name.
+a.ts(6,16): error TS2436: Ambient module declaration cannot specify relative module name.
+a.ts(8,5): error TS2668: 'export' modifier cannot be applied to ambient modules and module augmentations since they are always visible.
+a.ts(8,27): error TS2435: Ambient modules cannot be nested in other modules or namespaces.
+b.ts(1,1): error TS2668: 'export' modifier cannot be applied to ambient modules and module augmentations since they are always visible.
+b.ts(1,23): error TS2664: Invalid module name in augmentation, module 'm2' cannot be found.
+b.ts(2,1): error TS2668: 'export' modifier cannot be applied to ambient modules and module augmentations since they are always visible.

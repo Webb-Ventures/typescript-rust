@@ -7,8 +7,11 @@
 //! default (`interface I {}` next to `interface I<T = number> {}` is fine). A missing
 //! constraint or default, and variance modifiers, do not count.
 
+use ts_r_ast::visit::{Visitor, Walk, walk};
 use ts_r_ast::{Node, NodeId};
-use ts_r_types::TypeId;
+use ts_r_binder::meaning;
+use ts_r_diagnostics::FileId;
+use ts_r_types::{SymId, TypeId};
 
 use crate::checker::{Ck, Loc};
 use crate::diag::dg;
@@ -131,6 +134,120 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         ta == tb
+    }
+}
+
+impl<'c, 'a> Ck<'c, 'a> {
+    /// A type parameter list's defaults: a parameter without a default after one with a
+    /// default is TS2706 (at the parameter), and a default naming its own parameter or a
+    /// later one of the list is TS2744 (at the reference). Names are resolved, so a
+    /// parameter of a nested signature that shadows one is fine (tsc:
+    /// tsc/internal/checker/checker.go, checkTypeParameters).
+    pub(crate) fn check_type_param_defaults(&mut self, file: FileId, list: NodeId) {
+        let ast = self.ast(file);
+        let Node::TypeParams { params } = *ast.node(list) else {
+            return;
+        };
+        let params = ast.list(params).to_vec();
+        let syms: Vec<_> = params
+            .iter()
+            .map(|&p| self.c.sym_of_decl(Loc::new(file, p)))
+            .collect();
+        let mut seen_default = false;
+        for (i, &p) in params.iter().enumerate() {
+            let Node::TypeParam { default, .. } = *ast.node(p) else {
+                continue;
+            };
+            let Some(d) = default else {
+                if seen_default {
+                    self.error(
+                        Loc::new(file, p),
+                        dg::REQUIRED_TYPE_PARAMETERS_MAY_NOT_FOLLOW_OPTIONAL_TYPE_PARAMETERS_2706,
+                        &[],
+                    );
+                }
+                continue;
+            };
+            seen_default = true;
+            let mut refs = TypeRefs(Vec::new());
+            walk(ast, d, &mut refs);
+            for (r, name) in refs.0 {
+                let Some(text) = crate::nodes::ident_text(ast, name) else {
+                    continue;
+                };
+                let Some(s) = self.resolve_name_at(Loc::new(file, name), text, meaning::TYPE)
+                else {
+                    continue;
+                };
+                if syms[i..].contains(&Some(s)) {
+                    self.error(
+                        Loc::new(file, r),
+                        dg::TYPE_PARAMETER_DEFAULTS_CAN_ONLY_REFERENCE_PREVIOUSLY_DECLARED_TYPE_PARAMETERS_2744,
+                        &[],
+                    );
+                }
+            }
+            if let Some(s) = syms[i] {
+                self.check_type_param_default(Loc::new(file, d), s);
+            }
+        }
+    }
+
+    /// A default that needs itself (`interface I<T = I> {}`) is TS2716 at the default. A
+    /// type parameter's default must be assignable to its constraint instantiated with
+    /// the parameter as the default: TS2344 at the default (`<T extends string = number>`,
+    /// `<T, U extends T = number>`; tsc: checker.go, checkTypeParameter).
+    fn check_type_param_default(&mut self, d: Loc, s: SymId) {
+        let t = self.declared_type_of_symbol(s);
+        if self.store().type_param_data(t).is_none() {
+            return;
+        }
+        // (A merged declaration's parameter may stand for another declaration's, which
+        // declares no default.)
+        if self.type_param_default(t).is_none() && self.has_type_param_default(t) {
+            let name = self.type_to_string(t);
+            self.error(
+                d,
+                dg::TYPE_PARAMETER_0_HAS_A_CIRCULAR_DEFAULT_2716,
+                &[&name],
+            );
+            return;
+        }
+        let Some(c) = self.type_param_constraint(t) else {
+            return;
+        };
+        let dt = self.type_from_node(d);
+        if self.store().is_error(dt) || dt == TypeId::UNRESOLVED || c == TypeId::UNRESOLVED {
+            return;
+        }
+        let m = self.store().mapper(&[t], &[dt]);
+        let c = self.instantiate(c, m);
+        if self.store().is_error(c) || self.is_assignable(dt, c) {
+            return;
+        }
+        let (chain, _) = self.relation_error_chain(
+            dt,
+            c,
+            ts_r_types::RelationKind::Assignable,
+            Some(crate::relate::Head {
+                info: dg::TYPE_0_DOES_NOT_SATISFY_THE_CONSTRAINT_1_2344,
+            }),
+        );
+        self.error_chain(d, &chain);
+    }
+}
+
+/// The type references under a node whose name is a plain identifier: `(reference, name)`.
+struct TypeRefs(Vec<(NodeId, NodeId)>);
+
+impl Visitor for TypeRefs {
+    fn enter(&mut self, ast: &ts_r_ast::Ast, id: NodeId) -> Walk {
+        if let Node::TypeRef { name, .. } = *ast.node(id)
+            && matches!(ast.node(name), Node::Ident { .. })
+        {
+            self.0.push((id, name));
+        }
+        Walk::Continue
     }
 }
 

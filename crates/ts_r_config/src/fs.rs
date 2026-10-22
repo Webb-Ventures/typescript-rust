@@ -159,6 +159,32 @@ impl Default for RealFs {
     }
 }
 
+/// Source text from a file's bytes, as tsc reads it: a UTF-16 byte order mark (`FE FF` big
+/// endian, `FF FE` little endian) decodes the rest as UTF-16 without the mark; anything else is
+/// UTF-8 (invalid sequences become U+FFFD, which the lexer reports as a binary file).
+pub fn decode_text(bytes: Vec<u8>) -> String {
+    let utf16 = |rest: &[u8], big: bool| {
+        let units = rest.chunks_exact(2).map(|p| {
+            if big {
+                u16::from_be_bytes([p[0], p[1]])
+            } else {
+                u16::from_le_bytes([p[0], p[1]])
+            }
+        });
+        char::decode_utf16(units)
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect::<String>()
+    };
+    match bytes.as_slice() {
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, true),
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, false),
+        _ => match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+        },
+    }
+}
+
 impl RealFs {
     /// Uses the platform default: case-insensitive on macOS and Windows, sensitive elsewhere.
     pub fn new() -> Self {
@@ -180,10 +206,7 @@ impl RealFs {
 impl FileSystem for RealFs {
     fn read_file(&self, path: &str) -> Option<String> {
         let bytes = std::fs::read(Self::native(path)).ok()?;
-        Some(match String::from_utf8(bytes) {
-            Ok(s) => s,
-            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
-        })
+        Some(decode_text(bytes))
     }
 
     fn file_exists(&self, path: &str) -> bool {
@@ -466,6 +489,17 @@ impl FileSystem for MemoryFs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_text_reads_utf16_byte_order_marks() {
+        assert_eq!(decode_text(vec![0xFE, 0xFF, 0, b'x', 0, b';']), "x;");
+        assert_eq!(decode_text(vec![0xFF, 0xFE, b'x', 0, b';', 0]), "x;");
+        // an odd trailing byte is dropped, a lone surrogate is U+FFFD
+        assert_eq!(decode_text(vec![0xFF, 0xFE, b'x', 0, 7]), "x");
+        assert_eq!(decode_text(vec![0xFF, 0xFE, 0x00, 0xD8]), "\u{FFFD}");
+        assert_eq!(decode_text(b"a\xFFb".to_vec()), "a\u{FFFD}b");
+        assert_eq!(decode_text("\u{FEFF}x".into()), "\u{FEFF}x");
+    }
 
     #[test]
     fn memory_fs_basics() {

@@ -233,12 +233,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             return s.string_literal(&text, false);
         }
         new_texts.push(text);
-        if new_texts.iter().all(|t| t.is_empty())
-            && new_types
+        if new_texts.iter().all(|t| t.is_empty()) {
+            if new_types
                 .iter()
                 .all(|&t| s.flags(t).contains(TypeFlags::STRING))
-        {
-            return TypeId::STRING;
+            {
+                return TypeId::STRING;
+            }
+            // `${M}` for a single pattern type `M` (a string mapping or template) is `M`.
+            if let [only] = new_types[..]
+                && self.is_pattern_literal_type(only)
+            {
+                return only;
+            }
         }
         let text_ids: Vec<TypeId> = new_texts
             .iter()
@@ -427,7 +434,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// tsc's `isMemberOfStringMapping`.
-    fn is_member_of_string_mapping(&mut self, source: TypeId, target: TypeId) -> bool {
+    pub(crate) fn is_member_of_string_mapping(&mut self, source: TypeId, target: TypeId) -> bool {
         let s = self.store();
         let tf = s.flags(target);
         if tf.contains(TypeFlags::ANY) {

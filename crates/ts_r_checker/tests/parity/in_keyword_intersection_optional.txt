@@ -1,0 +1,4 @@
+a.ts(15,15): error TS2322: Type 'Win & typeof globalThis' is not assignable to type 'never'.
+a.ts(26,15): error TS2322: Type 'unknown' is not assignable to type 'number'.
+a.ts(31,21): error TS2638: Type 'NonNullable<T>' may represent a primitive value, which is not permitted as the right operand of the 'in' operator.
+a.ts(44,16): error TS2638: Type 'NonNullable<T>' may represent a primitive value, which is not permitted as the right operand of the 'in' operator.

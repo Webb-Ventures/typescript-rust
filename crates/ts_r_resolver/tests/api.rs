@@ -156,6 +156,31 @@ fn esm_mode_needs_extensions() {
 }
 
 #[test]
+fn ts_extension_flag_needs_the_written_extension_to_find_the_file() {
+    let mut fs = MemoryFs::new();
+    fs.add_file(
+        "/p/tsconfig.json",
+        r#"{ "compilerOptions": { "module": "commonjs", "moduleResolution": "bundler",
+            "paths": { "@a/*": ["./src/*"], "@b/*": ["./src/*.ts"] } } }"#,
+    )
+    .add_file("/p/a.ts", "")
+    .add_file("/p/b.js", "")
+    .add_file("/p/dir.ts/index.ts", "")
+    .add_file("/p/src/c.ts", "");
+    let r = resolver(&fs, "/p/tsconfig.json");
+    let flag = |spec: &str| {
+        r.resolve_module(spec, "/p/a.ts", ResolutionMode::Require)
+            .map(|m| m.resolved_using_ts_extension)
+    };
+    // A directory `index` behind a `.ts`-looking name was not found through `.ts`.
+    assert_eq!(flag("./dir.ts"), Some(false));
+    assert_eq!(flag("./b.js"), Some(false));
+    // Through `paths`: only when the specifier brought the extension in.
+    assert_eq!(flag("@a/c.ts"), Some(true));
+    assert_eq!(flag("@b/c"), Some(false));
+}
+
+#[test]
 fn symlinked_packages_resolve_to_real_paths() {
     let mut fs = MemoryFs::new();
     fs.add_file(
@@ -634,4 +659,56 @@ fn ambiguous_project_root_keeps_distinct_imports_in_order() {
         assert_eq!(root.entry, format!("entry{i}"));
         assert_eq!(root.package_json, "/p/package.json");
     }
+}
+
+/// A type reference to a package whose `exports` has no types for `.` is not resolved
+/// through its `types` field.
+#[test]
+fn type_reference_honours_exports_without_types() {
+    let mut fs = MemoryFs::new();
+    fs.add_file(
+        "/tsconfig.json",
+        r#"{ "compilerOptions": { "module": "commonjs" } }"#,
+    )
+    .add_file("/usage.ts", "")
+    .add_file("/node_modules/pkg/index.d.ts", "interface G {}")
+    .add_file(
+        "/node_modules/pkg/package.json",
+        r#"{ "name": "pkg", "types": "index.d.ts", "exports": "some-other-thing.js" }"#,
+    );
+    let r = resolver(&fs, "/tsconfig.json");
+    let mut t = Trace::new();
+    let res =
+        r.resolve_type_reference_traced("pkg", Some("/usage.ts"), ResolutionMode::Require, &mut t);
+    let lines = t.take_lines();
+    assert!(res.is_none(), "{lines:#?}");
+}
+
+/// An `import` whose `exports` lead to JavaScript only records the declarations a lookup
+/// ignoring `exports` finds, as a hint; the resolution stays the JavaScript.
+#[test]
+fn alternate_result_names_declarations_hidden_by_exports() {
+    let mut fs = MemoryFs::new();
+    fs.add_file(
+        "/tsconfig.json",
+        r#"{ "compilerOptions": { "module": "nodenext" } }"#,
+    )
+    .add_file("/index.mts", "")
+    .add_file("/node_modules/foo/index.mjs", "")
+    .add_file("/node_modules/foo/index.d.ts", "")
+    .add_file(
+        "/node_modules/foo/package.json",
+        r#"{ "name": "foo", "version": "1.0.0", "exports": { ".": { "import": "./index.mjs" } } }"#,
+    );
+    let r = resolver(&fs, "/tsconfig.json");
+    let res = r
+        .resolve_module("foo", "/index.mts", ResolutionMode::Import)
+        .unwrap();
+    assert_eq!(res.resolved_file_name, "/node_modules/foo/index.mjs");
+    assert_eq!(
+        res.alternate_result.as_deref(),
+        Some("/node_modules/foo/index.d.ts")
+    );
+    let cjs = r.resolve_module("foo", "/index.mts", ResolutionMode::Require);
+    assert!(cjs.is_none_or(|m| m.alternate_result.is_none()));
 }

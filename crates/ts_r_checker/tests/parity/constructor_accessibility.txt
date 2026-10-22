@@ -1,0 +1,13 @@
+a.ts(14,21): error TS2674: Constructor of class 'Baz' is protected and only accessible within the class declaration.
+a.ts(16,26): error TS2675: Cannot extend a class 'Qux'. Class constructor is marked as private.
+a.ts(17,10): error TS2674: Constructor of class 'Baz' is protected and only accessible within the class declaration.
+a.ts(18,10): error TS2673: Constructor of class 'Qux' is private and only accessible within the class declaration.
+a.ts(19,5): error TS2322: Type 'Function' is not assignable to type '() => void'.
+  Type 'Function' provides no match for the signature '(): void'.
+a.ts(21,1): error TS2322: Type 'typeof Baz' is not assignable to type 'typeof Foo'.
+  Cannot assign a 'protected' constructor type to a 'public' constructor type.
+a.ts(22,1): error TS2322: Type 'typeof Qux' is not assignable to type 'typeof Foo'.
+  Cannot assign a 'private' constructor type to a 'public' constructor type.
+a.ts(25,1): error TS2322: Type 'typeof Qux' is not assignable to type 'typeof Baz'.
+  Cannot assign a 'private' constructor type to a 'protected' constructor type.
+a.ts(27,1): error TS2741: Property 'make' is missing in type 'typeof Baz' but required in type 'typeof Qux'.

@@ -63,6 +63,9 @@ fn message(code: u32) -> &'static str {
         9025 => {
             "Declaration emit for this parameter requires implicitly adding undefined to its type. This is not supported with --isolatedDeclarations."
         }
+        9026 => {
+            "Declaration emit for this file requires preserving this import for augmentations. This is not supported with --isolatedDeclarations."
+        }
         9037 => "Default exports can't be inferred with --isolatedDeclarations.",
         9038 => {
             "Computed property names on class or object literals cannot be inferred with --isolatedDeclarations."
@@ -72,12 +75,12 @@ fn message(code: u32) -> &'static str {
 }
 
 impl Emitter<'_, '_> {
-    fn iso_on(&self, n: NodeId) -> bool {
+    pub(super) fn iso_on(&self, n: NodeId) -> bool {
         self.opts.isolated_declarations && !self.is_synth(n)
     }
 
     /// Records a TS9xxx error at `at` (the file's `.d.ts` is refused).
-    fn iso_error(&mut self, code: u32, at: NodeId) {
+    pub(super) fn iso_error(&mut self, code: u32, at: NodeId) {
         let span = self.ast.span(at);
         if !self.failed.iter().any(|f| f.0 == code && f.1 == span) {
             self.failed
@@ -87,6 +90,18 @@ impl Emitter<'_, '_> {
 
     fn iso_report(&mut self, issues: Vec<Issue>, own: u32, own_at: NodeId) {
         for i in issues {
+            // An object literal's computed name stays as written (`{ [u]: number }`), so
+            // the entity it names is printed too: its own declaration may need a type.
+            if i.code == Some(9038)
+                && let Node::ComputedKey { expr } = *self.ast.node(i.at)
+                && is_entity_name_expr(&self.ast, expr)
+            {
+                let mut root = expr;
+                while let Node::Member { obj, .. } = *self.ast.node(root) {
+                    root = obj;
+                }
+                self.reference_ident(root, ts_r_binder::meaning::VALUE);
+            }
             match i.code {
                 Some(c) => self.iso_error(c, i.at),
                 None => self.iso_error(own, own_at),
@@ -133,7 +148,7 @@ impl Emitter<'_, '_> {
         if self.iso_on(key)
             && let Some(i) = self.iso_key(key)
         {
-            self.iso_report(vec![i], 9038, key);
+            self.iso_error(9038, i.at);
         }
     }
 
@@ -284,6 +299,8 @@ impl Emitter<'_, '_> {
         if !self.opts.isolated_declarations {
             return;
         }
+        // Each property is reported once, at its first assignment (its declaration).
+        let mut seen: Vec<(&str, String)> = Vec::new();
         for &s in stmts {
             let Node::ExprStmt { expr } = *self.ast.node(s) else {
                 continue;
@@ -291,14 +308,28 @@ impl Emitter<'_, '_> {
             let Node::Assign { left, .. } = *self.ast.node(expr) else {
                 continue;
             };
-            let obj = match *self.ast.node(left) {
-                Node::Member { obj, .. } | Node::Index { obj, .. } => obj,
+            // The property: a name, a literal key, or a key that is an entity name
+            // (`f[k.x]`); other element accesses declare nothing.
+            let (obj, prop) = match *self.ast.node(left) {
+                Node::Member { obj, prop, .. } => (obj, self.raw(prop).to_owned()),
+                Node::Index { obj, index, .. } => match *self.ast.node(index) {
+                    Node::StringLit { value } => (obj, self.ast.atom(value).to_owned()),
+                    Node::NumberLit { .. } => (obj, self.raw(index).to_owned()),
+                    _ if is_entity_name_expr(&self.ast, index) => {
+                        (obj, format!("[{}]", self.raw(index)))
+                    }
+                    _ => continue,
+                },
                 _ => continue,
             };
             if !matches!(self.ast.node(obj), Node::Ident { .. }) {
                 continue;
             }
             let name = self.raw(obj);
+            if seen.iter().any(|(o, p)| *o == name && *p == prop) {
+                continue;
+            }
+            seen.push((name, prop));
             let target = stmts.iter().copied().find(|&d| match *self.ast.node(d) {
                 Node::FunctionDecl { name: Some(n), .. } => self.raw(n) == name,
                 Node::VarDecl { decls, .. } => self.ast.list(decls).iter().any(|&v| {
@@ -538,16 +569,23 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// A computed name other than a string or number literal (TS9038).
+    /// A computed name other than a primitive literal (TS9038): a string, number, boolean or
+    /// substitution-free template literal, or a signed number (`[-1]`).
     fn iso_key(&self, key: NodeId) -> Option<Issue> {
         let Node::ComputedKey { expr } = *self.ast.node(key) else {
             return None;
         };
         let e = skip_parens(&self.ast, expr);
-        if matches!(
-            self.ast.node(e),
-            Node::StringLit { .. } | Node::NumberLit { .. }
-        ) {
+        let literal = match *self.ast.node(e) {
+            Node::StringLit { .. } | Node::NumberLit { .. } | Node::BoolLit { .. } => true,
+            Node::TemplateLit { parts } => self.ast.list(parts).len() == 1,
+            Node::Unary {
+                op: UnaryOp::Minus | UnaryOp::Plus,
+                arg,
+            } => matches!(self.ast.node(arg), Node::NumberLit { .. }),
+            _ => false,
+        };
+        if literal {
             return None;
         }
         Some(Issue {
@@ -623,4 +661,17 @@ impl Emitter<'_, '_> {
             at,
         })
     }
+}
+
+/// An identifier or a property access chain of identifiers (`a`, `a.b.c`).
+fn is_entity_name_expr(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
+    let mut cur = n;
+    for _ in 0..256 {
+        match *ast.node(cur) {
+            Node::Ident { .. } => return true,
+            Node::Member { obj, .. } => cur = obj,
+            _ => return false,
+        }
+    }
+    false
 }

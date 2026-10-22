@@ -24,12 +24,19 @@
 //!   `JSX.ElementAttributesProperty` declared, its single property names the instance
 //!   property holding the props (no property: the instance type itself; a missing instance
 //!   property is TS2607 when there are attributes), else the first constructor parameter.
+//!   `ElementAttributesProperty` (checked for class components) or
+//!   `ElementChildrenAttribute` (checked for every element) with several properties is
+//!   TS2608 once, at its first declaration; it then counts as not declared.
 //!   Neither kind is TS2604. Props go through `JSX.LibraryManagedAttributes<typeof Tag, P>`
 //!   and are intersected with `IntrinsicAttributes` (and `IntrinsicClassAttributes<Inst>`
 //!   for classes) in that order, when declared.
 //! - **Overloads**: the first signature whose props the attributes satisfy (a subtype pass,
 //!   then an assignability pass, as for calls); when none does, the last one's errors are
 //!   reported under TS2769 "The last overload gave the following error.".
+//! - **Arity**: under the classic factory, a function component whose every call signature
+//!   needs more arguments than any function-component parameter of the factory's
+//!   overloads takes (`(props, context?)`: two) is TS6229 at the tag, and its attributes
+//!   are not checked. A rest parameter there accepts any arity.
 //! - **Generic components** infer their type arguments from the attributes that are not
 //!   context sensitive; explicit type arguments of the wrong count are TS2558.
 //! - **Children** are an attribute when `JSX.ElementChildrenAttribute` names one (always
@@ -41,6 +48,8 @@
 //! - **Validity** (TS2786 at the tag name): with `JSX.ElementType` the tag's type must be
 //!   assignable to it; else a function component's return type to `JSX.Element | null`
 //!   and a class component's instance type to `JSX.ElementClass`.
+//! - **Fragments** under `jsx: react` with React's default factories check their children
+//!   as the children attribute of `React.Fragment` (a component), at `<>`.
 //! - The element's type is `JSX.Element` (the error type without it).
 
 use rustc_hash::FxHashMap;
@@ -74,6 +83,9 @@ pub(crate) struct JsxResolved {
     pub tag_type: Option<TypeId>,
     /// Several candidates and none matched: errors are reported under TS2769.
     pub no_overload: bool,
+    /// The tag is a union resolved through its members' combined signatures: its return
+    /// is checked against `JSX.Element | null | JSX.ElementClass`.
+    pub mixed: bool,
 }
 
 /// Per-file facts about JSX.
@@ -254,6 +266,37 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// TS2608 at the first declaration of `JSX.<name>` (a property-name container) when it
+    /// has several properties; reported once.
+    fn check_jsx_container_props(&mut self, ns: Option<SymId>, name: &str) {
+        let Some(t) = self.jsx_ns_type(ns, name) else {
+            return;
+        };
+        if self.properties_of(t).len() < 2 {
+            return;
+        }
+        let Some(decl) = self
+            .jsx_ns_symbol(ns, name)
+            .and_then(|s| self.c.decls(s).first().copied())
+        else {
+            return;
+        };
+        let span = self.error_span_of(decl);
+        let code = dg::THE_GLOBAL_TYPE_JSX_0_MAY_NOT_HAVE_MORE_THAN_ONE_PROPERTY_2608.code;
+        if self
+            .diags
+            .iter()
+            .any(|d| d.file == decl.file && d.span == span && d.code == code)
+        {
+            return;
+        }
+        self.error(
+            decl,
+            dg::THE_GLOBAL_TYPE_JSX_0_MAY_NOT_HAVE_MORE_THAN_ONE_PROPERTY_2608,
+            &[name],
+        );
+    }
+
     /// The type of a JSX element or fragment (module doc).
     fn jsx_element_type(&mut self, e: Loc) -> TypeId {
         let ns = self.jsx_ns(e);
@@ -415,15 +458,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             r.target.props = self.jsx_intrinsic_props(ns, &text).ok();
             return r;
         }
-        let mut sigs = self.signatures_of(tt, SigKind::Call);
-        let mut construct = false;
-        if sigs.is_empty() {
-            sigs = self.signatures_of(tt, SigKind::Construct);
-            construct = true;
-        }
+        let Some((sigs, construct)) = self.jsx_signatures(tt) else {
+            return r;
+        };
         if sigs.is_empty() {
             return r;
         }
+        r.mixed = !construct && self.signatures_of(tt, SigKind::Call).is_empty();
         r.tag_type = Some(tt);
         let explicit = match type_args {
             Some(ta) => {
@@ -496,6 +537,50 @@ impl<'c, 'a> Ck<'c, 'a> {
             r.no_overload = true;
         }
         r
+    }
+
+    /// The signatures a value tag of type `tt` is resolved against, and whether they are
+    /// construct signatures. Construct signatures win over call signatures; a union whose
+    /// members each have some combines each member's (construct, else call) signatures
+    /// the way a union's call signatures combine, and the result counts as call signatures
+    /// (props are the first parameter; tsc: `getUninstantiatedJsxSignaturesOfType` in
+    /// `tsc/internal/checker/jsx.go`). `None` when not modelled (a string or instantiable
+    /// member); an empty list is TS2604.
+    pub(crate) fn jsx_signatures(&mut self, tt: TypeId) -> Option<(Vec<SigId>, bool)> {
+        let construct = self.signatures_of(tt, SigKind::Construct);
+        if !construct.is_empty() {
+            return Some((construct, true));
+        }
+        let call = self.signatures_of(tt, SigKind::Call);
+        if !call.is_empty() {
+            return Some((call, false));
+        }
+        let at = self.apparent_type(tt);
+        if !self.store().flags(at).contains(TypeFlags::UNION) {
+            return Some((Vec::new(), false));
+        }
+        let members = self.store().members_of_union(at).to_vec();
+        let mut lists = Vec::with_capacity(members.len());
+        for m in members {
+            if self.store().flags(m).intersects(
+                TypeFlags::STRING_LIKE
+                    | TypeFlags::ANY
+                    | TypeFlags::UNKNOWN
+                    | TypeFlags::NEVER
+                    | TypeFlags::INSTANTIABLE,
+            ) {
+                return None;
+            }
+            let mut sigs = self.signatures_of(m, SigKind::Construct);
+            if sigs.is_empty() {
+                sigs = self.signatures_of(m, SigKind::Call);
+            }
+            if sigs.is_empty() {
+                return Some((Vec::new(), false));
+            }
+            lists.push(sigs);
+        }
+        Some((self.union_signatures_of_lists(lists, SigKind::Call), false))
     }
 
     /// The attributes type of `opening` with `props` assumed for it (speculatively).
@@ -579,7 +664,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let p = self.property_of_type_id(inst, n)?;
                         self.type_of_symbol(p)
                     }
-                    _ => return None,
+                    // Several properties: TS2608 (`check_jsx_opening`).
+                    _ => first_param(self),
                 },
             }
         } else {
@@ -726,11 +812,95 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_jsx_child_exprs(e.file, children);
                 if reporting {
                     self.check_jsx_spread_children(e.file, children);
+                    self.check_jsx_fragment_props(e, children);
                 }
             }
             _ => {}
         }
         self.jsx_element_type(e)
+    }
+
+    /// Under `jsx: react` with React's default factories, a fragment's children are checked
+    /// as the `children` attribute of `React.Fragment` (a component), reported at `<>`
+    /// against the first props member they fail (tsc: `getJSXFragmentType` in `jsx.go`).
+    /// Only a non-generic single-signature `Fragment` value is modelled.
+    fn check_jsx_fragment_props(&mut self, e: Loc, children: NodeList) {
+        let file = e.file;
+        let ast = self.ast(file);
+        let sf = self.c.file(file);
+        if !matches!(self.c.opts.jsx, Some(JsxEmit::React))
+            || self.c.opts.jsx_factory_custom
+            || self.c.opts.jsx_fragment_factory_set
+            || crate::jsx_runtime::leading_pragma(ast, &sf.text, "@jsx").is_some()
+            || crate::jsx_runtime::leading_pragma(ast, &sf.text, "@jsxFrag").is_some()
+        {
+            return;
+        }
+        let root = self.jsx_factory_root(file);
+        let Some(frag) = self
+            .jsx_lookup(e, &root)
+            .and_then(|s| self.c.resolve_alias(s))
+            .and_then(|s| self.c.export_of(s, "Fragment"))
+            .and_then(|s| self.c.resolve_alias(s))
+            .filter(|&s| self.c.has_meaning(s, meaning::VALUE))
+        else {
+            return;
+        };
+        let real = self.jsx_real_children(file, children);
+        if real.is_empty() {
+            return;
+        }
+        let ns = self.jsx_ns(e);
+        let Some(cname) = self.jsx_children_prop(file, ns) else {
+            return;
+        };
+        let ft = self.type_of_symbol(frag);
+        let Some((sigs, construct)) = self.jsx_signatures(ft) else {
+            return;
+        };
+        let [sig] = sigs[..] else {
+            return;
+        };
+        if self.store().sig(sig).type_params != ListId::EMPTY {
+            return;
+        }
+        let Some(props) = self.jsx_sig_props(ns, ft, sig, construct) else {
+            return;
+        };
+        let mut types = Vec::new();
+        for &c in &real {
+            let t = match *ast.node(c) {
+                Node::JsxText {} => TypeId::STRING,
+                Node::JsxExprContainer { expr: Some(x) } => {
+                    self.check_expr_mutable(Loc::new(file, x))
+                }
+                Node::JsxExprContainer { expr: None } | Node::JsxSpreadChild { .. } => return,
+                _ => self.check_expr(Loc::new(file, c)),
+            };
+            if t == TypeId::UNRESOLVED || self.store().is_error(t) {
+                return;
+            }
+            types.push(t);
+        }
+        let ty = match types[..] {
+            [one] => one,
+            _ => {
+                let u = self.union(&types);
+                self.create_array(u, false)
+            }
+        };
+        let s = self.c.new_synth(
+            crate::symbols::SynthSym::new(
+                cname,
+                ts_r_binder::SymbolFlags::PROPERTY,
+                crate::symbols::check_flags::OBJECT_LITERAL,
+            )
+            .with_type(ty)
+            .with_decl(Some(e)),
+        );
+        let attrs = self.make_object_literal(e, vec![(cname, s)], &mut Vec::new(), true, false);
+        let (source, target) = self.jsx_report_target(ns, attrs, props);
+        self.check_assignable_with_elaboration(source, target, e, None);
     }
 
     /// Checks the tag of `opening` (TS7026, TS2339, TS2604 and the tag expression's own
@@ -748,8 +918,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let tag = self.jsx_tag_text(file, name);
                 self.report_intrinsic_tag(ns, &tag, opening);
                 self.check_jsx_intrinsic_element_type(ns, &tag, Loc::new(file, name));
-                // `<A:foo>` under the React modes.
+                // `<A:foo>` under the React modes: a grammar error, so a file that already
+                // has syntax errors doesn't get it.
                 if let Node::JsxNamespacedName { ns: n, .. } = *ast.node(name)
+                    && !self.has_syntax_errors(file)
                     && let Node::Ident { name: a } = *ast.node(n)
                     && ast.atom(a).starts_with(|c: char| c.is_ascii_uppercase())
                     && matches!(
@@ -996,6 +1168,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         let reporting = self.reporting(file);
         let ns = self.jsx_ns(opening);
         let r = self.jsx_resolved(opening);
+        if reporting {
+            if self.jsx_file_info(file).automatic.is_none() {
+                self.check_jsx_container_props(ns, "ElementChildrenAttribute");
+            }
+            if r.sig.is_some_and(|(_, construct)| construct) {
+                self.check_jsx_container_props(ns, "ElementAttributesProperty");
+            }
+        }
         let Some(props) = r.target.props else {
             // Nothing to check against: the values are still checked.
             for &a in ast.list(attrs) {
@@ -1027,8 +1207,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         if r.target.children.is_none() {
             self.check_jsx_child_exprs(file, children);
         }
+        let arity_failed = reporting
+            && r.tag_type
+                .is_some_and(|tt| self.check_jsx_tag_arity(opening, name, tt));
         if let Some(attrs_t) = attrs_t
             && reporting
+            && !arity_failed
         {
             // Children a component doesn't accept are only reported when the attributes
             // are otherwise assignable: a missing prop or a weak type is reported first.
@@ -1047,9 +1231,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             let mark = self.diags.len();
-            let target = self.jsx_report_target(ns, attrs_t, props);
+            let (source, target) = self.jsx_report_target(ns, attrs_t, props);
             self.check_assignable_with_elaboration(
-                attrs_t,
+                source,
                 target,
                 Loc::new(file, name),
                 Some(opening),
@@ -1070,36 +1254,120 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// The type a failed attributes check is reported against: with
-    /// `JSX.IntrinsicClassAttributes` declared, a failure that is not an excess attribute is
-    /// reported against the first member of the props intersection the attributes fail
-    /// (`Property 'x' is missing in type '{}' but required in type 'P'.` without the
-    /// intersection's head; observed tsc 7).
-    fn jsx_report_target(&mut self, ns: Option<SymId>, attrs: TypeId, props: TypeId) -> TypeId {
+    /// The source and target a failed attributes check is reported with. With
+    /// `JSX.IntrinsicAttributes` and `JSX.IntrinsicClassAttributes` declared, attributes (an
+    /// object, not a lone spread of a type parameter) that fail the props intersection for a
+    /// reason other than an excess or weak-type failure are reported against the first
+    /// member they fail, with no head for the intersection and no excess check against that
+    /// member (`Property 'x' is missing in type '{}' but required in type 'P'.`; tsc:
+    /// `reportErrorResults` in `tsc/internal/checker/relater.go`).
+    fn jsx_report_target(
+        &mut self,
+        ns: Option<SymId>,
+        attrs: TypeId,
+        props: TypeId,
+    ) -> (TypeId, TypeId) {
         if !self.store().flags(props).contains(TypeFlags::INTERSECTION)
+            || !self.store().flags(attrs).contains(TypeFlags::OBJECT)
+            || self.jsx_ns_type(ns, "IntrinsicAttributes").is_none()
             || self.jsx_ns_symbol(ns, "IntrinsicClassAttributes").is_none()
             || self.is_assignable(attrs, props)
         {
-            return props;
+            return (attrs, props);
         }
-        for (n, _) in self.properties_of(attrs) {
-            if !self.is_known_property(props, n) {
-                return props;
+        for (n, p) in self.properties_of(attrs) {
+            if !self.is_known_property(props, n) && !self.is_hyphenated_jsx_attr(p) {
+                return (attrs, props);
             }
         }
+        // Members are related without excess property checks; weak type detection applies
+        // to the whole intersection, not to its members.
+        let regular = self.regular_of(attrs);
         let members = self.store().members_of_union(props).to_vec();
-        // Weak type detection applies to the whole intersection, not to its members.
-        let Some(m) = members.into_iter().find(|&m| {
-            !self.is_assignable(attrs, m)
-                && !self.weak_type_violation(attrs, m, RelationKind::Assignable)
-        }) else {
-            return props;
-        };
-        // A failure against `IntrinsicAttributes` keeps the whole intersection.
-        if self.jsx_ns_type(ns, "IntrinsicAttributes") == Some(m) {
-            return props;
+        match members.into_iter().find(|&m| {
+            !self.is_assignable(regular, m)
+                && !self.weak_type_violation(regular, m, RelationKind::Assignable)
+        }) {
+            Some(m) => (regular, m),
+            None => (attrs, props),
         }
-        m
+    }
+
+    /// TS6229: a function component needs more arguments than the classic JSX factory
+    /// passes to any function component it accepts (module doc). Returns whether it was
+    /// reported; the attributes are then not checked.
+    fn check_jsx_tag_arity(&mut self, opening: Loc, name: NodeId, tt: TypeId) -> bool {
+        let file = opening.file;
+        if self.jsx_file_info(file).automatic.is_some() {
+            return false;
+        }
+        let tag_sigs = self.signatures_of(tt, SigKind::Call);
+        if tag_sigs.is_empty() {
+            return false;
+        }
+        let sf = self.c.file(file);
+        let entity = match crate::jsx_runtime::leading_pragma(&sf.ast, &sf.text, "@jsx") {
+            Some(p) => p.to_owned(),
+            None => self.c.opts.jsx_factory_entity.clone(),
+        };
+        let mut parts = entity.split('.');
+        let Some(mut t) = parts
+            .next()
+            .and_then(|root| self.jsx_lookup(Loc::new(file, name), root))
+            .and_then(|s| self.c.resolve_alias(s))
+            .filter(|&s| self.c.has_meaning(s, meaning::VALUE))
+            .map(|s| self.type_of_symbol(s))
+        else {
+            return false;
+        };
+        for part in parts {
+            let id = self.store().intern_str(part);
+            let Some(p) = self.property_of_type_id(t, id) else {
+                return false;
+            };
+            t = self.type_of_symbol(p);
+        }
+        let mut max = None::<usize>;
+        for f in self.signatures_of(t, SigKind::Call) {
+            let Some(first) = self.param_type_at(f, 0) else {
+                continue;
+            };
+            for ps in self.signatures_of(first, SigKind::Call) {
+                let (_, count, rest) = self.arity(ps, self.effective_min_args(ps));
+                if rest {
+                    return false;
+                }
+                max = Some(max.unwrap_or(0).max(count));
+            }
+        }
+        // No factory overload takes a function component: not checked.
+        let Some(max) = max else {
+            return false;
+        };
+        let min = tag_sigs
+            .iter()
+            .map(|&s| self.arity(s, self.effective_min_args(s)).0)
+            .min()
+            .unwrap_or(0);
+        if min <= max {
+            return false;
+        }
+        let tag = self.jsx_tag_text(file, name);
+        let mark = self.diags.len();
+        self.error(
+            Loc::new(file, name),
+            dg::TAG_0_EXPECTS_AT_LEAST_1_ARGUMENTS_BUT_THE_JSX_FACTORY_2_PROVIDES_AT_MOST_3_6229,
+            &[&tag, &min.to_string(), &entity, &max.to_string()],
+        );
+        if let Node::Ident { name: a } = *self.ast(file).node(name)
+            && let Some(decl) = self
+                .c
+                .lookup_in_scope_chain(Loc::new(file, name), self.ast(file).atom(a), meaning::VALUE)
+                .and_then(|s| self.c.value_decl(s))
+        {
+            self.relate_last(mark, decl, dg::_0_IS_DECLARED_HERE_2728, &[&tag]);
+        }
+        true
     }
 
     /// TS2604 for a value tag without call or construct signatures.
@@ -1138,12 +1406,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self
             .store()
             .flags(tt)
-            .intersects(TypeFlags::STRING_LIKE | TypeFlags::UNION | TypeFlags::INSTANTIABLE)
+            .intersects(TypeFlags::STRING_LIKE | TypeFlags::INSTANTIABLE)
         {
             return;
         }
-        if self.signatures_of(tt, SigKind::Call).is_empty()
-            && self.signatures_of(tt, SigKind::Construct).is_empty()
+        if self
+            .jsx_signatures(tt)
+            .is_some_and(|(sigs, _)| sigs.is_empty())
         {
             let text = self.jsx_tag_text(opening.file, name);
             self.error(
@@ -1205,6 +1474,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let (source, target, info) = if let Some(et) = self.jsx_ns_type(ns, "ElementType") {
             (tt, et, dg::ITS_TYPE_0_IS_NOT_A_VALID_JSX_ELEMENT_TYPE_18053)
+        } else if r.mixed {
+            let (Some(e), Some(ec)) = (
+                self.jsx_ns_type(ns, "Element"),
+                self.jsx_ns_type(ns, "ElementClass"),
+            ) else {
+                return;
+            };
+            let t = self.union(&[e, TypeId::NULL, ec]);
+            (
+                self.return_type_of(sig),
+                t,
+                dg::ITS_ELEMENT_TYPE_0_IS_NOT_A_VALID_JSX_ELEMENT_2789,
+            )
         } else if construct {
             let Some(ec) = self.jsx_ns_type(ns, "ElementClass") else {
                 return;

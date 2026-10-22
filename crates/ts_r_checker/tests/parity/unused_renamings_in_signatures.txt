@@ -1,0 +1,11 @@
+a.ts(3,17): error TS2842: 'string' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(5,17): error TS2842: 'string' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(6,18): error TS2842: 'string' is an unused renaming of '2'. Did you intend to use it as a type annotation?
+a.ts(7,22): error TS2842: 'string' is an unused renaming of '["a"]'. Did you intend to use it as a type annotation?
+a.ts(8,21): error TS2842: 'string' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(9,18): error TS2842: 'b' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(9,28): error TS2842: 'a' is an unused renaming of 'b'. Did you intend to use it as a type annotation?
+a.ts(12,18): error TS2842: 'string' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(13,11): error TS2842: 'string' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(14,15): error TS2842: 'string' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(16,25): error TS2842: 'number' is an unused renaming of 'a'. Did you intend to use it as a type annotation?

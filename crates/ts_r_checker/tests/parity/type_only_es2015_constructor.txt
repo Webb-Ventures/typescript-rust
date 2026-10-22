@@ -1,0 +1,3 @@
+a.ts(5,11): error TS2585: 'Promise' only refers to a type, but is being used as a value here. Do you need to change your target library? Try changing the 'lib' compiler option to es2015 or later.
+a.ts(6,11): error TS2585: 'Map' only refers to a type, but is being used as a value here. Do you need to change your target library? Try changing the 'lib' compiler option to es2015 or later.
+a.ts(7,11): error TS2693: 'Foo' only refers to a type, but is being used as a value here.

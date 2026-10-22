@@ -1,0 +1,8 @@
+a.ts(4,12): error TS2845: This condition will always return 'false'.
+a.ts(5,5): error TS2845: This condition will always return 'true'.
+a.ts(6,10): error TS2845: This condition will always return 'true'.
+a.ts(7,5): error TS2845: This condition will always return 'false'.
+a.ts(8,11): error TS2845: This condition will always return 'false'.
+a.ts(10,11): error TS2845: This condition will always return 'true'.
+a.ts(15,5): error TS2845: This condition will always return 'true'.
+a.ts(19,5): error TS2845: This condition will always return 'true'.

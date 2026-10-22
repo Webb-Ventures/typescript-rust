@@ -1,0 +1,6 @@
+a.ts(13,11): error TS2322: Type 'unknown[] | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+a.ts(16,11): error TS2322: Type 'unknown[] | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+a.ts(19,11): error TS2322: Type 'unknown[] | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.

@@ -1,0 +1,10 @@
+b.mts(7,1): error TS2349: This expression is not callable.
+  Type 'typeof import("/p/mod")' has no call signatures.
+b.mts(8,1): error TS2349: This expression is not callable.
+  Type 'typeof import("/p/mod")' has no call signatures.
+b.mts(9,6): error TS2349: This expression is not callable.
+  Type 'typeof import("/p/mod")' has no call signatures.
+c.cts(3,1): error TS2349: This expression is not callable.
+  Type 'typeof import("/p/mod")' has no call signatures.
+c.cts(4,1): error TS2349: This expression is not callable.
+  Type 'typeof import("/p/mod")' has no call signatures.

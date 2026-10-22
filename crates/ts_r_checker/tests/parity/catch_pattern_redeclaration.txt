@@ -1,0 +1,8 @@
+a.ts(1,15): error TS2488: Type 'unknown' must have a '[Symbol.iterator]()' method that returns an iterator.
+a.ts(2,15): error TS2492: Cannot redeclare identifier 'b' in catch clause.
+a.ts(4,17): error TS2339: Property 'x' does not exist on type 'unknown'.
+a.ts(4,20): error TS2339: Property 'y' does not exist on type 'unknown'.
+a.ts(5,14): error TS2492: Cannot redeclare identifier 'w' in catch clause.
+a.ts(6,11): error TS2492: Cannot redeclare identifier 'x' in catch clause.
+a.ts(6,18): error TS2492: Cannot redeclare identifier 'z' in catch clause.
+a.ts(10,9): error TS2492: Cannot redeclare identifier 'e' in catch clause.

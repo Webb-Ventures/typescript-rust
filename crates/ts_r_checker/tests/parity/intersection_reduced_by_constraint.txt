@@ -1,0 +1,5 @@
+a.ts(4,9): error TS2322: Type 'AB' is not assignable to type 'never'.
+  Type '"A"' is not assignable to type 'never'.
+a.ts(8,9): error TS2322: Type 'V & string' is not assignable to type 'never'.
+a.ts(9,9): error TS2322: Type 'AB' is not assignable to type 'never'.
+  Type '"A"' is not assignable to type 'never'.

@@ -1,0 +1,15 @@
+a.ts(17,7): error TS2420: Class 'Impl' incorrectly implements interface 'I'.
+  Property 'y' is missing in type 'Foo' but required in type 'I'.
+a.ts(23,5): error TS2322: Type 'E' is not assignable to type 'I'.
+  Property 'y' is missing in type 'Foo' but required in type 'I'.
+a.ts(24,5): error TS2741: Property 'y' is missing in type 'Q' but required in type 'I'.
+a.ts(25,5): error TS2322: Type 'E' is not assignable to type 'J'.
+  Property 'y' is missing in type 'Foo' but required in type 'J'.
+a.ts(26,5): error TS2741: Property 'y' is missing in type 'G<number>' but required in type 'I'.
+a.ts(27,5): error TS2322: Type 'H' is not assignable to type 'I'.
+  Property 'y' is missing in type 'Foo' but required in type 'I'.
+a.ts(28,5): error TS2322: Type 'S' is not assignable to type 'I'.
+  Property 'y' is missing in type 'Foo' but required in type 'I'.
+a.ts(29,5): error TS2741: Property 'y' is missing in type '{}' but required in type 'K'.
+a.ts(30,5): error TS2322: Type '{}' is not assignable to type 'L'.
+  Property 'x' is missing in type '{}' but required in type 'Foo'.

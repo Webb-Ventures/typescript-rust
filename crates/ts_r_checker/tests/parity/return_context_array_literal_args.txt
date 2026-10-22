@@ -1,0 +1,8 @@
+a.ts(10,5): error TS2322: Type 'OK<[string, string]>' is not assignable to type 'OK<[string, number]>'.
+  Type '[string, string]' is not assignable to type '[string, number]'.
+    Type at position 1 in source is not compatible with type at position 1 in target.
+      Type 'string' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type '{ name: string; position: "KEEPER"; }[]' is not assignable to type 'Player[]'.
+  Type '{ name: string; position: "KEEPER"; }' is not assignable to type 'Player'.
+    Types of property 'position' are incompatible.
+      Type '"KEEPER"' is not assignable to type '"GOALKEEPER" | "STRIKER"'.

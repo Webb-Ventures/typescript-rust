@@ -2,7 +2,7 @@
 //! exports merged with other declarations (TS2652, see `check_default_merges`).
 //!
 //! Rules observed from tsc 7.0.2, per container (a module file, a namespace body, an
-//! ambient module body):
+//! ambient module body), in JavaScript files too:
 //! - Each top-level declaration has a name and the meanings it declares: interfaces and
 //!   type aliases a type; functions and variables a value; classes and enums a type and a
 //!   value; a namespace a namespace (and a value when instantiated); an `import x =` alias
@@ -13,8 +13,12 @@
 //! - Ambient bodies (`declare namespace`, `declare module "x"`, declaration files) export
 //!   everything implicitly, so they are only checked when they contain an `export =`,
 //!   `export default` or `export { }` statement.
-//! - `export default` declarations and `import` bindings do not take part. An `import x =`
-//!   alias means what its target means. All-function groups are overloads (TS2383); a type
+//! - `export default` declarations do not take part. An `import x =` alias, a default
+//!   import and a namespace import mean what their target means; a named import declares
+//!   a value. tsc runs the check from every declaration kind but functions and imports, so
+//!   groups of only functions and imports are not reported (`import { f }` with
+//!   `export function f`; tsc: checker.go checkExportsOnMergedDeclarations, its callers).
+//!   All-function groups are overloads (TS2383); a type
 //!   alias with a class, interface or enum, and an enum with anything but enums and
 //!   namespaces, are duplicates (TS2300/TS2567) and not reported here.
 
@@ -37,7 +41,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Checks every container of `file` for TS2395.
     pub(crate) fn check_export_local_merges(&mut self, file: FileId) {
         let f = self.c.file(file);
-        if !self.reporting(file) || f.is_js() {
+        if !self.reporting(file) {
             return;
         }
         let ast = self.ast(file);
@@ -140,26 +144,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::TypeAlias { name, .. } => push(name, TYPE, Kind::TypeAlias),
                 Node::Enum { name, .. } => push(name, TYPE | VALUE, Kind::Enum),
                 Node::ImportEquals { name, .. } => {
-                    // An alias means what its target means (nothing when unresolved).
-                    let meanings = self
-                        .c
-                        .sym_of_decl(Loc::new(file, s))
-                        .and_then(|a| self.c.resolve_alias(a))
-                        .map_or(0, |t| {
-                            let f = self.c.sym_flags(t);
-                            let mut m = 0;
-                            if f.intersects(SymbolFlags::TYPE) {
-                                m |= TYPE;
+                    push(name, self.alias_meanings(Loc::new(file, s)), Kind::Other)
+                }
+                // Import bindings: a named one declares a value; a default or namespace
+                // import means what its target means.
+                Node::ImportDecl { specifiers, .. } => {
+                    for &sp in ast.list(specifiers) {
+                        match *ast.node(sp) {
+                            Node::ImportSpecifier { local, .. } => push(local, VALUE, Kind::Import),
+                            Node::ImportDefaultSpecifier { local }
+                            | Node::ImportNamespaceSpecifier { local } => {
+                                push(local, self.alias_meanings(Loc::new(file, sp)), Kind::Import)
                             }
-                            if f.intersects(SymbolFlags::VALUE) {
-                                m |= VALUE;
-                            }
-                            if f.intersects(SymbolFlags::NAMESPACE) {
-                                m |= NAMESPACE;
-                            }
-                            m
-                        });
-                    push(name, meanings, Kind::Other)
+                            _ => {}
+                        }
+                    }
                 }
                 Node::Module { kind, name, .. } if kind != ModuleKind::Global => {
                     let n = match *ast.node(name) {
@@ -200,7 +199,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             // Overloads (all functions) are TS2383; a type alias with a class, interface
             // or enum, and an enum with anything but enums and namespaces, are duplicates
             // (TS2300/TS2567) instead.
-            if g.kinds == Kind::Function as u8
+            if g.kinds & !(Kind::Function as u8 | Kind::Import as u8) == 0
                 || (g.kinds & Kind::TypeAlias as u8 != 0
                     && g.kinds & (Kind::TypeDecl as u8 | Kind::Enum as u8) != 0)
                 || (g.kinds & Kind::Enum as u8 != 0
@@ -268,6 +267,68 @@ impl<'c, 'a> Ck<'c, 'a> {
 }
 
 impl<'c, 'a> Ck<'c, 'a> {
+    /// What the alias declared at `l` means: its target's meanings (nothing when
+    /// unresolved). A module with `export =` means what its `export =` entity means, and a
+    /// named import of a member of an `export =` value is that property. A target declared
+    /// only by property or method signatures counts as a type, as tsc's declaration spaces
+    /// do (tsc: checker.go getDeclarationSpaces).
+    fn alias_meanings(&mut self, l: Loc) -> u8 {
+        let Some(mut a) = self.c.sym_of_decl(l) else {
+            return 0;
+        };
+        let mut target = None;
+        for _ in 0..MAX_DEPTH {
+            let t = match self.c.resolve_alias(a) {
+                Some(t) => t,
+                None => match self.c.export_equals_member(a) {
+                    Some((eq, name)) => {
+                        let et = self.type_of_symbol(eq);
+                        match self.property_of_type(et, &name) {
+                            Some(p) => p,
+                            None => return 0,
+                        }
+                    }
+                    None => return 0,
+                },
+            };
+            if self.c.sym_flags(t).intersects(SymbolFlags::MODULE_FILE)
+                && let Some(eq) = self.c.export_of(t, "export=")
+                && eq != a
+            {
+                a = eq;
+                continue;
+            }
+            target = Some(t);
+            break;
+        }
+        let Some(t) = target else {
+            return 0;
+        };
+        let decls = self.c.decls(t);
+        if !decls.is_empty()
+            && decls.iter().all(|d| {
+                matches!(
+                    self.ast(d.file).node(d.node),
+                    Node::PropertySignature { .. } | Node::MethodSignature { .. }
+                )
+            })
+        {
+            return TYPE;
+        }
+        let f = self.c.sym_flags(t);
+        let mut m = 0;
+        if f.intersects(SymbolFlags::TYPE) {
+            m |= TYPE;
+        }
+        if f.intersects(SymbolFlags::VALUE) {
+            m |= VALUE;
+        }
+        if f.intersects(SymbolFlags::NAMESPACE) {
+            m |= NAMESPACE;
+        }
+        m
+    }
+
     /// The meanings of one declaration: a namespace declares a value only when its own body
     /// does (the merged symbol may be instantiated by another part).
     fn own_meanings(&self, file: FileId, name: NodeId, meanings: u8, kind: Kind) -> u8 {
@@ -303,6 +364,7 @@ enum Kind {
     TypeAlias = 4,
     Enum = 8,
     Namespace = 16,
+    Import = 64,
 }
 
 #[derive(Default, Clone, Copy)]

@@ -186,7 +186,18 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     fn compute_type_of_symbol(&mut self, s: SymId) -> TypeId {
         let flags = self.c.sym_flags(s);
-        if flags.intersects(SymbolFlags::ALIAS) {
+        // An alias merged with a local value (`import { A }` and `const A = 0`, or
+        // `import * as Lib` and `namespace Lib { .. }`, TS2440): the local value
+        // (tsc: `getTypeOfSymbol` reads values before aliases).
+        let local_value = SymbolFlags::VARIABLE
+            | SymbolFlags::FUNCTION
+            | SymbolFlags::CLASS
+            | SymbolFlags::REGULAR_ENUM
+            | SymbolFlags::VALUE_MODULE;
+        let merged_local = flags.intersects(SymbolFlags::ALIAS)
+            && flags.intersects(local_value)
+            && self.c.resolve_alias(s).is_some_and(|t| t != s);
+        if flags.intersects(SymbolFlags::ALIAS) && !merged_local {
             let Some(t) = self.c.resolve_alias(s) else {
                 // `import d from "m"` of a module without a default export (synthetic
                 // default): the module itself (a JSON module's value).
@@ -207,6 +218,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return v;
             }
             if !self.c.has_meaning(t, meaning::VALUE) {
+                if let Some(v) = self.alias_merged_value(s) {
+                    return self.type_of_symbol(v);
+                }
                 return self.export_equals_member_type(s).unwrap_or(TypeId::ERROR);
             }
             return self.type_of_symbol(t);
@@ -271,7 +285,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if let Node::ExportDefaultExpr { expr } | Node::ExportAssignment { expr } =
                     *ast.node(d.node)
                 {
-                    return self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
+                    // Widened like a declaration's initializer: an exported object literal
+                    // is no longer fresh where it is imported.
+                    let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
+                    return self.widened_type(t);
                 }
                 // JavaScript `module.exports = v`: the assigned value (`1`, as `export = 1`).
                 // tsc unions several assignments (with its own property order); not
@@ -1050,16 +1067,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                 }
             }
-            Node::CatchClause { type_ann, .. } => {
-                if let Some(ta) = type_ann {
-                    return self.type_from_node(Loc::new(id.file, ta));
-                }
-                if self.c.opts.use_unknown_in_catch_variables {
-                    TypeId::UNKNOWN
-                } else {
-                    TypeId::ANY
-                }
-            }
+            Node::CatchClause { type_ann, .. } => self.catch_variable_type(id.file, type_ann),
             Node::BindingProperty { .. }
             | Node::ArrayPattern { .. }
             | Node::AssignPattern { .. }
@@ -1068,9 +1076,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// The type of an initializer that calls a function with one non-generic call
-    /// signature (and no properties, index or construct signatures): its declared return
-    /// type, read without checking the arguments. A variable's type does not depend on the
+    /// The type of an initializer that calls (or awaits a call of) a function with one
+    /// non-generic call signature (and no properties, index or construct signatures): its
+    /// declared (awaited) return type, read without checking the arguments. A variable's type does not depend on the
     /// call's arguments then (`const s = link({ next() { const n = run(); return n } })`
     /// inside `run` is no cycle), as in tsc.
     fn quick_call_type(&mut self, init: Loc) -> Option<TypeId> {
@@ -1079,6 +1087,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ast = self.ast(init.file);
         let e = crate::nodes::skip_parens(ast, init.node);
+        // `await f()`: the awaited return type.
+        if let Node::Await { arg } = *ast.node(e) {
+            let t = self.quick_call_type(Loc::new(init.file, arg))?;
+            return Some(self.quietly(|ck| ck.awaited_type(t)));
+        }
         let Node::Call {
             callee,
             optional: false,
@@ -1214,7 +1227,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Whether the declarator `d` is in an `export var`/`let` statement.
-    fn is_exported_var(&self, d: Loc) -> bool {
+    pub(crate) fn is_exported_var(&self, d: Loc) -> bool {
         self.c.parent(d).is_some_and(|l| {
             matches!(*self.node(l), Node::VarDecl { modifiers, .. } if modifiers.contains(Modifiers::EXPORT))
         })
@@ -1349,6 +1362,18 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The element type produced by iterating a value of type `t`.
     pub fn iterated_type(&mut self, t: TypeId, is_await: bool) -> Option<TypeId> {
+        let mut notes = IterNotes::default();
+        self.iterated_type_noting(t, is_await, &mut notes)
+    }
+
+    /// [`Self::iterated_type`], recording in `notes` the sync iterator problems that still
+    /// iterate (see [`IterNotes`]).
+    pub(crate) fn iterated_type_noting(
+        &mut self,
+        t: TypeId,
+        is_await: bool,
+        notes: &mut IterNotes,
+    ) -> Option<TypeId> {
         let t = self.reduce_conflicting_intersections(t);
         let s = self.store();
         let f = s.flags(t);
@@ -1359,7 +1384,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             let ms = s.members_of_union(t).to_vec();
             let mut parts = Vec::new();
             for m in ms {
-                parts.push(self.iterated_type(m, is_await)?);
+                parts.push(self.iterated_type_noting(m, is_await, notes)?);
             }
             return Some(self.union(&parts));
         }
@@ -1375,18 +1400,24 @@ impl<'c, 'a> Ck<'c, 'a> {
         // The iterator protocol: `[Symbol.iterator]().next()`'s `value` when not done.
         // `for await` also accepts sync iterables (their values are awaited).
         if is_await {
-            if let Some(v) = self.iterated_by_protocol(t, "asyncIterator", true) {
+            if let Some(v) = self.iterated_by_protocol(t, "asyncIterator", true, notes) {
                 return Some(v);
             }
-            let v = self.iterated_by_protocol(t, "iterator", false)?;
+            let v = self.iterated_by_protocol(t, "iterator", false, notes)?;
             return Some(self.awaited_type(v));
         }
-        self.iterated_by_protocol(t, "iterator", false)
+        self.iterated_by_protocol(t, "iterator", false, notes)
     }
 
     /// `t[Symbol.<method>]().next()`'s non-done `value` type; `any` anywhere along the
     /// chain makes the element `any`.
-    fn iterated_by_protocol(&mut self, t: TypeId, method: &str, is_await: bool) -> Option<TypeId> {
+    fn iterated_by_protocol(
+        &mut self,
+        t: TypeId,
+        method: &str,
+        is_await: bool,
+        notes: &mut IterNotes,
+    ) -> Option<TypeId> {
         let it_name = self.well_known_symbol_name(method)?;
         let p = self.property_of_type(t, &it_name)?;
         let pt = self.type_of_symbol(p);
@@ -1400,6 +1431,27 @@ impl<'c, 'a> Ck<'c, 'a> {
         let iter = self.return_type_of(sig);
         if self.store().flags(iter).intersects(TypeFlags::ANY) {
             return Some(TypeId::ANY);
+        }
+        // `return` and `throw` are optional, but when present they must be methods.
+        if !is_await && notes.not_method.is_none() {
+            for name in ["return", "throw"] {
+                let Some(m) = self.quietly(|ck| ck.property_of_type(iter, name)) else {
+                    continue;
+                };
+                let mt = self.type_of_symbol(m);
+                let mt = self.non_nullable(mt);
+                if !self
+                    .store()
+                    .flags(mt)
+                    .intersects(TypeFlags::ANY | TypeFlags::NEVER)
+                    && self
+                        .signatures_of(mt, crate::members::SigKind::Call)
+                        .is_empty()
+                {
+                    notes.not_method = Some(name);
+                    break;
+                }
+            }
         }
         let next = self.property_of_type(iter, "next")?;
         let nt = self.type_of_symbol(next);
@@ -1444,6 +1496,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         if vals.is_empty() {
+            // A sync iterator whose `next()` result has no `value` still iterates (as
+            // `any`); the caller reports it.
+            if !is_await {
+                notes.no_value = true;
+                return Some(TypeId::ANY);
+            }
             return None;
         }
         let v = self.union(&vals);
@@ -1451,6 +1509,82 @@ impl<'c, 'a> Ck<'c, 'a> {
             return Some(self.awaited_type(v));
         }
         Some(v)
+    }
+
+    /// The value a `yield*` of a value of type `t` produces: the `value` of the
+    /// `done: true` results of its iterator's `next()` (awaited in an async generator,
+    /// which also delegates to sync iterables). `None` when no result says `done: true`.
+    pub(crate) fn iterated_return_type(&mut self, t: TypeId, is_await: bool) -> Option<TypeId> {
+        let s = self.store();
+        let f = s.flags(t);
+        if f.intersects(TypeFlags::ANY) {
+            return Some(t);
+        }
+        if f.contains(TypeFlags::UNION) {
+            let ms = s.members_of_union(t).to_vec();
+            let mut parts = Vec::new();
+            for m in ms {
+                parts.push(self.iterated_return_type(m, is_await)?);
+            }
+            return Some(self.union(&parts));
+        }
+        let res = if is_await {
+            match self.iterator_next_result(t, "asyncIterator") {
+                Some(r) => r,
+                None => self.iterator_next_result(t, "iterator")?,
+            }
+        } else {
+            self.iterator_next_result(t, "iterator")?
+        };
+        let res = if is_await {
+            self.awaited_type(res)
+        } else {
+            res
+        };
+        if self.store().flags(res).intersects(TypeFlags::ANY) {
+            return Some(TypeId::ANY);
+        }
+        let mut vals = Vec::new();
+        for m in self.union_members(res) {
+            let done =
+                self.quietly(|ck| ck.property_of_type(m, "done").map(|d| ck.type_of_symbol(d)));
+            if done == Some(TypeId::TRUE)
+                && let Some(v) = self.quietly(|ck| ck.property_of_type(m, "value"))
+            {
+                vals.push(self.type_of_symbol(v));
+            }
+        }
+        if vals.is_empty() {
+            return None;
+        }
+        let v = self.union(&vals);
+        Some(if is_await { self.awaited_type(v) } else { v })
+    }
+
+    /// The return type of `t[Symbol.<method>]().next()`, quietly; `any` along the way is
+    /// `any`.
+    fn iterator_next_result(&mut self, t: TypeId, method: &str) -> Option<TypeId> {
+        let it_name = self.well_known_symbol_name(method)?;
+        let p = self.quietly(|ck| ck.property_of_type(t, &it_name))?;
+        let pt = self.type_of_symbol(p);
+        if self.store().flags(pt).intersects(TypeFlags::ANY) {
+            return Some(TypeId::ANY);
+        }
+        let sigs = self.signatures_of(pt, crate::members::SigKind::Call);
+        let sig = *sigs.iter().find(|&&s| self.store().sig(s).min_args == 0)?;
+        let iter = self.return_type_of(sig);
+        if self.store().flags(iter).intersects(TypeFlags::ANY) {
+            return Some(TypeId::ANY);
+        }
+        let next = self.quietly(|ck| ck.property_of_type(iter, "next"))?;
+        let nt = self.type_of_symbol(next);
+        if self.store().flags(nt).intersects(TypeFlags::ANY) {
+            return Some(TypeId::ANY);
+        }
+        let nsig = *self
+            .signatures_of(nt, crate::members::SigKind::Call)
+            .first()?;
+        Some(self.return_type_of(nsig))
     }
 
     /// The property name of `Symbol.<name>`.
@@ -1545,6 +1679,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// A catch variable's type: `unknown` or `any` by `useUnknownInCatchVariables`, or its
+    /// annotation, which must be one of those (any other is TS1196 and an error type).
+    fn catch_variable_type(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        type_ann: Option<NodeId>,
+    ) -> TypeId {
+        let Some(ta) = type_ann else {
+            return if self.c.opts.use_unknown_in_catch_variables {
+                TypeId::UNKNOWN
+            } else {
+                TypeId::ANY
+            };
+        };
+        let t = self.type_from_node(Loc::new(file, ta));
+        if self.store().flags(t).intersects(TypeFlags::ANY_OR_UNKNOWN) {
+            t
+        } else {
+            TypeId::ERROR
+        }
+    }
+
     /// The type of the pattern (or declaration) a binding element belongs to.
     pub(crate) fn pattern_parent_type(&mut self, pattern: Loc) -> TypeId {
         let Some(p) = self.c.parent(pattern) else {
@@ -1574,7 +1730,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             Node::Param { pattern: pat, .. } if pat == pattern.node => self.param_type(p),
-            Node::CatchClause { .. } => TypeId::ANY,
+            Node::CatchClause { type_ann, .. } => self.catch_variable_type(p.file, type_ann),
             Node::BindingProperty { .. }
             | Node::AssignPattern { .. }
             | Node::Rest { .. }
@@ -1670,9 +1826,34 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return self.create_tuple(&els, false);
         }
-        let e = self
-            .element_type_of_array_like(parent_t)
-            .unwrap_or(TypeId::UNRESOLVED);
+        // The rest of a union of tuples and arrays is the union of their rests.
+        if self.store().flags(parent_t).contains(TypeFlags::UNION) {
+            let members = self.union_members(parent_t);
+            if members
+                .iter()
+                .all(|&m| self.store().tuple_shape_of(m).is_some() || self.c.is_array_type(m))
+            {
+                let parts: Vec<TypeId> = members
+                    .into_iter()
+                    .map(|m| self.array_rest_type(m, idx))
+                    .collect();
+                return self.union(&parts);
+            }
+        }
+        // The rest of an iterable is an array of what it iterates.
+        let e = match self.element_type_of_array_like(parent_t) {
+            Some(e) => e,
+            None if self
+                .store()
+                .flags(parent_t)
+                .intersects(TypeFlags::STRING_LIKE) =>
+            {
+                TypeId::UNRESOLVED
+            }
+            None => self
+                .iterated_type(parent_t, false)
+                .unwrap_or(TypeId::UNRESOLVED),
+        };
         self.create_array(e, false)
     }
 
@@ -1703,6 +1884,22 @@ impl<'c, 'a> Ck<'c, 'a> {
                     None => TypeId::UNRESOLVED,
                 };
                 t = self.destructured_flow_type(p, t);
+                // `var { e = 1 } = {}`: the object literal initializer is typed by the
+                // pattern, which gives it an optional `e`; the default supplies the type.
+                if t == TypeId::ERROR
+                    && init.is_some()
+                    && let Some(d) = self.c.parent(obj_pat)
+                    && let Node::VarDeclarator {
+                        name: dn,
+                        type_ann: None,
+                        init: Some(di),
+                        ..
+                    } = *ast.node(d.node)
+                    && dn == obj_pat.node
+                    && matches!(ast.node(skip_parens(ast, di)), Node::ObjectLit { .. })
+                {
+                    t = TypeId::UNDEFINED;
+                }
                 if let Some(i) = init {
                     t = self.with_default(t, Loc::new(n.file, i));
                 }
@@ -1765,21 +1962,70 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// The rest of a generic `parent` (tsc: `getRestType` in
+    /// `tsc/internal/checker/checker.go`): `Omit<parent, K>` where `K` holds the named keys
+    /// and the keys of the apparent type's properties a rest cannot take (methods and
+    /// accessors of classes; private and protected ones add nothing). No such keys leave
+    /// `parent` itself.
+    fn generic_object_rest_type(&mut self, parent: TypeId, omit: &[String]) -> TypeId {
+        let Some(alias) = self
+            .c
+            .global_symbol("Omit", ts_r_binder::meaning::TYPE)
+            .filter(|&a| self.c.sym_flags(a).intersects(SymbolFlags::TYPE_ALIAS))
+        else {
+            return TypeId::UNRESOLVED;
+        };
+        let local = self.local_type_params(alias);
+        if local.len() != 2 {
+            return TypeId::UNRESOLVED;
+        }
+        let mut keys: Vec<TypeId> = omit.iter().map(|k| self.property_key_type(k)).collect();
+        let apparent = self.apparent_type(parent);
+        let class_instance = self.is_class_instance_type(apparent);
+        for (n, p) in self.properties_of(apparent) {
+            let name = self.store().str(n).to_owned();
+            if omit.contains(&name) {
+                continue;
+            }
+            if name.starts_with('#') || self.is_non_public_property(p) {
+                continue;
+            }
+            if class_instance
+                && self
+                    .c
+                    .sym_flags(p)
+                    .intersects(SymbolFlags::METHOD | SymbolFlags::ACCESSOR)
+            {
+                keys.push(self.property_key_type(&name));
+            }
+        }
+        if keys.is_empty() {
+            return parent;
+        }
+        let key = self.union(&keys);
+        let d = self.declared_type_of_symbol(alias);
+        let m = self.store().mapper(&local, &[parent, key]);
+        self.instantiate(d, m)
+    }
+
     /// The type of `...rest` in an object binding pattern destructuring `parent`, the other
     /// elements binding `omit` (observed): the remaining public properties without
     /// `readonly`, the index signatures, and no signatures; class instances also lose their
-    /// methods and accessors. Unions distribute. Generic parents (tsc: `Omit<T, "a">`),
-    /// arrays, tuples and primitives are not modelled.
+    /// methods and accessors. Unions distribute. Generic parents give `Omit<T, K>`
+    /// (`generic_object_rest_type`); arrays, tuples and primitives are not modelled.
     pub(crate) fn object_rest_type(&mut self, parent: TypeId, omit: &[String]) -> TypeId {
         let f = self.store().flags(parent);
         if f.intersects(TypeFlags::ANY) {
             return parent;
         }
-        if self.is_generic_type(parent) {
-            return TypeId::UNRESOLVED;
-        }
         if f.contains(TypeFlags::UNION) {
-            let members = self.store().members_of_union(parent).to_vec();
+            let members: Vec<TypeId> = self
+                .store()
+                .members_of_union(parent)
+                .iter()
+                .copied()
+                .filter(|&m| !self.store().flags(m).intersects(TypeFlags::NULLABLE))
+                .collect();
             let mut out = Vec::with_capacity(members.len());
             for m in members {
                 let r = self.object_rest_type(m, omit);
@@ -1789,6 +2035,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 out.push(r);
             }
             return self.union(&out);
+        }
+        if self.is_generic_type(parent) {
+            return self.generic_object_rest_type(parent, omit);
         }
         if !f.intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION)
             || self.c.is_array_type(parent)
@@ -1998,6 +2247,44 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// The element at `idx` of tuple `t` with a rest element when `idx` is at or past the
+    /// rest: the union of the rest element and every element after it (`[number,
+    /// ...string[], boolean]` at 1 is `string | boolean`), under noUncheckedIndexedAccess
+    /// with `undefined` from the count of non-rest elements on (observed: at 2 it is
+    /// `string | boolean | undefined`, and `[...number[], number]` at 0 is `number`).
+    /// `None` before the rest, for tuples without one and for variadic elements.
+    pub(crate) fn tuple_rest_region_element(&mut self, t: TypeId, idx: usize) -> Option<TypeId> {
+        let s = self.store();
+        let shape = s.tuple_shape_of(t)?;
+        if !shape.has_rest()
+            || shape
+                .elements
+                .iter()
+                .any(|e| e.kind == TupleElement::VARIADIC)
+        {
+            return None;
+        }
+        let lead = shape
+            .elements
+            .iter()
+            .position(|e| e.kind == TupleElement::REST)?;
+        let fixed = shape
+            .elements
+            .iter()
+            .filter(|e| e.kind != TupleElement::REST)
+            .count();
+        let n = shape.elements.len();
+        let args = self.c.type_args_of_tuple(t).to_vec();
+        if idx < lead || args.len() != n {
+            return None;
+        }
+        let mut parts = args[lead..].to_vec();
+        if idx >= fixed && self.c.opts.no_unchecked_indexed_access {
+            parts.push(TypeId::UNDEFINED);
+        }
+        Some(self.union(&parts))
+    }
+
     pub(crate) fn array_element_at(&mut self, t: TypeId, idx: usize) -> TypeId {
         let s = self.store();
         if s.flags(t).intersects(TypeFlags::ANY) {
@@ -2005,6 +2292,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if let Some(shape) = s.tuple_shape_of(t) {
             let shape = shape.clone();
+            if let Some(r) = self.tuple_rest_region_element(t, idx) {
+                return r;
+            }
             let args = self.c.type_args_of_tuple(t).to_vec();
             if let Some(el) = shape.elements.get(idx) {
                 let a = args.get(idx).copied().unwrap_or(TypeId::UNRESOLVED);
@@ -2052,6 +2342,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             return TypeId::STRING;
         }
         match self.iterated_type(t, false) {
+            // An element read from an iterable may be missing too (observed:
+            // `const [x] = iterable` is `number | undefined` under noUncheckedIndexedAccess).
+            Some(e) if self.c.opts.no_unchecked_indexed_access => self.add_undefined(e),
             Some(e) => e,
             None => TypeId::UNRESOLVED,
         }
@@ -2178,4 +2471,13 @@ fn is_null_or_undefined(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
         Node::Ident { name } => ast.atom(name) == "undefined",
         _ => false,
     }
+}
+
+/// Problems with a sync iterator that tsc reports but that still let it iterate.
+#[derive(Default)]
+pub(crate) struct IterNotes {
+    /// `next()`'s result has no `value` (TS2490); the element is `any`.
+    pub no_value: bool,
+    /// A `return` or `throw` member that is not a method (TS2767).
+    pub not_method: Option<&'static str>,
 }

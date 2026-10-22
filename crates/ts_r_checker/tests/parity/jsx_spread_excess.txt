@@ -1,0 +1,4 @@
+a.tsx(14,25): error TS2322: Type '{ property1: string; property2: number; Property1: true; }' is not assignable to type 'IntrinsicAttributes & AP'.
+  Property 'Property1' does not exist on type 'IntrinsicAttributes & AP'. Did you mean 'property1'?
+a.tsx(15,14): error TS2322: Type '{ property1: string; property2: number; zzz: true; }' is not assignable to type 'IntrinsicAttributes & AP'.
+  Property 'zzz' does not exist on type 'IntrinsicAttributes & AP'.

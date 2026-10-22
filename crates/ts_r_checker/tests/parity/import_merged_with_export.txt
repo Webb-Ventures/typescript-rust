@@ -1,0 +1,4 @@
+a.ts(2,8): error TS2395: Individual declarations in merged declaration 'Obj' must be all exported or all local.
+a.ts(2,8): error TS2440: Import declaration conflicts with local declaration of 'Obj'.
+a.ts(3,14): error TS2395: Individual declarations in merged declaration 'Obj' must be all exported or all local.
+b.ts(1,10): error TS2440: Import declaration conflicts with local declaration of 'f'.

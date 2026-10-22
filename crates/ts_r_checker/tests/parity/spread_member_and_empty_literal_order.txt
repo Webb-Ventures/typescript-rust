@@ -1,0 +1,1 @@
+a.ts(4,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'o1' must be of type '{ a: number; } | { b: number; } | { a: number; b: number; } | {}', but here has type '{ a?: number | undefined; b?: number | undefined; }'.

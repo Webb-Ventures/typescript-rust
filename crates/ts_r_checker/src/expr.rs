@@ -120,6 +120,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::NumberLit { value } => self.store().number_literal(value.get(), true),
             Node::StringLit { value } => self.store().string_literal(ast.atom(value), true),
             Node::BigIntLit { value } => {
+                // A bigint literal expression outside ambient code needs ES2020 (a grammar
+                // error: not reported in a file with syntax errors; tsc: checker/
+                // grammarchecks.go, checkGrammarBigIntLiteral).
+                if self.c.opts.target < ts_r_config::ScriptTarget::ES2020
+                    && self.reporting(f)
+                    && !self.is_ambient_node(e)
+                    && !self.has_syntax_errors(f)
+                {
+                    self.error(
+                        e,
+                        dg::BIGINT_LITERALS_ARE_NOT_AVAILABLE_WHEN_TARGETING_LOWER_THAN_ES2020_2737,
+                        &[],
+                    );
+                }
                 let text = bigint_text(ast.atom(value));
                 self.store().bigint_literal(&text, true)
             }
@@ -142,6 +156,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .unwrap_or(TypeId::UNRESOLVED),
             Node::TemplateLit { parts } => {
                 let ps = ast.list(parts);
+                let tagged = self
+                    .c
+                    .parent(e)
+                    .is_some_and(|p| matches!(self.node(p), Node::TaggedTemplate { .. }));
                 let mut texts = vec![String::new()];
                 let mut types = Vec::new();
                 for &p in ps {
@@ -152,13 +170,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                             }
                         }
                         _ => {
-                            types.push(self.check_expr(at(p)));
+                            let t = self.check_expr(at(p));
+                            if !tagged && self.maybe_symbol_like(t) {
+                                self.error(
+                                    at(p),
+                                    dg::IMPLICIT_CONVERSION_OF_A_SYMBOL_TO_A_STRING_WILL_FAIL_AT_RUNTIME_CONSIDER_WRAPPI_2731,
+                                    &[],
+                                );
+                            }
+                            types.push(t);
                             texts.push(String::new());
                         }
                     }
                 }
+                // A template of constants (`${E.a}`, `${k}` of `const k = "k"`) is that
+                // string literal, even where a template literal type is wanted (tsc 7).
+                let constant = if types.is_empty() || tagged {
+                    None
+                } else {
+                    self.eval_constant(e, SymId::NONE, &[], 0)
+                        .and_then(|v| self.store().string_value(v).map(str::to_owned))
+                };
                 if types.is_empty() {
                     self.store().string_literal(&texts[0], true)
+                } else if let Some(text) = constant {
+                    self.store().string_literal(&text, true)
                 } else if self.in_const_context(e) || self.is_template_literal_context(e) {
                     // A template literal type when the context asks for one.
                     match self.template_literal_type(&texts, &types) {
@@ -278,7 +314,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 if !self.is_assignable(t, target)
                     && self.reporting(e.file)
-                    && !self.report_jsdoc_satisfies(e, ty, t, target)
+                    && !self.report_satisfies(e, ty, t, target)
                 {
                     self.report_assignability(
                         t,
@@ -306,6 +342,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                         dg::AWAIT_EXPRESSIONS_ARE_ONLY_ALLOWED_WITHIN_ASYNC_FUNCTIONS_AND_AT_THE_TOP_LEVELS_O_1308,
                         &[],
                     );
+                } else if !self.builds_into_node_commonjs(e.file)
+                    && self.at_top_level(e)
+                    && self.await_operand_starts_with_word(e)
+                    && self.await_operand_on_same_line(e)
+                {
+                    // TS1375/TS1378 follow the TS1309 rule, and skip an operand on the
+                    // next line (topLevelAwait.1).
+                    let start = self.c.span(e).start;
+                    self.top_level_await_error(e.file, start, false);
                 } else if self.builds_into_node_commonjs(e.file)
                     && self.at_top_level(e)
                     && self.await_operand_starts_with_word(e)
@@ -351,6 +396,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     let is_async = parts.flags.contains(ts_r_ast::FnFlags::ASYNC);
                     self.check_iterable(t, at(a), is_async);
+                    // What an annotated generator sends must suit the delegate's `next`
+                    // (TS2766; tsc: checker.go, getIteratedTypeOrElementType).
+                    if parts.return_type.is_some()
+                        && let Some((_, _, sent)) = self.generator_context_full(func)
+                        && sent != TypeId::UNRESOLVED
+                    {
+                        let next = self.delegated_next_type(t, is_async);
+                        if !self
+                            .store()
+                            .flags(next)
+                            .intersects(TypeFlags::ANY_OR_UNKNOWN)
+                        {
+                            self.check_type_related(
+                                sent,
+                                next,
+                                RelationKind::Assignable,
+                                Some(at(a)),
+                                Some(Head {
+                                    info: dg::CANNOT_DELEGATE_ITERATION_TO_VALUE_BECAUSE_THE_NEXT_METHOD_OF_ITS_ITERATOR_EXPEC_2766,
+                                }),
+                            );
+                        }
+                    }
                 }
                 // The operand (`undefined` for a bare `yield`, what a `yield*` operand
                 // iterates) against the yield type of an annotated generator (awaited in an
@@ -388,6 +456,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                     }
                 }
+                // A `yield*` is what the delegated iterator returns (`undefined` for an
+                // array under strictBuiltinIteratorReturn).
+                if delegate
+                    && let Some(t) = t
+                    && t != TypeId::NEVER
+                    && t != TypeId::UNRESOLVED
+                    && let Some(func) = self.containing_function(e)
+                    && let Some(parts) = crate::nodes::fn_parts(self.ast(e.file), func.node)
+                    && let Some(r) = {
+                        let is_async = parts.flags.contains(ts_r_ast::FnFlags::ASYNC);
+                        self.iterated_return_type(t, is_async)
+                    }
+                {
+                    return r;
+                }
                 // The value a `yield` receives: `any` in a generator without a return
                 // annotation or context (tsc: TS7057 under noImplicitAny, not reported here).
                 if let Some(func) = self.containing_function(e)
@@ -397,15 +480,108 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     return TypeId::ANY;
                 }
+                // In an annotated generator a `yield` receives the next type of the return
+                // type and a `yield*` the return type of what it delegates to (tsc:
+                // checker.go, checkYieldExpression).
+                if let Some(func) = self.containing_function(e)
+                    && let Some(parts) = crate::nodes::fn_parts(self.ast(e.file), func.node)
+                    && parts.return_type.is_some()
+                    && parts.flags.contains(ts_r_ast::FnFlags::GENERATOR)
+                {
+                    let is_async = parts.flags.contains(ts_r_ast::FnFlags::ASYNC);
+                    if delegate {
+                        if let Some(t) = t
+                            && let Some(r) = self.delegated_return_type(t, is_async)
+                        {
+                            return r;
+                        }
+                    } else if let Some((_, _, n)) = self.generator_context_full(func)
+                        && n != TypeId::UNRESOLVED
+                    {
+                        return n;
+                    }
+                }
                 TypeId::UNRESOLVED
             }
             Node::Spread { arg } => self.check_expr(at(arg)),
-            Node::ImportCall { arg, options, .. } => {
-                self.check_expr(at(arg));
+            Node::ImportCall {
+                arg,
+                options,
+                phase,
+            } => {
+                // `import()` under verbatimModuleSyntax and `module: commonjs` is a grammar
+                // error, before the others (tsc: grammarchecks.go
+                // checkGrammarImportCallExpression).
+                let verbatim_cjs = self.c.opts.verbatim_module_syntax
+                    && self.c.opts.module == ts_r_config::ModuleKind::CommonJS;
+                if verbatim_cjs {
+                    if self.reporting(e.file) && !self.has_syntax_errors(e.file) {
+                        let info = self.verbatim_commonjs_message(e.file);
+                        self.error(e, info, &[]);
+                    }
+                } else if phase == ts_r_ast::ImportPhase::Defer
+                    && !self.module_supports_defer(e.file)
+                {
+                    self.error(
+                        e,
+                        dg::DEFERRED_IMPORTS_ARE_ONLY_SUPPORTED_WHEN_THE_MODULE_FLAG_IS_SET_TO_ESNEXT_OR_PRE_18060,
+                        &[],
+                    );
+                }
+                // `module: es2015` has no dynamic imports (TS1323, then no TS1324); a grammar
+                // error, so not next to syntax errors or the call's TS1326
+                // (importWithTypeArguments).
+                let start = self.c.span(e).start;
+                let no_dynamic = phase == ts_r_ast::ImportPhase::Evaluation
+                    && self.c.opts.module == ts_r_config::ModuleKind::ES2015
+                    && self.reporting(e.file)
+                    && !self.c.file(e.file).kind.is_declaration()
+                    && !self.has_syntax_errors(e.file)
+                    && !self
+                        .c
+                        .file(e.file)
+                        .grammar
+                        .iter()
+                        .any(|d| d.code == 1326 && d.span.start == start);
+                if no_dynamic {
+                    self.error(
+                        e,
+                        dg::DYNAMIC_IMPORTS_ARE_ONLY_SUPPORTED_WHEN_THE_MODULE_FLAG_IS_SET_TO_ES2020_ES2022_E_1323,
+                        &[],
+                    );
+                }
+                let spec = self.check_expr(at(arg));
+                // The specifier must be a string: `null`/`undefined` (even without
+                // strictNullChecks) or anything not assignable to `string` is TS7036. A
+                // spread (already TS1325) stands for its elements: not checked.
+                if !matches!(ast.node(arg), Node::Missing {} | Node::Spread { .. })
+                    && spec != TypeId::UNRESOLVED
+                    && (self
+                        .store()
+                        .flags(spec)
+                        .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED)
+                        || !self.is_assignable(spec, TypeId::STRING))
+                {
+                    let shown = self.type_to_string(spec);
+                    self.error(
+                        at(arg),
+                        dg::DYNAMIC_IMPORT_S_SPECIFIER_MUST_BE_OF_TYPE_STRING_BUT_HERE_HAS_TYPE_0_7036,
+                        &[&shown],
+                    );
+                }
                 if let Some(o) = options {
-                    self.check_expr(at(o));
-                    use ts_r_config::ModuleKind as M;
+                    let ot = self.check_expr(at(o));
+                    // The options must fit the global `ImportCallOptions | undefined`.
                     if self.reporting(e.file)
+                        && !matches!(ast.node(o), Node::Spread { .. })
+                        && let Some(g) = self.global_type_reported(GlobalType::ImportCallOptions)
+                    {
+                        let target = self.union2(g, TypeId::UNDEFINED);
+                        self.check_assignable_with_elaboration(ot, target, at(o), None);
+                    }
+                    use ts_r_config::ModuleKind as M;
+                    if !no_dynamic
+                        && self.reporting(e.file)
                         && !self.c.file(e.file).kind.is_declaration()
                         && !matches!(
                             self.c.opts.module,
@@ -437,6 +613,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                     dg::IMPORT_ASSERTIONS_HAVE_BEEN_REPLACED_BY_IMPORT_ATTRIBUTES_USE_WITH_INSTEAD_OF_AS_2880,
                                     &[],
                                 );
+                                break;
                             }
                         }
                     }
@@ -482,6 +659,34 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .text
                     .get(span.start as usize..span.end as usize)
                     .unwrap_or("");
+                // `import.meta` with `module` commonjs or es2015, misspelled ones too
+                // (importMeta: `import.metal`).
+                if kind == ts_r_ast::MetaPropKind::ImportMeta
+                    && matches!(
+                        self.c.opts.module,
+                        ts_r_config::ModuleKind::CommonJS
+                            | ts_r_config::ModuleKind::ES2015
+                            | ts_r_config::ModuleKind::AMD
+                            | ts_r_config::ModuleKind::UMD
+                    )
+                    && !self.c.file(e.file).kind.is_declaration()
+                {
+                    self.error(
+                        e,
+                        dg::THE_IMPORT_META_META_PROPERTY_IS_ONLY_ALLOWED_WHEN_THE_MODULE_OPTION_IS_ES2020_E_1343,
+                        &[],
+                    );
+                }
+                if kind == ts_r_ast::MetaPropKind::NewTarget
+                    && written == "new.target"
+                    && !self.new_target_allowed(e)
+                {
+                    self.error(
+                        e,
+                        dg::META_PROPERTY_0_IS_ONLY_ALLOWED_IN_THE_BODY_OF_A_FUNCTION_DECLARATION_FUNCTION_E_17013,
+                        &["new.target"],
+                    );
+                }
                 match kind {
                     // The global `ImportMeta` interface (lib.es5 declares it, lib.dom and
                     // @types/node add members); not for a misspelled `import.metal`.
@@ -532,16 +737,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !tf.bound.is_module || tf.is_js() {
             return None;
         }
-        // Under the Node module kinds a CommonJS-format target is wrapped (its exports
-        // become a synthetic `default`); not modelled.
         use ts_r_config::ModuleKind as M;
-        if matches!(
+        let node = matches!(
             self.c.opts.module,
             M::Node16 | M::Node18 | M::Node20 | M::NodeNext
-        ) && !tf.esm_format
-        {
-            return None;
-        }
+        );
+        let (esm, decl, package_esm) = (tf.esm_format, tf.kind.is_declaration(), tf.package_esm);
         let msym = self.c.sym(target, tf.bound.file_symbol);
         if self.c.export_of(msym, "export=").is_some() {
             return None;
@@ -550,7 +751,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         if ns == TypeId::UNRESOLVED {
             return None;
         }
-        Some(self.promise_of(ns))
+        // A synthetic `default` (the module itself) joins the namespace: always for a
+        // CommonJS-format target under the Node module kinds; never for an ESM one there;
+        // elsewhere for a declaration file not known to be ESM (`.d.mts`, `"type": "module"`)
+        // without its own `default` or `__esModule`.
+        let synthetic = if node {
+            !esm
+        } else {
+            decl && !package_esm
+                && self.c.export_of(msym, "default").is_none()
+                && self.c.export_of(msym, "__esModule").is_none()
+        };
+        if !synthetic {
+            return Some(self.promise_of(ns));
+        }
+        let n = self.store().intern_str("default");
+        let p = self
+            .c
+            .new_synth(SynthSym::new(n, SymbolFlags::PROPERTY, 0).with_type(ns));
+        let wrapper = self.store().literal_object(
+            SymId::NONE,
+            ObjectFlags::NONE,
+            ResolvedMembers::new(vec![(n, p)], Vec::new(), Vec::new(), Vec::new()),
+            TypeTraits::NONE,
+        );
+        // Spread like `{ ...ns, default }` (the namespace's properties lose `readonly`).
+        let spread = self.spread_types(TypeId::EMPTY_OBJECT, ns);
+        let t = self.spread_types(spread, wrapper);
+        Some(self.promise_of(t))
     }
 
     /// Defers checking a function or class body to the per-file walk.
@@ -571,6 +799,140 @@ impl<'c, 'a> Ck<'c, 'a> {
         ) && !f.package_esm
             && !f.kind.is_declaration()
             && f.bound.is_module
+    }
+
+    /// Whether `new.target` at `e` is in a function declaration, function expression or
+    /// constructor (arrows look through; methods, accessors, class fields and the top
+    /// level do not allow it: invalidNewTarget.es6).
+    fn new_target_allowed(&self, e: Loc) -> bool {
+        let ast = self.ast(e.file);
+        let parents = self.c.file(e.file).parents();
+        let mut cur = parents.parent(e.node);
+        while let Some(n) = cur {
+            match *ast.node(n) {
+                Node::FunctionDecl { .. } => return true,
+                Node::FunctionExpr { .. } => {
+                    return match parents.parent(n).map(|p| *ast.node(p)) {
+                        Some(Node::MethodDef { kind, .. }) => kind == MethodKind::Constructor,
+                        _ => true,
+                    };
+                }
+                Node::ClassDecl { .. }
+                | Node::ClassExpr { .. }
+                | Node::PropertyDef { .. }
+                | Node::StaticBlock { .. } => return false,
+                _ => {}
+            }
+            cur = parents.parent(n);
+        }
+        false
+    }
+
+    /// TS18057 at each string literal import or export name (`export { a as "b" }`,
+    /// `export * as "ns"`) of the import or export declaration `d` when `module` is
+    /// `es2015` or `es2020` (arbitraryModuleNamespaceIdentifiers_module).
+    pub(crate) fn check_string_module_names(&mut self, d: Loc) {
+        use ts_r_config::ModuleKind as M;
+        if !matches!(self.c.opts.module, M::ES2015 | M::ES2020)
+            || !self.reporting(d.file)
+            || self.c.file(d.file).kind.is_declaration()
+        {
+            return;
+        }
+        let ast = self.ast(d.file);
+        let mut names: Vec<NodeId> = Vec::new();
+        match *ast.node(d.node) {
+            Node::ImportDecl { specifiers, .. } | Node::ExportNamed { specifiers, .. } => {
+                for &s in ast.list(specifiers) {
+                    match *ast.node(s) {
+                        Node::ImportSpecifier {
+                            imported, local, ..
+                        } => names.extend(imported.into_iter().chain([local])),
+                        Node::ExportSpecifier {
+                            local, exported, ..
+                        } => names.extend([local].into_iter().chain(exported)),
+                        _ => {}
+                    }
+                }
+            }
+            Node::ExportAll {
+                exported: Some(n), ..
+            } => names.push(n),
+            _ => {}
+        }
+        for n in names {
+            if matches!(ast.node(n), Node::StringLit { .. }) {
+                self.error(
+                    Loc::new(d.file, n),
+                    dg::STRING_LITERAL_IMPORT_AND_EXPORT_NAMES_ARE_NOT_SUPPORTED_WHEN_THE_MODULE_FLAG_IS_18057,
+                    &[],
+                );
+            }
+        }
+    }
+
+    /// Whether `import defer` may be used in `file` (TS18060 otherwise): `module` is
+    /// `esnext` or `preserve`. Declaration files and files not reported always may.
+    pub(crate) fn module_supports_defer(&self, file: ts_r_diagnostics::FileId) -> bool {
+        use ts_r_config::ModuleKind as M;
+        !self.reporting(file)
+            || self.c.file(file).kind.is_declaration()
+            || matches!(self.c.opts.module, M::ESNext | M::Preserve)
+    }
+
+    /// TS1375/TS1431 for a top-level `await` (`for await` when `is_for`) at `start` in a
+    /// file that is not a module; then TS1378/TS1432 when `module` or `target` does not
+    /// allow it (both in parser.forAwait.es2018).
+    pub(crate) fn top_level_await_error(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        start: u32,
+        is_for: bool,
+    ) {
+        use ts_r_config::{ModuleKind as M, ScriptTarget};
+        let f = self.c.file(file);
+        if f.kind.is_declaration() {
+            return;
+        }
+        let span = Span::new(start, start + "await".len() as u32);
+        if !f.bound.is_module {
+            let msg = if is_for {
+                dg::FOR_AWAIT_LOOPS_ARE_ONLY_ALLOWED_AT_THE_TOP_LEVEL_OF_A_FILE_WHEN_THAT_FILE_IS_A_M_1431
+            } else {
+                dg::AWAIT_EXPRESSIONS_ARE_ONLY_ALLOWED_AT_THE_TOP_LEVEL_OF_A_FILE_WHEN_THAT_FILE_IS_A_1375
+            };
+            self.error_span(file, span, msg, &[]);
+        }
+        if !matches!(
+            self.c.opts.module,
+            M::ES2022
+                | M::ESNext
+                | M::System
+                | M::Node16
+                | M::Node18
+                | M::Node20
+                | M::NodeNext
+                | M::Preserve
+        ) || self.c.opts.target < ScriptTarget::ES2017
+        {
+            let msg = if is_for {
+                dg::TOP_LEVEL_FOR_AWAIT_LOOPS_ARE_ONLY_ALLOWED_WHEN_THE_MODULE_OPTION_IS_SET_TO_ES20_1432
+            } else {
+                dg::TOP_LEVEL_AWAIT_EXPRESSIONS_ARE_ONLY_ALLOWED_WHEN_THE_MODULE_OPTION_IS_SET_TO_ES_1378
+            };
+            self.error_span(file, span, msg, &[]);
+        }
+    }
+
+    /// Whether the operand of the `await` expression `e` is on the `await`'s line.
+    fn await_operand_on_same_line(&self, e: Loc) -> bool {
+        let span = self.c.span(e);
+        let text = &self.c.file(e.file).text;
+        let rest = text
+            .get(span.start as usize + "await".len()..span.end as usize)
+            .unwrap_or("");
+        let gap = rest.len() - rest.trim_start().len();
+        !rest[..gap].contains(['\n', '\r'])
     }
 
     /// Whether the operand of the `await` expression `e` starts with an identifier, keyword
@@ -639,9 +1001,13 @@ impl<'c, 'a> Ck<'c, 'a> {
     pub fn at_top_level(&self, e: Loc) -> bool {
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
+        let mut child = e.node;
         let mut cur = parents.parent(e.node);
         while let Some(n) = cur {
             match *ast.node(n) {
+                // A class's decorators run in the enclosing scope (`@(await dec) class C {}`).
+                Node::ClassDecl { decorators, .. } | Node::ClassExpr { decorators, .. }
+                    if ast.list(decorators).contains(&child) => {}
                 Node::FunctionDecl { .. }
                 | Node::FunctionExpr { .. }
                 | Node::Arrow { .. }
@@ -652,30 +1018,44 @@ impl<'c, 'a> Ck<'c, 'a> {
                 | Node::StaticBlock { .. } => return false,
                 _ => {}
             }
+            child = n;
             cur = parents.parent(n);
         }
         true
     }
 
     /// Whether `e` is directly inside a function, function expression or arrow that is not
-    /// async (class bodies and the top level are not).
-    fn in_sync_function(&self, e: Loc) -> bool {
+    /// async, or in a field or enum member initializer (class bodies, computed keys and
+    /// the top level are not).
+    pub(crate) fn in_sync_function(&self, e: Loc) -> bool {
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
+        let mut child = e.node;
         let mut cur = parents.parent(e.node);
+        // Decorators run in the scope around their class (decoratorOnClassMethodParameter3).
+        let mut in_decorator = false;
         while let Some(n) = cur {
             match *ast.node(n) {
+                Node::Decorator { .. } => in_decorator = true,
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } if in_decorator => {
+                    in_decorator = false;
+                }
+                _ if in_decorator => {}
                 Node::FunctionDecl { flags, .. }
                 | Node::FunctionExpr { flags, .. }
                 | Node::Arrow { flags, .. } => {
                     return !flags.contains(ts_r_ast::FnFlags::ASYNC);
                 }
-                Node::ClassDecl { .. }
-                | Node::ClassExpr { .. }
-                | Node::PropertyDef { .. }
-                | Node::StaticBlock { .. } => return false,
+                // A field initializer and an enum member initializer are not async, even
+                // inside an async function; a computed key belongs to the enclosing body.
+                Node::PropertyDef { value, .. } => return value == Some(child),
+                Node::EnumMember { init, .. } => return init == Some(child),
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } | Node::StaticBlock { .. } => {
+                    return false;
+                }
                 _ => {}
             }
+            child = n;
             cur = parents.parent(n);
         }
         false
@@ -684,7 +1064,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2464 at computed name `key` whose expression has type `kt` when that is not a
     /// valid key: valid keys are assignable to `string | number | symbol` (`never`,
     /// `K extends keyof U`, `S extends string` too).
-    pub(crate) fn check_computed_key_type(&mut self, key: Loc, kt: TypeId) {
+    pub(crate) fn check_computed_key_type(&mut self, key: Loc, kt: TypeId) -> bool {
         let keys = self.union(&[TypeId::STRING, TypeId::NUMBER, TypeId::SYMBOL]);
         if !self.store().flags(kt).intersects(
             TypeFlags::STRING_LIKE
@@ -704,7 +1084,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 dg::A_COMPUTED_PROPERTY_NAME_MUST_BE_OF_TYPE_STRING_NUMBER_SYMBOL_OR_ANY_2464,
                 &[],
             );
+            return true;
         }
+        false
     }
 
     fn in_generator(&self, e: Loc) -> bool {
@@ -750,6 +1132,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         return false;
                     }
                 }
+                // An enum member initializer is no generator body (awaitAndYield).
+                Node::EnumMember { init, .. } if init == Some(prev) => return false,
                 _ => {}
             }
             prev2 = prev;
@@ -763,13 +1147,50 @@ impl<'c, 'a> Ck<'c, 'a> {
     // Identifiers, `this`, `super`
     // ---------------------------------------------------------------------------------
 
+    /// An `import x = N.M` whose target does not resolve, read as a value: tsc then
+    /// resolves `N` as a value too, reporting it when that also fails (TS2304, TS2591; tsc:
+    /// checker.go, markAliasSymbolAsReferenced, whose unknown target counts as a value).
+    fn check_unresolved_import_equals_value(&mut self, alias: ts_r_types::SymId) {
+        let Some(d) = self.c.first_decl(alias) else {
+            return;
+        };
+        let ast = self.ast(d.file);
+        let Node::ImportEquals { module_ref, .. } = *ast.node(d.node) else {
+            return;
+        };
+        let mut n = module_ref;
+        for _ in 0..1000 {
+            match *ast.node(n) {
+                Node::QualifiedName { left, .. } => n = left,
+                _ => break,
+            }
+        }
+        let Some(name) = crate::nodes::ident_text(ast, n) else {
+            return;
+        };
+        let name = name.to_owned();
+        let l = Loc::new(d.file, n);
+        if self.c.resolve_ident(l, meaning::VALUE).is_none() {
+            self.unresolved_identifier(l, &name);
+        }
+    }
+
     fn check_identifier(&mut self, e: Loc, name: &str) -> TypeId {
         let Some(s) = self.c.resolve_ident(e, meaning::VALUE) else {
             return self.unresolved_identifier(e, name);
         };
+        // Inside a function other than an arrow, `arguments` declared outside it names the
+        // function's own arguments object (tsc: binder/nameresolver.go, function scopes end
+        // the lookup of `arguments` after their locals).
+        if name == "arguments" && self.arguments_shadows(e, s) {
+            return self.unresolved_identifier(e, name);
+        }
         if self.check_body_local_from_parameter(e, s, name) {
             return TypeId::ERROR;
         }
+        self.check_umd_global_value(e, s, name);
+        self.check_global_shadowed_by_type_import(e, s, name);
+        self.check_cross_file_enum_member(e, s, name);
         // `exports` declared ambiently (`declare var exports: any`) in a CommonJS module
         // with `module.exports = v` is still the exports object.
         if name == "exports"
@@ -783,11 +1204,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut sym = s;
         if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
             match self.c.resolve_alias(s) {
-                // A type-only import merged with a local value (`import type I = ...;
-                // const I = {}`): the value is the local declaration.
+                // An import merged with a local value (`import type I = ...; const I =
+                // {}`, or `import * as Lib` and `namespace Lib { .. }`): the value is the
+                // local declaration.
                 Some(t)
                     if t != s
-                        && !self.c.has_meaning(t, meaning::VALUE)
                         && self.c.sym_flags(s).intersects(
                             SymbolFlags::VARIABLE
                                 | SymbolFlags::FUNCTION
@@ -795,21 +1216,39 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 | SymbolFlags::REGULAR_ENUM
                                 | SymbolFlags::VALUE_MODULE,
                         ) => {}
+                Some(t)
+                    if t != s
+                        && !self.c.has_meaning(t, meaning::VALUE)
+                        && self.c.value_merged_in_alias_chain(s).is_some() =>
+                {
+                    sym = self.c.value_merged_in_alias_chain(s).unwrap_or(s);
+                }
                 Some(t) if t != s => {
                     if let Some(v) = self.json_import_type(s, t) {
                         self.check_type_only_alias_use(e, s, t, name);
                         return v;
                     }
+                    // An alias further along merged with a local value (`import { A }` and
+                    // `const A = 0` re-exported): that value.
+                    let t = if !self.c.has_meaning(t, meaning::VALUE)
+                        && let Some(v) = self.alias_merged_value(s)
+                    {
+                        v
+                    } else {
+                        t
+                    };
                     if !self.c.has_meaning(t, meaning::VALUE) {
                         if let Some(v) = self.export_equals_member_type(s) {
                             return v;
                         }
-                        if self.c.has_meaning(t, meaning::TYPE) {
-                            self.error(
-                                e,
-                                dg::_0_ONLY_REFERS_TO_A_TYPE_BUT_IS_BEING_USED_AS_A_VALUE_HERE_2693,
-                                &[name],
-                            );
+                        // A namespace (also merged with a type) is TS2708 before TS2693.
+                        if self.c.has_meaning(t, meaning::TYPE)
+                            && !self
+                                .c
+                                .sym_flags(t)
+                                .intersects(SymbolFlags::NAMESPACE_MODULE)
+                        {
+                            self.error(e, type_as_value_info(name), &[name]);
                         } else {
                             self.error(e, dg::CANNOT_USE_NAMESPACE_0_AS_A_VALUE_2708, &[name]);
                         }
@@ -827,21 +1266,94 @@ impl<'c, 'a> Ck<'c, 'a> {
                     // A named import of a property of an `export =` value
                     // (`import { resolve } from "path"`).
                     None => {
+                        self.check_unresolved_import_equals_value(s);
                         return self.export_equals_member_type(s).unwrap_or(TypeId::ERROR);
                     }
                 },
                 _ => return TypeId::ERROR,
             }
         }
+        if sym == s && self.c.file(e.file).is_js() {
+            self.check_type_only_require_use(e, sym, name);
+        }
         self.check_use_before_declaration(e, sym, name);
         self.check_parameter_reference(e, sym, name);
         self.check_constructor_shadowed_reference(e, Some(sym), name);
+        if self.c.sym_flags(sym).intersects(SymbolFlags::CONST_ENUM) {
+            let through_alias = self.c.sym_flags(s).intersects(SymbolFlags::ALIAS);
+            self.check_const_enum_reference(e, sym, through_alias);
+        }
         let declared = self.type_of_symbol(sym);
         let f = self.c.sym_flags(sym);
         if f.intersects(SymbolFlags::VARIABLE) && !f.intersects(SymbolFlags::ALIAS) {
             return self.narrowed_identifier_type(e, sym, declared, name);
         }
+        // A namespace import of an `export =` value (`import * as b from "./b"` with
+        // `export = b` of a `number | undefined`) narrows like a constant.
+        if sym != s
+            && self.store().flags(declared).contains(TypeFlags::UNION)
+            && self.is_narrowable_reference(e)
+        {
+            return self.flow_type_of_reference(e, declared, declared);
+        }
         declared
+    }
+
+    /// TS2686: a module reads, as a value, a global declared only by `export as namespace`.
+    fn check_umd_global_value(&mut self, e: Loc, s: SymId, name: &str) {
+        if self.c.opts.allow_umd_global_access
+            || !self.c.bound(e.file).is_module
+            || !self.reporting(e.file)
+            || self.c.file(e.file).ast.is_jsdoc(e.node)
+        {
+            return;
+        }
+        // `export = N` names its entity with every meaning (a local namespace first).
+        if let Some(p) = self.c.parent(e)
+            && matches!(self.c.node(p), Node::ExportAssignment { .. })
+        {
+            return;
+        }
+        let mut parts = self.c.parts(s).peekable();
+        if parts.peek().is_none() {
+            return;
+        }
+        if !parts.all(|r| r.symbol == self.c.bound(r.file).file_symbol) {
+            return;
+        }
+        // A `declare global { const N }` merges with the UMD name: it is a value of its own.
+        let augmented = (0..self.c.file_count()).any(|i| {
+            let f = self.c.file(ts_r_diagnostics::FileId(i as u32));
+            f.bound
+                .lookup_str(&f.ast, f.bound.global_augmentations, name)
+                .is_some()
+        });
+        if !augmented {
+            self.error(
+                e,
+                dg::_0_REFERS_TO_A_UMD_GLOBAL_BUT_THE_CURRENT_FILE_IS_A_MODULE_CONSIDER_ADDING_AN_IMP_2686,
+                &[name],
+            );
+        }
+    }
+
+    /// The first alias after `s` on its chain that is merged with a local value
+    /// (`import { A } from "./a"; const A = 0; export { A }`).
+    pub(crate) fn alias_merged_value(&self, s: SymId) -> Option<SymId> {
+        let r = self.c.parts(s).next()?;
+        for a in self.c.link.alias_chain(r).into_iter().skip(1) {
+            let f = self.c.file(a.file);
+            if f.bound.symbol(a.symbol).flags.intersects(
+                SymbolFlags::VARIABLE
+                    | SymbolFlags::FUNCTION
+                    | SymbolFlags::CLASS
+                    | SymbolFlags::REGULAR_ENUM
+                    | SymbolFlags::VALUE_MODULE,
+            ) {
+                return Some(self.c.sym_ref(a));
+            }
+        }
+        None
     }
 
     /// TS1361/TS1362: a value read through an alias chain with a type-only link (`import
@@ -865,7 +1377,32 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return;
         }
-        for a in self.c.link.alias_chain(r) {
+        let mut chain = self.c.link.alias_chain(r);
+        // An import standing for an ES module's `"module.exports"` export goes through it.
+        if let Some(me) = self.c.module_exports_export(s)
+            && let Some(p) = self.c.parts(me).next()
+        {
+            chain.truncate(1);
+            chain.extend(self.c.link.alias_chain(p));
+        }
+        // `import * as ns` of a module with `export =` stands for the assigned entity: the
+        // `export =` alias's own chain counts too.
+        if let Some(&last) = chain.last()
+            && let Some(info) = self.c.file(last.file).bound.alias(last.symbol)
+            && let ts_r_binder::AliasTarget::Module {
+                request,
+                import: ts_r_binder::ImportName::Namespace,
+            } = info.target
+            && let Some(m) = self
+                .c
+                .module_target_symbol(self.c.link.module_target(last.file, request))
+            && let Some(eq) = self.c.export_of(m, "export=")
+            && let Some(eq) = self.c.parts(eq).next()
+            && !chain.contains(&eq)
+        {
+            chain.extend(self.c.link.alias_chain(eq));
+        }
+        for a in chain {
             let f = self.c.file(a.file);
             let sym = f.bound.symbol(a.symbol);
             // An alias merged with a local value (`import { A }` and `namespace A`) exports
@@ -880,6 +1417,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return;
             }
             if !sym.facts.intersects(SymbolFacts::TYPE_ONLY) {
+                // A name the module re-exports through `export type * from`.
+                if let Some(info) = f.bound.alias(a.symbol)
+                    && let ts_r_binder::AliasTarget::Module {
+                        request,
+                        import: ts_r_binder::ImportName::Named(n),
+                    } = info.target
+                {
+                    let text = f.bound.name_text(&f.ast, n);
+                    let t = self.c.link.module_target(a.file, request);
+                    if self.c.link.star_export_is_type_only(t, text) {
+                        self.error(
+                            e,
+                            dg::_0_CANNOT_BE_USED_AS_A_VALUE_BECAUSE_IT_WAS_EXPORTED_USING_EXPORT_TYPE_1362,
+                            &[name],
+                        );
+                        return;
+                    }
+                }
                 continue;
             }
             let exported = f.bound.decls(a.symbol).first().is_some_and(|&d| {
@@ -905,6 +1460,58 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Uses of a type-only alias that emit nothing: `export =` / `export default` of it, type
     /// positions (`typeof`, interfaces, type literals), ambient (`declare`) declarations and
     /// the computed names of abstract members.
+    /// `const x = require("m")` in JavaScript is an import alias in tsc: under `node20` and
+    /// `nodenext`, when `m` is an ES module whose `"module.exports"` export is type-only, a
+    /// value use of `x` is TS1362 (tsc: checker.go getTargetOfImportEqualsDeclaration).
+    fn check_type_only_require_use(&mut self, e: Loc, s: SymId, name: &str) {
+        use ts_r_config::ModuleKind as M;
+        if !matches!(self.c.opts.module, M::Node20 | M::NodeNext)
+            || !self.c.sym_flags(s).intersects(SymbolFlags::VARIABLE)
+        {
+            return;
+        }
+        let Some(d) = self.c.value_decl(s) else {
+            return;
+        };
+        let ast = self.ast(d.file);
+        let decl = match *ast.node(d.node) {
+            Node::VarDeclarator { .. } => d.node,
+            _ => match self.c.file(d.file).parents().parent(d.node) {
+                Some(p) => p,
+                None => return,
+            },
+        };
+        let Node::VarDeclarator {
+            name: decl_name,
+            init: Some(init),
+            ..
+        } = *ast.node(decl)
+        else {
+            return;
+        };
+        let Node::Call { callee, args, .. } = *ast.node(init) else {
+            return;
+        };
+        let [arg] = ast.list(args) else {
+            return;
+        };
+        let arg = *arg;
+        if !matches!(ast.node(decl_name), Node::Ident { .. })
+            || crate::nodes::ident_text(ast, callee) != Some("require")
+            || !matches!(ast.node(arg), Node::StringLit { .. })
+        {
+            return;
+        }
+        let Some(m) = self.required_module(d.file, arg) else {
+            return;
+        };
+        let Some(me) = self.c.export_of(m, "module.exports") else {
+            return;
+        };
+        let target = self.c.resolve_alias(me).unwrap_or(me);
+        self.check_type_only_alias_use(e, me, target, name);
+    }
+
     fn type_only_use_allowed(&self, e: Loc) -> bool {
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
@@ -952,6 +1559,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .global_type(GlobalType::IArguments)
                     .unwrap_or(TypeId::UNRESOLVED);
             }
+            // Through a class nested in a function, `arguments` is still the function's;
+            // read in a field initializer or a static block it is TS2815.
+            "arguments" if self.arguments_through_class(e) => {
+                if self.in_initializer_or_static_block(e) {
+                    self.error(
+                        e,
+                        dg::ARGUMENTS_CANNOT_BE_REFERENCED_IN_PROPERTY_INITIALIZERS_OR_CLASS_STATIC_INITIALI_2815,
+                        &[],
+                    );
+                    return TypeId::ERROR;
+                }
+                return self
+                    .global_type(GlobalType::IArguments)
+                    .unwrap_or(TypeId::UNRESOLVED);
+            }
             "globalThis" if self.c.resolve_ident(e, meaning::VALUE).is_none() => {
                 return self.global_this_type();
             }
@@ -970,12 +1592,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if let Some(t) = self.c.resolve_ident(e, meaning::TYPE | meaning::NAMESPACE) {
             let t = self.c.resolve_alias(t).unwrap_or(t);
-            if self.c.has_meaning(t, meaning::TYPE) {
-                self.error(
-                    e,
-                    dg::_0_ONLY_REFERS_TO_A_TYPE_BUT_IS_BEING_USED_AS_A_VALUE_HERE_2693,
-                    &[name],
-                );
+            // A local type merged with an exported value of its block (`interface F {}`,
+            // `export const F`, `export default F`): tsc reads the merged local symbol,
+            // which has no value type of its own: an error type, silently.
+            if self.c.local_merged_export_value(t).is_some() {
+                return TypeId::ERROR;
+            }
+            if self.c.has_meaning(t, meaning::TYPE)
+                && !self
+                    .c
+                    .sym_flags(t)
+                    .intersects(SymbolFlags::NAMESPACE_MODULE)
+            {
+                self.error(e, type_as_value_info(name), &[name]);
             } else {
                 self.error(e, dg::CANNOT_USE_NAMESPACE_0_AS_A_VALUE_2708, &[name]);
             }
@@ -1026,6 +1655,77 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         true
+    }
+
+    /// TS2475: a `const` enum object is only read for a member (`E.A`, `E["A"]`), or named
+    /// by an export assignment.
+    ///
+    /// TS2748: a reference to an ambient `const` enum (`sym`) under `isolatedModules` set
+    /// explicitly, or under `verbatimModuleSyntax` in an allowed position when the name is
+    /// not an import (imports are checked at the import, in `isolated_modules.rs`); not in
+    /// a position a type-only import could be used (tsc: checker.go checkConstEnumAccess).
+    fn check_const_enum_reference(&mut self, e: Loc, sym: SymId, through_alias: bool) {
+        if !self.reporting(e.file) {
+            return;
+        }
+        let ast = self.ast(e.file);
+        let allowed = match self.c.file(e.file).parents().parent(e.node) {
+            Some(p) => match *ast.node(p) {
+                Node::Member { obj, .. } | Node::Index { obj, .. } => obj == e.node,
+                Node::ExportAssignment { .. }
+                | Node::ExportDefaultExpr { .. }
+                | Node::ImportEquals { .. } => true,
+                _ => false,
+            },
+            None => false,
+        };
+        if !allowed {
+            self.error(
+                e,
+                dg::CONST_ENUMS_CAN_ONLY_BE_USED_IN_PROPERTY_OR_INDEX_ACCESS_EXPRESSIONS_OR_THE_RIGH_2475,
+                &[],
+            );
+        }
+        let opts = &self.c.opts;
+        if (opts.isolated_modules_explicit
+            || opts.verbatim_module_syntax && allowed && !through_alias)
+            && self
+                .c
+                .value_decl(sym)
+                .is_some_and(|d| self.is_ambient_node(d))
+            && !self.type_only_use_allowed(e)
+        {
+            let flag = self.isolated_modules_flag_name();
+            self.error(
+                e,
+                dg::CANNOT_ACCESS_AMBIENT_CONST_ENUMS_WHEN_0_IS_ENABLED_2748,
+                &[flag],
+            );
+        }
+    }
+
+    /// The option named by `isolatedModules` diagnostics: `verbatimModuleSyntax` when it is
+    /// set, else `isolatedModules`.
+    pub(crate) fn isolated_modules_flag_name(&self) -> &'static str {
+        if self.c.opts.verbatim_module_syntax {
+            "verbatimModuleSyntax"
+        } else {
+            "isolatedModules"
+        }
+    }
+
+    /// Whether `obj` names a `const` enum object (`E` in `E[k]`).
+    fn is_const_enum_object(&mut self, obj: Loc) -> bool {
+        let ast = self.ast(obj.file);
+        let n = skip_parens(ast, obj.node);
+        if !matches!(ast.node(n), Node::Ident { .. }) {
+            return false;
+        }
+        let Some(s) = self.c.resolve_ident(Loc::new(obj.file, n), meaning::VALUE) else {
+            return false;
+        };
+        let s = self.c.resolve_alias(s).unwrap_or(s);
+        self.c.sym_flags(s).intersects(SymbolFlags::CONST_ENUM)
     }
 
     /// Whether identifier `e` is the callee of `require("x")` (one string literal argument).
@@ -1151,6 +1851,45 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.commonjs_export_equals_type(e)
     }
 
+    /// `x === NaN` (the global `NaN`, possibly parenthesized, on either side): TS2845 "always
+    /// false" for `==`/`===`, "always true" for `!=`/`!==`, with a related "Did you mean
+    /// 'Number.isNaN(x)'?" at the other operand unless both are `NaN` (`...` for an operand
+    /// that is not an entity name; tsc: checker/checker.go, checkNaNEquality).
+    fn check_nan_equality(&mut self, e: Loc, op: BinaryOp, l: Loc, r: Loc) {
+        let ast = self.ast(e.file);
+        let is_nan = |ck: &Self, n: Loc| {
+            let n = Loc::new(n.file, skip_parens(ast, n.node));
+            matches!(*ast.node(n.node), Node::Ident { name } if ast.atom(name) == "NaN")
+                && ck
+                    .c
+                    .global_symbol("NaN", meaning::VALUE)
+                    .is_some_and(|g| ck.c.resolve_ident(n, meaning::VALUE) == Some(g))
+        };
+        let (ln, rn) = (is_nan(self, l), is_nan(self, r));
+        if !ln && !rn {
+            return;
+        }
+        let eq = matches!(op, BinaryOp::Eq | BinaryOp::StrictEq);
+        let mark = self.diags.len();
+        self.error(
+            e,
+            dg::THIS_CONDITION_WILL_ALWAYS_RETURN_0_2845,
+            &[if eq { "false" } else { "true" }],
+        );
+        if ln && rn {
+            return;
+        }
+        let other = if ln { r } else { l };
+        let inner = skip_parens(ast, other.node);
+        let name = if crate::nodes::is_entity_name_expr(ast, inner) {
+            crate::nodes::entity_text(ast, inner)
+        } else {
+            "...".to_owned()
+        };
+        let suggestion = format!("{}Number.isNaN({name})", if eq { "" } else { "!" });
+        self.relate_last(mark, other, dg::DID_YOU_MEAN_0_1369, &[&suggestion]);
+    }
+
     /// TS2304 and its "did you mean" / missing-types variants.
     pub fn report_cannot_find_name(&mut self, e: Loc, name: &str) {
         if !self.reporting(e.file) {
@@ -1184,7 +1923,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.error(e, info, &[name, &class]);
             return;
         }
-        if let Some(s) = self.name_suggestion(e, name) {
+        // An export specifier's name may be of any meaning (`export type { T }`).
+        let ast = self.ast(e.file);
+        let m = match self.c.parent(e).map(|p| ast.node(p.node)) {
+            Some(Node::ExportSpecifier { .. }) => meaning::ALL,
+            _ => meaning::VALUE,
+        };
+        let names = self.scope_name_candidates(e, m, false);
+        if let Some(s) = crate::relate::spelling_suggestion(name, names.iter().map(String::as_str))
+        {
             self.error(e, dg::CANNOT_FIND_NAME_0_DID_YOU_MEAN_1_2552, &[name, &s]);
             return;
         }
@@ -1242,10 +1989,6 @@ impl<'c, 'a> Ck<'c, 'a> {
         e: Loc,
         name: &str,
     ) -> Option<(dg::DiagnosticInfo, String)> {
-        // `arguments` there is TS2815 in tsc (not modelled).
-        if name == "arguments" {
-            return None;
-        }
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
         let mut at = e.node;
@@ -1346,55 +2089,56 @@ impl<'c, 'a> Ck<'c, 'a> {
         None
     }
 
-    /// A spelling suggestion among the names visible at `e` (locals of enclosing scopes and
-    /// globals).
+    /// A spelling suggestion among the value names visible at `e` (TS2552 for value
+    /// references).
     pub fn name_suggestion(&mut self, e: Loc, name: &str) -> Option<String> {
-        let b = self.c.bound(e.file);
-        let mut names: Vec<String> = Vec::new();
-        let ast = self.ast(e.file);
-        let parents = self.c.file(e.file).parents();
-        let mut cur = Some(e.node);
-        let mut scope = None;
-        while let Some(n) = cur {
-            if let Some(sc) = b.scope_of(n) {
-                scope = Some(sc);
-                break;
-            }
-            cur = parents.parent(n);
-        }
-        let mut guard = 0;
-        while let Some(sc) = scope {
-            guard += 1;
-            if guard > 1000 {
-                break;
-            }
-            let Some(data) = b.scopes.get(sc.0 as usize) else {
-                break;
-            };
-            for (n, _) in b.table(data.locals) {
-                names.push(b.names.text(ast, *n).to_owned());
-            }
-            scope = data.parent;
-        }
-        // (Globals with a value meaning: `arguments` is not `IArguments`.)
-        for (g, _) in self.c.link.globals.iter() {
-            if self.c.global_symbol(g, meaning::VALUE).is_some() {
-                names.push(g.to_string());
-            }
-        }
+        let names = self.scope_name_candidates(e, meaning::VALUE, false);
         crate::relate::spelling_suggestion(name, names.iter().map(|s| s.as_str()))
     }
 
     /// A spelling suggestion among the type names visible at `e` (TS2552 for type
-    /// references): locals of enclosing scopes and globals that have a type meaning.
+    /// references).
     pub fn type_name_suggestion(&mut self, e: Loc, name: &str) -> Option<String> {
+        let names = self.scope_name_candidates(e, meaning::TYPE, false);
+        crate::relate::spelling_suggestion(name, names.iter().map(|s| s.as_str()))
+    }
+
+    /// The names of meaning `m` in scope at `e`, in the order tsc's suggestions visit them
+    /// (observed with tsc 7): for types the primitive type keywords, for values
+    /// `undefined`; then each enclosing scope's locals and, for a namespace or module file,
+    /// its exports; then the globals in declaration order (lib files first, so a lib's
+    /// `Lock` is preferred to a script's `ELoc` at the same distance). A script's own
+    /// top-level declarations are globals and come with them. Symbols without the meaning
+    /// are not candidates (a type-only `A` is no suggestion for the value `a`), and neither
+    /// are, with `skip_declaring`, symbols declared around `e` (the alias being declared,
+    /// `import v = V`).
+    pub(crate) fn scope_name_candidates(
+        &mut self,
+        e: Loc,
+        m: u8,
+        skip_declaring: bool,
+    ) -> Vec<String> {
+        let at = self.c.span(e);
+        let declaring = |ck: &Self, s: ts_r_types::SymId| {
+            skip_declaring
+                && ck.c.decls(s).iter().any(|d| {
+                    let ds = ck.c.span(*d);
+                    d.file == e.file && ds.start <= at.start && at.end <= ds.end
+                })
+        };
         let b = self.c.bound(e.file);
-        // Primitive type keywords are candidates too (observed: `numbr` → `number`).
-        let mut names: Vec<String> = ["string", "number", "boolean", "bigint", "symbol", "object"]
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect();
         let ast = self.ast(e.file);
+        let mut names: Vec<String> = Vec::new();
+        if m == meaning::TYPE {
+            names.extend(
+                ["string", "number", "boolean", "bigint", "symbol", "object"]
+                    .iter()
+                    .map(|s| (*s).to_owned()),
+            );
+        }
+        if m & meaning::VALUE != 0 {
+            names.push("undefined".to_owned());
+        }
         let parents = self.c.file(e.file).parents();
         let mut cur = Some(e.node);
         let mut scope = None;
@@ -1405,32 +2149,68 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             cur = parents.parent(n);
         }
-        let mut guard = 0;
-        while let Some(sc) = scope {
-            guard += 1;
-            if guard > 1000 {
-                break;
+        let usable = |ck: &Self, s: ts_r_types::SymId| {
+            let f = ck.c.sym_flags(s);
+            ck.c.has_meaning(s, m) && !declaring(ck, s) && {
+                // Class members and enum members merged into a namespace are not in
+                // scope in its body.
+                let own = f.without(
+                    SymbolFlags::PROPERTY
+                        | SymbolFlags::METHOD
+                        | SymbolFlags::ACCESSOR
+                        | SymbolFlags::ENUM_MEMBER,
+                );
+                crate::symbols::symbol_meaning(own) & m != 0
             }
+        };
+        for _ in 0..1000 {
+            let Some(sc) = scope else { break };
             let Some(data) = b.scopes.get(sc.0 as usize) else {
                 break;
             };
-            for (n, sym) in b.table(data.locals) {
-                let s = self.c.sym(e.file, *sym);
-                if self.c.has_meaning(s, meaning::TYPE) {
-                    names.push(b.names.text(ast, *n).to_owned());
+            let script_file = data.kind == ts_r_binder::ScopeKind::File && !b.is_module;
+            if !script_file {
+                for (n, sym) in b.table(data.locals) {
+                    let s = self.c.sym(e.file, *sym);
+                    if usable(self, s) {
+                        names.push(b.names.text(ast, *n).to_owned());
+                    }
+                }
+                if matches!(
+                    data.kind,
+                    ts_r_binder::ScopeKind::File | ts_r_binder::ScopeKind::Module
+                ) && let Some(container) = data.symbol
+                {
+                    let exports = b.symbol(container).exports;
+                    if exports != b.global_augmentations {
+                        for (n, sym) in b.table(exports) {
+                            let s = self.c.sym(e.file, *sym);
+                            if !self.c.sym_flags(s).intersects(SymbolFlags::ALIAS)
+                                && usable(self, s)
+                            {
+                                names.push(b.names.text(ast, *n).to_owned());
+                            }
+                        }
+                    }
                 }
             }
             scope = data.parent;
         }
-        for (g, _) in self.c.link.globals.iter() {
-            if self.c.global_symbol(g, meaning::TYPE).is_some() {
-                names.push(g.to_string());
+        let mut globals: Vec<(ts_r_binder::program::SymbolRef, &str)> = Vec::new();
+        for (g, merged) in self.c.link.globals.iter() {
+            if let Some(&first) = merged.symbols.first()
+                && let Some(s) = self.c.global_symbol(g, m)
+                && !declaring(self, s)
+            {
+                globals.push((first, g));
             }
         }
-        crate::relate::spelling_suggestion(name, names.iter().map(|s| s.as_str()))
+        globals.sort();
+        names.extend(globals.into_iter().map(|(_, g)| g.to_owned()));
+        names
     }
 
-    fn in_non_arrow_function(&self, e: Loc) -> bool {
+    pub(crate) fn in_non_arrow_function(&self, e: Loc) -> bool {
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
         let mut cur = parents.parent(e.node);
@@ -1445,6 +2225,75 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// Whether `e` lies in a function other than an arrow and `s` is declared outside the
+    /// innermost such function (so `arguments` there is the function's arguments object).
+    fn arguments_shadows(&self, e: Loc, s: SymId) -> bool {
+        let ast = self.ast(e.file);
+        let parents = self.c.file(e.file).parents();
+        let mut cur = parents.parent(e.node);
+        let func = loop {
+            let Some(n) = cur else { return false };
+            if matches!(
+                ast.node(n),
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. }
+            ) {
+                break n;
+            }
+            cur = parents.parent(n);
+        };
+        !self.c.decls(s).iter().any(|d| {
+            d.file == e.file && {
+                let mut cur = Some(d.node);
+                while let Some(n) = cur {
+                    if n == func {
+                        break;
+                    }
+                    cur = parents.parent(n);
+                }
+                cur.is_some()
+            }
+        })
+    }
+
+    /// Whether `e` lies in a function other than an arrow, class boundaries included (a
+    /// class nested in a function sees the function's `arguments`).
+    fn arguments_through_class(&self, e: Loc) -> bool {
+        let ast = self.ast(e.file);
+        let parents = self.c.file(e.file).parents();
+        let mut cur = parents.parent(e.node);
+        while let Some(n) = cur {
+            if matches!(
+                ast.node(n),
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. }
+            ) {
+                return true;
+            }
+            cur = parents.parent(n);
+        }
+        false
+    }
+
+    /// Whether `e` is read in a class field (its initializer) or a static block, arrows
+    /// being transparent and another function's body ending the search (tsc: checker.go,
+    /// isInPropertyInitializerOrClassStaticBlock).
+    fn in_initializer_or_static_block(&self, e: Loc) -> bool {
+        let ast = self.ast(e.file);
+        let parents = self.c.file(e.file).parents();
+        let mut cur = parents.parent(e.node);
+        while let Some(n) = cur {
+            match ast.node(n) {
+                Node::PropertyDef { .. } | Node::StaticBlock { .. } => return true,
+                Node::TypeQuery { .. }
+                | Node::JsxClosing { .. }
+                | Node::FunctionDecl { .. }
+                | Node::FunctionExpr { .. } => return false,
+                _ => {}
+            }
+            cur = parents.parent(n);
+        }
+        false
+    }
+
     /// TS2448/2449/2450: block-scoped names used before their declaration in the same
     /// function body.
     fn check_use_before_declaration(&mut self, e: Loc, s: SymId, name: &str) {
@@ -1452,9 +2301,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         }
         let f = self.c.sym_flags(s);
-        if !f.intersects(
-            SymbolFlags::BLOCK_SCOPED_VARIABLE | SymbolFlags::CLASS | SymbolFlags::REGULAR_ENUM,
-        ) {
+        // Const enums are inlined, so reading one early is fine unless `isolatedModules`
+        // preserves them as objects (tsc: checker.go checkResolvedBlockScopedVariable).
+        let early_enums = if self.c.opts.isolated_modules {
+            SymbolFlags::ENUM
+        } else {
+            SymbolFlags::REGULAR_ENUM
+        };
+        if !f.intersects(SymbolFlags::BLOCK_SCOPED_VARIABLE | SymbolFlags::CLASS | early_enums) {
             return;
         }
         let Some(mut d) = self.c.value_decl(s).or_else(|| self.c.first_decl(s)) else {
@@ -1473,6 +2327,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         if d.file != e.file || self.is_ambient_node(d) {
+            return;
+        }
+        // `export = X` names the declaration rather than reading it.
+        if self.c.parent(e).is_some_and(
+            |p| matches!(self.node(p), Node::ExportAssignment { expr } if *expr == e.node),
+        ) {
             return;
         }
         let use_span = self.c.span(e);
@@ -1495,14 +2355,26 @@ impl<'c, 'a> Ck<'c, 'a> {
         let parents = self.c.file(e.file).parents();
         let mut prev = e.node;
         let mut cur = parents.parent(e.node);
+        let mut param_decorator = false;
         while let Some(n) = cur {
             if Some(n) == decl_container {
                 break;
             }
             match ast.node(n) {
-                // Functions called where they are written run now.
-                Node::FunctionExpr { .. } | Node::Arrow { .. }
-                    if self.is_iife(Loc::new(e.file, n)) => {}
+                // Functions called where they are written run now. An async function or
+                // generator does for later declarations (as tsc has it, past an `await` or
+                // `yield` too), not for its own variable's initializer.
+                Node::FunctionExpr { flags, .. } | Node::Arrow { flags, .. }
+                    if !(in_own_init
+                        && flags.intersects(
+                            ts_r_ast::FnFlags::ASYNC | ts_r_ast::FnFlags::GENERATOR,
+                        ))
+                        && self.is_called_where_written(Loc::new(e.file, n)) => {}
+                // A parameter's decorators run with its class.
+                Node::Param { .. } if matches!(ast.node(prev), Node::Decorator { .. }) => {
+                    param_decorator = true;
+                }
+                Node::FunctionExpr { .. } | Node::MethodDef { .. } if param_decorator => {}
                 // An enum's members may read the enum itself.
                 Node::Enum { .. } if n == d.node => return,
                 // Computed member names run with the class, unless it is ambient.
@@ -1562,7 +2434,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let info = if f.intersects(SymbolFlags::CLASS) {
             dg::CLASS_0_USED_BEFORE_ITS_DECLARATION_2449
-        } else if f.intersects(SymbolFlags::REGULAR_ENUM) {
+        } else if f.intersects(SymbolFlags::ENUM) {
             dg::ENUM_0_USED_BEFORE_ITS_DECLARATION_2450
         } else {
             dg::BLOCK_SCOPED_VARIABLE_0_USED_BEFORE_ITS_DECLARATION_2448
@@ -1607,6 +2479,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             match *ast.node(n) {
                 Node::VarDeclarator { init, .. } => {
                     inits.extend(init);
+                    // A `for`-`in`/`of` variable's iterated expression is its initializer.
+                    if let Some(head) = parents.parent(n).and_then(|l| parents.parent(l))
+                        && let Node::ForIn { right, .. } | Node::ForOf { right, .. } =
+                            *ast.node(head)
+                    {
+                        inits.push(right);
+                    }
                     declarator = Some(n);
                     break;
                 }
@@ -1790,6 +2669,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut guard = 0;
         // `this` in a computed name (`[this.a]: 1`) never falls back to the literal's type.
         let mut in_key = false;
+        let mut in_arrow = false;
         while let Some(n) = cur {
             guard += 1;
             if guard > 100_000 {
@@ -1797,6 +2677,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             match *ast.node(n) {
                 Node::ComputedKey { .. } => in_key = true,
+                Node::Arrow { .. } => in_arrow = true,
                 Node::FunctionDecl { params, .. } | Node::FunctionExpr { params, .. } => {
                     // An explicit `this` parameter.
                     for &p in ast.list(params) {
@@ -1894,15 +2775,46 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
                     // Computed names and heritage clauses: the outer `this`.
                 }
-                Node::Module { .. } => return TypeId::UNRESOLVED,
+                // A namespace body (TS2331) and an enum member (TS2332) have no `this`: it is
+                // `any`, implicitly so under noImplicitThis.
+                Node::Module { .. } | Node::Enum { .. } => {
+                    if self.reporting(e.file) {
+                        let d = if matches!(ast.node(n), Node::Module { .. }) {
+                            dg::THIS_CANNOT_BE_REFERENCED_IN_A_MODULE_OR_NAMESPACE_BODY_2331
+                        } else {
+                            dg::THIS_CANNOT_BE_REFERENCED_IN_CURRENT_LOCATION_2332
+                        };
+                        self.error(e, d, &[]);
+                        if self.c.opts.no_implicit_this {
+                            self.error(e, dg::THIS_IMPLICITLY_HAS_TYPE_ANY_BECAUSE_IT_DOES_NOT_HAVE_A_TYPE_ANNOTATION_2683, &[]);
+                        }
+                    }
+                    return TypeId::ANY;
+                }
                 _ => {}
             }
             prev = n;
             cur = parents.parent(n);
         }
-        // A script's top-level `this` is the global object.
-        if !self.c.file(e.file).bound.is_module && !self.c.file(e.file).is_js() {
-            return self.global_this_type();
+        // A script's top-level `this` is the global object, a module's is `undefined`.
+        // In JavaScript too, where a CommonJS module is a script for this.
+        if !self.c.file(e.file).is_js() || !self.c.file(e.file).bound.is_module {
+            if !self.c.file(e.file).bound.is_module {
+                // An arrow function there captures it, implicitly (TS7041).
+                if in_arrow && self.c.opts.no_implicit_this {
+                    self.error(
+                        e,
+                        dg::THE_CONTAINING_ARROW_FUNCTION_CAPTURES_THE_GLOBAL_VALUE_OF_THIS_7041,
+                        &[],
+                    );
+                }
+                return self.global_this_type();
+            }
+            // Observed: `this.x` at the top level of a module, or in an arrow there, is
+            // TS2532 (not in declaration files).
+            if !self.c.file(e.file).is_declaration() {
+                return TypeId::UNDEFINED;
+            }
         }
         TypeId::UNRESOLVED
     }
@@ -2087,10 +2999,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
         // `super.x` (or a bare `super`), not `super(...)`.
-        if !parents
+        let is_call = parents
             .parent(e.node)
-            .is_some_and(|p| matches!(*ast.node(p), Node::Call { callee, .. } if callee == e.node))
-        {
+            .is_some_and(|p| matches!(*ast.node(p), Node::Call { callee, .. } if callee == e.node));
+        if !is_call {
             self.check_super_called_before(e, true);
         }
         let mut cur = parents.parent(e.node);
@@ -2105,6 +3017,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let Some(s) = self.c.sym_of_decl(Loc::new(e.file, n)) else {
                         return TypeId::UNRESOLVED;
                     };
+                    // In a class that `extends null`, `super` is `null` (so `super.x` is
+                    // possibly null); `super()` there is reported elsewhere.
+                    if matches!(
+                        self.extends_expression_type(s),
+                        Some(TypeId::NULL | TypeId::NULL_WIDENING)
+                    ) {
+                        return if is_call {
+                            TypeId::UNRESOLVED
+                        } else {
+                            TypeId::NULL_WIDENING
+                        };
+                    }
                     if is_static {
                         return self.base_constructor_type(s).unwrap_or(TypeId::UNRESOLVED);
                     }
@@ -2127,7 +3051,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// type without `null`/`undefined`.
     pub fn check_non_null(&mut self, node: Loc, t: TypeId) -> TypeId {
         if !self.c.opts.strict_null_checks {
-            return t;
+            // Without strictNullChecks only a value that is nothing but `undefined` or
+            // `null` is reported (observed: `u.x` with `u: undefined`, module-level
+            // `this.x`, `null.x`).
+            let (undef, null) = match t {
+                TypeId::UNDEFINED | TypeId::UNDEFINED_WIDENING => (true, false),
+                TypeId::NULL | TypeId::NULL_WIDENING => (false, true),
+                _ => return t,
+            };
+            self.report_possibly_nullish(node, undef, null);
+            return TypeId::ERROR;
         }
         let s = self.store();
         let f = s.flags(t);
@@ -2271,10 +3204,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.filter_type(t, |ck, m| !ck.is_nullish_member(m))
     }
 
-    fn report_possibly_nullish(&mut self, node: Loc, undef: bool, null: bool) {
+    pub(crate) fn report_possibly_nullish(&mut self, node: Loc, undef: bool, null: bool) {
         let ast = self.ast(node.file);
         let n = skip_parens(ast, node.node);
-        if let Node::NullLit {} = ast.node(n) {
+        // (A parenthesized `(null)` is an object possibly null, observed.)
+        if let Node::NullLit {} = ast.node(node.node) {
             self.error(node, dg::THE_VALUE_0_CANNOT_BE_USED_HERE_18050, &["null"]);
             return;
         }
@@ -2453,6 +3387,99 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// How the expression at `e` is written: `None` when only read, `Some(true)` for a
+    /// plain write (`=`, a destructuring assignment target, a `for-in`/`for-of` head) and
+    /// `Some(false)` for a read-and-write (`op=`, `++`, `--`).
+    pub(crate) fn write_kind(&self, e: Loc) -> Option<bool> {
+        let ast = self.ast(e.file);
+        let parents = self.c.file(e.file).parents();
+        let mut cur = e.node;
+        // Within a literal, `cur` is a write only when the literal is a target itself.
+        let mut in_literal = false;
+        for _ in 0..256 {
+            let p = parents.parent(cur)?;
+            match *ast.node(p) {
+                Node::Paren { .. } | Node::NonNull { .. } => {}
+                Node::Assign { left, op, .. } if left == cur => {
+                    return Some(in_literal || op == AssignOp::Assign);
+                }
+                Node::Update { .. } => return Some(false),
+                Node::ForIn { left, .. } | Node::ForOf { left, .. } => {
+                    return (left == cur).then_some(true);
+                }
+                Node::ArrayLit { .. } | Node::ObjectLit { .. } | Node::Spread { .. } => {
+                    in_literal = true;
+                }
+                Node::ShorthandProp { name, .. } if name == cur => in_literal = true,
+                Node::Property { value, .. } if value == cur => in_literal = true,
+                _ => return None,
+            }
+            if in_literal
+                && !matches!(
+                    ast.node(p),
+                    Node::ArrayLit { .. }
+                        | Node::ObjectLit { .. }
+                        | Node::Spread { .. }
+                        | Node::Property { .. }
+                        | Node::ShorthandProp { .. }
+                        | Node::Paren { .. }
+                )
+            {
+                return None;
+            }
+            cur = p;
+        }
+        None
+    }
+
+    /// TS2803: a write to a private method (`this.#m = f`), the `#name` the innermost
+    /// enclosing class declaring it has, whatever the object's type (tsc: checker.go,
+    /// checkPropertyAccessExpressionOrQualifiedName).
+    fn check_private_method_write(&mut self, e: Loc, prop: NodeId, name: &str) {
+        if !self.reporting(e.file) {
+            return;
+        }
+        if self.write_kind(e).is_some() {
+            let mut cur = self.enclosing_class(e);
+            for _ in 0..64 {
+                let Some(c) = cur else { break };
+                if let Some(m) = self.private_member_named(c, name) {
+                    if matches!(
+                        *self.node(m),
+                        Node::MethodDef {
+                            kind: ts_r_ast::MethodKind::Method,
+                            ..
+                        }
+                    ) {
+                        self.error(
+                            Loc::new(e.file, prop),
+                            dg::CANNOT_ASSIGN_TO_PRIVATE_METHOD_0_PRIVATE_METHODS_ARE_NOT_WRITABLE_2803,
+                            &[name],
+                        );
+                    }
+                    break;
+                }
+                cur = self.enclosing_class(c);
+            }
+        }
+    }
+
+    /// TS2806: `obj.#v` read (or read and written) where `#v` has only a setter.
+    fn check_private_setter_read(&mut self, e: Loc, p: SymId) {
+        let f = self.c.sym_flags(p);
+        if f.intersects(SymbolFlags::SET_ACCESSOR)
+            && !f.intersects(SymbolFlags::GET_ACCESSOR)
+            && self.reporting(e.file)
+            && self.write_kind(e) != Some(true)
+        {
+            self.error(
+                e,
+                dg::PRIVATE_ACCESSOR_WAS_DEFINED_WITHOUT_A_GETTER_2806,
+                &[],
+            );
+        }
+    }
+
     /// `obj.prop` with `ot` the type of `obj`.
     pub fn property_access(
         &mut self,
@@ -2468,7 +3495,29 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::PrivateName { name } => format!("#{}", ast.atom(name)),
             _ => return TypeId::ERROR,
         };
+        // Members emptied by conflicting discriminants are gone (`reduced_type`); an
+        // intersection emptied so says why.
+        let orig = ot;
+        let ot = self.reduced_type(ot);
+        if ot == TypeId::NEVER
+            && orig != ot
+            && let Some((info, os, pname)) = self.never_reduction_reason(orig)
+        {
+            if self.reporting(e.file) {
+                let mut chain = Chain::new();
+                chain.push_back(
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, "never"],
+                );
+                chain.push_back(info, &[&os, &pname]);
+                self.error_chain(Loc::new(e.file, prop), &chain);
+            }
+            return TypeId::ERROR;
+        }
         let ol = Loc::new(e.file, obj);
+        if name.starts_with('#') {
+            self.check_private_method_write(e, prop, &name);
+        }
         // `anyValue.#x` outside every class body: TS18016 at the name (tsc 7).
         if name.starts_with('#')
             && ot != TypeId::UNRESOLVED
@@ -2485,12 +3534,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         if ot == TypeId::UNRESOLVED || ot == TypeId::SILENT_NEVER || self.store().is_error(ot) {
             return ot;
         }
+        // `anyValue.#x` in a class body where no enclosing class declares `#x` (observed:
+        // TS2339 on `any`, also after `unknown`'s TS18046).
+        let undeclared_private = |ck: &mut Self| {
+            name.starts_with('#')
+                && ck.enclosing_class(e).is_some()
+                && !ck.private_name_in_scope(e, &name)
+                && ck.reporting(e.file)
+        };
         if self.store().flags(ot).intersects(TypeFlags::ANY) {
+            if undeclared_private(self) {
+                self.error(
+                    Loc::new(e.file, prop),
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, "any"],
+                );
+            }
             return TypeId::ANY;
         }
         let is_super = matches!(ast.node(skip_parens(ast, obj)), Node::Super {});
         let nt = self.check_non_null(ol, ot);
         if self.store().is_error(nt) {
+            if ot == TypeId::UNKNOWN && undeclared_private(self) {
+                self.error(
+                    Loc::new(e.file, prop),
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, "any"],
+                );
+            }
             return TypeId::ERROR;
         }
         let pl = Loc::new(e.file, prop);
@@ -2504,9 +3575,43 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.store().flags(apparent).intersects(TypeFlags::ANY) {
             return TypeId::ANY;
         }
-        if let Some(p) = self.property_of_type_id(nt, name_id) {
-            self.check_property_accessibility(pl, p, nt, &name, is_super);
+        let found = self.property_of_type_id(nt, name_id);
+        // A static `#private` field belongs to its class's constructor only: a derived
+        // class's `typeof Child` does not have it (observed: TS2339).
+        if let Some(p) = found
+            && name.starts_with('#')
+            && let Some(d) = self.c.value_decl(p)
+            && self
+                .node(d)
+                .modifiers()
+                .contains(ts_r_ast::Modifiers::STATIC)
+            && let Some(dc) = self.enclosing_class(d)
+            && let Some(ts_r_types::ObjectKind::Anonymous { decl, kind, .. }) =
+                self.store().object_of(nt).map(|o| o.kind)
+            && kind == crate::declared::anon::CLASS_STATIC
+            && let Some(dsym) = self.c.sym_of_decl(dc)
+            && decl != crate::declared::sym_key(dsym)
+        {
+            self.report_missing_property(pl, &name, nt);
+            return TypeId::ERROR;
+        }
+        if let Some(p) = found {
+            if name.starts_with('#') {
+                self.check_private_setter_read(e, p);
+            }
+            self.check_property_accessibility(Some(e), pl, p, nt, &name, is_super);
             self.check_property_initialization_order(e, obj, pl, p, &name, is_write);
+            // A namespace's class read before its declaration (`N.E` above `class E`):
+            // TS2449 at the name, as for a plain identifier (tsc: checker.go,
+            // checkPropertyNotUsedBeforeDeclaration).
+            if self.c.sym_flags(p).contains(SymbolFlags::CLASS)
+                && self
+                    .c
+                    .value_decl(p)
+                    .is_some_and(|d| matches!(self.node(d), Node::ClassDecl { .. }))
+            {
+                self.check_use_before_declaration(pl, p, &name);
+            }
             self.check_abstract_this_access(e, obj, pl, p, &name);
             if is_write && self.is_readonly_write(e, p) {
                 self.error(
@@ -2569,7 +3674,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
                         &[&ts],
                     );
-                    return TypeId::ERROR;
+                    // The assigned value is still checked against the signature's type.
+                    return i.value;
                 }
                 let mut t = i.value;
                 if self.c.opts.no_unchecked_indexed_access && !is_write {
@@ -2590,7 +3696,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         // noImplicitAny), unless it names a global `let`/`const` (not a property of the
         // global object): that is a missing property.
         if !name.starts_with('#')
-            && nt == self.global_this_type()
+            && (nt == self.global_this_type()
+                || self.is_augmented_global_this(Loc::new(e.file, obj)))
             && !self
                 .c
                 .global_symbol(&name, meaning::VALUE)
@@ -2856,8 +3963,98 @@ impl<'c, 'a> Ck<'c, 'a> {
         ts_r_ast::Modifiers::NONE
     }
 
+    /// Whether a class enclosing `e` declares the private name `name` (instance or static).
+    fn private_name_in_scope(&mut self, e: Loc, name: &str) -> bool {
+        let mut cur = self.enclosing_class(e);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+            if let Some(cs) = self.c.sym_of_decl(c) {
+                let inst = self.declared_type_of_symbol(cs);
+                let stat = self.type_of_symbol(cs);
+                if self.property_of_type(inst, name).is_some()
+                    || self.property_of_type(stat, name).is_some()
+                {
+                    return true;
+                }
+            }
+            cur = self.enclosing_class(c);
+        }
+        false
+    }
+
+    /// Whether class `outer` encloses class `inner`.
+    fn class_encloses(&self, outer: Loc, inner: Loc) -> bool {
+        let mut cur = self.enclosing_class(inner);
+        for _ in 0..64 {
+            match cur {
+                Some(c) if c == outer => return true,
+                Some(c) => cur = self.enclosing_class(c),
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// The member of class `class` declared with private name `name` (`#x`).
+    fn private_member_named(&self, class: Loc, name: &str) -> Option<Loc> {
+        let ast = self.ast(class.file);
+        let (Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. }) =
+            *ast.node(class.node)
+        else {
+            return None;
+        };
+        ast.list(members).iter().find_map(|&m| {
+            let key = match *ast.node(m) {
+                Node::PropertyDef { key, .. } | Node::MethodDef { key, .. } => key,
+                _ => return None,
+            };
+            match *ast.node(key) {
+                Node::PrivateName { name: n } if name.strip_prefix('#') == Some(ast.atom(n)) => {
+                    Some(Loc::new(class.file, m))
+                }
+                _ => None,
+            }
+        })
+    }
+
+    /// `d` is a property declaration in a class body without `static` or `accessor`.
+    fn is_class_instance_field(&self, d: Loc) -> bool {
+        let Node::PropertyDef { modifiers, .. } = *self.node(d) else {
+            return false;
+        };
+        !modifiers.intersects(ts_r_ast::Modifiers::STATIC | ts_r_ast::Modifiers::ACCESSOR)
+            && self.c.parent(d).is_some_and(|c| {
+                matches!(
+                    self.node(c),
+                    Node::ClassDecl { .. } | Node::ClassExpr { .. }
+                )
+            })
+    }
+
+    /// The accessibility of property `name` of `parent` read by a destructuring at `at`
+    /// (a binding element or an assignment pattern's property).
+    pub(crate) fn check_destructured_member_access(&mut self, at: Loc, parent: TypeId, name: &str) {
+        let s = self.store();
+        if parent == TypeId::UNRESOLVED
+            || s.is_error(parent)
+            || s.flags(parent).intersects(TypeFlags::ANY)
+            || name.starts_with('#')
+        {
+            return;
+        }
+        if let Some(p) = self.property_of_type(parent, name) {
+            self.check_property_accessibility(None, at, p, parent, name, false);
+        }
+    }
+
+    /// `e` is the access expression, `None` for a destructuring (always a read).
     fn check_property_accessibility(
         &mut self,
+        e: Option<Loc>,
         pl: Loc,
         p: SymId,
         obj_type: TypeId,
@@ -2867,15 +4064,39 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.reporting(pl.file) {
             return;
         }
-        let _ = is_super;
-        let decl = match self.c.synth_sym(p) {
-            Some(x) if x.origins.len() == 1 => self
-                .c
-                .value_decl(x.origins[0])
-                .or_else(|| self.c.first_decl(x.origins[0])),
+        let sym = match self.c.synth_sym(p) {
+            Some(x) if x.origins.len() == 1 => Some(x.origins[0]),
             Some(_) => None,
-            None => self.c.value_decl(p).or_else(|| self.c.first_decl(p)),
+            None => Some(p),
         };
+        // An accessor pair's modifiers: the setter's for a write (`=`, `+=`, `++`), else the
+        // getter's (tsc: checker/utilities.go, getDeclarationModifierFlagsFromSymbolEx).
+        let decl = sym.and_then(|s| {
+            let d = self.c.value_decl(s).or_else(|| self.c.first_decl(s))?;
+            if !matches!(
+                *self.node(d),
+                Node::MethodDef {
+                    kind: MethodKind::Get | MethodKind::Set,
+                    ..
+                }
+            ) {
+                return Some(d);
+            }
+            let want = if e.is_some_and(|e| self.write_kind(e).is_some()) {
+                MethodKind::Set
+            } else {
+                MethodKind::Get
+            };
+            let decls = self.c.decls(s);
+            let of_kind = |kind: MethodKind| {
+                decls.iter().copied().find(
+                    |&d| matches!(*self.node(d), Node::MethodDef { kind: k, .. } if k == kind),
+                )
+            };
+            of_kind(want)
+                .or_else(|| of_kind(MethodKind::Get))
+                .or(Some(d))
+        });
         let Some(d) = decl else { return };
         let mods = self.node(d).modifiers() | self.jsdoc_assignment_access(d);
         // `super.m` where the nearest declaration of `m` is abstract (TS2513). Element
@@ -2894,6 +4115,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
+        // `super.x` where `x` is an instance field of a base class: fields live on the
+        // instance, not on the prototype `super` reads (tsc: checkPropertyAccessibilityAtLocation).
+        if is_super
+            && !mods.contains(ts_r_ast::Modifiers::STATIC)
+            && self.is_class_instance_field(d)
+        {
+            self.error(
+                pl,
+                dg::CLASS_FIELD_0_DEFINED_BY_THE_PARENT_CLASS_IS_NOT_ACCESSIBLE_IN_THE_CHILD_CLASS_V_2855,
+                &[name],
+            );
+            return;
+        }
         let private_name = name.starts_with('#');
         if !private_name
             && !mods.intersects(ts_r_ast::Modifiers::PRIVATE | ts_r_ast::Modifiers::PROTECTED)
@@ -2904,6 +4138,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         // Inside the declaring class (or, for protected, a subclass)?
+        let protected = !private_name && mods.contains(ts_r_ast::Modifiers::PROTECTED);
         let mut cur = self.enclosing_class(pl);
         let mut guard = 0;
         while let Some(c) = cur {
@@ -2912,32 +4147,255 @@ impl<'c, 'a> Ck<'c, 'a> {
                 break;
             }
             if c == decl_class {
+                if protected {
+                    self.check_protected_instance(pl, c, obj_type, name, mods, is_super);
+                }
+                return;
+            }
+            // A nested class declaring the same private name shadows it (TS18014).
+            if private_name
+                && let Some(shadow) = self.private_member_named(c, name)
+                && self.class_encloses(decl_class, c)
+            {
+                let shown = self.type_to_string(obj_type);
+                let mark = self.diags.len();
+                self.error(
+                    pl,
+                    dg::THE_PROPERTY_0_CANNOT_BE_ACCESSED_ON_TYPE_1_WITHIN_THIS_CLASS_BECAUSE_IT_IS_SHAD_18014,
+                    &[name, &shown],
+                );
+                self.relate_last(
+                    mark,
+                    shadow,
+                    dg::THE_SHADOWING_DECLARATION_OF_0_IS_DEFINED_HERE_18017,
+                    &[name],
+                );
+                self.relate_last(
+                    mark,
+                    d,
+                    dg::THE_DECLARATION_OF_0_THAT_YOU_PROBABLY_INTENDED_TO_USE_IS_DEFINED_HERE_18018,
+                    &[name],
+                );
                 return;
             }
             if mods.contains(ts_r_ast::Modifiers::PROTECTED)
                 && self.class_derives_from(c, decl_class)
             {
+                if protected {
+                    self.check_protected_instance(pl, c, obj_type, name, mods, is_super);
+                }
                 return;
             }
             cur = self.enclosing_class(c);
         }
-        let class_name = self
-            .c
-            .sym_of_decl(decl_class)
-            .map(|s| self.c.sym_name(s).to_owned())
-            .unwrap_or_default();
-        let _ = obj_type;
+        // `new Child().#foo` inside `Parent`, which declares its own `#foo`: the access
+        // names `Parent`'s field, which a `Child` has by inheritance (observed: OK).
         if private_name {
+            let mut cur = self.enclosing_class(pl);
+            let mut guard = 0;
+            while let Some(c) = cur {
+                guard += 1;
+                if guard > 64 {
+                    break;
+                }
+                if self.class_derives_from(decl_class, c)
+                    && let Some(cs) = self.c.sym_of_decl(c)
+                {
+                    let inst = self.declared_type_of_symbol(cs);
+                    let own = self.property_of_type(inst, name).is_some_and(|q| {
+                        self.c.value_decl(q).and_then(|qd| self.enclosing_class(qd)) == Some(c)
+                    });
+                    if own {
+                        return;
+                    }
+                }
+                cur = self.enclosing_class(c);
+            }
+        }
+        // A `#name` error names the class symbol (`C` for `const C = class {}`); the
+        // `private`/`protected` ones print the class's declared type, type parameters
+        // included (`D<T>`) (tsc: checker.go, checkPropertyAccessibilityAtLocation).
+        let class_sym = self.c.sym_of_decl(decl_class);
+        if private_name {
+            let class_name = class_sym
+                .map(|s| self.sym_display_name(s))
+                .unwrap_or_default();
             self.error(pl, dg::PROPERTY_0_IS_NOT_ACCESSIBLE_OUTSIDE_CLASS_1_BECAUSE_IT_HAS_A_PRIVATE_IDENTIFIER_18013, &[name, &class_name]);
-        } else if mods.contains(ts_r_ast::Modifiers::PRIVATE) {
+            return;
+        }
+        let class_name = match class_sym {
+            Some(s) => {
+                let declared = self.declared_type_of_symbol(s);
+                self.type_to_string(declared)
+            }
+            None => String::new(),
+        };
+        if mods.contains(ts_r_ast::Modifiers::PRIVATE) {
             self.error(
                 pl,
                 dg::PROPERTY_0_IS_PRIVATE_AND_ONLY_ACCESSIBLE_WITHIN_CLASS_1_2341,
                 &[name, &class_name],
             );
         } else {
+            // Outside any deriving class, a function's `this` parameter typed as (or
+            // constrained to) a class or interface deriving from the declaring class grants
+            // instance access (tsc: checker.go, getEnclosingClassFromThisParameter).
+            if !mods.contains(ts_r_ast::Modifiers::STATIC)
+                && let Some(dcs) = class_sym
+                && let Some(this_sym) = self.this_parameter_class(pl)
+            {
+                let this_decl = self.declared_type_of_symbol(this_sym);
+                if self.type_has_base_class(this_decl, dcs, 0) == Some(true) {
+                    self.check_protected_instance_of(pl, this_sym, obj_type, name, mods, is_super);
+                    return;
+                }
+            }
             self.error(pl, dg::PROPERTY_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_CLASS_1_AND_ITS_SUBCLASSES_2445, &[name, &class_name]);
         }
+    }
+
+    /// The class or interface named by the explicit `this` parameter of the function
+    /// whose `this` `l` sees (arrow functions pass through), a type parameter standing for
+    /// its constraint.
+    fn this_parameter_class(&mut self, l: Loc) -> Option<SymId> {
+        let ast = self.ast(l.file);
+        let parents = self.c.file(l.file).parents();
+        let mut cur = parents.parent(l.node);
+        let mut guard = 0;
+        let ann = loop {
+            guard += 1;
+            let n = cur?;
+            if guard > 100_000 {
+                return None;
+            }
+            match *ast.node(n) {
+                Node::FunctionDecl { params, .. } | Node::FunctionExpr { params, .. } => {
+                    let p = ast
+                        .list(params)
+                        .iter()
+                        .copied()
+                        .find(|&p| crate::nodes::is_this_param(ast, p))?;
+                    let Node::Param {
+                        type_ann: Some(t), ..
+                    } = *ast.node(p)
+                    else {
+                        return None;
+                    };
+                    break t;
+                }
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } | Node::Module { .. } => {
+                    return None;
+                }
+                _ => cur = parents.parent(n),
+            }
+        };
+        let mut t = self.type_from_node(Loc::new(l.file, ann));
+        if self.store().flags(t).contains(TypeFlags::TYPE_PARAMETER) {
+            t = self.type_param_constraint(t)?;
+        }
+        let target = match self.store().object_of(t).map(|o| o.kind) {
+            Some(ts_r_types::ObjectKind::Reference { target, .. }) => target,
+            _ => t,
+        };
+        match self.store().object_of(target).map(|o| o.kind) {
+            Some(ts_r_types::ObjectKind::Declared { sym, .. })
+                if self
+                    .c
+                    .sym_flags(sym)
+                    .intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE) =>
+            {
+                Some(sym)
+            }
+            _ => None,
+        }
+    }
+
+    /// TS2446: an instance member that is protected, read inside class `enclosing` (the
+    /// innermost enclosing class deriving from its declaring class), must be read through
+    /// an object whose type has `enclosing` among its bases (`this`, or a variable of
+    /// `enclosing`'s type or a subclass's). `super.x` and static members are exempt; an
+    /// object type other than a class or interface reference or a type parameter
+    /// constrained to one (a union, an intersection) is not checked here (tsc: checker.go,
+    /// checkPropertyAccessibilityAtLocation and hasBaseType).
+    fn check_protected_instance(
+        &mut self,
+        pl: Loc,
+        enclosing: Loc,
+        obj_type: TypeId,
+        name: &str,
+        mods: ts_r_ast::Modifiers,
+        is_super: bool,
+    ) {
+        if let Some(es) = self.c.sym_of_decl(enclosing) {
+            self.check_protected_instance_of(pl, es, obj_type, name, mods, is_super);
+        }
+    }
+
+    /// [`Self::check_protected_instance`] for the enclosing class or interface symbol `es`.
+    fn check_protected_instance_of(
+        &mut self,
+        pl: Loc,
+        es: SymId,
+        obj_type: TypeId,
+        name: &str,
+        mods: ts_r_ast::Modifiers,
+        is_super: bool,
+    ) {
+        if is_super || mods.contains(ts_r_ast::Modifiers::STATIC) {
+            return;
+        }
+        let mut t = obj_type;
+        if self.store().flags(t).contains(TypeFlags::TYPE_PARAMETER) {
+            t = self.base_constraint(t);
+        }
+        // A mixin base on the enclosing class's side is not modelled either.
+        let enc = self.declared_type_of_symbol(es);
+        if self.type_has_base_class(enc, es, 1).is_none() {
+            return;
+        }
+        match self.type_has_base_class(t, es, 0) {
+            Some(true) | None => {}
+            Some(false) => {
+                let es_text = self.type_to_string(enc);
+                let ts_text = self.type_to_string(t);
+                self.error(
+                    pl,
+                    dg::PROPERTY_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_THROUGH_AN_INSTANCE_OF_CLASS_1_THIS_I_2446,
+                    &[name, &es_text, &ts_text],
+                );
+            }
+        }
+    }
+
+    /// Whether class or interface type `t` is the declared type of `base` or derives from
+    /// it; `None` when `t` is neither a class nor an interface, or when an intersection is
+    /// on the way (mixin bases: their members' modifiers combine, not modelled here).
+    fn type_has_base_class(&mut self, t: TypeId, base: SymId, depth: u32) -> Option<bool> {
+        if depth > 32 || self.store().flags(t).contains(TypeFlags::INTERSECTION) {
+            return None;
+        }
+        let target = match self.store().object_of(t).map(|o| o.kind) {
+            Some(ts_r_types::ObjectKind::Reference { target, .. }) => target,
+            _ => t,
+        };
+        let Some(ts_r_types::ObjectKind::Declared { sym, .. }) =
+            self.store().object_of(target).map(|o| o.kind)
+        else {
+            return None;
+        };
+        if sym == base {
+            return Some(true);
+        }
+        let bases = self.base_types(sym);
+        let mut found = false;
+        for &b in bases.iter() {
+            match self.type_has_base_class(b, base, depth + 1) {
+                Some(true) => found = true,
+                Some(false) => {}
+                None => return None,
+            }
+        }
+        Some(found)
     }
 
     pub(crate) fn class_derives_from(&mut self, c: Loc, base: Loc) -> bool {
@@ -2998,13 +4456,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let ts = self.type_to_string(shown);
         // Static member accessed through an instance.
-        if let Some(cls) = self.class_symbol_of_instance(t)
-            && let Some(stat) = self.type_of_symbol_opt(cls)
-            && self.property_of_type(stat, name).is_some()
-            && !name.starts_with('#')
-        {
-            let cname = self.c.sym_name(cls).to_owned();
-            let full = format!("{cname}.{name}");
+        if !name.starts_with('#') && self.class_has_static_member(shown, name) {
+            let full = format!("{ts}.{name}");
             self.error(
                 pl,
                 dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_DID_YOU_MEAN_TO_ACCESS_THE_STATIC_MEMBER_2_I_2576,
@@ -3066,8 +4519,121 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    fn type_of_symbol_opt(&mut self, s: SymId) -> Option<TypeId> {
-        Some(self.type_of_symbol(s))
+    /// Whether the class whose instance type `t` is has a member `name` declared `static`
+    /// (a namespace export merged into the class or the synthetic `prototype` does not
+    /// count). tsc: `typeHasStaticProperty` in tsc/internal/checker/checker.go.
+    pub(crate) fn class_has_static_member(&mut self, t: TypeId, name: &str) -> bool {
+        let Some(cls) = self.class_symbol_of_instance(t) else {
+            return false;
+        };
+        let stat = self.type_of_symbol(cls);
+        let Some(prop) = self.property_of_type(stat, name) else {
+            return false;
+        };
+        self.c.value_decl(prop).is_some_and(|d| {
+            self.ast(d.file)
+                .node(d.node)
+                .modifiers()
+                .contains(ts_r_ast::Modifiers::STATIC)
+        })
+    }
+
+    /// TS7052's hint for `obj[key]` on a type without index signatures: `get` for a read,
+    /// `set` for any kind of write, when `t` has that member as a function taking at least one
+    /// argument whose first parameter accepts `key`. Prefixed by the receiver when it is a
+    /// plain name or property path (`'m.prop.get'`). tsc:
+    /// `getSuggestionForNonexistentIndexSignature` in tsc/internal/checker/checker.go.
+    fn index_method_suggestion(
+        &mut self,
+        e: Loc,
+        obj: NodeId,
+        t: TypeId,
+        key: TypeId,
+    ) -> Option<String> {
+        let method = if self.is_any_assignment_target(e) {
+            "set"
+        } else {
+            "get"
+        };
+        let prop = self.property_of_type(t, method)?;
+        let pt = self.type_of_symbol(prop);
+        // A plain function type: one call signature and nothing else.
+        if !self.store().flags(pt).contains(TypeFlags::OBJECT)
+            || !self
+                .signatures_of(pt, crate::members::SigKind::Construct)
+                .is_empty()
+            || !self.properties_of(pt).is_empty()
+            || !self.resolved_members(pt).index.is_empty()
+        {
+            return None;
+        }
+        let [sig] = self.signatures_of(pt, crate::members::SigKind::Call)[..] else {
+            return None;
+        };
+        if self.effective_min_args(sig) < 1 {
+            return None;
+        }
+        let first = self.param_type_at(sig, 0)?;
+        if !self.is_assignable(key, first) {
+            return None;
+        }
+        Some(match self.access_path_text(Loc::new(e.file, obj)) {
+            Some(base) => format!("{base}.{method}"),
+            None => method.to_owned(),
+        })
+    }
+
+    /// `a`, `a.b`, `a["b"]` (as `a.b`) as text; `None` for anything else.
+    fn access_path_text(&self, l: Loc) -> Option<String> {
+        let ast = self.ast(l.file);
+        match *ast.node(l.node) {
+            Node::Ident { name } => Some(ast.atom(name).to_owned()),
+            Node::Member { obj, prop, .. } => {
+                let base = self.access_path_text(Loc::new(l.file, obj))?;
+                Some(format!("{base}.{}", self.c.text(Loc::new(l.file, prop))))
+            }
+            Node::Index { obj, index, .. } => {
+                let name = match *ast.node(index) {
+                    Node::StringLit { value } => ast.atom(value).to_owned(),
+                    Node::Ident { name } => ast.atom(name).to_owned(),
+                    Node::NumberLit { .. } => self.c.text(Loc::new(l.file, index)).to_owned(),
+                    _ => return None,
+                };
+                let base = self.access_path_text(Loc::new(l.file, obj))?;
+                Some(format!("{base}.{name}"))
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `e` (through parentheses) is written by `=`, a compound or logical
+    /// assignment, or `++`/`--`.
+    fn is_any_assignment_target(&self, e: Loc) -> bool {
+        let ast = self.ast(e.file);
+        let mut n = e;
+        while let Some(p) = self.c.parent(n) {
+            match *ast.node(p.node) {
+                Node::Paren { .. } => n = p,
+                Node::Update { arg, .. } => return arg == n.node,
+                Node::Assign { left, .. } => return left == n.node,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// Whether `e` (through parentheses) is the callee of a call or `new`.
+    fn is_callee(&self, e: Loc) -> bool {
+        let ast = self.ast(e.file);
+        let mut n = e;
+        while let Some(p) = self.c.parent(n) {
+            match *ast.node(p.node) {
+                Node::Paren { .. } => n = p,
+                Node::Call { callee, .. } | Node::New { callee, .. } => return callee == n.node,
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// The class symbol whose instance type `t` is.
@@ -3127,6 +4693,40 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// Whether the only index signature of `t` is a number one. A union has the
+    /// signatures whose key every member declares exactly (a string signature does not
+    /// count as a number one there: `any[] | Record<string, any>` has none).
+    fn has_numeric_property_names(&mut self, t: TypeId) -> bool {
+        let numeric_only = |ck: &mut Self, m: TypeId| {
+            ck.index_info_of(m, TypeId::STRING).is_none()
+                && ck.index_info_of(m, TypeId::NUMBER).is_some()
+        };
+        let t = self.apparent_type(t);
+        if !self.store().flags(t).contains(TypeFlags::UNION) {
+            return numeric_only(self, t);
+        }
+        let mut common: Option<Vec<TypeId>> = None;
+        for m in self.store().members_of_union(t).to_vec() {
+            let m = self.apparent_type(m);
+            let keys: Vec<TypeId> = if self.store().flags(m).contains(TypeFlags::OBJECT) {
+                self.resolved_members(m)
+                    .index
+                    .iter()
+                    .map(|i| i.key)
+                    .collect()
+            } else if numeric_only(self, m) {
+                vec![TypeId::NUMBER]
+            } else {
+                Vec::new()
+            };
+            common = Some(match common {
+                None => keys,
+                Some(c) => c.into_iter().filter(|k| keys.contains(k)).collect(),
+            });
+        }
+        common.is_some_and(|c| c == [TypeId::NUMBER])
+    }
+
     /// `index` is the variable of a `for (let k in x)` statement and `obj` is the same
     /// identifier as `x` (tsc indexes with `number` when `x` has only a number index
     /// signature).
@@ -3173,6 +4773,59 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return self.c.resolve_ident(Loc::new(p.file, r), meaning::VALUE) == Some(o);
             }
             cur = p;
+        }
+        false
+    }
+
+    /// `index` (an identifier, maybe parenthesized) is the variable of a `for-in` whose
+    /// body holds it, over an expression whose only index signature is a number index
+    /// (`for (var k in this.items) other[k]`): the key counts as a `number`, whatever is
+    /// indexed (tsc: tsc/internal/checker/checker.go, isForInVariableForNumericPropertyNames).
+    fn is_numeric_for_in_key(&mut self, index: Loc) -> bool {
+        let file = index.file;
+        let ast = self.ast(file);
+        let e = skip_parens(ast, index.node);
+        if !matches!(ast.node(e), Node::Ident { .. }) {
+            return false;
+        }
+        let Some(sym) = self.c.resolve_ident(Loc::new(file, e), meaning::VALUE) else {
+            return false;
+        };
+        if !self.c.sym_flags(sym).intersects(SymbolFlags::VARIABLE) {
+            return false;
+        }
+        let parents = self.c.file(file).parents();
+        let mut child = index.node;
+        for _ in 0..4096 {
+            let Some(p) = parents.parent(child) else {
+                return false;
+            };
+            if let Node::ForIn { left, right, body } = *ast.node(p)
+                && body == child
+            {
+                let var = match *ast.node(left) {
+                    Node::VarDecl { decls, .. } => {
+                        ast.list(decls).first().and_then(|&d| match *ast.node(d) {
+                            Node::VarDeclarator { name, .. }
+                                if matches!(ast.node(name), Node::Ident { .. }) =>
+                            {
+                                self.c.resolve_ident(Loc::new(file, name), meaning::VALUE)
+                            }
+                            _ => None,
+                        })
+                    }
+                    Node::Ident { .. } => {
+                        self.c.resolve_ident(Loc::new(file, left), meaning::VALUE)
+                    }
+                    _ => None,
+                };
+                if var == Some(sym) {
+                    let t = self.quietly(|ck| ck.check_expr(Loc::new(file, right)));
+                    return self.index_info_of(t, TypeId::STRING).is_none()
+                        && self.index_info_of(t, TypeId::NUMBER).is_some();
+                }
+            }
+            child = p;
         }
         false
     }
@@ -3238,6 +4891,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         index: NodeId,
         is_write: bool,
     ) -> TypeId {
+        let ot = self.reduced_type(ot);
         let f = e.file;
         let ol = Loc::new(f, obj);
         let il = Loc::new(f, index);
@@ -3273,26 +4927,81 @@ impl<'c, 'a> Ck<'c, 'a> {
             let r = self
                 .indexed_access_type(nt, it, None)
                 .unwrap_or(TypeId::UNRESOLVED);
-            // Only for a conditional key, whose relation to `keyof` is modelled (through
-            // its branches).
-            if self.store().flags(r).contains(TypeFlags::INDEXED_ACCESS)
-                && self.store().flags(it).contains(TypeFlags::CONDITIONAL)
-                && !self.conditional_has_infer(it)
-                && !self.is_valid_generic_index(nt, it)
+            // The key must be assignable to `keyof` the object (a conditional key with
+            // `infer` is not checked: its relation to `keyof` is not modelled).
+            if let TypeKind::IndexedAccess { obj: ro, index: ri } = self.store().kind(r)
+                && !(self.store().flags(ri).contains(TypeFlags::CONDITIONAL)
+                    && self.conditional_has_infer(ri))
             {
-                let is = self.type_to_string(it);
-                let os = self.type_to_string(nt);
-                self.error(
-                    e,
-                    dg::TYPE_0_CANNOT_BE_USED_TO_INDEX_TYPE_1_2536,
-                    &[&is, &os],
-                );
+                if !self.is_valid_generic_index(ro, ri) {
+                    let is = self.type_to_string(ri);
+                    let os = self.type_to_string(ro);
+                    self.error(
+                        e,
+                        dg::TYPE_0_CANNOT_BE_USED_TO_INDEX_TYPE_1_2536,
+                        &[&is, &os],
+                    );
+                    return TypeId::ERROR;
+                }
+                // Writing through a `readonly` mapped type (`Readonly<T>[K]`).
+                if is_write
+                    && self.mapped_info(ro).is_some_and(|i| {
+                        matches!(
+                            i.readonly,
+                            ts_r_ast::MappedModifier::Present | ts_r_ast::MappedModifier::Add
+                        )
+                    })
+                {
+                    let os = self.type_to_string(ro);
+                    self.error(
+                        e,
+                        dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
+                        &[&os],
+                    );
+                }
+            }
+            // A constant generic key (`obj[key]` with `key: K`) in a constraint position
+            // (the object of an access, a callee) narrows through the access's union
+            // constraint (`if (obj[key]) obj[key].toUpperCase()` on `Record<K, string |
+            // undefined>`).
+            if !is_write
+                && self.store().flags(r).contains(TypeFlags::INDEXED_ACCESS)
+                && matches!(
+                    self.ast(f).node(skip_parens(self.ast(f), index)),
+                    Node::Ident { .. }
+                )
+                && self.is_narrowable_reference(e)
+            {
+                let d = self.narrowable_type_for_reference(e, r);
+                if d != r {
+                    return self.flow_type_of_reference(e, d, d);
+                }
             }
             return r;
         }
         let apparent = self.apparent_type(nt);
         if apparent == TypeId::UNRESOLVED {
             return TypeId::UNRESOLVED;
+        }
+        // A `const` enum member is only read with a string literal key (TS2476), checked
+        // by syntax (`E[k]` with `k: "A"` too).
+        let string_key = {
+            let ast = self.ast(f);
+            match *ast.node(skip_parens(ast, index)) {
+                Node::StringLit { .. } => true,
+                Node::TemplateLit { parts } => ast.list(parts).len() == 1,
+                _ => false,
+            }
+        };
+        if !string_key && self.is_const_enum_object(ol) {
+            if self.reporting(e.file) {
+                self.error(
+                    il,
+                    dg::A_CONST_ENUM_MEMBER_CAN_ONLY_BE_ACCESSED_USING_A_STRING_LITERAL_2476,
+                    &[],
+                );
+            }
+            return TypeId::ERROR;
         }
         // A type parameter constrained to `any` (or an unresolved import's error type):
         // the access is `any`, as tsc gives it, so implicit-any checks still run downstream.
@@ -3353,7 +5062,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 return t;
             }
-            // Tuples: out of bounds.
+            // A missing member of a `const` enum is a missing property, at the key.
+            if self.is_const_enum_object(ol) {
+                let ts = self.type_to_string(nt);
+                self.error(
+                    il,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, &ts],
+                );
+                return TypeId::ERROR;
+            }
+            // Tuples: a negative index, then out of bounds.
+            if let Some(shape) = self.store().tuple_shape_of(nt)
+                && !shape.has_rest()
+                && let Some(v) = self.store().number_value(itr)
+                && v < 0.0
+            {
+                self.error(
+                    il,
+                    dg::A_TUPLE_TYPE_CANNOT_BE_INDEXED_WITH_A_NEGATIVE_VALUE_2514,
+                    &[],
+                );
+                return TypeId::UNDEFINED;
+            }
             if let Some(shape) = self.store().tuple_shape_of(nt)
                 && !shape.has_rest()
                 && let Some(v) = self.store().number_value(itr)
@@ -3369,45 +5100,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
                 return TypeId::UNDEFINED;
             }
+            // A union of tuples none of which has the element: TS2339 naming the union.
+            if let Some(v) = self.store().number_value(itr)
+                && self.union_tuples_out_of_range(nt, v)
+            {
+                let ts = self.type_to_string(nt);
+                self.error(
+                    il,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, &ts],
+                );
+                return TypeId::UNDEFINED;
+            }
             // Tuples with a rest element: an index past the leading elements reads the rest
             // element and every element after it (`[number, string, ...boolean[]][2]` is
             // `boolean`), under noUncheckedIndexedAccess with `undefined` from the count of
             // fixed elements on.
             if !is_write
-                && let Some(shape) = self.store().tuple_shape_of(nt)
-                && shape.has_rest()
-                && !shape
-                    .elements
-                    .iter()
-                    .any(|e| e.kind == ts_r_types::TupleElement::VARIADIC)
                 && let Some(v) = self.store().number_value(itr)
                 && v >= 0.0
                 && v.fract() == 0.0
+                && let Some(r) = self.tuple_rest_region_element(nt, v as usize)
             {
-                let lead = shape
-                    .elements
-                    .iter()
-                    .position(|e| e.kind == ts_r_types::TupleElement::REST)
-                    .unwrap_or(0);
-                let fixed = shape
-                    .elements
-                    .iter()
-                    .filter(|e| e.kind != ts_r_types::TupleElement::REST)
-                    .count();
-                let args: Vec<TypeId> = match self.store().object_of(nt).map(|o| o.kind) {
-                    Some(ts_r_types::ObjectKind::Reference { args, .. }) => {
-                        self.store().list_items(args).to_vec()
-                    }
-                    _ => Vec::new(),
-                };
-                let idx = v as usize;
-                if idx >= lead && args.len() == shape.elements.len() {
-                    let mut parts = args[lead..].to_vec();
-                    if idx >= fixed && self.c.opts.no_unchecked_indexed_access {
-                        parts.push(TypeId::UNDEFINED);
-                    }
-                    return self.union(&parts);
-                }
+                return r;
             }
         }
         // A branded key (`number & { __brand: never }`, `string & {}`) indexes as its
@@ -3503,9 +5218,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         && texts.iter().all(|&x| s.string_value(x) == Some(""))
                 })
         }) || (f_it.intersects(TypeFlags::STRING)
-            && self.index_info_of(nt, TypeId::STRING).is_none()
-            && self.index_info_of(nt, TypeId::NUMBER).is_some()
-            && self.is_for_in_key_access(ol, il));
+            && self.has_numeric_property_names(nt)
+            && (self.is_for_in_key_access(ol, il) || self.is_numeric_for_in_key(il)));
         let symbolic = self.every_member(itr, |m| {
             self.store().flags(m).intersects(TypeFlags::ES_SYMBOL_LIKE)
         });
@@ -3534,6 +5248,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             self.index_info_of(nt, TypeId::STRING)
         };
+        // A union key of numbers and strings reads both index signatures
+        // (`o[k]` with `k: string | number` is `A | B`).
+        let info = match info {
+            Some(mut i)
+                if !is_write
+                    && self.store().flags(itr).contains(TypeFlags::UNION)
+                    && self.some_member(itr, |m| {
+                        self.store().flags(m).intersects(TypeFlags::NUMBER_LIKE)
+                    })
+                    && self.some_member(itr, |m| {
+                        self.store().flags(m).intersects(TypeFlags::STRING_LIKE)
+                    }) =>
+            {
+                if let Some(n) = self.index_info_of(nt, TypeId::NUMBER)
+                    && n.value != i.value
+                {
+                    i.value = self.union(&[i.value, n.value]);
+                }
+                Some(i)
+            }
+            other => other,
+        };
         if let Some(i) = info {
             if is_write && i.readonly {
                 let ts = self.type_to_string(nt);
@@ -3542,7 +5278,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
                     &[&ts],
                 );
-                return TypeId::ERROR;
+                // The assigned value is still checked against the signature's type
+                // (`a[0] = ""` on a `readonly number[]` is TS2542 and TS2322).
+                return i.value;
             }
             let mut t = i.value;
             if self.c.opts.no_unchecked_indexed_access && !is_write {
@@ -3658,11 +5396,60 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => false,
             }
         };
-        if self.store().object_of(nt).is_some_and(|o| {
-            o.flags.contains(ObjectFlags::OBJECT_LITERAL)
-                && (const_asserted || o.flags.contains(ObjectFlags::FRESH_LITERAL))
-        }) {
+        // Only for reads: a written key (any assignment, `++`) or a called one indexes the
+        // widened object, which is implicitly `any` (TS7053).
+        if !is_write
+            && !self.is_any_assignment_target(e)
+            && !self.is_callee(e)
+            && self.store().object_of(nt).is_some_and(|o| {
+                o.flags.contains(ObjectFlags::OBJECT_LITERAL)
+                    && (const_asserted || o.flags.contains(ObjectFlags::FRESH_LITERAL))
+            })
+        {
             let kf = self.store().flags(itr);
+            // A union of literal keys reads the properties it names, and each missing key is
+            // TS2339 (`{ a: 1 }[k]` with `k: "a" | "z"`).
+            if kf.contains(TypeFlags::UNION) {
+                let ms = self.store().members_of_union(itr).to_vec();
+                let names: Vec<Option<String>> = ms
+                    .iter()
+                    .map(|&m| {
+                        if self
+                            .store()
+                            .flags(m)
+                            .intersects(TypeFlags::STRING_LITERAL | TypeFlags::NUMBER_LITERAL)
+                        {
+                            self.property_name_of_type(m)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if names.iter().all(Option::is_some) {
+                    let mut parts: Vec<TypeId> = Vec::new();
+                    let mut missing = false;
+                    for name in names.into_iter().flatten() {
+                        let nid = self.store().intern_str(&name);
+                        if let Some(p) = self.property_of_type_id(nt, nid) {
+                            parts.push(self.type_of_symbol(p));
+                        } else {
+                            missing = true;
+                            if self.c.opts.no_implicit_any && self.reporting(e.file) {
+                                let ts = self.type_to_string(nt);
+                                self.error(
+                                    e,
+                                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                                    &[&name, &ts],
+                                );
+                            }
+                        }
+                    }
+                    if missing {
+                        parts.push(TypeId::UNDEFINED);
+                    }
+                    return self.union(&parts);
+                }
+            }
             if kf.intersects(TypeFlags::STRING | TypeFlags::NUMBER)
                 && !kf.contains(TypeFlags::UNION)
             {
@@ -3687,7 +5474,35 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return TypeId::UNDEFINED;
             }
         }
+        // A symbol key on an object with a string index signature but no symbol one cannot
+        // index it (observed: TS2538, not an implicit `any`).
+        if symbolic
+            && !self.store().flags(itr).contains(TypeFlags::UNION)
+            && self.store().flags(nt).contains(TypeFlags::OBJECT)
+            && self.index_info_of(nt, TypeId::STRING).is_some()
+            && self.reporting(e.file)
+        {
+            let ks = match self.store().kind(itr) {
+                TypeKind::UniqueSymbol(_) => "unique symbol".to_owned(),
+                _ => self.type_to_string(itr),
+            };
+            self.error(il, dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538, &[&ks]);
+            return TypeId::ERROR;
+        }
         if self.c.opts.no_implicit_any && self.reporting(e.file) {
+            // A primitive is indexed as its apparent type (`Number`, and `String` with its
+            // number index signature).
+            let nt = if nt == TypeId::BOOLEAN {
+                self.global_type(crate::checker::GlobalType::Boolean)
+                    .unwrap_or(nt)
+            } else if self.store().flags(nt).intersects(TypeFlags::PRIMITIVE)
+                && !self.store().flags(nt).contains(TypeFlags::UNION)
+                && self.store().flags(apparent).contains(TypeFlags::OBJECT)
+            {
+                apparent
+            } else {
+                nt
+            };
             // An unconstrained type parameter is indexed as its apparent type `unknown`.
             let ts = if self.store().flags(nt).intersects(TypeFlags::INSTANTIABLE)
                 && self.apparent_type(nt) == TypeId::UNKNOWN
@@ -3716,19 +5531,100 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .resolved_members(nt)
                         .index
                         .iter()
-                        .any(|i| i.key == TypeId::NUMBER));
+                        .any(|i| i.key == TypeId::NUMBER))
+                || (self.store().flags(nt).contains(TypeFlags::INTERSECTION)
+                    && self.index_info_of(nt, TypeId::NUMBER).is_some());
+            // A union key is reported through its first member that names no property.
+            let mut key = itr;
+            if self.store().flags(itr).contains(TypeFlags::UNION) {
+                let ms = self.store().members_of_union(itr).to_vec();
+                for m in ms {
+                    let found = match self.property_name_of_type(m) {
+                        Some(name) => {
+                            let nid = self.store().intern_str(&name);
+                            self.property_of_type_id(nt, nid).is_some()
+                        }
+                        None => false,
+                    };
+                    if !found {
+                        key = m;
+                        break;
+                    }
+                }
+            }
+            // A string literal key naming a static member, or spelled like a property, is
+            // reported as the missing property (observed tsc 7).
+            let literal_name = if self.store().flags(key).contains(TypeFlags::STRING_LITERAL) {
+                self.property_name_of_type(key)
+                    .filter(|n| !n.starts_with("__@") && !n.starts_with('#'))
+            } else {
+                None
+            };
+            let static_class = literal_name
+                .as_ref()
+                .is_some_and(|name| self.class_has_static_member(nt, name));
+            let suggestion = match &literal_name {
+                Some(name) if !number_indexed && !static_class => {
+                    self.spelling_suggestion_symbol_for_property(name, nt)
+                }
+                _ => None,
+            };
+            // A global `let`/`const` is no property of the global object.
+            let global_block = match &literal_name {
+                Some(name) if !number_indexed => {
+                    nt == self.global_this_type()
+                        && self.c.global_symbol(name, meaning::VALUE).is_some_and(|g| {
+                            self.c
+                                .sym_flags(g)
+                                .intersects(SymbolFlags::BLOCK_SCOPED_VARIABLE)
+                        })
+                }
+                _ => false,
+            };
             if !numeric && number_indexed {
                 self.error(il, dg::ELEMENT_IMPLICITLY_HAS_AN_ANY_TYPE_BECAUSE_INDEX_EXPRESSION_IS_NOT_OF_TYPE_NUMBE_7015, &[]);
+            } else if let Some(name) = literal_name.as_ref().filter(|_| global_block) {
+                self.error(
+                    e,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[name, &ts],
+                );
+            } else if let Some(name) = literal_name.as_ref().filter(|_| static_class) {
+                let full = format!("{ts}[{}]", self.c.text(il));
+                self.error(
+                    e,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_DID_YOU_MEAN_TO_ACCESS_THE_STATIC_MEMBER_2_I_2576,
+                    &[name, &ts, &full],
+                );
+            } else if let (Some(name), Some((sug, sym))) = (&literal_name, suggestion) {
+                let mark = self.diags.len();
+                self.error(
+                    il,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_DID_YOU_MEAN_2_2551,
+                    &[name, &ts, &sug],
+                );
+                if let Some(d) = self.c.value_decl(sym) {
+                    self.relate_last(mark, d, dg::_0_IS_DECLARED_HERE_2728, &[&sug]);
+                }
+            } else if let Some(call) = self.index_method_suggestion(e, obj, nt, key) {
+                self.error(
+                    e,
+                    dg::ELEMENT_IMPLICITLY_HAS_AN_ANY_TYPE_BECAUSE_TYPE_0_HAS_NO_INDEX_SIGNATURE_DID_YOU_7052,
+                    &[&ts, &call],
+                );
             } else {
                 // A `unique symbol` key is shown as such, its property as `[name]` (observed
                 // tsc 7).
-                let unique = match self.store().kind(itr) {
+                let unique = match self.store().kind(key) {
                     TypeKind::UniqueSymbol(sym) => Some(format!("[{}]", self.c.sym_name(sym))),
+                    _ if self.store().flags(key).contains(TypeFlags::ENUM_LITERAL) => {
+                        Some(format!("[{}]", self.type_to_string(key)))
+                    }
                     _ => None,
                 };
-                let ks = match unique {
-                    Some(_) => "unique symbol".to_owned(),
-                    None => self.type_to_string(itr),
+                let ks = match self.store().kind(itr) {
+                    TypeKind::UniqueSymbol(_) => "unique symbol".to_owned(),
+                    _ => self.type_to_string(itr),
                 };
                 let mut chain = Chain::new();
                 chain.push_back(
@@ -3737,17 +5633,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
                 if let Some(name) = unique {
                     chain.push_back(dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339, &[&name, &ts]);
-                } else if let Some(name) = self.property_name_of_type(itr) {
+                } else if let Some(name) = self.property_name_of_type(key) {
                     if !name.starts_with("__@") {
                         chain
                             .push_back(dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339, &[&name, &ts]);
                     }
-                } else if !self
-                    .store()
-                    .flags(itr)
-                    .intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
-                {
-                    let base = self.base_of_literal(itr);
+                } else if !self.store().flags(key).intersects(
+                    TypeFlags::TEMPLATE_LITERAL
+                        | TypeFlags::STRING_MAPPING
+                        | TypeFlags::ES_SYMBOL_LIKE,
+                ) {
+                    let base = self.base_of_literal(key);
                     let bs = self.type_to_string(base);
                     chain.push_back(
                         dg::NO_INDEX_SIGNATURE_WITH_A_PARAMETER_OF_TYPE_0_WAS_FOUND_ON_TYPE_1_7054,
@@ -3767,6 +5663,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         let k = self.keyof_type(obj);
         if self.is_assignable(index, k) {
             return true;
+        }
+        // `keyof (A | B)` is the keys common to every member; a key valid for each member
+        // is valid for the union (`(X & Record<K, V>) | (Y & Record<K, V>)` indexed by `K`).
+        if self.store().flags(obj).contains(TypeFlags::UNION) {
+            let ms = self.store().members_of_union(obj).to_vec();
+            if ms.iter().all(|&m| {
+                let mk = self.keyof_type(m);
+                self.is_assignable(index, mk)
+            }) {
+                return true;
+            }
         }
         if self.is_generic_object_type(obj) && self.is_assignable(index, TypeId::NUMBER) {
             let a = self.apparent_type(obj);
@@ -3795,10 +5702,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.in_const_context(e) {
             return self.regular_of_literal(t);
         }
+        // A literal kept for its contextual type loses its freshness (tsc:
+        // `getWidenedLiteralLikeTypeForContextualType`), so reading it back
+        // (`Object.freeze({ a: "x" }).a`) gives a literal a `let` keeps.
         if let Some(ct) = self.contextual_type(e)
             && self.is_literal_of_contextual_type(t, ct)
         {
-            return t;
+            return self.regular_of_literal(t);
         }
         self.widen_literal(t)
     }
@@ -3999,6 +5909,25 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// `f(...[a, b])`, parentheses allowed around the literal: spread straight into a call's
+    /// or `new`'s arguments, the literal is a tuple (its elements are separate arguments).
+    fn is_spread_into_call(&self, e: Loc) -> bool {
+        let ast = self.ast(e.file);
+        let mut cur = e;
+        while let Some(p) = self.c.parent(cur) {
+            match *ast.node(p.node) {
+                Node::Paren { .. } => cur = p,
+                Node::Spread { .. } => {
+                    return self.c.parent(p).is_some_and(|g| {
+                        matches!(ast.node(g.node), Node::Call { .. } | Node::New { .. })
+                    });
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     fn check_array_literal(&mut self, e: Loc) -> TypeId {
         let ast = self.ast(e.file);
         let Node::ArrayLit { elements } = *ast.node(e.node) else {
@@ -4021,7 +5950,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .any(|m| self.c.is_array_like_type(m) && !self.is_readonly_array_like(m))
             });
         let readonly_tuple = (const_assert && !mutable_ctx) || const_param == Some(true);
-        let tuple_ctx = const_ctx || ct.is_some_and(|c| self.is_tuple_like_context(c));
+        let tuple_ctx = const_ctx
+            || self.is_spread_into_call(e)
+            || ct.is_some_and(|c| self.is_tuple_like_context(c));
         let mut els: Vec<TupleEl> = Vec::new();
         let mut elem_types: Vec<TypeId> = Vec::new();
         for &el in ast.list(elements) {
@@ -4034,8 +5965,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let args = self.c.type_args_of_tuple(t).to_vec();
                         for (i, x) in shape.elements.iter().enumerate() {
                             let a = args.get(i).copied().unwrap_or(TypeId::UNRESOLVED);
+                            // A rest element's type argument is its element type; the
+                            // literal's rest element is the array of it.
+                            let ty = if x.kind == ts_r_types::TupleElement::REST {
+                                self.create_array(a, false)
+                            } else {
+                                a
+                            };
                             els.push(TupleEl {
-                                ty: a,
+                                ty,
                                 kind: x.kind,
                                 label: None,
                             });
@@ -4144,8 +6082,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         // Object types with a "0" property (but not arrays).
-        if s.flags(ct).contains(TypeFlags::OBJECT) && !self.c.is_array_like_type(ct) {
-            return self.property_of_type(ct, "0").is_some();
+        if s.flags(ct).contains(TypeFlags::OBJECT)
+            && !self.c.is_array_like_type(ct)
+            && self.property_of_type(ct, "0").is_some()
+        {
+            return true;
+        }
+        // An array-like type with a literal `length` (`interface E extends [] {}`).
+        if s.flags(ct).contains(TypeFlags::OBJECT)
+            && !self.c.is_array_type(ct)
+            && let Some(p) = self.property_of_type(ct, "length")
+        {
+            let lt = self.type_of_symbol(p);
+            return self.every_member(lt, |m| {
+                self.store().flags(m).contains(TypeFlags::NUMBER_LITERAL)
+            });
         }
         false
     }
@@ -4181,10 +6132,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut spread: Option<TypeId> = None;
         let mut seen: rustc_hash::FxHashMap<StrId, (usize, bool)> =
             rustc_hash::FxHashMap::default();
+        // Properties written so far (the last of each name), for TS2783.
+        let mut written: Vec<(StrId, NodeId)> = Vec::new();
+        let mut invalid_spread = false;
         for &m in ast.list(props) {
             let ml = Loc::new(e.file, m);
             let (key, ty, is_method, accessor) = match *ast.node(m) {
                 Node::Property { key, value, .. } => {
+                    if matches!(ast.node(key), Node::BigIntLit { .. }) && self.reporting(e.file) {
+                        self.error(
+                            Loc::new(e.file, key),
+                            dg::A_BIGINT_LITERAL_CANNOT_BE_USED_AS_A_PROPERTY_NAME_1539,
+                            &[],
+                        );
+                    }
                     let t = self.check_expr_mutable(Loc::new(e.file, value));
                     let t = self.jsdoc_typed_property(ml, key, value, t);
                     (Some(key), t, false, None)
@@ -4202,7 +6163,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let _ = t;
                         let sig = self.signature_from_decl(Loc::new(e.file, value));
                         let pt = if kind == MethodKind::Get {
-                            self.return_type_of(sig)
+                            // An unannotated getter has its setter's annotated type.
+                            match self.object_literal_setter_annotation(e, key, value) {
+                                Some(t) => t,
+                                None => self.return_type_of(sig),
+                            }
                         } else {
                             self.store()
                                 .sig(sig)
@@ -4219,6 +6184,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 },
                 Node::Spread { arg } => {
                     let t = self.check_expr(Loc::new(e.file, arg));
+                    if !self.can_spread(t, 0) {
+                        self.error(
+                            ml,
+                            dg::SPREAD_TYPES_MAY_ONLY_BE_CREATED_FROM_OBJECT_TYPES_2698,
+                            &[],
+                        );
+                        invalid_spread = true;
+                        continue;
+                    }
+                    if self.c.opts.strict_null_checks && self.reporting(e.file) {
+                        self.report_spread_overwrites(e.file, t, &written);
+                    }
+                    if invalid_spread {
+                        continue;
+                    }
                     // Flush the members so far (if any) into the spread.
                     if !members.is_empty() || !index_types.is_empty() || spread.is_none() {
                         let so_far = self.make_object_literal(
@@ -4255,7 +6235,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     match self.property_name_of_type(self.store().regular(kt)) {
                         Some(n) => n,
                         None => {
-                            self.check_computed_key_type(Loc::new(e.file, key), kt);
+                            let _ = self.check_computed_key_type(Loc::new(e.file, key), kt);
                             let kind = self.index_key_kind(kt);
                             index_types.push((ty, kind));
                             continue;
@@ -4295,6 +6275,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             );
             seen.insert(nid, (members.len(), accessor.is_some()));
             members.push((nid, s));
+            if accessor.is_none() {
+                written.retain(|&(n, _)| n != nid);
+                written.push((nid, m));
+            }
+        }
+        if invalid_spread {
+            return TypeId::ERROR;
         }
         let trailing_empty = members.is_empty() && index_types.is_empty();
         let lit = self.make_object_literal(e, members, &mut index_types, true, contains_widening);
@@ -4323,7 +6310,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The fresh version of the object literal type `t` an object literal `e` with spreads
     /// produced: its own written properties are checked for excess, the spread ones not.
-    fn fresh_spread_literal(&mut self, t: TypeId, e: Loc) -> TypeId {
+    pub(crate) fn fresh_spread_literal(&mut self, t: TypeId, e: Loc) -> TypeId {
         // (Only spreads: nothing of its own to check.)
         let ast = self.ast(e.file);
         if let Node::ObjectLit { props } = *ast.node(e.node)
@@ -4381,6 +6368,45 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             IndexKeyKind::String
         }
+    }
+
+    /// For the getter `getter` (its function) with key `key` in object literal `e` and no
+    /// return annotation: the annotated parameter type of a setter of the same name.
+    fn object_literal_setter_annotation(
+        &mut self,
+        e: Loc,
+        key: NodeId,
+        getter: NodeId,
+    ) -> Option<TypeId> {
+        let ast = self.ast(e.file);
+        if crate::nodes::fn_parts(ast, getter)?.return_type.is_some() {
+            return None;
+        }
+        let name = key_text(ast, key)?;
+        let Node::ObjectLit { props } = *ast.node(e.node) else {
+            return None;
+        };
+        let ann = ast.list(props).iter().find_map(|&m| match *ast.node(m) {
+            Node::MethodDef {
+                kind: MethodKind::Set,
+                key: k,
+                value,
+                ..
+            } if key_text(ast, k).as_deref() == Some(name.as_ref()) => {
+                let parts = crate::nodes::fn_parts(ast, value)?;
+                let p = ast
+                    .list(parts.params)
+                    .iter()
+                    .copied()
+                    .find(|&x| !crate::nodes::is_this_param(ast, x))?;
+                match *ast.node(p) {
+                    Node::Param { type_ann, .. } => type_ann,
+                    _ => None,
+                }
+            }
+            _ => None,
+        })?;
+        Some(self.type_from_node(Loc::new(e.file, ann)))
     }
 
     fn object_literal_has_setter(&self, e: Loc, name: &str) -> bool {
@@ -4517,16 +6543,201 @@ impl<'c, 'a> Ck<'c, 'a> {
         s.literal_object(sym, flags, rm, TypeTraits::NONE)
     }
 
+    /// Whether an object literal can spread a value of type `t` (TS2698 otherwise).
+    /// Rule (tsc: `isValidSpreadType` in tsc/internal/checker/checker.go): each union member
+    /// is replaced by its base constraint (an unconstrained type parameter stays itself),
+    /// the members that are always falsy are dropped, and what is left must be `any`, an
+    /// object, `object` or a type parameter / indexed access / conditional type, or a union
+    /// or intersection of such. A value that is only `null`/`undefined`/`0`/`""` is rejected.
+    pub(crate) fn can_spread(&mut self, t: TypeId, depth: u32) -> bool {
+        let f = self.store().flags(t);
+        if depth > 8 || t == TypeId::UNRESOLVED || f.intersects(TypeFlags::ANY) {
+            return true;
+        }
+        let mut unknown = false;
+        let constrained = self.map_type(t, |ck, m| {
+            let s = ck.store();
+            let mf = s.flags(m);
+            if mf.contains(TypeFlags::TYPE_PARAMETER) {
+                if ck.type_param_constraint(m).is_none() {
+                    return m;
+                }
+            } else if !mf.intersects(TypeFlags::INSTANTIABLE | TypeFlags::INTERSECTION)
+                || mf.contains(TypeFlags::INTERSECTION)
+                    && !s.traits(m).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+            {
+                return m;
+            }
+            let c = ck.base_constraint(m);
+            if c == TypeId::UNRESOLVED {
+                unknown = true;
+                return m;
+            }
+            // Only a type parameter's own constraint may make it `unknown`.
+            if c == TypeId::UNKNOWN && !mf.contains(TypeFlags::TYPE_PARAMETER) {
+                return m;
+            }
+            c
+        });
+        if unknown {
+            return true;
+        }
+        let s = self.remove_definitely_falsy(constrained);
+        let f = self.store().flags(s);
+        if f.intersects(
+            TypeFlags::ANY
+                | TypeFlags::NON_PRIMITIVE
+                | TypeFlags::OBJECT
+                | TypeFlags::INSTANTIABLE_NON_PRIMITIVE,
+        ) {
+            return true;
+        }
+        if f.intersects(TypeFlags::UNION_OR_INTERSECTION) {
+            let ms = self.store().members_of_union(s).to_vec();
+            return ms.into_iter().all(|m| self.can_spread(m, depth + 1));
+        }
+        false
+    }
+
+    /// TS2783 (strict null checks): each property written before the spread of `t` that the
+    /// spread always overwrites, at the written property. A property is always overwritten
+    /// when the spread type has it required: a union must have it required in every
+    /// member, and a union with one object member next to `{}`/nullish/primitive members
+    /// spreads everything optionally (tsc: `checkSpreadPropOverrides` and
+    /// `tryMergeUnionOfObjectTypeAndEmptyObject`).
+    fn report_spread_overwrites(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        t: TypeId,
+        written: &[(StrId, NodeId)],
+    ) {
+        if written.is_empty() || self.store().flags(t).intersects(TypeFlags::ANY) {
+            return;
+        }
+        let members: Vec<TypeId> = if self.store().flags(t).contains(TypeFlags::UNION) {
+            self.store().members_of_union(t).to_vec()
+        } else {
+            vec![t]
+        };
+        if members.len() > 1 {
+            for &m in &members {
+                let mf = self.store().flags(m);
+                if mf.intersects(
+                    TypeFlags::NULLABLE
+                        | TypeFlags::VOID
+                        | TypeFlags::BOOLEAN_LIKE
+                        | TypeFlags::NUMBER_LIKE
+                        | TypeFlags::BIGINT_LIKE
+                        | TypeFlags::STRING_LIKE
+                        | TypeFlags::ENUM_LIKE
+                        | TypeFlags::NON_PRIMITIVE
+                        | TypeFlags::INDEX,
+                ) || self.is_empty_object_type(m)
+                {
+                    return;
+                }
+            }
+        }
+        let mut first = true;
+        let mut names: Vec<StrId> = Vec::new();
+        for &m in &members {
+            let props = self.properties_of(m);
+            let required: Vec<StrId> = props
+                .into_iter()
+                .filter(|&(_, p)| !self.c.sym_flags(p).intersects(SymbolFlags::OPTIONAL))
+                .map(|(n, _)| n)
+                .collect();
+            if first {
+                names = required;
+                first = false;
+            } else {
+                names.retain(|n| required.contains(n));
+            }
+            if names.is_empty() {
+                return;
+            }
+        }
+        for &(n, at) in written.iter() {
+            if names.contains(&n) {
+                let text = self.store().str(n).to_owned();
+                self.error(
+                    Loc::new(file, at),
+                    dg::_0_IS_SPECIFIED_MORE_THAN_ONCE_SO_THIS_USAGE_WILL_BE_OVERWRITTEN_2783,
+                    &[&text],
+                );
+            }
+        }
+    }
+
+    /// Whether property `p` is declared in a class body.
+    fn declared_in_class(&self, p: SymId) -> bool {
+        let Some(d) = self.c.value_decl(p).or_else(|| self.c.first_decl(p)) else {
+            return false;
+        };
+        self.c.parent(d).is_some_and(|c| {
+            matches!(
+                self.node(c),
+                Node::ClassDecl { .. } | Node::ClassExpr { .. }
+            )
+        })
+    }
+
+    /// Whether property `p` is an accessor with a setter and no getter (an object
+    /// literal's `set x(v) {}` without `get x()`).
+    fn is_set_only_accessor(&self, p: SymId) -> bool {
+        let f = self.c.sym_flags(p);
+        if f.contains(SymbolFlags::SET_ACCESSOR) && !f.contains(SymbolFlags::GET_ACCESSOR) {
+            return true;
+        }
+        let Some(d) = self.c.synth_sym(p).and_then(|x| x.decl) else {
+            return false;
+        };
+        let ast = self.ast(d.file);
+        let Node::MethodDef {
+            kind: MethodKind::Set,
+            key,
+            ..
+        } = *ast.node(d.node)
+        else {
+            return false;
+        };
+        let Some(lit) = self.c.parent(d) else {
+            return false;
+        };
+        let Some(name) = key_text(ast, key) else {
+            return false;
+        };
+        !self.object_literal_has_getter(lit, &name)
+    }
+
+    fn object_literal_has_getter(&self, e: Loc, name: &str) -> bool {
+        let ast = self.ast(e.file);
+        let Node::ObjectLit { props } = *ast.node(e.node) else {
+            return false;
+        };
+        ast.list(props).iter().any(|&m| {
+            matches!(*ast.node(m), Node::MethodDef { kind: MethodKind::Get, key, .. } if key_text(ast, key).as_deref() == Some(name))
+        })
+    }
+
     /// `x`'s properties, all optional (`...(c ? x : {})` spreads this).
     fn optional_spread_of(&mut self, x: TypeId) -> TypeId {
         let mut props = Vec::new();
         for (n, p) in self.properties_of(x) {
-            if self.c.sym_flags(p).intersects(SymbolFlags::METHOD) && self.is_class_instance_type(x)
+            if self.is_private_like(p).is_some()
+                || self.c.sym_flags(p).intersects(
+                    SymbolFlags::METHOD | SymbolFlags::GET_ACCESSOR | SymbolFlags::SET_ACCESSOR,
+                ) && (self.is_class_instance_type(x) || self.declared_in_class(p))
+                || self.store().str(n).starts_with('#')
             {
                 continue;
             }
-            let pt = self.type_of_symbol(p);
-            let ty = self.union2(pt, TypeId::UNDEFINED);
+            let ty = if self.is_set_only_accessor(p) {
+                TypeId::UNDEFINED
+            } else {
+                let pt = self.type_of_symbol(p);
+                self.union2(pt, TypeId::UNDEFINED)
+            };
             let decl = self.c.synth_sym(p).and_then(|x| x.decl);
             let np = self.c.new_synth(
                 SynthSym::new(
@@ -4588,14 +6799,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .flags(m)
                         .intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION)
             }) {
-                if ms.len() == 2 {
-                    let e0 = nullish(self, ms[0]) || self.is_empty_object_type(ms[0]);
-                    let e1 = nullish(self, ms[1]) || self.is_empty_object_type(ms[1]);
-                    if e0 != e1 {
-                        let x = if e0 { ms[1] } else { ms[0] };
-                        let partial = self.optional_spread_of(x);
-                        return self.spread_types(left, partial);
+                // One object member among `{}` and nullish ones spreads optionally.
+                let mut object = None;
+                let mut objects = 0;
+                for &m in &ms {
+                    if !(nullish(self, m) || self.is_empty_object_type(m)) {
+                        objects += 1;
+                        object = Some(m);
                     }
+                }
+                if objects == 1
+                    && let Some(x) = object
+                {
+                    let partial = self.optional_spread_of(x);
+                    return self.spread_types(left, partial);
                 }
                 if ms.len() <= 32 {
                     let mut parts: Vec<TypeId> = Vec::with_capacity(ms.len());
@@ -4656,12 +6873,26 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let rprops = self.properties_of(right);
         for (n, p) in rprops {
-            if self.c.sym_flags(p).intersects(SymbolFlags::METHOD)
-                && self.is_class_instance_type(right)
+            // `private` and `protected` members are not spread, and the left side's
+            // property of the same name goes too.
+            if self.is_private_like(p).is_some() {
+                props.retain(|(m, _)| *m != n);
+                continue;
+            }
+            // Methods and accessors of classes and `#private` fields are not spread.
+            if (self.c.sym_flags(p).intersects(
+                SymbolFlags::METHOD | SymbolFlags::GET_ACCESSOR | SymbolFlags::SET_ACCESSOR,
+            ) && (self.is_class_instance_type(right) || self.declared_in_class(p)))
+                || self.store().str(n).starts_with('#')
             {
                 continue;
             }
-            let pt = self.type_of_symbol(p);
+            // A set-only accessor spreads as `undefined`.
+            let pt = if self.is_set_only_accessor(p) {
+                TypeId::UNDEFINED
+            } else {
+                self.type_of_symbol(p)
+            };
             let optional = self.c.sym_flags(p).intersects(SymbolFlags::OPTIONAL);
             let ty = if optional {
                 match props.iter().find(|(m, _)| *m == n) {
@@ -4706,6 +6937,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             props.retain(|(m, _)| *m != n);
             props.push((n, np));
         }
+        self.sort_props_by_declaration(&mut props);
         // Index signatures: the right side's when nothing precedes it, otherwise those both
         // sides have (`{ ...h }` keeps `h`'s, `{ ...h, a }` and `{ a, ...h }` lose them).
         // (A spread's signatures are writable: `{ ...ro }` of `{ readonly [k: string]: T }`
@@ -4840,6 +7072,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut changed =
             s.traits(t).contains(TypeTraits::FRESH) || o.flags.contains(ObjectFlags::FRESH_LITERAL);
         let own: Vec<StrId> = props.iter().map(|&(n, _)| n).collect();
+        // The symbol whose declaration places each member (see `sort_by_declaration`).
+        let mut order_of: Vec<SymId> = props.iter().map(|&(_, p)| p).collect();
         for (n, p) in props {
             let pt = self.type_of_symbol(p);
             // Nested object literals widen with the same property of each sibling.
@@ -4887,8 +7121,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 out.push((n, p));
             }
         }
-        // Properties only siblings have: optional, of type `undefined`.
+        // Properties only siblings have: optional, of type `undefined` (`missing`).
         if let Some(sibs) = siblings {
+            let own_count = out.len();
             let mut seen = own;
             for &sib in sibs {
                 if sib == t || !self.is_object_literal_type(sib) {
@@ -4909,14 +7144,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     seen.push(n);
                     let decl = self.c.synth_sym(p).and_then(|x| x.decl);
+                    // `missing` under exactOptionalPropertyTypes (tsc: `getUndefinedProperty`).
+                    let ut = if self.c.opts.exact_optional_property_types {
+                        TypeId::MISSING
+                    } else {
+                        TypeId::UNDEFINED
+                    };
                     let np = self.c.new_synth(
                         SynthSym::new(n, SymbolFlags::PROPERTY | SymbolFlags::OPTIONAL, 0)
-                            .with_type(TypeId::UNDEFINED)
+                            .with_type(ut)
                             .with_decl(decl),
                     );
                     out.push((n, np));
+                    order_of.push(*self.undefined_prop_origin.entry(n).or_insert(p));
                     changed = true;
                 }
+            }
+            if out.len() > own_count {
+                self.sort_by_declaration(&mut out, &order_of);
             }
         }
         let s = self.store();
@@ -4937,6 +7182,49 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.widened.insert(t, r);
         }
         r
+    }
+
+    /// Orders members by where `order_of` (one symbol per member) is declared: program
+    /// file order, then source position; members without a declaration go last, in their
+    /// current order. A widened literal that gained its siblings' missing properties lists
+    /// them where they were written (`{ z?: undefined; x: number; y: string; }` when `z`
+    /// came from an earlier literal).
+    fn sort_by_declaration(&self, out: &mut Vec<(StrId, SymId)>, order_of: &[SymId]) {
+        let keys: Vec<(bool, u32, u32)> = order_of
+            .iter()
+            .map(|&o| match self.c.first_decl(o) {
+                Some(d) => (false, d.file.0, self.ast(d.file).span(d.node).start),
+                None => (true, 0, 0),
+            })
+            .collect();
+        let mut idx: Vec<usize> = (0..out.len()).collect();
+        idx.sort_by_key(|&i| keys.get(i).copied().unwrap_or((true, 0, 0)));
+        *out = idx.into_iter().map(|i| out[i]).collect();
+    }
+
+    /// Puts a spread's properties in the order tsc lists a built member table: by where
+    /// each was declared (file, then position), the ones with no declaration last by name.
+    fn sort_props_by_declaration(&self, props: &mut [(StrId, SymId)]) {
+        let keys: Vec<Option<(u32, u32)>> = props
+            .iter()
+            .map(|&(_, p)| {
+                self.c
+                    .first_decl(p)
+                    .map(|d| (d.file.0, self.ast(d.file).span(d.node).start))
+            })
+            .collect();
+        let mut idx: Vec<usize> = (0..props.len()).collect();
+        idx.sort_by(|&i, &j| match (keys[i], keys[j]) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => self
+                .store()
+                .str(props[i].0)
+                .cmp(self.store().str(props[j].0)),
+        });
+        let sorted: Vec<(StrId, SymId)> = idx.iter().map(|&i| props[i]).collect();
+        props.copy_from_slice(&sorted);
     }
 
     /// An object literal expression's type (fresh or widened).
@@ -5122,12 +7410,22 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 let t = self.check_expr(al);
                 let t = self.check_non_null(al, t);
-                if self.store().flags(t).intersects(TypeFlags::ES_SYMBOL_LIKE) {
+                if self.maybe_symbol_like(t) {
                     let o = if op == UnaryOp::Minus { "-" } else { "+" };
                     self.error(
                         al,
                         dg::THE_0_OPERATOR_CANNOT_BE_APPLIED_TO_TYPE_SYMBOL_2469,
                         &[o],
+                    );
+                }
+                if op == UnaryOp::Plus && self.maybe_kind_or_constraint(t, TypeFlags::BIGINT_LIKE) {
+                    // `+x` converts to a number, which throws for a bigint.
+                    let shown = self.base_of_literal(t);
+                    let shown = self.type_to_string(shown);
+                    self.error(
+                        al,
+                        dg::OPERATOR_0_CANNOT_BE_APPLIED_TO_TYPE_1_2736,
+                        &["+", &shown],
                     );
                 }
                 if op == UnaryOp::Minus
@@ -5143,6 +7441,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             UnaryOp::BitNot => {
                 let t = self.check_expr(al);
                 let t = self.check_non_null(al, t);
+                if self.maybe_symbol_like(t) {
+                    self.error(
+                        al,
+                        dg::THE_0_OPERATOR_CANNOT_BE_APPLIED_TO_TYPE_SYMBOL_2469,
+                        &["~"],
+                    );
+                }
                 if self.every_member(t, |m| {
                     self.store().flags(m).intersects(TypeFlags::BIGINT_LIKE)
                 }) && t != TypeId::NEVER
@@ -5156,7 +7461,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.typeof_result_type()
             }
             UnaryOp::Void => {
-                self.check_expr(al);
+                // The operand is checked with the deferred nodes (tsc: checker.go
+                // checkVoidExpression); a quiet check (resolving a type) skips it.
+                if self.reporting(e.file) {
+                    self.defer(e);
+                }
                 TypeId::UNDEFINED
             }
             UnaryOp::Delete => {
@@ -5166,31 +7475,32 @@ impl<'c, 'a> Ck<'c, 'a> {
                 match *ast.node(inner) {
                     Node::Member { .. } | Node::Index { .. } => {
                         let il = Loc::new(e.file, inner);
+                        if let Node::Member { prop, .. } = *ast.node(inner)
+                            && matches!(ast.node(prop), Node::PrivateName { .. })
+                        {
+                            self.error(
+                                il,
+                                dg::THE_OPERAND_OF_A_DELETE_OPERATOR_CANNOT_BE_A_PRIVATE_IDENTIFIER_18011,
+                                &[],
+                            );
+                        }
                         let prop = self.property_symbol_of_access(il);
                         // Deleting through a readonly index signature (`delete v[2]` of a
                         // readonly tuple's rest) writes it: TS2542.
-                        if prop.is_none()
-                            && let Node::Index { obj, index, .. } = *ast.node(inner)
+                        if prop.is_none() && self.check_readonly_index_write(il) {
+                            return TypeId::BOOLEAN;
+                        }
+                        // A readonly property (an enum member, `Symbol.iterator`) is
+                        // TS2704 instead of the optional check.
+                        if let Some(p) = prop
+                            && self.is_readonly_symbol(p)
                         {
-                            let ot = self.quietly(|ck| ck.check_expr(Loc::new(e.file, obj)));
-                            let it = self.quietly(|ck| ck.check_expr(Loc::new(e.file, index)));
-                            let nt = self.non_nullable(ot);
-                            let key = if self.store().flags(it).intersects(TypeFlags::NUMBER_LIKE) {
-                                TypeId::NUMBER
-                            } else {
-                                TypeId::STRING
-                            };
-                            if let Some(i) = self.index_info_of(nt, key)
-                                && i.readonly
-                            {
-                                let ts = self.type_to_string(nt);
-                                self.error(
-                                    il,
-                                    dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
-                                    &[&ts],
-                                );
-                                return TypeId::BOOLEAN;
-                            }
+                            self.error(
+                                il,
+                                dg::THE_OPERAND_OF_A_DELETE_OPERATOR_CANNOT_BE_A_READ_ONLY_PROPERTY_2704,
+                                &[],
+                            );
+                            return TypeId::BOOLEAN;
                         }
                         if self.c.opts.strict_null_checks
                             && let Some(p) = prop
@@ -5204,7 +7514,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                             let has_undef = self.nullable_facts(pt).0;
                             if !optional && !any_like && !has_undef {
                                 self.error(
-                                    al,
+                                    il,
                                     dg::THE_OPERAND_OF_A_DELETE_OPERATOR_MUST_BE_OPTIONAL_2790,
                                     &[],
                                 );
@@ -5213,7 +7523,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     _ => {
                         self.error(
-                            al,
+                            Loc::new(e.file, inner),
                             dg::THE_OPERAND_OF_A_DELETE_OPERATOR_MUST_BE_A_PROPERTY_REFERENCE_2703,
                             &[],
                         );
@@ -5270,6 +7580,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         let _ = op;
         let al = Loc::new(e.file, arg);
         let t = self.check_expr(al);
+        // `++undefined` reports only that `undefined` is not a variable (observed).
+        let ast = self.ast(e.file);
+        if let Node::Ident { name } = *ast.node(skip_parens(ast, arg))
+            && ast.atom(name) == "undefined"
+            && self.store().flags(t).intersects(TypeFlags::UNDEFINED)
+        {
+            self.error(
+                al,
+                dg::CANNOT_ASSIGN_TO_0_BECAUSE_IT_IS_NOT_A_VARIABLE_2539,
+                &["undefined"],
+            );
+            return TypeId::NUMBER;
+        }
         let t = self.check_non_null(al, t);
         // A target that can't be assigned (`++E` for an enum, `eval++`) reports only that;
         // an operand that isn't a number reports only that (`++true`, not TS2357 too).
@@ -5284,7 +7607,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 dg::AN_ARITHMETIC_OPERAND_MUST_BE_OF_TYPE_ANY_NUMBER_BIGINT_OR_AN_ENUM_TYPE_2356,
                 &[],
             );
-        } else if self.check_reference_target(al, true) {
+            // A readonly index signature target is reported too (`Enum[k]--`).
+            self.check_readonly_index_write(al);
+        } else if self.check_reference_target(al, true) && !self.check_readonly_index_write(al) {
             self.check_readonly_update_target(al);
         }
         if self.every_member(t, |m| {
@@ -5295,6 +7620,43 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             TypeId::NUMBER
         }
+    }
+
+    /// TS2542 for a write through a readonly index signature by the element access `il`
+    /// that reads no property (`delete v[2]`, `ro[k]++`, `Enum[k]--`); whether reported.
+    fn check_readonly_index_write(&mut self, il: Loc) -> bool {
+        let ast = self.ast(il.file);
+        let Node::Index { obj, index, .. } = *ast.node(skip_parens(ast, il.node)) else {
+            return false;
+        };
+        if self.property_symbol_of_access(il).is_some() {
+            return false;
+        }
+        let ot = self.quietly(|ck| ck.check_expr(Loc::new(il.file, obj)));
+        let it = self.quietly(|ck| ck.check_expr(Loc::new(il.file, index)));
+        let nt = self.non_nullable(ot);
+        let f = self.store().flags(it);
+        let info = if f.intersects(TypeFlags::ANY) {
+            // An `any` key (or an unresolved one) prefers the numeric index signature.
+            self.index_info_of(nt, TypeId::NUMBER)
+                .or_else(|| self.index_info_of(nt, TypeId::STRING))
+        } else if f.intersects(TypeFlags::NUMBER_LIKE) {
+            self.index_info_of(nt, TypeId::NUMBER)
+        } else {
+            self.index_info_of(nt, TypeId::STRING)
+        };
+        if let Some(i) = info
+            && i.readonly
+        {
+            let ts = self.type_to_string(nt);
+            self.error(
+                il,
+                dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
+                &[&ts],
+            );
+            return true;
+        }
+        false
     }
 
     /// TS2540 for `o.p++` / `--o.p` on a read-only property.
@@ -5348,7 +7710,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Validates an assignment target: a variable or property, not a constant, function,
     /// class, enum, namespace or import. `update` selects the `++`/`--` message. Returns
     /// whether the target is valid (an invalid one is not checked for assignability).
-    fn check_reference_target(&mut self, l: Loc, update: bool) -> bool {
+    pub(crate) fn check_reference_target(&mut self, l: Loc, update: bool) -> bool {
         let ast = self.ast(l.file);
         // `x!++` and `(x!) = 1` still check `x` (constants included).
         let mut n = skip_parens(ast, l.node);
@@ -5362,6 +7724,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::Ident { name } => {
                 let text = ast.atom(name);
                 let Some(s) = self.c.resolve_ident(Loc::new(l.file, n), meaning::VALUE) else {
+                    // The global `undefined` is not a variable (`undefined = null`).
+                    if text == "undefined" && !update {
+                        self.error(
+                            Loc::new(l.file, n),
+                            dg::CANNOT_ASSIGN_TO_0_BECAUSE_IT_IS_NOT_A_VARIABLE_2539,
+                            &["undefined"],
+                        );
+                        return false;
+                    }
                     return true;
                 };
                 let f = self.c.sym_flags(s);
@@ -5518,11 +7889,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                         &[always],
                     );
                 }
+                if self.reporting(e.file) {
+                    self.check_nan_equality(e, op, ll, rl);
+                }
                 TypeId::BOOLEAN
             }
             BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
                 let lt = self.check_expr(ll);
                 let rt = self.check_expr(rl);
+                if self.symbol_operand_error(op.as_str(), ll, rl, lt, rt) {
+                    return TypeId::BOOLEAN;
+                }
                 let lt = self.check_non_null(ll, lt);
                 let rt = self.check_non_null(rl, rt);
                 if self.store().is_error(lt) || self.store().is_error(rt) {
@@ -5559,14 +7936,47 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.check_type_related(lt, key, RelationKind::Assignable, Some(ll), None);
                     }
                 }
-                if !self.store().is_error(rt) && !self.could_be_object(rt) {
-                    let rs = self.type_to_string(rt);
-                    self.error(rl, dg::TYPE_0_MAY_REPRESENT_A_PRIMITIVE_VALUE_WHICH_IS_NOT_PERMITTED_AS_THE_RIGHT_OPERA_2638, &[&rs]);
+                // The right operand must be an `object` (TS2322); the `{}` of a narrowed
+                // `unknown` (alone or as `NonNullable<T>`) may be a primitive (TS2638).
+                let st = self.store();
+                // (`unknown` was TS18046 under strictNullChecks.)
+                let reported_unknown = rt == TypeId::UNKNOWN && self.c.opts.strict_null_checks;
+                if !st.is_error(rt) && !rt.is_any_like() && !reported_unknown {
+                    // An intersection counts when its base constraint is `{}` (`T & {}`).
+                    let members = if st.flags(rt).contains(TypeFlags::UNION) {
+                        st.members_of_union(rt).to_vec()
+                    } else {
+                        vec![rt]
+                    };
+                    let narrowed_empty = members.into_iter().any(|m| {
+                        m == TypeId::EMPTY_OBJECT
+                            || (self.store().flags(m).contains(TypeFlags::INTERSECTION) && {
+                                let b = self.base_constraint(m);
+                                self.is_empty_anonymous_object(b)
+                            })
+                    });
+                    if narrowed_empty {
+                        let rs = self.type_to_string(rt);
+                        self.error(rl, dg::TYPE_0_MAY_REPRESENT_A_PRIMITIVE_VALUE_WHICH_IS_NOT_PERMITTED_AS_THE_RIGHT_OPERA_2638, &[&rs]);
+                    } else if !self.is_assignable(rt, TypeId::OBJECT) {
+                        self.check_type_related(
+                            rt,
+                            TypeId::OBJECT,
+                            RelationKind::Assignable,
+                            Some(rl),
+                            None,
+                        );
+                    }
                 }
                 TypeId::BOOLEAN
             }
             BinaryOp::InstanceOf => {
                 let lt = self.check_expr(ll);
+                // `x instanceof C<T>`: the type arguments have no runtime meaning.
+                let inner = self.skip_parens_loc(rl);
+                if matches!(self.c.node(inner), Node::Instantiation { .. }) {
+                    self.error(inner, dg::THE_RIGHT_HAND_SIDE_OF_AN_INSTANCEOF_EXPRESSION_MUST_NOT_BE_AN_INSTANTIATION_EXP_2848, &[]);
+                }
                 let rt = self.check_expr(rl);
                 let lf = self.store().flags(lt);
                 if !lf.intersects(TypeFlags::ANY)
@@ -5575,7 +7985,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     self.error(ll, dg::THE_LEFT_HAND_SIDE_OF_AN_INSTANCEOF_EXPRESSION_MUST_BE_OF_TYPE_ANY_AN_OBJECT_TYP_2358, &[]);
                 }
-                if !self.store().flags(rt).intersects(TypeFlags::ANY) && !self.store().is_error(rt)
+                if !self.store().flags(rt).intersects(TypeFlags::ANY)
+                    && !self.store().is_error(rt)
+                    && let Some(m) = self.has_instance_method(rt)
+                {
+                    self.check_has_instance_call(ll, rl, lt, m);
+                } else if !self.store().flags(rt).intersects(TypeFlags::ANY)
+                    && !self.store().is_error(rt)
                 {
                     let callable = !self
                         .signatures_of(rt, crate::members::SigKind::Construct)
@@ -5585,8 +8001,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                             .is_empty()
                         || self
                             .global_type(GlobalType::Function)
-                            .is_some_and(|ft| self.is_assignable(rt, ft))
-                        || self.property_of_type(rt, "__@hasInstance@0").is_some();
+                            .is_some_and(|ft| self.is_assignable(rt, ft));
                     if !callable {
                         self.error(rl, dg::THE_RIGHT_HAND_SIDE_OF_AN_INSTANCEOF_EXPRESSION_MUST_BE_EITHER_OF_TYPE_ANY_A_CLA_2359, &[]);
                     }
@@ -5604,6 +8019,59 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_arithmetic(e, op.as_str(), op.as_str(), ll, rl, lt, rt)
             }
         }
+    }
+
+    /// The type of `t[Symbol.hasInstance]` when `t` is an object type with such a callable
+    /// property (a class or function gets `Function`'s from the ES2015 lib).
+    fn has_instance_method(&mut self, t: TypeId) -> Option<TypeId> {
+        if !self.is_assignable(t, TypeId::OBJECT) {
+            return None;
+        }
+        let name = self.well_known_symbol_name("hasInstance")?;
+        let apparent = self.apparent_type(t);
+        let p = self.property_of_type(apparent, &name)?;
+        let pt = self.type_of_symbol(p);
+        (!self
+            .signatures_of(pt, crate::members::SigKind::Call)
+            .is_empty())
+        .then_some(pt)
+    }
+
+    /// `l instanceof r` with `r[Symbol.hasInstance]` of type `method`: checked like the
+    /// call `r[Symbol.hasInstance](l)` for a single non-generic signature (TS2860 at `l`),
+    /// whose result must be a boolean (TS2861 at `r`).
+    fn check_has_instance_call(&mut self, ll: Loc, rl: Loc, lt: TypeId, method: TypeId) {
+        let sigs = self.signatures_of(method, crate::members::SigKind::Call);
+        let [sig] = sigs[..] else {
+            return;
+        };
+        if self.store().sig(sig).type_params != ts_r_types::ListId::EMPTY {
+            return;
+        }
+        if let Some(pt) = self.param_type_at(sig, 0)
+            && !self.store().is_error(lt)
+            && !self.check_type_related(
+                lt,
+                pt,
+                RelationKind::Assignable,
+                Some(ll),
+                Some(Head {
+                    info: dg::THE_LEFT_HAND_SIDE_OF_AN_INSTANCEOF_EXPRESSION_MUST_BE_ASSIGNABLE_TO_THE_FIRST_A_2860,
+                }),
+            )
+        {
+            return;
+        }
+        let ret = self.return_type_of(sig);
+        self.check_type_related(
+            ret,
+            TypeId::BOOLEAN,
+            RelationKind::Assignable,
+            Some(rl),
+            Some(Head {
+                info: dg::AN_OBJECT_S_SYMBOL_HASINSTANCE_METHOD_MUST_RETURN_A_BOOLEAN_VALUE_FOR_IT_TO_BE_U_2861,
+            }),
+        );
     }
 
     fn could_be_object(&mut self, t: TypeId) -> bool {
@@ -5661,8 +8129,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             (lt, rt)
         };
-        let ls = self.type_to_string(lt);
-        let rs = self.type_to_string(rt);
+        let (ls, rs) = self.type_names_for_error(lt, rt);
         if equality {
             self.error(e, dg::THIS_COMPARISON_APPEARS_TO_BE_UNINTENTIONAL_BECAUSE_THE_TYPES_0_AND_1_HAVE_NO_OV_2367, &[&ls, &rs]);
         } else {
@@ -5715,36 +8182,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             lt = self.check_non_null(ll, lt);
             rt = self.check_non_null(rl, rt);
         }
-        if self.store().is_error(lt) || self.store().is_error(rt) {
-            // A string operand makes the result `string` even next to the error type
-            // (`Missing + 's'`); otherwise the error type propagates (`Missing + 1`).
-            let other = if self.store().is_error(lt) { rt } else { lt };
-            if !self.store().is_error(other)
-                && self.assignable_to_kind(other, TypeFlags::STRING_LIKE, true)
-            {
-                return TypeId::STRING;
-            }
-            return TypeId::ERROR;
-        }
-        if self.assignable_to_kind(lt, TypeFlags::NUMBER_LIKE, true)
-            && self.assignable_to_kind(rt, TypeFlags::NUMBER_LIKE, true)
-        {
-            return TypeId::NUMBER;
-        }
-        if self.assignable_to_kind(lt, TypeFlags::BIGINT_LIKE, true)
-            && self.assignable_to_kind(rt, TypeFlags::BIGINT_LIKE, true)
-        {
-            return TypeId::BIGINT;
-        }
-        if self.assignable_to_kind(lt, TypeFlags::STRING_LIKE, true)
-            || self.assignable_to_kind(rt, TypeFlags::STRING_LIKE, true)
-        {
-            return TypeId::STRING;
-        }
-        if self.store().flags(lt).intersects(TypeFlags::ANY)
-            || self.store().flags(rt).intersects(TypeFlags::ANY)
-        {
-            return TypeId::ANY;
+        if let Some(result) = self.plus_result(lt, rt) {
+            // A valid result type with a symbol operand is TS2469 (`s + ""`).
+            self.symbol_operand_error(shown, ll, rl, lt, rt);
+            return result;
         }
         // Mixing number and bigint (or a `null`/`undefined` operand without strict null
         // checks) shows the operand types as they are; any other invalid pair shows them
@@ -5766,8 +8207,133 @@ impl<'c, 'a> Ck<'c, 'a> {
         TypeId::ANY
     }
 
+    /// The result type of `+` when the operand pair is valid, ignoring symbols.
+    fn plus_result(&mut self, lt: TypeId, rt: TypeId) -> Option<TypeId> {
+        if self.store().is_error(lt) || self.store().is_error(rt) {
+            // A string operand makes the result `string` even next to the error type
+            // (`Missing + 's'`); otherwise the error type propagates (`Missing + 1`).
+            let other = if self.store().is_error(lt) { rt } else { lt };
+            if !self.store().is_error(other)
+                && self.assignable_to_kind(other, TypeFlags::STRING_LIKE, true)
+            {
+                return Some(TypeId::STRING);
+            }
+            return Some(TypeId::ERROR);
+        }
+        if self.assignable_to_kind(lt, TypeFlags::NUMBER_LIKE, true)
+            && self.assignable_to_kind(rt, TypeFlags::NUMBER_LIKE, true)
+        {
+            return Some(TypeId::NUMBER);
+        }
+        if self.assignable_to_kind(lt, TypeFlags::BIGINT_LIKE, true)
+            && self.assignable_to_kind(rt, TypeFlags::BIGINT_LIKE, true)
+        {
+            return Some(TypeId::BIGINT);
+        }
+        if self.assignable_to_kind(lt, TypeFlags::STRING_LIKE, true)
+            || self.assignable_to_kind(rt, TypeFlags::STRING_LIKE, true)
+        {
+            return Some(TypeId::STRING);
+        }
+        if self.store().flags(lt).intersects(TypeFlags::ANY)
+            || self.store().flags(rt).intersects(TypeFlags::ANY)
+        {
+            return Some(TypeId::ANY);
+        }
+        None
+    }
+
+    /// Whether `t`, a member of it, or its base constraint is symbol-like.
+    fn maybe_symbol_like(&mut self, t: TypeId) -> bool {
+        self.maybe_kind_or_constraint(t, TypeFlags::ES_SYMBOL_LIKE)
+    }
+
+    /// Whether `t` (a union member, at any depth) or else its base constraint has one of
+    /// the `kind` flags.
+    fn maybe_kind_or_constraint(&mut self, t: TypeId, kind: TypeFlags) -> bool {
+        fn walk(s: &ts_r_types::TypeStore, t: TypeId, kind: TypeFlags, depth: u32) -> bool {
+            let f = s.flags(t);
+            if f.intersects(kind) {
+                return true;
+            }
+            depth < 16
+                && f.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION)
+                && s.members_of_union(t)
+                    .iter()
+                    .any(|&m| walk(s, m, kind, depth + 1))
+        }
+        if walk(self.store(), t, kind, 0) {
+            return true;
+        }
+        // The base constraint of a union is the union of its members' (`S | string` with
+        // `S extends symbol`).
+        let members = if self.store().flags(t).contains(TypeFlags::UNION) {
+            self.store().members_of_union(t).to_vec()
+        } else {
+            vec![t]
+        };
+        members.into_iter().any(|m| {
+            if !self.store().flags(m).intersects(TypeFlags::INSTANTIABLE) {
+                return false;
+            }
+            let b = self.base_constraint(m);
+            b != m && b != TypeId::UNRESOLVED && walk(self.store(), b, kind, 0)
+        })
+    }
+
+    /// TS2469 at the first operand that may be a symbol (`op` is the operator text);
+    /// returns whether it was reported.
+    fn symbol_operand_error(&mut self, op: &str, ll: Loc, rl: Loc, lt: TypeId, rt: TypeId) -> bool {
+        let at = if self.maybe_symbol_like(lt) {
+            ll
+        } else if self.maybe_symbol_like(rt) {
+            rl
+        } else {
+            return false;
+        };
+        self.error(
+            at,
+            dg::THE_0_OPERATOR_CANNOT_BE_APPLIED_TO_TYPE_SYMBOL_2469,
+            &[op],
+        );
+        true
+    }
+
     /// Arithmetic and bitwise operators; `shown` names the operator in TS2365 (`-=` for a
     /// compound assignment).
+    /// The span of the operator `op` written between the operands `ll` and `rl`: the
+    /// first non-trivia text after the left operand. Falls back to the gap between them.
+    fn operator_token_span(&self, ll: Loc, rl: Loc, op: &str) -> Span {
+        let ast = self.ast(ll.file);
+        let text = self.c.file(ll.file).text.as_bytes();
+        let (from, to) = (ast.span(ll.node).end, ast.span(rl.node).start);
+        let mut i = from as usize;
+        let end = (to as usize).min(text.len());
+        while i < end {
+            match text[i] {
+                b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+                b'/' if text.get(i + 1) == Some(&b'/') => {
+                    while i < end && text[i] != b'\n' {
+                        i += 1;
+                    }
+                }
+                b'/' if text.get(i + 1) == Some(&b'*') => {
+                    i += 2;
+                    while i < end && !(text[i] == b'*' && text.get(i + 1) == Some(&b'/')) {
+                        i += 1;
+                    }
+                    i += 2;
+                }
+                _ => break,
+            }
+        }
+        if i < end && text[i..end].starts_with(op.as_bytes()) {
+            let s = i as u32;
+            return Span::new(s, s + op.len() as u32);
+        }
+        Span::new(from, to.max(from))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn check_arithmetic(
         &mut self,
@@ -5789,18 +8355,37 @@ impl<'c, 'a> Ck<'c, 'a> {
             // An operand of the error type itself (an unresolved name) is an `any`:
             // `Missing * 7` is a `number` (a `bigint` next to an all-bigint operand), and
             // nothing is reported. An operand made an error here (`null`, `unknown`) was
-            // reported already; the result stays the error type.
-            if (self.store().is_error(lt) && !self.store().is_error(l0))
-                || (self.store().is_error(rt) && !self.store().is_error(r0))
-            {
+            // reported already; the result stays the error type, and the other operand is
+            // still checked (`null * true` is TS18050 and TS2363).
+            let made_l = self.store().is_error(lt) && !self.store().is_error(l0);
+            let made_r = self.store().is_error(rt) && !self.store().is_error(r0);
+            if made_l || made_r {
+                let nb = self.number_or_bigint();
+                if !self.store().is_error(rt) && !self.is_assignable(rt, nb) {
+                    self.error(rl, dg::THE_RIGHT_HAND_SIDE_OF_AN_ARITHMETIC_OPERATION_MUST_BE_OF_TYPE_ANY_NUMBER_BIGINT_2363, &[]);
+                }
+                if !self.store().is_error(lt) && !self.is_assignable(lt, nb) {
+                    self.error(ll, dg::THE_LEFT_HAND_SIDE_OF_AN_ARITHMETIC_OPERATION_MUST_BE_OF_TYPE_ANY_NUMBER_BIGINT_O_2362, &[]);
+                }
                 return TypeId::ERROR;
             }
-            let other = if self.store().is_error(lt) { rt } else { lt };
+            let (other, other_loc, other_left) = if self.store().is_error(lt) {
+                (rt, rl, false)
+            } else {
+                (lt, ll, true)
+            };
             if !self.store().is_error(other) {
-                // An invalid other operand (`true * Missing`) is not modelled; stay silent.
+                // An invalid other operand (`true * Missing`, `Missing ** []`) is still
+                // reported; the result is a `number`.
                 let nb = self.number_or_bigint();
                 if !self.is_assignable(other, nb) {
-                    return TypeId::ERROR;
+                    let info = if other_left {
+                        dg::THE_LEFT_HAND_SIDE_OF_AN_ARITHMETIC_OPERATION_MUST_BE_OF_TYPE_ANY_NUMBER_BIGINT_O_2362
+                    } else {
+                        dg::THE_RIGHT_HAND_SIDE_OF_AN_ARITHMETIC_OPERATION_MUST_BE_OF_TYPE_ANY_NUMBER_BIGINT_2363
+                    };
+                    self.error(other_loc, info, &[]);
+                    return TypeId::NUMBER;
                 }
             }
             let all_big = !self.store().is_error(other)
@@ -5825,10 +8410,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 "&" => "&&",
                 _ => "!==",
             };
-            self.error(
-                e,
+            // Reported at the operator token, named as written (`^=` for the compound form).
+            let span = self.operator_token_span(ll, rl, shown);
+            self.error_span(
+                e.file,
+                span,
                 dg::THE_0_OPERATOR_IS_NOT_ALLOWED_FOR_BOOLEAN_TYPES_CONSIDER_USING_1_INSTEAD_2447,
-                &[op, sugg],
+                &[shown, sugg],
             );
             return TypeId::NUMBER;
         }
@@ -5847,9 +8435,6 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ck.store().flags(m).intersects(TypeFlags::BIGINT_LIKE)
             })
         };
-        if (any(self, lt) && any(self, rt)) || !(maybe_big(self, lt) || maybe_big(self, rt)) {
-            return TypeId::NUMBER;
-        }
         let all_big = |ck: &Self, t: TypeId| {
             ck.every_member(t, |m| {
                 ck.store()
@@ -5857,16 +8442,68 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .intersects(TypeFlags::BIGINT_LIKE | TypeFlags::ANY)
             })
         };
-        if all_big(self, lt) && all_big(self, rt) {
-            return TypeId::BIGINT;
-        }
-        if lok && rok {
-            // Operand types are shown widened (`bigint` and `number`, not `2`).
+        let result = if (any(self, lt) && any(self, rt))
+            || !(maybe_big(self, lt) || maybe_big(self, rt))
+        {
+            TypeId::NUMBER
+        } else if all_big(self, lt) && all_big(self, rt) {
+            if op == ">>>" {
+                // No unsigned shift on bigints; the operands are shown as written.
+                self.report_operator_error(e, shown, lt, rt, false);
+            } else if op == "**" && self.c.opts.target < ts_r_config::ScriptTarget::ES2016 {
+                self.error(
+                    e,
+                    dg::EXPONENTIATION_CANNOT_BE_PERFORMED_ON_BIGINT_VALUES_UNLESS_THE_TARGET_OPTION_IS_S_2791,
+                    &[],
+                );
+            }
+            TypeId::BIGINT
+        } else {
+            // A bigint mixed with something else, reported even when an operand was
+            // already TS2362/TS2363 (`"s" & 1n`). Operand types are shown widened
+            // (`bigint` and `number`, not `2`).
             let lb = self.base_of_literal(lt);
             let rb = self.base_of_literal(rt);
             self.report_operator_error(e, shown, lb, rb, false);
+            TypeId::ERROR
+        };
+        if lok && rok && matches!(op, "<<" | ">>" | ">>>") {
+            self.check_overshift(e, ll, rl, shown);
         }
-        TypeId::ERROR
+        result
+    }
+
+    /// TS6807: a shift by a constant count of 32 or more (either sign) shifts by the count
+    /// modulo 32. tsc only makes this a suggestion, except in an enum member initializer,
+    /// where it is an error (tsc: tsc/internal/checker/checker.go, checkBinaryLikeExpression).
+    fn check_overshift(&mut self, e: Loc, ll: Loc, rl: Loc, shown: &str) {
+        let ast = self.ast(e.file);
+        let mut up = self.c.parent(e);
+        while let Some(p) = up
+            && matches!(ast.node(p.node), Node::Paren { .. })
+        {
+            up = self.c.parent(p);
+        }
+        if !up.is_some_and(|p| matches!(ast.node(p.node), Node::EnumMember { .. })) {
+            return;
+        }
+        let Some(count) = self
+            .eval_constant(rl, SymId::NONE, &[], 0)
+            .and_then(|t| self.store().number_value(t))
+        else {
+            return;
+        };
+        if count.abs() < 32.0 {
+            return;
+        }
+        let rem = count % 32.0;
+        let rem = ts_r_binder::names::js_number_to_string(if rem == 0.0 { 0.0 } else { rem });
+        let left = self.c.text(ll).to_owned();
+        self.error(
+            e,
+            dg::THIS_OPERATION_CAN_BE_SIMPLIFIED_THIS_SHIFT_IS_IDENTICAL_TO_0_1_2_6807,
+            &[&left, shown, &rem],
+        );
     }
 
     // ---------------------------------------------------------------------------------
@@ -5884,6 +8521,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let Some(s) = self.c.resolve_ident(nl, meaning::VALUE) else {
                     return self.unresolved_identifier(nl, text);
                 };
+                if text == "arguments" && self.arguments_shadows(nl, s) {
+                    return self.unresolved_identifier(nl, text);
+                }
                 self.checked.insert(nl);
                 let s2 = if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
                     self.c.resolve_alias(s).unwrap_or(s)
@@ -5915,6 +8555,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(l.file);
         match *ast.node(l.node) {
             Node::ObjectLit { props } => {
+                self.check_rest_binding_pattern(l.file, props);
                 for &p in ast.list(props) {
                     match *ast.node(p) {
                         Node::Property { key, value, .. } => {
@@ -6000,6 +8641,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_destructuring_targets(l);
                     return;
                 }
+                if !syntax_errors {
+                    self.check_iterator_takes_undefined(
+                        source,
+                        l,
+                        false,
+                        dg::CANNOT_ITERATE_VALUE_BECAUSE_THE_NEXT_METHOD_OF_ITS_ITERATOR_EXPECTS_TYPE_1_BUT_A_2765,
+                    );
+                }
                 let els = ast.list(elements).to_vec();
                 let tuple_len = self
                     .store()
@@ -6026,6 +8675,44 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 None,
                             );
                         }
+                        // `[a, ...b] = xs`: `b` receives the rest of the source as an array.
+                        // (Not for a nested pattern, nor when an array literal value meets
+                        // an array target: tsc types the literal by the target then.)
+                        Node::Spread { arg }
+                            if !matches!(
+                                *ast.node(skip_parens(ast, arg)),
+                                Node::Assign { .. }
+                                    | Node::ArrayLit { .. }
+                                    | Node::ObjectLit { .. }
+                            ) && origin.is_some()
+                                && self.is_array_like_or_iterable_source(source)
+                                && !(origin.as_ref().is_some_and(|(r, _)| {
+                                    matches!(
+                                        *self
+                                            .ast(r.file)
+                                            .node(skip_parens(self.ast(r.file), r.node)),
+                                        Node::ArrayLit { .. }
+                                    )
+                                }) && {
+                                    let tt = self
+                                        .quietly(|ck| ck.assignment_target_type(Loc::new(f, arg)));
+                                    self.store().tuple_shape_of(tt).is_some()
+                                        || self.element_type_of_array_like(tt).is_some()
+                                }) =>
+                        {
+                            let rest = self.array_rest_type(source, i);
+                            let rest = if self
+                                .c
+                                .type_args_of(rest)
+                                .first()
+                                .is_some_and(|&a| a == TypeId::UNRESOLVED)
+                            {
+                                TypeId::UNRESOLVED
+                            } else {
+                                rest
+                            };
+                            self.destructuring_element(Loc::new(f, arg), rest, depth, None);
+                        }
                         Node::Spread { arg } => self.destructuring_target(Loc::new(f, arg)),
                         _ => {
                             let sub = origin.as_ref().map(|(r, p)| {
@@ -6033,6 +8720,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 p.push(i.to_string().into());
                                 (*r, p)
                             });
+                            // Past the end of the tuple (TS2493), unless defaulted.
+                            let defaulted = matches!(
+                                *ast.node(el),
+                                Node::Assign {
+                                    op: AssignOp::Assign,
+                                    ..
+                                }
+                            );
+                            if !defaulted && self.reporting(f) {
+                                self.check_tuple_element_bound(source, i, Loc::new(f, el));
+                            }
                             let et = if tuple_len.is_some_and(|n| i >= n) {
                                 TypeId::UNRESOLVED
                             } else {
@@ -6048,14 +8746,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             Node::ObjectLit { props } => {
+                self.check_rest_binding_pattern(f, props);
+                // An empty pattern still needs an object (`({} = maybeNull)`).
+                if ast.list(props).is_empty() {
+                    self.check_non_null(l, source);
+                }
                 for p in ast.list(props).to_vec() {
                     let ast = self.ast(f);
                     match *ast.node(p) {
                         Node::Property { key, value, .. } => {
-                            if let Node::ComputedKey { expr } = *ast.node(key) {
-                                self.check_expr(Loc::new(f, expr));
-                            }
+                            let computed = match *ast.node(key) {
+                                Node::ComputedKey { expr } => {
+                                    Some((expr, self.check_expr(Loc::new(f, expr))))
+                                }
+                                _ => None,
+                            };
                             let name = self.member_key_name(Loc::new(f, key));
+                            if name.is_none()
+                                && let Some((expr, kt)) = computed
+                                && self.reporting(f)
+                                && !self.c.file(f).is_js()
+                            {
+                                self.check_computed_key_read(Loc::new(f, expr), kt, source, None);
+                            }
                             let sub = match (&origin, &name) {
                                 (Some((r, p)), Some(n)) => {
                                     let mut p = p.clone();
@@ -6071,7 +8784,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                                     ..
                                 }
                             );
+                            if !has_default && let Node::NumberLit { value } = *ast.node(key) {
+                                self.check_tuple_element_in_range(
+                                    Loc::new(f, key),
+                                    source,
+                                    value.get(),
+                                );
+                            }
                             if let Some(n) = &name {
+                                self.check_destructured_member_access(Loc::new(f, p), source, n);
                                 let kl = match *ast.node(key) {
                                     Node::ComputedKey { expr } => Loc::new(f, expr),
                                     _ => Loc::new(f, key),
@@ -6101,6 +8822,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 continue;
                             };
                             let text = ast.atom(atom).to_owned();
+                            self.check_destructured_member_access(Loc::new(f, p), source, &text);
                             self.check_destructured_assignment_property(
                                 source,
                                 &text,
@@ -6126,7 +8848,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                                         Some(Loc::new(f, i)),
                                     );
                                 }
-                                et = self.without_undefined_strict(et);
+                                // A default that may be `undefined` itself leaves the read
+                                // value's `undefined` in (`({ x = undefined } = a)` reports
+                                // `number | undefined`; observed, tsc 7).
+                                if !self.may_be_undefined_value(rt) {
+                                    et = self.without_undefined_strict(et);
+                                }
                             }
                             if target_ok && self.destructured_part_checkable(et) {
                                 self.check_assignable_with_elaboration(et, tt, nl, None);
@@ -6134,8 +8861,52 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                         Node::Spread { arg } => {
                             let al = Loc::new(f, arg);
+                            let last = ast.list(props).last() == Some(&p);
+                            // `({ ...[] } = o)`: a literal rest (TS2501) is still checked as
+                            // a pattern against the rest type.
+                            if last
+                                && matches!(
+                                    ast.node(arg),
+                                    Node::ObjectLit { .. } | Node::ArrayLit { .. }
+                                )
+                            {
+                                let rest = self
+                                    .object_pattern_names(f, props)
+                                    .map(|omit| self.object_rest_type(source, &omit))
+                                    .unwrap_or(TypeId::UNRESOLVED);
+                                self.check_destructuring_assignment_from(al, rest, depth + 1, None);
+                                continue;
+                            }
                             self.check_destructuring_element_shape(al, true);
-                            self.assignment_target_type(al);
+                            // `({ a, ...r } = o)`: `r` receives `o` without the named
+                            // properties (only a last rest; others are TS2462).
+                            let plain_target = matches!(
+                                *ast.node(skip_parens(ast, arg)),
+                                Node::Ident { .. } | Node::Member { .. } | Node::Index { .. }
+                            );
+                            let rest = if last && plain_target {
+                                let omit = self.object_pattern_names(f, props);
+                                omit.map(|omit| self.object_rest_type(source, &omit))
+                            } else {
+                                None
+                            };
+                            match rest {
+                                Some(rest)
+                                    if rest != TypeId::UNRESOLVED
+                                        && !self.store().is_error(rest) =>
+                                {
+                                    let tt = self.assignment_target_type(al);
+                                    if !self.store().is_error(tt)
+                                        && tt != TypeId::UNRESOLVED
+                                        && self.destructured_part_checkable(rest)
+                                    {
+                                        self.check_assignable_with_elaboration(rest, tt, al, None);
+                                    }
+                                }
+                                _ => {
+                                    self.assignment_target_type(al);
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -6143,6 +8914,64 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => {}
         }
+    }
+
+    /// TS2501 at the first rest of an object assignment pattern that is itself an object or
+    /// array literal, parenthesized or not (`({ ...{} } = o)`), when the file parsed
+    /// cleanly (tsc: grammarchecks.go, checkGrammarObjectLiteralExpression).
+    fn check_rest_binding_pattern(
+        &mut self,
+        f: ts_r_diagnostics::FileId,
+        props: ts_r_ast::NodeList,
+    ) {
+        if self.has_syntax_errors(f) {
+            return;
+        }
+        let ast = self.ast(f);
+        let bad = ast.list(props).iter().find_map(|&p| match *ast.node(p) {
+            Node::Spread { arg }
+                if matches!(
+                    ast.node(skip_parens(ast, arg)),
+                    Node::ObjectLit { .. } | Node::ArrayLit { .. }
+                ) =>
+            {
+                Some(arg)
+            }
+            _ => None,
+        });
+        if let Some(arg) = bad {
+            self.error(
+                Loc::new(f, arg),
+                dg::A_REST_ELEMENT_CANNOT_CONTAIN_A_BINDING_PATTERN_2501,
+                &[],
+            );
+        }
+    }
+
+    /// The property names an object assignment pattern reads before its rest, or `None`
+    /// when one is not known statically.
+    fn object_pattern_names(
+        &mut self,
+        f: ts_r_diagnostics::FileId,
+        props: ts_r_ast::NodeList,
+    ) -> Option<Vec<String>> {
+        let ast = self.ast(f);
+        let items = ast.list(props).to_vec();
+        let mut out = Vec::with_capacity(items.len());
+        for p in items {
+            let ast = self.ast(f);
+            match *ast.node(p) {
+                Node::Property { key, .. } => out.push(self.member_key_name(Loc::new(f, key))?),
+                Node::ShorthandProp { name, .. } => {
+                    let Node::Ident { name: atom } = *ast.node(name) else {
+                        return None;
+                    };
+                    out.push(ast.atom(atom).to_owned());
+                }
+                _ => {}
+            }
+        }
+        Some(out)
     }
 
     /// TS2339 at the key of an object assignment pattern's property that the source lacks
@@ -6156,7 +8985,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         at: Loc,
         has_default: bool,
     ) {
-        if !self.reporting(at.file) || name.starts_with("__@") || name.starts_with('#') {
+        if !self.reporting(at.file) || name.starts_with('#') {
             return;
         }
         let s = self.store();
@@ -6165,6 +8994,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             || s.is_error(source)
             || source == TypeId::UNRESOLVED
         {
+            return;
+        }
+        // A unique symbol key the source lacks (with no symbol index signature) cannot
+        // index it (observed: TS2538).
+        if name.starts_with("__@") {
+            let apparent = self.apparent_type(source);
+            if self.store().flags(apparent).contains(TypeFlags::OBJECT)
+                && self.property_of_type(apparent, name).is_none()
+                && self.index_info_of(apparent, TypeId::SYMBOL).is_none()
+            {
+                self.error(
+                    at,
+                    dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538,
+                    &["unique symbol"],
+                );
+            }
             return;
         }
         let fresh = s
@@ -6294,11 +9139,37 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// Whether destructuring `t` with a rest element gives a known array: a tuple, an
+    /// array or another iterable (not a string, `any` or the error type).
+    fn is_array_like_or_iterable_source(&mut self, t: TypeId) -> bool {
+        let s = self.store();
+        if t == TypeId::UNRESOLVED
+            || s.is_error(t)
+            || s.flags(t)
+                .intersects(TypeFlags::ANY_OR_UNKNOWN | TypeFlags::STRING_LIKE)
+        {
+            return false;
+        }
+        s.tuple_shape_of(t).is_some()
+            || self.element_type_of_array_like(t).is_some()
+            || self.iterated_type(t, false).is_some()
+    }
+
     fn destructured_part_checkable(&self, et: TypeId) -> bool {
         et != TypeId::UNRESOLVED && !self.store().is_error(et)
     }
 
     /// `t` without `undefined` under strictNullChecks (a destructuring default replaces it).
+    /// A value of type `t` may be `undefined` (`undefined`, `void`, `any`, `unknown` or a
+    /// union holding one).
+    fn may_be_undefined_value(&self, t: TypeId) -> bool {
+        self.contains_undefined(t)
+            || self
+                .store()
+                .flags(t)
+                .intersects(TypeFlags::VOID | TypeFlags::ANY_OR_UNKNOWN)
+    }
+
     pub(crate) fn without_undefined_strict(&mut self, t: TypeId) -> TypeId {
         if self.c.opts.strict_null_checks {
             self.filter_type(t, |ck, m| {
@@ -6333,15 +9204,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         let rl = Loc::new(f, right);
         let ast = self.ast(f);
         let lnode = skip_parens(ast, left);
+        // A parenthesized literal is a value, not a pattern (`([]) = v`: TS2364).
         if op == AssignOp::Assign
             && matches!(
-                ast.node(lnode),
+                ast.node(left),
                 Node::ObjectLit { .. } | Node::ArrayLit { .. }
             )
         {
             let rt = self.check_expr(rl);
             let origin = Some((rl, Vec::new()));
             self.check_destructuring_assignment_from(Loc::new(f, lnode), rt, 0, origin);
+            self.check_assignment_pattern_excess(Loc::new(f, lnode), rl, 0);
             return rt;
         }
         // An arithmetic compound assignment checks its operands before the target's shape
@@ -6350,9 +9223,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             op,
             AssignOp::Assign | AssignOp::AndAssign | AssignOp::OrAssign | AssignOp::CoalesceAssign
         );
-        let valid_target = self.check_reference_target(ll, false)
+        // With a compound operator an object or array literal is a value, not a pattern
+        // (`[a] += v` reads the array, then TS2364); a lone `super` is the parser's TS1034
+        // and an error type.
+        let literal = matches!(
+            ast.node(lnode),
+            Node::ObjectLit { .. } | Node::ArrayLit { .. }
+        );
+        let lone_super = matches!(ast.node(lnode), Node::Super {});
+        let valid_target = !lone_super
+            && self.check_reference_target(ll, false)
             && (arithmetic || self.check_assignment_target_shape(ll));
-        let target = self.assignment_target_type(ll);
+        let target = if literal {
+            TypeId::UNRESOLVED
+        } else {
+            self.assignment_target_type(ll)
+        };
         match op {
             AssignOp::Assign => {
                 let rt = self.check_expr(rl);
@@ -6953,6 +9839,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             };
             let vl = Loc::new(el.file, value);
+            // An earlier property of a name written again is checked with the type the
+            // last one gives the literal (reported at its name).
+            let later_same = ast.list(props).iter().skip_while(|&&x| x != m).skip(1).any(|&x| {
+                matches!(*ast.node(x), Node::Property { key: k, .. } if key_text(ast, k).as_deref() == Some(name.as_str()))
+            });
+            if later_same && let Some(sp) = self.property_of_type_id(source, nid) {
+                let st = self.type_of_symbol(sp);
+                if !self.is_assignable(st, tprop_type) {
+                    let kl = Loc::new(el.file, key);
+                    let (chain, _) =
+                        self.relation_error_chain(st, tprop_type, RelationKind::Assignable, None);
+                    let mark = self.diags.len();
+                    self.error_chain(kl, &chain);
+                    self.relate_expected_property(mark, target, nid, &name);
+                    reported = true;
+                }
+                continue;
+            }
             let vt = self.quietly(|ck| ck.check_expr(vl));
             // A nested object literal stays fresh: its excess properties are reported.
             let fresh_object = self
@@ -7108,13 +10012,30 @@ impl<'c, 'a> Ck<'c, 'a> {
         file: ts_r_diagnostics::FileId,
         elements: ts_r_ast::NodeList,
     ) -> TypeId {
+        self.tupleized_array_literal_at(file, elements, 0)
+    }
+
+    fn tupleized_array_literal_at(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        elements: ts_r_ast::NodeList,
+        depth: u32,
+    ) -> TypeId {
         let ast = self.ast(file);
         let mut els: Vec<TupleEl> = Vec::new();
         for &x in ast.list(elements) {
             let l = Loc::new(file, x);
             let (ty, kind) = match *ast.node(x) {
                 Node::Spread { arg } => {
-                    let t = self.check_expr(Loc::new(file, arg));
+                    // A spread array literal is made a tuple too (`[...['y']]` is `[string]`;
+                    // tsc: relater.go, elaborateArrayLiteral checks with ForceTuple).
+                    let inner = crate::nodes::skip_parens(ast, arg);
+                    let t = match *ast.node(inner) {
+                        Node::ArrayLit { elements } if depth < 32 => {
+                            self.tupleized_array_literal_at(file, elements, depth + 1)
+                        }
+                        _ => self.check_expr(Loc::new(file, arg)),
+                    };
                     if self.store().tuple_shape_of(t).is_some() {
                         (t, ts_r_types::TupleElement::VARIADIC)
                     } else {
@@ -7158,7 +10079,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 return false;
             }
-            // A literal whose tuple type is just an array is not elaborated.
+            // A literal whose tuple type is just an array (`[...xs]`, `[...xs, ...ys]`: a
+            // lone rest element) is not elaborated.
             let src = self.quietly(|ck| ck.tupleized_array_literal(el.file, elements));
             if self.store().tuple_shape_of(src).is_none() {
                 return false;
@@ -7239,8 +10161,24 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else if spread_source.is_some() {
                 self.quietly(|ck| ck.check_expr_mutable(xl))
             } else {
+                // A literal element is widened unless the element's target takes literals
+                // of its kind (`[1]` against `null[]` shows `number`); the element type is
+                // then re-read in the context of that widened type, which keeps `true`
+                // (`boolean` is a union of literals).
                 let xt = self.quietly(|ck| ck.check_expr(xl));
-                self.regular_of(xt)
+                if self.has_fresh_literal(xt)
+                    && !self.in_const_context(xl)
+                    && !self.is_literal_of_contextual_type(xt, tt)
+                {
+                    let w = self.widen_literal(xt);
+                    if self.is_literal_of_contextual_type(xt, w) {
+                        self.regular_of(xt)
+                    } else {
+                        w
+                    }
+                } else {
+                    self.regular_of(xt)
+                }
             };
             if self.is_assignable(xt, tt) {
                 continue;
@@ -7260,10 +10198,60 @@ impl<'c, 'a> Ck<'c, 'a> {
     // Assertions
     // ---------------------------------------------------------------------------------
 
+    /// What `as const` may be applied to: a literal (string, template, number, bigint,
+    /// boolean, array, object; `-1`, `+1`, `-1n`), through parentheses, or a property or
+    /// element access on an entity name that resolves to an enum (tsc: checker.go, the
+    /// const assertion argument check).
+    fn is_valid_const_assertion_operand(&mut self, l: Loc) -> bool {
+        let ast = self.ast(l.file);
+        let n = skip_parens(ast, l.node);
+        match *ast.node(n) {
+            Node::StringLit { .. }
+            | Node::TemplateLit { .. }
+            | Node::NumberLit { .. }
+            | Node::BigIntLit { .. }
+            | Node::BoolLit { .. }
+            | Node::ArrayLit { .. }
+            | Node::ObjectLit { .. } => true,
+            Node::Unary { op, arg } => matches!(
+                (op, ast.node(arg)),
+                (
+                    UnaryOp::Minus,
+                    Node::NumberLit { .. } | Node::BigIntLit { .. }
+                ) | (UnaryOp::Plus, Node::NumberLit { .. })
+            ),
+            Node::Member { obj, .. } | Node::Index { obj, .. } => {
+                let obj = skip_parens(ast, obj);
+                is_entity_name_expression(ast, obj)
+                    && !matches!(ast.node(obj), Node::This {})
+                    && self
+                        .resolve_entity(Loc::new(l.file, obj), meaning::VALUE)
+                        .map(|s| {
+                            if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
+                                self.c.resolve_alias(s).unwrap_or(s)
+                            } else {
+                                s
+                            }
+                        })
+                        .is_some_and(|s| self.c.sym_flags(s).intersects(SymbolFlags::ENUM))
+            }
+            // Anything the parser could not read is its own error.
+            Node::Missing {} => true,
+            _ => false,
+        }
+    }
+
     fn check_assertion(&mut self, e: Loc, expr: NodeId, ty: NodeId) -> TypeId {
         let ast = self.ast(e.file);
         let xl = Loc::new(e.file, expr);
         if crate::nodes::is_keyword(ast, ty, KeywordTypeKind::Const) {
+            if self.reporting(e.file) && !self.is_valid_const_assertion_operand(xl) {
+                self.error(
+                    xl,
+                    dg::A_CONST_ASSERTION_CAN_ONLY_BE_APPLIED_TO_REFERENCES_TO_ENUM_MEMBERS_OR_STRING_NU_1355,
+                    &[],
+                );
+            }
             let t = self.check_expr(xl);
             return self.regular_of_literal(t);
         }
@@ -7280,17 +10268,33 @@ impl<'c, 'a> Ck<'c, 'a> {
         let src = self.base_of_literal(src);
         let widened = self.widened_type(src);
         if !self.is_comparable(target, widened) && !self.is_comparable(src, target) {
-            let (chain, _) = self.relation_error_chain(
+            let (mut chain, at_node) = self.relation_error_chain(
                 src,
                 target,
                 RelationKind::Comparable,
                 Some(Head { info: dg::CONVERSION_OF_TYPE_0_TO_TYPE_1_MAY_BE_A_MISTAKE_BECAUSE_NEITHER_TYPE_SUFFICIENTL_2352 }),
             );
+            // An excess property in an element of an array literal stands alone, at the
+            // property (`<{ id: number }[]>[{ foo: "s" }]`).
+            let mut at_node = at_node;
+            if self.c.is_array_type(src) || self.c.is_tuple_type(src) {
+                if let Some(i) = chain.items.iter().position(|(c, _)| {
+                    *c == dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_AND_0_DOES_NOT_EXIST_IN_TYPE_1_2353.code
+                        || *c == dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_BUT_0_DOES_NOT_EXIST_IN_TYPE_1_D_2561.code
+                }) {
+                    chain.items.drain(..i);
+                    chain.nested.clear();
+                } else {
+                    at_node = None;
+                }
+            } else {
+                at_node = None;
+            }
             // A JSDoc cast (`/** @type {T} */ (x)`) is reported at `T` (tsc 7).
             let at = if ast.is_jsdoc(ty) {
                 Loc::new(e.file, ty)
             } else {
-                e
+                at_node.unwrap_or(e)
             };
             self.error_chain(at, &chain);
         }
@@ -7302,14 +10306,9 @@ impl<'c, 'a> Ck<'c, 'a> {
 pub fn is_entity_name_expression(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
     match *ast.node(n) {
         Node::Ident { .. } | Node::This {} => true,
-        Node::Member {
-            obj,
-            prop,
-            optional,
-        } => {
-            !optional
-                && matches!(ast.node(prop), Node::Ident { .. })
-                && is_entity_name_expression(ast, obj)
+        // An optional chain counts too (`item?.id` is named `item.id`).
+        Node::Member { obj, prop, .. } => {
+            matches!(ast.node(prop), Node::Ident { .. }) && is_entity_name_expression(ast, obj)
         }
         _ => false,
     }
@@ -7326,6 +10325,23 @@ pub fn is_numeric_name(name: &str) -> bool {
 impl Ck<'_, '_> {
     /// `typeof globalThis`: an object with the global `var`s, functions, classes, enums and
     /// namespaces as properties (not `let`/`const`), and `globalThis` itself.
+    /// `obj` is `globalThis` naming a global `namespace globalThis` (in `declare global`):
+    /// tsc merges it into the global object, so it stays open to unknown globals.
+    fn is_augmented_global_this(&mut self, obj: Loc) -> bool {
+        let ast = self.ast(obj.file);
+        let o = skip_parens(ast, obj.node);
+        if !matches!(*ast.node(o), Node::Ident { name } if ast.atom(name) == "globalThis") {
+            return false;
+        }
+        let Some(s) = self.c.resolve_ident(Loc::new(obj.file, o), meaning::VALUE) else {
+            return false;
+        };
+        self.c
+            .sym_flags(s)
+            .intersects(SymbolFlags::NAMESPACE_MODULE)
+            && self.c.global_symbol("globalThis", meaning::VALUE) == Some(s)
+    }
+
     pub fn global_this_type(&mut self) -> TypeId {
         if let Some(t) = self.global_this {
             return t;
@@ -7367,6 +10383,20 @@ impl Ck<'_, '_> {
         }
         self.global_this = Some(t);
         t
+    }
+}
+
+/// TS2693 for a type-only name read as a value; TS2585 (suggesting `lib` es2015) for the
+/// ES2015 constructors a lib without them may still declare as types (tsc: checker.go,
+/// checkAndReportErrorForUsingTypeAsValue).
+pub(crate) fn type_as_value_info(name: &str) -> dg::DiagnosticInfo {
+    if matches!(
+        name,
+        "Promise" | "Symbol" | "Map" | "WeakMap" | "Set" | "WeakSet"
+    ) {
+        dg::_0_ONLY_REFERS_TO_A_TYPE_BUT_IS_BEING_USED_AS_A_VALUE_HERE_DO_YOU_NEED_TO_CHANGE_Y_2585
+    } else {
+        dg::_0_ONLY_REFERS_TO_A_TYPE_BUT_IS_BEING_USED_AS_A_VALUE_HERE_2693
     }
 }
 

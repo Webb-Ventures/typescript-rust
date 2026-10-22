@@ -1,0 +1,25 @@
+a.ts(3,5): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(3,5): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(4,13): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(4,13): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(5,21): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(5,21): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(6,27): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(8,19): error TS2332: 'this' cannot be referenced in current location.
+a.ts(8,19): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(9,31): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(9,31): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(11,14): error TS2332: 'this' cannot be referenced in current location.
+a.ts(11,14): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(11,24): error TS2332: 'this' cannot be referenced in current location.
+a.ts(11,24): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(11,45): error TS2332: 'this' cannot be referenced in current location.
+a.ts(11,45): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(12,37): error TS2331: 'this' cannot be referenced in a module or namespace body.
+a.ts(12,37): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(15,12): error TS2532: Object is possibly 'undefined'.
+a.ts(16,18): error TS2532: Object is possibly 'undefined'.
+a.ts(17,16): error TS18048: 'this' is possibly 'undefined'.
+a.ts(41,19): error TS18048: 'this' is possibly 'undefined'.
+a.ts(44,19): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+a.ts(48,19): error TS18048: 'v' is possibly 'undefined'.

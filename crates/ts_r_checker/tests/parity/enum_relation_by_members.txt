@@ -1,0 +1,11 @@
+a.ts(17,1): error TS2322: Type 'Wide.E' is not assignable to type 'First.E'.
+  Property 'd' is missing in type 'First.E'.
+a.ts(19,1): error TS2322: Type 'Shifted.E' is not assignable to type 'First.E'.
+  Each declaration of 'E.c' differs in its value, where '2' was expected but '0' was given.
+a.ts(20,1): error TS2322: Type 'Const.E' is not assignable to type 'First.E'.
+a.ts(21,1): error TS2322: Type 'First.E' is not assignable to type 'Narrow.E'.
+  Property 'c' is missing in type 'Narrow.E'.
+a.ts(24,1): error TS2322: Type 'Amb.E' is not assignable to type 'Str.E'.
+  One value of 'E.a' is the string '"a"', and the other is assumed to be an unknown numeric value.
+a.ts(25,5): error TS2322: Type 'E.c' is not assignable to type 'E.a'.
+  Each declaration of 'E.c' differs in its value, where '2' was expected but '0' was given.

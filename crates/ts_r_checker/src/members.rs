@@ -29,6 +29,34 @@ pub enum SigKind {
     Construct,
 }
 
+/// One side of a union signature fold: fixed positions, a rest element, the minimum count.
+struct UnionPositions {
+    fixed: Vec<(StrId, TypeId)>,
+    rest: Option<(StrId, TypeId)>,
+    min: u32,
+}
+
+impl UnionPositions {
+    fn count(&self) -> usize {
+        self.fixed.len() + usize::from(self.rest.is_some())
+    }
+
+    fn type_at(&self, i: usize) -> Option<TypeId> {
+        match self.fixed.get(i) {
+            Some(&(_, t)) => Some(t),
+            None => self.rest.map(|(_, t)| t),
+        }
+    }
+
+    fn name_at(&self, i: usize) -> Option<StrId> {
+        match self.fixed.get(i) {
+            Some(&(n, _)) => Some(n),
+            None if i < self.count() => self.rest.map(|(n, _)| n),
+            None => None,
+        }
+    }
+}
+
 impl<'c, 'a> Ck<'c, 'a> {
     // ---------------------------------------------------------------------------------
     // Resolved members
@@ -779,7 +807,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Whether `n` type arguments fit these type parameters (trailing defaults optional).
     pub(crate) fn type_arg_count_fits(&mut self, tps: &[TypeId], n: usize) -> bool {
         let mut min = tps.len();
-        while min > 0 && self.type_param_default(tps[min - 1]).is_some() {
+        while min > 0 && self.has_type_param_default(tps[min - 1]) {
             min -= 1;
         }
         n >= min && n <= tps.len()
@@ -850,9 +878,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             0
         };
+        // Only the elements before a rest element are properties: the position of one
+        // after it varies (`[...number[], number]` has no `"1"`).
+        let mut past_rest = false;
         for (i, el) in shape.elements.iter().enumerate() {
             let ty = args.get(i).copied().unwrap_or(TypeId::UNRESOLVED);
             match el.kind {
+                TupleElement::REQUIRED if past_rest => {
+                    elem_types.push(ty);
+                }
+                TupleElement::OPTIONAL if past_rest => {
+                    elem_types.push(self.add_optionality(ty));
+                }
                 TupleElement::REQUIRED | TupleElement::OPTIONAL => {
                     let opt = el.kind == TupleElement::OPTIONAL;
                     let pt = if opt { self.add_optionality(ty) } else { ty };
@@ -867,9 +904,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                             .with_parent(Some(t)),
                     );
                     props.push((name, p));
-                    elem_types.push(ty);
+                    // The array base of `[number, string?]` is `(string | number |
+                    // undefined)[]`, like its element type (tsc getTupleBaseType).
+                    elem_types.push(pt);
                 }
                 _ => {
+                    past_rest = true;
                     if el.kind == TupleElement::VARIADIC {
                         let et = self
                             .element_type_of_array_like(ty)
@@ -1238,6 +1278,10 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Value exports of a namespace-like symbol as `(name, symbol)` in declaration order.
     fn value_exports(&mut self, sym: SymId) -> Vec<(StrId, SymId)> {
         let mut out = Vec::new();
+        let star_module = self
+            .c
+            .module_target_of(sym)
+            .filter(|_| self.c.sym_flags(sym).intersects(SymbolFlags::MODULE_FILE));
         for (name, s) in self.c.exports_of(sym) {
             if name == "export="
                 || name == "__export"
@@ -1248,17 +1292,34 @@ impl<'c, 'a> Ck<'c, 'a> {
                 continue;
             }
             let target = if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
-                match self.c.resolve_alias(s) {
-                    Some(t) => t,
-                    None => continue,
-                }
+                self.c.resolve_alias(s)
             } else {
-                s
+                Some(s)
             };
-            if !self.c.has_meaning(target, meaning::VALUE) {
+            let mut s = s;
+            if !target.is_some_and(|t| self.c.has_meaning(t, meaning::VALUE)) {
+                // An alias on the way merged with a local value exports that value.
+                match self.alias_merged_value(s) {
+                    Some(v) if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) => s = v,
+                    _ => continue,
+                }
+            }
+            if self.c.sym_facts(s).intersects(SymbolFacts::TYPE_ONLY)
+                && !self.c.sym_flags(s).intersects(SymbolFlags::VALUE)
+            {
                 continue;
             }
-            if self.c.sym_facts(s).intersects(SymbolFacts::TYPE_ONLY) {
+            // Seen through a type-only import or export on the way (`export type { A }`
+            // re-exported plainly), or only through `export type *`: no value property
+            // (tsc: checker.go getPropertyOfTypeEx skips members that are not values when
+            // type-only meanings are excluded).
+            if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS)
+                && !self.c.sym_flags(s).intersects(SymbolFlags::VALUE)
+                && self.type_only_alias_file(s).is_some()
+            {
+                continue;
+            }
+            if star_module.is_some_and(|t| self.c.link.star_export_is_type_only(t, &name)) {
                 continue;
             }
             out.push((self.store().intern_str(&name), s));
@@ -1410,6 +1471,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 i.value = self.union(&[i.value, proto_ty]);
             }
         }
+        // A class extending an `any` value has `any` statics: `C.unknown` is `any`
+        // (observed: tsc 7 reports nothing), as `new C().unknown` is.
+        if base_ctor.is_none()
+            && !index.iter().any(|i| i.key == TypeId::STRING)
+            && self.extends_expression_type(sym) == Some(TypeId::ANY)
+        {
+            index.push(IndexInfo {
+                key: TypeId::STRING,
+                value: TypeId::ANY,
+                readonly: false,
+                decl: None,
+            });
+        }
         ResolvedMembers::new(props, call, construct, index)
     }
 
@@ -1487,6 +1561,19 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The type of the `extends` expression of a class (the base constructor type).
     pub fn base_constructor_type(&mut self, sym: SymId) -> Option<TypeId> {
+        let t = self.extends_expression_type(sym)?;
+        if self
+            .store()
+            .flags(t)
+            .intersects(TypeFlags::ANY | TypeFlags::NULL)
+        {
+            return None;
+        }
+        Some(t)
+    }
+
+    /// The type of a class's `extends` expression, `any` and `null` included.
+    pub(crate) fn extends_expression_type(&mut self, sym: SymId) -> Option<TypeId> {
         let d = self.c.decls(sym).into_iter().find(|d| {
             matches!(
                 self.node(*d),
@@ -1512,13 +1599,6 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
                 self.pop_resolution();
-                if self
-                    .store()
-                    .flags(t)
-                    .intersects(TypeFlags::ANY | TypeFlags::NULL)
-                {
-                    return None;
-                }
                 return Some(t);
             }
         }
@@ -1546,7 +1626,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether `sig` is a mixin constructor's signature: one rest parameter of type
     /// `any[]` (or `any`) and no type parameters.
-    fn is_mixin_construct_signature(&mut self, sig: SigId) -> bool {
+    pub(crate) fn is_mixin_construct_signature(&mut self, sig: SigId) -> bool {
         let s = self.store();
         let g = s.sig(sig);
         if g.type_params != ListId::EMPTY || !g.flags.contains(SigFlags::HAS_REST) {
@@ -1912,8 +1992,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::MethodSignature { .. }
                 | Node::CallSignature { .. }
                 | Node::ConstructSignature { .. }
-        ) || parts.body.is_none()
-        {
+        ) || parts.body.is_none_or(|b| {
+            // (So does a body the parser made up after a missing `{`.)
+            let sp = ast.span(b);
+            sp.start == sp.end && matches!(ast.node(b), Node::Block { .. })
+        }) {
             // Body-less declarations without an annotation return `any`.
             ret = Some(TypeId::ANY);
         } else if self.c.file(l.file).is_js()
@@ -2067,12 +2150,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return t;
         }
-        if rest {
-            return self.create_array(TypeId::IMPLICIT_ANY, false);
-        }
-        // A binding pattern without annotation: the type implied by the pattern.
+        // A binding pattern without annotation: the type implied by the pattern (a rest
+        // `...[a, b]` takes the tuple `[any, any]`, so two arguments).
         if !matches!(ast.node(pattern), Node::Ident { .. }) {
             return self.type_from_binding_pattern(Loc::new(p.file, pattern));
+        }
+        if rest {
+            return self.create_array(TypeId::IMPLICIT_ANY, false);
         }
         if let Some(t) = self.setter_param_type_from_getter(p) {
             return t;
@@ -2453,8 +2537,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     if o == obj && i == index {
                         return TypeId::UNRESOLVED;
                     }
+                    // Without an applicable index signature, a symbol key reads the string
+                    // index signature (`Record<string, X>[keyof T]` is `X`; tsc: checker.go,
+                    // getPropertyTypeForIndexType).
                     let r = self
                         .indexed_access_type(o, i, None)
+                        .or_else(|| self.indexed_access_symbol_as_string(o, i))
                         .unwrap_or(TypeId::UNRESOLVED);
                     // Circular (`F extends M<F>`, `M<F>[string]` reading `F[string]`): no
                     // constraint.
@@ -2585,18 +2673,23 @@ impl<'c, 'a> Ck<'c, 'a> {
     pub fn apparent_type(&mut self, t: TypeId) -> TypeId {
         // A generic intersection (`T[K] & {}` from narrowing) is the intersection of its
         // members' constraints.
-        let t = if self.store().flags(t).contains(TypeFlags::INTERSECTION)
-            && self.is_generic_type(t)
-        {
-            let b = self.base_constraint(t);
-            if b == TypeId::UNRESOLVED || self.store().flags(b).contains(TypeFlags::INTERSECTION) {
-                t
+        let t =
+            if self.store().flags(t).contains(TypeFlags::INTERSECTION) && self.is_generic_type(t) {
+                let b = self.base_constraint(t);
+                // (`string & {}`, the constraint of `NonNullable<T>` with `T extends string |
+                // undefined`, is the primitive's.)
+                if b == TypeId::UNRESOLVED
+                    || (self.store().flags(b).contains(TypeFlags::INTERSECTION)
+                        && !self.is_primitive_with_empty_object(b))
+                {
+                    t
+                } else {
+                    b
+                }
             } else {
-                b
-            }
-        } else {
-            t
-        };
+                t
+            };
+        let t = self.primitive_with_empty_object(t).unwrap_or(t);
         let t = if self.store().flags(t).intersects(TypeFlags::INSTANTIABLE) {
             let b = self.base_constraint(t);
             if b == TypeId::UNKNOWN {
@@ -2631,6 +2724,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return match self.mapped_apparent_type(t) {
                 Some(a) if a != t => self.apparent_type(a),
+                // Its members come from the lower bound of its key type.
+                _ if self.mapped_lower_bound_keys(t).is_some() => t,
                 _ => TypeId::UNRESOLVED,
             };
         }
@@ -2667,9 +2762,34 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ) && s.tuple_shape_of(m).is_none()
             })
         {
-            return self.with_this_arg(t, t);
+            // A member that already has its `this` (the base intersection of `interface
+            // Thing5 extends Thing1 & Thing2` has `Thing5`'s) keeps it.
+            let parts: Vec<TypeId> = s.members_of_union(t).to_vec();
+            let mapped: Vec<TypeId> = parts
+                .iter()
+                .map(|&p| {
+                    if self.has_explicit_this_arg(p) {
+                        p
+                    } else {
+                        self.with_this_arg(p, t)
+                    }
+                })
+                .collect();
+            return self.intersection(&mapped);
         }
         t
+    }
+
+    /// Whether `t` is a class or interface reference with an explicit `this` argument.
+    fn has_explicit_this_arg(&self, t: TypeId) -> bool {
+        let s = self.store();
+        if let Some(ObjectKind::Reference { target, args }) = s.object_of(t).map(|o| o.kind)
+            && let Some(ObjectKind::Declared { type_params, .. }) =
+                s.object_of(target).map(|o| o.kind)
+        {
+            return s.list_items(args).len() > s.list_items(type_params).len();
+        }
+        false
     }
 
     /// A class or interface type (or an intersection with one), whose members may mention
@@ -2953,8 +3073,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         for m in members {
             if let Some(p) = self.property_of_type_id(m, name) {
                 let pf = self.c.sym_flags(p);
-                flags |= pf & (SymbolFlags::PROPERTY | SymbolFlags::METHOD | SymbolFlags::ACCESSOR);
-                all_optional &= pf.intersects(SymbolFlags::OPTIONAL);
+                let member = SymbolFlags::PROPERTY | SymbolFlags::METHOD | SymbolFlags::ACCESSOR;
+                flags |= pf & member;
+                // Only members vote on optionality: a global `var` of `typeof globalThis`
+                // leaves `Window`'s optional `ontouchstart` optional.
+                if pf.intersects(member) {
+                    all_optional &= pf.intersects(SymbolFlags::OPTIONAL);
+                }
                 readonly &= self.is_readonly_symbol(p);
                 types.push(self.type_of_symbol(p));
                 origins.push(p);
@@ -3211,6 +3336,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             lists.push(sigs);
         }
+        self.union_signatures_of_lists(lists, kind)
+    }
+
+    /// [`Self::union_signatures`] over the members' signature lists, each non-empty (a JSX
+    /// tag combines each member's construct or else call signatures).
+    pub(crate) fn union_signatures_of_lists(
+        &mut self,
+        lists: Vec<Vec<SigId>>,
+        kind: SigKind,
+    ) -> Vec<SigId> {
+        if lists.is_empty() || lists.iter().any(Vec::is_empty) {
+            return Vec::new();
+        }
         if lists.windows(2).all(|w| w[0] == w[1]) {
             return lists[0].clone();
         }
@@ -3218,11 +3356,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             .iter()
             .flatten()
             .any(|&s| self.store().sig(s).type_params != ListId::EMPTY);
+        // A member signature whose parameters every other member accepts (exactly, else
+        // partially) stands for the union (`F1 | F5` with `F5 = (a, b)` takes `(a, b)`).
+        let matched = self.matching_union_signatures(&lists, kind);
+        if !matched.is_empty() {
+            return matched;
+        }
         if !lists.iter().all(|l| l.len() == 1) || generic {
-            let matched = self.matching_union_signatures(&lists);
-            if !matched.is_empty() {
-                return matched;
-            }
             if generic {
                 return self.combined_generic_union_signature(&lists, kind);
             }
@@ -3268,6 +3408,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let d = self.store().sig(s);
                 d.has_rest() && d.params.len() == max_params
             });
+        // Some member has a rest parameter, not all at one position: fold the members pair
+        // by pair the way tsc does.
+        if !all_rest
+            && sigs.iter().any(|&s| self.store().sig(s).has_rest())
+            && let Some(folded) = self.fold_union_parameters(sigs)
+        {
+            return self.finish_combined_union_signature(sigs, kind, type_params, folded);
+        }
         let mut params = Vec::with_capacity(max_params);
         for i in 0..max_params {
             let mut types = Vec::new();
@@ -3316,6 +3464,138 @@ impl<'c, 'a> Ck<'c, 'a> {
         for (i, p) in params.iter_mut().enumerate() {
             p.optional = i as u32 >= min;
         }
+        if all_rest && let Some(last) = params.last_mut() {
+            last.optional = false;
+        }
+        self.finish_combined_union_signature(sigs, kind, type_params, (params, min, all_rest))
+    }
+
+    /// A member signature's parameter positions for combining: names and types of the
+    /// fixed positions (a rest of a fixed-length tuple spread), the name and element type of
+    /// a remaining rest parameter, and the minimum argument count. `None` for rests this
+    /// does not spread (variadic tuples, generic rests).
+    fn union_member_positions(&mut self, s: SigId) -> Option<UnionPositions> {
+        let d = self.store().sig(s);
+        let min = d.min_args;
+        let has_rest = d.has_rest();
+        let params: Vec<(StrId, TypeId)> = d.params.iter().map(|p| (p.name, p.ty)).collect();
+        if !has_rest {
+            return Some(UnionPositions {
+                fixed: params,
+                rest: None,
+                min,
+            });
+        }
+        let (&(rest_name, rest_ty), head) = params.split_last()?;
+        let mut fixed = head.to_vec();
+        let mut rest = None;
+        if let Some(shape) = self.store().tuple_shape_of(rest_ty) {
+            let shape = shape.clone();
+            if shape
+                .elements
+                .iter()
+                .any(|e| e.kind == TupleElement::VARIADIC)
+            {
+                return None;
+            }
+            for (k, e) in shape.elements.iter().enumerate() {
+                let ty = self.param_type_at(s, head.len() + k)?;
+                if e.kind == TupleElement::REST {
+                    rest = Some((rest_name, ty));
+                } else {
+                    fixed.push((rest_name, ty));
+                }
+            }
+        } else {
+            let el = self.element_type_of_array_like(rest_ty)?;
+            rest = Some((rest_name, el));
+        }
+        Some(UnionPositions { fixed, rest, min })
+    }
+
+    /// The parameters of a union of signatures some of which have rest parameters (tsc:
+    /// `combineUnionOrIntersectionParameters` in `checker.go`), folded member by member.
+    /// Each position intersects both sides' types (a missing one is ignored); the longer
+    /// side's rest stays a rest, and a rest only on the shorter side becomes an extra
+    /// `...args` after the longer side's positions. A position is optional past both
+    /// minimum counts; differing names become `arg<i>`.
+    fn fold_union_parameters(&mut self, sigs: &[SigId]) -> Option<(Vec<Param>, u32, bool)> {
+        let (&first, rest) = sigs.split_first()?;
+        let mut acc = self.union_member_positions(first)?;
+        for &s in rest {
+            let right = self.union_member_positions(s)?;
+            let (lc, rc) = (acc.count(), right.count());
+            let (long, short) = if lc >= rc {
+                (&acc, &right)
+            } else {
+                (&right, &acc)
+            };
+            let long_count = long.count();
+            let either_rest = acc.rest.is_some() || right.rest.is_some();
+            let extra = either_rest && long.rest.is_none();
+            let mut fixed = Vec::with_capacity(long_count);
+            let mut new_rest = None;
+            for i in 0..long_count {
+                let lt = long.type_at(i)?;
+                let ty = match short.type_at(i) {
+                    Some(st) if st != lt => self.intersection(&[lt, st]),
+                    _ => lt,
+                };
+                let name = match (acc.name_at(i), right.name_at(i)) {
+                    (Some(a), Some(b)) if a == b => a,
+                    (Some(a), None) | (None, Some(a)) => a,
+                    _ => self.store().intern_str(&format!("arg{i}")),
+                };
+                if either_rest && !extra && i + 1 == long_count {
+                    new_rest = Some((name, ty));
+                } else {
+                    fixed.push((name, ty));
+                }
+            }
+            if extra {
+                let ty = short.type_at(long_count)?;
+                new_rest = Some((self.store().intern_str("args"), ty));
+            }
+            acc = UnionPositions {
+                min: acc.min.max(right.min),
+                fixed,
+                rest: new_rest,
+            };
+        }
+        let min = acc.min;
+        let mut params: Vec<Param> = acc
+            .fixed
+            .iter()
+            .enumerate()
+            .map(|(i, &(name, ty))| Param {
+                name,
+                ty,
+                optional: i as u32 >= min,
+                sym: SymId::NONE,
+            })
+            .collect();
+        let has_rest = acc.rest.is_some();
+        if let Some((name, el)) = acc.rest {
+            let ty = self.create_array(el, false);
+            params.push(Param {
+                name,
+                ty,
+                optional: false,
+                sym: SymId::NONE,
+            });
+        }
+        Some((params, min, has_rest))
+    }
+
+    /// The combined signature of a union's members from its parameters: the union of the
+    /// return types, the members' predicates and their intersected `this` types.
+    fn finish_combined_union_signature(
+        &mut self,
+        sigs: &[SigId],
+        kind: SigKind,
+        type_params: ListId,
+        (params, min, has_rest): (Vec<Param>, u32, bool),
+    ) -> SigId {
         let rets: Vec<TypeId> = sigs.iter().map(|&s| self.return_type_of(s)).collect();
         let ret = self.union(&rets);
         let mut flags = if kind == SigKind::Construct {
@@ -3323,11 +3603,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             SigFlags::NONE
         } | SigFlags::SYNTHETIC;
-        if all_rest {
+        if has_rest {
             flags |= SigFlags::HAS_REST;
-            if let Some(last) = params.last_mut() {
-                last.optional = false;
-            }
+        }
+        // Combined member signatures keep an abstract member's flag (tsc:
+        // combineUnionOrIntersectionMemberSignatures propagates it).
+        if sigs
+            .iter()
+            .any(|&s| self.store().sig(s).flags.contains(SigFlags::ABSTRACT))
+        {
+            flags |= SigFlags::ABSTRACT;
         }
         let predicate = if kind == SigKind::Call {
             self.union_type_predicate(sigs)
@@ -3443,7 +3728,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// parameters, matched by position), each returning the subtype-reduced union of the
     /// matches' return types
     /// (`Callable<"A"> | Callable<"B">`, `(<K extends "t">(k: K) => A[K]) | (<K ...> => B[K])`).
-    fn matching_union_signatures(&mut self, lists: &[Vec<SigId>]) -> Vec<SigId> {
+    fn matching_union_signatures(&mut self, lists: &[Vec<SigId>], kind: SigKind) -> Vec<SigId> {
         if lists.iter().any(|l| l.len() > 16) {
             return Vec::new();
         }
@@ -3455,23 +3740,33 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
                 let mut rets = Vec::with_capacity(lists.len());
+                let mut matched = Vec::with_capacity(lists.len());
                 let mut all = true;
                 for (j, other) in lists.iter().enumerate() {
                     if j == i {
                         rets.push(self.return_type_of(a));
+                        matched.push(a);
                         continue;
                     }
                     // An identical signature, else one that takes no more required
                     // arguments and whose parameters `a`'s are subtypes of
                     // (`end(cb?)` matches `end(chunk, cb?)`'s missing positions).
-                    let found = match other.iter().find_map(|&b| self.signature_matching(a, b)) {
+                    let found = match other
+                        .iter()
+                        .find_map(|&b| self.signature_matching(a, b).map(|r| (r, b)))
+                    {
                         Some(r) => Some(r),
                         None => other
                             .iter()
-                            .find_map(|&b| self.signature_partially_matching(a, b)),
+                            .find_map(|&b| self.signature_partially_matching(a, b).map(|r| (r, b))),
                     };
                     match found {
-                        Some(r) => rets.push(r),
+                        Some((r, b)) => {
+                            rets.push(r);
+                            if !matched.contains(&b) {
+                                matched.push(b);
+                            }
+                        }
                         None => {
                             all = false;
                             break;
@@ -3490,16 +3785,56 @@ impl<'c, 'a> Ck<'c, 'a> {
                 } else {
                     self.union(&rets)
                 };
+                // Several matches need every one's declared `this` (`(this: void) | (this:
+                // number) | (i: number)` called through `(i: number)` needs `never`).
+                // (A generic signature only matches identical ones and stands alone.)
+                let generic = self.store().sig(a).type_params != ListId::EMPTY;
+                let mut this_type = self.store().sig(a).this_type;
+                let mut predicate = None;
+                let combined = matched.len() > 1 && !generic;
+                if combined {
+                    if kind == SigKind::Call {
+                        predicate = Some(self.union_type_predicate(&matched));
+                    }
+                    let mut thises: Vec<TypeId> = Vec::new();
+                    for &m in &matched {
+                        if let Some(t) = self.store().sig(m).this_type
+                            && !thises.contains(&t)
+                        {
+                            thises.push(t);
+                        }
+                    }
+                    this_type = match thises[..] {
+                        [] => None,
+                        [one] => Some(one),
+                        _ => Some(self.intersection(&thises)),
+                    };
+                }
+                let d = self.store().sig(a);
+                let mut flags = d.flags;
+                // A `new` through the union is abstract when any signature it stands for is
+                // (tsc: `someSignature` looks into a union signature's members).
+                if combined
+                    && matched
+                        .iter()
+                        .any(|&m| self.store().sig(m).flags.contains(SigFlags::ABSTRACT))
+                {
+                    flags |= SigFlags::UNION_OF_ABSTRACT;
+                }
                 let d = self.store().sig(a);
                 let sig = Signature::new(
-                    d.flags,
+                    flags,
                     d.decl,
                     d.type_params,
                     d.params.to_vec(),
-                    d.this_type,
+                    this_type,
                     d.min_args,
                     Some(ret),
                 );
+                let sig = match predicate {
+                    Some(p) => sig.with_predicate(p),
+                    None => sig,
+                };
                 out.push(self.store().add_signature(sig));
             }
         }
@@ -3512,13 +3847,14 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn signature_partially_matching(&mut self, a: SigId, b: SigId) -> Option<TypeId> {
         let s = self.store();
         let (da, db) = (s.sig(a), s.sig(b));
-        if da.type_params != ListId::EMPTY
-            || db.type_params != ListId::EMPTY
-            || db.min_args > da.min_args
-        {
+        if da.type_params != ListId::EMPTY || db.type_params != ListId::EMPTY {
             return None;
         }
-        let n = da.params.len();
+        let (n, a_min) = self.arity_for_matching(a);
+        let (_, b_min) = self.arity_for_matching(b);
+        if b_min > a_min {
+            return None;
+        }
         for i in 0..n {
             let Some(x) = self.param_type_at(a, i) else {
                 break;
@@ -3531,11 +3867,35 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         if let (Some(x), Some(y)) = (self.store().sig(a).this_type, self.store().sig(b).this_type)
-            && !self.is_identical(x, y)
+            && !self.is_subtype(y, x)
         {
             return None;
         }
         Some(self.return_type_of(b))
+    }
+
+    /// Parameter count and minimum argument count with a tuple rest parameter spread out
+    /// (`(...args: [string])` takes one argument, `(...args: [])` none).
+    fn arity_for_matching(&mut self, sig: SigId) -> (usize, usize) {
+        let d = self.store().sig(sig);
+        let n = d.params.len();
+        let min = self.effective_min_args(sig);
+        if !d.has_rest() {
+            return (n, min);
+        }
+        let rest = d.params[n - 1].ty;
+        let Some(shape) = self.store().tuple_shape_of(rest) else {
+            return (n, min);
+        };
+        let fixed = n - 1;
+        let count = fixed + shape.fixed_length() + usize::from(shape.has_rest());
+        let required = shape
+            .elements
+            .iter()
+            .take_while(|e| e.kind == TupleElement::REQUIRED)
+            .count();
+        let min = if min >= fixed { fixed + required } else { min };
+        (count, min)
     }
 
     /// The return type of `b` (with its type parameters renamed to `a`'s) when `b` has the
@@ -3619,6 +3979,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.element_type_of_array_like(a)
                             .unwrap_or(TypeId::UNRESOLVED),
                     );
+                } else if el.kind == TupleElement::OPTIONAL && a != TypeId::UNRESOLVED {
+                    // An optional element adds `undefined` (`[number, string?]` is an
+                    // array of `string | number | undefined`).
+                    types.push(self.add_optionality(a));
                 } else {
                     types.push(a);
                 }
@@ -3658,6 +4022,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 None => s.index_type(t),
             };
         }
+        // `keyof (A & B)` is `keyof A | keyof B`, generic or not, except an intersection of
+        // a generic type with `{}` (tsc: checker.go, getIndexTypeEx, shouldDeferIndexType).
+        if f.contains(TypeFlags::INTERSECTION)
+            && self.is_generic_type(t)
+            && !s
+                .members_of_union(t)
+                .iter()
+                .any(|&m| self.is_empty_anonymous_object(m))
+        {
+            let ms = s.members_of_union(t).to_vec();
+            let parts: Vec<TypeId> = ms.iter().map(|&m| self.keyof_type(m)).collect();
+            return self.union(&parts);
+        }
         if self.is_generic_type(t) {
             return s.index_type(t);
         }
@@ -3686,6 +4063,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         for (n, p) in names.into_iter().zip(props) {
+            // Private and protected members are not keys (tsc: `getLiteralTypeFromProperty`).
+            if self.is_non_public_property(p) {
+                continue;
+            }
             let text = self.store().str(n);
             if text.starts_with('#') {
                 continue;
@@ -3731,6 +4112,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         u
     }
 
+    /// Whether a property is declared `private` or `protected` (also a synthesized one
+    /// carrying those check flags).
+    pub(crate) fn is_non_public_property(&mut self, p: SymId) -> bool {
+        self.c.sym_check_flags(p) & (check_flags::PRIVATE | check_flags::PROTECTED) != 0
+            || self.c.decls(p).into_iter().any(|d| {
+                self.node(d)
+                    .modifiers()
+                    .intersects(ts_r_ast::Modifiers::PRIVATE | ts_r_ast::Modifiers::PROTECTED)
+            })
+    }
+
     /// The key type of a property declared with a numeric literal or a computed numeric
     /// (literal or enum member) name.
     pub(crate) fn numeric_key_type(&mut self, p: SymId) -> Option<TypeId> {
@@ -3757,6 +4149,30 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => None,
         }
+    }
+
+    /// `obj[index]` where symbol keys without a symbol index signature read `obj`'s string
+    /// index signature; `None` when `obj` has no string index signature or another key fails.
+    fn indexed_access_symbol_as_string(&mut self, obj: TypeId, index: TypeId) -> Option<TypeId> {
+        let si = self
+            .index_info_of(obj, TypeId::STRING)
+            .filter(|i| i.key == TypeId::STRING)?;
+        let keys: Vec<TypeId> = if self.store().flags(index).contains(TypeFlags::UNION) {
+            self.store().members_of_union(index).to_vec()
+        } else {
+            vec![index]
+        };
+        let mut parts = Vec::with_capacity(keys.len());
+        for k in keys {
+            if self.store().flags(k).intersects(TypeFlags::ES_SYMBOL_LIKE)
+                && self.index_info_of(obj, TypeId::SYMBOL).is_none()
+            {
+                parts.push(si.value);
+            } else {
+                parts.push(self.indexed_access_type(obj, k, None)?);
+            }
+        }
+        Some(self.union(&parts))
     }
 
     /// `T[K]` for a non-generic object and key; `None` when the access is invalid.
@@ -3921,8 +4337,17 @@ fn write_pattern(ast: &ts_r_ast::Ast, n: NodeId, out: &mut String, depth: u32) -
                 }
                 match *ast.node(p) {
                     Node::BindingProperty { key, value, .. } => {
-                        let Some(k) = crate::nodes::key_text(ast, key) else {
-                            return false;
+                        let k = match crate::nodes::key_text(ast, key) {
+                            Some(k) => k,
+                            // A computed entity name prints as written (`[foo.bar]: c`).
+                            None => match *ast.node(key) {
+                                Node::ComputedKey { expr }
+                                    if crate::expr::is_entity_name_expression(ast, expr) =>
+                                {
+                                    format!("[{}]", crate::nodes::entity_text(ast, expr))
+                                }
+                                _ => return false,
+                            },
                         };
                         let shorthand = match value {
                             None => true,

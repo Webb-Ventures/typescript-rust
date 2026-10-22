@@ -1,0 +1,8 @@
+a.ts(3,12): error TS2699: Static property 'prototype' conflicts with built-in property 'Function.prototype' of constructor function 'StaticProto'.
+a.ts(8,9): error TS1123: Variable declaration list cannot be empty.
+a.ts(8,13): error TS2304: Cannot find name 'missingName'.
+a.ts(11,16): error TS2304: Cannot find name 'NoSuchNamespace'.
+a.ts(11,16): error TS2503: Cannot find namespace 'NoSuchNamespace'.
+a.ts(18,7): error TS2417: Class static side 'typeof Nulled' incorrectly extends base class static side 'null'.
+a.ts(23,12): error TS2545: A mixin class must have a constructor with a single rest parameter of type 'any[]'.
+a.ts(33,11): error TS2797: A mixin class that extends from a type variable containing an abstract construct signature must also be declared 'abstract'.

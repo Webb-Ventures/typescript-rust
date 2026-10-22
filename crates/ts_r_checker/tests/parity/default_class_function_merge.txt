@@ -1,0 +1,9 @@
+a.ts(2,25): error TS2323: Cannot redeclare exported variable 'default'.
+a.ts(2,25): error TS2814: Function with bodies can only merge with classes that are ambient.
+a.ts(3,22): error TS2323: Cannot redeclare exported variable 'default'.
+a.ts(3,22): error TS2813: Class declaration cannot implement overload list for 'default'.
+b.ts(1,22): error TS2323: Cannot redeclare exported variable 'default'.
+b.ts(1,22): error TS2813: Class declaration cannot implement overload list for 'default'.
+b.ts(2,25): error TS2814: Function with bodies can only merge with classes that are ambient.
+b.ts(3,25): error TS2323: Cannot redeclare exported variable 'default'.
+b.ts(3,25): error TS2814: Function with bodies can only merge with classes that are ambient.

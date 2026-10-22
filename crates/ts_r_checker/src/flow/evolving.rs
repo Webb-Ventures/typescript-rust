@@ -6,13 +6,15 @@
 //!   add the widened types of their arguments / value.
 //! - `xs = []` starts over; `xs = other` makes the reference that type on that path.
 //! - Branches join; loops iterate to a fixed point.
-//! - A read where nothing was pushed is `any[]` (tsc also reports TS7034/TS7005 there; not
-//!   modelled). `xs.push`, `xs.unshift`, `xs.length` and `xs[n] = v` targets keep the
+//! - A read where nothing was pushed is `any[]` (the caller reports TS7034/TS7005). `xs.push`, `xs.unshift`, `xs.length` and `xs[n] = v` targets keep the
 //!   silent declared type.
 //!
 //! Anything else (references from nested functions, the start of the function before the
 //! declaration, destructuring or compound assignments to the variable) keeps the declared
 //! `UNRESOLVED[]`, which reports nothing.
+//!
+//! An auto variable (`let x;`) with an `x = []` assignment uses the same walk: it is
+//! `undefined` until assigned, and the walk is used when some path evolves.
 
 use rustc_hash::FxHashMap;
 use ts_r_ast::{AssignOp, Node};
@@ -29,7 +31,7 @@ const MAX_LOOP_ROUNDS: u32 = 6;
 
 /// The value of the variable on the paths reaching a flow node.
 #[derive(Clone, Debug, Default, PartialEq)]
-struct Ev {
+pub(crate) struct Ev {
     /// Some path is an evolving array.
     evolving: bool,
     /// Element types pushed on the evolving paths.
@@ -61,9 +63,26 @@ impl Ev {
     }
 }
 
+/// A loop label some walk is iterating: a read of the same variable re-entered while
+/// computing an assigned value inside the loop sees the antecedents joined so far.
+pub(crate) struct EvPending {
+    sym: SymId,
+    auto: bool,
+    file: ts_r_diagnostics::FileId,
+    flow: u32,
+    value: Ev,
+    /// Re-entered reads that saw an implicit `any[]`.
+    implicit_reads: Vec<Loc>,
+}
+
 struct EvWalk {
     sym: SymId,
+    /// The pending loop a re-entered read stopped at.
+    hit_pending: Option<usize>,
     decl: Loc,
+    /// The variable is auto-typed (`let x;`): it starts `undefined` and evolves from an
+    /// `x = []` assignment.
+    auto: bool,
     steps: u32,
     memo: FxHashMap<u32, Ev>,
     /// Loop labels being iterated, with their value so far.
@@ -108,12 +127,22 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// reference keeps the declared type.
     pub(crate) fn is_evolving_array_operation_target(&self, e: Loc) -> bool {
         let ast = self.ast(e.file);
-        // Parentheses are transparent: `(xs).push(..)`.
+        // Parentheses, the last expression of a comma list and the target of an assignment
+        // are transparent: `(xs).push(..)`, `(xs = [], xs).push(..)`.
         let mut e = e;
         let Some(mut p) = self.c.parent(e) else {
             return false;
         };
-        while matches!(*ast.node(p.node), Node::Paren { .. }) {
+        while match *ast.node(p.node) {
+            Node::Paren { .. } => true,
+            Node::Seq { exprs } => ast.list(exprs).last() == Some(&e.node),
+            Node::Assign {
+                left,
+                op: AssignOp::Assign,
+                ..
+            } => left == e.node,
+            _ => false,
+        } {
             e = p;
             let Some(g) = self.c.parent(p) else {
                 return false;
@@ -149,16 +178,48 @@ impl<'c, 'a> Ck<'c, 'a> {
         sym: SymId,
         decl: Loc,
     ) -> Option<(TypeId, bool)> {
+        self.ev_read(e, sym, decl, false)
+            .map(|(t, implicit, _, _)| (t, implicit))
+    }
+
+    /// The type of a read `e` of the auto variable `sym` (`let x;`) when some path reaching
+    /// it is an evolving array (`x = []`), as for [`Self::evolving_array_read_type`], plus
+    /// whether any path evolves and whether every path does.
+    pub(crate) fn evolving_auto_read(
+        &mut self,
+        e: Loc,
+        sym: SymId,
+        decl: Loc,
+    ) -> Option<(TypeId, bool, bool, bool)> {
+        self.ev_read(e, sym, decl, true)
+    }
+
+    fn ev_read(
+        &mut self,
+        e: Loc,
+        sym: SymId,
+        decl: Loc,
+        auto: bool,
+    ) -> Option<(TypeId, bool, bool, bool)> {
         let flow = self.c.bound(e.file).flow.flow_at(e.node)?;
         let mut w = EvWalk {
             sym,
+            hit_pending: None,
             decl,
+            auto,
             steps: 0,
             memo: FxHashMap::default(),
             in_loop: FxHashMap::default(),
         };
         let ev = self.ev_walk(&mut w, e.file, flow)?;
         let implicit = ev.evolving && ev.elems.is_empty() && ev.finals.is_empty();
+        if implicit
+            && let Some(i) = w.hit_pending
+            && let Some(p) = self.ev_pending.get_mut(i)
+            && !p.implicit_reads.contains(&e)
+        {
+            p.implicit_reads.push(e);
+        }
         let mut types = ev.finals.clone();
         if ev.evolving {
             let el = if ev.elems.is_empty() {
@@ -171,7 +232,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         if types.is_empty() {
             return None;
         }
-        Some((self.union(&types), implicit))
+        let only_evolving = ev.evolving && ev.finals.is_empty();
+        Some((self.union(&types), implicit, ev.evolving, only_evolving))
     }
 
     fn ev_walk(
@@ -200,6 +262,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             let node = *graph.nodes.get(flow.index())?;
             match node.kind {
                 FlowKind::Unreachable => return Some(Ev::default()),
+                // An auto variable is `undefined` until assigned.
+                FlowKind::Start if w.auto => {
+                    let mut v = Ev::default();
+                    if self.c.opts.strict_null_checks {
+                        v.finals.push(TypeId::UNDEFINED);
+                    }
+                    return Some(v);
+                }
                 FlowKind::Start => return None,
                 FlowKind::Assignment => {
                     let Some(target) = node.node else {
@@ -243,29 +313,35 @@ impl<'c, 'a> Ck<'c, 'a> {
                         add_pushed(&mut v, &pushed);
                         return Some(v);
                     }
+                    if let Some(i) = self.ev_pending.iter().rposition(|p| {
+                        p.sym == w.sym && p.auto == w.auto && p.file == file && p.flow == flow.0
+                    }) {
+                        w.hit_pending = Some(i);
+                        let mut v = self.ev_pending[i].value.clone();
+                        add_pushed(&mut v, &pushed);
+                        return Some(v);
+                    }
                     let antes: Vec<FlowId> = graph.antecedents(flow).to_vec();
-                    let mut cur = Ev::default();
-                    let mut done = false;
-                    for _ in 0..MAX_LOOP_ROUNDS {
-                        w.in_loop.insert(flow.0, cur.clone());
-                        // Memoized nodes inside the loop depend on the value so far.
-                        let saved = w.memo.clone();
-                        let mut next = Ev::default();
-                        for &a in &antes {
-                            let av = self.ev_walk(w, file, a)?;
-                            next.join(&av);
-                        }
-                        w.memo = saved;
-                        if next == cur {
-                            done = true;
-                            break;
-                        }
-                        cur = next;
-                    }
+                    let idx = self.ev_pending.len();
+                    self.ev_pending.push(EvPending {
+                        sym: w.sym,
+                        auto: w.auto,
+                        file,
+                        flow: flow.0,
+                        value: Ev::default(),
+                        implicit_reads: Vec::new(),
+                    });
+                    let r = self.ev_loop(w, file, flow, &antes, idx);
                     w.in_loop.remove(&flow.0);
-                    if !done {
-                        return None;
+                    self.ev_pending.truncate(idx + 1);
+                    let p = self.ev_pending.pop()?;
+                    if !p.implicit_reads.is_empty() {
+                        let name = self.c.sym_name(w.sym).to_string();
+                        for l in p.implicit_reads {
+                            self.report_implicit_any_evolving(l, w.decl, &name, "any[]");
+                        }
                     }
+                    let mut cur = r?;
                     w.memo.insert(flow.0, cur.clone());
                     add_pushed(&mut cur, &pushed);
                     return Some(cur);
@@ -274,11 +350,59 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// Iterates the loop label `flow` (pending entry `idx`) to a fixed point.
+    fn ev_loop(
+        &mut self,
+        w: &mut EvWalk,
+        file: ts_r_diagnostics::FileId,
+        flow: FlowId,
+        antes: &[FlowId],
+        idx: usize,
+    ) -> Option<Ev> {
+        let mut cur = Ev::default();
+        for _ in 0..MAX_LOOP_ROUNDS {
+            w.in_loop.insert(flow.0, cur.clone());
+            // Memoized nodes inside the loop depend on the value so far.
+            let saved = w.memo.clone();
+            let mut next = Ev::default();
+            for &a in antes {
+                let mut so_far = cur.clone();
+                so_far.join(&next);
+                self.ev_pending.get_mut(idx)?.value = so_far;
+                let av = self.ev_walk(w, file, a)?;
+                next.join(&av);
+            }
+            w.memo = saved;
+            if next == cur {
+                return Some(cur);
+            }
+            cur = next;
+        }
+        None
+    }
+
     /// The effect of an assignment flow node on the variable: `Some(Some(ev))` decides the
     /// value, `Some(None)` is unrelated, `None` is not modelled.
     fn ev_assignment(&mut self, w: &EvWalk, target: Loc) -> Option<Option<Ev>> {
         if target == w.decl {
-            return Some(Some(Ev::empty_array()));
+            if !w.auto {
+                return Some(Some(Ev::empty_array()));
+            }
+            // `let x = null` / `= undefined`: that value (TS files under noImplicitAny).
+            let p = self.c.parent(target)?;
+            let mut v = Ev::default();
+            if let Node::VarDeclarator {
+                init: Some(init), ..
+            } = *self.node(p)
+            {
+                let t = self.quietly(|ck| ck.check_expr(Loc::new(target.file, init)));
+                if self.c.opts.strict_null_checks {
+                    v.finals.push(t);
+                }
+            } else if self.c.opts.strict_null_checks {
+                v.finals.push(TypeId::UNDEFINED);
+            }
+            return Some(Some(v));
         }
         let ast = self.ast(target.file);
         if !matches!(*ast.node(target.node), Node::Ident { .. }) {
@@ -313,7 +437,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let t = self.quietly(|ck| ck.check_expr(Loc::new(target.file, right)));
         let t = self.widen_literal(t);
-        let t = self.widened_type(t);
+        let mut t = self.widened_type(t);
+        // An evolving array's declared type is `any[]`: a value not assignable to it reads
+        // as `any[]` from here on.
+        if !w.auto {
+            let any_array = self.create_array(TypeId::ANY, false);
+            if !self.quietly(|ck| ck.is_assignable(t, any_array)) {
+                t = any_array;
+            }
+        }
         Some(Some(Ev {
             finals: vec![t],
             ..Ev::default()
@@ -379,6 +511,24 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     fn ev_is_var(&mut self, w: &EvWalk, l: Loc) -> bool {
         let ast = self.ast(l.file);
+        // The reference an operand stands for: `(xs)`, `(a, xs)`, `(xs = v)`.
+        let mut n = l.node;
+        loop {
+            match *ast.node(n) {
+                Node::Paren { expr } => n = expr,
+                Node::Seq { exprs } => match ast.list(exprs).last() {
+                    Some(&last) => n = last,
+                    None => return false,
+                },
+                Node::Assign {
+                    left,
+                    op: AssignOp::Assign,
+                    ..
+                } => n = left,
+                _ => break,
+            }
+        }
+        let l = Loc::new(l.file, n);
         match ast.name_of(l.node) {
             Some(name) if matches!(*ast.node(l.node), Node::Ident { .. }) => {
                 self.c.sym_name(w.sym) == name && self.ident_ref_symbol(l) == Some(w.sym)

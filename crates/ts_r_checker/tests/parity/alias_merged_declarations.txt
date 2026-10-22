@@ -1,0 +1,1 @@
+aug.ts(2,16): error TS2664: Invalid module name in augmentation, module 'm9' cannot be found.

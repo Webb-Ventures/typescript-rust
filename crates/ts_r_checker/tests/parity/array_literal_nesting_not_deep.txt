@@ -1,0 +1,4 @@
+a.ts(11,59): error TS2741: Property 'i' is missing in type '{}' but required in type 'H'.
+a.ts(12,40): error TS2741: Property 'i' is missing in type '{}' but required in type 'H'.
+a.ts(13,47): error TS2741: Property 'i' is missing in type '{}' but required in type 'H'.
+a.ts(14,52): error TS2741: Property 'i' is missing in type '{}' but required in type 'H'.
