@@ -202,12 +202,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ast = self.ast(file);
         let name = match *ast.node(n) {
+            // A body the parser recovered from nothing (`function f() => 4`) is none.
             Node::FunctionDecl {
                 name: Some(name),
-                body: None,
+                body,
                 return_type: None,
                 ..
-            } => name,
+            } if body.is_none_or(|b| ast.span(b).is_empty()) => name,
             // Private methods are exempt (their types are not part of declarations).
             Node::MethodDef {
                 kind: MethodKind::Method,
@@ -250,7 +251,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => return,
         };
-        let text = self.c.text(Loc::new(file, name)).to_owned();
+        let mut text = self.c.text(Loc::new(file, name)).to_owned();
+        // A name the parser recovered as missing prints as tsc's `(Missing)`.
+        if text.is_empty() {
+            text = "(Missing)".to_owned();
+        }
         self.error(
             Loc::new(file, name),
             dg::_0_WHICH_LACKS_RETURN_TYPE_ANNOTATION_IMPLICITLY_HAS_AN_1_RETURN_TYPE_7010,

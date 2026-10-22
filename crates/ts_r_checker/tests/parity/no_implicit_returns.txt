@@ -1,0 +1,18 @@
+a.ts(1,25): error TS2322: Type 'undefined' is not assignable to type 'number'.
+a.ts(2,52): error TS2322: Type 'undefined' is not assignable to type 'number'.
+a.ts(6,26): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(7,26): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.
+a.ts(8,26): error TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.
+a.ts(9,12): error TS7030: Not all code paths return a value.
+a.ts(10,7): error TS7030: Not all code paths return a value.
+a.ts(11,12): error TS7030: Not all code paths return a value.
+a.ts(12,11): error TS7030: Not all code paths return a value.
+a.ts(12,50): error TS7030: Not all code paths return a value.
+a.ts(13,13): error TS7030: Not all code paths return a value.
+a.ts(13,52): error TS7030: Not all code paths return a value.
+a.ts(15,11): error TS7030: Not all code paths return a value.
+a.ts(19,10): error TS7030: Not all code paths return a value.
+a.ts(22,4): error TS7030: Not all code paths return a value.
+a.ts(24,5): error TS7030: Not all code paths return a value.
+a.ts(26,5): error TS7030: Not all code paths return a value.
+a.ts(27,1): error TS7030: Not all code paths return a value.

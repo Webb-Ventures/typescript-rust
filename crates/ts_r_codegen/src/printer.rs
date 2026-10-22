@@ -52,7 +52,7 @@ pub struct Printer<'a> {
     pending_space: bool,
     /// Source-map segments recorded while a separator was pending: their generated column is
     /// known only once the next token decides whether the separator is written.
-    deferred_maps: Vec<(u32, u32, Option<String>)>,
+    deferred_maps: Vec<(u32, u32, Option<&'a str>)>,
     /// [`Printer::tsc_maps`]: print without segments (what tsc leaves unmapped).
     pub(crate) map_muted: bool,
     /// Ends of the original expressions being printed ([`Printer::expr`]), innermost last.
@@ -327,7 +327,7 @@ impl<'a> Printer<'a> {
             let maps = std::mem::take(&mut self.deferred_maps);
             if let Some(m) = &mut self.map {
                 for (line, col, name) in &maps {
-                    m.add(gl, gc, *line, *col, name.as_deref());
+                    m.add(gl, gc, *line, *col, *name);
                 }
             }
             self.deferred_maps = maps;
@@ -465,7 +465,8 @@ impl<'a> Printer<'a> {
         self.map_span_named(span, None);
     }
 
-    pub(crate) fn map_span_named(&mut self, span: Span, name: Option<&str>) {
+    /// `name`: the original name, a slice of the source text.
+    pub(crate) fn map_span_named(&mut self, span: Span, name: Option<&'a str>) {
         if self.map.is_none() || self.tsc_maps || (span.start == 0 && span.end == 0) {
             return;
         }
@@ -475,8 +476,7 @@ impl<'a> Printer<'a> {
         };
         if self.pending_semi || self.pending_space {
             // The node's first token decides where it starts.
-            self.deferred_maps
-                .push((line, col, name.map(str::to_owned)));
+            self.deferred_maps.push((line, col, name));
             return;
         }
         // Map the token, not the indentation.
@@ -1526,10 +1526,18 @@ fn utf16_len(s: &str) -> u32 {
 
 /// `/*! ... */`, `@license`, `@preserve` (kept even without comments).
 pub(crate) fn is_legal_comment(text: &str) -> bool {
-    text.starts_with("/*!")
-        || text.starts_with("//!")
-        || text.contains("@license")
-        || text.contains("@preserve")
+    if text.starts_with("/*!") || text.starts_with("//!") {
+        return true;
+    }
+    // Every comment is checked: find each `@` (a memchr scan) instead of two substring searches.
+    let mut rest = text;
+    while let Some(i) = rest.find('@') {
+        rest = &rest[i + 1..];
+        if rest.starts_with("license") || rest.starts_with("preserve") {
+            return true;
+        }
+    }
+    false
 }
 
 /// `/// <reference ... />` and `/// <amd-...>` directives.

@@ -1,0 +1,5 @@
+a.ts(8,22): error TS2678: Type 'string' is not comparable to type 'null'.
+a.ts(9,27): error TS2678: Type '0 | 1' is not comparable to type 'undefined'.
+  Type '1' is not comparable to type 'undefined'.
+a.ts(13,19): error TS2678: Type 'null | undefined' is not comparable to type 'string'.
+  Type 'null' is not comparable to type 'string'.

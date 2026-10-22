@@ -8,7 +8,8 @@
 use std::cmp::Ordering;
 
 use ts_r_types::{
-    AliasId, ObjectFlags, ObjectKind, SymId, TupleElement, TypeFlags, TypeId, TypeKind, TypeTraits,
+    AliasId, ObjectFlags, ObjectKind, StrId, SymId, TupleElement, TypeFlags, TypeId, TypeKind,
+    TypeTraits,
 };
 
 use crate::checker::{Checker, Ck, Loc};
@@ -824,8 +825,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             return TypeId::NEVER;
         }
         // `{}` (also written as an empty type literal, as in `T & {}`) is absorbed by
-        // another primitive or object type (not by a type variable: `T & {}` stays).
-
+        // another primitive or object type (not by a type variable: `T & {}` stays; see
+        // `written_primitive_and_empty_object` for `string & {}` as written).
         if set.len() > 1
             && set.iter().any(|&t| self.is_empty_anonymous_object(t))
             && set.iter().any(|&t| {
@@ -914,6 +915,205 @@ impl<'c, 'a> Ck<'c, 'a> {
             return self.union_with(&parts, Reduction::Literal, alias);
         }
         s.intersection_sorted(&set, Some(alias))
+    }
+
+    /// `t` without what is empty because of conflicting discriminants: an intersection
+    /// of object types where a property declared with literal types in two members has
+    /// no common value is `never` (`{ kind: "two" } & { kind: "one" }`), and a union
+    /// drops such members (`(A | B) & { kind: "one" }` is `A & { kind: "one" }` when `B`
+    /// has `kind: "two"`). Two non-literal property types (`string & number`) do not
+    /// empty the intersection (observed).
+    pub(crate) fn reduced_type(&mut self, t: TypeId) -> TypeId {
+        let f = self.store().flags(t);
+        if !f.intersects(TypeFlags::UNION_OR_INTERSECTION) {
+            return t;
+        }
+        if let Some(&r) = self.reduced.get(&t) {
+            return r;
+        }
+        self.reduced.insert(t, t);
+        let r = if f.contains(TypeFlags::UNION) {
+            let ms = self.store().members_of_union(t).to_vec();
+            if ms
+                .iter()
+                .any(|&m| self.store().flags(m).contains(TypeFlags::INTERSECTION))
+            {
+                let kept: Vec<TypeId> = ms
+                    .iter()
+                    .copied()
+                    .filter(|&m| self.reduced_type(m) != TypeId::NEVER)
+                    .collect();
+                if kept.len() == ms.len() {
+                    t
+                } else {
+                    self.union(&kept)
+                }
+            } else {
+                t
+            }
+        } else if self.has_conflicting_discriminant(t) {
+            TypeId::NEVER
+        } else {
+            t
+        };
+        self.reduced.insert(t, r);
+        r
+    }
+
+    fn has_conflicting_discriminant(&mut self, t: TypeId) -> bool {
+        self.conflicting_discriminant(t).is_some() || self.conflicting_private(t).is_some()
+    }
+
+    /// Why the intersection `t` was reduced to `never` (TS18031 or TS18032), with its
+    /// arguments.
+    pub(crate) fn never_reduction_reason(
+        &mut self,
+        t: TypeId,
+    ) -> Option<(crate::diagnostics_generated::DiagnosticInfo, String, String)> {
+        if !self.store().flags(t).contains(TypeFlags::INTERSECTION) {
+            return None;
+        }
+        let (info, pn) = if let Some(pn) = self.conflicting_discriminant(t) {
+            (crate::diagnostics_generated::THE_INTERSECTION_0_WAS_REDUCED_TO_NEVER_BECAUSE_PROPERTY_1_HAS_CONFLICTING_TYPES_18031, pn)
+        } else {
+            let pn = self.conflicting_private(t)?;
+            (crate::diagnostics_generated::THE_INTERSECTION_0_WAS_REDUCED_TO_NEVER_BECAUSE_PROPERTY_1_EXISTS_IN_MULTIPLE_CO_18032, pn)
+        };
+        let ts = self.type_to_string(t);
+        let pname = self.store().str(pn).to_owned();
+        Some((info, ts, pname))
+    }
+
+    /// The property of intersection `t` declared separately by two of its members, private
+    /// in one of them (`A & B` with a `private x` in each class).
+    pub(crate) fn conflicting_private(&mut self, t: TypeId) -> Option<StrId> {
+        let ms = self.store().members_of_union(t).to_vec();
+        if ms.len() < 2
+            || !ms
+                .iter()
+                .all(|&m| self.store().flags(m).contains(TypeFlags::OBJECT))
+            || self.is_generic_type(t)
+        {
+            return None;
+        }
+        let mut seen: Vec<(StrId, SymId)> = Vec::new();
+        for &m in &ms {
+            for (name, p) in self.properties_of(m) {
+                if let Some(&(_, q)) = seen.iter().find(|e| e.0 == name) {
+                    if q != p
+                        && !self.same_declaration(p, q)
+                        && (self.is_private_like(p) == Some(true)
+                            || self.is_private_like(q) == Some(true))
+                    {
+                        return Some(name);
+                    }
+                } else {
+                    seen.push((name, p));
+                }
+            }
+        }
+        None
+    }
+
+    /// The property of intersection `t` whose literal types in two members have no common
+    /// value. Only properties declared by two members are typed (`window` is
+    /// `Window & typeof globalThis`, whose globals are being declared).
+    pub(crate) fn conflicting_discriminant(&mut self, t: TypeId) -> Option<StrId> {
+        let ms = self.store().members_of_union(t).to_vec();
+        if ms.len() < 2
+            || !ms
+                .iter()
+                .all(|&m| self.store().flags(m).contains(TypeFlags::OBJECT))
+            || self.is_generic_type(t)
+        {
+            return None;
+        }
+        let per_member: Vec<Vec<(StrId, SymId)>> =
+            ms.iter().map(|&m| self.properties_of(m)).collect();
+        let mut counts: rustc_hash::FxHashMap<StrId, u32> = rustc_hash::FxHashMap::default();
+        for props in &per_member {
+            for &(n, _) in props {
+                *counts.entry(n).or_insert(0) += 1;
+            }
+        }
+        let mut seen: Vec<(StrId, TypeId)> = Vec::new();
+        for props in &per_member {
+            for &(name, p) in props {
+                if counts.get(&name).copied().unwrap_or(0) < 2 {
+                    continue;
+                }
+                let pt = self.type_of_symbol(p);
+                if !self.every_member(pt, |m| self.is_unit(m)) {
+                    continue;
+                }
+                if let Some(e) = seen.iter_mut().find(|e| e.0 == name) {
+                    let both = self.intersection(&[e.1, pt]);
+                    if both == TypeId::NEVER {
+                        return Some(name);
+                    }
+                    e.1 = both;
+                } else {
+                    seen.push((name, pt));
+                }
+            }
+        }
+        None
+    }
+
+    /// The primitive of an intersection of a primitive with `{}` (`string & {}` is
+    /// `string`), which behaves as the primitive except that literals stay next to it in
+    /// a union.
+    pub fn primitive_with_empty_object(&self, t: TypeId) -> Option<TypeId> {
+        let s = self.store();
+        if !s.flags(t).contains(TypeFlags::INTERSECTION) {
+            return None;
+        }
+        let mut prim = None;
+        for &m in s.members_of_union(t) {
+            if self.is_empty_anonymous_object(m) {
+                continue;
+            }
+            if prim.is_some() || !s.flags(m).intersects(TypeFlags::PRIMITIVE) {
+                return None;
+            }
+            prim = Some(m);
+        }
+        prim
+    }
+
+    pub fn is_primitive_with_empty_object(&self, t: TypeId) -> bool {
+        self.primitive_with_empty_object(t).is_some()
+    }
+
+    /// An intersection type written as a non-unit string, number or bigint with `{}`
+    /// (`string & {}`, `` `a${string}` & {} ``) keeps the `{}` (observed: it prints as
+    /// written and a union keeps its literals next to it, `"left" | (string & {})`), unlike
+    /// one made by instantiation or distribution (`NonNullable<string>` and `(string |
+    /// undefined) & {}` are `string`).
+    pub fn written_primitive_and_empty_object(
+        &mut self,
+        parts: &[TypeId],
+        alias: AliasId,
+    ) -> Option<TypeId> {
+        let s = self.store();
+        let keeps = TypeFlags::STRING
+            | TypeFlags::NUMBER
+            | TypeFlags::BIGINT
+            | TypeFlags::TEMPLATE_LITERAL
+            | TypeFlags::STRING_MAPPING;
+        let mut prim = None;
+        let mut empty = None;
+        for &p in parts {
+            if self.is_empty_anonymous_object(p) {
+                empty.get_or_insert(p);
+            } else if prim.is_none() && s.flags(p).intersects(keeps) {
+                prim = Some(p);
+            } else {
+                return None;
+            }
+        }
+        let (p, e) = (prim?, empty?);
+        Some(s.intersection_sorted(&[p, e], Some(alias)))
     }
 
     /// `{}`: the empty object type or an empty type literal.

@@ -749,6 +749,8 @@ impl<'a> Program<'a> {
                                 )
                                 .with_file(FileId(fi as u32)),
                             );
+                            // Once per augmented name in a file (observed with tsc 7).
+                            break;
                         }
                     }
                 }
@@ -1014,7 +1016,24 @@ impl<'a> Program<'a> {
         r
     }
 
+    /// Whether resolving alias `sym` comes back to `sym` itself (`import A = B; import B =
+    /// A;`, a module re-exporting from itself); not an alias that only leads into a cycle.
+    pub fn is_circular_alias(&self, sym: SymbolRef) -> bool {
+        let mut cycle = false;
+        let _ = self.follow_alias_ext(sym, &mut Vec::new(), &mut cycle);
+        cycle
+    }
+
     fn follow_alias(&self, sym: SymbolRef, active: &mut Vec<SymbolRef>) -> Option<SymbolRef> {
+        self.follow_alias_ext(sym, active, &mut false)
+    }
+
+    fn follow_alias_ext(
+        &self,
+        sym: SymbolRef,
+        active: &mut Vec<SymbolRef>,
+        cycle: &mut bool,
+    ) -> Option<SymbolRef> {
         let mut cur = sym;
         loop {
             let f = self.file(cur.file);
@@ -1022,7 +1041,11 @@ impl<'a> Program<'a> {
             if !s.flags.intersects(SymbolFlags::ALIAS) {
                 return Some(cur);
             }
-            if active.contains(&cur) || active.len() >= MAX_CHAIN {
+            if active.contains(&cur) {
+                *cycle = active.first() == Some(&cur);
+                return None;
+            }
+            if active.len() >= MAX_CHAIN {
                 return None;
             }
             active.push(cur);

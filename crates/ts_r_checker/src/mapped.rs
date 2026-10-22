@@ -583,6 +583,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 None => key,
             };
             for pn in self.union_members(pnt) {
+                // `string & {}` keys an index signature as `string` does.
+                let pn = self.primitive_with_empty_object(pn).unwrap_or(pn);
                 let pf = self.store().flags(pn);
                 if let Some(name) = self.property_name_of_type(pn) {
                     let nid = self.store().intern_str(&name);
@@ -811,11 +813,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             // Through another template, an array from the call's contextual type still
             // reverse-maps to an array (`Post[]` against `Promise.all`'s `{ -readonly [P in
             // keyof T]: Awaited<T[P]> }` makes `T` an array, not a tuple context); its
-            // elements are a silent `any`.
+            // elements are a silent `any`, unless they are tuples (`[string, number][]` keeps
+            // its elements tuple contexts).
+            let tuple_elements = self.is_array_of_tuples(source);
             let src = if simple {
                 self.constrained_reverse_source(source, tv, None, true)
                     .unwrap_or(source)
-            } else if ctx.from_return_context && self.c.is_array_type(source) {
+            } else if ctx.from_return_context && self.c.is_array_type(source) && !tuple_elements {
                 self.create_array(TypeId::ANY, false)
             } else if !self.mentions_type_variable(tmpl, tv)
                 && let Some(r) = self.reverse_mapped_unknown(source)

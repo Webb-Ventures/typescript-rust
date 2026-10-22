@@ -1,0 +1,7 @@
+a.ts(9,7): error TS2322: Type 'OptionOne & { kind: "one"; }' is not assignable to type 'undefined'.
+a.ts(16,7): error TS2322: Type 'Z' is not assignable to type 'undefined'.
+a.ts(20,7): error TS2322: Type 'W' is not assignable to type 'undefined'.
+a.ts(24,4): error TS2339: Property 'kind' does not exist on type 'never'.
+  The intersection 'X' was reduced to 'never' because property 'kind' has conflicting types in some constituents.
+a.ts(26,4): error TS2339: Property 'p' does not exist on type 'never'.
+  The intersection 'V' was reduced to 'never' because property 'kind' has conflicting types in some constituents.

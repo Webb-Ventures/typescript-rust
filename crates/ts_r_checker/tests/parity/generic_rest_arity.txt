@@ -1,0 +1,5 @@
+a.ts(6,1): error TS2554: Expected 3 arguments, but got 1.
+a.ts(7,45): error TS2554: Expected 3 arguments, but got 8.
+a.ts(13,1): error TS2554: Expected 2 arguments, but got 1.
+a.ts(16,7): error TS2554: Expected 3 arguments, but got 2.
+a.ts(17,30): error TS2554: Expected 3 arguments, but got 4.

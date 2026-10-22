@@ -1,0 +1,10 @@
+a.ts(5,1): error TS2322: Type '{ a: null; } & { b: string; }' is not assignable to type '{ a?: number | undefined; b: string; }'.
+  Types of property 'a' are incompatible.
+    Type 'null' is not assignable to type 'number | undefined'.
+a.ts(13,5): error TS2322: Type 'From' is not assignable to type 'To'.
+  Types of property 'field' are incompatible.
+    Type 'null' is not assignable to type 'number | undefined'.
+a.ts(16,5): error TS2322: Type 'T & { a: boolean; }' is not assignable to type '{ a?: string | undefined; }'.
+  Types of property 'a' are incompatible.
+    Type 'boolean' is not assignable to type 'string'.
+a.ts(22,24): error TS2322: Type 'boolean' is not assignable to type 'string[]'.

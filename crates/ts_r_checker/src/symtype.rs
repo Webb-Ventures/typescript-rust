@@ -186,7 +186,20 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     fn compute_type_of_symbol(&mut self, s: SymId) -> TypeId {
         let flags = self.c.sym_flags(s);
-        if flags.intersects(SymbolFlags::ALIAS) {
+        // An alias merged with a local value whose target has none (`import { A }` of a
+        // type and `const A = 0`): the local value.
+        let local_value = SymbolFlags::VARIABLE
+            | SymbolFlags::FUNCTION
+            | SymbolFlags::CLASS
+            | SymbolFlags::REGULAR_ENUM
+            | SymbolFlags::VALUE_MODULE;
+        let merged_local = flags.intersects(SymbolFlags::ALIAS)
+            && flags.intersects(local_value)
+            && self
+                .c
+                .resolve_alias(s)
+                .is_some_and(|t| t != s && !self.c.has_meaning(t, meaning::VALUE));
+        if flags.intersects(SymbolFlags::ALIAS) && !merged_local {
             let Some(t) = self.c.resolve_alias(s) else {
                 // `import d from "m"` of a module without a default export (synthetic
                 // default): the module itself (a JSON module's value).
@@ -207,6 +220,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return v;
             }
             if !self.c.has_meaning(t, meaning::VALUE) {
+                if let Some(v) = self.alias_merged_value(s) {
+                    return self.type_of_symbol(v);
+                }
                 return self.export_equals_member_type(s).unwrap_or(TypeId::ERROR);
             }
             return self.type_of_symbol(t);
@@ -271,7 +287,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if let Node::ExportDefaultExpr { expr } | Node::ExportAssignment { expr } =
                     *ast.node(d.node)
                 {
-                    return self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
+                    // Widened like a declaration's initializer: an exported object literal
+                    // is no longer fresh where it is imported.
+                    let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
+                    return self.widened_type(t);
                 }
                 // JavaScript `module.exports = v`: the assigned value (`1`, as `export = 1`).
                 // tsc unions several assignments (with its own property order); not
@@ -1670,9 +1689,34 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return self.create_tuple(&els, false);
         }
-        let e = self
-            .element_type_of_array_like(parent_t)
-            .unwrap_or(TypeId::UNRESOLVED);
+        // The rest of a union of tuples and arrays is the union of their rests.
+        if self.store().flags(parent_t).contains(TypeFlags::UNION) {
+            let members = self.union_members(parent_t);
+            if members
+                .iter()
+                .all(|&m| self.store().tuple_shape_of(m).is_some() || self.c.is_array_type(m))
+            {
+                let parts: Vec<TypeId> = members
+                    .into_iter()
+                    .map(|m| self.array_rest_type(m, idx))
+                    .collect();
+                return self.union(&parts);
+            }
+        }
+        // The rest of an iterable is an array of what it iterates.
+        let e = match self.element_type_of_array_like(parent_t) {
+            Some(e) => e,
+            None if self
+                .store()
+                .flags(parent_t)
+                .intersects(TypeFlags::STRING_LIKE) =>
+            {
+                TypeId::UNRESOLVED
+            }
+            None => self
+                .iterated_type(parent_t, false)
+                .unwrap_or(TypeId::UNRESOLVED),
+        };
         self.create_array(e, false)
     }
 
@@ -1998,6 +2042,44 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// The element at `idx` of tuple `t` with a rest element when `idx` is at or past the
+    /// rest: the union of the rest element and every element after it (`[number,
+    /// ...string[], boolean]` at 1 is `string | boolean`), under noUncheckedIndexedAccess
+    /// with `undefined` from the count of non-rest elements on (observed: at 2 it is
+    /// `string | boolean | undefined`, and `[...number[], number]` at 0 is `number`).
+    /// `None` before the rest, for tuples without one and for variadic elements.
+    pub(crate) fn tuple_rest_region_element(&mut self, t: TypeId, idx: usize) -> Option<TypeId> {
+        let s = self.store();
+        let shape = s.tuple_shape_of(t)?;
+        if !shape.has_rest()
+            || shape
+                .elements
+                .iter()
+                .any(|e| e.kind == TupleElement::VARIADIC)
+        {
+            return None;
+        }
+        let lead = shape
+            .elements
+            .iter()
+            .position(|e| e.kind == TupleElement::REST)?;
+        let fixed = shape
+            .elements
+            .iter()
+            .filter(|e| e.kind != TupleElement::REST)
+            .count();
+        let n = shape.elements.len();
+        let args = self.c.type_args_of_tuple(t).to_vec();
+        if idx < lead || args.len() != n {
+            return None;
+        }
+        let mut parts = args[lead..].to_vec();
+        if idx >= fixed && self.c.opts.no_unchecked_indexed_access {
+            parts.push(TypeId::UNDEFINED);
+        }
+        Some(self.union(&parts))
+    }
+
     pub(crate) fn array_element_at(&mut self, t: TypeId, idx: usize) -> TypeId {
         let s = self.store();
         if s.flags(t).intersects(TypeFlags::ANY) {
@@ -2005,6 +2087,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if let Some(shape) = s.tuple_shape_of(t) {
             let shape = shape.clone();
+            if let Some(r) = self.tuple_rest_region_element(t, idx) {
+                return r;
+            }
             let args = self.c.type_args_of_tuple(t).to_vec();
             if let Some(el) = shape.elements.get(idx) {
                 let a = args.get(idx).copied().unwrap_or(TypeId::UNRESOLVED);
@@ -2052,6 +2137,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             return TypeId::STRING;
         }
         match self.iterated_type(t, false) {
+            // An element read from an iterable may be missing too (observed:
+            // `const [x] = iterable` is `number | undefined` under noUncheckedIndexedAccess).
+            Some(e) if self.c.opts.no_unchecked_indexed_access => self.add_undefined(e),
             Some(e) => e,
             None => TypeId::UNRESOLVED,
         }

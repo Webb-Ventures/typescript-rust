@@ -465,6 +465,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         (ss, ts)
     }
 
+    /// The constraint of the type parameter `tp` declares an index signature.
+    fn constraint_has_index(&mut self, tp: TypeId) -> bool {
+        let oc = self.base_constraint(tp);
+        let oc = self.apparent_type(oc);
+        self.store().flags(oc).contains(TypeFlags::OBJECT)
+            && !self.resolved_members(oc).index.is_empty()
+    }
+
     fn report_error_results(
         &mut self,
         s: TypeId,
@@ -883,8 +891,27 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             s
         };
+        // Members emptied by conflicting discriminants are gone (`reduced_type`); the
+        // head names the reduced source.
+        let t0 = t;
+        let (s, t) = if rel == RelationKind::Identity {
+            (s, t)
+        } else {
+            (self.reduced_type(s), self.reduced_type(t))
+        };
         if s == t {
             return true;
+        }
+        // A target intersection reduced to `never` says why under the head.
+        if report
+            && t == TypeId::NEVER
+            && t0 != t
+            && s != TypeId::NEVER
+            && let Some((info, ts, pname)) = self.never_reduction_reason(t0)
+        {
+            self.report_error(info, &[&ts, &pname]);
+            self.report_error_results(s, t, head, rel);
+            return false;
         }
         // A reference named by an alias relates as the plain reference: a missing property
         // below it names the plain reference and leaves the head (`Type 'NB' is not
@@ -1252,11 +1279,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         // below `X[][]` to the union `Style` is not a third nesting).
         let id = |ck: &Self, t: TypeId| ck.recursion_identity(t).unwrap_or((u32::MAX, t.0));
         let (si, ti) = (id(self, s), id(self, t));
+        // Only levels whose types were made no earlier than the previous level's count: a
+        // finite nesting of existing instantiations (`Cb<Cb<Cb<Cb<number>>>>`, whose
+        // inner types are older) is compared in full (observed).
         let mut n = 0;
+        let (mut last_a, mut last_b) = (0u32, 0u32);
         for &(a, b, _) in &self.rel.stack {
-            if id(self, a) == si && id(self, b) == ti {
+            if id(self, a) == si && id(self, b) == ti && (a.0 >= last_a || b.0 >= last_b) {
                 n += 1;
-                if n >= 3 {
+                last_a = a.0;
+                last_b = b.0;
+                if n >= 3 && (s.0 >= last_a || t.0 >= last_b) {
                     return true;
                 }
             }
@@ -1301,8 +1334,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         return true;
                     }
                 }
-                // tsc elaborates against the last member.
-                if report && let Some(&m) = members.last() {
+                // tsc elaborates against the last member (`boolean` is reported whole).
+                if report
+                    && s != TypeId::BOOLEAN
+                    && let Some(&m) = members.last()
+                {
                     self.related_to(m, t, rel, true, None);
                 }
                 return false;
@@ -1317,6 +1353,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return false;
                 }
             }
+            return true;
+        }
+        // `{} | null | undefined` is `unknown` to a generic source with no constraint (`T`,
+        // `T[keyof T]`), which no single member accepts.
+        if tf.contains(TypeFlags::UNION)
+            && sf.intersects(TypeFlags::INSTANTIABLE)
+            && rel != RelationKind::Identity
+            && self.is_unknown_like_union(t)
+            && matches!(
+                self.base_constraint(s),
+                TypeId::UNKNOWN | TypeId::UNRESOLVED
+            )
+        {
             return true;
         }
         if tf.contains(TypeFlags::UNION) {
@@ -1358,6 +1407,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         if sf.contains(TypeFlags::INTERSECTION) {
+            // A generic intersection is comparable as its constraint (observed: `T & number`
+            // with `T extends string | number` has no overlap with `"hello"`).
+            if rel == RelationKind::Comparable
+                && self.is_generic_type(s)
+                && !self.is_generic_type(t)
+            {
+                let c = self.base_constraint(s);
+                if c != s
+                    && c != TypeId::UNRESOLVED
+                    && c != TypeId::UNKNOWN
+                    && !self.store().is_error(c)
+                    && !self.is_generic_type(c)
+                {
+                    return self.related_to(c, t, rel, false, None);
+                }
+            }
             let members = st.members_of_union(s).to_vec();
             // A member does not get an implicit index signature on its own (the whole
             // intersection is compared structurally next): `{ a: R } & { [x: string]: true }`
@@ -1389,6 +1454,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let r = self.related_to(m, t, rel, false, None);
                 self.rel.in_target_member = in_member;
                 if r {
+                    // The other members' properties still meet the target's (observed:
+                    // `{ a: null } & { b: string }` is not a `{ a?: number; b: string }`).
+                    if tf.contains(TypeFlags::OBJECT)
+                        && rel != RelationKind::Comparable
+                        && !self.is_generic_object_type(t)
+                        && !self.properties_related(s, t, rel, false)
+                    {
+                        if report {
+                            self.properties_related(s, t, rel, true);
+                        }
+                        return false;
+                    }
                     return true;
                 }
             }
@@ -1919,6 +1996,56 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(false)
     }
 
+    /// A generic source against a union of intersections that mention it relates when each
+    /// member of its constraint `c`, intersected with the source, does (`T extends 1 | 2`
+    /// is assignable to `(1 & T) | (2 & T)`, that is `A & T` distributed).
+    fn distributed_constraint_related(
+        &mut self,
+        s: TypeId,
+        c: TypeId,
+        t: TypeId,
+        rel: RelationKind,
+    ) -> bool {
+        let st = self.store();
+        if c == s
+            || c == TypeId::UNRESOLVED
+            || st.is_error(c)
+            || st
+                .flags(c)
+                .intersects(TypeFlags::ANY_OR_UNKNOWN | TypeFlags::NEVER)
+            || !st.flags(t).contains(TypeFlags::UNION)
+            || !st.traits(t).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+        {
+            return false;
+        }
+        let parts: Vec<TypeId> = if st.flags(s).contains(TypeFlags::INTERSECTION) {
+            st.members_of_union(s).to_vec()
+        } else {
+            vec![s]
+        };
+        let mentions = st.members_of_union(t).iter().any(|&m| {
+            st.flags(m).contains(TypeFlags::INTERSECTION)
+                && parts.iter().all(|p| st.members_of_union(m).contains(p))
+        });
+        if !mentions {
+            return false;
+        }
+        let members: Vec<TypeId> = if st.flags(c).contains(TypeFlags::UNION) {
+            st.members_of_union(c).to_vec()
+        } else {
+            vec![c]
+        };
+        for m in members {
+            let mut ps = parts.clone();
+            ps.push(m);
+            let x = self.intersection(&ps);
+            if x == s || !self.related_to(x, t, rel, false, None) {
+                return false;
+            }
+        }
+        true
+    }
+
     fn structured_related(
         &mut self,
         s: TypeId,
@@ -1931,6 +2058,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         let tf = st.flags(t);
         if rel == RelationKind::Identity {
             return self.identity_structured(s, t);
+        }
+        // Under the strict subtype relation nothing but an empty object is a subtype of a
+        // fresh `{}` literal (observed: `c ? {} : dict` is the dictionary type).
+        if rel == RelationKind::StrictSubtype
+            && tf.contains(TypeFlags::OBJECT)
+            && sf.contains(TypeFlags::OBJECT)
+            && st
+                .object_of(t)
+                .is_some_and(|o| o.flags.contains(ObjectFlags::FRESH_LITERAL))
+            && self.is_empty_object_type(t)
+            && !self.is_empty_object_type(s)
+        {
+            return false;
         }
         if tf.contains(TypeFlags::UNION)
             && let Some(r) = self.conditional_source_related(s, t, rel, report)
@@ -1953,6 +2093,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 && c != TypeId::UNKNOWN
                 && self.related_to(c, t, rel, false, None)
             {
+                return true;
+            }
+            if self.distributed_constraint_related(s, c, t, rel) {
                 return true;
             }
             // The failure is explained by the constraint (`Type 'string' is not assignable
@@ -2020,6 +2163,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     && !self.store().is_error(c)
                     && self.related_to(c, t, rel, false, None)
                 {
+                    return true;
+                }
+                if self.distributed_constraint_related(s, c, t, rel) {
                     return true;
                 }
             }
@@ -2137,6 +2283,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return true;
         }
+        // `(A & B)[K]` is `A[K] & B[K]`: it relates when one member's access does
+        // (`({ [P in keyof U]: P } & { [x: string]: never })[keyof U]` to `keyof U`).
+        if sf.contains(TypeFlags::INDEXED_ACCESS)
+            && let TypeKind::IndexedAccess { obj, index } = st.kind(s)
+            && st.flags(obj).contains(TypeFlags::INTERSECTION)
+        {
+            for m in st.members_of_union(obj).to_vec() {
+                if let Some(x) = self.indexed_access_type(m, index, None)
+                    && x != s
+                    && x != TypeId::UNRESOLVED
+                    && !self.store().is_error(x)
+                    && self.related_to(x, t, rel, false, None)
+                {
+                    return true;
+                }
+            }
+        }
         if tf.contains(TypeFlags::INDEX) {
             // A type parameter constrained (through other parameters) to the target:
             // `K in Keys` with `Keys extends keyof T` against `keyof T`, also through a
@@ -2229,6 +2392,22 @@ impl<'c, 'a> Ck<'c, 'a> {
                         _ => break,
                     }
                 }
+                // A union or intersection constraint mentioning type parameters relates
+                // whole (`U extends T | string` is comparable to `T`).
+                if let Some(dc) = self.type_param_constraint(s)
+                    && dc != s
+                    && self
+                        .store()
+                        .flags(dc)
+                        .intersects(TypeFlags::UNION_OR_INTERSECTION)
+                    && self
+                        .store()
+                        .traits(dc)
+                        .contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+                    && self.related_to(dc, t, rel, false, None)
+                {
+                    return true;
+                }
             }
             if sf.contains(TypeFlags::INDEXED_ACCESS) {
                 return true;
@@ -2237,6 +2416,46 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if sf.intersects(TypeFlags::INSTANTIABLE) {
             let c = self.base_constraint(s);
+            // `T[keyof T]` without a constraint relates as `T[string] | T[number] |
+            // T[symbol]` (observed in tsc's elaboration).
+            if let TypeKind::IndexedAccess { obj, index } = self.store().kind(s)
+                && self.store().flags(obj).contains(TypeFlags::TYPE_PARAMETER)
+                && matches!(self.store().kind(index), TypeKind::Index(x) if x == obj)
+                && c == TypeId::UNRESOLVED
+                && !self.constraint_has_index(obj)
+            {
+                let parts: Vec<TypeId> = [TypeId::STRING, TypeId::NUMBER, TypeId::SYMBOL]
+                    .iter()
+                    .map(|&k| self.store().indexed_access(obj, k))
+                    .collect();
+                let u = self.union(&parts);
+                return self.related_to(u, t, rel, report, None);
+            }
+            // `T[K]` with `K extends keyof T` relates as `T[keyof T]`.
+            if c == TypeId::UNRESOLVED
+                && let TypeKind::IndexedAccess { obj, index } = self.store().kind(s)
+                && self.store().flags(obj).contains(TypeFlags::TYPE_PARAMETER)
+                && self
+                    .store()
+                    .flags(index)
+                    .contains(TypeFlags::TYPE_PARAMETER)
+                && let Some(kc) = self.type_param_constraint(index)
+                && matches!(self.store().kind(kc), TypeKind::Index(x) if x == obj)
+            {
+                let ia = self.store().indexed_access(obj, kc);
+                return self.related_to(ia, t, rel, report, None);
+            }
+            // `T[string]` (of `T[keyof T]`) whose `T` has no index signature relates to
+            // nothing but itself and `unknown`-like types (observed).
+            if c == TypeId::UNRESOLVED
+                && let TypeKind::IndexedAccess { obj, index } = self.store().kind(s)
+                && self.store().flags(obj).contains(TypeFlags::TYPE_PARAMETER)
+                && matches!(index, TypeId::STRING | TypeId::NUMBER | TypeId::SYMBOL)
+                && !self.is_unknown_like_union(t)
+                && !self.constraint_has_index(obj)
+            {
+                return false;
+            }
             if c == TypeId::UNRESOLVED {
                 return true;
             }
@@ -2684,6 +2903,9 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     fn tuple_related(&mut self, s: TypeId, t: TypeId, rel: RelationKind, report: bool) -> bool {
+        // Elements already related as discriminants (`["a" | "b", number]` against each of
+        // `["a", number] | ["b", number]`) are skipped.
+        let excluded = std::mem::take(&mut self.rel.excluded_props);
         let st = self.store();
         let tshape = st
             .tuple_shape_of(t)
@@ -2833,6 +3055,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Some(tel) = tshape.elements.get(tidx) else {
                 break;
             };
+            if tidx == i
+                && !excluded.is_empty()
+                && excluded.contains(&self.store().intern_str(&i.to_string()))
+            {
+                continue;
+            }
             let mut te = targs.get(tidx).copied().unwrap_or(TypeId::ANY);
             if sk == TupleElement::OPTIONAL
                 && tel.kind != TupleElement::OPTIONAL
@@ -2942,6 +3170,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
                 if self.property_of_type_id(s, n).is_none() {
+                    // A class's static `#private` fields are not required of another
+                    // constructor type (observed: `const c: typeof A = class {}` is OK).
+                    if self.store().str(n).starts_with('#')
+                        && self.c.value_decl(tp).is_some_and(|d| {
+                            self.node(d)
+                                .modifiers()
+                                .contains(ts_r_ast::Modifiers::STATIC)
+                        })
+                    {
+                        continue;
+                    }
                     // Index signatures don't satisfy required properties.
                     missing.push((n, tp));
                 }
@@ -2962,9 +3201,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .iter()
                         .any(|&(n, _)| !self.store().str(n).bytes().all(|b| b.is_ascii_digit()));
                 if report && !plain_fn && !non_array_to_tuple {
-                    let (ss, ts) = self.type_names_for_error(s, t);
+                    let (ss, mut ts) = self.type_names_for_error(s, t);
+                    let mut keep_head = false;
                     if missing.len() == 1 {
                         let pn = self.written_name(missing[0].1, missing[0].0);
+                        // A private or protected property names the class declaring it,
+                        // under the head when that is not the target (`C2 extends A`).
+                        if self.is_private_like(missing[0].1).is_some()
+                            && let Some(dn) = self.declaring_type_name(missing[0].1, t)
+                            && dn != ts
+                        {
+                            ts = dn;
+                            keep_head = true;
+                        }
                         self.report_error(
                             dg::PROPERTY_0_IS_MISSING_IN_TYPE_1_BUT_REQUIRED_IN_TYPE_2_2741,
                             &[&pn, &ss, &ts],
@@ -2987,7 +3236,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                             );
                         }
                     }
-                    self.suppress_next_head();
+                    if !keep_head {
+                        self.suppress_next_head();
+                    }
                 }
                 return false;
             }
@@ -3296,6 +3547,31 @@ impl<'c, 'a> Ck<'c, 'a> {
             .unwrap_or_default()
     }
 
+    /// 0 for a public construct signature, 1 for a `protected` and 2 for a `private`
+    /// class constructor.
+    fn constructor_visibility(&self, sig: SigId) -> u8 {
+        let Some(d) = self.store().sig(sig).decl.and_then(Loc::unpack) else {
+            return 0;
+        };
+        if !matches!(
+            self.node(d),
+            Node::MethodDef {
+                kind: ts_r_ast::MethodKind::Constructor,
+                ..
+            }
+        ) {
+            return 0;
+        }
+        let m = self.node(d).modifiers();
+        if m.contains(ts_r_ast::Modifiers::PRIVATE) {
+            2
+        } else if m.contains(ts_r_ast::Modifiers::PROTECTED) {
+            1
+        } else {
+            0
+        }
+    }
+
     /// Whether `sp` is declared in a class derived from the class declaring `tp`.
     fn declared_in_derived_class(&mut self, sp: SymId, tp: SymId) -> bool {
         match (self.declaring_class(sp), self.declaring_class(tp)) {
@@ -3304,7 +3580,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    fn same_declaration(&self, a: SymId, b: SymId) -> bool {
+    pub(crate) fn same_declaration(&self, a: SymId, b: SymId) -> bool {
         let da = self.c.value_decl(a).or_else(|| self.c.first_decl(a));
         let db = self.c.value_decl(b).or_else(|| self.c.first_decl(b));
         da.is_some() && da == db
@@ -3349,6 +3625,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.report_error(dg::CANNOT_ASSIGN_AN_ABSTRACT_CONSTRUCTOR_TYPE_TO_A_NON_ABSTRACT_CONSTRUCTOR_TYPE_2517, &[]);
                 }
                 return false;
+            }
+            // A `protected` or `private` constructor is not a less restricted one (TS2672).
+            if rel != RelationKind::Identity {
+                let sv = self.constructor_visibility(ssigs[0]);
+                let tv = self.constructor_visibility(tsigs[0]);
+                if sv > tv {
+                    if report {
+                        let names = ["public", "protected", "private"];
+                        self.report_error(
+                            dg::CANNOT_ASSIGN_A_0_CONSTRUCTOR_TYPE_TO_A_1_CONSTRUCTOR_TYPE_2672,
+                            &[names[sv as usize], names[tv as usize]],
+                        );
+                    }
+                    return false;
+                }
             }
         }
         // Two instantiations of one type literal (or one generic interface) relate their

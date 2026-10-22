@@ -1,0 +1,9 @@
+a.ts(3,12): error TS2538: Type '[]' cannot be used as an index type.
+a.ts(4,12): error TS2538: Type '{}' cannot be used as an index type.
+a.ts(5,12): error TS2538: Type 'boolean' cannot be used as an index type.
+a.ts(7,12): error TS2538: Type 'undefined' cannot be used as an index type.
+a.ts(9,12): error TS2538: Type 'object' cannot be used as an index type.
+a.ts(10,12): error TS2538: Type 'null' cannot be used as an index type.
+a.ts(11,16): error TS2538: Type '[]' cannot be used as an index type.
+a.ts(16,8): error TS2538: Type 'unique symbol' cannot be used as an index type.
+a.ts(17,8): error TS2538: Type 'symbol' cannot be used as an index type.

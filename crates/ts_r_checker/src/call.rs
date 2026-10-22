@@ -416,7 +416,82 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let cl = Loc::new(e.file, callee);
         let ft = self.check_expr(cl);
+        // An inaccessible constructor still makes an instance (observed: `c.constructor` is
+        // checked); its arguments are not checked against it.
+        if !self.constructor_accessible(e, ft) {
+            self.resolved_calls.insert(e, None);
+            self.check_args_plain(e, Args::List(args));
+            let sigs = self.signatures_of(ft, SigKind::Construct);
+            return match sigs.first() {
+                Some(&sig) if self.store().sig(sig).type_params == ListId::EMPTY => {
+                    self.return_type_of(sig)
+                }
+                _ => TypeId::ERROR,
+            };
+        }
         self.resolve_call_like(e, cl, ft, type_args, Args::List(args), SigKind::Construct)
+    }
+
+    /// The class of a `private` or `protected` constructor among `ft`'s construct
+    /// signatures, with whether it is private.
+    pub(crate) fn restricted_constructor(&mut self, ft: TypeId) -> Option<(Loc, bool)> {
+        if ft == TypeId::UNRESOLVED || self.store().is_error(ft) {
+            return None;
+        }
+        let sigs = self.signatures_of(ft, SigKind::Construct);
+        let &sig = sigs.first()?;
+        let d = self.store().sig(sig).decl.and_then(Loc::unpack)?;
+        if !matches!(
+            self.node(d),
+            Node::MethodDef {
+                kind: ts_r_ast::MethodKind::Constructor,
+                ..
+            }
+        ) {
+            return None;
+        }
+        let m = self.node(d).modifiers();
+        let private = m.contains(ts_r_ast::Modifiers::PRIVATE);
+        if !private && !m.contains(ts_r_ast::Modifiers::PROTECTED) {
+            return None;
+        }
+        Some((self.enclosing_class(d)?, private))
+    }
+
+    /// `new C()` of a class with a `private` constructor outside its declaration, or a
+    /// `protected` one outside it and its subclasses: TS2673/TS2674 at the expression.
+    fn constructor_accessible(&mut self, e: Loc, ft: TypeId) -> bool {
+        let Some((dc, private)) = self.restricted_constructor(ft) else {
+            return true;
+        };
+        let mut cur = self.enclosing_class(e);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+            if c == dc || (!private && self.class_derives_from(c, dc)) {
+                return true;
+            }
+            cur = self.enclosing_class(c);
+        }
+        if self.reporting(e.file) {
+            let name = match self.c.sym_of_decl(dc) {
+                Some(s) => {
+                    let t = self.declared_type_of_symbol(s);
+                    self.type_to_string(t)
+                }
+                None => String::new(),
+            };
+            let info = if private {
+                dg::CONSTRUCTOR_OF_CLASS_0_IS_PRIVATE_AND_ONLY_ACCESSIBLE_WITHIN_THE_CLASS_DECLARATI_2673
+            } else {
+                dg::CONSTRUCTOR_OF_CLASS_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_THE_CLASS_DECLARA_2674
+            };
+            self.error(e, info, &[&name]);
+        }
+        false
     }
 
     /// Whether the callee's root identifier is an unannotated parameter of a function
@@ -935,7 +1010,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return TypeId::ANY;
                 }
                 let mut chain = Chain::new();
-                chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
+                // `o.getter()`: TS6234 suggests dropping the call.
+                let is_getter = !tagged
+                    && matches!(self.ast(cl.file).node(cl.node), Node::Member { .. })
+                    && self.property_symbol_of_access(cl).is_some_and(|p| {
+                        self.c
+                            .sym_flags(p)
+                            .contains(ts_r_binder::SymbolFlags::GET_ACCESSOR)
+                    });
+                if is_getter {
+                    chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_BECAUSE_IT_IS_A_GET_ACCESSOR_DID_YOU_MEAN_TO_USE_6234, &[]);
+                } else {
+                    chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
+                }
                 self.no_signatures_chain(&mut chain, t, kind);
                 // A property access callee reports at the name (`o.m()`).
                 let ast = self.ast(cl.file);
@@ -1075,6 +1162,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let min = if required > 0 { count + required } else { min };
         (min, count + len, open)
+    }
+
+    /// Whether the rest parameter of `sig` has a generic type rather than an array type.
+    fn has_generic_rest(&self, sig: SigId) -> bool {
+        let s = self.store();
+        let d = s.sig(sig);
+        d.has_rest()
+            && d.params
+                .last()
+                .is_some_and(|p| s.flags(p.ty).intersects(TypeFlags::INSTANTIABLE))
     }
 
     fn has_correct_arity(&self, sig: SigId, args: &[Arg]) -> bool {
@@ -1288,10 +1385,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         let mut last_failures: Vec<(SigId, Failure)> = Vec::new();
+        // An instance of a generic rest parameter (`...args: TS`) may take a different
+        // number of arguments: the first such instance that does not fit is the arity error
+        // reported if no candidate fits otherwise.
+        let mut arity_failure: Option<SigId> = None;
         for &rel in relations {
             last_failures.clear();
             for &cand in &candidates {
                 let inst = self.instantiate_candidate(e, cand, &eff, explicit.as_deref());
+                if inst != cand
+                    && self.has_generic_rest(cand)
+                    && !self.has_correct_arity(inst, &eff)
+                {
+                    arity_failure.get_or_insert(inst);
+                    continue;
+                }
                 let failure = if fixing {
                     match self.check_candidate_args_in(e, inst, &eff, rel, ArgPass::Skip(&sens)) {
                         Some(f) => Some(f),
@@ -1316,6 +1424,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // Report.
         self.overload_failed = true;
+        if last_failures.is_empty()
+            && let Some(inst) = arity_failure
+        {
+            self.report_arity_error(e, cl, &[inst], &eff);
+            return Some(inst);
+        }
         // When every overload fails and some is generic, the call stands for the overload
         // with the most parameters (the first of those), its type arguments inferred from
         // the arguments that are not context sensitive (observed: `unknown` for type
@@ -2267,6 +2381,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                             let at = self.speculative_arg_type(arm, pt);
                             self.infer_types(&mut ctx, at, pt, 0);
                         }
+                        // So do the elements of an array literal that are not
+                        // (`[makeFooer(), { foo: (v) => v }]` infers `Fooer` for `T[]`).
+                        if let Some(at) = self.context_free_array_elements_type(l, pt) {
+                            self.infer_types(&mut ctx, at, pt, 0);
+                        }
                         deferred.push(i);
                         continue;
                     }
@@ -2295,9 +2414,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                         // A tuple-like constraint the context implies is an array (`T extends
                         // readonly unknown[] | []` with `T = Post[]`): no tuple.
-                        Some(m) if self.is_tuple_like_context(pt) => {
+                        // So is an array of tuples (`[string, number][]`): its elements
+                        // stay tuple contexts.
+                        Some(m) => {
+                            let tuple_like = self.is_tuple_like_context(pt);
                             let r = self.instantiate_return_context(pt, m, false);
-                            if r != pt && self.c.is_array_type(r) {
+                            if r != pt
+                                && self.c.is_array_type(r)
+                                && (tuple_like || self.is_array_of_tuples(r))
+                            {
                                 r
                             } else {
                                 pt
@@ -2374,12 +2499,57 @@ impl<'c, 'a> Ck<'c, 'a> {
             let tps = ctx.params.clone();
             let mut mentioned = vec![false; tps.len()];
             let ptn = self.non_nullable(pt);
-            let pt_calls = self.signatures_of(ptn, SigKind::Call);
+            let mut pt_calls = self.signatures_of(ptn, SigKind::Call);
             let callable = !pt_calls.is_empty();
+            // Functions nested in an array or object literal argument fix what their own
+            // contextual signatures mention (`[cb => cb(null, 1)]` against `Task<T>[]`).
+            let nested = !matches!(
+                self.ast(e.file)
+                    .node(crate::nodes::skip_parens(self.ast(e.file), n)),
+                Node::Arrow { .. } | Node::FunctionExpr { .. }
+            );
+            if nested {
+                pt_calls.clear();
+                // (A homomorphic mapped type infers by reversing it: nothing to fix.)
+                // (Only when every element or property is such a function: the others would
+                // infer first.)
+                if self.is_generic_mapped_type(ptn)
+                    || !self.nested_context_sigs(Loc::new(e.file, n), pt, 0, &mut pt_calls)
+                {
+                    pt_calls.clear();
+                }
+                // A function returning a type parameter that a later one's parameters mention
+                // infers it before that one is typed (intra-expression inference, not
+                // modelled here).
+                let mut returned = vec![false; tps.len()];
+                for &cs in &pt_calls.clone() {
+                    let d = self.store().sig(cs);
+                    let ptys: Vec<TypeId> = d.params.iter().map(|p| p.ty).collect();
+                    let rt = self.return_type_of(cs);
+                    for (j, &tp) in tps.iter().enumerate() {
+                        if returned[j] && ptys.iter().any(|&t| self.type_mentions(t, tp)) {
+                            pt_calls.clear();
+                            break;
+                        }
+                    }
+                    if pt_calls.is_empty() {
+                        break;
+                    }
+                    for (j, &tp) in tps.iter().enumerate() {
+                        if self.type_mentions(rt, tp) {
+                            returned[j] = true;
+                        }
+                    }
+                }
+            }
             // Only the positions where a function argument has a parameter without a type
             // annotation take a contextual type (`(set: string[], part) => ..` leaves the
             // `U` of `prev: U` to be inferred from the body as well).
-            let untyped = self.untyped_param_positions(Loc::new(e.file, n));
+            let untyped = if nested {
+                None
+            } else {
+                self.untyped_param_positions(Loc::new(e.file, n))
+            };
             for cs in pt_calls {
                 let n = self.store().sig(cs).params.len();
                 for k in 0..n {
@@ -2570,6 +2740,73 @@ impl<'c, 'a> Ck<'c, 'a> {
             .collect()
     }
 
+    /// Whether `t` is an array whose elements are tuples.
+    pub(crate) fn is_array_of_tuples(&self, t: TypeId) -> bool {
+        self.c.is_array_type(t)
+            && self.c.type_args_of(t).first().is_some_and(|&el| {
+                self.every_member(el, |m| self.store().tuple_shape_of(m).is_some())
+            })
+    }
+
+    /// The contextual call signatures of the context-sensitive functions in the array and
+    /// object literal `l` (the elements and property values of `l` typed by `ct`); `false`
+    /// when some element or property is not one of them (nor such a literal).
+    fn nested_context_sigs(
+        &mut self,
+        l: Loc,
+        ct: TypeId,
+        depth: u32,
+        out: &mut Vec<SigId>,
+    ) -> bool {
+        if depth > 8 || out.len() > 64 {
+            return false;
+        }
+        let ast = self.ast(l.file);
+        let n = crate::nodes::skip_parens(ast, l.node);
+        match *ast.node(n) {
+            Node::Arrow { .. } | Node::FunctionExpr { .. } => {
+                let t = self.non_nullable(ct);
+                out.extend(self.signatures_of(t, SigKind::Call));
+            }
+            Node::ArrayLit { elements } => {
+                for (i, &x) in ast.list(elements).to_vec().iter().enumerate() {
+                    let xl = Loc::new(l.file, x);
+                    if matches!(ast.node(x), Node::Spread { .. })
+                        || !self.is_context_sensitive_expr(xl)
+                    {
+                        return false;
+                    }
+                    if let Some(t) = self.contextual_element_type(ct, i, false, None)
+                        && !self.nested_context_sigs(xl, t, depth + 1, out)
+                    {
+                        return false;
+                    }
+                }
+            }
+            Node::ObjectLit { props } => {
+                for &p in ast.list(props).to_vec().iter() {
+                    let (key, value) = match *ast.node(p) {
+                        Node::Property { key, value, .. } | Node::MethodDef { key, value, .. } => {
+                            (key, value)
+                        }
+                        _ => return false,
+                    };
+                    let vl = Loc::new(l.file, value);
+                    if !self.is_context_sensitive_expr(vl) {
+                        return false;
+                    }
+                    if let Some(t) = self.contextual_member_type(ct, Loc::new(l.file, key))
+                        && !self.nested_context_sigs(vl, t, depth + 1, out)
+                    {
+                        return false;
+                    }
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     /// `at` has a single generic call signature and the parameter type `pt` has a call
     /// signature whose parameters mention one of `tps`.
     fn is_generic_function_for(&mut self, at: TypeId, pt: TypeId, tps: &[TypeId]) -> bool {
@@ -2653,6 +2890,36 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         false
+    }
+
+    /// For an array literal argument `l` of the array parameter type `pt`: the array of the
+    /// union of the types of its elements that are not context sensitive (none if all are,
+    /// or `l` has spreads).
+    fn context_free_array_elements_type(&mut self, l: Loc, pt: TypeId) -> Option<TypeId> {
+        let ast = self.ast(l.file);
+        let Node::ArrayLit { elements } = *ast.node(crate::nodes::skip_parens(ast, l.node)) else {
+            return None;
+        };
+        if !self.c.is_array_type(pt) {
+            return None;
+        }
+        let et = *self.c.type_args_of(pt).first()?;
+        let mut parts = Vec::new();
+        for &x in ast.list(elements).to_vec().iter() {
+            let xl = Loc::new(l.file, x);
+            if matches!(self.ast(l.file).node(x), Node::Spread { .. }) {
+                return None;
+            }
+            if self.is_context_sensitive_expr(xl) {
+                continue;
+            }
+            parts.push(self.speculative_arg_type(xl, et));
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        let u = self.union(&parts);
+        Some(self.create_array(u, false))
     }
 
     /// The arms of a (nested) conditional expression that are not context sensitive.

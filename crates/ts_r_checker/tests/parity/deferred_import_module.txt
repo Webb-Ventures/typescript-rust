@@ -1,0 +1,2 @@
+b.ts(1,8): error TS18060: Deferred imports are only supported when the '--module' flag is set to 'esnext' or 'preserve'.
+b.ts(3,1): error TS18060: Deferred imports are only supported when the '--module' flag is set to 'esnext' or 'preserve'.

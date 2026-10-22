@@ -7,7 +7,8 @@
 //!   own type is its annotation, else its widened initializer type, else `any`; a `for-in`
 //!   variable is `string` (`Extract<keyof T, string>` over a generic `T` or `this`), a
 //!   `for-of` variable the iterated type. `= null` and `= undefined` initializers count as
-//!   `any` (they start an evolving `any`). JavaScript files too (a JSDoc `@type` is the
+//!   `any` (they start an evolving `any`), and so does an initializer that makes the
+//!   variable's type circular (TS7022). JavaScript files too (a JSDoc `@type` is the
 //!   annotation; a function initializer's type has the variable's expandos).
 //! - Every property declaration merged into a symbol (interface/interface or class/interface
 //!   merges) after the first must have a type identical to the first: TS2717 at the later
@@ -188,7 +189,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .flatten()
                         .any(|n| mentions_ident(ast, n, own))
                 {
-                    return None;
+                    // An initializer whose variable type is circular through variables
+                    // alone (TS7022) makes the variable `any`, compared as such.
+                    return (type_ann.is_none() && self.var_type_circular(d))
+                        .then_some(TypeId::ANY);
                 }
                 if type_ann.is_none()
                     && let Some(i) = init
@@ -253,6 +257,27 @@ impl<'c, 'a> Ck<'c, 'a> {
             _ => return None,
         };
         Some(if t == TypeId::AUTO { TypeId::ANY } else { t })
+    }
+
+    /// Whether the type of the variable declared at `d` is circular through the types of
+    /// variables alone.
+    fn var_type_circular(&mut self, d: Loc) -> bool {
+        let Some(sym) = self.c.sym_of_decl(d) else {
+            return false;
+        };
+        self.type_of_symbol(sym);
+        if !self
+            .circular
+            .contains(&crate::checker::Resolving::Type(sym))
+        {
+            return false;
+        }
+        let path = self.type_cycles.get(&sym).cloned().unwrap_or_default();
+        !path.is_empty()
+            && path.iter().all(|r| {
+                matches!(*r, crate::checker::Resolving::Type(s) if self.c.sym_flags(s).intersects(SymbolFlags::VARIABLE)
+                    && !self.c.sym_flags(s).intersects(SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION))
+            })
     }
 
     /// Whether `e` is `E.a` for an enum `E`.

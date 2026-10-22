@@ -1,0 +1,7 @@
+a.ts(5,1): error TS2322: Type '[number, string, boolean, ...boolean[]]' is not assignable to type '[number, string, boolean, boolean, ...boolean[]]'.
+  Source provides no match for required element at position 3 in target.
+a.ts(7,1): error TS4104: The type 'readonly [1, string, boolean, ...boolean[]]' is 'readonly' and cannot be assigned to the mutable type '[number, string, boolean, boolean, ...boolean[]]'.
+a.ts(8,5): error TS2322: Type '[number, string, boolean, ...boolean[]]' is not assignable to type '[number, string, boolean, boolean, ...boolean[]]'.
+  Source provides no match for required element at position 3 in target.
+a.ts(9,5): error TS2322: Type '[number, string, boolean, ...boolean[]]' is not assignable to type '[number, string]'.
+  Source has 3 element(s) but target allows only 2.

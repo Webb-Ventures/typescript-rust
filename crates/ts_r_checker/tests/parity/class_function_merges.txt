@@ -1,0 +1,8 @@
+a.ts(2,7): error TS2813: Class declaration cannot implement overload list for 'Foo'.
+a.ts(3,10): error TS2391: Function implementation is missing or not immediately following the declaration.
+a.ts(3,10): error TS2814: Function with bodies can only merge with classes that are ambient.
+a.ts(5,10): error TS2391: Function implementation is missing or not immediately following the declaration.
+a.ts(5,10): error TS2814: Function with bodies can only merge with classes that are ambient.
+a.ts(6,7): error TS2813: Class declaration cannot implement overload list for 'bar'.
+a.ts(8,10): error TS2814: Function with bodies can only merge with classes that are ambient.
+a.ts(10,7): error TS2813: Class declaration cannot implement overload list for 'baz'.

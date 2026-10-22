@@ -1,0 +1,6 @@
+a.ts(9,3): error TS6234: This expression is not callable because it is a 'get' accessor. Did you mean to use it without '()'?
+  Type 'Number' has no call signatures.
+a.ts(10,3): error TS6234: This expression is not callable because it is a 'get' accessor. Did you mean to use it without '()'?
+  Type 'String' has no call signatures.
+a.ts(11,3): error TS2349: This expression is not callable.
+  Type 'Number' has no call signatures.

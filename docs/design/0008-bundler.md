@@ -100,7 +100,8 @@ short bundle-wide names. `--minify-syntax` runs `compress` (statement merging, `
 ### Incremental builds and caching
 
 - In memory (`BuildContext`): prepared modules keyed by `prep_key` = blake3 of file contents,
-  loader, transform options cache key and defines; printed fragments keyed by
+  loader, transform options cache key, defines, annotation handling and effective output
+  format (including strict-mode validation); printed fragments keyed by
   `blake3(prep_key, ModulePlan)`. A rebuild re-reads changed files, re-links (cheap), and
   reprints only modules whose plan changed. Fragments not used by the latest build are
   evicted.

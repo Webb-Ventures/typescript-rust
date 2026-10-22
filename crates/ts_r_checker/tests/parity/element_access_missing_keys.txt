@@ -1,0 +1,30 @@
+a.ts(4,1): error TS7053: Element implicitly has an 'any' type because expression of type '"zzz"' can't be used to index type 'J'.
+  Property 'zzz' does not exist on type 'J'.
+a.ts(5,1): error TS7053: Element implicitly has an 'any' type because expression of type '"abd"' can't be used to index type 'J'.
+  Property 'abd' does not exist on type 'J'.
+a.ts(6,3): error TS2551: Property 'foo' does not exist on type 'J'. Did you mean 'foof'?
+a.ts(7,3): error TS2551: Property 'helo' does not exist on type 'J'. Did you mean 'hello'?
+a.ts(8,3): error TS2551: Property 'foo' does not exist on type 'J'. Did you mean 'foof'?
+a.ts(10,3): error TS2551: Property 'foo' does not exist on type '{ foof: number; }'. Did you mean 'foof'?
+a.ts(13,3): error TS2551: Property 'foo' does not exist on type 'C'. Did you mean 'foof'?
+a.ts(14,1): error TS2576: Property 'bar' does not exist on type 'C'. Did you mean to access the static member 'C["bar"]' instead?
+a.ts(15,1): error TS2576: Property 'bar' does not exist on type 'C'. Did you mean to access the static member 'C['bar']' instead?
+a.ts(17,3): error TS2551: Property 'foo' does not exist on type 'C | J'. Did you mean 'foof'?
+a.ts(20,1): error TS2339: Property 'zzz' does not exist on type '{ a: number; }'.
+a.ts(21,1): error TS7053: Element implicitly has an 'any' type because expression of type '"zzz"' can't be used to index type '{ a: number; }'.
+  Property 'zzz' does not exist on type '{ a: number; }'.
+a.ts(23,13): error TS2339: Property 'y' does not exist on type '{ a: number; b: string; }'.
+a.ts(23,13): error TS2339: Property 'z' does not exist on type '{ a: number; b: string; }'.
+a.ts(32,1): error TS7053: Element implicitly has an 'any' type because expression of type '"zzz"' can't be used to index type 'Number'.
+  Property 'zzz' does not exist on type 'Number'.
+a.ts(33,3): error TS2551: Property 'toFixd' does not exist on type 'Number'. Did you mean 'toFixed'?
+a.ts(35,1): error TS7053: Element implicitly has an 'any' type because expression of type '"zzz"' can't be used to index type 'Boolean'.
+  Property 'zzz' does not exist on type 'Boolean'.
+a.ts(37,3): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+a.ts(42,14): error TS2476: A const enum member can only be accessed using a string literal.
+a.ts(44,14): error TS2339: Property 'Z' does not exist on type 'typeof E'.
+a.ts(45,14): error TS2476: A const enum member can only be accessed using a string literal.
+a.ts(46,12): error TS2475: 'const' enums can only be used in property or index access expressions or the right hand side of an import declaration or export assignment or type query.
+a.ts(47,13): error TS2475: 'const' enums can only be used in property or index access expressions or the right hand side of an import declaration or export assignment or type query.
+a.ts(48,13): error TS2475: 'const' enums can only be used in property or index access expressions or the right hand side of an import declaration or export assignment or type query.
+a.ts(50,5): error TS2475: 'const' enums can only be used in property or index access expressions or the right hand side of an import declaration or export assignment or type query.
