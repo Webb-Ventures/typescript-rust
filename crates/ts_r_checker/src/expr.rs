@@ -166,6 +166,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         t if self.store().is_error(t) => TypeId::STRING,
                         t => t,
                     }
+                } else if let Some(v) = self.eval_constant(e, SymId::NONE, &[], 0)
+                    && let Some(text) = self.store().string_value(v).map(str::to_owned)
+                {
+                    // A template of constants (`${E.a}`, `${k}` of `const k = "k"`) is that
+                    // string literal (observed, tsc 7).
+                    self.store().string_literal(&text, true)
                 } else {
                     TypeId::STRING
                 }
@@ -684,7 +690,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2464 at computed name `key` whose expression has type `kt` when that is not a
     /// valid key: valid keys are assignable to `string | number | symbol` (`never`,
     /// `K extends keyof U`, `S extends string` too).
-    pub(crate) fn check_computed_key_type(&mut self, key: Loc, kt: TypeId) {
+    pub(crate) fn check_computed_key_type(&mut self, key: Loc, kt: TypeId) -> bool {
         let keys = self.union(&[TypeId::STRING, TypeId::NUMBER, TypeId::SYMBOL]);
         if !self.store().flags(kt).intersects(
             TypeFlags::STRING_LIKE
@@ -704,7 +710,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 dg::A_COMPUTED_PROPERTY_NAME_MUST_BE_OF_TYPE_STRING_NUMBER_SYMBOL_OR_ANY_2464,
                 &[],
             );
+            return true;
         }
+        false
     }
 
     fn in_generator(&self, e: Loc) -> bool {
@@ -800,6 +808,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.check_type_only_alias_use(e, s, t, name);
                         return v;
                     }
+                    // An alias further along merged with a local value (`import { A }` and
+                    // `const A = 0` re-exported): that value.
+                    let t = if !self.c.has_meaning(t, meaning::VALUE)
+                        && let Some(v) = self.alias_merged_value(s)
+                    {
+                        v
+                    } else {
+                        t
+                    };
                     if !self.c.has_meaning(t, meaning::VALUE) {
                         if let Some(v) = self.export_equals_member_type(s) {
                             return v;
@@ -841,7 +858,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         if f.intersects(SymbolFlags::VARIABLE) && !f.intersects(SymbolFlags::ALIAS) {
             return self.narrowed_identifier_type(e, sym, declared, name);
         }
+        // A namespace import of an `export =` value (`import * as b from "./b"` with
+        // `export = b` of a `number | undefined`) narrows like a constant.
+        if sym != s
+            && self.store().flags(declared).contains(TypeFlags::UNION)
+            && self.is_narrowable_reference(e)
+        {
+            return self.flow_type_of_reference(e, declared, declared);
+        }
         declared
+    }
+
+    /// The first alias after `s` on its chain that is merged with a local value
+    /// (`import { A } from "./a"; const A = 0; export { A }`).
+    pub(crate) fn alias_merged_value(&self, s: SymId) -> Option<SymId> {
+        let r = self.c.parts(s).next()?;
+        for a in self.c.link.alias_chain(r).into_iter().skip(1) {
+            let f = self.c.file(a.file);
+            if f.bound.symbol(a.symbol).flags.intersects(
+                SymbolFlags::VARIABLE
+                    | SymbolFlags::FUNCTION
+                    | SymbolFlags::CLASS
+                    | SymbolFlags::REGULAR_ENUM
+                    | SymbolFlags::VALUE_MODULE,
+            ) {
+                return Some(self.c.sym_ref(a));
+            }
+        }
+        None
     }
 
     /// TS1361/TS1362: a value read through an alias chain with a type-only link (`import
@@ -1894,7 +1938,32 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
                     // Computed names and heritage clauses: the outer `this`.
                 }
-                Node::Module { .. } => return TypeId::UNRESOLVED,
+                Node::Module { .. } => {
+                    if self.reporting(e.file) {
+                        self.error(
+                            e,
+                            dg::THIS_CANNOT_BE_REFERENCED_IN_A_MODULE_OR_NAMESPACE_BODY_2331,
+                            &[],
+                        );
+                        if self.c.opts.no_implicit_this {
+                            self.error(e, dg::THIS_IMPLICITLY_HAS_TYPE_ANY_BECAUSE_IT_DOES_NOT_HAVE_A_TYPE_ANNOTATION_2683, &[]);
+                        }
+                    }
+                    return TypeId::UNRESOLVED;
+                }
+                Node::EnumMember { .. } => {
+                    if self.reporting(e.file) {
+                        self.error(
+                            e,
+                            dg::THIS_CANNOT_BE_REFERENCED_IN_CURRENT_LOCATION_2332,
+                            &[],
+                        );
+                        if self.c.opts.no_implicit_this {
+                            self.error(e, dg::THIS_IMPLICITLY_HAS_TYPE_ANY_BECAUSE_IT_DOES_NOT_HAVE_A_TYPE_ANNOTATION_2683, &[]);
+                        }
+                    }
+                    return TypeId::UNRESOLVED;
+                }
                 _ => {}
             }
             prev = n;
@@ -1903,6 +1972,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A script's top-level `this` is the global object.
         if !self.c.file(e.file).bound.is_module && !self.c.file(e.file).is_js() {
             return self.global_this_type();
+        }
+        // A module's is `undefined` (observed: `this.x` at the top level of a module, or
+        // in an arrow there, is TS2532).
+        if !self.c.file(e.file).is_js() && !self.c.file(e.file).is_declaration() {
+            return TypeId::UNDEFINED;
         }
         TypeId::UNRESOLVED
     }
@@ -2127,7 +2201,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// type without `null`/`undefined`.
     pub fn check_non_null(&mut self, node: Loc, t: TypeId) -> TypeId {
         if !self.c.opts.strict_null_checks {
-            return t;
+            // Without strictNullChecks only a value that is nothing but `undefined` or
+            // `null` is reported (observed: `u.x` with `u: undefined`, module-level
+            // `this.x`, `null.x`).
+            let (undef, null) = match t {
+                TypeId::UNDEFINED | TypeId::UNDEFINED_WIDENING => (true, false),
+                TypeId::NULL | TypeId::NULL_WIDENING => (false, true),
+                _ => return t,
+            };
+            self.report_possibly_nullish(node, undef, null);
+            return TypeId::ERROR;
         }
         let s = self.store();
         let f = s.flags(t);
@@ -2274,7 +2357,8 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn report_possibly_nullish(&mut self, node: Loc, undef: bool, null: bool) {
         let ast = self.ast(node.file);
         let n = skip_parens(ast, node.node);
-        if let Node::NullLit {} = ast.node(n) {
+        // (A parenthesized `(null)` is an object possibly null, observed.)
+        if let Node::NullLit {} = ast.node(node.node) {
             self.error(node, dg::THE_VALUE_0_CANNOT_BE_USED_HERE_18050, &["null"]);
             return;
         }
@@ -2468,6 +2552,25 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::PrivateName { name } => format!("#{}", ast.atom(name)),
             _ => return TypeId::ERROR,
         };
+        // Members emptied by conflicting discriminants are gone (`reduced_type`); an
+        // intersection emptied so says why.
+        let orig = ot;
+        let ot = self.reduced_type(ot);
+        if ot == TypeId::NEVER
+            && orig != ot
+            && let Some((info, os, pname)) = self.never_reduction_reason(orig)
+        {
+            if self.reporting(e.file) {
+                let mut chain = Chain::new();
+                chain.push_back(
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, "never"],
+                );
+                chain.push_back(info, &[&os, &pname]);
+                self.error_chain(Loc::new(e.file, prop), &chain);
+            }
+            return TypeId::ERROR;
+        }
         let ol = Loc::new(e.file, obj);
         // `anyValue.#x` outside every class body: TS18016 at the name (tsc 7).
         if name.starts_with('#')
@@ -2485,12 +2588,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         if ot == TypeId::UNRESOLVED || ot == TypeId::SILENT_NEVER || self.store().is_error(ot) {
             return ot;
         }
+        // `anyValue.#x` in a class body where no enclosing class declares `#x` (observed:
+        // TS2339 on `any`, also after `unknown`'s TS18046).
+        let undeclared_private = |ck: &mut Self| {
+            name.starts_with('#')
+                && ck.enclosing_class(e).is_some()
+                && !ck.private_name_in_scope(e, &name)
+                && ck.reporting(e.file)
+        };
         if self.store().flags(ot).intersects(TypeFlags::ANY) {
+            if undeclared_private(self) {
+                self.error(
+                    Loc::new(e.file, prop),
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, "any"],
+                );
+            }
             return TypeId::ANY;
         }
         let is_super = matches!(ast.node(skip_parens(ast, obj)), Node::Super {});
         let nt = self.check_non_null(ol, ot);
         if self.store().is_error(nt) {
+            if ot == TypeId::UNKNOWN && undeclared_private(self) {
+                self.error(
+                    Loc::new(e.file, prop),
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, "any"],
+                );
+            }
             return TypeId::ERROR;
         }
         let pl = Loc::new(e.file, prop);
@@ -2504,7 +2629,27 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.store().flags(apparent).intersects(TypeFlags::ANY) {
             return TypeId::ANY;
         }
-        if let Some(p) = self.property_of_type_id(nt, name_id) {
+        let found = self.property_of_type_id(nt, name_id);
+        // A static `#private` field belongs to its class's constructor only: a derived
+        // class's `typeof Child` does not have it (observed: TS2339).
+        if let Some(p) = found
+            && name.starts_with('#')
+            && let Some(d) = self.c.value_decl(p)
+            && self
+                .node(d)
+                .modifiers()
+                .contains(ts_r_ast::Modifiers::STATIC)
+            && let Some(dc) = self.enclosing_class(d)
+            && let Some(ts_r_types::ObjectKind::Anonymous { decl, kind, .. }) =
+                self.store().object_of(nt).map(|o| o.kind)
+            && kind == crate::declared::anon::CLASS_STATIC
+            && let Some(dsym) = self.c.sym_of_decl(dc)
+            && decl != crate::declared::sym_key(dsym)
+        {
+            self.report_missing_property(pl, &name, nt);
+            return TypeId::ERROR;
+        }
+        if let Some(p) = found {
             self.check_property_accessibility(pl, p, nt, &name, is_super);
             self.check_property_initialization_order(e, obj, pl, p, &name, is_write);
             self.check_abstract_this_access(e, obj, pl, p, &name);
@@ -2569,7 +2714,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
                         &[&ts],
                     );
-                    return TypeId::ERROR;
+                    // The assigned value is still checked against the signature's type.
+                    return i.value;
                 }
                 let mut t = i.value;
                 if self.c.opts.no_unchecked_indexed_access && !is_write {
@@ -2856,6 +3002,29 @@ impl<'c, 'a> Ck<'c, 'a> {
         ts_r_ast::Modifiers::NONE
     }
 
+    /// Whether a class enclosing `e` declares the private name `name` (instance or static).
+    fn private_name_in_scope(&mut self, e: Loc, name: &str) -> bool {
+        let mut cur = self.enclosing_class(e);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+            if let Some(cs) = self.c.sym_of_decl(c) {
+                let inst = self.declared_type_of_symbol(cs);
+                let stat = self.type_of_symbol(cs);
+                if self.property_of_type(inst, name).is_some()
+                    || self.property_of_type(stat, name).is_some()
+                {
+                    return true;
+                }
+            }
+            cur = self.enclosing_class(c);
+        }
+        false
+    }
+
     fn check_property_accessibility(
         &mut self,
         pl: Loc,
@@ -2920,6 +3089,30 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return;
             }
             cur = self.enclosing_class(c);
+        }
+        // `new Child().#foo` inside `Parent`, which declares its own `#foo`: the access
+        // names `Parent`'s field, which a `Child` has by inheritance (observed: OK).
+        if private_name {
+            let mut cur = self.enclosing_class(pl);
+            let mut guard = 0;
+            while let Some(c) = cur {
+                guard += 1;
+                if guard > 64 {
+                    break;
+                }
+                if self.class_derives_from(decl_class, c)
+                    && let Some(cs) = self.c.sym_of_decl(c)
+                {
+                    let inst = self.declared_type_of_symbol(cs);
+                    let own = self.property_of_type(inst, name).is_some_and(|q| {
+                        self.c.value_decl(q).and_then(|qd| self.enclosing_class(qd)) == Some(c)
+                    });
+                    if own {
+                        return;
+                    }
+                }
+                cur = self.enclosing_class(c);
+            }
         }
         let class_name = self
             .c
@@ -3238,6 +3431,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         index: NodeId,
         is_write: bool,
     ) -> TypeId {
+        let ot = self.reduced_type(ot);
         let f = e.file;
         let ol = Loc::new(f, obj);
         let il = Loc::new(f, index);
@@ -3287,6 +3481,23 @@ impl<'c, 'a> Ck<'c, 'a> {
                     dg::TYPE_0_CANNOT_BE_USED_TO_INDEX_TYPE_1_2536,
                     &[&is, &os],
                 );
+            }
+            // A constant generic key (`obj[key]` with `key: K`) in a constraint position
+            // (the object of an access, a callee) narrows through the access's union
+            // constraint (`if (obj[key]) obj[key].toUpperCase()` on `Record<K, string |
+            // undefined>`).
+            if !is_write
+                && self.store().flags(r).contains(TypeFlags::INDEXED_ACCESS)
+                && matches!(
+                    self.ast(f).node(skip_parens(self.ast(f), index)),
+                    Node::Ident { .. }
+                )
+                && self.is_narrowable_reference(e)
+            {
+                let d = self.narrowable_type_for_reference(e, r);
+                if d != r {
+                    return self.flow_type_of_reference(e, d, d);
+                }
             }
             return r;
         }
@@ -3369,45 +3580,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
                 return TypeId::UNDEFINED;
             }
+            // A union of tuples none of which has the element: TS2339 naming the union.
+            if let Some(v) = self.store().number_value(itr)
+                && self.union_tuples_out_of_range(nt, v)
+            {
+                let ts = self.type_to_string(nt);
+                self.error(
+                    il,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&name, &ts],
+                );
+                return TypeId::UNDEFINED;
+            }
             // Tuples with a rest element: an index past the leading elements reads the rest
             // element and every element after it (`[number, string, ...boolean[]][2]` is
             // `boolean`), under noUncheckedIndexedAccess with `undefined` from the count of
             // fixed elements on.
             if !is_write
-                && let Some(shape) = self.store().tuple_shape_of(nt)
-                && shape.has_rest()
-                && !shape
-                    .elements
-                    .iter()
-                    .any(|e| e.kind == ts_r_types::TupleElement::VARIADIC)
                 && let Some(v) = self.store().number_value(itr)
                 && v >= 0.0
                 && v.fract() == 0.0
+                && let Some(r) = self.tuple_rest_region_element(nt, v as usize)
             {
-                let lead = shape
-                    .elements
-                    .iter()
-                    .position(|e| e.kind == ts_r_types::TupleElement::REST)
-                    .unwrap_or(0);
-                let fixed = shape
-                    .elements
-                    .iter()
-                    .filter(|e| e.kind != ts_r_types::TupleElement::REST)
-                    .count();
-                let args: Vec<TypeId> = match self.store().object_of(nt).map(|o| o.kind) {
-                    Some(ts_r_types::ObjectKind::Reference { args, .. }) => {
-                        self.store().list_items(args).to_vec()
-                    }
-                    _ => Vec::new(),
-                };
-                let idx = v as usize;
-                if idx >= lead && args.len() == shape.elements.len() {
-                    let mut parts = args[lead..].to_vec();
-                    if idx >= fixed && self.c.opts.no_unchecked_indexed_access {
-                        parts.push(TypeId::UNDEFINED);
-                    }
-                    return self.union(&parts);
-                }
+                return r;
             }
         }
         // A branded key (`number & { __brand: never }`, `string & {}`) indexes as its
@@ -3542,7 +3737,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
                     &[&ts],
                 );
-                return TypeId::ERROR;
+                // The assigned value is still checked against the signature's type
+                // (`a[0] = ""` on a `readonly number[]` is TS2542 and TS2322).
+                return i.value;
             }
             let mut t = i.value;
             if self.c.opts.no_unchecked_indexed_access && !is_write {
@@ -3687,6 +3884,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return TypeId::UNDEFINED;
             }
         }
+        // A symbol key on an object with a string index signature but no symbol one cannot
+        // index it (observed: TS2538, not an implicit `any`).
+        if symbolic
+            && !self.store().flags(itr).contains(TypeFlags::UNION)
+            && self.store().flags(nt).contains(TypeFlags::OBJECT)
+            && self.index_info_of(nt, TypeId::STRING).is_some()
+            && self.reporting(e.file)
+        {
+            let ks = match self.store().kind(itr) {
+                TypeKind::UniqueSymbol(_) => "unique symbol".to_owned(),
+                _ => self.type_to_string(itr),
+            };
+            self.error(il, dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538, &[&ks]);
+            return TypeId::ERROR;
+        }
         if self.c.opts.no_implicit_any && self.reporting(e.file) {
             // An unconstrained type parameter is indexed as its apparent type `unknown`.
             let ts = if self.store().flags(nt).intersects(TypeFlags::INSTANTIABLE)
@@ -3742,11 +3954,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         chain
                             .push_back(dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339, &[&name, &ts]);
                     }
-                } else if !self
-                    .store()
-                    .flags(itr)
-                    .intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
-                {
+                } else if !self.store().flags(itr).intersects(
+                    TypeFlags::TEMPLATE_LITERAL
+                        | TypeFlags::STRING_MAPPING
+                        | TypeFlags::ES_SYMBOL_LIKE,
+                ) {
                     let base = self.base_of_literal(itr);
                     let bs = self.type_to_string(base);
                     chain.push_back(
@@ -4034,8 +4246,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let args = self.c.type_args_of_tuple(t).to_vec();
                         for (i, x) in shape.elements.iter().enumerate() {
                             let a = args.get(i).copied().unwrap_or(TypeId::UNRESOLVED);
+                            // A rest element's type argument is its element type; the
+                            // literal's rest element is the array of it.
+                            let ty = if x.kind == ts_r_types::TupleElement::REST {
+                                self.create_array(a, false)
+                            } else {
+                                a
+                            };
                             els.push(TupleEl {
-                                ty: a,
+                                ty,
                                 kind: x.kind,
                                 label: None,
                             });
@@ -4144,8 +4363,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         // Object types with a "0" property (but not arrays).
-        if s.flags(ct).contains(TypeFlags::OBJECT) && !self.c.is_array_like_type(ct) {
-            return self.property_of_type(ct, "0").is_some();
+        if s.flags(ct).contains(TypeFlags::OBJECT)
+            && !self.c.is_array_like_type(ct)
+            && self.property_of_type(ct, "0").is_some()
+        {
+            return true;
+        }
+        // An array-like type with a literal `length` (`interface E extends [] {}`).
+        if s.flags(ct).contains(TypeFlags::OBJECT)
+            && !self.c.is_array_type(ct)
+            && let Some(p) = self.property_of_type(ct, "length")
+        {
+            let lt = self.type_of_symbol(p);
+            return self.every_member(lt, |m| {
+                self.store().flags(m).contains(TypeFlags::NUMBER_LITERAL)
+            });
         }
         false
     }
@@ -4202,7 +4434,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let _ = t;
                         let sig = self.signature_from_decl(Loc::new(e.file, value));
                         let pt = if kind == MethodKind::Get {
-                            self.return_type_of(sig)
+                            // An unannotated getter has its setter's annotated type.
+                            match self.object_literal_setter_annotation(e, key, value) {
+                                Some(t) => t,
+                                None => self.return_type_of(sig),
+                            }
                         } else {
                             self.store()
                                 .sig(sig)
@@ -4255,7 +4491,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     match self.property_name_of_type(self.store().regular(kt)) {
                         Some(n) => n,
                         None => {
-                            self.check_computed_key_type(Loc::new(e.file, key), kt);
+                            let _ = self.check_computed_key_type(Loc::new(e.file, key), kt);
                             let kind = self.index_key_kind(kt);
                             index_types.push((ty, kind));
                             continue;
@@ -4381,6 +4617,45 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             IndexKeyKind::String
         }
+    }
+
+    /// For the getter `getter` (its function) with key `key` in object literal `e` and no
+    /// return annotation: the annotated parameter type of a setter of the same name.
+    fn object_literal_setter_annotation(
+        &mut self,
+        e: Loc,
+        key: NodeId,
+        getter: NodeId,
+    ) -> Option<TypeId> {
+        let ast = self.ast(e.file);
+        if crate::nodes::fn_parts(ast, getter)?.return_type.is_some() {
+            return None;
+        }
+        let name = key_text(ast, key)?;
+        let Node::ObjectLit { props } = *ast.node(e.node) else {
+            return None;
+        };
+        let ann = ast.list(props).iter().find_map(|&m| match *ast.node(m) {
+            Node::MethodDef {
+                kind: MethodKind::Set,
+                key: k,
+                value,
+                ..
+            } if key_text(ast, k).as_deref() == Some(name.as_ref()) => {
+                let parts = crate::nodes::fn_parts(ast, value)?;
+                let p = ast
+                    .list(parts.params)
+                    .iter()
+                    .copied()
+                    .find(|&x| !crate::nodes::is_this_param(ast, x))?;
+                match *ast.node(p) {
+                    Node::Param { type_ann, .. } => type_ann,
+                    _ => None,
+                }
+            }
+            _ => None,
+        })?;
+        Some(self.type_from_node(Loc::new(e.file, ann)))
     }
 
     fn object_literal_has_setter(&self, e: Loc, name: &str) -> bool {
@@ -4656,8 +4931,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let rprops = self.properties_of(right);
         for (n, p) in rprops {
-            if self.c.sym_flags(p).intersects(SymbolFlags::METHOD)
-                && self.is_class_instance_type(right)
+            // Methods of class instances and `#private` fields are not spread.
+            if (self.c.sym_flags(p).intersects(SymbolFlags::METHOD)
+                && self.is_class_instance_type(right))
+                || self.store().str(n).starts_with('#')
             {
                 continue;
             }
@@ -5169,28 +5446,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let prop = self.property_symbol_of_access(il);
                         // Deleting through a readonly index signature (`delete v[2]` of a
                         // readonly tuple's rest) writes it: TS2542.
-                        if prop.is_none()
-                            && let Node::Index { obj, index, .. } = *ast.node(inner)
-                        {
-                            let ot = self.quietly(|ck| ck.check_expr(Loc::new(e.file, obj)));
-                            let it = self.quietly(|ck| ck.check_expr(Loc::new(e.file, index)));
-                            let nt = self.non_nullable(ot);
-                            let key = if self.store().flags(it).intersects(TypeFlags::NUMBER_LIKE) {
-                                TypeId::NUMBER
-                            } else {
-                                TypeId::STRING
-                            };
-                            if let Some(i) = self.index_info_of(nt, key)
-                                && i.readonly
-                            {
-                                let ts = self.type_to_string(nt);
-                                self.error(
-                                    il,
-                                    dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
-                                    &[&ts],
-                                );
-                                return TypeId::BOOLEAN;
-                            }
+                        if prop.is_none() && self.check_readonly_index_write(il) {
+                            return TypeId::BOOLEAN;
                         }
                         if self.c.opts.strict_null_checks
                             && let Some(p) = prop
@@ -5270,6 +5527,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         let _ = op;
         let al = Loc::new(e.file, arg);
         let t = self.check_expr(al);
+        // `++undefined` reports only that `undefined` is not a variable (observed).
+        let ast = self.ast(e.file);
+        if let Node::Ident { name } = *ast.node(skip_parens(ast, arg))
+            && ast.atom(name) == "undefined"
+            && self.store().flags(t).intersects(TypeFlags::UNDEFINED)
+        {
+            self.error(
+                al,
+                dg::CANNOT_ASSIGN_TO_0_BECAUSE_IT_IS_NOT_A_VARIABLE_2539,
+                &["undefined"],
+            );
+            return TypeId::NUMBER;
+        }
         let t = self.check_non_null(al, t);
         // A target that can't be assigned (`++E` for an enum, `eval++`) reports only that;
         // an operand that isn't a number reports only that (`++true`, not TS2357 too).
@@ -5284,7 +5554,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 dg::AN_ARITHMETIC_OPERAND_MUST_BE_OF_TYPE_ANY_NUMBER_BIGINT_OR_AN_ENUM_TYPE_2356,
                 &[],
             );
-        } else if self.check_reference_target(al, true) {
+            // A readonly index signature target is reported too (`Enum[k]--`).
+            self.check_readonly_index_write(al);
+        } else if self.check_reference_target(al, true) && !self.check_readonly_index_write(al) {
             self.check_readonly_update_target(al);
         }
         if self.every_member(t, |m| {
@@ -5295,6 +5567,43 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             TypeId::NUMBER
         }
+    }
+
+    /// TS2542 for a write through a readonly index signature by the element access `il`
+    /// that reads no property (`delete v[2]`, `ro[k]++`, `Enum[k]--`); whether reported.
+    fn check_readonly_index_write(&mut self, il: Loc) -> bool {
+        let ast = self.ast(il.file);
+        let Node::Index { obj, index, .. } = *ast.node(skip_parens(ast, il.node)) else {
+            return false;
+        };
+        if self.property_symbol_of_access(il).is_some() {
+            return false;
+        }
+        let ot = self.quietly(|ck| ck.check_expr(Loc::new(il.file, obj)));
+        let it = self.quietly(|ck| ck.check_expr(Loc::new(il.file, index)));
+        let nt = self.non_nullable(ot);
+        let f = self.store().flags(it);
+        let info = if f.intersects(TypeFlags::ANY) {
+            // An `any` key (or an unresolved one) prefers the numeric index signature.
+            self.index_info_of(nt, TypeId::NUMBER)
+                .or_else(|| self.index_info_of(nt, TypeId::STRING))
+        } else if f.intersects(TypeFlags::NUMBER_LIKE) {
+            self.index_info_of(nt, TypeId::NUMBER)
+        } else {
+            self.index_info_of(nt, TypeId::STRING)
+        };
+        if let Some(i) = info
+            && i.readonly
+        {
+            let ts = self.type_to_string(nt);
+            self.error(
+                il,
+                dg::INDEX_SIGNATURE_IN_TYPE_0_ONLY_PERMITS_READING_2542,
+                &[&ts],
+            );
+            return true;
+        }
+        false
     }
 
     /// TS2540 for `o.p++` / `--o.p` on a read-only property.
@@ -5559,9 +5868,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.check_type_related(lt, key, RelationKind::Assignable, Some(ll), None);
                     }
                 }
-                if !self.store().is_error(rt) && !self.could_be_object(rt) {
-                    let rs = self.type_to_string(rt);
-                    self.error(rl, dg::TYPE_0_MAY_REPRESENT_A_PRIMITIVE_VALUE_WHICH_IS_NOT_PERMITTED_AS_THE_RIGHT_OPERA_2638, &[&rs]);
+                // The right operand must be an `object` (TS2322); the `{}` of a narrowed
+                // `unknown` (alone or as `NonNullable<T>`) may be a primitive (TS2638).
+                let st = self.store();
+                // (`unknown` was TS18046 under strictNullChecks.)
+                let reported_unknown = rt == TypeId::UNKNOWN && self.c.opts.strict_null_checks;
+                if !st.is_error(rt) && !rt.is_any_like() && !reported_unknown {
+                    let narrowed_empty = self.some_member(rt, |m| {
+                        m == TypeId::EMPTY_OBJECT
+                            || (st.flags(m).contains(TypeFlags::INTERSECTION)
+                                && st.members_of_union(m).contains(&TypeId::EMPTY_OBJECT))
+                    });
+                    if narrowed_empty {
+                        let rs = self.type_to_string(rt);
+                        self.error(rl, dg::TYPE_0_MAY_REPRESENT_A_PRIMITIVE_VALUE_WHICH_IS_NOT_PERMITTED_AS_THE_RIGHT_OPERA_2638, &[&rs]);
+                    } else if !self.is_assignable(rt, TypeId::OBJECT) {
+                        self.check_type_related(
+                            rt,
+                            TypeId::OBJECT,
+                            RelationKind::Assignable,
+                            Some(rl),
+                            None,
+                        );
+                    }
                 }
                 TypeId::BOOLEAN
             }
@@ -6026,6 +6355,44 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 None,
                             );
                         }
+                        // `[a, ...b] = xs`: `b` receives the rest of the source as an array.
+                        // (Not for a nested pattern, nor when an array literal value meets
+                        // an array target: tsc types the literal by the target then.)
+                        Node::Spread { arg }
+                            if !matches!(
+                                *ast.node(skip_parens(ast, arg)),
+                                Node::Assign { .. }
+                                    | Node::ArrayLit { .. }
+                                    | Node::ObjectLit { .. }
+                            ) && origin.is_some()
+                                && self.is_array_like_or_iterable_source(source)
+                                && !(origin.as_ref().is_some_and(|(r, _)| {
+                                    matches!(
+                                        *self
+                                            .ast(r.file)
+                                            .node(skip_parens(self.ast(r.file), r.node)),
+                                        Node::ArrayLit { .. }
+                                    )
+                                }) && {
+                                    let tt = self
+                                        .quietly(|ck| ck.assignment_target_type(Loc::new(f, arg)));
+                                    self.store().tuple_shape_of(tt).is_some()
+                                        || self.element_type_of_array_like(tt).is_some()
+                                }) =>
+                        {
+                            let rest = self.array_rest_type(source, i);
+                            let rest = if self
+                                .c
+                                .type_args_of(rest)
+                                .first()
+                                .is_some_and(|&a| a == TypeId::UNRESOLVED)
+                            {
+                                TypeId::UNRESOLVED
+                            } else {
+                                rest
+                            };
+                            self.destructuring_element(Loc::new(f, arg), rest, depth, None);
+                        }
                         Node::Spread { arg } => self.destructuring_target(Loc::new(f, arg)),
                         _ => {
                             let sub = origin.as_ref().map(|(r, p)| {
@@ -6033,7 +6400,37 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 p.push(i.to_string().into());
                                 (*r, p)
                             });
+                            if tuple_len.is_none()
+                                && self.union_tuples_out_of_range(source, i as f64)
+                                && !matches!(
+                                    *ast.node(el),
+                                    Node::Assign {
+                                        op: AssignOp::Assign,
+                                        ..
+                                    }
+                                )
+                            {
+                                self.check_tuple_element_in_range(
+                                    Loc::new(f, el),
+                                    source,
+                                    i as f64,
+                                );
+                            }
                             let et = if tuple_len.is_some_and(|n| i >= n) {
+                                // Past the end of the tuple (TS2493), unless defaulted.
+                                if !matches!(
+                                    *ast.node(el),
+                                    Node::Assign {
+                                        op: AssignOp::Assign,
+                                        ..
+                                    }
+                                ) {
+                                    self.check_tuple_element_in_range(
+                                        Loc::new(f, el),
+                                        source,
+                                        i as f64,
+                                    );
+                                }
                                 TypeId::UNRESOLVED
                             } else {
                                 let et = self.array_element_at(source, i);
@@ -6071,6 +6468,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                                     ..
                                 }
                             );
+                            if !has_default && let Node::NumberLit { value } = *ast.node(key) {
+                                self.check_tuple_element_in_range(
+                                    Loc::new(f, key),
+                                    source,
+                                    value.get(),
+                                );
+                            }
                             if let Some(n) = &name {
                                 let kl = match *ast.node(key) {
                                     Node::ComputedKey { expr } => Loc::new(f, expr),
@@ -6126,7 +6530,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                                         Some(Loc::new(f, i)),
                                     );
                                 }
-                                et = self.without_undefined_strict(et);
+                                // A default that may be `undefined` itself leaves the read
+                                // value's `undefined` in (`({ x = undefined } = a)` reports
+                                // `number | undefined`; observed, tsc 7).
+                                if !self.may_be_undefined_value(rt) {
+                                    et = self.without_undefined_strict(et);
+                                }
                             }
                             if target_ok && self.destructured_part_checkable(et) {
                                 self.check_assignable_with_elaboration(et, tt, nl, None);
@@ -6156,7 +6565,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         at: Loc,
         has_default: bool,
     ) {
-        if !self.reporting(at.file) || name.starts_with("__@") || name.starts_with('#') {
+        if !self.reporting(at.file) || name.starts_with('#') {
             return;
         }
         let s = self.store();
@@ -6165,6 +6574,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             || s.is_error(source)
             || source == TypeId::UNRESOLVED
         {
+            return;
+        }
+        // A unique symbol key the source lacks (with no symbol index signature) cannot
+        // index it (observed: TS2538).
+        if name.starts_with("__@") {
+            let apparent = self.apparent_type(source);
+            if self.store().flags(apparent).contains(TypeFlags::OBJECT)
+                && self.property_of_type(apparent, name).is_none()
+                && self.index_info_of(apparent, TypeId::SYMBOL).is_none()
+            {
+                self.error(
+                    at,
+                    dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538,
+                    &["unique symbol"],
+                );
+            }
             return;
         }
         let fresh = s
@@ -6294,11 +6719,37 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// Whether destructuring `t` with a rest element gives a known array: a tuple, an
+    /// array or another iterable (not a string, `any` or the error type).
+    fn is_array_like_or_iterable_source(&mut self, t: TypeId) -> bool {
+        let s = self.store();
+        if t == TypeId::UNRESOLVED
+            || s.is_error(t)
+            || s.flags(t)
+                .intersects(TypeFlags::ANY_OR_UNKNOWN | TypeFlags::STRING_LIKE)
+        {
+            return false;
+        }
+        s.tuple_shape_of(t).is_some()
+            || self.element_type_of_array_like(t).is_some()
+            || self.iterated_type(t, false).is_some()
+    }
+
     fn destructured_part_checkable(&self, et: TypeId) -> bool {
         et != TypeId::UNRESOLVED && !self.store().is_error(et)
     }
 
     /// `t` without `undefined` under strictNullChecks (a destructuring default replaces it).
+    /// A value of type `t` may be `undefined` (`undefined`, `void`, `any`, `unknown` or a
+    /// union holding one).
+    fn may_be_undefined_value(&self, t: TypeId) -> bool {
+        self.contains_undefined(t)
+            || self
+                .store()
+                .flags(t)
+                .intersects(TypeFlags::VOID | TypeFlags::ANY_OR_UNKNOWN)
+    }
+
     pub(crate) fn without_undefined_strict(&mut self, t: TypeId) -> TypeId {
         if self.c.opts.strict_null_checks {
             self.filter_type(t, |ck, m| {
@@ -6953,6 +7404,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             };
             let vl = Loc::new(el.file, value);
+            // An earlier property of a name written again is checked with the type the
+            // last one gives the literal (reported at its name).
+            let later_same = ast.list(props).iter().skip_while(|&&x| x != m).skip(1).any(|&x| {
+                matches!(*ast.node(x), Node::Property { key: k, .. } if key_text(ast, k).as_deref() == Some(name.as_str()))
+            });
+            if later_same && let Some(sp) = self.property_of_type_id(source, nid) {
+                let st = self.type_of_symbol(sp);
+                if !self.is_assignable(st, tprop_type) {
+                    let kl = Loc::new(el.file, key);
+                    let (chain, _) =
+                        self.relation_error_chain(st, tprop_type, RelationKind::Assignable, None);
+                    let mark = self.diags.len();
+                    self.error_chain(kl, &chain);
+                    self.relate_expected_property(mark, target, nid, &name);
+                    reported = true;
+                }
+                continue;
+            }
             let vt = self.quietly(|ck| ck.check_expr(vl));
             // A nested object literal stays fresh: its excess properties are reported.
             let fresh_object = self
@@ -7280,17 +7749,33 @@ impl<'c, 'a> Ck<'c, 'a> {
         let src = self.base_of_literal(src);
         let widened = self.widened_type(src);
         if !self.is_comparable(target, widened) && !self.is_comparable(src, target) {
-            let (chain, _) = self.relation_error_chain(
+            let (mut chain, at_node) = self.relation_error_chain(
                 src,
                 target,
                 RelationKind::Comparable,
                 Some(Head { info: dg::CONVERSION_OF_TYPE_0_TO_TYPE_1_MAY_BE_A_MISTAKE_BECAUSE_NEITHER_TYPE_SUFFICIENTL_2352 }),
             );
+            // An excess property in an element of an array literal stands alone, at the
+            // property (`<{ id: number }[]>[{ foo: "s" }]`).
+            let mut at_node = at_node;
+            if self.c.is_array_type(src) || self.c.is_tuple_type(src) {
+                if let Some(i) = chain.items.iter().position(|(c, _)| {
+                    *c == dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_AND_0_DOES_NOT_EXIST_IN_TYPE_1_2353.code
+                        || *c == dg::OBJECT_LITERAL_MAY_ONLY_SPECIFY_KNOWN_PROPERTIES_BUT_0_DOES_NOT_EXIST_IN_TYPE_1_D_2561.code
+                }) {
+                    chain.items.drain(..i);
+                    chain.nested.clear();
+                } else {
+                    at_node = None;
+                }
+            } else {
+                at_node = None;
+            }
             // A JSDoc cast (`/** @type {T} */ (x)`) is reported at `T` (tsc 7).
             let at = if ast.is_jsdoc(ty) {
                 Loc::new(e.file, ty)
             } else {
-                e
+                at_node.unwrap_or(e)
             };
             self.error_chain(at, &chain);
         }

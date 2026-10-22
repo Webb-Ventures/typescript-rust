@@ -814,6 +814,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 t
             });
         }
+        // An unannotated getter returns into its setter's annotated type.
+        if let Some(t) = self.unannotated_getter_setter_type(func) {
+            return Some(t);
+        }
         // Constructors and accessors have no contextual return type. An immediately invoked
         // function returns into its call's context (`const x: T = (() => v)()`).
         let r = match self.iife_call(func) {

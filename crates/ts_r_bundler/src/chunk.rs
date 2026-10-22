@@ -9,7 +9,7 @@ use crate::graph::{Graph, ModuleId};
 use crate::options::{BuildOptions, Format};
 use crate::plan::{Plan, relative_import};
 use crate::print::Fragment;
-use crate::sourcemap::ChunkMap;
+use crate::sourcemap::{ChunkMap, encode_fragment};
 
 /// One assembled chunk.
 #[derive(Debug, Default)]
@@ -31,14 +31,39 @@ struct Out {
     compact: bool,
 }
 
+/// How text moves the output position: its line breaks, and the UTF-16 length of what
+/// follows the last one (or of all of it).
+#[derive(Clone, Copy, Debug)]
+struct Measure {
+    newlines: u32,
+    tail: u32,
+}
+
+impl Measure {
+    fn of(s: &str) -> Measure {
+        match s.rfind('\n') {
+            Some(i) => Measure {
+                newlines: s.bytes().filter(|&b| b == b'\n').count() as u32,
+                tail: utf16_len(&s[i + 1..]),
+            },
+            None => Measure {
+                newlines: 0,
+                tail: utf16_len(s),
+            },
+        }
+    }
+}
+
 impl Out {
     fn push(&mut self, s: &str) {
-        match s.rfind('\n') {
-            Some(i) => {
-                self.line += s.bytes().filter(|&b| b == b'\n').count() as u32;
-                self.col = utf16_len(&s[i + 1..]);
-            }
-            None => self.col += utf16_len(s),
+        self.push_measured(s, Measure::of(s));
+    }
+    fn push_measured(&mut self, s: &str, m: Measure) {
+        if m.newlines > 0 {
+            self.line += m.newlines;
+            self.col = m.tail;
+        } else {
+            self.col += m.tail;
         }
         self.code.push_str(s);
     }
@@ -87,6 +112,7 @@ pub fn assemble(
     graph: &Graph,
     fragments: &[Option<Arc<Fragment>>],
     opts: &BuildOptions,
+    threads: usize,
 ) -> ChunkOutput {
     let c = &plan.chunks[ci];
     let compact = opts.minify_whitespace;
@@ -236,30 +262,58 @@ pub fn assemble(
     let mut map = (opts.sourcemap != crate::options::SourceMapMode::None).then(ChunkMap::new);
     let map_dir =
         ts_r_config::path::directory_of(&format!("{}/{}", plan.outdir, c.file)).to_owned();
-    for &m in &c.modules {
-        let Some(f) = &fragments[m as usize] else {
-            continue;
-        };
-        if f.code.is_empty() {
-            continue;
-        }
+    // Per fragment, in parallel: where its code ends (lines and last-line columns), and with
+    // a map its re-encoded mappings, source path and escaped `sourcesContent` (the costly
+    // part of a big chunk's map). They are joined in order below.
+    let frags: Vec<(ModuleId, &Fragment)> = c
+        .modules
+        .iter()
+        .filter_map(|&m| {
+            let f = fragments[m as usize].as_deref()?;
+            (!f.code.is_empty()).then_some((m, f))
+        })
+        .collect();
+    let ids: Vec<Option<Vec<u32>>> = frags
+        .iter()
+        .map(|(_, f)| Some(map.as_mut()?.intern_names(&f.map.as_ref()?.names)))
+        .collect();
+    let work: Vec<usize> = (0..frags.len()).collect();
+    let measured = crate::pool::map(threads, work, |i| {
+        let (m, f) = frags[i];
         let module = &graph.modules[m as usize];
+        let size = Measure::of(&f.code);
+        let map = match (&f.map, &ids[i]) {
+            (Some(fm), Some(ids)) => {
+                let rel = if ts_r_config::path::is_rooted(&module.path) {
+                    ts_r_config::path::relative(&map_dir, &module.path, true)
+                } else {
+                    module.pretty.clone()
+                };
+                let content = opts.sources_content.then(|| {
+                    let mut j = String::new();
+                    ts_r_codegen::sourcemap::json_string(&mut j, &module.source.js);
+                    j
+                });
+                Some((encode_fragment(fm, ids), rel, content))
+            }
+            _ => None,
+        };
+        (size, map)
+    });
+    out.code
+        .reserve(frags.iter().map(|(_, f)| f.code.len()).sum::<usize>() + 64);
+    for ((m, f), (size, fmap)) in frags.iter().zip(measured) {
+        let module = &graph.modules[*m as usize];
         if !compact {
             out.line(&format!("// {}", module.pretty));
         }
-        if let (Some(cm), Some(fm)) = (map.as_mut(), &f.map) {
-            let rel = if ts_r_config::path::is_rooted(&module.path) {
-                ts_r_config::path::relative(&map_dir, &module.path, true)
-            } else {
-                module.pretty.clone()
-            };
-            let content = opts.sources_content.then(|| module.source.js.to_string());
-            let si = cm.add_source(rel, content);
-            cm.add_fragment(out.line, out.col, si, fm);
+        if let (Some(cm), Some((enc, rel, content))) = (map.as_mut(), fmap) {
+            let si = cm.add_source_json(rel, content);
+            cm.add_encoded(out.line, out.col, si, &enc);
         }
         let start = out.code.len();
-        out.push(&f.code);
-        result.module_bytes.push((m, out.code.len() - start));
+        out.push_measured(&f.code, size);
+        result.module_bytes.push((*m, out.code.len() - start));
     }
     for t in &c.tail {
         out.stmt(t);

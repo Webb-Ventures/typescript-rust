@@ -645,7 +645,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     fn check_case_comparable(&mut self, test: Loc, tt: TypeId, dt: TypeId) {
+        // A case of type `null` or `undefined` itself (not a union holding them) is never
+        // reported (observed, tsc 7: `case null:` and `case u:` with `u: undefined` against
+        // `string` are fine; `case nl:` with `nl: null | undefined` is TS2678).
         if self.store().flags(dt).intersects(TypeFlags::ANY_OR_UNKNOWN)
+            || self.store().flags(tt).intersects(TypeFlags::NULLABLE)
             || self.store().is_error(dt)
             || self.store().is_error(tt)
         {
@@ -675,12 +679,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.is_comparable(tr, dr) || self.is_comparable(dr, tr) {
             return;
         }
-        let ts = self.type_to_string(tr);
-        let ds = self.type_to_string(dr);
-        self.error(
-            test,
-            dg::TYPE_0_IS_NOT_COMPARABLE_TO_TYPE_1_2678,
-            &[&ts, &ds],
+        // Elaborated case to switch (`Type '1' is not comparable to type 'undefined'`).
+        self.check_type_related(
+            tr,
+            dr,
+            ts_r_types::RelationKind::Comparable,
+            Some(test),
+            None,
         );
     }
 
@@ -740,8 +745,41 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else {
                 self.check_pattern_default_excess(nl, il);
             }
+            self.check_empty_pattern_nullable(nl, declared.unwrap_or(t));
         }
         self.check_binding_pattern_defaults(nl);
+    }
+
+    /// An empty pattern (`const {} = v`, `const [] = v`) over a value that may be
+    /// `undefined` (or `void`) or `null`: TS2532/TS2531/TS2533 at the pattern (observed; a
+    /// pattern with elements reports its properties instead).
+    fn check_empty_pattern_nullable(&mut self, p: Loc, t: TypeId) {
+        if !self.c.opts.strict_null_checks || !self.reporting(p.file) {
+            return;
+        }
+        let ast = self.ast(p.file);
+        let empty = match *ast.node(p.node) {
+            Node::ObjectPattern { props } => ast.list(props).is_empty(),
+            Node::ArrayPattern { elements } => ast.list(elements).is_empty(),
+            _ => false,
+        };
+        if !empty || self.store().is_error(t) {
+            return;
+        }
+        let mut undef = false;
+        let mut null = false;
+        for m in self.union_members(t) {
+            let f = self.store().flags(m);
+            undef |= f.intersects(TypeFlags::UNDEFINED | TypeFlags::VOID);
+            null |= f.contains(TypeFlags::NULL);
+        }
+        let info = match (undef, null) {
+            (true, true) => dg::OBJECT_IS_POSSIBLY_NULL_OR_UNDEFINED_2533,
+            (true, false) => dg::OBJECT_IS_POSSIBLY_UNDEFINED_2532,
+            (false, true) => dg::OBJECT_IS_POSSIBLY_NULL_2531,
+            (false, false) => return,
+        };
+        self.error(p, info, &[]);
     }
 
     /// Default values inside binding patterns.
@@ -803,23 +841,46 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// through an index signature (observed rules): an `any` key (or one that failed to
     /// resolve) needs a string or number index signature (else TS2538 naming `any`), a
     /// `string` key a string one and a `number` key either (else TS2537). Reported at the
-    /// key expression; `any`, `never`, `unknown` and generic parents are not checked, nor
-    /// untyped parameters of declarations, methods and functions called in place.
+    /// key expression; `any`, `never`, `unknown` and generic parents are not checked. An
+    /// untyped parameter's parent is the type its pattern implies (`{}`).
     fn check_destructured_computed_key(&mut self, prop: Loc, expr: NodeId, kt: TypeId) {
         if !self.reporting(prop.file) || self.c.file(prop.file).is_js() {
             return;
         }
         let e = Loc::new(prop.file, expr);
-        if self.late_bound_name(e).is_some() {
+        let late_bound = self.late_bound_name(e);
+        let symbol_key = self.store().flags(kt).intersects(TypeFlags::ES_SYMBOL_LIKE)
+            && !self.store().flags(kt).contains(TypeFlags::UNION);
+        if late_bound.is_some() && !symbol_key {
             return;
         }
         let Some(obj_pat) = self.c.parent(prop) else {
             return;
         };
-        if self.untyped_param_pattern(obj_pat) {
+        // A parameter of a function called in place without that argument receives
+        // `undefined` (`any` without strictNullChecks).
+        let parent = if self.called_in_place_without_argument(obj_pat) {
+            if !self.c.opts.strict_null_checks {
+                return;
+            }
+            TypeId::UNDEFINED
+        } else {
+            self.pattern_parent_type(obj_pat)
+        };
+        // Not a key type: TS2464 at the name, and TS2538 naming the type at the expression
+        // unless the parent is `any` (observed, generic parents included).
+        if let Some(key) = self.c.parent(e)
+            && self.check_computed_key_type(key, kt)
+        {
+            if parent != TypeId::UNRESOLVED
+                && !self.store().is_error(parent)
+                && !self.store().flags(parent).intersects(TypeFlags::ANY)
+            {
+                let ks = self.type_to_string(kt);
+                self.error(e, dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538, &[&ks]);
+            }
             return;
         }
-        let parent = self.pattern_parent_type(obj_pat);
         let s = self.store();
         if parent == TypeId::UNRESOLVED
             || s.is_error(parent)
@@ -827,6 +888,30 @@ impl<'c, 'a> Ck<'c, 'a> {
                 TypeFlags::ANY | TypeFlags::NEVER | TypeFlags::UNKNOWN | TypeFlags::INSTANTIABLE,
             )
         {
+            return;
+        }
+        // A symbol key the parent has neither as a property nor through a symbol index
+        // signature cannot index it (observed: TS2538, even with a string index).
+        if symbol_key {
+            let apparent = self.apparent_type(parent);
+            if apparent == TypeId::UNRESOLVED
+                || self.store().flags(apparent).intersects(TypeFlags::ANY)
+                || self.index_info_of(apparent, TypeId::SYMBOL).is_some()
+            {
+                return;
+            }
+            let found = late_bound.as_ref().is_some_and(|n| {
+                let id = self.store().intern_str(n);
+                self.property_of_type_id(apparent, id).is_some()
+            });
+            if !found {
+                let ks = if late_bound.is_some() {
+                    "unique symbol".to_owned()
+                } else {
+                    self.type_to_string(kt)
+                };
+                self.error(e, dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538, &[&ks]);
+            }
             return;
         }
         let any_key = s.is_error(kt) || s.flags(kt).intersects(TypeFlags::ANY);
@@ -855,58 +940,40 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// Whether `pattern` is (inside) a parameter with neither a type nor a default of a
-    /// function declaration, method or function called in place (not modelled there).
-    fn untyped_param_pattern(&self, pattern: Loc) -> bool {
+    /// Whether `pattern` is the pattern of a parameter of a function expression or arrow
+    /// that is called in place with no argument for it (`(({ a }) => {})()`).
+    fn called_in_place_without_argument(&self, pattern: Loc) -> bool {
+        let Some(param) = self.c.parent(pattern) else {
+            return false;
+        };
         let ast = self.ast(pattern.file);
-        let mut cur = pattern;
-        for _ in 0..256 {
-            let Some(p) = self.c.parent(cur) else {
-                return false;
-            };
-            match *ast.node(p.node) {
-                Node::Param { type_ann, init, .. } => {
-                    if type_ann.is_some() || init.is_some() {
-                        return false;
-                    }
-                    // Arrows and function expressions (not called in place) are checked
-                    // against the type their pattern implies (or their contextual type).
-                    let Some(func) = self.c.parent(p) else {
-                        return true;
-                    };
-                    return match *ast.node(func.node) {
-                        Node::Arrow { .. } => self.is_called_in_place(func),
-                        Node::FunctionExpr { .. } => {
-                            self.is_called_in_place(func)
-                                || self.c.parent(func).is_some_and(|m| {
-                                    matches!(ast.node(m.node), Node::MethodDef { .. })
-                                })
-                        }
-                        _ => true,
-                    };
-                }
-                Node::ObjectPattern { .. }
-                | Node::ArrayPattern { .. }
-                | Node::BindingProperty { .. }
-                | Node::AssignPattern { .. }
-                | Node::Rest { .. } => cur = p,
-                _ => return false,
-            }
+        if !matches!(*ast.node(param.node), Node::Param { pattern: p, .. } if p == pattern.node) {
+            return false;
         }
-        false
-    }
-
-    /// Whether the function expression `f` is the callee of a call (`(() => {})()`).
-    fn is_called_in_place(&self, f: Loc) -> bool {
-        let ast = self.ast(f.file);
-        let mut cur = f;
+        let Some(func) = self.c.parent(param) else {
+            return false;
+        };
+        let params = match *ast.node(func.node) {
+            Node::Arrow { params, .. } | Node::FunctionExpr { params, .. } => params,
+            _ => return false,
+        };
+        let Some(index) = ast.list(params).iter().position(|&x| x == param.node) else {
+            return false;
+        };
+        let mut cur = func;
         for _ in 0..64 {
             let Some(p) = self.c.parent(cur) else {
                 return false;
             };
             match *ast.node(p.node) {
                 Node::Paren { .. } => cur = p,
-                Node::Call { callee, .. } => return callee == cur.node,
+                Node::Call { callee, args, .. } if callee == cur.node => {
+                    let args = ast.list(args);
+                    return index >= args.len()
+                        && !args
+                            .iter()
+                            .any(|&a| matches!(ast.node(a), Node::Spread { .. }));
+                }
                 _ => return false,
             }
         }
@@ -950,7 +1017,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         // patterns over literals (tuples in tsc) are not modelled.
         if root.default_literal
             || root.rest
-            || (root.literal && (has_default || root.in_array_pattern))
+            || (root.literal && (has_default || root.in_array_pattern) && !root.rest_of_array)
         {
             return;
         }
@@ -1058,15 +1125,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::AssignPattern { right, .. } => r.default_literal |= is_lit(right),
                 Node::ArrayPattern { .. } => r.in_array_pattern = true,
                 Node::ObjectPattern { .. } => {}
-                Node::Rest { .. } => r.rest = true,
+                Node::Rest { .. } => {
+                    if cur == pattern
+                        && self.c.parent(p).is_some_and(|ap| {
+                            matches!(ast.node(ap.node), Node::ArrayPattern { .. })
+                        })
+                    {
+                        r.rest_of_array = true;
+                    } else {
+                        r.rest = true;
+                    }
+                }
                 Node::VarDeclarator { init, .. } => {
                     r.literal = init.is_some_and(is_lit);
                     // `= []` prints as tsc's `undefined[]`/`never[]`; not modelled.
                     // `= x || {}`: object literals in a union are normalized (missing
                     // properties become optional), not modelled.
+                    // A rest element over a non-empty array literal reads an array.
+                    let rest_of_array = r.rest_of_array;
                     r.rest |= init.is_some_and(|i| {
-                        !matches!(ast.node(skip_parens(ast, i)), Node::ObjectLit { .. })
-                            && is_lit(i)
+                        let n = skip_parens(ast, i);
+                        let array_rest = rest_of_array
+                            && matches!(ast.node(n), Node::ArrayLit { elements } if !ast.list(*elements).is_empty());
+                        !matches!(ast.node(n), Node::ObjectLit { .. }) && !array_rest && is_lit(i)
                     });
                     let stmt = self.c.parent(p).and_then(|d| self.c.parent(d));
                     if let Some(st) = stmt
@@ -1465,6 +1546,23 @@ impl<'c, 'a> Ck<'c, 'a> {
                     Loc::new(file, pattern),
                     Some(il),
                 );
+            } else if in_expr_fn
+                && matches!(ast.node(pattern), Node::Ident { .. })
+                && let Some(f) = self.c.parent(p)
+                && self.contextual_signature(f).is_some()
+                && !self.in_unresolved_context(f)
+                && let Some(ctx) = self.contextual_param_type(p)
+                && ctx != TypeId::UNRESOLVED
+                && ctx != TypeId::NEVER
+                && {
+                    let base = self.base_of_literal(ctx);
+                    !self.is_assignable(it, base)
+                }
+            {
+                // A contextually typed parameter's default must fit the contextual type
+                // with its literals widened (`f: (a: number) => void = (a = "") => {}` is an
+                // error, `(a: 1 | 2) => void = (a = 3) => {}` is not; observed, tsc 7).
+                self.check_assignable_with_elaboration(it, ctx, Loc::new(file, pattern), Some(il));
             }
         }
         if !matches!(ast.node(pattern), Node::Ident { .. }) {
@@ -1752,6 +1850,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         let parts = fn_parts(ast, f.node);
         let at = arg.map(|a| self.check_expr(Loc::new(file, a)));
         let Some(parts) = parts else { return };
+        if parts.return_type.is_none()
+            && let (Some(_), Some(t)) = (arg, at)
+            && let Some(target) = self.unannotated_getter_setter_type(f)
+        {
+            // An unannotated getter returns its setter's annotated type; a mismatch is
+            // reported at the `return` statement (observed, tsc 7).
+            self.check_assignable_with_elaboration(t, target, l, None);
+            return;
+        }
         if (parts.return_type.is_none() && self.jsdoc_declared_signature(f).is_none())
             || parts.flags.contains(ts_r_ast::FnFlags::GENERATOR)
         {
@@ -1803,6 +1910,88 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
         }
+    }
+
+    /// For the function `f` of a getter without return annotation: the annotated parameter
+    /// type of its setter (class or object literal member).
+    pub(crate) fn unannotated_getter_setter_type(&mut self, f: Loc) -> Option<TypeId> {
+        let m = self.c.parent(f)?;
+        let Node::MethodDef {
+            kind: MethodKind::Get,
+            ..
+        } = *self.node(m)
+        else {
+            return None;
+        };
+        if let Some(s) = self.c.sym_of_decl(m)
+            && let Some(t) = self.setter_type(s)
+        {
+            return Some(t);
+        }
+        self.computed_sibling_setter_type(m)
+    }
+
+    /// The annotated parameter type of the setter next to getter `m` whose computed name
+    /// is the same (`get [G.B]()` and `set [G.B](x: number)`).
+    fn computed_sibling_setter_type(&mut self, m: Loc) -> Option<TypeId> {
+        let ast = self.ast(m.file);
+        let Node::MethodDef { key, modifiers, .. } = *ast.node(m.node) else {
+            return None;
+        };
+        if !matches!(ast.node(key), Node::ComputedKey { .. }) {
+            return None;
+        }
+        let owner = self.c.parent(m)?;
+        let members = match *ast.node(owner.node) {
+            Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => members,
+            Node::ObjectLit { props } => props,
+            _ => return None,
+        };
+        let name = self.member_key_name(Loc::new(m.file, key))?;
+        let is_static = modifiers.contains(ts_r_ast::Modifiers::STATIC);
+        // A duplicate (a method of the same name) leaves the getter alone.
+        for &x in ast.list(members) {
+            if let Node::MethodDef {
+                kind: MethodKind::Method,
+                key: mk,
+                ..
+            }
+            | Node::PropertyDef { key: mk, .. } = *ast.node(x)
+                && self.member_key_name(Loc::new(m.file, mk)).as_deref() == Some(name.as_str())
+            {
+                return None;
+            }
+        }
+        for &x in ast.list(members) {
+            let Node::MethodDef {
+                kind: MethodKind::Set,
+                key: sk,
+                modifiers: sm,
+                value,
+                ..
+            } = *ast.node(x)
+            else {
+                continue;
+            };
+            if sm.contains(ts_r_ast::Modifiers::STATIC) != is_static
+                || self.member_key_name(Loc::new(m.file, sk)).as_deref() != Some(name.as_str())
+            {
+                continue;
+            }
+            let params = crate::nodes::fn_parts(ast, value)?.params;
+            let param = *ast
+                .list(params)
+                .iter()
+                .find(|&&p| !crate::nodes::is_this_param(ast, p))?;
+            if let Node::Param {
+                type_ann: Some(t), ..
+            } = *ast.node(param)
+            {
+                return Some(self.type_from_node(Loc::new(m.file, t)));
+            }
+            return None;
+        }
+        None
     }
 
     /// A returned expression (or arrow expression body) against the declared return type.
@@ -1936,7 +2125,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 ..
                             }
                         ) {
-                            self.check_computed_key_type(Loc::new(file, key), kt);
+                            let _ = self.check_computed_key_type(Loc::new(file, key), kt);
                         }
                     }
                     let declared = self.c.sym_of_decl(ml).map(|s| self.type_of_symbol(s));
@@ -2014,7 +2203,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 } => {
                     if let Node::ComputedKey { expr } = *ast.node(key) {
                         let kt = self.check_expr(Loc::new(file, expr));
-                        self.check_computed_key_type(Loc::new(file, key), kt);
+                        let _ = self.check_computed_key_type(Loc::new(file, key), kt);
                     }
                     // A class method's JSDoc `@type` without a fitting call signature: TS8030.
                     if kind == MethodKind::Method {
@@ -2159,7 +2348,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 }
                             );
                         if !mapped_like {
-                            self.check_computed_key_type(Loc::new(file, n), kt);
+                            let _ = self.check_computed_key_type(Loc::new(file, n), kt);
                         }
                     }
                 }
@@ -2316,6 +2505,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         let i = self.type_from_node(index);
         let s = self.store();
         let Some(shape) = s.tuple_shape_of(o) else {
+            if let Some(v) = s.number_value(i)
+                && self.union_tuples_out_of_range(o, v)
+            {
+                let ts = self.type_to_string(o);
+                let is = ts_r_binder::js_number_to_string(v);
+                self.error(
+                    index,
+                    dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                    &[&is, &ts],
+                );
+                return;
+            }
             if !self.in_true_branch_checking(obj, o) {
                 self.check_indexed_access_type_key(o, i, index);
             }
@@ -2365,6 +2566,35 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// a union key is reported. Generic objects and keys are checked where instantiated.
     fn check_indexed_access_type_key(&mut self, o: TypeId, i: TypeId, index: Loc) {
         let s = self.store();
+        // `any` and `never` take any key that can index (observed: `any[[]]`,
+        // `any[boolean]` and `never[null]` are TS2538).
+        if s.flags(o).intersects(TypeFlags::ANY | TypeFlags::NEVER)
+            && o != TypeId::UNRESOLVED
+            && !s.is_error(o)
+            && i != TypeId::UNRESOLVED
+            && !s.is_error(i)
+            && !s.flags(i).intersects(TypeFlags::ANY | TypeFlags::NEVER)
+            && !self.is_generic_type(i)
+        {
+            let keys = if i == TypeId::BOOLEAN || !s.flags(i).contains(TypeFlags::UNION) {
+                vec![i]
+            } else {
+                s.members_of_union(i).to_vec()
+            };
+            for k in keys {
+                if !self.store().flags(k).intersects(
+                    TypeFlags::STRING_LIKE | TypeFlags::NUMBER_LIKE | TypeFlags::ES_SYMBOL_LIKE,
+                ) {
+                    let ks = self.type_to_string(k);
+                    self.error(
+                        index,
+                        dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538,
+                        &[&ks],
+                    );
+                }
+            }
+            return;
+        }
         if s.flags(o).intersects(TypeFlags::ANY | TypeFlags::NEVER)
             || s.flags(i).intersects(TypeFlags::NEVER)
             || o == TypeId::UNRESOLVED
@@ -3023,12 +3253,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 implied.push(both);
                             }
                         }
-                    } else if ct == at && self.store().flags(ct).contains(TypeFlags::INDEXED_ACCESS)
+                    } else if ct == at
+                        && self
+                            .store()
+                            .traits(ct)
+                            .contains(ts_r_types::TypeTraits::CONTAINS_TYPE_PARAMETER)
                     {
-                        // `T["k"] extends X ? F<T["k"]> : ...`: the argument is `T["k"] & X`.
+                        // `T["k"] extends X ? F<T["k"]> : ...`: the argument is `T["k"] & X`
+                        // (so is any generic check type: `[A, B] extends unknown[][] ?
+                        // Bar<[A, B]>`, `Set<A> extends Set<unknown[]> ? Bar<Set<A>>`).
                         let et = self.type_from_node(Loc::new(a.file, extends));
                         if !self.store().is_error(et) && et != TypeId::UNRESOLVED {
-                            return self.intersection(&[at, et]);
+                            return self.intersection(&[et, at]);
                         }
                     }
                 }
@@ -5980,6 +6216,9 @@ struct PatternRoot {
     literal: bool,
     in_array_pattern: bool,
     rest: bool,
+    /// The object pattern is directly the rest element of an array pattern
+    /// (`[...{ 0: a, b }]`), which reads an array (or the rest of a tuple).
+    rest_of_array: bool,
     param: bool,
     optional_param: bool,
     /// An unannotated parameter of a function expression or arrow.

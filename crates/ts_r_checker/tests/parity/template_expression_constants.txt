@@ -1,0 +1,3 @@
+a.ts(9,7): error TS2322: Type 'string' is not assignable to type '"a"'.
+a.ts(18,7): error TS2322: Type 'string' is not assignable to type '"cat"'.
+a.ts(20,7): error TS2322: Type 'string' is not assignable to type '"z"'.

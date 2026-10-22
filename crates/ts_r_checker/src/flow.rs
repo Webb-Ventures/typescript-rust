@@ -66,6 +66,8 @@ struct Walk {
     /// Narrowing continues into the flow where a function expression was created.
     cross_functions: bool,
     file: ts_r_diagnostics::FileId,
+    /// The reference expression read, when the walk is for one.
+    at: Option<Loc>,
 }
 
 /// Cache key of a flow type at a label: (file, flow node, reference hash, declared, initial).
@@ -176,6 +178,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 k.path.push(name.into());
                 Some(k)
             }
+            // `typeof x.p` in a type reads the reference `x.p`.
+            Node::QualifiedName { left, right } => {
+                let name = crate::nodes::ident_text(ast, right)?;
+                let mut k =
+                    self.compute_ref_key(Loc::new(l.file, left), depth + 1, through_assign)?;
+                k.path.push(name.into());
+                Some(k)
+            }
             Node::Index { obj, index, .. } => {
                 let i = skip_parens(ast, index);
                 let name: String = match ast.node(i) {
@@ -252,6 +262,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 } => return Some("import.meta".into()),
                 Node::Paren { expr } | Node::NonNull { expr } => n = expr,
                 Node::Member { obj, .. } | Node::Index { obj, .. } => n = obj,
+                Node::QualifiedName { left, .. } => n = left,
                 Node::Seq { exprs } => n = *ast.list(exprs).last()?,
                 Node::Assign {
                     left,
@@ -325,6 +336,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             initial,
             cross_functions: cross,
             file: e.file,
+            at: Some(e),
         };
         // Temporary results computed under loop assumptions are redone per reference;
         // speculative ones are kept while the speculative assumptions stay the same.
@@ -448,6 +460,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             initial: declared,
             cross_functions: false,
             file,
+            at: None,
         };
         let t = self.walk_flow(&w, flow);
         if t == TypeId::NEVER && declared != TypeId::NEVER {
@@ -489,6 +502,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             initial: TypeId::UNDEFINED,
             cross_functions: false,
             file,
+            at: None,
         };
         if self.flow_depth == 0 && self.flow_loop > 0 {
             self.clear_flow_temp(0);
@@ -578,7 +592,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let cross = same_file
             && (is_const
                 || !self.is_symbol_assigned(sym, decl.file)
-                || (is_outer && self.closure_past_last_assignment(sym, e, decl_container)));
+                || (is_outer
+                    && !self.is_var_declaration(decl)
+                    && self.closure_past_last_assignment(sym, e, decl_container)));
         // An outer `let` without initializer that is never assigned anywhere is still
         // reported when read from a closure.
         let never_assigned_let = is_outer
@@ -669,7 +685,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// `t` with each generic member whose base constraint is a union replaced by that
     /// constraint (and narrowed generic intersections such as `T[K] & {}` by theirs), when
     /// `e` is the object of a property or element access.
-    fn narrowable_type_for_reference(&mut self, e: Loc, t: TypeId) -> TypeId {
+    pub(crate) fn narrowable_type_for_reference(&mut self, e: Loc, t: TypeId) -> TypeId {
         let Some(p) = self.c.parent(e) else {
             return t;
         };
@@ -819,6 +835,28 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether `decl` is the name of a local `let` declarator: not exported and not a
     /// top-level declaration of a script (whose names are global).
+    /// Whether `decl` (a binding name) is declared by `var`: a closure does not see such a
+    /// variable narrowed past its last assignment (observed, unlike `let` and parameters).
+    fn is_var_declaration(&self, decl: Loc) -> bool {
+        let mut cur = decl;
+        for _ in 0..32 {
+            let Some(p) = self.c.parent(cur) else {
+                return false;
+            };
+            match *self.node(p) {
+                Node::VarDecl { kind, .. } => return kind == ts_r_ast::VarKind::Var,
+                Node::VarDeclarator { .. }
+                | Node::ObjectPattern { .. }
+                | Node::ArrayPattern { .. }
+                | Node::BindingProperty { .. }
+                | Node::AssignPattern { .. }
+                | Node::Rest { .. } => cur = p,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     fn is_local_let_declaration(&self, decl: Loc) -> bool {
         let Some(p) = self.c.parent(decl) else {
             return false;
@@ -944,7 +982,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let l = Loc::new(file, t);
                 let is_decl = match self.c.parent(l).map(|p| *self.node(p)) {
                     Some(Node::VarDeclarator { name, .. }) => name == t,
-                    Some(Node::Param { .. }) => true,
+                    Some(Node::Param { .. } | Node::CatchClause { .. }) => true,
                     Some(
                         Node::BindingProperty { .. }
                         | Node::ArrayPattern { .. }
@@ -1055,9 +1093,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                 FlowKind::Start => {
                     // An immediately invoked function runs inline: the flow before the
                     // call continues through it.
+                    // A bare `this` read in an arrow function is the enclosing `this`: its
+                    // narrowing continues out of the arrow (`this.p` does not; observed).
                     if node.a != 0
                         && (w.cross_functions
-                            || node.node.is_some_and(|f| self.is_iife(Loc::new(file, f))))
+                            || node.node.is_some_and(|f| self.is_iife(Loc::new(file, f)))
+                            || (w.key.root == RefRoot::This
+                                && w.key.path.is_empty()
+                                && node.node.is_some_and(|f| {
+                                    matches!(self.ast(file).node(f), Node::Arrow { .. })
+                                })))
                     {
                         flow = FlowId(node.a);
                         continue;
@@ -1284,7 +1329,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// A union with `null`, `undefined` and `{}` among its members.
-    fn is_unknown_like_union(&self, t: TypeId) -> bool {
+    pub(crate) fn is_unknown_like_union(&self, t: TypeId) -> bool {
         let s = self.store();
         if !s.flags(t).contains(TypeFlags::UNION) {
             return false;
@@ -2021,14 +2066,74 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// A reference narrowable through an aliased condition: a `const` variable or a
     /// parameter that is never assigned.
+    /// Also (observed, tsc 7): a local `let` that is never assigned, `this`, and a
+    /// read-only property (`obj.x`, `this.x`, `outer.obj`, `t[0]` of a read-only tuple) of
+    /// a constant reference.
     fn is_constant_reference(&mut self, w: &Walk) -> bool {
-        if !w.key.path.is_empty() {
-            return false;
+        if w.key.path.is_empty() {
+            let RefRoot::Sym(s) = w.key.root else {
+                return false;
+            };
+            return self.is_constant_symbol(s) || self.is_unassigned_local_let(s);
         }
-        let RefRoot::Sym(s) = w.key.root else {
+        match w.at {
+            Some(at) => self.is_constant_reference_expr(at, 0),
+            None => false,
+        }
+    }
+
+    fn is_unassigned_local_let(&mut self, s: SymId) -> bool {
+        let Some(d) = self.c.value_decl(s) else {
             return false;
         };
-        self.is_constant_symbol(s)
+        self.is_local_let_declaration(d) && !self.is_symbol_assigned(s, d.file)
+    }
+
+    /// `e` is a constant reference (see `is_constant_reference`).
+    fn is_constant_reference_expr(&mut self, e: Loc, depth: u32) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        let ast = self.ast(e.file);
+        let n = skip_parens(ast, e.node);
+        match *ast.node(n) {
+            Node::This {} => true,
+            Node::Ident { .. } => self
+                .ident_ref_symbol(Loc::new(e.file, n))
+                .is_some_and(|s| self.is_constant_symbol(s) || self.is_unassigned_local_let(s)),
+            Node::Member { obj, prop, .. } => {
+                let Some(name) = crate::nodes::ident_text(ast, prop).map(str::to_owned) else {
+                    return false;
+                };
+                self.is_constant_reference_expr(Loc::new(e.file, obj), depth + 1)
+                    && self.is_readonly_member_of(Loc::new(e.file, obj), &name)
+            }
+            Node::Index { obj, index, .. } => {
+                let name = match *ast.node(skip_parens(ast, index)) {
+                    Node::StringLit { value } => ast.atom(value).to_owned(),
+                    Node::NumberLit { value } => ts_r_binder::js_number_to_string(value.get()),
+                    _ => return false,
+                };
+                self.is_constant_reference_expr(Loc::new(e.file, obj), depth + 1)
+                    && self.is_readonly_member_of(Loc::new(e.file, obj), &name)
+            }
+            _ => false,
+        }
+    }
+
+    /// Property `name` of the type of expression `obj` is read-only (in every member).
+    fn is_readonly_member_of(&mut self, obj: Loc, name: &str) -> bool {
+        let t = self.quietly(|ck| ck.check_expr(obj));
+        let t = self.non_nullable(t);
+        let members = self.union_members(t);
+        !members.is_empty()
+            && members.into_iter().all(|m| {
+                let a = self.apparent_type(m);
+                match self.property_of_type(a, name) {
+                    Some(p) => self.is_readonly_symbol(p),
+                    None => false,
+                }
+            })
     }
 
     /// A key of a narrowable `obj[key]`: a constant symbol, or a `let`/`var` that is never
@@ -2056,11 +2161,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.is_const_declaration(d) {
             return true;
         }
+        // A parameter, or a catch clause variable (observed: `const isS = typeof e ===
+        // "string"; if (isS) e.toUpperCase()` narrows the unassigned `e` of `catch (e)`).
         let is_param = matches!(self.node(d), Node::Param { .. })
-            || self
-                .c
-                .parent(d)
-                .is_some_and(|p| matches!(self.node(p), Node::Param { .. }));
+            || self.c.parent(d).is_some_and(|p| {
+                matches!(
+                    self.node(p),
+                    Node::Param { .. } | Node::CatchClause { param: Some(_), .. }
+                )
+            });
         is_param && !self.is_symbol_assigned(s, d.file)
     }
 
@@ -2381,6 +2490,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             // Every alias binding keeps its value, so closures see the narrowing too.
             cross_functions: true,
             file: e.file,
+            at: None,
         };
         let nt = self.walk_flow(&w, flow);
         if nt == parent || nt == TypeId::NEVER {
@@ -2631,6 +2741,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 initial: declared,
                 cross_functions: false,
                 file: decl.file,
+                at: None,
             };
             let t_true = self.narrow(&w, declared, cond, true, 0);
             if t_true == declared || t_true == TypeId::NEVER {
@@ -3180,10 +3291,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return if narrows { vt } else { t };
             }
             let filtered = self.filter_type(t, |ck, m| {
-                if ck
-                    .store()
-                    .flags(m)
-                    .intersects(TypeFlags::INSTANTIABLE | TypeFlags::ANY_OR_UNKNOWN)
+                let mf = ck.store().flags(m);
+                // A template literal or string mapping of no type variable is a set of
+                // strings, compared like one: `${string}!` is not `undefined`.
+                let concrete_pattern = mf
+                    .intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
+                    && !ck.is_generic_type(m);
+                if !concrete_pattern
+                    && mf.intersects(TypeFlags::INSTANTIABLE | TypeFlags::ANY_OR_UNKNOWN)
                 {
                     return true;
                 }
@@ -3512,7 +3627,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return t;
             }
             self.map_type(t, |ck, m| {
-                let f = ck.typeof_facts(m, 0);
+                let f = ck.removable_typeof_facts(m);
                 if f != 0 && f & !fact == 0 {
                     TypeId::NEVER
                 } else {
@@ -3520,6 +3635,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             })
         }
+    }
+
+    /// The `typeof` results whose exclusion removes `m`: its `typeof` facts, except that
+    /// `object` goes by `"object"` alone (observed: `typeof o !== "object"` on `o: object`
+    /// is `never`, though `typeof o === "function"` keeps a `Function`).
+    fn removable_typeof_facts(&mut self, m: TypeId) -> u16 {
+        if self.store().flags(m).contains(TypeFlags::NON_PRIMITIVE) {
+            return facts::OBJECT;
+        }
+        self.typeof_facts(m, 0)
     }
 
     fn narrow_by_instanceof(&mut self, t: TypeId, right: Loc, assume_true: bool) -> TypeId {
@@ -4195,6 +4320,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             return t;
         };
+        if matches!(kind, Kind::TypeOf) {
+            return self.narrow_typeof_switch(t, file, &clauses, start, end);
+        }
         // The clause tests in range, and whether the range includes `default`.
         let mut tests = Vec::new();
         let mut has_default = start == end;
@@ -4249,6 +4377,104 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Kind::Prop(p) => SwitchKind::Prop(p.clone()),
             }
         }
+    }
+
+    /// The text of a `typeof` switch case: a string literal or a template literal without
+    /// substitutions (`` case `number`: ``).
+    fn typeof_case_text(&self, test: Loc) -> Option<String> {
+        let ast = self.ast(test.file);
+        match *ast.node(skip_parens(ast, test.node)) {
+            Node::StringLit { value } => Some(ast.atom(value).to_owned()),
+            Node::TemplateLit { parts } if ast.list(parts).len() == 1 => {
+                match *ast.node(ast.list(parts)[0]) {
+                    Node::TemplateElement { cooked, .. } => Some(ast.atom(cooked).to_owned()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The `typeof` facts the case tests of `clauses` (those `pick` selects) name together
+    /// (tests that are not a known `typeof` result add nothing).
+    fn typeof_case_facts(
+        &self,
+        clauses: &[NodeId],
+        file: ts_r_diagnostics::FileId,
+        pick: impl Fn(usize) -> bool,
+    ) -> u16 {
+        let ast = self.ast(file);
+        let mut set = 0;
+        for (i, &c) in clauses.iter().enumerate() {
+            if !pick(i) {
+                continue;
+            }
+            if let Node::SwitchCase { test: Some(x), .. } = *ast.node(c)
+                && let Some(text) = self.typeof_case_text(Loc::new(file, x))
+                && let Some(f) = typeof_fact(&text)
+            {
+                set |= f;
+            }
+        }
+        set
+    }
+
+    /// Removes the members of `t` whose every `typeof` result is in `set` (an `object`
+    /// member goes by `"object"` alone).
+    fn remove_typeof_facts(&mut self, t: TypeId, set: u16) -> TypeId {
+        if set == 0 || self.store().flags(t).intersects(TypeFlags::ANY_OR_UNKNOWN) {
+            return t;
+        }
+        self.map_type(t, |ck, m| {
+            let f = ck.removable_typeof_facts(m);
+            if f != 0 && f & !set == 0 {
+                TypeId::NEVER
+            } else {
+                m
+            }
+        })
+    }
+
+    /// `switch (typeof x)` clauses `start..end` (observed, tsc 7): a value reaching a case
+    /// did not match an earlier case; `default` (and the implicit default after the
+    /// switch, `start == end`) removes what every other case matches, together.
+    fn narrow_typeof_switch(
+        &mut self,
+        t: TypeId,
+        file: ts_r_diagnostics::FileId,
+        clauses: &[NodeId],
+        start: usize,
+        end: usize,
+    ) -> TypeId {
+        let ast = self.ast(file);
+        let in_range = |i: usize| (start..end).contains(&i);
+        let mut has_default = start == end;
+        let mut tests = Vec::new();
+        for &c in clauses.get(start..end.min(clauses.len())).unwrap_or(&[]) {
+            if let Node::SwitchCase { test, .. } = *ast.node(c) {
+                match test {
+                    Some(x) => tests.push(x),
+                    None => has_default = true,
+                }
+            }
+        }
+        let mut parts = Vec::new();
+        if has_default {
+            let others = self.typeof_case_facts(clauses, file, |i| !in_range(i));
+            parts.push(self.remove_typeof_facts(t, others));
+        }
+        if !tests.is_empty() {
+            // (Narrowed to the case first: `{}` by a second `case "number"` is `never`.)
+            let earlier = self.typeof_case_facts(clauses, file, |i| i < start);
+            for x in tests {
+                let r = match self.typeof_case_text(Loc::new(file, x)) {
+                    Some(lit) => self.narrow_by_typeof(t, &lit, true),
+                    None => t,
+                };
+                parts.push(self.remove_typeof_facts(r, earlier));
+            }
+        }
+        self.union(&parts)
     }
 
     /// `switch (true)` clauses `start..end`: every earlier clause test is false and one of
@@ -4343,16 +4569,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let vt = self.quietly(|ck| ck.check_expr(test));
                 self.narrow_type_by_equality(t, vt, true, assume_eq)
             }
-            SwitchKind::TypeOf => {
-                let ast = self.ast(test.file);
-                match *ast.node(skip_parens(ast, test.node)) {
-                    Node::StringLit { value } => {
-                        let lit = ast.atom(value).to_owned();
-                        self.narrow_by_typeof(t, &lit, assume_eq)
-                    }
-                    _ => t,
-                }
-            }
+            SwitchKind::TypeOf => match self.typeof_case_text(test) {
+                Some(lit) => self.narrow_by_typeof(t, &lit, assume_eq),
+                None => t,
+            },
             SwitchKind::Prop(p) => {
                 let vt = self.quietly(|ck| ck.check_expr(test));
                 self.narrow_by_discriminant(t, p, |ck, pt| {
@@ -4669,6 +4889,22 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::SwitchCase { test: None, .. } => return true,
                 _ => {}
             }
+        }
+        // `switch (typeof x)`: exhaustive when every member of `x`'s type has all its
+        // `typeof` results among the cases.
+        if let Node::Unary {
+            op: UnaryOp::TypeOf,
+            arg,
+        } = *ast.node(skip_parens(ast, disc))
+        {
+            let clauses = ast.list(cases).to_vec();
+            let set = self.typeof_case_facts(&clauses, sw.file, |_| true);
+            // (All eight results cover `any` and `unknown` too.)
+            if set == facts::ALL {
+                return true;
+            }
+            let xt = self.quietly(|ck| ck.check_expr(Loc::new(sw.file, arg)));
+            return self.remove_typeof_facts(xt, set) == TypeId::NEVER;
         }
         let dt = self.quietly(|ck| ck.check_expr(Loc::new(sw.file, disc)));
         let s = self.store();

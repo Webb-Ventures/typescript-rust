@@ -4440,7 +4440,10 @@ impl<'a> Binder<'a> {
                         self.add_entity_ref(expr_name, meaning::VALUE);
                         self.record_flow(expr_name);
                     }
-                    Node::QualifiedName { .. } => self.add_entity_ref(expr_name, meaning::VALUE),
+                    Node::QualifiedName { .. } => {
+                        self.add_entity_ref(expr_name, meaning::VALUE);
+                        self.record_flow(expr_name);
+                    }
                     _ => self.bind_type(expr_name),
                 }
                 if let Some(t) = type_args {

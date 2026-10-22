@@ -850,9 +850,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             0
         };
+        // Only the elements before a rest element are properties: the position of one
+        // after it varies (`[...number[], number]` has no `"1"`).
+        let mut past_rest = false;
         for (i, el) in shape.elements.iter().enumerate() {
             let ty = args.get(i).copied().unwrap_or(TypeId::UNRESOLVED);
             match el.kind {
+                TupleElement::REQUIRED | TupleElement::OPTIONAL if past_rest => {
+                    elem_types.push(ty);
+                }
                 TupleElement::REQUIRED | TupleElement::OPTIONAL => {
                     let opt = el.kind == TupleElement::OPTIONAL;
                     let pt = if opt { self.add_optionality(ty) } else { ty };
@@ -870,6 +876,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     elem_types.push(ty);
                 }
                 _ => {
+                    past_rest = true;
                     if el.kind == TupleElement::VARIADIC {
                         let et = self
                             .element_type_of_array_like(ty)
@@ -1255,8 +1262,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else {
                 s
             };
+            let mut s = s;
             if !self.c.has_meaning(target, meaning::VALUE) {
-                continue;
+                // An alias on the way merged with a local value exports that value.
+                match self.alias_merged_value(s) {
+                    Some(v) if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) => s = v,
+                    _ => continue,
+                }
             }
             if self.c.sym_facts(s).intersects(SymbolFacts::TYPE_ONLY) {
                 continue;
@@ -1410,6 +1422,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 i.value = self.union(&[i.value, proto_ty]);
             }
         }
+        // A class extending an `any` value has `any` statics: `C.unknown` is `any`
+        // (observed: tsc 7 reports nothing), as `new C().unknown` is.
+        if base_ctor.is_none()
+            && !index.iter().any(|i| i.key == TypeId::STRING)
+            && self.extends_expression_type(sym) == Some(TypeId::ANY)
+        {
+            index.push(IndexInfo {
+                key: TypeId::STRING,
+                value: TypeId::ANY,
+                readonly: false,
+                decl: None,
+            });
+        }
         ResolvedMembers::new(props, call, construct, index)
     }
 
@@ -1487,6 +1512,19 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The type of the `extends` expression of a class (the base constructor type).
     pub fn base_constructor_type(&mut self, sym: SymId) -> Option<TypeId> {
+        let t = self.extends_expression_type(sym)?;
+        if self
+            .store()
+            .flags(t)
+            .intersects(TypeFlags::ANY | TypeFlags::NULL)
+        {
+            return None;
+        }
+        Some(t)
+    }
+
+    /// The type of a class's `extends` expression, `any` and `null` included.
+    fn extends_expression_type(&mut self, sym: SymId) -> Option<TypeId> {
         let d = self.c.decls(sym).into_iter().find(|d| {
             matches!(
                 self.node(*d),
@@ -1512,13 +1550,6 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
                 self.pop_resolution();
-                if self
-                    .store()
-                    .flags(t)
-                    .intersects(TypeFlags::ANY | TypeFlags::NULL)
-                {
-                    return None;
-                }
                 return Some(t);
             }
         }
@@ -2585,18 +2616,23 @@ impl<'c, 'a> Ck<'c, 'a> {
     pub fn apparent_type(&mut self, t: TypeId) -> TypeId {
         // A generic intersection (`T[K] & {}` from narrowing) is the intersection of its
         // members' constraints.
-        let t = if self.store().flags(t).contains(TypeFlags::INTERSECTION)
-            && self.is_generic_type(t)
-        {
-            let b = self.base_constraint(t);
-            if b == TypeId::UNRESOLVED || self.store().flags(b).contains(TypeFlags::INTERSECTION) {
-                t
+        let t =
+            if self.store().flags(t).contains(TypeFlags::INTERSECTION) && self.is_generic_type(t) {
+                let b = self.base_constraint(t);
+                // (`string & {}`, the constraint of `NonNullable<T>` with `T extends string |
+                // undefined`, is the primitive's.)
+                if b == TypeId::UNRESOLVED
+                    || (self.store().flags(b).contains(TypeFlags::INTERSECTION)
+                        && !self.is_primitive_with_empty_object(b))
+                {
+                    t
+                } else {
+                    b
+                }
             } else {
-                b
-            }
-        } else {
-            t
-        };
+                t
+            };
+        let t = self.primitive_with_empty_object(t).unwrap_or(t);
         let t = if self.store().flags(t).intersects(TypeFlags::INSTANTIABLE) {
             let b = self.base_constraint(t);
             if b == TypeId::UNKNOWN {
@@ -2667,9 +2703,34 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ) && s.tuple_shape_of(m).is_none()
             })
         {
-            return self.with_this_arg(t, t);
+            // A member that already has its `this` (the base intersection of `interface
+            // Thing5 extends Thing1 & Thing2` has `Thing5`'s) keeps it.
+            let parts: Vec<TypeId> = s.members_of_union(t).to_vec();
+            let mapped: Vec<TypeId> = parts
+                .iter()
+                .map(|&p| {
+                    if self.has_explicit_this_arg(p) {
+                        p
+                    } else {
+                        self.with_this_arg(p, t)
+                    }
+                })
+                .collect();
+            return self.intersection(&mapped);
         }
         t
+    }
+
+    /// Whether `t` is a class or interface reference with an explicit `this` argument.
+    fn has_explicit_this_arg(&self, t: TypeId) -> bool {
+        let s = self.store();
+        if let Some(ObjectKind::Reference { target, args }) = s.object_of(t).map(|o| o.kind)
+            && let Some(ObjectKind::Declared { type_params, .. }) =
+                s.object_of(target).map(|o| o.kind)
+        {
+            return s.list_items(args).len() > s.list_items(type_params).len();
+        }
+        false
     }
 
     /// A class or interface type (or an intersection with one), whose members may mention

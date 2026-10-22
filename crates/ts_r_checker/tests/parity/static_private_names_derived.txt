@@ -1,0 +1,5 @@
+a.ts(8,11): error TS18013: Property '#foo' is not accessible outside class 'B' because it has a private identifier.
+a.ts(9,11): error TS2339: Property '#bar' does not exist on type 'typeof B'.
+a.ts(23,15): error TS2339: Property '#bar' does not exist on type 'typeof Child'.
+a.ts(30,7): error TS2322: Type 'typeof willErrorSomeDay' is not assignable to type 'typeof A'.
+  Property 'm' is missing in type 'willErrorSomeDay' but required in type 'A'.

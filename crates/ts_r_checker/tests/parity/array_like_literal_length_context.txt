@@ -1,0 +1,4 @@
+a.ts(7,7): error TS2322: Type '[number, number, number]' is not assignable to type 'Pair'.
+  Types of property 'length' are incompatible.
+    Type '3' is not assignable to type '2'.
+a.ts(8,7): error TS2322: Type 'MyEmptyTuple' is not assignable to type 'undefined'.

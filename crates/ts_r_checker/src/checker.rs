@@ -689,6 +689,8 @@ pub struct Ck<'c, 'a> {
     pub(crate) fn_types: FxHashMap<Loc, TypeId>,
     /// Widened object literal types.
     pub(crate) widened: FxHashMap<TypeId, TypeId>,
+    /// [`Ck::reduced_type`] results.
+    pub(crate) reduced: FxHashMap<TypeId, TypeId>,
     pub(crate) flow_depth: u32,
     pub(crate) depth: u32,
     /// Stack of contextual types for expressions being checked: `(expression, type)`.
@@ -825,6 +827,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             speculative: 0,
             fn_types: FxHashMap::default(),
             widened: FxHashMap::default(),
+            reduced: FxHashMap::default(),
             flow_depth: 0,
             depth: 0,
             context_overrides: Vec::new(),

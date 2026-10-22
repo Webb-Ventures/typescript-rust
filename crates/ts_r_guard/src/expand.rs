@@ -67,7 +67,17 @@ const VALUES: &[(&str, &str)] = &[
 
 /// Cheap pre-check: only files mentioning the package are expanded.
 pub fn mentions_guard(src: &str) -> bool {
-    src.contains(PACKAGE)
+    // Every file read is checked: jump between `@`s (a memchr scan), which is several times
+    // faster than a general substring search.
+    let mut rest = src;
+    while let Some(i) = rest.find('@') {
+        rest = &rest[i..];
+        if rest.starts_with(PACKAGE) {
+            return true;
+        }
+        rest = &rest[1..];
+    }
+    false
 }
 
 /// Whether `path` is a TypeScript source the transform expands (not a declaration file).

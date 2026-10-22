@@ -228,8 +228,11 @@ pub fn compile(
 ) -> Result<Compiled, String> {
     let kind = SourceKind::from_path(path);
     let parsed = ts_r_parser::parse(src, kind);
-    if parsed.diagnostics.iter().any(|d| d.is_error()) {
-        return Err(render_errors(path, src, &parsed.diagnostics));
+    // Only the errors a build fails on (as esbuild): tsc's checker grammar errors such as
+    // `if (x) ;` or `declare function f() {}` are not syntax errors here.
+    let errors = ts_r_transform::build_errors(&parsed);
+    if !errors.is_empty() {
+        return Err(render_errors(path, src, &errors));
     }
     let mut ast = parsed.ast;
     let format = format_of(path, pkg, &ast, src);
@@ -273,13 +276,13 @@ pub fn compile(
     })
 }
 
-fn render_errors(path: &str, src: &str, diags: &[ts_r_diagnostics::Diagnostic]) -> String {
+fn render_errors(path: &str, src: &str, diags: &[&ts_r_diagnostics::Diagnostic]) -> String {
     let file = SourceText::new(path, src);
     let r = Renderer {
         color: std::io::stderr().is_terminal(),
     };
     let mut out = String::new();
-    for d in diags.iter().filter(|d| d.is_error()) {
+    for d in diags {
         out.push_str(&format_pretty(d, &file, r));
         if !out.ends_with('\n') {
             out.push('\n');
@@ -422,6 +425,22 @@ mod tests {
         )
         .expect_err("syntax error");
         assert!(e.contains("bad.ts"), "{e}");
+    }
+
+    #[test]
+    fn grammar_errors_esbuild_accepts_do_not_stop_a_run() {
+        let src = "declare function f() { return 1 }\nif (globalThis.x) ;\nconsole.log(1);\n";
+        let c = run("a.ts", src, PackageType::Module);
+        assert!(c.code.contains("console.log(1)"), "{}", c.code);
+        let e = compile(
+            "b.ts",
+            "const x: number;\n",
+            &TransformOptions::default(),
+            PackageType::Module,
+            false,
+        )
+        .expect_err("early error");
+        assert!(e.contains("must be initialized"), "{e}");
     }
 
     #[test]

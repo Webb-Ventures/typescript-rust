@@ -416,7 +416,82 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let cl = Loc::new(e.file, callee);
         let ft = self.check_expr(cl);
+        // An inaccessible constructor still makes an instance (observed: `c.constructor` is
+        // checked); its arguments are not checked against it.
+        if !self.constructor_accessible(e, ft) {
+            self.resolved_calls.insert(e, None);
+            self.check_args_plain(e, Args::List(args));
+            let sigs = self.signatures_of(ft, SigKind::Construct);
+            return match sigs.first() {
+                Some(&sig) if self.store().sig(sig).type_params == ListId::EMPTY => {
+                    self.return_type_of(sig)
+                }
+                _ => TypeId::ERROR,
+            };
+        }
         self.resolve_call_like(e, cl, ft, type_args, Args::List(args), SigKind::Construct)
+    }
+
+    /// The class of a `private` or `protected` constructor among `ft`'s construct
+    /// signatures, with whether it is private.
+    pub(crate) fn restricted_constructor(&mut self, ft: TypeId) -> Option<(Loc, bool)> {
+        if ft == TypeId::UNRESOLVED || self.store().is_error(ft) {
+            return None;
+        }
+        let sigs = self.signatures_of(ft, SigKind::Construct);
+        let &sig = sigs.first()?;
+        let d = self.store().sig(sig).decl.and_then(Loc::unpack)?;
+        if !matches!(
+            self.node(d),
+            Node::MethodDef {
+                kind: ts_r_ast::MethodKind::Constructor,
+                ..
+            }
+        ) {
+            return None;
+        }
+        let m = self.node(d).modifiers();
+        let private = m.contains(ts_r_ast::Modifiers::PRIVATE);
+        if !private && !m.contains(ts_r_ast::Modifiers::PROTECTED) {
+            return None;
+        }
+        Some((self.enclosing_class(d)?, private))
+    }
+
+    /// `new C()` of a class with a `private` constructor outside its declaration, or a
+    /// `protected` one outside it and its subclasses: TS2673/TS2674 at the expression.
+    fn constructor_accessible(&mut self, e: Loc, ft: TypeId) -> bool {
+        let Some((dc, private)) = self.restricted_constructor(ft) else {
+            return true;
+        };
+        let mut cur = self.enclosing_class(e);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+            if c == dc || (!private && self.class_derives_from(c, dc)) {
+                return true;
+            }
+            cur = self.enclosing_class(c);
+        }
+        if self.reporting(e.file) {
+            let name = match self.c.sym_of_decl(dc) {
+                Some(s) => {
+                    let t = self.declared_type_of_symbol(s);
+                    self.type_to_string(t)
+                }
+                None => String::new(),
+            };
+            let info = if private {
+                dg::CONSTRUCTOR_OF_CLASS_0_IS_PRIVATE_AND_ONLY_ACCESSIBLE_WITHIN_THE_CLASS_DECLARATI_2673
+            } else {
+                dg::CONSTRUCTOR_OF_CLASS_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_THE_CLASS_DECLARA_2674
+            };
+            self.error(e, info, &[&name]);
+        }
+        false
     }
 
     /// Whether the callee's root identifier is an unannotated parameter of a function
@@ -935,7 +1010,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return TypeId::ANY;
                 }
                 let mut chain = Chain::new();
-                chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
+                // `o.getter()`: TS6234 suggests dropping the call.
+                let is_getter = !tagged
+                    && matches!(self.ast(cl.file).node(cl.node), Node::Member { .. })
+                    && self.property_symbol_of_access(cl).is_some_and(|p| {
+                        self.c
+                            .sym_flags(p)
+                            .contains(ts_r_binder::SymbolFlags::GET_ACCESSOR)
+                    });
+                if is_getter {
+                    chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_BECAUSE_IT_IS_A_GET_ACCESSOR_DID_YOU_MEAN_TO_USE_6234, &[]);
+                } else {
+                    chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
+                }
                 self.no_signatures_chain(&mut chain, t, kind);
                 // A property access callee reports at the name (`o.m()`).
                 let ast = self.ast(cl.file);

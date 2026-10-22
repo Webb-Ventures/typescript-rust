@@ -583,6 +583,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 None => key,
             };
             for pn in self.union_members(pnt) {
+                // `string & {}` keys an index signature as `string` does.
+                let pn = self.primitive_with_empty_object(pn).unwrap_or(pn);
                 let pf = self.store().flags(pn);
                 if let Some(name) = self.property_name_of_type(pn) {
                     let nid = self.store().intern_str(&name);

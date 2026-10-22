@@ -1293,3 +1293,256 @@ fn wrapped_esm_is_tree_shaken() {
         assert_eq!(run_node("wrapped-esm-shaken", &r, "main.cjs"), "1\n");
     }
 }
+
+#[test]
+fn tsc_grammar_errors_esbuild_accepts_do_not_fail_the_build() {
+    // tsc's checker grammar errors that esbuild accepts (TS1313, TS1183, TS18030, TS1189 in
+    // sloppy code, TS1540) are not build errors; ECMAScript early errors still are.
+    let fs = project(&[
+        (
+            "a.js",
+            "if (globalThis.x) ;\nfor (var k = 1 in {});\n\
+             class C { #x = 1; static f(o) { return o?.#x } }\nconsole.log(C.f(new C()), k);\n",
+        ),
+        (
+            "b.ts",
+            "declare function f() { return 1 }\nnamespace N {}\nmodule M { export const y = 2 }\n\
+             import './a.js';\nconsole.log(M.y);\n",
+        ),
+        ("bad.js", "const z;\nconsole.log(z);\n"),
+    ]);
+    let r = run_build(&fs, opts(&["b.ts"]));
+    if have_node() {
+        assert_eq!(run_node("grammar-accepted", &r, "b.js"), "1 1\n2\n");
+    }
+    let ctx = BuildContext::new(opts(&["bad.js"]), Arc::new(fs.clone())).expect("options");
+    let r = ctx.build();
+    assert!(r.has_errors());
+    assert!(
+        r.messages[0].text.contains("must be initialized"),
+        "{:?}",
+        r.messages
+    );
+}
+
+#[test]
+fn with_and_delete_name_fail_only_in_strict_code() {
+    let build = |files: &[(&str, &str)], entry: &str, format: Format| {
+        let fs = project(files);
+        let mut o = opts(&[entry]);
+        o.format = Some(format);
+        let r = BuildContext::new(o, Arc::new(fs)).expect("options").build();
+        r.messages
+            .iter()
+            .filter(|m| m.is_error())
+            .map(|m| m.text.clone())
+            .collect::<Vec<_>>()
+    };
+    let sloppy = [("a.js", "with (Math) PI;\ndelete globalThis;\n")];
+    assert_eq!(build(&sloppy, "a.js", Format::Cjs), Vec::<String>::new());
+    assert_eq!(
+        build(&sloppy, "a.js", Format::Esm),
+        [
+            "With statements cannot be used with the \"esm\" output format due to strict mode",
+            "Delete of a bare identifier cannot be used with the \"esm\" output format due to strict mode",
+        ]
+    );
+    let module = [("a.js", "export {};\nwith (Math) PI;\n")];
+    assert_eq!(
+        build(&module, "a.js", Format::Cjs),
+        ["With statements cannot be used in an ECMAScript module"]
+    );
+    let directive = [("a.js", "function f() { 'use strict'; delete x }\n")];
+    assert_eq!(
+        build(&directive, "a.js", Format::Cjs),
+        ["Delete of a bare identifier cannot be used in strict mode"]
+    );
+    // tsconfig's `alwaysStrict` counts only when set (directly or through `strict`).
+    let ts = |config: &'static str| [("a.ts", "with (Math) PI;\n"), ("tsconfig.json", config)];
+    assert!(build(&ts("{}"), "a.ts", Format::Cjs).is_empty());
+    assert!(
+        build(
+            &ts(r#"{"compilerOptions":{"strict":false}}"#),
+            "a.ts",
+            Format::Cjs
+        )
+        .is_empty()
+    );
+    for config in [
+        r#"{"compilerOptions":{"strict":true}}"#,
+        r#"{"compilerOptions":{"strict":false,"alwaysStrict":true}}"#,
+    ] {
+        assert_eq!(
+            build(&ts(config), "a.ts", Format::Cjs),
+            ["With statements cannot be used in strict mode"],
+            "{config}"
+        );
+    }
+}
+
+#[test]
+fn cached_preparation_rechecks_output_format() {
+    use ts_r_bundler::graph::{GraphContext, ModuleCache, build_graph};
+    use ts_r_bundler::prepare::{Defines, PrepareContext};
+    use ts_r_bundler::resolve::Resolver;
+
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("bundler-e2e")
+        .join("cached-preparation-format");
+    let _ = std::fs::remove_dir_all(&dir);
+    let fs = project(&[("a.js", "with (Math) console.log(PI);\ndelete globalThis;\n")]);
+    for (format, platform, parsed, errors) in [
+        (Some(Format::Cjs), Platform::Node, 1, 0),
+        (None, Platform::Node, 0, 0),
+        (Some(Format::Esm), Platform::Node, 1, 2),
+        (None, Platform::Neutral, 1, 2),
+    ] {
+        let mut o = opts(&["a.js"]);
+        o.format = format;
+        o.platform = platform;
+        let o = Arc::new(o);
+        let resolver = Arc::new(Resolver::new(Arc::new(fs.clone()), &o));
+        let prep =
+            PrepareContext::new(Arc::clone(&o), Defines::from_options(&o).unwrap(), resolver);
+        let disk = ts_r_cache::Cache::open_in(&dir, "build", 1).expect("cache");
+        let ctx = GraphContext {
+            prep: &prep,
+            cache: &ModuleCache::default(),
+            disk: Some(&disk),
+            threads: 2,
+            changed: None,
+            parsed: Default::default(),
+            read_ahead: None,
+        };
+        let graph = build_graph(&ctx, &["/proj/a.js".into()]);
+        assert_eq!(
+            graph.messages.iter().filter(|m| m.is_error()).count(),
+            errors,
+            "{format:?} / {platform:?}: {:?}",
+            graph.messages
+        );
+        assert_eq!(
+            ctx.parsed.load(std::sync::atomic::Ordering::Relaxed),
+            parsed
+        );
+    }
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn colliding_output_paths_fail_before_writing() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("bundler-e2e")
+        .join("colliding-output-paths");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let fs = project(&[
+        (
+            "src/a.ts",
+            "console.log('longer output from TypeScript');\n",
+        ),
+        ("src/a.js", "console.log(1);\n"),
+        ("src/b.ts", "console.log('unrelated output');\n"),
+    ]);
+    for bundle in [false, true] {
+        std::fs::write(dir.join("a.js"), "existing a").expect("write");
+        std::fs::write(dir.join("b.js"), "existing b").expect("write");
+        let mut o = opts(&["src/a.ts", "src/a.js", "src/b.ts"]);
+        o.bundle = bundle;
+        o.outdir = Some(dir.to_string_lossy().replace('\\', "/"));
+        o.write = true;
+        let r = BuildContext::new(o, Arc::new(fs.clone()))
+            .expect("options")
+            .build();
+        assert!(r.has_errors(), "{r:?}");
+        assert!(
+            r.errors()
+                .any(|m| m.text.contains("Two output files share the same path")),
+            "{:?}",
+            r.messages
+        );
+        assert_eq!(std::fs::read(dir.join("a.js")).unwrap(), b"existing a");
+        assert_eq!(std::fs::read(dir.join("b.js")).unwrap(), b"existing b");
+    }
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+#[test]
+fn assignments_to_constants_and_imports_fail_a_bundle() {
+    let fs = project(&[
+        (
+            "a.js",
+            "import { y } from './b.js';\nconst x = 1;\nfunction f(x) { x = 2 }\n\
+             x += 1;\ny = 2;\n{ using u = null; u = 3 }\n",
+        ),
+        ("b.js", "export let y = 1;\n"),
+    ]);
+    let errors = |bundle: bool| {
+        let mut o = opts(&["a.js"]);
+        o.bundle = bundle;
+        let r = BuildContext::new(o, Arc::new(fs.clone()))
+            .expect("options")
+            .build();
+        r.messages
+            .iter()
+            .filter(|m| m.is_error())
+            .map(|m| m.text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        errors(true),
+        [
+            "Cannot assign to \"x\" because it is a constant",
+            "Cannot assign to import \"y\"",
+            "Cannot assign to \"u\" because it is a constant",
+        ]
+    );
+    assert!(errors(false).is_empty());
+}
+
+#[test]
+fn top_level_await_makes_top_level_return_an_error() {
+    let errors = |src: &str| {
+        let fs = project(&[("a.js", src)]);
+        let r = BuildContext::new(opts(&["a.js"]), Arc::new(fs))
+            .expect("options")
+            .build();
+        r.messages
+            .iter()
+            .filter(|m| m.is_error())
+            .map(|m| m.text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        errors("await 0;\nreturn;\n"),
+        ["Top-level return cannot be used inside an ECMAScript module"]
+    );
+    assert!(errors("async function f() { await 0 }\nreturn;\n").is_empty());
+    assert!(errors("const f = async () => { await 0 };\nreturn;\n").is_empty());
+}
+
+#[test]
+fn javascript_wins_over_typescript_inside_node_modules() {
+    // esbuild: implicit extensions prefer `.js` to `.ts` in `node_modules`, `.ts` elsewhere.
+    let fs = project(&[
+        (
+            "main.ts",
+            "import './rel/path';\nimport 'pkg/path';\nimport 'pkg/only_ts';\n",
+        ),
+        ("rel/path.ts", "console.log('rel ts');\n"),
+        ("rel/path.js", "console.log('rel js');\n"),
+        ("node_modules/pkg/path.ts", "console.log('pkg ts');\n"),
+        ("node_modules/pkg/path.js", "console.log('pkg js');\n"),
+        ("node_modules/pkg/only_ts.ts", "console.log('only ts');\n"),
+        ("node_modules/pkg/only_ts.css", ".x {}\n"),
+    ]);
+    let r = run_build(&fs, opts(&["main.ts"]));
+    let code = file(&r, "/proj/out/main.js");
+    for (want, not) in [
+        ("rel ts", "rel js"),
+        ("pkg js", "pkg ts"),
+        ("only ts", ".x"),
+    ] {
+        assert!(code.contains(want) && !code.contains(not), "{code}");
+    }
+}
