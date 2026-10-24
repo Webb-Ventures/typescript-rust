@@ -42,6 +42,9 @@ pub struct SourceFile {
     pub syntax: Vec<Diagnostic>,
     /// The checker grammar errors in `syntax` ([`ts_r_parser::ParseResult::grammar`]).
     pub grammar: Vec<Diagnostic>,
+    /// The entries of `grammar` that are syntax errors to tsc
+    /// ([`ts_r_parser::ParseResult::lenient`]).
+    pub lenient: Vec<Diagnostic>,
     /// Syntax errors in JSDoc types (JavaScript files): reported for checked files only,
     /// and they do not stop semantic checking.
     pub jsdoc: Vec<Diagnostic>,
@@ -107,6 +110,7 @@ impl SourceFile {
             is_external: false,
             syntax: parsed.diagnostics,
             grammar: parsed.grammar,
+            lenient: parsed.lenient,
             jsdoc,
             references,
             ast: parsed.ast,

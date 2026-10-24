@@ -68,11 +68,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .cloned()
                 .map(|d| d.with_file(file)),
         );
+        let target = self.c.opts.target;
+        let sf = self.c.file(file);
         diags.extend(
-            self.c
-                .file(file)
-                .grammar
+            sf.grammar
                 .iter()
+                .filter(|d| !ts_r_parser::is_target_regex_error(d) || regex_needs_target(d, target))
+                // Syntax errors (`driver`).
+                .filter(|d| {
+                    let at = sf.lenient.partition_point(|l| l.span.start < d.span.start);
+                    !sf.lenient[at..]
+                        .iter()
+                        .take_while(|l| l.span.start == d.span.start)
+                        .any(|l| l == *d)
+                })
                 .cloned()
                 .map(|d| d.with_file(file)),
         );
@@ -10140,4 +10149,15 @@ fn binding_name_nodes(ast: &ts_r_ast::Ast, n: NodeId) -> Vec<NodeId> {
         }
     }
     names
+}
+
+/// Whether a regex flag or named group (TS1501 / TS1503, from the parser) needs a newer
+/// target than `target`: the message names it (`'es2018'`, `'ES2018'`).
+fn regex_needs_target(d: &Diagnostic, target: ts_r_config::ScriptTarget) -> bool {
+    let needed = d
+        .message
+        .split('\'')
+        .nth(1)
+        .and_then(ts_r_config::ScriptTarget::parse);
+    needed.is_some_and(|needed| target < needed)
 }

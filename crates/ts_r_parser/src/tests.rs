@@ -7,6 +7,7 @@ ts_r_testing::cap_memory!();
 use ts_r_ast::{Modifiers, NodeKind, SourceKind};
 
 use crate::parse;
+use ts_r_diagnostics::Diagnostic;
 
 #[track_caller]
 fn ok_kind(src: &str, kind: SourceKind) -> String {
@@ -2859,4 +2860,63 @@ fn conditional_branch_with_leading_bar() {
     has(&dump, "ConditionalType");
     let dump = ok("type B<S> = S extends\n  Array<infer I> ?\n    | string\n    | I\n  : never;\n");
     has(&dump, "ConditionalType");
+}
+
+/// Octal and `\8` escapes: TS1487 / TS1488 from the backslash to the end of the escape, in
+/// strings (`lenient`: also in `grammar`, which ESLint's parser and build tools accept) and
+/// untagged templates (syntax only). Tagged templates allow them; `\0` alone is fine.
+#[test]
+fn octal_escapes() {
+    let errs = |src: &str| {
+        let r = parse(src, SourceKind::Ts);
+        let show = |ds: &[Diagnostic]| -> Vec<String> {
+            ds.iter()
+                .map(|d| format!("{}@{}..{} {}", d.code, d.span.start, d.span.end, d.message))
+                .collect()
+        };
+        assert_eq!(r.lenient, r.grammar);
+        assert_eq!(
+            show(&r.syntax_errors()).len() + r.grammar.len(),
+            r.diagnostics.len()
+        );
+        (show(&r.diagnostics), show(&r.grammar))
+    };
+    let oct = |at: u32, end: u32, arg: &str| {
+        format!("1487@{at}..{end} Octal escape sequences are not allowed. Use the syntax '{arg}'.")
+    };
+    let (all, grammar) = errs(r#""\05"; '\0'; "\08"; '\477';"#);
+    let want = vec![
+        oct(1, 4, r"\x05"),
+        oct(14, 16, r"\x00"),
+        oct(21, 24, r"\x27"),
+    ];
+    assert_eq!(all, want);
+    assert_eq!(grammar, want);
+    let (all, grammar) = errs(r#""\8"; "\9x";"#);
+    let want = vec![
+        r"1488@1..3 Escape sequence '\8' is not allowed.".to_string(),
+        r"1488@7..9 Escape sequence '\9' is not allowed.".to_string(),
+    ];
+    assert_eq!(all, want);
+    assert_eq!(grammar, want);
+    let (all, grammar) = errs(r"`\05${0}\8`; tag`\05${0}\8`; `\0`;");
+    assert_eq!(
+        all,
+        vec![
+            oct(1, 4, r"\x05"),
+            r"1488@8..10 Escape sequence '\8' is not allowed.".to_string()
+        ]
+    );
+    assert!(grammar.is_empty());
+}
+
+/// Regex flags and named groups newer than some target (TS1501, TS1503) are in `grammar`
+/// only: the checker keeps them for older targets. Other regex errors are in both.
+#[test]
+fn target_regex_errors_are_grammar_only() {
+    let r = parse("/(?<a>x)/s; /a/gg;", SourceKind::Ts);
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    assert_eq!(codes(&r.diagnostics), vec![1500]);
+    assert_eq!(codes(&r.grammar), vec![1503, 1501, 1500]);
+    assert_eq!(codes(&r.syntax_errors()), Vec::<u32>::new());
 }

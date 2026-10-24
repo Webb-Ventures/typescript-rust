@@ -16,6 +16,7 @@
 mod chars;
 mod cook;
 mod regex;
+mod regex_props;
 mod token;
 
 use std::borrow::Cow;
@@ -1004,20 +1005,18 @@ impl<'a> Lexer<'a> {
             i = unterminated_regex_end(b, start + 1, i);
         } else {
             let pattern_end = i - 1;
-            let mut seen = 0u32;
-            while i < b.len() && chars::is_ascii_ident_part(b[i]) {
-                self.check_regex_flag(b[i], i, &mut seen);
-                i += 1;
+            let mut accepted = 0u8;
+            while let Some(c) = self.src.get(i..).and_then(|rest| rest.chars().next()) {
+                if !chars::is_id_part(c) {
+                    break;
+                }
+                self.check_regex_flag(c, i, &mut accepted);
+                i += c.len_utf8();
             }
-            let flags = &b[pattern_end + 1..i];
-            let (unicode, sets) = (flags.contains(&b'u'), flags.contains(&b'v'));
-            for (s, e, msg, arg) in regex::validate(self.src, start + 1, pattern_end, unicode, sets)
-            {
-                // Not merged with an error at the same position (TS1538 and TS1517 at
-                // one escape: regularExpressionCharacterClassRangeOrder).
-                let args: &[&str] = if arg.is_empty() { &[] } else { &[arg] };
-                self.diagnostics
-                    .push(Diagnostic::new(msg, Span::new(s as u32, e as u32), args));
+            for e in regex::validate(self.src, start + 1, pattern_end, accepted) {
+                let args: &[&str] = if e.arg.is_empty() { &[] } else { &[&e.arg] };
+                let span = Span::new(e.start as u32, e.end as u32);
+                self.diagnostics.push(Diagnostic::new(e.msg, span, args));
             }
         }
         self.pos = i;
@@ -1207,11 +1206,12 @@ impl<'a> Lexer<'a> {
         if !tok.flags.has(TokenFlags::ESCAPED) {
             return Cow::Borrowed(inner);
         }
-        match cook::cook(inner, false) {
+        match cook::cook(inner) {
             Ok(v) => Cow::Owned(v),
             Err((v, errors)) => {
-                for (off, msg) in errors {
-                    let at = (s + off).min(self.bytes.len());
+                for err in errors {
+                    let at = (s + err.at).min(self.bytes.len());
+                    let end = (s + err.end).clamp(at, self.bytes.len());
                     // tsc scans the escape first: at the end of an unterminated string the
                     // escape's error wins (unicodeExtendedEscapesInStrings24).
                     if self
@@ -1221,27 +1221,35 @@ impl<'a> Lexer<'a> {
                     {
                         self.diagnostics.pop();
                     }
-                    self.error(msg, at, (at + 1).min(self.bytes.len()), &[]);
+                    match &err.arg {
+                        Some(arg) => self.error(err.msg, at, end, &[arg]),
+                        None => self.error(err.msg, at, end, &[]),
+                    }
                 }
                 Cow::Owned(v)
             }
         }
     }
 
-    /// Reports unknown (TS1499), duplicate (TS1500) and `u`+`v` (TS1502) regex flags.
-    fn check_regex_flag(&mut self, c: u8, at: usize, seen: &mut u32) {
-        let Some(bit) = b"dgimsuvy".iter().position(|&f| f == c) else {
-            self.error(messages::UNKNOWN_REGEX_FLAG, at, at + 1, &[]);
+    /// Reports unknown (TS1499), duplicate (TS1500) and `u`+`v` (TS1502) regex flags, and
+    /// accepts the others (with TS1501, which the checker keeps only for older targets).
+    fn check_regex_flag(&mut self, c: char, at: usize, accepted: &mut u8) {
+        let end = at + c.len_utf8();
+        let Some(bit) = regex::flag_bit(c) else {
+            self.error(messages::UNKNOWN_REGEX_FLAG, at, end, &[]);
             return;
         };
-        let bit = 1u32 << bit;
-        let (u, v) = (1 << 5, 1 << 6);
-        if *seen & bit != 0 {
-            self.error(messages::DUPLICATE_REGEX_FLAG, at, at + 1, &[]);
-        } else if (bit == u && *seen & v != 0) || (bit == v && *seen & u != 0) {
-            self.error(messages::REGEX_UNICODE_AND_SETS_FLAGS, at, at + 1, &[]);
+        let unicode = regex::FLAG_U | regex::FLAG_V;
+        if *accepted & bit != 0 {
+            self.error(messages::DUPLICATE_REGEX_FLAG, at, end, &[]);
+        } else if (*accepted | bit) & unicode == unicode {
+            self.error(messages::REGEX_UNICODE_AND_SETS_FLAGS, at, end, &[]);
+        } else {
+            *accepted |= bit;
+            if let Some(target) = regex::flag_target(bit) {
+                self.error(messages::REGEX_FLAG_NEEDS_TARGET, at, end, &[target]);
+            }
         }
-        *seen |= bit;
     }
 
     /// Byte span of a template part's raw text (without `` ` ``, `${` and `}`).
@@ -1266,30 +1274,37 @@ impl<'a> Lexer<'a> {
         if !tok.flags.has(TokenFlags::ESCAPED) && !raw.contains('\r') {
             return Ok(Cow::Borrowed(raw));
         }
-        match cook::cook(raw, true) {
+        match cook::cook(raw) {
             Ok(v) => Ok(Cow::Owned(v)),
             Err((_, errors)) => {
-                let (off, msg) = errors[0];
-                let at = (span.start + off as u32).min(span.end);
-                Err((Span::new(at, (at + 1).min(span.end.max(at))), msg))
+                let d = Self::escape_diagnostic(span, &errors[0]);
+                Err((d.span, errors[0].msg))
             }
         }
     }
 
-    /// Every invalid escape of a template part (TS1125, TS1198, ...): an untagged
+    /// Every invalid escape of a template part (TS1125, TS1198, TS1487, ...): an untagged
     /// template reports them all (unicodeExtendedEscapesInTemplates17).
-    pub fn template_escape_errors(&self, tok: Token) -> Vec<(Span, DiagnosticMessage)> {
+    pub fn template_escape_errors(&self, tok: Token) -> Vec<Diagnostic> {
         let span = self.template_raw_span(tok);
         let raw = self.text(span);
-        match cook::cook(raw, true) {
+        match cook::cook(raw) {
             Ok(_) => Vec::new(),
             Err((_, errors)) => errors
-                .into_iter()
-                .map(|(off, msg)| {
-                    let at = (span.start + off as u32).min(span.end);
-                    (Span::new(at, (at + 1).min(span.end.max(at))), msg)
-                })
+                .iter()
+                .map(|e| Self::escape_diagnostic(span, e))
                 .collect(),
+        }
+    }
+
+    /// The diagnostic for an invalid escape in the template text at `span`.
+    fn escape_diagnostic(span: Span, e: &cook::EscapeError) -> Diagnostic {
+        let at = (span.start + e.at as u32).min(span.end);
+        let end = (span.start + e.end as u32).min(span.end.max(at)).max(at);
+        let span = Span::new(at, end);
+        match &e.arg {
+            Some(arg) => Diagnostic::new(e.msg, span, &[arg]),
+            None => Diagnostic::new(e.msg, span, &[]),
         }
     }
 
