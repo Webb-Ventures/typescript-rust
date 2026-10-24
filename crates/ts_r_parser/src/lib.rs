@@ -37,8 +37,17 @@ pub struct ParseResult {
     pub diagnostics: Vec<Diagnostic>,
     /// The errors in `diagnostics` that tsc's checker reports (its grammar checks, only in a
     /// file without syntax errors: `class C<> {}`, `set x() {}`), not its parser. Parsers that
-    /// stop at syntax errors only, like typescript-eslint's, do not report them.
+    /// stop at syntax errors only, like typescript-eslint's, do not report them. TS1501 and
+    /// TS1503 (regex flags and named groups newer than the target,
+    /// [`is_target_regex_error`]) are only here, not in `diagnostics`: the checker keeps
+    /// them for older targets.
     pub grammar: Vec<Diagnostic>,
+    /// Syntax errors to tsc that ESLint's parser and esbuild accept in sloppy code: octal
+    /// and `\8` escapes in strings (TS1487, TS1488; `"\033"`). They are also in `grammar`,
+    /// so `syntax_errors` and the build tools leave them out; the checker reports them as
+    /// syntax errors. (In a template they are an error everywhere: syntax only.) Sorted by
+    /// starting position.
+    pub lenient: Vec<Diagnostic>,
 }
 
 impl ParseResult {
@@ -49,19 +58,56 @@ impl ParseResult {
 }
 
 /// `diagnostics` without the ones in `grammar` (see [`ParseResult::grammar`]).
-/// Both slices are sorted by starting position; `grammar` has at most one per position.
+/// Both slices are sorted by starting position. `grammar` may hold entries `diagnostics`
+/// doesn't have (TS1501 and TS1503, which the checker filters by target).
 pub fn without_grammar(diagnostics: &[Diagnostic], grammar: &[Diagnostic]) -> Vec<Diagnostic> {
-    let mut grammar = grammar.iter().peekable();
+    let mut rest = grammar;
+    diagnostics
+        .iter()
+        .filter(|d| !in_sorted(&mut rest, d))
+        .cloned()
+        .collect()
+}
+
+/// The syntax errors tsc reports for a file (what stops checking, and all a `noCheck`
+/// build reports): `diagnostics` without `grammar`, but with `lenient` (octal escapes in
+/// strings, which are in `grammar` for the build tools). All three are sorted by starting
+/// position, and so is the result. Every tsc-facing caller (the checker driver,
+/// `ts-r-check --noCheck`, the incremental history) goes through this.
+pub fn tsc_syntax_errors(
+    diagnostics: &[Diagnostic],
+    grammar: &[Diagnostic],
+    lenient: &[Diagnostic],
+) -> Vec<Diagnostic> {
+    let (mut g, mut l) = (grammar, lenient);
     diagnostics
         .iter()
         .filter(|d| {
-            while grammar.peek().is_some_and(|g| g.span.start < d.span.start) {
-                grammar.next();
-            }
-            grammar.peek().is_none_or(|g| *g != *d)
+            let in_grammar = in_sorted(&mut g, d);
+            !in_grammar || in_sorted(&mut l, d)
         })
         .cloned()
         .collect()
+}
+
+/// Whether `d` is in `rest` (sorted by start), dropping the entries before `d` from `rest`.
+/// Calls must come in order of position.
+fn in_sorted(rest: &mut &[Diagnostic], d: &Diagnostic) -> bool {
+    let skip = rest
+        .iter()
+        .take_while(|g| g.span.start < d.span.start)
+        .count();
+    *rest = &rest[skip..];
+    rest.iter()
+        .take_while(|g| g.span.start == d.span.start)
+        .any(|g| g == d)
+}
+
+/// TS1501 (a regex flag needs a newer target) and TS1503 (named groups need ES2018): kept in
+/// `grammar` only; the checker reports them when the target is older.
+pub fn is_target_regex_error(d: &Diagnostic) -> bool {
+    d.code == messages::REGEX_FLAG_NEEDS_TARGET.code
+        || d.code == messages::REGEX_NAMED_GROUPS_NEED_TARGET.code
 }
 
 /// What to do with TypeScript-only syntax (types, `interface`, `as`, ...) in a JavaScript
@@ -107,6 +153,7 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
             ast,
             diagnostics: vec![Diagnostic::new(messages::FILE_TOO_LARGE, Span::EMPTY, &[])],
             grammar: Vec::new(),
+            lenient: Vec::new(),
         };
     }
     let js_ts = !kind.is_typescript() && opts.ts_in_js != TsInJs::Reject;
@@ -464,21 +511,47 @@ impl<'a> Parser<'a> {
         // errors were deduplicated in the order they were reported (`push_diag`): two at
         // one position stay when another came between them (`<` at the end of the file is
         // `Type expected`, `'>' expected` at the end, then `Expression expected`).
+        // A TS8xxx error is not checked against the checker's grammar errors (tsc keeps
+        // them in separate lists): `{ m?() {} }` in JavaScript is TS1162 and TS8009 at
+        // the `?` (plainJSGrammarErrors).
+        let js_ts = |d: &Diagnostic| (8000..9000).contains(&d.code);
         diags.dedup_by(|a, b| {
-            a.span.start == b.span.start && (clean || a.code >= 2000 || b.code >= 2000)
+            a.span.start == b.span.start
+                && js_ts(a) == js_ts(b)
+                && (clean || a.code >= 2000 || b.code >= 2000)
         });
         let mut kept = diags.iter().peekable();
         grammar.retain(|d| {
             while kept.peek().is_some_and(|k| k.span.start < d.span.start) {
                 kept.next();
             }
-            kept.peek().is_some_and(|k| *k == d)
+            kept.clone()
+                .take_while(|k| k.span.start == d.span.start)
+                .any(|k| k == d)
         });
         grammar.dedup_by(|a, b| a.span.start == b.span.start);
         if clean && !self.regex_errs.is_empty() {
             grammar.extend(self.regex_errs.iter().cloned());
             grammar.sort_by_key(|d| d.span.start);
+            // A regex flag or named group newer than the target (TS1501, TS1503) is only
+            // known to the checker, which has the target: grammar only.
+            self.regex_errs.retain(|d| !is_target_regex_error(d));
             diags.append(&mut self.regex_errs);
+        }
+        let mut lenient: Vec<Diagnostic> = self
+            .lx
+            .diagnostics
+            .iter()
+            .filter(|d| {
+                d.code == messages::OCTAL_ESCAPE_NOT_ALLOWED.code
+                    || d.code == messages::INVALID_ESCAPE_SEQUENCE.code
+            })
+            .cloned()
+            .collect();
+        lenient.sort_by_key(|d| d.span.start);
+        if !lenient.is_empty() {
+            grammar.extend(lenient.iter().cloned());
+            grammar.sort_by_key(|d| d.span.start);
         }
         if !self.kept_grammar.is_empty() {
             grammar.extend(self.kept_grammar.iter().cloned());
@@ -492,6 +565,7 @@ impl<'a> Parser<'a> {
             ast: self.ast,
             diagnostics: diags,
             grammar,
+            lenient,
         }
     }
 
@@ -769,16 +843,6 @@ impl<'a> Parser<'a> {
         self.checker_errs.push(Diagnostic::new(msg, span, &[]));
     }
 
-    /// A checker grammar error: deferred in TypeScript, and kept next to syntax errors in
-    /// JavaScript, as tsc 7 does (plainJSGrammarErrors).
-    fn checker_grammar_error(&mut self, msg: DiagnosticMessage, span: Span) {
-        if !self.ts || self.js_ts {
-            self.grammar_error_at(msg, span, &[]);
-        } else {
-            self.deferred_grammar_error_at(msg, span, &[]);
-        }
-    }
-
     /// A checker grammar error tsc reports next to syntax errors without stopping the
     /// check (TS18037): see `kept_grammar`. Does not fail speculation.
     fn kept_grammar_error_at(&mut self, msg: DiagnosticMessage, span: Span) {
@@ -800,10 +864,9 @@ impl<'a> Parser<'a> {
     /// ambient context (`declare function f(...args,): void;`, tsc 7).
     fn check_rest_trailing_comma(&mut self, close: TokenKind) {
         if self.at(TokenKind::Comma) && self.peek_kind() == close && !self.ctx.has(Ctx::AMBIENT) {
-            // The checker's error in tsc 7: only in a TypeScript file without syntax errors
-            // (kept next to them in JavaScript, plainJSGrammarErrors).
+            // The checker's error in tsc 7: only in a file without syntax errors.
             let span = self.tok().span();
-            self.rest_grammar_error(messages::REST_TRAILING_COMMA, span);
+            self.deferred_grammar_error_at(messages::REST_TRAILING_COMMA, span, &[]);
         }
     }
 
@@ -814,17 +877,7 @@ impl<'a> Parser<'a> {
             || self.at(TokenKind::Eof)
             || (self.at(TokenKind::Comma) && self.peek_kind() == close);
         if !last {
-            self.rest_grammar_error(messages::REST_ELEMENT_NOT_LAST, target);
-        }
-    }
-
-    /// A rest element's grammar error: kept next to syntax errors in JavaScript, only
-    /// without them in TypeScript (plainJSGrammarErrors).
-    fn rest_grammar_error(&mut self, msg: DiagnosticMessage, span: Span) {
-        if !self.ts || self.js_ts {
-            self.grammar_error_at(msg, span, &[]);
-        } else {
-            self.deferred_grammar_error_at(msg, span, &[]);
+            self.deferred_grammar_error_at(messages::REST_ELEMENT_NOT_LAST, target, &[]);
         }
     }
 

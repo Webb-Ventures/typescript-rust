@@ -6,8 +6,9 @@
 [![Sponsor](https://img.shields.io/badge/sponsor-ts--r-f0814a?logo=githubsponsors&logoColor=white)](https://ts-r.dev/donate/)
 
 **Fast TypeScript tooling, written from scratch in Rust.** ts-r type-checks, lints, bundles,
-runs and serves TypeScript with the same results as the tools you use today, and faster:
-ts-r-check type-checks the benchmark repos 2–7× faster than tsc 7 ([benchmarks](#benchmarks)). Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
+runs and serves TypeScript, aiming for the same results as the tools you use today, and faster:
+ts-r-check type-checks tRPC, date-fns and RxJS 2.0–6.7× faster than tsc 7 ([benchmarks](#benchmarks)).
+Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
 you can adopt one without the rest.
 
 ```sh
@@ -20,7 +21,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 ```
 
 > **Status: preview.** The type checker is the most mature tool. It gives tsc 7's exact output on
-> 96.6% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns
+> 97.0% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns
 > and TypeORM, and is within a few diagnostics on Playwright (2 extra) and RxJS (6 extra, 5
 > missing, of about 21,900). Every other tool works on real projects
 > but has known gaps (below). Version numbers stay below 1.0 until that changes.
@@ -40,9 +41,9 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 
 | Tool | Replaces | Works today | Known gaps |
 |---|---|---|---|
-| `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Regex pattern errors, some inference and narrowing; 3.4% of conformance tests still differ |
+| `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and narrowing; 3.0% of conformance tests still differ |
 | `ts-r-lint` | ESLint, oxlint | 154 rules, 51 of them type-aware on ts-r's own checker; 15,495 of 15,517 cases of ESLint's and typescript-eslint's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint |
-| `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, no lowering below ES2022 |
+| `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | `ts-r-run` | tsx, ts-node | Runs TypeScript on Node 22.15+ with tsc 7's JavaScript output | Only the entry's tsconfig is used |
 | `ts-r-dev` | `vite dev` | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling, `vite.config` and Vite plugins | No CSS preprocessors; some `vite.config` options and plugin APIs; HTTP/1.1 only |
 | `ts-r-lsp` | tsserver, the ESLint server | One server per workspace for lint and types; our checker or your own TypeScript as the type backend | Most projects still fall back to tsserver for diagnostics |
@@ -83,8 +84,10 @@ are in [npm/ts-r/README.md](npm/ts-r/README.md).
 
 Each table shows ts-r's median time per scenario next to the fastest other tool on the same
 workload. Workloads include type-checking pinned open-source repos (tRPC, date-fns, rxjs) and
-bundling three.js ten times over, among others. Every pull request is benchmarked against its
-base on dedicated cores, and a slowdown beyond the gate blocks the merge. Method and scenarios:
+bundling three.js ten times over, among others. Pull requests that change the crates or the
+benchmarks are benchmarked against their base: maintainers' PRs on four dedicated cores of a
+bench machine, fork PRs on GitHub's shared Linux runners. A slowdown beyond the gate fails the
+bench check, which reviewers read before merging. Method and scenarios:
 [bench/README.md](bench/README.md).
 
 ### Unreleased (main)

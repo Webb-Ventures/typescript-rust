@@ -10,12 +10,13 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "status", "explanation", "files"],
+        "required": ["id", "status", "explanation", "files", "checks"],
         "properties": {
           "id": { "type": "string", "description": "The finding's id, exactly as given." },
-          "status": { "type": "string", "enum": ["fixed", "not_fixed"] },
+          "status": { "type": "string", "enum": ["fixed", "not_fixed", "wrong"], "description": "wrong: the finding is mistaken (for example the oracle does what ts-r does); nothing was changed for it." },
           "explanation": { "type": "string", "description": "Posted on the finding's thread: what changed and why, or why it was not fixed." },
-          "files": { "type": "array", "items": { "type": "string" }, "description": "Repository paths changed for this finding; empty when not fixed." }
+          "files": { "type": "array", "items": { "type": "string" }, "description": "Repository paths changed for this finding; empty when not fixed." },
+          "checks": { "type": "array", "items": { "type": "string" }, "description": "What was run for this finding through box-run, one line each with its result: the oracle on the finding's input and what it printed, then builds and tests with their exit status. Empty when nothing was run." }
         }
       }
     }

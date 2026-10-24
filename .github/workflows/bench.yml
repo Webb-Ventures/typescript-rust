@@ -2,8 +2,9 @@ name: Bench
 
 # Hands the bench to the review box on the tailnet and exits, like the code review: the box runs
 # bench/scenarios.toml and the PR repo set (trpc, date-fns, rxjs, three-x10) for the PR and for its
-# base branch on four CPU cores of its own, re-measures any flagged scenario with the PR first,
-# and fails the gate only on a regression beyond max_regression and noise_sigmas in both runs.
+# base branch on one slot of CPU cores of its own (the box may run several PRs' benches at once,
+# one per slot), re-measures any flagged scenario with the PR first, and fails the gate only on a
+# regression beyond max_regression and noise_sigmas in both runs.
 # Progress (queued, running and its phase, results) shows in the PR's bench comment, and the
 # result as the "Bench (review box)" commit status. The box keeps the pinned repos, package
 # stores, crates and both release builds between runs, and skips code that already passed
@@ -17,12 +18,17 @@ name: Bench
 #     from forks carry no secrets, so a fork's bench takes the comment);
 #   - by hand, a manual run by a trusted user.
 # The box checks each of these again against GitHub before it queues a bench.
+# A push hands the new head to the box, which drops the PR's queued bench and stops its running
+# one. Closing the PR hands it over too, and the box drops the PR's benches (it checks that the
+# PR is closed; nothing is benched). Any run the box accepts can only stop work that GitHub
+# already says is moot: a bench of a head that is no longer the PR's, or of a closed PR.
 # BENCH_BOX: the tailnet name of the box that runs benches (its own machine, with the disk for
 # cached builds), a secret in a public repo (its logs are public, and secrets are masked in them)
 # or a variable. Without it, benches go to the review box (CODE_REVIEW_BOX).
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - "crates/**"
       - "bench/**"
@@ -44,8 +50,12 @@ on:
 
 permissions: {}
 
+# A newer push's hand-off replaces an older one still running. Only pushes share a group: every
+# review and comment on the PR also starts this workflow (most of them skip the job), and with
+# one group per PR they cancelled the hand-off of the push before them, so the box never heard of
+# the new head and kept benching the old one.
 concurrency:
-  group: bench-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  group: bench-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}-${{ github.event_name == 'pull_request' && 'push' || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -102,8 +112,8 @@ jobs:
             echo "::error::$BOX is not visible from this node. The tailnet policy must let ${TAG} reach it on port 443."
             exit 1
           fi
-          # 409 is fine: the PR moved on, is not the top of its stack, or this head is already
-          # being benchmarked.
+          # 409 is fine: the PR moved on or closed (the box drops its benches), is not the top of
+          # its stack, or this head is already being benchmarked.
           code=$(curl -sS --retry 5 --retry-all-errors --retry-delay 3 --max-time 30 -o response.txt -w '%{http_code}' \
             --resolve "$BOX:443:$ip" \
             -H "Authorization: Bearer $DISPATCH_TOKEN" -H 'Content-Type: application/json' \

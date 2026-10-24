@@ -23,7 +23,7 @@
 //!   with the widened type printed.
 
 use ts_r_ast::{FnFlags, MethodKind, Node, NodeId};
-use ts_r_types::{ObjectFlags, TypeFlags, TypeId, TypeTraits};
+use ts_r_types::{ObjectFlags, SymId, TypeFlags, TypeId, TypeTraits};
 
 use crate::checker::{Ck, Loc};
 use crate::diag::dg;
@@ -200,7 +200,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             return false;
         }
         let literal = match o.kind {
-            ts_r_types::ObjectKind::Literal { sym } => self.c.value_decl(sym),
+            ts_r_types::ObjectKind::Literal { sym } if sym != SymId::NONE => self.c.value_decl(sym),
+            ts_r_types::ObjectKind::Literal { .. } => self.spread_owner.get(&t).copied(),
             _ => None,
         };
         let Some(m) = o.members() else {

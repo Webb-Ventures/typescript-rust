@@ -429,7 +429,10 @@ impl Lower<'_, '_> {
         // `export default class { static ... }`: `class default_1 { }` exported after.
         let mut export_default = None;
         if !p.is_expr && p.name.is_none() {
-            let n = self.unique("default");
+            let n = match self.tx.opts.default_class_name.as_deref() {
+                Some(name) => self.unique_exact(name),
+                None => self.unique("default"),
+            };
             p.name = Some(self.ident_atom(n, at));
             p.modifiers.remove(Modifiers::EXPORT | Modifiers::DEFAULT);
             export_default = Some(n);

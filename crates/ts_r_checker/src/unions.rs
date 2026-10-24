@@ -536,6 +536,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             true
         });
+        if includes.contains(TypeFlags::INTERSECTION) && set.len() > 1 {
+            self.remove_constrained_type_variables(&mut set);
+        }
         if reduction == Reduction::Subtype && set.len() > 1 {
             set = self.remove_subtypes(set);
         }
@@ -705,6 +708,103 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         set
+    }
+
+    /// The type variable and the primitive of a constraining intersection `T & P` (one that
+    /// `reduce_by_constraint` kept: `T`'s constraint is made of primitives, `object` or
+    /// `{}`, and `P` narrows it).
+    fn constraining_intersection(&mut self, t: TypeId) -> Option<(TypeId, TypeId)> {
+        let s = self.store();
+        if !s.flags(t).contains(TypeFlags::INTERSECTION) {
+            return None;
+        }
+        let &[a, b] = s.members_of_union(t) else {
+            return None;
+        };
+        let var = |t: TypeId| {
+            s.flags(t)
+                .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS)
+        };
+        let (tv, p) = if var(a) { (a, b) } else { (b, a) };
+        if !var(tv) {
+            return None;
+        }
+        let pf = s.flags(p);
+        let generic_string_like = pf
+            .intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
+            && !self.is_pattern_literal_type(p);
+        let primitive = pf.intersects(TypeFlags::PRIMITIVE | TypeFlags::NON_PRIMITIVE)
+            && !pf.contains(TypeFlags::UNION)
+            && !generic_string_like;
+        if !primitive && !self.is_empty_anonymous_object(p) {
+            return None;
+        }
+        let c = self.base_constraint(tv);
+        if matches!(c, TypeId::UNKNOWN | TypeId::UNRESOLVED) || self.store().is_error(c) {
+            return None;
+        }
+        let members = self.union_members(c);
+        let ok = members.iter().all(|&m| {
+            self.store()
+                .flags(m)
+                .intersects(TypeFlags::PRIMITIVE | TypeFlags::NON_PRIMITIVE)
+                || self.is_empty_anonymous_object(m)
+        });
+        ok.then_some((tv, p))
+    }
+
+    /// Constraining intersections `T & P1 | T & P2 | ...` whose primitives cover every
+    /// member of `T`'s constraint are replaced by `T` (`K extends "a" | "b"`:
+    /// `("a" & K) | ("b" & K)` is `K`; tsc: checker.go, removeConstrainedTypeVariables).
+    fn remove_constrained_type_variables(&mut self, set: &mut Vec<TypeId>) {
+        let mut pairs: Vec<(usize, TypeId, TypeId)> = Vec::new();
+        for (i, &t) in set.iter().enumerate() {
+            if self.store().flags(t).contains(TypeFlags::INTERSECTION)
+                && let Some((tv, p)) = self.constraining_intersection(t)
+            {
+                pairs.push((i, tv, p));
+            }
+        }
+        if pairs.len() < 2 {
+            return;
+        }
+        let mut vars: Vec<TypeId> = Vec::new();
+        for &(_, tv, _) in &pairs {
+            if !vars.contains(&tv) {
+                vars.push(tv);
+            }
+        }
+        let mut remove: Vec<usize> = Vec::new();
+        let mut add: Vec<TypeId> = Vec::new();
+        for tv in vars {
+            let c = self.base_constraint(tv);
+            let members = self.union_members(c);
+            let covered = members
+                .iter()
+                .all(|m| pairs.iter().any(|&(_, v, p)| v == tv && p == *m));
+            if covered {
+                for &(i, v, p) in &pairs {
+                    if v == tv && members.contains(&p) {
+                        remove.push(i);
+                    }
+                }
+                add.push(tv);
+            }
+        }
+        if add.is_empty() {
+            return;
+        }
+        let mut i = 0;
+        set.retain(|_| {
+            let keep = !remove.contains(&i);
+            i += 1;
+            keep
+        });
+        for tv in add {
+            if !set.contains(&tv) {
+                set.push(tv);
+            }
+        }
     }
 
     /// `T1 & T2 & ...`, normalised (distributes over unions, removes `unknown`, detects

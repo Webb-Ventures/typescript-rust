@@ -1,0 +1,2 @@
+a.ts(11,3): error TS7018: Object literal's property 'p' implicitly has an 'any' type.
+a.ts(14,7): error TS7005: Variable 'baz' implicitly has an '{ p: number; }' type.

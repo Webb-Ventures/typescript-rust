@@ -68,11 +68,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .cloned()
                 .map(|d| d.with_file(file)),
         );
+        let target = self.c.opts.target;
+        let sf = self.c.file(file);
         diags.extend(
-            self.c
-                .file(file)
-                .grammar
+            sf.grammar
                 .iter()
+                .filter(|d| !ts_r_parser::is_target_regex_error(d) || regex_needs_target(d, target))
+                // Syntax errors (`driver`).
+                .filter(|d| {
+                    let at = sf.lenient.partition_point(|l| l.span.start < d.span.start);
+                    !sf.lenient[at..]
+                        .iter()
+                        .take_while(|l| l.span.start == d.span.start)
+                        .any(|l| l == *d)
+                })
                 .cloned()
                 .map(|d| d.with_file(file)),
         );
@@ -2070,12 +2079,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.report_circular_getter(p, key, l);
             return;
         }
+        let method = self.signature_from_decl(l);
+        let method = self.is_class_method_sig(method);
         let name = match *ast.node(l.node) {
             Node::FunctionDecl { name, .. } => name,
-            Node::FunctionExpr { name: Some(n), .. } => Some(n),
-            // Methods and accessors are not reported: their `this` and member types
-            // resolve in a different order from tsc's here, which finds no cycle.
+            Node::FunctionExpr { name: Some(n), .. } if !method => Some(n),
+            // Methods are reported only on cycles of variable types and method return
+            // types: through `this` and member types they resolve in a different order
+            // from tsc's here, which finds no cycle.
             _ => match parent.map(|p| *ast.node(p.node)) {
+                Some(Node::MethodDef { key, .. }) if method => Some(key),
                 Some(Node::VarDeclarator {
                     name,
                     init: Some(i),
@@ -2084,7 +2097,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => return,
             },
         };
-        let sig = self.signature_from_decl(l);
+        let mut sig = self.signature_from_decl(l);
+        // A method's type reads the signature declared by the method node itself.
+        if method
+            && let Some(p) = parent
+            && let Some(sym) = self.c.sym_of_decl(p)
+        {
+            let t = self.type_of_symbol(sym);
+            if let Some(&s) = self
+                .signatures_of(t, crate::members::SigKind::Call)
+                .iter()
+                .find(|&&s| self.store().sig(s).decl.and_then(Loc::unpack) == Some(p))
+            {
+                sig = s;
+            }
+        }
         self.return_type_of(sig);
         if !self.circular.contains(&Resolving::Return(sig)) {
             return;
@@ -2109,11 +2136,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         };
         if path.is_empty()
-            || path.iter().any(|r| match *r {
-                Resolving::Return(s) => !named_function(self, s),
-                Resolving::Node(_) => false,
-                _ => true,
-            })
+            || (!method
+                && path.iter().any(|r| match *r {
+                    Resolving::Return(s) => !named_function(self, s),
+                    Resolving::Node(_) => false,
+                    _ => true,
+                }))
+            || (method
+                && (!path.iter().any(|r| matches!(r, Resolving::Type(_)))
+                    || path.iter().any(|r| match *r {
+                        Resolving::Return(s) => !self.is_class_method_sig(s),
+                        Resolving::Type(s) => self.c.sym_flags(s).intersects(
+                            SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION,
+                        ),
+                        _ => true,
+                    })))
         {
             return;
         }
@@ -3384,6 +3421,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 continue;
                             }
                             match value {
+                                // `{ while }`: a keyword can't be shorthand, the name is
+                                // missing (tsc's `(Missing)` binding element).
+                                Some(v) if matches!(ast.node(v), Node::Missing {}) => {
+                                    names.push(v);
+                                }
                                 Some(v) => stack.push(v),
                                 None => names.push(key),
                             }
@@ -3422,6 +3464,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(pattern.file);
         for n in Self::untyped_binding_names(ast, pattern.node) {
             let l = Loc::new(pattern.file, n);
+            // A renaming (`{ a: b }`, or `{ while }` whose name is missing) in a parameter of
+            // a signature without a body is TS2842's: tsc's checkVariableLikeDeclaration
+            // returns early for it (checker.go), so only resolving the signature reports it.
+            let renamed = self.c.parent(l).is_some_and(|p| {
+                matches!(*ast.node(p.node), Node::BindingProperty { value: Some(v), .. } if v == n)
+            });
+            if renamed && self.in_unresolved_bodyless_signature(l) {
+                continue;
+            }
+            if matches!(ast.node(n), Node::Missing {}) {
+                self.error(
+                    l,
+                    dg::BINDING_ELEMENT_0_IMPLICITLY_HAS_AN_1_TYPE_7031,
+                    &["(Missing)", "any"],
+                );
+                continue;
+            }
             let Some(sym) = self.c.sym_of_decl(l) else {
                 continue;
             };
@@ -3450,6 +3509,47 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
             }
         }
+    }
+
+    /// Whether `n` sits in a parameter of a signature without a body whose parameter types
+    /// nothing resolves while checking: a type-level signature (`({ a: b }) => void`, call,
+    /// construct and method signatures) or a function declaration with no implementation.
+    /// tsc reports a binding element's implicit any when the parameter's type is first
+    /// computed; for a bodyless signature that happens only when an implementation is
+    /// checked against it (or a call resolves it).
+    fn in_unresolved_bodyless_signature(&self, n: Loc) -> bool {
+        let ast = self.ast(n.file);
+        let mut cur = n;
+        for _ in 0..256 {
+            let Some(p) = self.c.parent(cur) else {
+                return false;
+            };
+            if matches!(ast.node(p.node), Node::Param { .. }) {
+                let Some(f) = self.c.parent(p) else {
+                    return false;
+                };
+                if fn_parts(ast, f.node).is_none_or(|parts| parts.body.is_some()) {
+                    return false;
+                }
+                return match ast.node(f.node) {
+                    Node::FunctionDecl { .. } => {
+                        let Some(sym) = self.c.sym_of_decl(f) else {
+                            return false;
+                        };
+                        !self.c.decls(sym).iter().any(|d| {
+                            matches!(
+                                self.c.file(d.file).ast.node(d.node),
+                                Node::FunctionDecl { body: Some(_), .. }
+                            )
+                        })
+                    }
+                    Node::FunctionExpr { .. } => false,
+                    _ => true,
+                };
+            }
+            cur = p;
+        }
+        false
     }
 
     fn declared_without_optionality(&mut self, t: TypeId, p: Loc) -> TypeId {
@@ -4244,18 +4344,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     value,
                     ..
                 } => {
-                    if let Node::ComputedKey { expr } = *ast.node(key) {
-                        let kt = self.check_expr(Loc::new(file, expr));
-                        // `[P in K]: T` (a mapped type written as a member) is TS7061 there.
-                        if !matches!(
+                    // `[P in K]: T` (a mapped type written as a member) is the parser's
+                    // TS7061, and tsc 7 checks nothing in that key (observed).
+                    if let Node::ComputedKey { expr } = *ast.node(key)
+                        && !matches!(
                             ast.node(expr),
                             Node::Binary {
                                 op: ts_r_ast::BinaryOp::In,
                                 ..
                             }
-                        ) {
-                            let _ = self.check_computed_key_type(Loc::new(file, key), kt);
-                        }
+                        )
+                    {
+                        let kt = self.check_expr(Loc::new(file, expr));
+                        let _ = self.check_computed_key_type(Loc::new(file, key), kt);
                     }
                     let declared = self.c.sym_of_decl(ml).map(|s| self.type_of_symbol(s));
                     // TS7008: no annotation, no initializer and no constructor assignment.
@@ -4605,8 +4706,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                             Node::PropertySignature { .. } | Node::MethodSignature { .. }
                         )
                     {
-                        let kt = self.check_expr(Loc::new(file, expr));
-                        // `[P in K]: T` (a mapped type written as a member) is TS7061 there.
+                        // `[P in K]: T` (a mapped type written as a member) is the parser's
+                        // TS7061, and tsc 7 checks nothing in that key (observed).
                         let mapped_like = matches!(self.node(p), Node::PropertySignature { .. })
                             && matches!(
                                 ast.node(expr),
@@ -4616,6 +4717,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 }
                             );
                         if !mapped_like {
+                            let kt = self.check_expr(Loc::new(file, expr));
                             let _ = self.check_computed_key_type(Loc::new(file, n), kt);
                         }
                     }
@@ -5088,7 +5190,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// `t` written at `at` with the constraints implied by enclosing conditional types:
     /// in the true branch of `C extends E ? X : Y` (outside parameter positions that flip
-    /// variance, type variables always) a type that is `C` reads as `C & E`; members of
+    /// variance, type variables always) a type that is `C` reads as `E & C`; members of
     /// an intersection or union are substituted one by one (tsc: checker.go,
     /// getConditionalFlowTypeOfType, getImpliedConstraint).
     pub(crate) fn with_implied_constraints(&mut self, at: Loc, t: TypeId) -> TypeId {
@@ -5151,7 +5253,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = p;
         }
         if !constraints.is_empty() {
-            constraints.insert(0, t);
+            // The constraints come first (`T & number`), as tsc's substitution types read.
+            constraints.push(t);
             return self.intersection(&constraints);
         }
         let s = self.store();
@@ -9022,7 +9125,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_circular_type_alias(file, n);
                 self.check_intrinsic_type_alias(file, n);
             }
-            if let Node::MappedType { .. } = node {
+            if let Node::MappedType { ty, .. } = node {
+                // A mapped type without a template maps every key to an implicit `any`.
+                if ty.is_none() && self.c.opts.no_implicit_any && self.reporting(file) {
+                    self.error(
+                        Loc::new(file, n),
+                        dg::MAPPED_OBJECT_TYPE_IMPLICITLY_HAS_AN_ANY_TEMPLATE_TYPE_7039,
+                        &[],
+                    );
+                }
                 self.check_mapped_type_keys(Loc::new(file, n));
             }
             if let Node::Rest { arg } = node {
@@ -10195,4 +10306,15 @@ fn binding_name_nodes(ast: &ts_r_ast::Ast, n: NodeId) -> Vec<NodeId> {
         }
     }
     names
+}
+
+/// Whether a regex flag or named group (TS1501 / TS1503, from the parser) needs a newer
+/// target than `target`: the message names it (`'es2018'`, `'ES2018'`).
+fn regex_needs_target(d: &Diagnostic, target: ts_r_config::ScriptTarget) -> bool {
+    let needed = d
+        .message
+        .split('\'')
+        .nth(1)
+        .and_then(ts_r_config::ScriptTarget::parse);
+    needed.is_some_and(|needed| target < needed)
 }

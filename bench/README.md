@@ -188,7 +188,13 @@ cache (pnpm 3.3 GB, Yarn 3.2 GB); a repeat takes about a second, and a fetch aft
 
 PR benches run on the review box (`bench.yml` hands them over; see
 [the plugin README](../.agents/plugins/code-review/README.md#benches)), which keeps the same
-directories, the crates and both release builds in `/srv/ts-r-review/bench` between runs.
+directories, the crates and both release builds in `/srv/ts-r-review/bench` between runs. It
+runs one bench per slot (`BENCH_SLOTS`; one by default), each slot on a cpuset of its own with
+the PR and its base built and measured on the same cores, and by default measures one slot at a
+time while the others build. It builds only the binaries `scenarios.toml` runs, and reuses the
+reference tools' numbers from an earlier run while `bench/`, `xtask/`, `upstream/` and
+`scripts/` are unchanged (the comment says so); our tools are measured on both sides every
+time, so the gate is the same as a local `--baseline` run's.
 
 To clear: `rm -rf ~/.cache/ts-r/bench` (package caches), `cargo xtask bench --clean-repos
 --repos all` (checkouts and stamps), `rm -rf bench/node_modules` (reference tools), or
@@ -201,6 +207,12 @@ vscode, sentry, grafana, supabase, backstage, n8n, cal.com, next.js and react ar
 installs (1-3 GB of `node_modules`, native builds skipped) and full checks with tsc or ESLint
 exceed the 4096 MB cap of this shared machine, and tsserver with every source open needs more
 still. `--repos` refuses them without `--large`.
+
+One exception, its check only: react's `check-react` (the React Compiler,
+`compiler/packages/babel-plugin-react-compiler/tsconfig.ts-r-bench.json`) fits under the cap
+(peak RSS tsc 7.0.2 311 MB, ts-r-check 169 MB); its diagnostics are under
+[Diagnostics against tsc 7](#diagnostics-against-tsc-7-2026-10-24). Its time was not measured
+on a quiet machine and is not quoted.
 
 Run them on a machine or CI runner with at least 32 GB of RAM and 50 GB of free disk, one repo
 at a time:
@@ -218,6 +230,25 @@ pass `--mem-mb 16384 --dedicated-machine` (or more) there, for example
 8192 without `--dedicated-machine` is refused: only pass it on a machine nobody else is using. Expect the first run to need command adjustments (for
 example n8n's workspace packages may need `pnpm build` before their check, and cal.com's
 Yarn 4 install needs corepack).
+
+## Diagnostics against tsc 7 (2026-10-24)
+
+Each `check-*` scenario's project at `ea41eac`, `--pretty false`, ts-r-check with
+`--no-history`, compared with tsc 7.0.2 by file, line, column and code:
+
+| Project | tsc 7 | ts-r-check | Only ts-r-check | Only tsc |
+|---|---:|---:|---:|---:|
+| tRPC `packages/server` | 0 | 0 | 0 | 0 |
+| date-fns `pkgs/core` | 0 | 0 | 0 | 0 |
+| TypeORM `packages/typeorm` | 31 | 31 | 0 | 0 |
+| Playwright | 13 | 15 | 2 | 0 |
+| RxJS `packages/rxjs` | 21,908 | 21,909 | 6 | 5 |
+| React Compiler | 156 | 227 | 71 | 0 |
+
+3 of the 6 match tsc 7 exactly. Playwright's 2 extra are TS2604 (issue 6 below); RxJS's 6
+extra are TS2339 and its 5 missing TS2344. The React Compiler's 71 extra are 65 TS4111
+(property access on `env.config.*`, whose type is zod 4's `z.infer` of a schema), 4 TS7022,
+1 TS7006 and 1 TS2345.
 
 ## Headline run (2026-10-16)
 

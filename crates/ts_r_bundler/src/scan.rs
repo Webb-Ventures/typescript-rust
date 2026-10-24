@@ -449,6 +449,11 @@ impl Walker<'_> {
                     continue;
                 }
                 Node::Member { obj, prop, .. } => {
+                    if crate::print::is_import_meta(ast, id) {
+                        // A JSX factory of `import.meta`.
+                        m.uses_import_meta = true;
+                        continue;
+                    }
                     if let Node::Ident { .. } = ast.node(obj)
                         && let Some(sym) = self.scopes.symbol_of(obj)
                         && self.ns_syms.contains(&sym.0)

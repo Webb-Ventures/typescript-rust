@@ -427,7 +427,14 @@ Files, by layer:
   declaration (or the type-determining accessor) is reported. TS7022 (unannotated
   variables, `noImplicitAny`) uses the same records but only for cycles made of
   `Resolving::Type` steps alone, outside loops, with no function in the initializer: our
-  eager function and loop-flow checking makes cycles tsc does not have.
+  eager function and loop-flow checking makes cycles tsc does not have. The one exception
+  is a cycle of variable types and plain class methods' inferred return types (`next() {
+  return v; }` with `for (var v of new It())`): tsc finds it too, and reports the variable
+  (TS7022) and each method at its name (TS7023, `report_circular_return` reading the
+  method symbol's own signature; `is_class_method_sig`). A cycle through a method with no
+  variable step is still not reported.
+- TS7039 (`noImplicitAny`): a mapped type without a template (`{ [P in "bar"] }`), at the
+  mapped type (tsc: checker.go, checkMappedType, reportImplicitAny).
 - TS7023 for getters (`report_circular_getter` in `check.rs`, `noImplicitAny`): a getter
   without a return type annotation whose property type (inferred from its body, no setter
   annotation) is circular is reported at its name, once per getter. Only cycles made of
@@ -456,8 +463,12 @@ Files, by layer:
   (a function's, or a method's/getter's key), TS7011/TS7025 at a nameless function, skipped
   when a contextual signature gives a non-generic return or yield type
   (`widening_implicit_any`; tsc: checker.go, reportErrorsFromWidening and
-  reportWideningErrorsInType). Not done: a property coming out of a spread over a union is
-  not traced back to its literal (noImplicitAnyUnionNormalizedObjectLiteral1).
+  reportWideningErrorsInType). A spread result belongs to the object literal that made it
+  (`spread_owner`, what tsc gives it as its symbol), carries the widening trait of its
+  property types, and an optional right property merged into a widening left one keeps the
+  left's declaration, so `{ p: null, ...f() }` reports TS7018 at `p`. Spreading an optional
+  property drops its `undefined` without strict null checks too (tsc: checker.go,
+  getSpreadType, removeMissingOrUndefinedType).
 - Implicitly `any` interface and type literal members (`implicit_members.rs`): TS7008 for
   property signatures, TS7032/TS7033 for accessor signatures with no annotation in the
   pair; a getter types its setter's parameter (no TS7006). Files with syntax errors are
@@ -830,6 +841,17 @@ Files, by layer:
   declares no symbols, so under `noImplicitAny` every binding without a default is TS7031
   `any` at its name (tsc 7 reports them the same way; observed in
   destructuringParameterDeclaration1ES5).
+- **Missing and renamed binding names** (`report_implicit_binding_elements`,
+  `in_unresolved_bodyless_signature`; tsc: `checkVariableLikeDeclaration`,
+  `getTypeFromBindingElement` in `checker.go`). A keyword in an object pattern can't be
+  shorthand (`{ while }`): the parser leaves the name missing, and an untyped parameter
+  reports it as TS7031 `'(Missing)'` `any`. tsc reports a binding element's implicit any
+  when the parameter's type is first computed, and skips the type for a renamed element
+  (`{ a: b }`, missing names included) of a function without a body; so in a function
+  declaration none of whose declarations has a body (TS2391), a renamed element gets
+  TS2842 only. An overload with an implementation is checked against it, which computes
+  its parameter types: TS7031 there too (destructuringParameterDeclaration6,
+  parametersSyntaxErrorNoCrash1/2/3).
 - **Where `satisfies` errors go** (`report_satisfies`, `nodes::effective_check_node`; tsc:
   `checkSatisfiesExpression` in `checker.go`, `elaborateError` in `relater.go`). A failed
   `e satisfies T` is first elaborated into `e` (property and element errors keep their own
@@ -857,6 +879,10 @@ Files, by layer:
   check reaches the literal fixes their contexts (`fix_nested_contexts`). A single candidate never fixes; a single
   generic candidate whose other arguments fail is instantiated without its
   context-sensitive arguments too.
+- **Inference between type operators.** `S[K]` to `T[L]` infers `S` to `T` and `K` to `L`;
+  `keyof S` to `keyof T` infers `S` to `T` contravariantly (tsc: inference.go,
+  inferFromTypes), so `find<T, K extends keyof T>(o: T[K]): [T, K]` called with an `A[B]`
+  gives `[A, B]`.
 - **Inference priorities.** Candidates through homomorphic mapped types and to the branches
   of a conditional target are weak (used only without other candidates); inferences from
   the call's contextual type to the return type come last (only for parameters the
@@ -903,6 +929,11 @@ Files, by layer:
   the driver reports them only for checked files (`should_check`) and they do not stop
   semantic checking. A constructor's or setter's annotation is not checked as a return type
   (no TS2355).
+  Regex errors that depend on the target (TS1501 flag, TS1503 named groups) are grammar-only
+  in the parser; `check.rs` keeps them only when the file's target is below the one named in
+  the message (`regex_needs_target`). Octal and `\8`/`\9` escapes in strings (TS1487/TS1488)
+  are in `SourceFile::lenient`: they are tsc syntax errors (the driver reports them with the
+  syntax errors and marks the file broken), so the grammar merge skips them.
   Grammar errors the parser does
   not report (TS1042/1044/1070/1090/1184/2369 modifiers, TS1163, TS1308 for `await` in a
   function that is not async, at the keyword) are reported here; TS5076,
@@ -1100,6 +1131,9 @@ Files, by layer:
   (`Expected A<T> type arguments ...`), or TS8027 when some parameters have defaults (tsc 7
   prints `D<T, U>-<min>`), at the `extends` expression, under `noImplicitAny` only. Without
   it nothing is reported and the missing arguments are `any` (`js_extends_type_args`).
+  Without type arguments, a parameter's default of `unknown` or `{}` fills in as `any` too
+  (`fill_type_args_in`; `class C extends Foo` over `Foo<T = {}>` gives `props: any`; tsc:
+  checker.go, fillMissingTypeArguments with isJavaScriptImplicitAny).
 - **JSDoc on object literal members.** `/** @type {T} */ a: v` (or a shorthand `a`): the
   property has type `T`, `v` is contextually typed by `T` and checked against it at the key
   (`jsdoc_typed_property`). A method's `@type` without call signature is TS8030 (as for a
@@ -1337,8 +1371,12 @@ Files, by layer:
   written `O` and `K` (tsc: checker.go, checkIndexedAccessIndexType; the private/protected
   TS4105 is not reported). Both sides are first read with the constraints their position
   implies (tsc: getConditionalFlowTypeOfType): in the true branch of `C extends E ? X : Y`
-  a `C` is `C & E` (unary tuples `[C] extends [E]` too; not through a parameter position
-  unless it is a type variable), `C["a"]` there is `C["a"] & E["a"]`, and the key `K` of a
+  a `C` is `E & C` (constraint first, as tsc prints its substitution types; unary tuples
+  `[C] extends [E]` too; each parameter position on the way up flips variance, and a
+  contravariant position only takes it for a type variable), `C["a"]` there is
+  `C["a"] & E["a"]`. Parameter types of signatures written as types take it too, so in
+  `number extends T ? (cb: (n: number) => void) => void : never` the `n` is `T & number`
+  (two parameter positions: covariant). The key `K` of a
   homomorphic `{ [K in keyof T]: X }` whose `T` is constrained to arrays or tuples is
   `K & (number | `${number}`)` inside `X`. An unconstrained `...infer R` in a rest position
   is indexed as `R & unknown[]`, and a conditional object as its constraint with such an
@@ -1546,8 +1584,12 @@ Files, by layer:
   checked for excess properties against `T`'s constraint.
 - **Annotated expandos.** `f.x = v` declares an expando on an annotated `const f: Fn =
   () => ...` too: the variable keeps its annotation, the function initializer gets the
-  properties (checked against `Fn`), and a property `Fn` declares takes `Fn`'s type and
-  contextual type.
+  properties (checked against `Fn`), and a property `Fn` declares is contextually typed by
+  `Fn`'s member and has the type of its values widened as in a mutable location
+  (`annotated_expando_values`): `f.done = true` under `done: true` stays `true`, and
+  `f.done = false` is `false`, failing both the assignment and the annotation. Late-bound
+  expandos (`f[sym] = v`, `f[k] = v` with `k` a literal) follow the same rule when `Fn`
+  declares the key (tsc: checker.go, getAssignmentDeclarationInitializerType).
 - **Generic signatures in context.** Two instantiations of one declared generic signature
   (a method read through `ZodNumber` and through `ZodType<unknown>`) first relate with their
   type parameters identified; failing that, and for any other generic source, type
@@ -1568,7 +1610,9 @@ Files, by layer:
   export names the module in qualified type names (`net.Socket`).
 - **Referenced outer type parameters.** A type literal or function type outside any block
   is instantiated only by the outer type parameters it names (`referenced_outer_type_params`);
-  `typeof` queries, blocks, `this`, mapped and `infer` parameters keep all of them. So
+  `typeof` queries, blocks, `this`, mapped and `infer` parameters keep all of them, and a
+  parameter named in the extends type of an enclosing conditional type counts as named (its
+  implied constraint can appear inside; tsc: isTypeParameterPossiblyReferenced). So
   `(data: { elements: El[] }) => R` doesn't mention `R` in its parameter.
 - **`const` type parameters.** A literal whose contextual type (at its level or any
   enclosing array, spread or property level) is a `const` type parameter, a union or
@@ -2709,6 +2753,20 @@ Files, by layer:
   unconstrained `T[K]` against a union target is explained step by step: `T[keyof T]`, then
   `T[string] | T[number] | T[symbol]` (tsc: checker.go, getSimplifiedIndexedAccessType,
   getNormalizedUnionOrIntersectionType; relater.go, isRelatedTo; `mapped_access_relation`).
+- **A concrete mapped type indexed by a generic key** (no `as` clause, not `-?`, the object
+  itself not generic) has its template with the key put in as its constraint:
+  `OptionHandlers[K]` is `(option: Options & { kind: K }) => string`. Under strict null
+  checks it gains `| undefined` when the mapped type is optional (`?` or homomorphic over
+  optional properties) and some optional property's literal or unique-symbol key fits the
+  key's base constraint. This is the base constraint of such an access, the constraint used
+  when it is a relation source (also inside a union target and as a member of a source intersection),
+  but not the shape it is reported as (tsc: checker.go, getIndexedAccessType's mapped-type
+  branch, substituteIndexedMappedType, couldAccessOptionalProperty,
+  getEffectiveConstraintOfIntersection; `concrete_mapped_generic_index_substitution`).
+- **Constrained type variables in unions.** A union of intersections `("one" & K) | ("two"
+  & K)` collapses to `K` when every primitive member of `K`'s base constraint appears as the
+  other part of one of the intersections. Done before subtype reduction (tsc: checker.go,
+  removeConstrainedTypeVariables; `remove_constrained_type_variables`).
 - **A generic key in an element access** must be assignable to `keyof` the object, or to each
   member's `keyof` for a union object (TS2536, and the access is the error type). Writing
   through a mapped type with a `readonly` modifier reports TS2542 (tsc: checker.go,
@@ -2919,13 +2977,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-24, 1d94474, parity/checker merged with main at 2cd82e9 (#29's binder
-  changes): export= default views, widening implicit-any errors, class base checks and
-  import-name messages, object literal union reads; 12750 compared variants, 25 s on 4
-  threads): 12335 exact (96.7%; all diagnostics and chains), 12355 (96.9%) exact on first
-  lines; 207 variants with a diagnostic tsc does not report, 17 of them tests where tsc
-  reports nothing.
-  Earlier: 12331, 209 and 17 (e06c936, parity/checker before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-24, 9b5f8f2, parity/checker-2 merged with main at 79646f9 (#39's parser
+  round 2): mapped types indexed by a generic key, implied conditional constraints, TS7039 and
+  cycles of method return types, widening through spreads, missing binding names; 12750
+  compared variants, 23 s on 4 threads): 12365 exact (97.0%; all diagnostics and chains),
+  12385 (97.1%) exact on first lines; 191 variants with a diagnostic tsc does not report, 10 of
+  them tests where tsc reports nothing.
+  Earlier: 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

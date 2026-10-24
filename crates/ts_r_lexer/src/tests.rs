@@ -357,7 +357,242 @@ fn regex_rescan() {
     assert_eq!(codes(r"/[😀-😁]/"), vec![1517]);
     assert_eq!(codes(r"/\x4/"), vec![1125]);
     assert_eq!(codes(r"/a}]/u"), vec![1508, 1508]);
-    assert_eq!(codes(r"/a{1,2}\p{L}[\q{x}]/v"), Vec::<u32>::new());
+    // `v` needs ES2024: TS1501, which the checker drops for later targets.
+    assert_eq!(codes(r"/a{1,2}\p{L}[\q{x}]/v"), vec![1501]);
+}
+
+/// Each regex error as `code@start..end(quoted)`, in order.
+fn regex_errors(src: &str) -> Vec<String> {
+    let mut lx = Lexer::new(src);
+    lx.next_token();
+    lx.rescan_slash_as_regex();
+    lx.diagnostics
+        .iter()
+        .map(|d| {
+            let mut s = format!("{}@{}..{}", d.code, d.span.start, d.span.end);
+            // The first quoted part of the message: its argument, mostly.
+            if let Some((_, rest)) = d.message.split_once('\'')
+                && let Some((quoted, _)) = rest.split_once('\'')
+            {
+                s.push_str(&format!("({quoted})"));
+            }
+            s
+        })
+        .collect()
+}
+
+#[test]
+fn regex_flags() {
+    assert_eq!(regex_errors("/a/gimuy"), Vec::<String>::new());
+    assert_eq!(
+        regex_errors("/a/dsv"),
+        [
+            "1501@3..4(es2022)",
+            "1501@4..5(es2018)",
+            "1501@5..6(es2024)"
+        ]
+    );
+    // A rejected flag is not accepted: `uu` is a duplicate, `uv` is TS1502 and keeps `u`.
+    assert_eq!(regex_errors("/a/ggx"), ["1500@4..5", "1499@5..6"]);
+    assert_eq!(regex_errors("/a/uv"), ["1502@4..5"]);
+    // Flags run over identifier characters, not only ASCII.
+    assert_eq!(regex_errors("/a/gé"), ["1499@4..6"]);
+}
+
+#[test]
+fn regex_pattern_errors() {
+    let none = Vec::<String>::new();
+    // Quantifiers.
+    assert_eq!(regex_errors("/?a/"), ["1507@1..2"]);
+    assert_eq!(regex_errors("/a**/"), ["1507@3..4"]);
+    assert_eq!(regex_errors("/^*/"), ["1507@2..3"]);
+    assert_eq!(regex_errors("/a{2,1}/"), ["1506@3..6"]);
+    assert_eq!(regex_errors("/a{,5}/"), none);
+    assert_eq!(regex_errors("/a{,5}/u"), ["1505@3..3"]);
+    assert_eq!(regex_errors("/a{/"), none);
+    assert_eq!(regex_errors("/a{/u"), ["1508@2..3({)"]);
+    assert_eq!(regex_errors("/a{1/u"), ["1005@4..4(})"]);
+    assert_eq!(regex_errors("/(?=a)*/"), none);
+    assert_eq!(regex_errors("/(?=a)*/u"), ["1507@6..7"]);
+    // Groups.
+    assert_eq!(regex_errors("/a)/"), ["1508@2..3())"]);
+    assert_eq!(regex_errors("/(a/"), ["1005@3..3())"]);
+    assert_eq!(regex_errors("/(?<n>a)\\k<n>/"), ["1503@3..6(ES2018)"]);
+    assert_eq!(
+        regex_errors("/(?<n>a)(?<n>b)/"),
+        ["1503@3..6(ES2018)", "1515@11..12", "1503@10..13(ES2018)"]
+    );
+    assert_eq!(
+        regex_errors("/(?<n>a)|(?<n>b)/"),
+        ["1503@3..6(ES2018)", "1503@11..14(ES2018)"]
+    );
+    assert_eq!(regex_errors("/(?<>a)/"), ["1514@4..4", "1503@3..5(ES2018)"]);
+    assert_eq!(regex_errors("/\\k<x>/"), ["1532@4..5(x)"]);
+    assert_eq!(regex_errors("/\\k/"), none);
+    assert_eq!(regex_errors("/\\k/u"), ["1510@1..3(\\k)"]);
+    assert_eq!(regex_errors("/(a)\\2/"), ["1533@5..6"]);
+    assert_eq!(regex_errors("/\\1/"), ["1534@2..3"]);
+    assert_eq!(regex_errors("/(?-:a)/"), ["1504@3..4"]);
+    assert_eq!(regex_errors("/(?ig-x:a)/"), ["1509@4..5", "1499@6..7"]);
+    assert_eq!(regex_errors("/(?s:a)/"), ["1501@3..4(es2018)"]);
+    // Escapes.
+    assert_eq!(regex_errors("/\\01/"), ["1487@1..4(\\x01)"]);
+    assert_eq!(regex_errors("/\\0/"), none);
+    assert_eq!(regex_errors("/[\\1]/"), ["1536@2..4(\\x01)"]);
+    assert_eq!(regex_errors("/[\\01]/"), ["1487@2..5(\\x01)"]);
+    assert_eq!(regex_errors("/[\\8]/"), ["1537@2..4"]);
+    assert_eq!(regex_errors("/\\8/"), ["1534@2..3"]);
+    assert_eq!(regex_errors("/\\a/"), none);
+    assert_eq!(regex_errors("/\\a/u"), ["1535@1..3"]);
+    assert_eq!(regex_errors("/\\c1/u"), ["1512@1..3(\\c)"]);
+    assert_eq!(regex_errors("/\\c1/"), none);
+    assert_eq!(regex_errors("/\\u{41}/"), ["1538@1..7"]);
+    assert_eq!(regex_errors("/\\u{110000}/u"), ["1198@4..10"]);
+    assert_eq!(regex_errors("/\\u{41/u"), ["1126@6..6"]);
+    assert_eq!(regex_errors("/\\u{41x/u"), ["1199@6..6"]);
+    assert_eq!(regex_errors("/\\u{}/u"), ["1125@4..4"]);
+    assert_eq!(regex_errors("/\\x4/"), ["1125@4..4"]);
+    assert_eq!(regex_errors("/\\/"), ["1161@0..3"]);
+    // Classes without `v`.
+    assert_eq!(regex_errors("/[\\d-a]/"), none);
+    assert_eq!(regex_errors("/[\\d-a]/u"), ["1516@2..4"]);
+    assert_eq!(regex_errors("/[a-\\d]/u"), ["1516@4..6"]);
+    assert_eq!(regex_errors("/[a-\\d]/"), none);
+    assert_eq!(regex_errors("/[\\uD83D\\uDE00-\\uD83D\\uDE01]/u"), none);
+    assert_eq!(regex_errors("/[😀-😁]/u"), none);
+    // Unicode properties.
+    assert_eq!(regex_errors("/\\p{L}/"), ["1530@1..6"]);
+    assert_eq!(regex_errors("/\\p{Script=Greek}\\P{ASCII}/u"), none);
+    assert_eq!(regex_errors("/\\p{Foo}/u"), ["1529@4..7"]);
+    assert_eq!(regex_errors("/\\p{Foo=Bar}/u"), ["1524@4..7"]);
+    assert_eq!(regex_errors("/\\p{sc=Bar}/u"), ["1526@7..10"]);
+    assert_eq!(regex_errors("/\\p{=L}/u"), ["1523@4..4"]);
+    assert_eq!(regex_errors("/\\p{sc=}/u"), ["1525@7..7"]);
+    assert_eq!(regex_errors("/\\p{}/u"), ["1527@4..4"]);
+    assert_eq!(regex_errors("/\\p/u"), ["1531@1..3(\\p)"]);
+    assert_eq!(regex_errors("/\\p/"), none);
+    assert_eq!(regex_errors("/\\p{RGI_Emoji}/u"), ["1528@4..13"]);
+    assert_eq!(
+        regex_errors("/\\P{RGI_Emoji}/v"),
+        ["1501@15..16(es2024)", "1518@4..13"]
+    );
+}
+
+#[test]
+fn regex_class_sets() {
+    let v = |pattern: &str| {
+        let src = format!("/{pattern}/v");
+        let flag = src.len() - 1;
+        let mut errors = regex_errors(&src);
+        assert_eq!(
+            errors.remove(0),
+            format!("1501@{flag}..{}(es2024)", flag + 1)
+        );
+        errors
+    };
+    let none = Vec::<String>::new();
+    assert_eq!(v("[\\w&&[aeiou]]"), none);
+    assert_eq!(v("[a-z&&b]"), ["1519@5..7"]);
+    assert_eq!(v("[\\w--\\d]"), none);
+    assert_eq!(v("[\\q{a|bc}]"), none);
+    assert_eq!(v("[^\\q{a|bc}]"), ["1518@3..11"]);
+    assert_eq!(v("[^\\q{a}]"), none);
+    assert_eq!(v("[a&&b--c]"), ["1519@6..8"]);
+    assert_eq!(v("[a&&]"), ["1520@5..5"]);
+    assert_eq!(v("[&&a]"), ["1520@2..2"]);
+    assert_eq!(v("[a&&bc]"), ["1005@6..6(&&)"]);
+    assert_eq!(v("[a--b]"), none);
+    assert_eq!(v("[ab--c]"), ["1519@4..6"]);
+    assert_eq!(v("[(]"), ["1508@2..3(()"]);
+    assert_eq!(v("[a!!b]"), ["1522@3..5"]);
+    assert_eq!(v("[\\d-a]"), ["1516@2..4"]);
+    assert_eq!(v("[z-a]"), ["1517@2..5"]);
+    assert_eq!(v("[\\q]"), ["1521@2..4(\\q)"]);
+    assert_eq!(
+        v("\\q{a}"),
+        ["1511@1..3(\\q)", "1508@3..4({)", "1508@5..6(})"]
+    );
+}
+
+#[test]
+fn regex_escaped_group_names() {
+    // tsc 7 (observed) starts a group name only with an identifier character, not an
+    // escape: a name that starts with `\u` is TS1514 at the backslash, and no group gets
+    // that name. Later characters may be escapes.
+    for (src, expected) in [
+        (
+            r"/(?<\u0061>x)\k<a>/u",
+            "1514@4..4 1503@3..4(ES2018) 1532@16..17(a)",
+        ),
+        (r"/(?<a>x)\k<\u{61}>/u", "1503@3..6(ES2018) 1514@11..11"),
+        (
+            r"/(?<\u{61}>x)(?<a>y)/u",
+            "1514@4..4 1503@3..4(ES2018) 1503@15..18(ES2018)",
+        ),
+        (r"/(?<\u0030>x)/u", "1514@4..4 1503@3..4(ES2018)"),
+        (r"/(?<a\u0062>x)\k<ab>/u", "1503@3..12(ES2018)"),
+    ] {
+        assert_eq!(regex_errors(src).join(" "), expected, "{src}");
+    }
+}
+
+#[test]
+fn regex_many_group_names() {
+    use std::fmt::Write;
+
+    let mut pattern = String::new();
+    for i in 0..50_000 {
+        write!(pattern, "(?<g{i:05}>a)").unwrap();
+    }
+    for i in 0..50_000 {
+        write!(pattern, "\\k<g{i:05}>").unwrap();
+    }
+    let errors = regex::validate(&pattern, 0, pattern.len(), regex::FLAG_U);
+    assert_eq!(errors.len(), 50_000);
+    assert!(errors.iter().all(|e| e.msg.code == 1503));
+
+    for (src, duplicate) in [
+        ("/(?<a>x)((?<a>y)|(?<b>z))/", true),
+        ("/((?<a>x)|(?<a>y))/", false),
+        ("/(?<a>x)|((?<a>y))/", false),
+    ] {
+        assert_eq!(
+            regex_errors(src).iter().any(|e| e.starts_with("1515@")),
+            duplicate,
+            "{src}"
+        );
+    }
+}
+
+#[test]
+fn regex_pathological_patterns() {
+    // Deep nesting is not checked rather than overflowing the stack.
+    for pattern in ["(".repeat(100_000), "[".repeat(100_000)] {
+        for flags in ["", "u", "v"] {
+            let src = format!("/{pattern}/{flags}");
+            let mut lx = Lexer::new(&src);
+            lx.next_token();
+            lx.rescan_slash_as_regex();
+        }
+    }
+    assert_eq!(
+        regex_errors(&format!("/{}/", "(".repeat(1000))),
+        Vec::<String>::new()
+    );
+    // Odd input: every prefix of these patterns ends without a panic.
+    for src in [
+        r"/[\u{1F600}-\p{L}&&\q{😀|ab}--[^\c]]/v",
+        r"/(?<a\u{62}>x)\k<a\u0062>(?ims-ims:\0\01\8\x\u\u{)/u",
+        "/😀{1,}[😀-😁]\\c😀\\😀/",
+    ] {
+        for end in 1..src.len() {
+            if src.is_char_boundary(end) {
+                let mut lx = Lexer::new(&src[..end]);
+                lx.next_token();
+                lx.rescan_slash_as_regex();
+            }
+        }
+    }
 }
 
 #[test]
@@ -382,6 +617,30 @@ fn jsx_modes() {
     assert_eq!(lx.token_text(), " &amp; ");
     assert_eq!(lx.next_jsx_child(), T::Lt);
     assert_eq!(lx.next_token(), T::Slash);
+    assert!(lx.diagnostics.is_empty());
+}
+
+/// JSX names take `-` and escaped identifier parts (tsc's scanJsxIdentifier); an escape
+/// anywhere marks the token `ESCAPED`, and an escaped keyword becomes a plain name.
+#[test]
+fn jsx_identifier_escapes() {
+    let src = r"<a-\u0063-d \u{76}ar>";
+    let mut lx = Lexer::new(src);
+    assert_eq!(lx.next_token(), T::Lt);
+    assert_eq!(lx.next_token(), T::Ident);
+    assert_eq!(lx.rescan_jsx_identifier(), T::Ident);
+    assert_eq!(lx.token_text(), r"a-\u0063-d");
+    assert!(lx.token().flags.has(TokenFlags::ESCAPED));
+    assert_eq!(lx.ident_value(lx.token()), "a-c-d");
+    assert_eq!(lx.next_token(), T::Var);
+    assert_eq!(lx.rescan_jsx_identifier(), T::Ident);
+    assert!(!lx.token().flags.has(TokenFlags::ESCAPED_KEYWORD));
+    assert_eq!(lx.next_token(), T::Gt);
+    let mut lx = Lexer::new("<data-x>");
+    lx.next_token();
+    lx.next_token();
+    lx.rescan_jsx_identifier();
+    assert!(!lx.token().flags.has(TokenFlags::ESCAPED));
     assert!(lx.diagnostics.is_empty());
 }
 

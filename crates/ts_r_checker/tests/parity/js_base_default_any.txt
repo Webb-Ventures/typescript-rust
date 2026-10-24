@@ -1,0 +1,1 @@
+typed_component.ts(8,16): error TS2339: Property 'notThere' does not exist on type 'string'.

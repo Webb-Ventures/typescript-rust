@@ -177,7 +177,7 @@ pub fn transpile(
 }
 
 /// Type-only node kinds (never walked by value transforms).
-pub(crate) fn is_type_kind(k: NodeKind) -> bool {
+pub fn is_type_kind(k: NodeKind) -> bool {
     use NodeKind::*;
     matches!(
         k,

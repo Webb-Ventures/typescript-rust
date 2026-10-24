@@ -920,8 +920,9 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// An expando property (`f.x = v`): the union of the widened types of its assigned
     /// values.
     fn expando_type(&mut self, s: SymId) -> TypeId {
-        if let Some(t) = self.annotated_expando_type(s) {
-            return t;
+        if self.annotated_expando_type(s).is_some() {
+            let decls = self.c.decls(s).to_vec();
+            return self.annotated_expando_values(&decls);
         }
         if let Some(t) = self.jsdoc_expando_type(s) {
             return t;
@@ -1103,7 +1104,47 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// C.defaultProps = {...}`) that the annotation declares has the annotation's type.
     pub(crate) fn annotated_expando_type(&mut self, s: SymId) -> Option<TypeId> {
         let parent = self.c.sym_parent(s)?;
-        let d = self.c.value_decl(parent)?;
+        let name = self.c.sym_name(s);
+        self.annotated_expando_member(parent, name)
+    }
+
+    /// The type of an expando property the host's annotation declares: the union of its
+    /// assigned values, each checked against the declared type as its contextual type and
+    /// widened as in a mutable location (`f.done = true` under `done: true` stays `true`,
+    /// `f.done = false` is `false` and fails the annotation; tsc:
+    /// `getAssignmentDeclarationInitializerType` in `checker.go`).
+    pub(crate) fn annotated_expando_values(&mut self, lefts: &[Loc]) -> TypeId {
+        let mut types = Vec::new();
+        for &left in lefts {
+            let Some(p) = self.c.parent(left) else {
+                continue;
+            };
+            let Node::Assign { left: l, right, .. } = *self.node(p) else {
+                continue;
+            };
+            if l != left.node {
+                continue;
+            }
+            if !self.push_resolution(crate::checker::Resolving::Node(left)) {
+                types.push(TypeId::ANY);
+                continue;
+            }
+            let t = self.quietly(|ck| ck.check_expr_mutable(Loc::new(left.file, right)));
+            self.pop_resolution();
+            types.push(self.widened_type(t));
+        }
+        if types.is_empty() {
+            TypeId::ANY
+        } else {
+            self.union(&types)
+        }
+    }
+
+    /// The type the annotation of the variable `host` (`const f: F = () => {}`) gives
+    /// its expando property `name`, when the annotation declares it. Late-bound
+    /// expandos (`f[k] = v`) use it too.
+    pub(crate) fn annotated_expando_member(&mut self, host: SymId, name: &str) -> Option<TypeId> {
+        let d = self.c.value_decl(host)?;
         let p = self.c.parent(d)?;
         let Node::VarDeclarator {
             type_ann: Some(ta), ..
@@ -1112,7 +1153,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             return None;
         };
         let ann = self.type_from_node(Loc::new(p.file, ta));
-        let name = self.c.sym_name(s);
         let prop = self.property_of_type(ann, name)?;
         let t = self.type_of_symbol(prop);
         Some(self.remove_missing(t))

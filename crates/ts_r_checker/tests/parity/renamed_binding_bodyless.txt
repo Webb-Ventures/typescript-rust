@@ -1,0 +1,4 @@
+a.ts(1,24): error TS2842: 'b' is an unused renaming of 'a'. Did you intend to use it as a type annotation?
+a.ts(1,24): error TS7031: Binding element 'b' implicitly has an 'any' type.
+a.ts(2,21): error TS7031: Binding element 'c' implicitly has an 'any' type.
+a.ts(4,24): error TS7031: Binding element 'i' implicitly has an 'any' type.

@@ -18,7 +18,9 @@ parse error at the position of the error just before it (scanner or parser) is d
 a stray `\` is TS1127 (scanner) only, not also TS1128. Scanner errors are always kept, so a
 position can carry a parser and a scanner error (`'}' expected` and TS1160 at end of file).
 The rule is about the order errors are reported in, not their sorted order: `finish` only
-merges same-position deferred and TS8xxx errors, so `x <` at the end of the file keeps
+merges same-position deferred errors (a TS8xxx and a deferred error at one position both
+stay: tsc keeps them in separate lists, so `{ m?() {} }` in JavaScript is TS8009 and
+TS1162 at the `?`), so `x <` at the end of the file keeps
 `Type expected` and `Expression expected` at one position, with `'>' expected` reported
 between them. A missing expression or type (TS1109/TS1110) at the end of the file is
 reported just after the last token, before trailing trivia, as in tsc 7 (`'}' expected`
@@ -164,6 +166,14 @@ Files:
   - Regex pattern and flag errors from the lexer are moved to `regex_errs`
     (`defer_regex_errors`): tsc 7 reports them from the checker, so they are kept only
     without syntax errors, and are never merged with another error at their position.
+    They go to `grammar`; TS1501 and TS1503 (a flag or named group newer than some target,
+    `is_target_regex_error`) go to `grammar` only, and the checker keeps them when the
+    target is older than the one the message names.
+  - Octal and `\8` escapes (TS1487, TS1488) in strings are lexer errors, also listed in
+    `grammar` and in `ParseResult::lenient`: tsc reports them as syntax errors, but
+    ESLint's parser and esbuild accept them in sloppy code. Every tsc-facing consumer (the
+    checker driver, `ts-r-check --noCheck`, the incremental history) takes a file's syntax
+    errors from `tsc_syntax_errors(diagnostics, grammar, lenient)`, never `without_grammar`. In an untagged template they are plain syntax errors (`template_element`).
   - An escaped keyword consumed by `bump` as a keyword is TS1260; one read as a name goes
     through `intern_token`, which marks it (`name_tok`).
 - **Context lives in `Ctx` bits** (`AWAIT`, `YIELD`, `DISALLOW_IN`, `AMBIENT`,
@@ -245,13 +255,15 @@ Files:
   module names outside ambient contexts (TS1035), and in a namespace TS1319/1194/1147.
   Also: `export <modifiers> export =` (TS1120), `module N` (TS1540 per name), `if (x);`
   (TS1313), `for await` outside an async function (TS1103; TS18038 in a static block,
-  told apart by `Jump::StaticBlock`), `import(x,)` (TS1009), generator overloads (TS1222),
+  told apart by `Jump::StaticBlock`), generator overloads (TS1222),
   definite assignment `!` (TS1255/1263/1264), abstract accessor bodies (TS1318) and index
   signature trailing commas (TS1025). Nothing under a `with` body is checked.
 - **Import calls take an argument list.** `import(...)` parses its arguments like a call:
   the first is the specifier, the second the options, later ones are parsed and dropped
   (tsc's TS1450 for them, and for `import()`, is a checker message). A spread argument is
-  TS1325 and `import(x,)` TS1009, both deferred. `import` followed by neither `(` nor `.`
+  TS1325, deferred. A trailing comma (`import(x,)`, `import(x, {},)`) is not the parser's:
+  the checker reports TS1009 below the modules that take import attributes
+  (tsc: grammarchecks.go checkGrammarImportCallExpression). `import` followed by neither `(` nor `.`
   in an expression is `Expression expected` without consuming it, so the import
   declaration after it parses. A named import or export list ends at the first token
   that is not a name, string or `,`.
@@ -360,14 +372,18 @@ Files:
     `Seq` led by a zero-width `Missing` (tsc's synthesized comma: no TS2695).
     `</` (no space between) is one closing-tag token as in tsc: never a `<` operator,
     no expression (TS1109) and no statement start (TS1128, both characters skipped).
+  - JSX tag, member and attribute names take `-` and `\u` escapes (`rescan_jsx_identifier`).
+    A name with an escape is decoded (`<\u0061></a>` closes; tags compare by decoded
+    names, `jsx_tag_key`) and is TS17021 on the whole name, a syntax error (tsc
+    `parser.go` parseIdentifierNameErrorOnUnicodeEscapeSequence).
     `<:` starts no tag (TS1109); other bad tag starts are tags with a missing name.
   - `Identifier expected.` at the end of the file is reported after the last token,
     except after `?.`.
   - `throw` before a line break is TS1142 at the end of `throw`.
   - `new.x` and `import.x` take any name; one other than `target`/`meta` is the
     checker's TS17012 (TS18061 for `import.x(`), deferred.
-  - A tagged template in an optional chain (`a?.\`b\``, `a?.b\`c\``) is TS1358 at the
-    template.
+  - A tagged template in an optional chain (`a?.\`b\``, `a?.b\`c\``) is a deferred TS1358
+    at the template (the checker's in tsc 7).
   - Decorators before an expression other than `class` are TS1109 just after them.
   - `import defer` is a phase before `*`, `{` or a name; a default or named binding
     is a deferred TS18058/TS18059 on the clause. A default binding followed by neither
@@ -395,14 +411,23 @@ Files:
   - An object binding pattern skips a token that starts no property unless an enclosing
     list uses it (TS1180, often hidden by an error at the same position); parameter lists
     are a list context (`?` starts a type, so `f({a ?})` ends the pattern at `?`).
-  - `{ h?: 1 }` (TS1162) and `{ a! }` (TS1255) are deferred checker errors in TypeScript.
+  - `{ h?: 1 }`, `{ m?() {} }` (TS1162) and `{ a! }`, `{ p!: 1 }`, `{ m!() {} }` (TS1255,
+    at the `!`, `checkGrammarMethod`/`checkGrammarObjectLiteralExpression` in tsc's
+    `grammar.go`) are deferred checker errors in TypeScript.
   - Deferred too: a binding named `await` directly in a class static block TS1359;
     `import<T>(...)` (type arguments dropped, still a module request) TS1326 on the
-    expression; a `,` after a rest parameter or element TS1013 (immediate in JavaScript).
+    expression; a `,` after a rest parameter or element TS1013.
   - A shorthand initializer (`{ s = 5 }`) in an object literal that never becomes a
     destructuring target (assigned with `=`, or a `for...in`/`for...of` head, nested
     included) is TS1312 at the `=`, computed in `finish` from `shorthand_inits` and
     `pattern_literals` (both rewound with speculation).
+- **Mapped type members** (tsc 7 observed; rule from tsc `internal/parser/parser.go`
+  parseMappedType and `internal/checker/grammarchecks.go` checkGrammarProperty). After
+  `[K in X]: T` a mapped type ends its mapping like a statement (`';' expected` at a `,`),
+  then parses ordinary type members up to `}`; any members are TS7061 at the first one's
+  name (deferred) and are dropped from the tree. A property (not a method) whose computed
+  key is `[P in X]` in an interface, type literal or class is the same TS7061 at the first
+  member of the list, once per list; the checker checks nothing in that key.
 - **Heritage types take their type arguments across a line break.** `extends A<T>` followed by
   a newline and `{` is `ExprWithTypeArgs { expr: A, type_args: <T> }`, as on one line; the
   instantiation expression the member tail builds there is unwrapped (and dropped from the
@@ -446,7 +471,16 @@ Files:
   the TSX grammar except that calls, `new`, tagged templates, instantiation expressions and
   JSX tags take no type arguments (`Parser::js_ts`), as in tsc. `Report` then walks the tree
   once (`js_ts.rs`, explicit stack) for tsc's TS8xxx errors; the rules observed in tsc 7 are
-  listed at the top of that file and pinned by `ts_in_js_matches_tsc`.
+  listed at the top of that file and pinned by `ts_in_js_matches_tsc`. The TS8xxx are not
+  parse errors (tsc reports them from `getJSSyntacticDiagnosticsForFile`, apart from the
+  parse diagnostics), so they do not drop the deferred grammar errors (`grammar_diags`
+  counts them; `js_grammar_errors_stay_next_to_ts8xxx`). The deferred errors are the same
+  in JavaScript as in TypeScript: TS1013, TS2462, TS1171 (`,` in a computed name), TS18006
+  (a field named `constructor`), TS1162, TS1255, TS1358 (a tagged template in an optional
+  chain), TS1200 (a line break before `=>`) and TS1097 (an empty `extends`/`implements`
+  list) are all the checker's in tsc 7 (`grammar.go`), so a syntax error drops them in
+  either kind of file. `const` on a class member is TS8009 there as well as TS1248, and the
+  `?` of an object-literal method is TS8009 next to TS1162 (plainJSGrammarErrors).
 - Span rules:
   - A node's span runs from its first token to the end of its last consumed token.
   - A node that consumed nothing is zero-width at the end of the previous token, the same
@@ -498,7 +532,7 @@ Dev: `ts_r_testing` (memory cap for tests and examples).
   - Strict-mode-only restrictions beyond reserved words.
 - Recovery on badly broken input is close to tsc, but follow-on errors can differ in count
   and position. The first error usually matches.
-- Regex pattern syntax is not validated (see `ts_r_lexer`).
+- Regex pattern errors have no "Did you mean" suggestions (see `ts_r_lexer`).
 - No incremental re-parse; whole-file only.
 - `parse` runs on one thread. The corpus tool is single-threaded so its numbers are
   per-core throughput.

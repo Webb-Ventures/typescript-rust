@@ -301,7 +301,7 @@ impl<'a> Parser<'a> {
     fn check_arrow_line_break(&mut self) {
         if self.newline_before() {
             let span = self.tok().span();
-            self.grammar_error_at(messages::LINE_TERMINATOR_BEFORE_ARROW, span, &[]);
+            self.deferred_grammar_error_at(messages::LINE_TERMINATOR_BEFORE_ARROW, span, &[]);
         }
     }
 
@@ -1055,7 +1055,7 @@ impl<'a> Parser<'a> {
         // An argument list as in a call (importAssertion1, plainJSGrammarErrors): the
         // checker's rules are grammar errors here. A third argument and later ones are
         // dropped (tsc: TS1450, a message, not an error).
-        let (args, trailing) = self.with_ctx(0, NESTED_CLEAR, |p| {
+        let (args, _) = self.with_ctx(0, NESTED_CLEAR, |p| {
             p.parse_delimited(List::ArgumentExpressions, |p| {
                 let s = p.start();
                 if p.eat(T::DotDotDot) {
@@ -1073,14 +1073,7 @@ impl<'a> Parser<'a> {
         let list = self.ast.list(args);
         let arg = list.first().copied();
         let options = list.get(1).copied();
-        if let (Some(_), None, Some(comma)) = (arg, options, trailing) {
-            // `import(x,)` (dynamicImportTrailingComma); `import(x, {},)` is fine.
-            self.deferred_grammar_error_at(
-                messages::TRAILING_COMMA_NOT_ALLOWED,
-                Span::new(comma, comma + 1),
-                &[],
-            );
-        }
+        // A trailing comma (`import(x,)`) is the checker's TS1009: it depends on `module`.
         let arg = arg.unwrap_or_else(|| {
             let pos = self.prev_end.saturating_sub(1);
             self.add_node(Span::at(pos), Node::Missing {})
@@ -1288,7 +1281,11 @@ impl<'a> Parser<'a> {
                         T::NoSubstTemplate | T::TemplateHead => {
                             let quasi = self.parse_template(true);
                             let span = self.ast.span(quasi);
-                            self.error_at(messages::TAGGED_TEMPLATE_IN_OPTIONAL_CHAIN, span, &[]);
+                            self.deferred_grammar_error_at(
+                                messages::TAGGED_TEMPLATE_IN_OPTIONAL_CHAIN,
+                                span,
+                                &[],
+                            );
                             in_chain = false;
                             expr = self.finish_node(
                                 start,
@@ -1359,7 +1356,11 @@ impl<'a> Parser<'a> {
                     // `a?.b\`x\``: TS1358 at the template (not after `a?.b!`).
                     if in_chain && !matches!(self.ast.node(expr), Node::NonNull { .. }) {
                         let span = self.ast.span(quasi);
-                        self.error_at(messages::TAGGED_TEMPLATE_IN_OPTIONAL_CHAIN, span, &[]);
+                        self.deferred_grammar_error_at(
+                            messages::TAGGED_TEMPLATE_IN_OPTIONAL_CHAIN,
+                            span,
+                            &[],
+                        );
                     }
                     in_chain = false;
                     expr = self.finish_node(
@@ -1683,19 +1684,20 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_property_key()
         };
-        if self.ts && self.at(T::Question) {
-            // `{ a?() {} }`, `{ h?: 1 }`: the checker's TS1162 at the `?` (kept next to
-            // syntax errors in JavaScript, plainJSGrammarErrors).
-            if self.js_ts {
-                self.error(messages::AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL);
-            } else {
-                let span = self.tok().span();
-                self.deferred_grammar_error_at(
-                    messages::AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL,
-                    span,
-                    &[],
-                );
-            }
+        if self.ts && self.at(T::Bang) {
+            // `{ a! }`, `{ a!: 1 }`, `{ m!() {} }`: the checker's TS1255 at the `!`
+            // (definiteAssignmentAssertionsWithObjectShortHand, plainJSGrammarErrors).
+            let span = self.tok().span();
+            self.deferred_grammar_error_at(messages::DEFINITE_NOT_PERMITTED, span, &[]);
+            self.bump();
+        } else if self.ts && self.at(T::Question) {
+            // `{ a?() {} }`, `{ h?: 1 }`: the checker's TS1162 at the `?`.
+            let span = self.tok().span();
+            self.deferred_grammar_error_at(
+                messages::AN_OBJECT_MEMBER_CANNOT_BE_DECLARED_OPTIONAL,
+                span,
+                &[],
+            );
             self.bump();
         }
         if is_method || matches!(self.kind(), T::LParen | T::Lt) {
@@ -1765,13 +1767,6 @@ impl<'a> Parser<'a> {
                     value,
                 },
             );
-        }
-        if self.ts && self.at(T::Bang) {
-            // `{ a! }`: the checker's TS1255 at the `!` (definiteAssignmentAssertionsWith-
-            // ObjectShortHand).
-            let span = self.tok().span();
-            self.deferred_grammar_error_at(messages::DEFINITE_NOT_PERMITTED, span, &[]);
-            self.bump();
         }
         let eq = self.tok().start;
         let init = if self.eat(T::Eq) {
@@ -1850,7 +1845,7 @@ impl<'a> Parser<'a> {
         let expr = self.with_ctx(0, NESTED_CLEAR, |p| p.parse_expression());
         if matches!(self.ast.node(expr), Node::Seq { .. }) {
             let span = self.ast.span(expr);
-            self.checker_grammar_error(messages::COMMA_IN_COMPUTED_NAME, span);
+            self.deferred_grammar_error_at(messages::COMMA_IN_COMPUTED_NAME, span, &[]);
         }
         self.expect_closing(T::RBracket, T::LBracket, open);
         self.finish_node(start, Node::ComputedKey { expr })
@@ -2075,8 +2070,8 @@ impl<'a> Parser<'a> {
             Ok(c) => (self.ast.intern(&c), false),
             Err(_) => {
                 if !tagged {
-                    for (at, msg) in self.lx.template_escape_errors(tok) {
-                        self.error_at(msg, at, &[]);
+                    for d in self.lx.template_escape_errors(tok) {
+                        self.push_diag(d);
                     }
                 }
                 (Atom::EMPTY, true)
@@ -2210,7 +2205,7 @@ impl<'a> Parser<'a> {
                     }
                     if i + 1 < len {
                         let span = self.ast.span(el);
-                        self.rest_grammar_error(messages::REST_ELEMENT_NOT_LAST, span);
+                        self.deferred_grammar_error_at(messages::REST_ELEMENT_NOT_LAST, span, &[]);
                     } else {
                         let end = self.ast.span(el).end;
                         if let Some(comma) = self.next_byte_after_spaces(end, b',') {

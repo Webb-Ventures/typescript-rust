@@ -29,8 +29,8 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 
 - Loading the project from `tsconfig.json`, including `extends`, with tsc's config
   diagnostics such as [TS6053](../errors/TS6053.md).
-- Module resolution that matches tsc's: 63,958 resolutions across 24 private-app
-  configs, 0 mismatches.
+- Module resolution that matches tsc's: 158,174 resolutions across 114 configs of five
+  public repos, 10 mismatches (one `require` of vitest, in tRPC).
 - Assignability, calls and overloads, generics and inference, unions and narrowing, type
   operators (`keyof`, mapped, conditional and literal types), classes and declarations,
   and unused-code checks. Errors such as [TS2322](../errors/TS2322.md),
@@ -40,13 +40,13 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 
 ## Not yet
 
-- Regular expression pattern errors: only the flags of a regex literal are checked, so errors
-  such as TS1507 and TS1515 aren't reported. Octal escapes in strings (TS1487) aren't reported
-  either.
+- Octal escapes in strings (TS1487) are reported only with `--no-history`, not by a default
+  run or with `--noCheck`. Regular expression errors don't carry tsc's "Did you mean"
+  suggestions (TS1369).
 - Some inference: contextual types that flow through a reverse mapped type print wider than
   tsc's (`number | T["a"]` where tsc prints `number`).
 - Some relation and narrowing results differ from tsc's, mostly in TS2322, TS2339 and TS2345:
-  415 of tsc's 12,750 conformance test variants (3.3%) don't match exactly.
+  385 of tsc's 12,750 conformance test variants (3.0%) don't match exactly.
 
 The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.md).
 
@@ -106,11 +106,11 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 96.7% exact (all diagnostics and chains); 207 variants with a diagnostic tsc does not report, 17 of them in tests where tsc reports nothing |
-| All 25 private-app tsconfig projects | All 25 match tsc exactly (0 missing, 0 extra) |
-| Ecosystem check stage | 550 packages pass, 159 fail (77.6%) |
+| tsc's conformance baselines, 12,750 compared test variants | 97.0% exact (all diagnostics and chains); 191 variants with a diagnostic tsc does not report, 10 of them in tests where tsc reports nothing |
+| Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | 3 of 6 match exactly; Playwright 2 extra; RxJS 6 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
+| Ecosystem check stage | 652 packages pass, 57 fail (92.0%) |
 
-Most extra diagnostics in the ecosystem run are TS2344, TS2305, TS2694 and TS2304. Some of
+Most extra diagnostics in the ecosystem run are TS2344, TS2536, TS2417 and TS2716. Some of
 the 220 conformance extras are runner artefacts, such as tests for module kinds tsc 7 removed,
 which have no baseline.
 

@@ -388,7 +388,7 @@ pub fn syntactic_diagnostics(program: &ProgramFiles) -> Vec<Diagnostic> {
         if f.is_lib {
             continue;
         }
-        for d in ts_r_parser::without_grammar(&f.syntax, &f.grammar) {
+        for d in ts_r_parser::tsc_syntax_errors(&f.syntax, &f.grammar, &f.lenient) {
             if !ts_r_checker::driver::CHECKER_GRAMMAR_CODES.contains(&d.code) {
                 out.push(d.with_file(ts_r_diagnostics::FileId(i as u32)));
             }

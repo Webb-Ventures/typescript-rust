@@ -38,6 +38,46 @@ fn check(options: &str, src: &str) -> Option<Vec<String>> {
 const STRICT: &str = "\"strict\": true, \"target\": \"es2022\"";
 
 #[test]
+fn import_trailing_comma_skips_lexer_trivia() {
+    let mut src = String::from("declare const path: string;\n");
+    for newline in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+        src.push_str(&format!("import(path, // comment{newline});\n"));
+    }
+    for trivia in ["\u{a0}", "\u{feff}", "/* comment */"] {
+        src.push_str(&format!("import(path{trivia},{trivia});\n"));
+    }
+    src.push_str("import(path /* no comma */);\n");
+    for (module, expected) in [("commonjs", 8), ("esnext", 0)] {
+        let mut fs = MemoryFs::new();
+        fs.set_cwd("/p");
+        fs.add_file("/p/a.ts", &src);
+        fs.add_file(
+            "/p/tsconfig.json",
+            &format!(
+                "{{\"compilerOptions\": {{{STRICT}, \"module\": \"{module}\", \"noLib\": true}}, \"files\": [\"a.ts\"]}}"
+            ),
+        );
+        let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+        let program = load_program(&fs, &cfg.file_names, &cfg.options, None, 1);
+        let result = check_program(&program, CheckRun { threads: 1 });
+        let commas: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == 1009)
+            .collect();
+        assert_eq!(commas.len(), expected, "{module}: {commas:#?}");
+        for diagnostic in commas {
+            let file = &program.files[diagnostic.file.0 as usize];
+            assert_eq!(
+                file.text
+                    .get(diagnostic.span.start as usize..diagnostic.span.end as usize),
+                Some(",")
+            );
+        }
+    }
+}
+
+#[test]
 fn assignability_and_calls() {
     let Some(out) = check(
         STRICT,
@@ -699,6 +739,34 @@ fn implicit_any_missing_names() {
         ours,
         ["1:12 TS7006: Parameter '(Missing)' implicitly has an 'any' type."]
     );
+}
+
+/// A keyword in a binding pattern (`{ while }`) can't be shorthand: its name is missing, and
+/// an untyped pattern reports it as `(Missing)` (destructuringParameterDeclaration6).
+#[test]
+fn implicit_any_missing_binding_names() {
+    let Some(out) = check_through(
+        "a.ts",
+        STRICT,
+        "function a({while}) { }\nfunction c({ class }: { class: number }) { }\n",
+    ) else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS7031")).collect();
+    assert_eq!(
+        ours,
+        ["1:18 TS7031: Binding element '(Missing)' implicitly has an 'any' type."]
+    );
+    // A function with no implementation never resolves its parameter types: the renamings
+    // are TS2842's alone (parametersSyntaxErrorNoCrash2).
+    let Some(out) = check_through(
+        "a.ts",
+        STRICT,
+        "export default function getThing( { return 'thing'; }\n",
+    ) else {
+        return;
+    };
+    assert!(out.iter().all(|d| !d.contains("TS7031")), "{out:?}");
 }
 
 /// A `,` where a parameter should start is no parameter: no implicit-any error for it.

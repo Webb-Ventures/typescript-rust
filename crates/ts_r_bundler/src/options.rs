@@ -2,6 +2,8 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::features::{Feature, Features};
+
 /// Output module format.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Format {
@@ -160,8 +162,10 @@ pub struct BuildOptions {
     /// `None` = esbuild's default for the platform.
     pub format: Option<Format>,
     pub platform: Platform,
-    /// ECMAScript year of the target (2022+); `None` = esnext.
+    /// ECMAScript year of the target (`es5` is 2014); `None` = esnext.
     pub target: Option<u32>,
+    /// `--supported:<feature>=<bool>` overrides of what the target supports, in order.
+    pub supported: Vec<(Feature, bool)>,
     pub minify_whitespace: bool,
     pub minify_identifiers: bool,
     pub minify_syntax: bool,
@@ -223,6 +227,7 @@ impl Default for BuildOptions {
             format: None,
             platform: Platform::Browser,
             target: None,
+            supported: Vec::new(),
             minify_whitespace: false,
             minify_identifiers: false,
             minify_syntax: false,
@@ -262,6 +267,23 @@ impl Default for BuildOptions {
 }
 
 impl BuildOptions {
+    /// The syntax features the output may not use: those newer than `--target`, with the
+    /// `--supported:` overrides applied (`features.rs`).
+    pub fn unsupported(&self) -> Features {
+        let mut s = match self.target {
+            Some(y) => Features::newer_than(y),
+            None => Features::NONE,
+        };
+        for &(f, ok) in &self.supported {
+            if ok {
+                s.remove(f);
+            } else {
+                s.insert(f);
+            }
+        }
+        s
+    }
+
     /// The output format after defaults (esbuild: iife for browser, cjs for node, esm for
     /// neutral when bundling; esm when splitting).
     pub fn effective_format(&self) -> Format {
@@ -376,13 +398,6 @@ impl BuildOptions {
         }
         if self.entry_points.len() > 1 && self.outfile.is_some() {
             return Err("must use \"outdir\" when there are multiple input files".into());
-        }
-        if let Some(t) = self.target
-            && t < 2022
-        {
-            return Err(format!(
-                "target es{t} is not supported yet: ts-r-build only emits ES2022 and later"
-            ));
         }
         Ok(())
     }
