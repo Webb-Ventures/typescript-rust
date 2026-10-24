@@ -47,8 +47,8 @@ export const TOOLS: Tool[] = [
     ],
     notYet: [
       'No CSS preprocessors (Sass, Less), and no css.*, server.hmr, server.fs or server.watch config',
-      'CSS @import and CSS modules in app CSS aren’t handled',
-      'Inline module scripts in HTML and non-literal import(expr) aren’t rewritten',
+      'CSS modules and preprocessor @imports in app CSS aren’t handled',
+      'Non-literal import(expr) isn’t rewritten',
       'No compression; HTTP/1.1 only',
       'Windows is untested',
     ],
