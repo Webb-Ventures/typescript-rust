@@ -284,7 +284,8 @@ are cached by content hash. Change `cache_id` when output for the same input can
   file has changed. An unresolved reference is kept as written. Quoting follows Vite: an
   unquoted value that needs quotes gets `'...'`, a quoted one keeps its quote.
   Every file read or referenced is a watch dependency of the stylesheet (and of the page,
-  for its `<style>`s: changing one reloads the page).
+  for its `<style>`s: changing one reloads all connected pages, since retained page
+  dependencies may overlap other pages and linked stylesheets).
 - **Page URLs** (`html_urls.rs`, `vite: packages/vite/src/node/server/middlewares/indexHtml.ts`
   `processNodeUrl`, `packages/vite/src/node/assetSource.ts`): the attributes that name files
   (Vite's table: `src`, `srcset`, `href` of `link`/`image`/`use`, `imagesrcset`, `data`,

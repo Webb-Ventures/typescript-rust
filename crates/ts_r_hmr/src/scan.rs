@@ -830,6 +830,7 @@ impl Scanner<'_> {
         let mut expect_name = true;
         let mut depth = 0usize;
         let mut prev = b' ';
+        let mut last = Last::Start;
         while p < self.src.len() {
             let before = p;
             p = self.skip_trivia(p);
@@ -846,6 +847,7 @@ impl Scanner<'_> {
                     let e = self.ident_end(p);
                     self.export_name(p, e);
                     prev = b'a';
+                    last = Last::Value;
                     p = e;
                     continue;
                 }
@@ -864,6 +866,35 @@ impl Scanner<'_> {
                 b'"' | b'\'' => {
                     p = self.string_end(p);
                     prev = b'"';
+                    last = Last::Value;
+                    continue;
+                }
+                b'/' if matches!(last, Last::Start | Last::Operator) => {
+                    let end = self.regex_end(p);
+                    last = if end > p + 1 {
+                        Last::Value
+                    } else {
+                        Last::Operator
+                    };
+                    p = end;
+                    prev = b'/';
+                    continue;
+                }
+                c if is_ident_start(c) => {
+                    let end = self.ident_end(p);
+                    last = if last != Last::Dot && REGEX_KEYWORDS.contains(&&self.src[p..end]) {
+                        Last::Operator
+                    } else {
+                        Last::Value
+                    };
+                    p = end;
+                    prev = b'a';
+                    continue;
+                }
+                b'0'..=b'9' => {
+                    p = self.number_end(p);
+                    prev = b'0';
+                    last = Last::Value;
                     continue;
                 }
                 b'`' => {
@@ -875,6 +906,11 @@ impl Scanner<'_> {
                 _ => {}
             }
             prev = c;
+            last = match c {
+                b')' | b']' | b'}' | b'`' => Last::Value,
+                b'.' => Last::Dot,
+                _ => Last::Operator,
+            };
             p += 1;
         }
     }
@@ -1008,7 +1044,16 @@ impl Scanner<'_> {
     }
 
     fn regex(&mut self) {
-        let start = self.pos;
+        let end = self.regex_end(self.pos);
+        self.last = if end > self.pos + 1 {
+            Last::Value
+        } else {
+            Last::Operator
+        };
+        self.pos = end;
+    }
+
+    fn regex_end(&self, start: usize) -> usize {
         let mut i = start + 1;
         let mut in_class = false;
         while i < self.src.len() {
@@ -1024,16 +1069,13 @@ impl Scanner<'_> {
                     i += 1;
                 }
                 b'/' if !in_class => {
-                    self.pos = self.ident_end(i + 1);
-                    self.last = Last::Value;
-                    return;
+                    return self.ident_end(i + 1);
                 }
                 _ => i += 1,
             }
         }
         // Not a regex after all: treat `/` as an operator.
-        self.pos = start + 1;
-        self.last = Last::Operator;
+        start + 1
     }
 
     fn ident_end(&self, mut p: usize) -> usize {
@@ -1302,6 +1344,22 @@ const mode = import.meta.env.MODE;
             "['./p/*.js', '!./p/x.js'], { eager: true, query: { a: ')' } }"
         );
         assert!(scan_hot("const x = 1").node_env.is_empty());
+    }
+
+    #[test]
+    fn exported_declarators_skip_regex_literals() {
+        let m = scan(
+            r#"export const pattern = /,oops/;
+import.meta.hot.acceptExports(['pattern']);"#,
+        );
+        assert_eq!(m.exports, ["pattern"]);
+        assert_eq!(m.hot.accepted_exports, Some(vec!["pattern".to_owned()]));
+
+        let m = scan(
+            r#"export const a = /[,;{}\/]/g, b = 8 / 2, c = b / 2, d = /,fake/;
+export const e = () => /,alsoFake/;"#,
+        );
+        assert_eq!(m.exports, ["a", "b", "c", "d", "e"]);
     }
 
     #[test]

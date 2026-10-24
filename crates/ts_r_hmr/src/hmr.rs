@@ -221,19 +221,16 @@ fn handle_change(
         }
     }
     // A file a page's `<style>` reads or references: the page reloads.
-    let page = shared
+    let page_uses = shared
         .html_deps
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .iter()
-        .filter(|(_, deps)| deps.binary_search(path).is_ok())
-        .map(|(page, _)| page.clone())
-        .min();
-    if let Some(page) = page {
-        let page_url = server::url_for_file(&shared.root, &page);
+        .values()
+        .any(|deps| deps.binary_search(path).is_ok());
+    if page_uses {
         out.files.push(url.clone());
-        // The client compares it with the decoded `location.pathname`.
-        out.full_reload = Some(Some(crate::http::percent_decode(&page_url)));
+        // Other pages may use it too, including through a linked stylesheet.
+        out.full_reload = Some(None);
         return;
     }
     // A page reloads, unless it is also a module (`import x from './a.html?raw'`).

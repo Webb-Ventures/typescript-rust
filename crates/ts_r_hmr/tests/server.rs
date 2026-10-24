@@ -17,6 +17,10 @@ struct Fixture {
 }
 
 fn start() -> Fixture {
+    start_with_watch(true)
+}
+
+fn start_with_watch(watch: bool) -> Fixture {
     let app = TempDir::new("srv-app");
     let cache = TempDir::new("srv-cache");
     write_fixture_app(&app);
@@ -24,6 +28,7 @@ fn start() -> Fixture {
     let l = Arc::clone(&log);
     let mut config = DevConfig::new(app.path());
     config.port = 0;
+    config.watch = watch;
     config.cache = CacheMode::Dir(cache.path().to_path_buf());
     config.logger = Some(Arc::new(move |line: &str| {
         l.lock().unwrap().push(line.to_owned())
@@ -38,6 +43,18 @@ fn start() -> Fixture {
 }
 
 impl Fixture {
+    fn notify_modified(&self, path: &str) {
+        self.server.notify_changes(ts_r_hmr::ChangeBatch {
+            changes: vec![ts_r_hmr::FileChange {
+                path: self.app.path().join(path),
+                kind: ts_r_hmr::ChangeKind::Modified,
+                first_event: Instant::now(),
+                first_event_wall: std::time::SystemTime::now(),
+            }],
+            flushed: Instant::now(),
+        });
+    }
+
     fn get(&self, path: &str) -> (u16, Vec<(String, String)>, String) {
         http_get(self.server.addr(), path, &[])
     }
@@ -397,6 +414,55 @@ fn accepting_a_raw_import_keeps_it_raw_after_an_update() {
     // What the client imports for that update: `?import&t=…&raw`.
     let (_, _, fresh) = f.get(&format!("/src/message.txt?import&t={}&raw", u["timestamp"]));
     assert_eq!(fresh, "export default \"bye\";\n");
+}
+
+#[test]
+fn html_style_dependency_reloads_all_consumers() {
+    let f = start_with_watch(false);
+    f.app.write("shared.css", "body { color: red; }");
+    f.app
+        .write("a.html", "<style>@import './shared.css';</style>");
+    f.app
+        .write("b.html", "<link rel=stylesheet href='/shared.css'>");
+    f.app
+        .write("c.html", "<style>@import './shared.css';</style>");
+    for path in ["/a.html", "/b.html", "/shared.css", "/c.html"] {
+        assert_eq!(f.get(path).0, 200, "{path}");
+    }
+    let mut ws = f.ws();
+    f.app.write("shared.css", "body { color: blue; }");
+    f.notify_modified("shared.css");
+    let m = next_of(&mut ws, "full-reload");
+    assert!(m.get("path").is_none(), "{m}");
+    assert!(f.get("/a.html").2.contains("color: blue"));
+    assert!(f.get("/shared.css").2.contains("color: blue"));
+    assert!(f.get("/c.html").2.contains("color: blue"));
+}
+
+#[test]
+fn regex_export_accepted_by_name_updates_in_place() {
+    let f = start_with_watch(false);
+    f.app.write(
+        "src/entry.js",
+        "import * as ns from './pattern.js'; console.log(ns);",
+    );
+    f.app.write(
+        "src/pattern.js",
+        "export const pattern = /,oops/;\nimport.meta.hot.acceptExports(['pattern']);",
+    );
+    assert_eq!(f.get("/src/entry.js").0, 200);
+    assert_eq!(f.get("/src/pattern.js").0, 200);
+    let mut ws = f.ws();
+    f.app.write(
+        "src/pattern.js",
+        "export const pattern = /,changed/;\nimport.meta.hot.acceptExports(['pattern']);",
+    );
+    f.notify_modified("src/pattern.js");
+    let m = next(&mut ws);
+    assert_eq!(m["type"], "update", "{m}");
+    assert_eq!(m["updates"][0]["type"], "js-update", "{m}");
+    assert_eq!(m["updates"][0]["path"], "/src/pattern.js", "{m}");
+    assert_eq!(m["updates"][0]["acceptedPath"], "/src/pattern.js", "{m}");
 }
 
 #[test]

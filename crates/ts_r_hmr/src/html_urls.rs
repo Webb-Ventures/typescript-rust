@@ -144,65 +144,15 @@ pub fn rewrite(
 }
 
 /// The byte ranges (inside the quotes) of the string arguments of `import("...")` calls in
-/// classic script text, skipping comments, strings and template literals; `x.import(...)`
-/// is a method call, not one of them.
+/// classic script text. Use the JS scanner so comments, strings, template text and regex
+/// literals are skipped, and `x.import(...)` is left alone.
 fn import_expressions(js: &str) -> Vec<(usize, usize)> {
-    let b = js.as_bytes();
-    let mut found = Vec::new();
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'/' if b.get(i + 1) == Some(&b'/') => {
-                i = js[i..].find('\n').map_or(b.len(), |k| i + k + 1);
-            }
-            b'/' if b.get(i + 1) == Some(&b'*') => {
-                i = js[i + 2..].find("*/").map_or(b.len(), |k| i + 2 + k + 2);
-            }
-            q @ (b'"' | b'\'' | b'`') => i = literal_end(b, i, q),
-            b'i' if js[i..].starts_with("import")
-                && (i == 0 || !is_word(b[i - 1]))
-                && !b.get(i + 6).copied().is_some_and(is_word)
-                && !(i > 0 && b[i - 1] == b'.' && !(i > 2 && &b[i - 3..i - 1] == b"..")) =>
-            {
-                let mut j = i + 6;
-                while j < b.len() && b[j].is_ascii_whitespace() {
-                    j += 1;
-                }
-                if b.get(j) == Some(&b'(')
-                    && let Some(&q @ (b'"' | b'\'')) = b.get(j + 1)
-                {
-                    let end = literal_end(b, j + 1, q);
-                    if b.get(end) == Some(&b')') && b[end - 1] == q && end > j + 2 {
-                        found.push((j + 2, end - 1));
-                    }
-                    i = end;
-                } else {
-                    i += 6;
-                }
-            }
-            _ => i += 1,
-        }
-    }
-    found
-}
-
-/// The index past the literal opened by `q` at `at` (escapes skipped; a line break ends an
-/// unterminated quote).
-fn literal_end(b: &[u8], at: usize, q: u8) -> usize {
-    let mut i = at + 1;
-    while i < b.len() {
-        match b[i] {
-            b'\\' => i += 2,
-            b'\n' if q != b'`' => return i,
-            c if c == q => return i + 1,
-            _ => i += 1,
-        }
-    }
-    b.len()
-}
-
-fn is_word(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'$'
+    crate::scan::scan(js)
+        .imports
+        .into_iter()
+        .filter(|r| r.kind == crate::scan::ImportKind::Dynamic)
+        .map(|r| (r.start as usize, r.end as usize))
+        .collect()
 }
 
 struct Attr {
@@ -418,6 +368,15 @@ mod tests {
         assert_eq!(
             run(html, true),
             "<script>import('/app/a.js'); x.import('/b.js'); // import('/c.js')\n\"import('/d.js')\"; import (\"/app/e.js\")</script><script type=module>import('/f.js')</script>"
+        );
+    }
+
+    #[test]
+    fn classic_script_regex_literals_are_unchanged() {
+        let html = r#"<script>const re = /import("foo")/; const escaped = /\/["/]import("fake")/g; const n = 8 / 2; const x = n / import("real.js") / 2;</script>"#;
+        assert_eq!(
+            run(html, true),
+            r#"<script>const re = /import("foo")/; const escaped = /\/["/]import("fake")/g; const n = 8 / 2; const x = n / import("/app/real.js") / 2;</script>"#
         );
     }
 
