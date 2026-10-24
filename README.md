@@ -20,7 +20,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 ```
 
 > **Status: preview.** The type checker is the most mature tool. It gives tsc 7's exact output on
-> 96.9% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns
+> 97.0% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns
 > and TypeORM, and is within a few diagnostics on Playwright (2 extra) and RxJS (6 extra, 5
 > missing, of about 21,900). Every other tool works on real projects
 > but has known gaps (below). Version numbers stay below 1.0 until that changes.
@@ -40,7 +40,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 
 | Tool | Replaces | Works today | Known gaps |
 |---|---|---|---|
-| `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and narrowing; 3.1% of conformance tests still differ |
+| `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and narrowing; 3.0% of conformance tests still differ |
 | `ts-r-lint` | ESLint, oxlint | 154 rules, 51 of them type-aware on ts-r's own checker; 15,495 of 15,517 cases of ESLint's and typescript-eslint's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint |
 | `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | `ts-r-run` | tsx, ts-node | Runs TypeScript on Node 22.15+ with tsc 7's JavaScript output | Only the entry's tsconfig is used |
