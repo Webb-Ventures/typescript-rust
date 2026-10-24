@@ -496,14 +496,14 @@ checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "ts_r_ast"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_span",
 ]
 
 [[package]]
 name = "ts_r_binder"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_ast",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_build"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "notify",
  "rustc-hash",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_bundler"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
  "rustc-hash",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_cache"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
  "memmap2",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_check"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_ast",
  "ts_r_binder",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_checker"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_ast",
@@ -600,14 +600,14 @@ dependencies = [
 
 [[package]]
 name = "ts_r_cli"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_cache",
 ]
 
 [[package]]
 name = "ts_r_codegen"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_ast",
  "ts_r_lexer",
@@ -618,14 +618,14 @@ dependencies = [
 
 [[package]]
 name = "ts_r_config"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_testing",
 ]
 
 [[package]]
 name = "ts_r_decls"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
  "ts_r_ast",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_dev"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "serde_json",
  "ts_r_ast",
@@ -655,14 +655,14 @@ dependencies = [
 
 [[package]]
 name = "ts_r_diagnostics"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_span",
 ]
 
 [[package]]
 name = "ts_r_emit"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_ast",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_guard"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_ast",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_history"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
  "rustc-hash",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_hmr"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "regex-lite",
  "rustls",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_lexer"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "memchr",
  "ts_r_ast",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_lint"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "serde_json",
@@ -758,14 +758,14 @@ dependencies = [
 
 [[package]]
 name = "ts_r_lint_cli"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_lint",
 ]
 
 [[package]]
 name = "ts_r_lsp"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
  "interprocess",
@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_minify"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_ast",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_parser"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_ast",
  "ts_r_diagnostics",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_projects"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
  "rustc-hash",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_resolver"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "ts_r_config",
  "ts_r_testing",
@@ -841,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_run"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "notify",
  "rustc-hash",
@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_sound"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "toml",
@@ -879,21 +879,21 @@ dependencies = [
 
 [[package]]
 name = "ts_r_span"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "ts_r_testing"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "ts_r_transform"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_ast",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_types"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "rustc-hash",
  "ts_r_testing",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "ts_r_watch"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "kqueue",
  "notify",
@@ -1144,7 +1144,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "xtask"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "serde",
  "serde_json",
