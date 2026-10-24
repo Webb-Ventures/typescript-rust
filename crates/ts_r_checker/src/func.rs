@@ -405,9 +405,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Node::Index { obj, index, .. } = *self.ast(left.file).node(left.node) else {
             return false;
         };
-        if !b
-            .resolved(obj)
-            .is_some_and(|t| b.late_expandos.binary_search(&(t, left.node)).is_ok())
+        if b.resolved(obj)
+            .is_none_or(|t| b.late_expandos.binary_search(&(t, left.node)).is_err())
         {
             return false;
         }

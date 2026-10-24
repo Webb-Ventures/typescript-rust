@@ -2548,8 +2548,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if f.contains(TypeFlags::INDEXED_ACCESS) {
                 if let TypeKind::IndexedAccess { obj, index } = s.kind(cur) {
-                    // `{ [K in C]: X }[C]` is `X` with `K` replaced by `C`.
-                    if let Some(sub) = self.indexed_mapped_substitution_ext(cur, true)
+                    // `{ [K in C]: X }[C]` is `X` with `K` replaced by `C`, also for a
+                    // concrete `C` indexed by a generic key.
+                    if let Some(sub) = self.mapped_access_substitution(cur)
                         && sub != cur
                     {
                         cur = sub;

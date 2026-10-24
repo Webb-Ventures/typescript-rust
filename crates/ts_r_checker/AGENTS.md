@@ -2726,6 +2726,20 @@ Files, by layer:
   unconstrained `T[K]` against a union target is explained step by step: `T[keyof T]`, then
   `T[string] | T[number] | T[symbol]` (tsc: checker.go, getSimplifiedIndexedAccessType,
   getNormalizedUnionOrIntersectionType; relater.go, isRelatedTo; `mapped_access_relation`).
+- **A concrete mapped type indexed by a generic key** (no `as` clause, not `-?`, the object
+  itself not generic) has its template with the key put in as its constraint:
+  `OptionHandlers[K]` is `(option: Options & { kind: K }) => string`. Under strict null
+  checks it gains `| undefined` when the mapped type is optional (`?` or homomorphic over
+  optional properties) and some optional property's literal key fits the key's base
+  constraint. This is the base constraint of such an access, the constraint used when it is
+  a relation source (also inside a union target and as a member of a source intersection),
+  but not the shape it is reported as (tsc: checker.go, getIndexedAccessType's mapped-type
+  branch, substituteIndexedMappedType, couldAccessOptionalProperty,
+  getEffectiveConstraintOfIntersection; `concrete_mapped_generic_index_substitution`).
+- **Constrained type variables in unions.** A union of intersections `("one" & K) | ("two"
+  & K)` collapses to `K` when every primitive member of `K`'s base constraint appears as the
+  other part of one of the intersections. Done before subtype reduction (tsc: checker.go,
+  removeConstrainedTypeVariables; `remove_constrained_type_variables`).
 - **A generic key in an element access** must be assignable to `keyof` the object, or to each
   member's `keyof` for a union object (TS2536, and the access is the error type). Writing
   through a mapped type with a `readonly` modifier reports TS2542 (tsc: checker.go,
