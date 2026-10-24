@@ -2924,12 +2924,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-24, 48eb582, parity/grammar-diagnostics merged with main at 1c10cde (#31's
-  checker round and #29's binder changes): the lexer's regex pattern and flag errors and octal
-  escape errors; 12750 compared variants, 21 s on 4 threads): 12345 exact (96.8%; all
-  diagnostics and chains), 12365 (97.0%) exact on first lines; 203 variants with a diagnostic
-  tsc does not report, 17 of them tests where tsc reports nothing.
-  Earlier: 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-24, 7ae5e2e, parity/parser-2 merged with parity/grammar-diagnostics at
+  f9827c4: mapped type members, JSX name escapes, `import()` trailing commas by module and
+  plain JavaScript grammar errors; 12750 compared variants, 25 s on 4 threads): 12350 exact
+  (96.9%; all diagnostics and chains), 12370 (97.0%) exact on first lines; 200 variants with
+  a diagnostic tsc does not report, 17 of them tests where tsc reports nothing.
+  Earlier: 12345, 203 and 17 (48eb582, parity/grammar-diagnostics merged with main at 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
