@@ -1897,3 +1897,24 @@ fn external_imports_keep_evaluation_order() {
     let bar = code.find("from \"bar\"").expect(code);
     assert!(foo < bar, "{code}");
 }
+
+#[test]
+fn json_namespace_imports_are_es_namespaces() {
+    // `default` is the whole value, even with an `__esModule` key, and like every other
+    // property of an ES namespace it is a getter. A `__proto__` key is a property.
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "import * as ns from './a.json';\nimport b from './b.json';\n\
+             console.log(Object.getOwnPropertyDescriptor(ns, 'default').get !== undefined, \
+             ns.default.__esModule, Object.keys(b));\n",
+        ),
+        ("a.json", r#"{"__esModule": true, "x-y": 1}"#),
+        ("b.json", r#"{"__proto__": {"foo": 1}}"#),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    assert_eq!(run_node("json-ns", &r, "entry.js"), "true true [ '__proto__' ]\n");
+}

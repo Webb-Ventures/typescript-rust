@@ -99,7 +99,7 @@ pub fn load(
                 "{}".to_owned()
             } else {
                 // JSON is a JavaScript expression; parenthesize so `{` isn't a block.
-                format!("(\n{}\n)", text.trim_end())
+                format!("(\n{}\n)", computed_proto_keys(text.trim_end()))
             };
             Ok(js_value(body, hash))
         }
@@ -1033,6 +1033,72 @@ pub fn file_stem_name(path: &str) -> String {
 
 /// The first BigInt literal (`123n`) outside strings in `text`. The JSONC parser reads it as
 /// a number, but JSON has no BigInt and esbuild rejects it.
+/// JSON text used as a JavaScript expression, with each `"__proto__"` key made computed
+/// (`["__proto__"]`): in an object literal the plain key would set the prototype instead
+/// of creating a property, which is what `JSON.parse` does.
+fn computed_proto_keys(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains("__proto__") && !text.contains("\\u") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len() + 4);
+    let mut last = 0;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        while i < b.len() && b[i] != b'"' {
+            i += if b[i] == b'\\' { 2 } else { 1 };
+        }
+        let end = (i + 1).min(b.len());
+        i = end;
+        let mut j = end;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        let raw = text.get(start + 1..end.saturating_sub(1)).unwrap_or("");
+        if j < b.len() && b[j] == b':' && json_string_value(raw) == "__proto__" {
+            out.push_str(&text[last..start]);
+            out.push('[');
+            out.push_str(&text[start..end]);
+            out.push(']');
+            last = end;
+        }
+    }
+    if last == 0 {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    out.push_str(&text[last..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// The value of a JSON string's raw contents (only `\uXXXX` and one-character escapes).
+fn json_string_value(raw: &str) -> String {
+    let mut out = String::new();
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('u') => {
+                let hex: String = chars.by_ref().take(4).collect();
+                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    out.push(ch);
+                }
+            }
+            Some(e) => out.push(e),
+            None => {}
+        }
+    }
+    out
+}
+
 fn json_bigint(text: &str) -> Option<&str> {
     let b = text.as_bytes();
     let mut i = 0;
@@ -1065,6 +1131,18 @@ fn json_bigint(text: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_proto_keys_become_computed() {
+        let t = r#"{"a": "__proto__", "__proto__": {"x": 1}, "\u005f_proto__" : 2, "b\"": 3}"#;
+        assert_eq!(
+            computed_proto_keys(t),
+            r#"{"a": "__proto__", ["__proto__"]: {"x": 1}, ["\u005f_proto__"] : 2, "b\"": 3}"#
+        );
+        assert_eq!(computed_proto_keys(r#"{"a": 1}"#), r#"{"a": 1}"#);
+        // Unterminated input does not panic.
+        let _ = computed_proto_keys("\"__proto__\\");
+    }
 
     #[test]
     fn file_loader_hash_covers_the_generated_url() {

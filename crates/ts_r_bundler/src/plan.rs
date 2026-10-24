@@ -12,7 +12,7 @@ use crate::expr::Expr;
 use crate::graph::{DISABLED_PREFIX, Graph, ModuleId, Target};
 use crate::link::{Binding, Kind, Link, Wrap};
 use crate::meta::{Imported, PartKind, RecordKind, Sym, SymKind};
-use crate::options::{BuildOptions, Format, Platform};
+use crate::options::{BuildOptions, Format, Loader, Platform};
 use crate::prepare::file_stem_name;
 use crate::runtime::{Helper, Helpers};
 
@@ -307,7 +307,6 @@ fn unwrapped_entry(input: &PlanInput<'_>, format: Format) -> Option<ModuleId> {
 /// already, CommonJS modules need their own directive, and non-JavaScript loaders print
 /// strict-safe code. A banner would end the directive prologue.
 fn strict_file_ok(input: &PlanInput<'_>, e: ModuleId) -> bool {
-    use crate::options::Loader;
     let (g, l) = (input.graph, input.link);
     input.opts.banner.is_none()
         && g.modules.iter().enumerate().all(|(i, m)| {
@@ -1075,7 +1074,13 @@ impl Planner<'_> {
             let v = this.import_var(m, t);
             let to_esm = this.helper_names[Helper::ToEsm as usize].clone();
             let mut args = vec![Expr::call(&this.wrapper[t as usize], vec![])];
-            if node_mode {
+            let json = {
+                let tm = &this.g.modules[t as usize];
+                tm.loader == Loader::Json && !tm.default_only
+            };
+            if json {
+                args.push(Expr::Num(2));
+            } else if node_mode {
                 args.push(Expr::Num(1));
             }
             refs.insert(this.wrapper[t as usize].clone());
