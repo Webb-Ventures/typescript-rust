@@ -125,7 +125,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `error`, `custom`). We add only `tsrId` on `update` (clients ignore unknown fields). The
   overlay element is `<vite-error-overlay>`; CSS `<style>` tags carry `data-vite-dev-id`.
   A stylesheet imported from JS exports nothing (Vite dropped its default export; the text
-  is `?inline`'s default export).
+  is `?inline`'s default export). A CSS module (`x.module.css`) exports an empty class map
+  as its default, so `import classes from './x.module.css'` still links and the rest of the
+  page runs: a missing export would stop every module on the page.
   Client → server: `custom` events (`vite:invalidate`, `ts-r:applied`, user events). A
   client connecting or disconnecting is passed to the plugin host as Vite's
   `vite:client:connect`/`vite:client:disconnect` events (only when a plugin listens).

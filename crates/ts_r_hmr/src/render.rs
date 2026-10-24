@@ -124,8 +124,10 @@ fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
     None
 }
 
-/// A stylesheet as a self-accepting JS module that injects a `<style>` tag. It exports
-/// nothing, like Vite's (the text is `?inline`'s default export).
+/// A stylesheet as a self-accepting JS module that injects a `<style>` tag. A plain
+/// stylesheet exports nothing, like Vite's (the text is `?inline`'s default export). A CSS
+/// module (`x.module.css`) exports an empty class map as its default, so a page importing
+/// one still links: its class names aren't scoped or mapped yet.
 pub fn css_module(url: &str, css: &str) -> String {
     css_module_at(CLIENT_URL, url, css)
 }
@@ -141,9 +143,28 @@ pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
          const __ts_r_css = {};\n\
          __ts_r_update_style(__ts_r_id, __ts_r_css);\n\
          import.meta.hot.accept();\n\
-         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n",
-        js_string(css)
+         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n{}",
+        js_string(css),
+        if is_css_module(url) {
+            "export default {};\n"
+        } else {
+            ""
+        }
     )
+}
+
+/// Whether `url` names a CSS module: `.module.` before a stylesheet extension
+/// (`vite: packages/vite/src/node/plugins/css.ts`, the CSS modules pattern).
+pub fn is_css_module(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let Some((stem, ext)) = path.rsplit_once('.') else {
+        return false;
+    };
+    stem.ends_with(".module")
+        && matches!(
+            ext,
+            "css" | "less" | "sass" | "scss" | "styl" | "stylus" | "pcss" | "postcss" | "sss"
+        )
 }
 
 /// Joins a relative URL path onto a directory URL ending in `/`, resolving `.` and `..`.
@@ -321,6 +342,11 @@ mod tests {
         assert!(m.contains("import.meta.hot.accept();"));
         assert!(m.contains("<\\/style>"));
         assert!(!m.contains("export"));
+        let m = css_module("/src/a.module.css?t=1", ".a { color: red }");
+        assert!(m.ends_with("export default {};\n"), "{m}");
+        assert!(is_css_module("/x.module.scss"));
+        assert!(!is_css_module("/module.css"));
+        assert!(!is_css_module("/x.module.css.js"));
         assert_eq!(join_url("/", "../../x"), "/x");
     }
 
