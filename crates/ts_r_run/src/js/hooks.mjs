@@ -5,6 +5,7 @@ import { findPackageJSON, registerHooks, setSourceMapsSupport } from 'node:modul
 import { readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import './relay.mjs';
 
 const env = process.env;
 const manifestPath = env.TS_R_RUN_MANIFEST;

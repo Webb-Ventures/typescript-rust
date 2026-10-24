@@ -20,6 +20,9 @@ pub mod project;
 pub mod serve;
 pub mod watch;
 
+#[cfg(unix)]
+mod unix;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -30,6 +33,7 @@ use crate::project::{Project, absolute};
 const HOOKS: &str = include_str!("js/hooks.mjs");
 const PRELOAD_ASYNC: &str = include_str!("js/preload-async.mjs");
 const HOOKS_ASYNC: &str = include_str!("js/hooks-async.mjs");
+const RELAY: &str = include_str!("js/relay.mjs");
 
 const HELP: &str = "ts-r-run: run a TypeScript file with Node
 
@@ -266,12 +270,14 @@ pub fn hooks_dir(root: &Path) -> std::io::Result<PathBuf> {
         .str(HOOKS)
         .str(PRELOAD_ASYNC)
         .str(HOOKS_ASYNC)
+        .str(RELAY)
         .key()
         .to_hex();
     let dir = root.join(format!("hooks-{}", &key[..16]));
     manifest::write_once(&dir, "hooks.mjs", HOOKS.as_bytes())?;
     manifest::write_once(&dir, "hooks-async.mjs", HOOKS_ASYNC.as_bytes())?;
     manifest::write_once(&dir, "preload-async.mjs", PRELOAD_ASYNC.as_bytes())?;
+    manifest::write_once(&dir, "relay.mjs", RELAY.as_bytes())?;
     Ok(dir)
 }
 
@@ -287,6 +293,12 @@ pub struct Launch<'a> {
 impl Launch<'_> {
     pub fn command(&self) -> Command {
         let mut c = Command::new(&self.cli.node);
+        // Node's test runner reports where each test was declared from the stack of the
+        // `test()` call; without Node's own source-map support that is a line of the
+        // compiled code. Put the flag first so a later `--no-enable-source-maps` still wins.
+        if self.cli.source_maps && self.cli.node_args.iter().any(|a| a == "--test") {
+            c.arg("--enable-source-maps");
+        }
         c.args(&self.cli.node_args);
         c.arg("--import").arg(import_specifier(&self.preload));
         c.arg(self.entry).args(&self.cli.args);
@@ -345,17 +357,16 @@ fn file_url(path: &str) -> String {
     out
 }
 
-/// Replaces this process with `cmd` (Unix) or runs it and returns its exit code.
-fn exec(mut cmd: Command) -> i32 {
+/// Runs Node and returns the exit code to leave with. On Unix ts-r-run stays the parent and
+/// relays signals (`unix.rs`); elsewhere it waits for the child.
+fn run_node(cmd: Command) -> i32 {
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt as _;
-        let err = cmd.exec();
-        eprintln!("ts-r-run: cannot start node: {err}");
-        127
+        unix::run_node(cmd)
     }
     #[cfg(not(unix))]
     {
+        let mut cmd = cmd;
         match cmd.status() {
             Ok(s) => s.code().unwrap_or(1),
             Err(e) => {
@@ -424,7 +435,7 @@ fn run(cli: &Cli) -> i32 {
             preload: hooks.join("preload-async.mjs"),
             manifest: None,
         };
-        return exec(launch.command());
+        return run_node(launch.command());
     }
     let preload = hooks.join("hooks.mjs");
     if cli.cache {
@@ -437,19 +448,23 @@ fn run(cli: &Cli) -> i32 {
                 preload,
                 manifest: Some(m),
             };
-            return exec(launch.command());
+            return run_node(launch.command());
         }
     }
-    let engine = Engine::new(
-        Project::load(&entry, cli.tsconfig.as_deref()),
-        cli.cache,
-        cli.source_maps,
-    );
-    let manifest = match prepare(cli, &engine, &entry, &dir) {
-        Ok((m, _)) => m,
-        Err(e) => {
-            eprint!("{e}");
-            return 1;
+    // The engine (and the graph) are dropped before Node starts: this process stays alive
+    // as Node's parent for the whole run.
+    let manifest = {
+        let engine = Engine::new(
+            Project::load(&entry, cli.tsconfig.as_deref()),
+            cli.cache,
+            cli.source_maps,
+        );
+        match prepare(cli, &engine, &entry, &dir) {
+            Ok((m, _)) => m,
+            Err(e) => {
+                eprint!("{e}");
+                return 1;
+            }
         }
     };
     let launch = Launch {
@@ -458,20 +473,12 @@ fn run(cli: &Cli) -> i32 {
         preload,
         manifest: Some(manifest),
     };
-    if cli.cache {
-        exec(launch.command())
-    } else {
-        // Nothing may stay behind: run, then delete the temporary directory.
-        let code = match launch.command().status() {
-            Ok(s) => s.code().unwrap_or(1),
-            Err(e) => {
-                eprintln!("ts-r-run: cannot start node: {e}");
-                127
-            }
-        };
+    let code = run_node(launch.command());
+    if !cli.cache {
+        // Nothing may stay behind: delete the temporary directory.
         let _ = std::fs::remove_dir_all(&dir);
-        code
     }
+    code
 }
 
 #[cfg(test)]
@@ -518,5 +525,31 @@ mod tests {
         assert!(parse_args(&args("--strategy nope a.ts")).is_err());
         assert!(parse_args(&args("--watch")).is_err());
         assert_eq!(parse_args(&args("--help")).unwrap().mode, Mode::Help);
+    }
+
+    #[test]
+    fn test_runner_gets_node_source_maps_first() {
+        let argv = |cli: &Cli| -> Vec<String> {
+            let launch = Launch {
+                cli,
+                entry: "/p/t.ts",
+                preload: PathBuf::from("/h/hooks.mjs"),
+                manifest: None,
+            };
+            let c = launch.command();
+            c.get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let c = parse_args(&args("--test --no-enable-source-maps t.ts")).unwrap();
+        let a = argv(&c);
+        assert_eq!(
+            a[..3],
+            args("--enable-source-maps --test --no-enable-source-maps")
+        );
+        let c = parse_args(&args("--no-source-maps --test t.ts")).unwrap();
+        assert_eq!(argv(&c)[0], "--test");
+        let c = parse_args(&args("--inspect t.ts")).unwrap();
+        assert_eq!(argv(&c)[0], "--inspect");
     }
 }

@@ -238,3 +238,48 @@ fn a_tsconfig_given_with_a_missing_extends_stops_the_run() {
     assert!(out.stdout.is_empty());
     assert!(String::from_utf8_lossy(&out.stderr).contains("TS6053"));
 }
+
+#[test]
+fn test_runner_locations_map_to_typescript_lines() {
+    let test = "import assert from 'node:assert/strict'\nimport { test } from 'node:test'\n\n\
+                test('fails', () => {\n  const x: number = 1\n  assert.ok(x > 1)\n})\n";
+    let Some(out) = run("test-loc", &[("t.test.ts", test)], &["--test", "t.test.ts"]) else {
+        return;
+    };
+    let all = String::from_utf8_lossy(&out.stdout) + String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{all}");
+    assert!(all.contains("t.test.ts:4:1"), "{all}");
+}
+
+/// The program signals its parent (ts-r-run), which relays the signal back: a listener of
+/// the program's own runs, and the relay's own listener stays hidden.
+#[cfg(unix)]
+#[test]
+fn signals_sent_to_ts_r_run_reach_the_program() {
+    let app = "process.on('SIGTERM', () => {\n\
+                 console.log('listeners', process.listeners('SIGTERM').length, process.listenerCount('SIGTERM'));\n\
+                 console.log('raw', process.rawListeners('SIGTERM').length);\n\
+                 process.exit(3);\n\
+               });\n\
+               setTimeout(() => {}, 1e5);\n\
+               process.kill(process.ppid, 'SIGTERM');\n";
+    let Some(out) = run("relay", &[("app.ts", app)], &["app.ts"]) else {
+        return;
+    };
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "listeners 1 1\nraw 2\n"
+    );
+}
+
+/// A program that never returns to its event loop is killed, with the code of the signal.
+#[cfg(unix)]
+#[test]
+fn an_unresponsive_program_is_killed_on_sigint() {
+    let app = "process.kill(process.ppid, 'SIGINT');\nwhile (true) {}\n";
+    let Some(out) = run("relay-loop", &[("app.ts", app)], &["app.ts"]) else {
+        return;
+    };
+    assert_eq!(out.status.code(), Some(130));
+}

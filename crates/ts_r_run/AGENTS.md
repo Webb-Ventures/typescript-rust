@@ -14,13 +14,14 @@ argument). Internal modes: `--compile <file>` (prints `esm`/`cjs`, a newline, th
 the preload for files the graph walk missed), `--resolve <parent> <specifier>` (prints the
 tsconfig `paths`/`baseUrl` target or nothing; used by the preload for plain JavaScript
 parents) and `--serve` (the hook strategy's compiler).
-Env: `TS_R_RUN_THREADS`, `TS_R_CACHE_DIR`. Exit code: Node's (exec on Unix); 1 for compile
+Env: `TS_R_RUN_THREADS`, `TS_R_CACHE_DIR`. Exit code: Node's, or 128 + the signal that ended
+it; 1 for compile
 errors (printed tsc-style), 2 for usage errors. Needs Node 22.15+ (`module.registerHooks`).
 
 ## How a run works (strategy "prebuild", the default)
 
 1. `manifest::check_stamp`: if every input recorded for (build, entry, flags) still has its
-   size and mtime, exec Node with the recorded manifest. Nothing else runs.
+   size and mtime, start Node with the recorded manifest. Nothing else runs.
 2. `Project::load`: nearest `tsconfig.json` (no `include` globbing), `TransformOptions` for
    running (target ≥ ES2022, JSX runtime, no `importHelpers`), resolver in bundler mode.
    A `--tsconfig` that can't be read or whose `extends` is missing stops the run
@@ -37,15 +38,19 @@ errors (printed tsc-style), 2 for usage errors. Needs Node 22.15+ (`module.regis
    once per run; it is in the cache salt and its file is a stamp input.
 4. `manifest::write` (`<cache root>/run-graphs/<blake3>.graph`, written once per content) and
    `write_stamp`.
-5. Exec `node --import <hooks.mjs> <entry> args` with `TS_R_RUN_*` env vars (the preload
-   deletes them so child processes don't see them). `--import` takes a URL: on Windows the
+5. Start `node --import <hooks.mjs> <entry> args` with `TS_R_RUN_*` env vars (the preload
+   deletes them so child processes don't see them) and stay its parent (signal relay below).
+   With `--test` in the Node flags, `--enable-source-maps` goes first, as tsx does: Node's
+   test runner takes each test's location from the stack of its `test()` call, which only
+   Node's own source-map support maps to `.ts` lines (a later `--no-enable-source-maps` wins). `--import` takes a URL: on Windows the
    preload is passed as `file:///C:/...` (a bare `C:\...` is read as scheme `c:`).
 
 Files: `lib.rs` (CLI, modes, launch), `compile.rs` (one file: format detection, transform,
 print, specifiers, cache payload), `project.rs` (tsconfig, options, resolution policy),
 `graph.rs` (engine with cache, parallel walk, build fingerprint), `manifest.rs` (manifest and
 stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
-`js/preload-async.mjs` + `js/hooks-async.mjs` (hook strategy). The JS files are embedded with
+`js/preload-async.mjs` + `js/hooks-async.mjs` (hook strategy), `unix.rs` + `js/relay.mjs`
+(signal relay, imported by both preloads). The JS files are embedded with
 `include_str!` and written once per content to `run-graphs/hooks-<hash>/`.
 
 ## Invariants
@@ -80,6 +85,19 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
 - **Nothing left running**: `--watch` children exit when their parent ts-r-run disappears
   (`TS_R_RUN_WATCH_PARENT` poll); `--serve` exits when its stdin closes; `--no-cache` runs
   delete their temp directory.
+- **Signals reach the program, and a program that can't answer is stopped** (Unix, not
+  `--watch`; the rule follows tsx's relay, read in tsx 4.23 `dist/cli.mjs` and
+  `dist/preflight.cjs`, written here on our own design). ts-r-run spawns Node instead of
+  exec'ing it and passes its pid in `TS_R_RUN_RELAY`. `js/relay.mjs` puts a listener first on
+  SIGINT, SIGTERM and SIGHUP that sends SIGURG to ts-r-run ("got it") and exits with 128 +
+  the signal number when the program has no listener of its own; it is hidden from
+  `process.listeners()`/`listenerCount()` (counting one given listener hides it only when it is
+  the one asked about) but stays in `rawListeners()`. On one of those signals ts-r-run waits
+  30 ms for the report (Ctrl-C reaches the whole process group), then sends the signal on,
+  waits 1 s (tsx: 30 ms; longer so a busy but responsive program isn't killed), then kills the
+  child with SIGKILL and exits 128 + the signal. SIGQUIT, SIGUSR1 and SIGUSR2 are passed on
+  as they are. Signals are sent with the `kill` utility (no `unsafe`, as in `watch.rs`).
+  Windows waits for the child (no signals to relay).
 - The preload must stay small and synchronous on the hot path (one `readFileSync` of the
   manifest, `JSON.parse` of the index only, code sliced lazily per module).
 
@@ -91,7 +109,7 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
 - `tests/node.rs`: small projects run in Node under `scripts/limit.sh`, one per tsx behaviour
   the run oracle found missing (package resolution, lenient `.js`, JSON, `paths`/`baseUrl`
   from JavaScript, `module.exports` in a module package, `.jsx` without `allowJs`, a fatal
-  `--tsconfig`). Skipped when Node is missing.
+  `--tsconfig`, `--test` locations, the signal relay). Skipped when Node is missing.
 - Parity oracle: [`bench/run-oracle`](../../bench/run-oracle/README.md) runs tsx's own suite and
   Node's TypeScript tests against ts-r-run (`node bench/run-oracle/run.mjs`; numbers there).
 - `tests/guard.rs`: `parse<T>` end to end (the `ts_r_guard` fixture app run in Node under
@@ -123,7 +141,9 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
 `ts_r_span`, `ts_r_ast`, `ts_r_parser`, `ts_r_diagnostics`, `ts_r_codegen`,
 `ts_r_transform`, `ts_r_config`, `ts_r_resolver`, `ts_r_cache`, `ts_r_guard` (`parse<T>`
 call sites), `ts_r_sound` (only `config::guard_options`: `[sound.guard]`), `rustc-hash`, `notify` (file
-watching for `--watch`, same version and features as `ts_r_hmr`). Dev: `ts_r_testing`.
+watching for `--watch`, same version and features as `ts_r_hmr`), `signal-hook` (Unix only,
+`iterator` feature: receiving signals in a thread for the relay; std has no safe way to
+install a signal handler, and the crate denies `unsafe`). Dev: `ts_r_testing`.
 
 ## Gaps
 
@@ -136,11 +156,8 @@ watching for `--watch`, same version and features as `ts_r_hmr`). Dev: `ts_r_tes
 - Only the entry's tsconfig is used for every file (like tsx); per-package tsconfigs in a
   monorepo are ignored.
 - From the run oracle (bench/run-oracle/README.md has the cases):
-  - No signal relay: ts-r-run execs Node, so tsx's relay tests (exit 130 after a second
-    Ctrl-C, a child that ignores SIGINT) don't apply.
   - A syntax error in a file reached only by a dynamic `import()` stops the run up front
     (the invariant above); tsx fails only that import, at run time.
-  - `--test` reporter locations aren't mapped to `.ts` lines in its failure output.
   - Hook strategy: the preload's resolve fallback, lenient `.js` and `--resolve` are only in
     the prebuild preload (`js/hooks.mjs`).
   - Transform gaps (`ts_r_transform`): `import.meta` is kept verbatim in CommonJS output,
