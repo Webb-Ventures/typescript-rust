@@ -42,6 +42,7 @@ npm ci
 npm run build                     # next build, then scripts/check.mjs (below); writes out/
 SITE_MODE=launched npm run build  # the launched site, whatever data/site.json says
 npm run check                     # the checks alone (sources, and out/ if it exists)
+npm run typecheck                 # tsc --noEmit through ts-r's drop-in (below)
 npm run dev                       # next dev (launched routes need SITE_MODE=launched)
 
 cargo xtask diag-codes --out landing/data/diagnostics.json   # after a crate adds or drops a code
@@ -92,11 +93,35 @@ broken source can't be published even without the check.
 | `data/error-selection.json` | How the error codes with pages were chosen, and the counts behind it |
 | `public/` | Copied as is: `.nojekyll`, `favicon.svg`, `apple-touch-icon.png` and `assets/og-image.*` (kept so the docs site's old icon and share-image URLs still resolve) |
 
-Dependencies: `next`, `react`, `react-dom` and `posthog-js`; dev: `typescript`, the React and
-Node types, `@fontsource/inter` (the share image's font). The Markdown renderer is our own
+Dependencies: `next`, `react`, `react-dom` and `posthog-js`; dev: `typescript`,
+`@ts-r.dev/typescript` (below), the React and Node types, `@fontsource/inter` (the share
+image's font). The Markdown renderer is our own
 (`lib/content/markdown.mjs`, about 300 lines): the docs use a small subset, and keeping it means
 the heading anchors, tables and example blocks render exactly as before. Add a dependency only
 when it saves real work, and say why here.
+
+### Dogfooding ts-r
+
+The site type-checks with our own published drop-in, installed "next to TypeScript" (its
+README): `@ts-r.dev/typescript` at an exact version beside `typescript` 7.0.2, which stays as
+its fallback. `npm run typecheck` runs the drop-in's `bin/tsc` by path (both packages ship a
+`tsc` bin, so `node_modules/.bin/tsc` could be either). It runs ts-r-check when ts-r-check gave
+the same diagnostics as TypeScript on this tsconfig (the parity check, cached per tsconfig and
+lockfile), else TypeScript. `TS_R_TSC_VERBOSE=1` prints which (`parity match (cached)` means
+ts-r-check ran); `TS_R_TSC=typescript` forces TypeScript.
+
+- `next build`'s own type check stays on TypeScript: Next resolves the real `typescript`
+  package, and the flags it passes (`--declarationMap false --emitDeclarationOnly false`,
+  `--tsBuildInfoFile`, `--showConfig`) are ones the drop-in hands to TypeScript anyway. The
+  "in place of TypeScript" install (`"typescript": "npm:@ts-r.dev/typescript@…"`) fails
+  `npm install` with ERESOLVE for prerelease versions: the package's peer `typescript@^7.0.0`
+  then names itself, and `7.0.1000-alpha.3` doesn't satisfy `^7.0.0`.
+- CI (`.github/workflows/pages.yml`) runs `npm run typecheck` after the build, with no parity
+  cache, so every run compares ts-r-check with TypeScript on the site and warns, with the
+  report, if they differ.
+- Bump `@ts-r.dev/typescript` with each ts-r release (`npm i -D -E @ts-r.dev/typescript@next`).
+- Not yet: `@ts-r.dev/lint`. With no config it reports `no-undef` for Node globals in the
+  `.mjs` scripts, so it needs an `eslint.config` first.
 
 ## The rule for numbers
 
