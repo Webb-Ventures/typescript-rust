@@ -769,6 +769,11 @@ pub fn prepare_with(
         if let Some(m) = module {
             topts.module = m;
         }
+        if kind.is_typescript() && exports_const_enum(&ast) {
+            // Files are transformed one at a time, so an exported const enum can't be inlined
+            // into its importers: keep its object, as `isolatedModules` does.
+            topts.preserve_const_enums = true;
+        }
         let r = ts_r_transform::transform(&mut ast, &src, &topts);
         erased = r.erased;
         prelude = r.prelude;
@@ -1186,3 +1191,39 @@ mod tests {
     }
 }
 
+
+/// Whether a TypeScript file exports a const enum (`export const enum`, or a const enum named
+/// by a top-level `export { .. }`).
+fn exports_const_enum(ast: &Ast) -> bool {
+    let stmts = build::program_stmts(ast);
+    let mut consts: Vec<&str> = Vec::new();
+    for &s in stmts.iter() {
+        if let Node::Enum { modifiers, name, .. } = *ast.node(s)
+            && modifiers.contains(Modifiers::CONST)
+            && !modifiers.contains(Modifiers::DECLARE)
+        {
+            if modifiers.contains(Modifiers::EXPORT) {
+                return true;
+            }
+            if let Node::Ident { name } = *ast.node(name) {
+                consts.push(ast.atom(name));
+            }
+        }
+    }
+    !consts.is_empty()
+        && stmts.iter().any(|&s| {
+            let Node::ExportNamed {
+                type_only: false,
+                specifiers,
+                source: None,
+                ..
+            } = *ast.node(s)
+            else {
+                return false;
+            };
+            ast.list(specifiers).iter().any(|&sp| {
+                matches!(*ast.node(sp), Node::ExportSpecifier { type_only: false, local, .. }
+                    if matches!(*ast.node(local), Node::Ident { name } if consts.contains(&ast.atom(name))))
+            })
+        })
+}

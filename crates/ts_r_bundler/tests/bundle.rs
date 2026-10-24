@@ -1986,3 +1986,24 @@ fn an_export_named_proto_is_a_namespace_property() {
         assert_eq!(run_node("proto-export", &r, "entry.js"), "123 [ '__proto__' ]\n");
     }
 }
+
+#[test]
+fn exported_const_enums_keep_their_object() {
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "foo.ts",
+            "import { Foo, Baz } from './bar';\nconst enum Bar { A = 1, B = 2 }\n\
+             console.log(Foo['%/*'], Foo.Y, Baz.Z, Bar.A, Bar.B);\n",
+        ),
+        (
+            "bar.ts",
+            "export const enum Foo { '%/*' = 1, Y = 'y' }\nconst enum Baz { Z = 3 }\n\
+             export { Baz };\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["foo.ts"]));
+    assert_eq!(run_node("const-enum-export", &r, "foo.js"), "1 y 3 1 2\n");
+}
