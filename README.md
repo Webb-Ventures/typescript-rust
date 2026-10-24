@@ -113,17 +113,17 @@ request.
 ### Latest release
 
 <!-- bench:release:start -->
-Release **v0.1.0-alpha.3**:
+Release **v0.1.0-alpha.4**:
 
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
-| `version-startup` | `ts-r` 1.73 ms | `esbuild` 4.64 ms | **2.7× faster** |
-| `check-trpc` | `ts-r-check` 410 ms | `tsc-7` 969 ms | **2.4× faster** |
-| `check-date-fns` | `ts-r-check` 889 ms | `tsc-7` 1.76 s | **2.0× faster** |
-| `check-rxjs` | `ts-r-check` 980 ms | `tsc-7` 6.53 s | **6.7× faster** |
-| `build-three-x10` | `ts-r-build` 1.28 s | `esbuild` 1.21 s | 1.1× slower |
+| `version-startup` | `ts-r` 2.03 ms | `esbuild` 3.93 ms | **1.9× faster** |
+| `check-trpc` | `ts-r-check` 474 ms | `tsc-7` 979 ms | **2.1× faster** |
+| `check-date-fns` | `ts-r-check` 998 ms | `tsc-repo` 1.97 s | **2.0× faster** |
+| `check-rxjs` | `ts-r-check` 1.20 s | `tsc-7` 6.51 s | **5.4× faster** |
+| `build-three-x10` | `ts-r-build` 963 ms | `esbuild` 1.41 s | **1.5× faster** |
 
-Medians on linux-x86_64 (four dedicated cores), measured 2026-10-21. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
+Medians on linux-x86_64 (four dedicated cores), measured 2026-10-24. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
 <!-- bench:release:end -->
 
 ## How it works
