@@ -2924,7 +2924,7 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-24, MERGE, parity/grammar-diagnostics merged with main at 1c10cde (#31's
+  Current (2026-10-24, 48eb582, parity/grammar-diagnostics merged with main at 1c10cde (#31's
   checker round and #29's binder changes): the lexer's regex pattern and flag errors and octal
   escape errors; 12750 compared variants, 21 s on 4 threads): 12345 exact (96.8%; all
   diagnostics and chains), 12365 (97.0%) exact on first lines; 203 variants with a diagnostic
