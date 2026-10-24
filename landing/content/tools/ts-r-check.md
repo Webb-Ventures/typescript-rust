@@ -40,13 +40,13 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 
 ## Not yet
 
-- Regular expression pattern errors: only the flags of a regex literal are checked, so errors
-  such as TS1507 and TS1515 aren't reported. Octal escapes in strings (TS1487) aren't reported
-  either.
+- Octal escapes in strings (TS1487) are reported only with `--no-history`, not by a default
+  run or with `--noCheck`. Regular expression errors don't carry tsc's "Did you mean"
+  suggestions (TS1369).
 - Some inference: contextual types that flow through a reverse mapped type print wider than
   tsc's (`number | T["a"]` where tsc prints `number`).
 - Some relation and narrowing results differ from tsc's, mostly in TS2322, TS2339 and TS2345:
-  434 of tsc's 12,750 conformance test variants (3.4%) don't match exactly.
+  424 of tsc's 12,750 conformance test variants (3.3%) don't match exactly.
 
 The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.md).
 
