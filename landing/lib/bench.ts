@@ -96,7 +96,7 @@ export type Tile = {
 // 61 locale chunks esbuild emits, so they are in the build section's table instead.
 const TILES = [
   { tool: 'ts-r-dev', replaces: 'the Vite dev server', section: 'dev-vs-vite', chart: 'Save to page updated', ours: 'ts-r-dev', other: 'Vite 8.3.4', what: 'faster hot reload' },
-  { tool: 'ts-r-check', replaces: 'tsc', section: 'check', chart: 'Check all five projects', ours: 'ts-r-check', other: 'tsc 7.0.2', what: 'faster type checks' },
+  { tool: 'ts-r-check', replaces: 'tsc', section: 'check-linux', chart: 'Check three projects', ours: 'ts-r-check', other: 'tsc 7.0.2', what: 'faster type checks' },
   { tool: 'ts-r-lint', replaces: 'ESLint + typescript-eslint', section: 'lint-same-rules', chart: 'tRPC, same 48 rules', ours: 'ts-r-lint, config not cached', other: 'ESLint 10.10.0', what: 'faster linting' },
   { tool: 'ts-r-run', replaces: 'tsx, ts-node', section: 'run', chart: 'Run a 1,000-module', ours: 'ts-r-run, warm cache', other: 'tsx 4.23', what: 'faster runs' },
   { tool: 'ts-r-lsp', replaces: 'tsserver and the ESLint server', section: 'editor', chart: 'tRPC router.ts: first diagnostics', ours: 'ts-r-lsp', other: 'tsserver', what: 'faster first errors' },

@@ -7,7 +7,7 @@
 
 **Fast TypeScript tooling, written from scratch in Rust.** ts-r type-checks, lints, bundles,
 runs and serves TypeScript, aiming for the same results as the tools you use today, and faster:
-ts-r-check type-checks tRPC, date-fns and RxJS 2.0–6.7× faster than tsc 7 ([benchmarks](#benchmarks)).
+ts-r-check type-checks tRPC, date-fns and RxJS 2.0–5.4× faster than tsc 7 ([benchmarks](#benchmarks)).
 Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
 you can adopt one without the rest.
 
@@ -95,17 +95,20 @@ bench check, which reviewers read before merging. Method and scenarios:
 <!-- bench:main:start -->
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
-| `version-startup` | `ts-r` 1.73 ms | `esbuild` 4.64 ms | **2.7× faster** |
-| `check-trpc` | `ts-r-check` 410 ms | `tsc-7` 969 ms | **2.4× faster** |
-| `check-date-fns` | `ts-r-check` 889 ms | `tsc-7` 1.76 s | **2.0× faster** |
-| `check-rxjs` | `ts-r-check` 980 ms | `tsc-7` 6.53 s | **6.7× faster** |
-| `build-three-x10` | `ts-r-build` 1.28 s | `esbuild` 1.21 s | 1.1× slower |
+| `version-startup` | `ts-r` 2.03 ms | `esbuild` 3.93 ms | **1.9× faster** |
+| `check-trpc` | `ts-r-check` 474 ms | `tsc-7` 979 ms | **2.1× faster** |
+| `check-date-fns` | `ts-r-check` 998 ms | `tsc-repo` 1.97 s | **2.0× faster** |
+| `check-rxjs` | `ts-r-check` 1.20 s | `tsc-7` 6.51 s | **5.4× faster** |
+| `build-three-x10` | `ts-r-build` 963 ms | `esbuild` 1.41 s | **1.5× faster** |
 
-Medians on linux-x86_64 (four dedicated cores), measured 2026-10-21. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
+Medians on linux-x86_64 (four dedicated cores), measured 2026-10-24. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).
 <!-- bench:main:end -->
 
-The table above is updated by every sync to main. The one below is the same table at the time
-of the latest release, and is updated by each release pull request.
+The table above is written from one review-box bench of a pull request
+(`node scripts/readme-bench.mjs main`): this one is #42's, at `d8a6a97` (merged as `8b6c630`),
+whose code differs from main's only in `ts_r_run`, which none of these scenarios runs. The one
+below is the same table at the time of the latest release, and is updated by each release pull
+request.
 
 ### Latest release
 

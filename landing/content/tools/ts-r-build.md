@@ -121,8 +121,13 @@ build a library while the app keeps Vite. It has no JavaScript API, so scripts t
 
 ## Measured
 
-Apple M-series Mac (a shared laptop), 4 threads, against esbuild 0.28.2, on public projects
-pinned in `bench/repos.toml` (`cargo xtask bench --repos excalidraw,three-x10`).
+On four dedicated Linux cores (the review box's bench of pull request #42 on 2026-10-24,
+`cargo xtask bench --repos three-x10`, median of 10, peak memory not measured), three.js x10
+minified with source maps took 962.9 ms without the cache and 484.6 ms with it, against
+esbuild 0.28.2's 1,409.8 ms.
+
+Older runs on an Apple M-series Mac (a shared laptop), 4 threads, against esbuild 0.28.2, on
+public projects pinned in `bench/repos.toml` (`cargo xtask bench --repos excalidraw,three-x10`):
 
 | Input | ts-r-build | esbuild |
 |---|---|---|
@@ -132,9 +137,9 @@ pinned in `bench/repos.toml` (`cargo xtask bench --repos excalidraw,three-x10`).
 | three.js x10, minified IIFE with source maps, no cache (median of 10) | 255.0 ms | 246.2 ms |
 | Same, with the persistent cache | 132.2 ms | 246.2 ms |
 
-Without its cache, ts-r-build is slower than esbuild on excalidraw and about as fast on
-three.js x10: the rows above are the last of three invocations at commit 2fb2555; the other
-two gave 231.8 and 233.9 ms against esbuild's 262.7 and 238.5 ms. It also doesn't bundle
+On that laptop, without its cache, ts-r-build was slower than esbuild on excalidraw and about
+as fast on three.js x10: the rows above are the last of three invocations at commit 2fb2555; the
+other two gave 231.8 and 233.9 ms against esbuild's 262.7 and 238.5 ms. It also doesn't bundle
 template-literal `import()`s yet, so on excalidraw it leaves out the 61 locale chunks esbuild
 emits (7.2 MB of output against 9.3 MB), which flatters its times. The three.js x10 bundles
 agree: both load in Node with the same exports; ts-r's is 2.2% larger.
@@ -147,6 +152,7 @@ Correctness:
 - Ecosystem bundle stage: all 915 compared packages pass (100%). Minified output is 2.9%
   smaller than esbuild's in total over 914 packages, with a median per-package ratio of 0.993.
 
-Method and commits: [build](/benchmarks/#build),
+Method and commits: [build on Linux](/benchmarks/#build-linux),
+[build on the laptop](/benchmarks/#build),
 [ecosystem](/benchmarks/#ecosystem) and
 [correctness](/benchmarks/#correctness).

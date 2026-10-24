@@ -112,7 +112,8 @@ In the editor, [ts-r-lsp](ts-r-lsp.md) can show the same diagnostics.
 
 Like-for-like, on tRPC's server and client sources (147 files): tRPC's own ESLint config with
 every rule ts-r-lint doesn't implement removed, the same file for both tools
-(`cargo xtask bench --repos trpc lint-trpc-same-rules`, median of 5 runs):
+(`cargo xtask bench --repos trpc lint-trpc-same-rules`, median of 5 runs, Apple M-series shared
+laptop, crates as of 2026-10-18):
 
 | Run | ts-r-lint | ESLint 10.10.0 |
 |---|---|---|
@@ -122,7 +123,9 @@ every rule ts-r-lint doesn't implement removed, the same file for both tools
 Both report 0 problems from those rules. Most of ts-r-lint's uncached time is Node evaluating
 `eslint.config.js`. With the 32 type-aware rules as well the runs aren't comparable yet: on tRPC
 the parity gate turns them off, and with the gate off ts-r-lint reports 11 problems ESLint
-doesn't.
+doesn't. On four dedicated Linux cores (the review box's bench of pull request #42 on
+2026-10-24) the same runs took 2,850.7 ms with the config evaluated every run and 30.6 ms with
+it cached, against ESLint's 4,005.4 ms.
 
 Apple M-series Mac (a shared laptop), 4 threads, each project's own lint config, on public
 projects pinned in `bench/repos.toml` (`cargo xtask bench --repos`, median of 3 to 5 runs):
@@ -141,5 +144,6 @@ so the first column measures a type check plus the untyped rules. The type-aware
 themselves match ESLint's test suites (see Correctness).
 
 Method and commits: [same rules](/benchmarks/#lint-same-rules),
+[lint on Linux](/benchmarks/#lint-linux),
 [lint](/benchmarks/#lint) and
 [correctness](/benchmarks/#correctness).
