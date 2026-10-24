@@ -2977,7 +2977,7 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-24, f481df9, parity/checker-2 merged with main at 79646f9 (#39's parser
+  Current (2026-10-24, 9b5f8f2, parity/checker-2 merged with main at 79646f9 (#39's parser
   round 2): mapped types indexed by a generic key, implied conditional constraints, TS7039 and
   cycles of method return types, widening through spreads, missing binding names; 12750
   compared variants, 23 s on 4 threads): 12365 exact (97.0%; all diagnostics and chains),
