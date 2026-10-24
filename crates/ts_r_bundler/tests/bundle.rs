@@ -1861,3 +1861,19 @@ fn javascript_accessor_fields_are_lowered_for_a_year_target() {
     let r = run_build(&fs, opts(&["entry.js"]));
     assert!(file(&r, "/proj/out/entry.js").contains("accessor one"));
 }
+
+#[test]
+fn tsconfig_jsx_preserve_is_ignored() {
+    // As in esbuild, the output is JavaScript: only `--jsx=preserve` keeps JSX.
+    let fs = project(&[
+        ("entry.tsx", "console.log(<div />);\n"),
+        ("tsconfig.json", r#"{"compilerOptions": {"jsx": "preserve"}}"#),
+    ]);
+    let r = run_build(&fs, opts(&["entry.tsx"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("React.createElement(\"div\""), "{code}");
+    let mut o = opts(&["entry.tsx"]);
+    o.jsx.mode = Some("preserve".into());
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/entry.js").contains("<div />"));
+}

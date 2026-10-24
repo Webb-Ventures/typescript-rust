@@ -607,12 +607,16 @@ impl PrepareContext {
             }
             Some(_) => JsxMode::Classic,
             None => match tsconfig_jsx {
-                Some(JsxEmit::React) | None => JsxMode::Classic,
+                // `"jsx": "preserve"` (and `react-native`) in a tsconfig is ignored, as in
+                // esbuild: the output is JavaScript, so JSX is compiled. `--jsx=preserve`
+                // keeps it.
+                Some(JsxEmit::React | JsxEmit::Preserve | JsxEmit::ReactNative) | None => {
+                    JsxMode::Classic
+                }
                 // `--jsx-dev` picks the development runtime for `"jsx": "react-jsx"` too.
                 Some(JsxEmit::ReactJsx) if jsx.dev => JsxMode::AutomaticDev,
                 Some(JsxEmit::ReactJsx) => JsxMode::Automatic,
                 Some(JsxEmit::ReactJsxDev) => JsxMode::AutomaticDev,
-                Some(JsxEmit::Preserve) | Some(JsxEmit::ReactNative) => JsxMode::Preserve,
             },
         };
         if let Some(f) = &jsx.factory {
