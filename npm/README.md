@@ -5,6 +5,8 @@ What ships to npm and how it is built. User-facing docs are each package's READM
 
 ## Packages
 
+Every package also ships ts-r's `LICENSE` (MIT).
+
 | Package | Contains | Depends on |
 |---|---|---|
 | `@ts-r.dev/<tool>-<platform>` (7 tools x 8 platforms) | `bin/<binary>`; check and lsp also `lib/lib.*.d.ts` + TypeScript's license | nothing; `os`/`cpu`/`libc` fields |
