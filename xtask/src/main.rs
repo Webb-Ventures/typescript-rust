@@ -37,9 +37,10 @@ Commands:
                                Compare pins in upstream/UPSTREAM.json with the latest releases
                                (exit 1 when a TypeScript stable bump is available)
   upstream bump [--to <ver>]   Re-pin TypeScript in UPSTREAM.json (default: latest stable)
-  upstream sync [--minimal] [--commit <sha>] [--force]
+  upstream sync [--pin <name>] [--minimal] [--commit <sha>] [--force]
                                Fetch upstream TypeScript test/lib/diagnostic data files into
-                               target/upstream/typescript (data only, never compiler source)
+                               target/upstream/typescript, or another pin's `sync` data paths
+                               into target/upstream/<name> (data only, never compiler source)
   upstream diff <old> <new> [--out <file>]
                                Markdown summary of what changed between two TypeScript pins
   codegen [diagnostics|lint-globals] [--out <file>] [--input <dir>] [--check]
