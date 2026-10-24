@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Index of a module in the [`ModuleGraph`].
 pub type ModuleId = u32;
@@ -54,8 +55,10 @@ pub struct ModuleNode {
     pub errored: bool,
     /// Lost its last importer and wasn't imported or requested since: the page no longer
     /// uses it, so changes to its file are ignored (a late watcher event after the import
-    /// was removed must not reload the page).
+    /// was removed must not reload the page). Deleting it in a later batch reloads the page.
     pub pruned: bool,
+    /// When it was last pruned (it stays set after the module is imported again).
+    pub pruned_at: Option<Instant>,
     /// Files outside the graph its transform read ([`crate::Transform::deps`]).
     pub watch_deps: Vec<PathBuf>,
 }
@@ -161,6 +164,7 @@ impl ModuleGraph {
             prepared: None,
             errored: false,
             pruned: false,
+            pruned_at: None,
             watch_deps: Vec::new(),
         });
         self.by_file.insert(file.to_path_buf(), id);
@@ -221,6 +225,7 @@ impl ModuleGraph {
             }
             if n.importers.is_empty() && !n.linked_css {
                 n.pruned = true;
+                n.pruned_at = Some(Instant::now());
                 pruned.push(gone);
             }
         }

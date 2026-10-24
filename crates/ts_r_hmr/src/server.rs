@@ -24,7 +24,7 @@
 //! forwarded), then `base` is stripped (`/` redirects to the base; URLs outside the base
 //! are still served). Responses that aren't proxied get `server.headers`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -118,6 +118,9 @@ pub struct DevConfig {
     pub env_prefix: Vec<String>,
     /// `define`: key → JS expression text.
     pub define: Vec<(String, String)>,
+    /// Process variables the config file set, used over the server's own for `.env`
+    /// expansion and prefixed variables.
+    pub config_env: Vec<(String, String)>,
     /// `publicDir` (relative = from the root); `None` = none.
     pub public_dir: Option<PathBuf>,
     /// `assetsInclude`: more files served as assets (a URL), not as plugin modules.
@@ -200,6 +203,7 @@ impl DevConfig {
             env_dir: Some(PathBuf::new()),
             env_prefix: vec!["VITE_".to_owned()],
             define: Vec::new(),
+            config_env: Vec::new(),
             public_dir: Some(PathBuf::from("public")),
             assets_include: crate::glob::PathFilter::default(),
             assets_inline_limit: crate::assets::SVG_INLINE_LIMIT as u64,
@@ -309,6 +313,9 @@ pub(crate) struct Shared {
     /// `import.meta.glob` patterns per importing module: a matching file appearing or
     /// disappearing re-prepares the importer.
     pub glob_watches: Mutex<HashMap<ModuleId, Vec<GlobWatch>>>,
+    /// The same for pre-bundled files (by name, expanded when served): a matching file
+    /// appearing or disappearing reloads the page.
+    pub dep_glob_watches: Mutex<BTreeMap<String, Vec<GlobWatch>>>,
     #[cfg(feature = "tls")]
     pub tls: Option<Arc<rustls::ServerConfig>>,
     pub transforms: Vec<Arc<dyn Transform>>,
@@ -553,6 +560,7 @@ impl DevServer {
             prefixes: config.env_prefix.clone(),
             base: base.clone(),
             define: config.define.clone(),
+            process_env: config.config_env.clone(),
         };
         let env = crate::env::load(&env_options);
         let client = client_js(&base, &env);
@@ -590,6 +598,7 @@ impl DevServer {
             proxy: config.proxy.clone(),
             client_js: RwLock::new(Arc::new(client)),
             glob_watches: Mutex::default(),
+            dep_glob_watches: Mutex::default(),
             #[cfg(feature = "tls")]
             tls,
             root: root.clone(),
@@ -1088,16 +1097,20 @@ fn route(shared: &Shared, req: &Request) -> Response {
             };
         }
         return match crate::deps::file(shared, name, req.query_value("v")) {
-            Some((code, immutable)) => cacheable(
-                req,
-                JS_CONTENT_TYPE,
-                code.as_bytes().to_vec(),
-                if immutable {
-                    "max-age=31536000, immutable"
-                } else {
-                    "no-cache"
-                },
-            ),
+            Some((code, immutable)) => {
+                let (code, globbed) = dep_globs(shared, name, &code);
+                cacheable(
+                    req,
+                    JS_CONTENT_TYPE,
+                    code.into_bytes(),
+                    // Its glob results change without its version changing.
+                    if immutable && !globbed {
+                        "max-age=31536000, immutable"
+                    } else {
+                        "no-cache"
+                    },
+                )
+            }
             None => Response::text(404, format!("no pre-bundled dependency file {name}")),
         };
     }
@@ -1135,8 +1148,11 @@ fn route(shared: &Shared, req: &Request) -> Response {
     let Some(rel) = safe_relative(path) else {
         return Response::text(403, "path escapes the project root");
     };
+    // `//x` names no file (Vite serves no files for it either): straight to the fallback.
+    let files = !path.starts_with("//");
     // `public/` first, served verbatim (`?import`: its URL, like Vite).
-    if !rel.as_os_str().is_empty()
+    if files
+        && !rel.as_os_str().is_empty()
         && let Some(public) = &shared.public_dir
     {
         let p = public.join(&rel);
@@ -1160,7 +1176,7 @@ fn route(shared: &Shared, req: &Request) -> Response {
         }
     }
     let file = shared.root.join(&rel);
-    if file.is_file() {
+    if files && file.is_file() {
         if denied(&rel) {
             return Response::text(
                 403,
@@ -1293,14 +1309,53 @@ fn serve_static(req: &Request, file: &Path) -> Response {
             let mut r = Response::new(200, render::content_type(&ext), body)
                 .header("ETag", etag)
                 .header("Cache-Control", "no-cache");
-            // A file without an extension has no type to send (Vite's static server sends
-            // none either).
+            // A file without an extension has no known type: Vite's static server sends the
+            // header empty, and so do we.
             if ext.is_empty() {
-                r.headers.retain(|(k, _)| k != "Content-Type");
+                for (k, v) in &mut r.headers {
+                    if k == "Content-Type" {
+                        v.clear();
+                    }
+                }
             }
             r
         }
         Err(_) => Response::text(404, "Not found"),
+    }
+}
+
+/// A pre-bundled file with its `import.meta.glob` calls expanded (the bundler keeps them,
+/// as Vite's does): patterns resolve as if the file sat at its URL under the root, so the
+/// relative imports it gets point at the files' own URLs. Also says whether it had globs
+/// (whose patterns are then watched).
+fn dep_globs(shared: &Shared, name: &str, code: &str) -> (String, bool) {
+    if !code.contains("import.meta.glob") {
+        return (code.to_owned(), false);
+    }
+    let globs = scan::scan_hot(code).globs;
+    if globs.is_empty() {
+        return (code.to_owned(), false);
+    }
+    let importer = shared
+        .root
+        .join(crate::deps::DEPS_PREFIX.trim_matches('/'))
+        .join(name);
+    let no_alias = |_: &str| None;
+    let cx = crate::glob::GlobContext {
+        root: &shared.root,
+        importer: &importer,
+        alias: &no_alias,
+    };
+    match crate::glob::expand(code, &globs, &cx) {
+        Ok(e) => {
+            shared
+                .dep_glob_watches
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(name.to_owned(), e.watches);
+            (e.code, true)
+        }
+        Err(_) => (code.to_owned(), false),
     }
 }
 
@@ -1775,7 +1830,11 @@ pub(crate) fn prepare_script(
     let mut glob_watches = Vec::new();
     if !hot.globs.is_empty() {
         let importer_id = crate::paths::id(real);
-        let alias = |pattern: &str| alias_rewrite(shared, pattern, &importer_id);
+        let alias = |pattern: &str| {
+            alias_rewrite(shared, pattern, &importer_id)
+                .filter(|r| r != pattern)
+                .or_else(|| crate::glob::subpath_import(pattern, real))
+        };
         let cx = crate::glob::GlobContext {
             root: &shared.root,
             importer: real,
@@ -2085,6 +2144,14 @@ enum Pending {
 fn resolve_target(shared: &Shared, specifier: &str, importer: &Path) -> Result<Pending, String> {
     if let Some(u) = public_import(shared, specifier) {
         return Ok(Pending::Url(u));
+    }
+    // The server's own modules (`import '/@vite/env'`), with any query, are served URLs.
+    let path = specifier.split(['?', '#']).next().unwrap_or(specifier);
+    if matches!(
+        path,
+        "/@ts-r/client" | "/@vite/client" | "/@ts-r/env" | "/@vite/env"
+    ) {
+        return Ok(Pending::Url(shared.public_url(specifier)));
     }
     let fs_form = absolute_as_fs(&shared.root, specifier);
     let resolved = shared

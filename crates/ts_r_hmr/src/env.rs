@@ -32,6 +32,9 @@ pub struct EnvOptions {
     /// `define` entries: key → JS expression (strings already JSON-quoted by the caller
     /// when they were non-string values).
     pub define: Vec<(String, String)>,
+    /// Process variables to use over the server's own: what the config file set
+    /// (`process.env.X = ...` in `vite.config.js` runs in the plugin sidecar, not here).
+    pub process_env: Vec<(String, String)>,
 }
 
 /// The computed environment.
@@ -80,10 +83,21 @@ pub fn check_prefixes(prefixes: &[String]) -> Result<(), String> {
 
 /// Loads the env files and computes everything the server injects.
 pub fn load(opts: &EnvOptions) -> Env {
+    let extra = &opts.process_env;
+    let mut vars: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| !extra.iter().any(|(e, _)| e == k))
+        .collect();
+    vars.extend(extra.iter().cloned());
     load_with(
         opts,
-        &|k| std::env::var(k).ok(),
-        &std::env::vars().collect::<Vec<_>>(),
+        &|k| {
+            extra
+                .iter()
+                .find(|(e, _)| e == k)
+                .map(|(_, v)| v.clone())
+                .or_else(|| std::env::var(k).ok())
+        },
+        &vars,
     )
 }
 
@@ -491,6 +505,7 @@ mod tests {
                 ("import.meta.env.NUMBER".into(), "7".into()),
                 ("process.env.OTHER".into(), "\"other\"".into()),
             ],
+            process_env: Vec::new(),
         };
         let none = |_: &str| None;
         let env = load_with(&opts, &none, &[("VITE_FROM_SHELL".into(), "sh".into())]);
@@ -516,5 +531,25 @@ mod tests {
         assert!(is_env_file(dir.path(), &dir.path().join(".env.staging")));
         assert!(!is_env_file(dir.path(), &dir.path().join("x.env")));
         assert!(check_prefixes(&["".into()]).is_err());
+    }
+
+    /// Variables the config file set on `process.env` count like the shell's.
+    #[test]
+    fn config_process_env_counts_as_the_shell() {
+        let opts = EnvOptions {
+            dir: None,
+            mode: "development".into(),
+            prefixes: vec!["TS_R_ENV_TEST_".into()],
+            base: "/".into(),
+            define: Vec::new(),
+            process_env: vec![("TS_R_ENV_TEST_FROM_CONFIG".into(), "cfg".into())],
+        };
+        let env = load(&opts);
+        assert_eq!(
+            env.meta
+                .get("TS_R_ENV_TEST_FROM_CONFIG")
+                .map(String::as_str),
+            Some("\"cfg\"")
+        );
     }
 }

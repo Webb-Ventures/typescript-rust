@@ -36,6 +36,9 @@ const send = (msg) => writeOut(JSON.stringify(msg) + '\n')
 const root = process.env.TS_R_ROOT
 const configFile = process.env.TS_R_CONFIG
 process.env.NODE_ENV ??= 'development'
+// The environment before the config file runs: what it sets (`process.env.X = ...`) is
+// reported to the server, which loads `.env` files with it.
+const startEnv = { ...process.env }
 
 // Plugins ts-r-dev replaces with built-ins: their `config` hooks run (for their options),
 // nothing else does.
@@ -458,7 +461,10 @@ function assetsIncludePatterns(value) {
 function devOptions() {
   const s = resolved.server ?? {}
   const define = {}
-  for (const [k, v] of Object.entries(config.define ?? {})) {
+  // The client environment's own defines (`environments.client.define`) add to the top-level
+  // ones, as Vite merges them for the browser.
+  const defines = { ...(config.define ?? {}), ...(config.environments?.client?.define ?? {}) }
+  for (const [k, v] of Object.entries(defines)) {
     define[k] = typeof v === 'string' ? v : JSON.stringify(v) ?? 'undefined'
   }
   const host = s.host === true ? '0.0.0.0' : typeof s.host === 'string' ? s.host : null
@@ -469,6 +475,9 @@ function devOptions() {
     mode,
     base: config.base ?? '/',
     define,
+    processEnv: Object.fromEntries(
+      Object.entries(process.env).filter(([k, v]) => startEnv[k] !== v && typeof v === 'string'),
+    ),
     envPrefix: Array.isArray(envPrefix) ? envPrefix.map(String) : [String(envPrefix)],
     envDir: config.envDir === false ? false : typeof config.envDir === 'string' ? rootRelative(config.envDir) : null,
     publicDir: config.publicDir === false ? false : typeof config.publicDir === 'string' ? rootRelative(config.publicDir) : null,

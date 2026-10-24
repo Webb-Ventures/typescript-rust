@@ -72,6 +72,16 @@ are cached by content hash. Change `cache_id` when output for the same input can
   A pruned module stays `pruned` until something imports or requests it again; changes to
   its file are ignored (a late watcher event from before the prune must not reload the page),
   except that they stamp its `?t=`, so an import restored later fetches the new file.
+  Deleting a module pruned in an *earlier* batch, which doesn't accept itself, is a full
+  reload (Vite keeps the module with no importers: a dead end;
+  `vite: packages/vite/src/node/server/hmr.ts`, `handleHMRUpdate`/`propagateUpdate`); a
+  deletion in the batch that pruned it (import removed and file deleted together) only prunes.
+- **Prune runs the module's dispose callbacks, then its prune callbacks**, after
+  `vite:beforePrune`, queued behind any update in flight; then its `hot.data` is dropped, so
+  a module imported again starts with fresh data (`vite: packages/vite/src/client/client.ts`
+  and `hmr.ts`, `HMRClient.prunePaths`).
+- **Full-reload paths are percent-decoded** before they are matched against the page
+  (`vite:` client `full-reload` handling compares decoded paths).
 - **Changes are prepared eagerly** (transform before propagation), so accept info is current and
   the browser's `?t=` fetch is a cache hit. Changes and invalidations are serialized by
   `change_lock`; HTTP serving runs concurrently and only holds the graph lock briefly (never
@@ -97,6 +107,8 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `timestamp`, `explicitImportRequired`, `isWithinCircularImport`; `full-reload`, `prune`,
   `error`, `custom`). We add only `tsrId` on `update` (clients ignore unknown fields). The
   overlay element is `<vite-error-overlay>`; CSS `<style>` tags carry `data-vite-dev-id`.
+  A stylesheet imported from JS exports nothing (Vite dropped its default export; the text
+  is `?inline`'s default export).
   Client → server: `custom` events (`vite:invalidate`, `ts-r:applied`, user events). A
   client connecting or disconnecting is passed to the plugin host as Vite's
   `vite:client:connect`/`vite:client:disconnect` events (only when a plugin listens).
@@ -207,11 +219,34 @@ are cached by content hash. Change `cache_id` when output for the same input can
 - **Glob imports are expanded after the transform cache** (in `prepare_script`), so a new or
   deleted file matching a module's patterns (`Shared::glob_watches`) re-prepares that module
   and propagates like an edit. Aliases in patterns go through the plugin `resolveId` (pre).
+  The rules taken from Vite (`vite: packages/vite/src/node/plugins/importMetaGlob.ts`):
+  keys are relative only when every pattern starts with `.` or `!` and there is no `base`,
+  otherwise root-absolute; glob characters in the importer's (or base's) directory names are
+  escaped, so `src/[id]/` matches only itself; `caseSensitive: false` matches names ignoring
+  ASCII case; a `#x` pattern maps through the nearest `package.json` `imports` (longest key
+  wins; `browser`, `import`, `module`, `default` conditions); a match reached through a
+  symlinked directory inside the root is imported by its real path. A full reload drops the
+  prepared output of modules whose patterns match an added or deleted file, so their next
+  request expands again.
+- **Globs in pre-bundled dependencies** (Vite's optimizer keeps `import.meta.glob` calls) are
+  expanded when the file is served, as if it sat at its URL under the root; such a file is
+  sent with `Cache-Control: no-cache`, and a file added or deleted under its patterns
+  (`Shared::dep_glob_watches`) reloads the page.
 - **The public dir** (`public/` unless `publicDir`) is served at the base, before source files;
   importing `/x.png` from it gives its URL (`?import`, `encodeURI`d), never a module, and
   `?inline` gives its data URL. A public file matches only in the case it is written in
   (`ICON.png` doesn't serve `icon.png` on a case-insensitive disk). A file without an
-  extension is sent with no `Content-Type`.
+  extension (public or in the root) is sent with an empty `Content-Type`, as Vite's static
+  middleware does.
+- **`//x` is not a file path**: it skips the public and root file serving and gets the HTML
+  fallback (Vite's static middlewares skip URLs that start with `//`).
+- **The server's own modules have two names and any query.** `/@ts-r/client` and
+  `/@vite/client`, `/@ts-r/env` and `/@vite/env` (with or without a query) are served URLs:
+  an import of them is kept under the base, never resolved as a file.
+- **The config's `process.env` writes count.** A `vite.config.*` runs in the plugin sidecar,
+  so variables it sets on `process.env` are returned with the dev options (`processEnv`) and
+  overlaid on the server's environment when `.env` files and prefixes are loaded. The
+  sidecar's `define` also merges `environments.client.define`.
 - **Never served from the root:** `.env`, `.env.*`, `*.crt`, `*.pem` and anything under
   `.git` (403), like Vite's default `server.fs.deny`.
 - **HTML fallback** (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`): a

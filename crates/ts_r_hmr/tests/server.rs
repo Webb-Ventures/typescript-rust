@@ -244,6 +244,29 @@ fn denied_files_case_html_fallback_and_asset_queries() {
     assert_eq!(status, 404, "{body}");
     let (_, _, js) = f.get("/src/logo.svg?import&no-inline&x=1");
     assert!(js.contains("\"/src/logo.svg?no-inline&x=1\""), "{js}");
+    // `//x` is not a file of the root or the public directory: the fallback page.
+    let (status, _, body) = http_get(f.server.addr(), "//robots.txt", &html);
+    assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
+    // A file without an extension has no type to name.
+    std::fs::write(f.app.path().join("LICENSE"), "MIT\n").unwrap();
+    let (status, h, _) = f.get("/LICENSE");
+    assert_eq!((status, header(&h, "content-type")), (200, Some("")));
+    // The client and env modules, under either name and with any query, are the server's
+    // own URLs: imports of them are kept, not resolved as files.
+    std::fs::write(
+        f.app.path().join("src/client-user.js"),
+        "import '/@vite/client';\nimport '/@vite/env?x';\n",
+    )
+    .unwrap();
+    let (status, _, js) = f.get("/src/client-user.js");
+    assert_eq!(status, 200, "{js}");
+    assert!(
+        js.contains("import '/@vite/client';\nimport '/@vite/env?x';"),
+        "{js}"
+    );
+    for url in ["/@vite/client", "/@vite/env?x"] {
+        assert_eq!(f.get(url).0, 200, "{url}");
+    }
 }
 
 #[test]
@@ -486,7 +509,17 @@ fn hot_updates_over_websocket() {
     );
     let m = next_of(&mut ws, "full-reload");
     assert_eq!(m["path"], "/index.html");
+
+    // 10. Deleting the module pruned in an earlier batch: nothing accepts it, so the page
+    //     reloads (Vite keeps it as a module with no importers, a dead end).
+    std::fs::remove_file(f.app.path().join("src/missing.js")).unwrap();
+    assert_eq!(next_of(&mut ws, "full-reload")["type"], "full-reload");
     let log = f.log.lock().unwrap();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("/src/missing.js was deleted and nothing imports it")),
+        "{log:#?}"
+    );
     assert!(
         !log.iter().any(|l| l.contains("missing.js changed")),
         "{log:#?}"

@@ -21,6 +21,8 @@ struct Outcome {
     full_reload: Option<Option<String>>,
     errored: bool,
     files: Vec<String>,
+    /// When the batch started: a module pruned since then was pruned by this batch.
+    started: Option<Instant>,
 }
 
 /// Handles one settled batch from the watcher.
@@ -49,12 +51,19 @@ pub(crate) fn on_batch(shared: &Shared, batch: ChangeBatch) {
         });
     }
     let timestamp = server::next_timestamp(shared);
-    let mut out = Outcome::default();
+    let mut out = Outcome {
+        started: Some(started),
+        ..Outcome::default()
+    };
     let mut retry_errored = false;
 
     for change in &batch.changes {
         if out.full_reload.is_some() {
-            break;
+            // The page reloads anyway, but a glob importer must not serve its old expansion.
+            if change.kind != ChangeKind::Modified {
+                forget_globs(shared, &globbing(shared, &change.path));
+            }
+            continue;
         }
         handle_change(
             shared,
@@ -97,6 +106,28 @@ pub(crate) fn on_batch(shared: &Shared, batch: ChangeBatch) {
     finish(shared, out, timing);
 }
 
+/// The modules with an `import.meta.glob` pattern matching `path`.
+fn globbing(shared: &Shared, path: &std::path::Path) -> Vec<ModuleId> {
+    let mut ids: Vec<ModuleId> = shared
+        .glob_watches
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, ws)| ws.iter().any(|w| w.matches(path)))
+        .map(|(&id, _)| id)
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Drops the prepared output of `ids`, so their next request expands their globs again.
+fn forget_globs(shared: &Shared, ids: &[ModuleId]) {
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    for &id in ids {
+        g.node_mut(id).prepared = None;
+    }
+}
+
 fn handle_change(
     shared: &Shared,
     change: &FileChange,
@@ -128,16 +159,28 @@ fn handle_change(
     // A file appearing or disappearing under an `import.meta.glob` pattern changes the
     // importer's expansion.
     if change.kind != ChangeKind::Modified {
-        let globbing: Vec<ModuleId> = shared
-            .glob_watches
+        let dep = shared
+            .dep_glob_watches
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .filter(|(_, ws)| ws.iter().any(|w| w.matches(path)))
-            .map(|(&id, _)| id)
-            .collect();
-        for id in globbing {
-            reprepare(shared, id, timestamp, timing, out);
+            .find(|(_, ws)| ws.iter().any(|w| w.matches(path)))
+            .map(|(name, _)| name.clone());
+        if let Some(name) = dep {
+            // Served with its globs expanded; the page fetches it again.
+            shared.log(&format!(
+                "page reload: {url} matches a glob in pre-bundled {name}"
+            ));
+            out.files.push(url.clone());
+            out.full_reload = Some(None);
+        }
+        for id in globbing(shared, path) {
+            if out.full_reload.is_some() {
+                // Re-prepared when the reloaded page asks for it.
+                forget_globs(shared, &[id]);
+            } else {
+                reprepare(shared, id, timestamp, timing, out);
+            }
         }
     }
     // Modules whose transform read this file (types behind `parse<T>`, plugin modules
@@ -189,14 +232,15 @@ fn handle_change(
     if let Some(page) = page {
         let page_url = server::url_for_file(&shared.root, &page);
         out.files.push(url.clone());
-        out.full_reload = Some(Some(page_url));
+        // The client compares it with the decoded `location.pathname`.
+        out.full_reload = Some(Some(crate::http::percent_decode(&page_url)));
         return;
     }
     // A page reloads, unless it is also a module (`import x from './a.html?raw'`).
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if (ext == "html" || ext == "htm") && path.starts_with(&shared.root) && own.is_none() {
         out.files.push(url.clone());
-        out.full_reload = Some(Some(url));
+        out.full_reload = Some(Some(crate::http::percent_decode(&url)));
         return;
     }
     for d in dependents {
@@ -213,7 +257,24 @@ fn handle_change(
     // browser's instance of the old URL.
     {
         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-        if g.node(id).pruned {
+        let n = g.node(id);
+        if n.pruned {
+            // Deleting a file the page stopped importing in an earlier batch: nothing on the
+            // page accepts it, so the page reloads (Vite still has the module, with no
+            // importers: a dead end). A deletion in the batch that pruned it (the import
+            // removed and the file deleted together) only prunes.
+            let settled = n
+                .pruned_at
+                .zip(out.started)
+                .is_some_and(|(at, started)| at < started);
+            if change.kind == ChangeKind::Removed && settled && !n.self_accepting {
+                shared.log(&format!(
+                    "page reload: {url} was deleted and nothing imports it"
+                ));
+                out.files.push(url);
+                out.full_reload = Some(None);
+                return;
+            }
             g.node_mut(id).last_hmr_timestamp = timestamp;
             return;
         }

@@ -157,6 +157,12 @@ pub fn apply_dev_options(
             .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("undefined").to_owned()))
             .collect();
     }
+    if let Some(e) = dev["processEnv"].as_object() {
+        config.config_env = e
+            .iter()
+            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+            .collect();
+    }
     if let Some(p) = dev["envPrefix"].as_array() {
         config.env_prefix = p
             .iter()

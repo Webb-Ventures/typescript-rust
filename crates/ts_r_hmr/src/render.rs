@@ -124,7 +124,8 @@ fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
     None
 }
 
-/// A stylesheet as a self-accepting JS module that injects a `<style>` tag.
+/// A stylesheet as a self-accepting JS module that injects a `<style>` tag. It exports
+/// nothing, like Vite's (the text is `?inline`'s default export).
 pub fn css_module(url: &str, css: &str) -> String {
     css_module_at(CLIENT_URL, url, css)
 }
@@ -140,8 +141,7 @@ pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
          const __ts_r_css = {};\n\
          __ts_r_update_style(__ts_r_id, __ts_r_css);\n\
          import.meta.hot.accept();\n\
-         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n\
-         export default __ts_r_css;\n",
+         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n",
         js_string(css)
     )
 }
@@ -320,6 +320,7 @@ mod tests {
         let m = css_module("/src/a.css", "body { content: \"</style>\" }");
         assert!(m.contains("import.meta.hot.accept();"));
         assert!(m.contains("<\\/style>"));
+        assert!(!m.contains("export"));
         assert_eq!(join_url("/", "../../x"), "/x");
     }
 
