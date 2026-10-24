@@ -166,8 +166,9 @@ function createPhaseLock(mode = 'alone') {
       grant();
     }
   };
-  // A promise of the release function, and whether it had to wait.
-  const acquire = (kind) => {
+  // A promise of the release function (or of null, if `signal` aborted the wait), and whether it
+  // had to wait.
+  const acquire = (kind, signal) => {
     let entry;
     const granted = new Promise((resolve) => {
       let released = false;
@@ -179,17 +180,35 @@ function createPhaseLock(mode = 'alone') {
           holders[kind]--;
           pump();
         }),
+        drop: () => resolve(null),
       };
     });
+    if (signal?.aborted) {
+      entry.drop();
+      return { granted, waited: false };
+    }
     waiting.push(entry);
     pump();
-    return { granted, waited: waiting.includes(entry) };
+    const waited = waiting.includes(entry);
+    // A bench stopped while it waits leaves the line at once, and frees its slot.
+    if (waited && signal) {
+      signal.addEventListener('abort', () => {
+        const at = waiting.indexOf(entry);
+        if (at < 0) return;
+        waiting.splice(at, 1);
+        entry.drop();
+        pump();
+      }, { once: true });
+    }
+    return { granted, waited };
   };
-  // Runs `fn` holding the lock; `onWait` is called first if it has to wait.
-  async function run(kind, fn, onWait) {
-    const { granted, waited } = acquire(kind);
+  // Runs `fn` holding the lock; `onWait` is called first if it has to wait. Returns `aborted`
+  // without running `fn` if `signal` aborts first.
+  async function run(kind, fn, onWait, { signal, aborted } = {}) {
+    const { granted, waited } = acquire(kind, signal);
     if (waited && onWait) onWait();
     const release = await granted;
+    if (!release) return aborted;
     try {
       return await fn();
     } finally {

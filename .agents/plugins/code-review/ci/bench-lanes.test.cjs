@@ -199,3 +199,26 @@ test('a failing step releases the lock', async () => {
   }));
   assert.equal(await lock.run('work', async () => 'ok'), 'ok');
 });
+
+test('a bench stopped while it waits for the lock leaves the line without running', async () => {
+  const lock = lanes.createPhaseLock('alone');
+  let end;
+  const build = lock.run('work', () => new Promise((r) => (end = r)));
+  const stop = new AbortController();
+  let ran = false;
+  const measure = lock.run('measure', () => (ran = true), null, { signal: stop.signal, aborted: 'cancelled' });
+  // Behind it, another slot's build waits too, and goes ahead once the measurement is gone.
+  let next = false;
+  const later = lock.run('work', () => (next = true));
+  await tick();
+  stop.abort();
+  assert.equal(await measure, 'cancelled');
+  await later;
+  assert.equal(next, true);
+  assert.equal(ran, false);
+  end();
+  await build;
+  assert.deepEqual(lock.state(), { work: 0, measure: 0, waiting: 0 });
+  // Already stopped: it never queues.
+  assert.equal(await lock.run('work', () => 'ran', null, { signal: AbortSignal.abort(), aborted: 'cancelled' }), 'cancelled');
+});
