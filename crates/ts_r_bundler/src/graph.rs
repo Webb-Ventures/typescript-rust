@@ -26,8 +26,90 @@ pub enum Target {
     Missing,
 }
 
+/// The [`Target::External`] string of a static import with a phase (`import defer`) or
+/// import attributes: `path\0phase\0attrs`, so it stays its own import statement in the
+/// output and keeps both. Other imports of an external use the bare path.
+pub fn external_key(path: &str, phase: u8, attrs: &str) -> String {
+    if phase == crate::meta::PHASE_EVALUATION && attrs.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{path}\0{phase}\0{attrs}")
+    }
+}
+
+/// Splits an [`external_key`] into `(path, phase, attrs)`.
+pub fn split_external(key: &str) -> (&str, u8, &str) {
+    let mut it = key.splitn(3, '\0');
+    let path = it.next().unwrap_or(key);
+    let phase = it.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (path, phase, it.next().unwrap_or(""))
+}
+
+/// The word esbuild uses for an import phase in its messages.
+fn phase_words(phase: u8) -> &'static str {
+    if phase == crate::meta::PHASE_DEFER {
+        "deferred imports"
+    } else {
+        "source phase imports"
+    }
+}
+
 /// Prefix of the paths of modules disabled by a `browser` map.
 pub const DISABLED_PREFIX: &str = "(disabled):";
+
+/// Joins a file to the import attribute `type` it is loaded with in a module key: esbuild
+/// loads `import x from './data.json' with { type: 'json' }` as its own module instance, with
+/// the loader the type names (`json`, `text` or `bytes`) whatever the file's extension.
+pub const WITH_TYPE_SEP: &str = "\0with:";
+
+/// A module key's file and its import attribute `type`, if any ([`WITH_TYPE_SEP`]).
+pub fn split_with_type(key: &str) -> (&str, Option<&str>) {
+    match key.split_once(WITH_TYPE_SEP) {
+        Some((p, t)) => (p, Some(t)),
+        None => (key, None),
+    }
+}
+
+/// The `type` an import's attributes ask for (`assert { ... }` is ignored, like esbuild), or
+/// the error for attributes a bundle cannot honour.
+fn attribute_type(attrs: &str) -> Result<Option<&'static str>, String> {
+    let Some(inner) = attrs
+        .strip_prefix("with {")
+        .and_then(|a| a.strip_suffix('}'))
+    else {
+        return Ok(None);
+    };
+    let unquote = |s: &str| {
+        let s = s.trim();
+        s.strip_prefix(['\'', '"'])
+            .and_then(|t| t.strip_suffix(['\'', '"']))
+            .unwrap_or(s)
+            .to_owned()
+    };
+    let mut ty = None;
+    for part in inner.split(", ").filter(|p| !p.trim().is_empty()) {
+        let Some((k, v)) = part.split_once(": ") else {
+            continue;
+        };
+        let (k, v) = (unquote(k), unquote(v));
+        if k != "type" {
+            return Err(format!(
+                "Importing with the {k:?} attribute is not supported"
+            ));
+        }
+        ty = Some(match v.as_str() {
+            "json" => "json",
+            "text" => "text",
+            "bytes" => "bytes",
+            _ => {
+                return Err(format!(
+                    "Importing with a type attribute of {v:?} is not supported"
+                ));
+            }
+        });
+    }
+    Ok(ty)
+}
 
 /// One module of the graph.
 #[derive(Debug, Clone)]
@@ -50,6 +132,8 @@ pub struct Module {
     pub node_mode: bool,
     /// Hash of everything preparation depends on.
     pub prep_key: [u8; 32],
+    /// Imported `with { type: 'json' }`: the module has a default export only.
+    pub default_only: bool,
 }
 
 impl Module {
@@ -142,7 +226,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
                         .insert(q.clone());
                     if new {
                         if !q.starts_with(DISABLED_PREFIX) {
-                            queue(q.clone());
+                            queue(split_with_type(q).0.to_owned());
                         }
                         sp.spawn(q.clone());
                     }
@@ -239,6 +323,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             side_effects: n.side_effects,
             node_mode: n.node_mode,
             prep_key: l.prep_key,
+            default_only: split_with_type(p).1 == Some("json"),
         });
         ctx.cache
             .modules
@@ -262,6 +347,7 @@ pub fn pretty_path(wd: &str, p: &str) -> String {
 fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     let loaded = load_module(ctx, p, wd);
     let resolver = &ctx.prep.resolver;
+    let p = split_with_type(p).0;
     let dir = path::directory_of(p).to_owned();
     let mut messages = Vec::new();
     let mut targets = Vec::with_capacity(loaded.meta.records.len());
@@ -277,9 +363,50 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
         } else {
             resolver.resolve(&r.spec, &dir, kind)
         };
+        if r.phase != crate::meta::PHASE_EVALUATION && ctx.prep.opts.bundle {
+            // esbuild bundles neither phase: such imports must stay imports in ESM output.
+            let fmt = ctx.prep.opts.effective_format();
+            let text = if fmt != crate::Format::Esm {
+                Some(format!(
+                    "Bundling {} with the {:?} output format is not supported",
+                    phase_words(r.phase),
+                    fmt.as_str()
+                ))
+            } else if !matches!(res, Resolution::External(_)) {
+                Some(format!(
+                    "Bundling with {} is not supported unless they are external",
+                    phase_words(r.phase)
+                ))
+            } else {
+                None
+            };
+            if let Some(text) = text {
+                let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
+                messages.push(lines.message(Severity::Error, pretty, r.start, text));
+            }
+        }
         targets.push(match res {
+            Resolution::File(f)
+                if ctx.prep.opts.bundle
+                    && matches!(r.kind, RecordKind::Import | RecordKind::ReExport) =>
+            {
+                match attribute_type(&r.attrs) {
+                    Ok(Some(t)) => RawTarget::Path(format!("{f}{WITH_TYPE_SEP}{t}")),
+                    Ok(None) => RawTarget::Path(f),
+                    Err(text) => {
+                        let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
+                        messages.push(lines.message(Severity::Error, pretty, r.start, text));
+                        RawTarget::Path(f)
+                    }
+                }
+            }
             Resolution::File(f) => RawTarget::Path(f),
-            Resolution::External(e) => RawTarget::External(e),
+            Resolution::External(e) => match r.kind {
+                RecordKind::Import | RecordKind::ReExport => {
+                    RawTarget::External(external_key(&e, r.phase, &r.attrs))
+                }
+                _ => RawTarget::External(e),
+            },
             Resolution::Disabled => RawTarget::Path(format!("{DISABLED_PREFIX}{}", r.spec)),
             Resolution::NotFound(msg) => {
                 let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
@@ -332,11 +459,12 @@ fn prep_key(ctx: &GraphContext<'_>, p: &str, source: &Source) -> [u8; 32] {
     h.update(p.as_bytes());
     h.update(&[0]);
     h.update(&source.hash);
-    h.update(ctx.prep.cache_key(p).as_bytes());
+    h.update(ctx.prep.cache_key(split_with_type(p).0).as_bytes());
     *h.finalize().as_bytes()
 }
 
-fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
+fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
+    let (p, with_type) = split_with_type(key);
     if let Some(changed) = ctx.changed
         && !changed.contains(p)
         && let Some(l) = ctx
@@ -344,21 +472,26 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
             .modules
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(p)
+            .get(key)
     {
         return Arc::clone(l);
     }
     let opts = &ctx.prep.opts;
     let disabled = p.starts_with(DISABLED_PREFIX);
-    let loader = if disabled {
-        Loader::Empty
-    } else {
-        opts.loader_for(p)
+    let loader = match with_type {
+        _ if disabled => Loader::Empty,
+        Some("json") => Loader::Json,
+        Some("text") => Loader::Text,
+        Some(_) => Loader::Bytes,
+        None => opts.loader_for(p),
     };
     let fs = ctx.prep.resolver.fs();
     let mut messages = Vec::new();
-    let pretty = pretty_path(wd, p);
-    let loaded = if !disabled && !opts.has_loader(p) {
+    let pretty = match with_type {
+        Some(t) => format!("{} with {{ type: '{t}' }}", pretty_path(wd, p)),
+        None => pretty_path(wd, p),
+    };
+    let loaded = if !disabled && with_type.is_none() && !opts.has_loader(p) {
         let name = p.rsplit('/').next().unwrap_or(p);
         let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
         Err(format!(
@@ -375,22 +508,23 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
                 js: Arc::from(""),
                 css: None,
                 asset: None,
+                json_keys: None,
                 hash: [0; 32],
             }
         }
     };
-    let key = prep_key(ctx, p, &source);
+    let prep = prep_key(ctx, key, &source);
     if let Some(l) = ctx
         .cache
         .modules
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .get(p)
-        && l.prep_key == key
+        .get(key)
+        && l.prep_key == prep
     {
         return Arc::clone(l);
     }
-    let disk_key = ts_r_cache::Key::of(&key);
+    let disk_key = ts_r_cache::Key::of(&prep);
     if messages.is_empty()
         && let Some(disk) = ctx.disk
         && let Some(blob) = disk.get(&disk_key)
@@ -403,7 +537,7 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
             source,
             meta: Arc::new(meta),
             prepared: None,
-            prep_key: key,
+            prep_key: prep,
             messages,
         });
     }
@@ -424,7 +558,7 @@ fn load_module(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Arc<Loaded> {
         source,
         meta: Arc::new(meta),
         prepared: Some(Arc::new(prepared)),
-        prep_key: key,
+        prep_key: prep,
         messages,
     })
 }

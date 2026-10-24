@@ -38,3 +38,32 @@ fn diamond_extends_merge_each_base_once() {
         Some(&OptionValue::Bool(true))
     );
 }
+
+/// `${configDir}` stands for `./` in the leaf config's directory (as tsc reads it), so
+/// `${configDir}..` is that directory's parent, not `<dir>..`.
+#[test]
+fn config_dir_template_is_a_relative_path_from_the_leaf_config() {
+    let mut fs = MemoryFs::new();
+    fs.add_file(
+        "/p/src/tsconfig.json",
+        r#"{ "extends": "../shared/base.json", "files": [] }"#,
+    );
+    fs.add_file(
+        "/p/shared/base.json",
+        r#"{ "compilerOptions": { "baseUrl": "${configDir}..", "outDir": "${configDir}/../dist",
+             "paths": { "lib/*": ["${configDir}../lib/*"] } } }"#,
+    );
+    let parsed = load_tsconfig(&fs, "/p/src/tsconfig.json");
+    assert_eq!(
+        parsed.options.get(OptionId::BaseUrl),
+        Some(&OptionValue::String("/p".into()))
+    );
+    assert_eq!(
+        parsed.options.get(OptionId::OutDir),
+        Some(&OptionValue::String("/p/dist".into()))
+    );
+    let Some(OptionValue::Paths(paths)) = parsed.options.get(OptionId::Paths) else {
+        panic!("paths: {:?}", parsed.options.get(OptionId::Paths));
+    };
+    assert_eq!(paths.0[0].1, ["/p/lib/*"]);
+}

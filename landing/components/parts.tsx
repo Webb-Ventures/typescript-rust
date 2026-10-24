@@ -48,7 +48,7 @@ export function Footer() {
       <div className="wrap">
         <p className="foot-brand">
           <Logo size={20} id="lg-foot" />
-          <span>ts-r is open source under MIT OR Apache-2.0, by {site.org}.</span>
+          <span>ts-r is open source and MIT licensed, by {site.org}.</span>
         </p>
         <nav className="foot-nav" aria-label="Footer">
           <Link href="/tools/">Tools</Link>

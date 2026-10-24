@@ -444,6 +444,20 @@ Files, by layer:
   `useDefineForClassFields`, unless the constructor assigns it. TS2816 (`check_this`):
   `this` in a static field value (arrows included) of a class with legacy
   (`experimentalDecorators`) class decorators.
+- **Widening implicit-any errors** (`widening_errors.rs`; only under noImplicitAny without
+  strictNullChecks, TypeScript files). A declaration whose unannotated initializer type still
+  holds a widening `null`/`undefined` reports once it widens to `any`: TS7005 for variables,
+  TS7031 for binding elements (walked over the unwidened initializer, element by element),
+  TS7006 for parameters with an initializer, TS7008 for class properties. Before that, the
+  type is searched: a union with an empty-object member stays silent, arrays and tuples look
+  at their elements, and an object literal's own `null`/`undefined` property reports TS7018
+  at that property instead (`{ x: null }` is TS7018 on `x`, not TS7005). Functions with no
+  return annotation check their returns (and yields) the same way: TS7010/TS7055 at the name
+  (a function's, or a method's/getter's key), TS7011/TS7025 at a nameless function, skipped
+  when a contextual signature gives a non-generic return or yield type
+  (`widening_implicit_any`; tsc: checker.go, reportErrorsFromWidening and
+  reportWideningErrorsInType). Not done: a property coming out of a spread over a union is
+  not traced back to its literal (noImplicitAnyUnionNormalizedObjectLiteral1).
 - Implicitly `any` interface and type literal members (`implicit_members.rs`): TS7008 for
   property signatures, TS7032/TS7033 for accessor signatures with no annotation in the
   pair; a getter types its setter's parameter (no TS7006). Files with syntax errors are
@@ -454,7 +468,10 @@ Files, by layer:
 - TS2310 (`check_circular_interface_bases`): every interface declaration with an
   `extends` clause whose symbol's bases lead back to it (`has_circular_bases`). Classes
   get TS2506 instead. A class `extends` naming an interface with no value
-  (`extends_interface_only`) is TS2689 and its expression is not checked. An `implements`
+  (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
+  type of the first `extends` clause is checked; the rest of `extends A, B` and a second
+  `extends` clause are grammar errors only (tsc: checker.go, checkClassLikeDeclaration
+  through GetExtendsHeritageClauseElement). An `implements`
   or interface `extends` element that is not an identifier or a dotted chain of them (a
   call, an optional chain `a?.B`) is TS2500 / TS2499 at the expression, besides the
   reference's own errors (`check_heritage_entity_name`; tsc: checker/checker.go).
@@ -1100,7 +1117,10 @@ Files, by layer:
   (`!`), `T | undefined` (postfix `?`) or `T | null | undefined` (prefix `?`), with
   `strictNullChecks`; `any`, `unknown`, `never`, `void` and `undefined` as they are. Like
   grammar errors they are dropped in files with syntax errors (driver). A primitive type
-  name used as a value (`f(number)`) is TS2693, not TS2304/TS2552. A type-only `Promise`,
+  name used as a value (`f(number)`) is TS2693, not TS2304/TS2552. A missing `await`
+  whose parent is a call (`await(p)` outside an async function) is TS2311. A missing named
+  import written as a string literal shows with its quotes in TS2305/TS2724
+  (`'"missing"'`; `name_messages_misc`). A type-only `Promise`,
   `Symbol`, `Map`, `WeakMap`, `Set` or `WeakSet` read as a value is TS2585 (suggesting
   `lib` es2015) instead of TS2693 (`type_as_value_info`; tsc: checker/checker.go,
   checkAndReportErrorForUsingTypeAsValue).
@@ -1757,7 +1777,20 @@ Files, by layer:
 - **Re-exported `default`** (`export { default } from "./b"`) of a module without one is
   TS2305 unless a default can be synthesized, as for a default import (TS1192): synthetic
   defaults allowed and the module has `export =` or may have a synthetic default
-  (`reexport_missing_default`).
+  (`reexport_missing_default`). `import { default as d }` is a default import too
+  (`synthetic_default_module` accepts the named `default`).
+- **Namespace imports of callable `export =`** (`namespace_import_module_type`; tsc:
+  checker.go resolveESModuleSymbol, getTypeWithSyntheticDefaultImportType,
+  cloneTypeAsModuleType): `import * as ns` (not `export * as ns`) of a module whose
+  `export =` value has call or construct signatures or a `default` property, or of a
+  CommonJS file from an ES module under the Node kinds, is typed as the value's
+  properties and index signatures without its signatures (so `ns()` is TS2349), plus
+  `default: <value>` when the module can have a synthetic default
+  (`namespace_import_synthetic_default`, no `allowSyntheticDefaultImports` gate: Node
+  ESM-to-CJS always, ESM-to-ESM never, TS sources only with `export =`, declaration files
+  unless the `default` (a property of the `export =` value's type) is declared as a default
+  export, or `__esModule` is exported). The view prints `typeof X` for a class, enum or
+  namespace entity (`ObjectFlags::MODULE` on the literal), its structure for a function.
 - **A synthetic default overrides a real one** (`node_commonjs_default_module`, resolved in
   `resolve_alias`; tsc: checker.go getTargetOfModuleDefault, canHaveSyntheticDefault):
   under `node16`..`nodenext` a default import, `{ default }` import or `default` re-export
@@ -2310,6 +2343,14 @@ Files, by layer:
   private or protected one only when they all share a declaration (`union_origins_accessible`):
   `Public | Protected` has no `member`, `Foo | (Foo & Bar)` has `foo`. Indexed access types
   on unions check their keys like those on objects (TS2339) (`union_property_accessibility`).
+- **Missing properties of object literal union members.** A union member that is an object
+  literal type (not built by a spread, `ObjectFlags::CONTAINS_SPREAD`) and lacks a property
+  reads it as `undefined`: `(o || {}).color` is `string | undefined`, not TS2339. The union
+  property carries `WRITE_PARTIAL`, and a write does not find it (TS2339 / TS7053). An element
+  write first widens its object: a union with an empty object member is subtype-reduced, so
+  `(o || {})["color"] = 1` reports on `{}` (`union_object_literal_missing_prop`; tsc:
+  checker.go, createUnionOrIntersectionProperty and checkPropertyAccessExpressionOrQualifiedName
+  widening an assignment target).
 - **Assignment pattern properties.** An object assignment pattern's property that the source
   lacks is TS2339 at its key (`check_destructured_assignment_property`). There is no error
   when the property has a default and the source is a fresh literal, or when a union source
@@ -2883,12 +2924,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-24, 775ce97, parity/grammar-diagnostics merged with main at 2cd82e9
-  (#29's binder changes): the lexer's regex pattern and flag errors and octal escape errors;
-  12750 compared variants, 26 s on 4 threads): 12330 exact (96.7%; all diagnostics and
-  chains), 12350 (96.9%) exact on first lines; 214 variants with a diagnostic tsc does not
-  report, 22 of them tests where tsc reports nothing.
-  Earlier: 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-24, MERGE, parity/grammar-diagnostics merged with main at 1c10cde (#31's
+  checker round and #29's binder changes): the lexer's regex pattern and flag errors and octal
+  escape errors; 12750 compared variants, 21 s on 4 threads): 12345 exact (96.8%; all
+  diagnostics and chains), 12365 (97.0%) exact on first lines; 203 variants with a diagnostic
+  tsc does not report, 17 of them tests where tsc reports nothing.
+  Earlier: 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

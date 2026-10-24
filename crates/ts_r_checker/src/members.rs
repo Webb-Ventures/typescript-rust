@@ -2929,6 +2929,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut readonly = false;
         let mut partial = false;
         let mut literal_part = false;
+        let mut write_partial = false;
         let mut flags = SymbolFlags::NONE;
         for m in members {
             let am = self.apparent_type(m);
@@ -2963,6 +2964,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                             types.push(i.value);
                             readonly |= i.readonly;
                         }
+                        // An object literal's type without the property (and no spread)
+                        // reads it as `undefined`: `(o || {}).color` (tsc: checker.go,
+                        // createUnionOrIntersectionProperty).
+                        _ if self.store().object_of(m).is_some_and(|o| {
+                            o.flags.contains(ObjectFlags::OBJECT_LITERAL)
+                                && !o.flags.contains(ObjectFlags::CONTAINS_SPREAD)
+                        }) =>
+                        {
+                            types.push(TypeId::UNDEFINED);
+                            write_partial = true;
+                        }
                         _ => {
                             partial = true;
                             break;
@@ -2986,6 +2998,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if literal_part {
                 check |= check_flags::HAS_LITERAL_PART;
+            }
+            if write_partial {
+                check |= check_flags::WRITE_PARTIAL;
             }
             if types.windows(2).any(|w| w[0] != w[1]) {
                 check |= check_flags::HAS_NON_UNIFORM_TYPE;

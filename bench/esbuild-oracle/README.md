@@ -29,56 +29,56 @@ reason; cases that print `Math.random()` results are skipped as nondeterministic
 
 ## Results
 
-52b87b3 (2026-10-22, macOS arm64, esbuild 0.28.2, `--jobs 4`): **666 of 746 compared cases
-pass (89.3%)**; 324 of the 1070 cases are skipped. The esbuild test files come from
+cb637a3 (2026-10-24, macOS arm64, esbuild 0.28.2, `--jobs 4`): **742 of 779 compared cases
+pass (95.3%)**; 291 of the 1070 cases are skipped. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-Down from 667: `DuplicateEntryPoint` passes the same entry point twice, and the check that
-two outputs never share a path (added with parallel output writes) now fails the build, where
-esbuild writes the one output.
+33 more cases are compared than at 52b87b3: the runner now maps JSX options, entry, chunk and
+asset path templates, `OutputExtensionJS`, `TSConfigPath`, and `UnsupportedJSFeatures` sets
+that equal a year target of ES2022 or later (`--target=esN`). Sets older than ES2022 are
+skipped as `UnsupportedJSFeatures=es(<2022)`.
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| bundler_css_test.go | 1 | 4 | 57 |
+| bundler_css_test.go | 1 | 5 | 56 |
 | bundler_dce_test.go | 108 | 3 | 10 |
-| bundler_default_test.go | 188 | 19 | 96 |
-| bundler_glob_test.go | 0 | 1 | 9 |
-| bundler_importphase_test.go | 0 | 12 | 0 |
-| bundler_importstar_test.go | 77 | 3 | 0 |
+| bundler_default_test.go | 213 | 9 | 81 |
+| bundler_glob_test.go | 1 | 0 | 9 |
+| bundler_importphase_test.go | 12 | 0 | 0 |
+| bundler_importstar_test.go | 80 | 0 | 0 |
 | bundler_importstar_ts_test.go | 23 | 0 | 0 |
-| bundler_loader_test.go | 34 | 14 | 37 |
-| bundler_lower_test.go | 14 | 0 | 70 |
-| bundler_packagejson_test.go | 89 | 6 | 1 |
-| bundler_splitting_test.go | 20 | 2 | 1 |
-| bundler_ts_test.go | 54 | 8 | 26 |
-| bundler_tsconfig_test.go | 58 | 6 | 16 |
+| bundler_loader_test.go | 47 | 8 | 30 |
+| bundler_lower_test.go | 16 | 0 | 68 |
+| bundler_packagejson_test.go | 93 | 2 | 1 |
+| bundler_splitting_test.go | 21 | 2 | 0 |
+| bundler_ts_test.go | 59 | 3 | 26 |
+| bundler_tsconfig_test.go | 68 | 3 | 9 |
 | bundler_yarnpnp_test.go | 0 | 2 | 1 |
 
 Remaining failures by cause:
 
-- **Not implemented**: `import defer` / `import source` phases (12), glob imports
-  (`require('./src/' + x)`), CSS bundling details (`@import` inlining, CSS modules from JS),
-  `data:` URL imports of JavaScript and JSON, `with { type: ... }` loader overrides, Yarn PnP,
-  `--line-limit`.
-- **Missing diagnostics** (esbuild fails the build, we don't): assigning to a class name
-  inside its body, export cycles (`export {a as b}` / `export {b as a}`), `require()` of a
-  module with top-level await through a chain, strict JSON for `package.json` (comments, trailing commas) and BigInt in
-  JSON.
+- **Not implemented**: CSS modules imported from JS and CSS-from-JS missing-import errors
+  (4), `[hash]` content hashing of a CSS bundle (`MetafileCSSBundleTwoToOne`), `data:` URL
+  imports of JavaScript and JSON (4), `?query` suffixes as separate `file` loader modules,
+  asset `[dir]` relative to the output base, one asset reached from two output directories,
+  Yarn PnP (2), `--public-path` with splitting and a minified-identifiers splitting case.
+- **Top-level await in lazily initialized modules** (4): `require()` of a module with
+  top-level await through a chain, `import()` of one without code splitting and a cycle of
+  them (esbuild makes the module's wrapper async). `TopLevelAwaitAllowedImportWithSplitting`
+  differs because esbuild's own output throws (`require_entry is not defined`).
+- **Interop and DCE details**: TDZ and class renaming (`CommonJSFromES6`, `AvoidTDZ`),
+  `this` in ESM-looking files, namespace shapes of files that are neither ESM nor CommonJS,
+  CommonJS `exports` warnings in an ESM bundle, pure calls with spread arguments,
+  `@__NO_SIDE_EFFECTS__` on unused calls, dead `case` bodies that import a missing file.
 - **TypeScript, where esbuild and tsc 7 differ** (ts-r follows tsc): `@new x()` / `@x?.[y]`
-  decorators (tsc's TS1497), `'' + null` in const enums, computed keys of fields without an
-  initializer under `useDefineForClassFields: false` (tsc never evaluates them), a package
-  `tsconfig` field naming a missing file (tsc falls back to the package's `tsconfig.json`).
-- **TypeScript, needs the bundler**: cross-file const enum inlining (`TSConstEnumComments`,
-  `TSMinifyEnumPropertyNames`: the bundler must hand imported enum values to the transform),
-  missing re-exports from TS files (`TSExportMissingES6`), `jsx: preserve` in tsconfig ignored
-  when bundling (`TsconfigPreserveJSX`).
-- **Top-level await in lazily initialized modules**: `import()` of a module with top-level
-  `await` without code splitting (esbuild makes the module's wrapper async).
-- **Interop details**: namespace objects of empty or side-effect-free files, CommonJS files
-  that also use ESM syntax, the dual-package rule with `module` before `main`, `require.main`
-  and `require.cache`, `__proto__` keys in JSON, `AvoidTDZ` class renaming.
-- **Shapes we print differently**: JSON namespace `default` is a value rather than a getter;
-  `--public-path` with splitting; asset paths for one file reached from two output
-  directories; `?query` suffixes on `file` loader URLs.
+  decorators (tsc's TS1497, `TSExperimentalDecorators`), `'' + null` in const enums
+  (`EnumRulesFrom_TypeScript_5_0`), computed keys of fields without an initializer under
+  `useDefineForClassFields: false` (tsc never evaluates them), a package `tsconfig` field
+  naming a missing file (tsc falls back to the package's `tsconfig.json`).
+- **Oracle artifacts**: `TsconfigExtendsDotWithSlash` / `DotDotWithSlash` expect a warning
+  where the real esbuild CLI fails ("is a directory"); ts-r matches the test's intent.
+  `PackageJsonBrowserIssue2002B` depends on an esbuild quirk (a bare `sub` matched against a
+  browser-map key relative to the importer), and `PackageJsonExportsAlternatives` fails in
+  esbuild itself.
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -89,3 +89,4 @@ Remaining failures by cause:
 | build parity: only esbuild's errors fail a build (`ts_r_transform::build_errors`), `.js` before `.ts` inside `node_modules`, dead `catch` of an empty `try` | 1070 | 746 | 655 | 91 | 324 | 87.8% |
 | strict-mode errors (`with`, `delete x` in strict code, ESM files and ESM output; tsconfig `alwaysStrict` only when set), assignments to constants and imports when bundling, top-level `return` with top-level `await` | 1070 | 746 | 667 | 79 | 324 | 89.4% |
 | parallel output writes: `DuplicateEntryPoint` (one entry point given twice) now fails with "Two output files share the same path"; esbuild writes it once | 1070 | 746 | 666 | 80 | 324 | 89.3% |
+| parity/bundler at cb637a3: import phases and attributes, glob entries, strict package.json, re-export cycle errors, JSON namespaces, imported scripts as CommonJS, external evaluation order, exports targets naming compiled TypeScript, exported const enums kept; runner maps JSX, path templates and modern `UnsupportedJSFeatures` | 1070 | 779 | 742 | 37 | 291 | 95.3% |

@@ -2,7 +2,7 @@
   "name": "@ts-r.dev/typescript",
   "version": "7.0.0",
   "description": "Drop-in for the typescript package: tsc runs ts-r-check where it gives the same results as your TypeScript, and everything else goes to your TypeScript",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Webb-Ventures/typescript-rust.git",
@@ -22,7 +22,8 @@
   "files": [
     "bin",
     "lib",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {

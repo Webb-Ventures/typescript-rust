@@ -1081,6 +1081,23 @@ impl<'c, 'a> Ck<'c, 'a> {
             if let Some(i) = init {
                 let il = Loc::new(file, i);
                 let mut t = self.check_expr(il);
+                // `let x = null` evolves and `let xs = []` is an evolving array instead.
+                if type_ann.is_none()
+                    && declared != TypeId::AUTO
+                    && self.widening_errors_enabled(file)
+                    && !matches!(
+                        ast.node(crate::nodes::skip_parens(ast, i)),
+                        Node::ArrayLit { elements } if ast.list(*elements).is_empty()
+                    )
+                {
+                    let name = self.c.text(nl).to_owned();
+                    self.report_widening_declaration(
+                        nl,
+                        crate::widening_errors::WideningDecl::Variable,
+                        &name,
+                        t,
+                    );
+                }
                 if let Some(ta) = type_ann {
                     // A function initializer carries the variable's expando properties
                     // (`const f: Fn = () => 1; f.only = ...`).
@@ -1127,6 +1144,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(i) = init {
             let il = Loc::new(file, i);
             let t = self.check_expr(il);
+            if type_ann.is_none() && self.widening_errors_enabled(file) {
+                self.report_binding_widening(nl, t);
+            }
             // An empty pattern under `strictNullChecks` only asks for a non-nullish value
             // (`const {}: undefined = 1` is TS2532 alone; tsc: `checkVariableLikeDeclaration`).
             let empty = match *ast.node(nl.node) {
@@ -1968,6 +1988,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.check_param(Loc::new(file, p), is_expr);
         }
         self.report_circular_return(l, parts);
+        self.check_return_widening(l, parts);
         let Some(body) = parts.body else { return };
         let bl = Loc::new(file, body);
         let expression_body =
@@ -2880,6 +2901,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // with its literals widened (`f: (a: number) => void = (a = "") => {}` is an
                 // error, `(a: 1 | 2) => void = (a = 3) => {}` is not; observed, tsc 7).
                 self.check_assignable_with_elaboration(it, ctx, Loc::new(file, pattern), Some(il));
+            }
+            if type_ann.is_none()
+                && matches!(ast.node(pattern), Node::Ident { .. })
+                && self.widening_errors_enabled(file)
+                && !(in_expr_fn && self.contextual_param_type(p).is_some())
+            {
+                let name = self.c.text(Loc::new(file, pattern)).to_owned();
+                self.report_widening_declaration(
+                    p,
+                    crate::widening_errors::WideningDecl::Parameter,
+                    &name,
+                    it,
+                );
             }
         }
         if !matches!(ast.node(pattern), Node::Ident { .. }) {
@@ -4166,33 +4200,33 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.check_private_name_static_clash(file, members);
         self.check_accessor_pair_modifiers(file, members);
         self.check_static_function_name_conflicts(l, members);
-        for &h in ast.list(heritage) {
-            let Node::HeritageClause { kind, types } = *ast.node(h) else {
-                continue;
-            };
-            if kind == HeritageKind::Extends {
-                for (i, &t) in ast.list(types).iter().enumerate() {
-                    if let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(t) {
-                        // `class C extends I` with `I` an interface (no value): TS2689
-                        // instead of the expression's errors.
-                        if self.extends_interface_only(Loc::new(file, expr)) {
-                            if self.reporting(file) {
-                                let text = self.c.text(Loc::new(file, expr)).to_owned();
-                                self.error(
-                                    Loc::new(file, expr),
-                                    dg::CANNOT_EXTEND_AN_INTERFACE_0_DID_YOU_MEAN_IMPLEMENTS_2689,
-                                    &[&text],
-                                );
-                            }
-                            continue;
-                        }
-                        let et = self.check_expr(Loc::new(file, expr));
-                        if i == 0 {
-                            self.check_base_constructor_type(Loc::new(file, expr), et);
-                            self.check_class_extends_type_args(Loc::new(file, t), expr, type_args);
-                        }
-                    }
+        // Only the first type of the first `extends` clause is the base; the others
+        // (`extends A, B`, `extends A extends B`, both grammar errors) are never checked.
+        let base_node = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+            Node::HeritageClause {
+                kind: HeritageKind::Extends,
+                types,
+            } => ast.list(types).first().copied(),
+            _ => None,
+        });
+        if let Some(t) = base_node
+            && let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(t)
+        {
+            // `class C extends I` with `I` an interface (no value): TS2689 instead of the
+            // expression's errors.
+            if self.extends_interface_only(Loc::new(file, expr)) {
+                if self.reporting(file) {
+                    let text = self.c.text(Loc::new(file, expr)).to_owned();
+                    self.error(
+                        Loc::new(file, expr),
+                        dg::CANNOT_EXTEND_AN_INTERFACE_0_DID_YOU_MEAN_IMPLEMENTS_2689,
+                        &[&text],
+                    );
                 }
+            } else {
+                let et = self.check_expr(Loc::new(file, expr));
+                self.check_base_constructor_type(Loc::new(file, expr), et);
+                self.check_class_extends_type_args(Loc::new(file, t), expr, type_args);
             }
         }
         if let Some(sym) = self.c.sym_of_decl(l) {
@@ -4262,6 +4296,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                     if let Some(v) = value {
                         let vl = Loc::new(file, v);
                         let t = self.check_expr(vl);
+                        if type_ann.is_none()
+                            && self.widening_errors_enabled(file)
+                            && let Some(name) = key_text(ast, key)
+                        {
+                            self.report_widening_declaration(
+                                Loc::new(file, key),
+                                crate::widening_errors::WideningDecl::Member,
+                                &name,
+                                t,
+                            );
+                        }
                         if type_ann.is_some()
                             && let Some(d) = declared
                         {
@@ -8694,10 +8739,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                         _ => continue,
                     };
-                    // A re-exported `default` may be synthesized, as for a default import.
+                    // A re-exported or renamed `default` may be synthesized, as for a
+                    // default import.
                     if self.c.export_of(module_sym, &name).is_some()
                         || (name == "default"
-                            && matches!(ast.node(s), Node::ExportSpecifier { .. })
                             && self.c.opts.allow_synthetic_default_imports
                             && (self.c.export_of(module_sym, "export=").is_some()
                                 || self.c.can_have_synthetic_default(file, module_sym)))
@@ -8795,6 +8840,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         module_sym: ts_r_types::SymId,
     ) {
         let m = format!("\"{spec}\"");
+        // A string-literal import name (`import { "a b" as x }`) shows with its quotes.
+        let shown = if matches!(self.ast(at.file).node(at.node), Node::StringLit { .. }) {
+            self.c.text(at).to_owned()
+        } else {
+            name.to_owned()
+        };
         let eq = self.c.export_of(module_sym, "export=");
         let holder = match eq {
             Some(e) => self.c.resolve_alias(e).unwrap_or(e),
@@ -8813,7 +8864,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.error(
                 at,
                 dg::_0_HAS_NO_EXPORTED_MEMBER_NAMED_1_DID_YOU_MEAN_2_2724,
-                &[&m, name, &sug],
+                &[&m, &shown, &sug],
             );
             return;
         }
@@ -8887,7 +8938,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
-        self.error(at, dg::MODULE_0_HAS_NO_EXPORTED_MEMBER_1_2305, &[&m, name]);
+        self.error(
+            at,
+            dg::MODULE_0_HAS_NO_EXPORTED_MEMBER_1_2305,
+            &[&m, &shown],
+        );
     }
 
     /// A module-level local (not exported) named `name` in any declaration of the module

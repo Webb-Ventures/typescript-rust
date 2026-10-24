@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Webb-Ventures/typescript-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Webb-Ventures/typescript-rust/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@ts-r.dev/cli/next?label=npm&color=cb3837)](https://www.npmjs.com/package/@ts-r.dev/cli)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](#license)
 [![Sponsor](https://img.shields.io/badge/sponsor-ts--r-f0814a?logo=githubsponsors&logoColor=white)](https://ts-r.dev/donate/)
 
 **Fast TypeScript tooling, written from scratch in Rust.** ts-r type-checks, lints, bundles,
@@ -20,7 +20,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 ```
 
 > **Status: preview.** The type checker is the most mature tool. It gives tsc 7's exact output on
-> 96.6% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns
+> 96.8% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns
 > and TypeORM, and is within a few diagnostics on Playwright (2 extra) and RxJS (6 extra, 5
 > missing, of about 21,900). Every other tool works on real projects
 > but has known gaps (below). Version numbers stay below 1.0 until that changes.
@@ -68,10 +68,13 @@ TypeScript on that project, and hands everything else to your TypeScript:
 ```jsonc
 // package.json
 "devDependencies": {
-  "typescript": "npm:@ts-r.dev/typescript@^7",
+  "typescript": "npm:@ts-r.dev/typescript@next",
   "typescript-real": "npm:typescript@^7.0.0"
 }
 ```
+
+During the alpha, use `@next` or an exact version (`@7.0.1000-alpha.3`): a range like `^7`
+doesn't match prerelease versions.
 
 The details are in [npm/typescript/README.md](npm/typescript/README.md). Packages and platforms
 are in [npm/ts-r/README.md](npm/ts-r/README.md).
@@ -183,13 +186,8 @@ Sponsors are listed here.
 
 ## License
 
-ts-r is dual-licensed under either of
-
-- the MIT license ([LICENSE-MIT](LICENSE-MIT)), or
-- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)),
-
-at your option. Unless you say otherwise, any contribution you submit for inclusion in ts-r is
-dual-licensed as above, with no additional terms or conditions.
+ts-r is MIT licensed ([LICENSE](LICENSE)). Unless you say otherwise, any contribution you submit
+for inclusion in ts-r is licensed under MIT, with no additional terms or conditions.
 
 TypeScript's lib files shipped with `ts-r-check` and `ts-r-lsp` are under TypeScript's own
 Apache-2.0 license, included next to them. Upstream test data fetched by

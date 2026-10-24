@@ -265,11 +265,15 @@ pub fn function_expr(ast: &mut Ast, params: &[NodeId], body: &[NodeId], at: u32)
     )
 }
 
-/// `{ key: value, ... }` with identifier-or-string keys.
+/// `{ key: value, ... }` with identifier-or-string keys. A `__proto__` key is computed
+/// (`["__proto__"]`) so it creates a property instead of setting the prototype.
 pub fn object(ast: &mut Ast, props: &[(&str, NodeId)], at: u32) -> NodeId {
     let mut ids = Vec::with_capacity(props.len());
     for &(k, v) in props {
-        let key = if crate::names::is_identifier(k) {
+        let key = if k == "__proto__" {
+            let expr = string(ast, k, at);
+            ast.add(Node::ComputedKey { expr }, sp(at))
+        } else if crate::names::is_identifier(k) {
             ident(ast, k, at)
         } else {
             string(ast, k, at)
