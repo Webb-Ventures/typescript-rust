@@ -128,9 +128,10 @@ Files:
 
 ## Status (type-aware round 3, `m4/type-aware-3`)
 
-- 154 rules, 51 of them type-aware. Rule oracle: 15,471 / 15,517 cases. The non-type-aware
-  cases are 8,597 / 8,597 and the type-aware cases 6,874 / 6,920; the 46 failures are listed in
-  design record 0006.
+- 154 rules, 51 of them type-aware. Rule oracle: 15,495 / 15,517 cases. The non-type-aware
+  cases are 8,597 / 8,597 and the type-aware cases 6,898 / 6,920 (2026-10-24, `087afc9`); the
+  22 failures are a subset of the 46 listed in design record 0006 (`tests/oracle/baseline.txt`
+  has the current per-rule counts).
 - private-app against ESLint with every configured rule: all 23 projects pass the parity
   gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.

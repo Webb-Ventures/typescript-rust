@@ -162,6 +162,26 @@ jobs:
       # next build, then scripts/check.mjs: content, quoted numbers, lib/tools.ts, links, anchors.
       - run: npm run build
         working-directory: landing
+      # Dogfooding: the type check again, through ts-r's drop-in tsc (@ts-r.dev/typescript; next
+      # build's own check above runs TypeScript, see landing/AGENTS.md). After the build, so
+      # next-env.d.ts and .next/types exist. A fresh runner has no parity cache, so the drop-in
+      # runs ts-r-check and TypeScript side by side and keeps ts-r-check's result only when the
+      # two match. A mismatch is a ts-r bug, not a site bug: TypeScript's result is used, and this
+      # step warns and prints the report.
+      - name: Type-check with ts-r (@ts-r.dev/typescript)
+        working-directory: landing
+        env:
+          TS_R_TSC_VERBOSE: 1
+          TS_R_CACHE_DIR: ${{ runner.temp }}/ts-r
+        run: |
+          status=0
+          npm run typecheck || status=$?
+          for report in "$TS_R_CACHE_DIR"/typescript/parity/*.txt; do
+            [ -e "$report" ] || continue
+            echo "::warning title=ts-r parity::ts-r-check and TypeScript disagree on landing/ (a ts-r bug); TypeScript's result was used. Report below."
+            cat "$report"
+          done
+          exit "$status"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: landing/out

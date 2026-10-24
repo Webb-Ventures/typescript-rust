@@ -1,6 +1,7 @@
 # ts-r metrics
 
-Status as of 16 Oct 2026. Pre-alpha: nothing is published yet.
+Status as of 16 Oct 2026; the correctness rows for the checker, lint and the bundler were
+measured again on 24 Oct 2026 at `087afc9`. Alpha: releases are on npm under the `next` dist-tag.
 
 Speed and memory are measured on pinned public repos ([bench/repos.toml](../bench/repos.toml)):
 **excalidraw** (a Vite + React app, about 500 modules), **tRPC**, **date-fns**, **RxJS**,
@@ -43,8 +44,9 @@ A speed below 1× means ts-r is slower.
 diagnostics differ from tsc's, ts-r-lint runs without type information (its parity gate).
 ² ts-r-build leaves out excalidraw's 61 locale chunks (template-literal `import()` isn't
 bundled yet), which flatters its times.
-³ ts-r-check reports extra diagnostics on these repos and misses some of tsc's, and skips
-checks it doesn't implement yet; times will move as it grows.
+³ On 24 Oct 2026 (`087afc9`) ts-r-check matched tsc exactly on tRPC and TypeORM; it reported
+2 extra diagnostics on Playwright and 6 extra and 5 missing (of about 21,900) on RxJS. Times
+will move as it grows.
 ⁴ Like-for-like: tRPC's ESLint config limited to the rules ts-r-lint implements, the same file
 for both tools, `lint-trpc-same-rules` in `bench/scenarios.toml` (2026-10-18). Both report 0
 problems from the rules. ESLint evaluates its config on every run; the cached row skips that.
@@ -75,7 +77,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Release profile (fat LTO) vs thin LTO | 7% smaller, 2–4% faster |
 | PGO on top | 3–5% faster, 26% larger (opt-in; measured before training moved to the public repos) |
 | npm package, packed | `ts-r-lint` 1.2 MB · `ts-r-check` 2.3 MB · `ts-r-lsp` 3.7 MB · all tools 11.7 MB |
-| Minified output vs esbuild, top 1,000 packages | 2.9% smaller in total; median package 0.7% smaller |
+| Minified output vs esbuild, top 1,000 packages | 3.1% larger in total over 909 packages; median ratio 1.048 (ecosystem/STATUS.md) |
 | `parse<T>` runtime | 510 B gzipped (budget 0.5 KB) |
 
 ## Correctness
@@ -84,13 +86,13 @@ private app before the switch to public repos and are not re-measured yet.
 |---|---|
 | Type checker vs tsc's conformance suite (exact diagnostics) | 96.7% of 12,750 compared test variants |
 | private-app projects with exactly tsc's diagnostics | 25 of 25 |
-| private-app diagnostics: extra / missing vs tsc | 4 / 128 |
+| private-app diagnostics: extra / missing vs tsc | 0 / 0 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
-| Lint rule oracle (ESLint + typescript-eslint test cases) | 15,471 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,874 / 6,920) |
+| Lint rule oracle (ESLint + typescript-eslint test cases) | 15,495 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,898 / 6,920) |
 | Lint on private-app, every configured rule (type-aware included) vs ESLint | 26,578 match, 0 missed, 0 extra; 23 of 23 projects pass the parity gate |
 | Parser + printer round trip over tsc's test files | 18,260 files, 0 mismatches |
 | Parse corpus (tsc's tests + private-app) | 0 errors where tsc accepts the file |
-| esbuild's bundler test cases | 646 / 746 |
+| esbuild's bundler test cases | 666 / 746 (324 skipped) |
 | tsconfig error projects matching tsc | 114 / 118 |
 | Sound-mode spec cases | 221 / 221 |
 | Incremental vs full check | identical in all 25 projects; 18,000 random edits (seeds 1–60 × 300) |
