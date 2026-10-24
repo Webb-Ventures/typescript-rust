@@ -114,8 +114,21 @@ Most extra diagnostics in the ecosystem run are TS2344, TS2536, TS2417 and TS271
 the 220 conformance extras are runner artefacts, such as tests for module kinds tsc 7 removed,
 which have no baseline.
 
-Speed and memory on public projects (`cargo xtask bench --repos`, cold check, no history;
-Apple M-series shared laptop, median of 5, peak memory of one run):
+Speed on four dedicated Linux cores (the review box's bench of pull request #42 on
+2026-10-24, `cargo xtask bench --repos`, cold check, no history, median of 5; peak memory not
+measured):
+
+| Project | ts-r-check | tsc 7.0.2 |
+|---|---|---|
+| tRPC `packages/server` | 474.4 ms | 979.0 ms |
+| date-fns `pkgs/core` | 998.4 ms | 1,980.1 ms |
+| RxJS `packages/rxjs` | 1,202.1 ms | 6,513.9 ms |
+
+With its saved history and nothing changed, ts-r-check took 140.9 ms on RxJS, 401.0 ms on tRPC
+and 1,020.4 ms on date-fns in that run.
+
+An older run with two more projects and peak memory (Apple M-series shared laptop, 2026-10-16
+at commit 9c3a371, median of 5, peak memory of one run):
 
 | Project | ts-r-check | tsc 7.0.2 |
 |---|---|---|
@@ -125,12 +138,13 @@ Apple M-series shared laptop, median of 5, peak memory of one run):
 | TypeORM `packages/typeorm` | 548 ms, 377 MB | 567 ms, 826 MB |
 | Playwright (root project) | 592 ms, 463 MB | 685 ms, 1,094 MB |
 
-With its saved history and nothing changed, ts-r-check takes 23 to 126 ms on the same
-projects. These repos don't type-check cleanly under TypeScript 7, and ts-r-check doesn't
-report the same diagnostics as tsc on them yet: it reports extra ones on all five (from a few
-dozen on date-fns to over a thousand on RxJS) and misses some of tsc's. ts-r also skips work it
-doesn't implement yet, so these numbers will move as the checker grows.
+With its saved history and nothing changed, ts-r-check took 23 to 126 ms on those projects.
+These repos don't type-check cleanly under TypeScript 7. ts-r-check reports exactly tsc's
+diagnostics on tRPC, date-fns and TypeORM, 2 extra on Playwright, and 6 extra and 5 missing of
+about 21,900 on RxJS (2026-10-24, `087afc9`). ts-r also skips work it doesn't implement yet, so
+these numbers will move as the checker grows.
 
-Method and commits: [check](/benchmarks/#check),
+Method and commits: [check on Linux](/benchmarks/#check-linux),
+[check on the laptop](/benchmarks/#check),
 [ecosystem](/benchmarks/#ecosystem) and
 [correctness](/benchmarks/#correctness).

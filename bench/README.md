@@ -250,9 +250,39 @@ extra are TS2339 and its 5 missing TS2344. The React Compiler's 71 extra are 65 
 (property access on `env.config.*`, whose type is zod 4's `z.infer` of a schema), 4 TS7022,
 1 TS7006 and 1 TS2345.
 
+## Dedicated Linux run (2026-10-24)
+
+The review box's bench of pull request #42 (bench.yml, on four dedicated cores of its bench
+machine, linux-x86_64; the CPU model is not recorded): `d8a6a97` against main at `0697824`,
+11 minutes. `d8a6a97` is the tree #42 merged as `8b6c630`; it differs from main at `0697824`
+(and from `a74e016`) only in `crates/ts_r_run`, `bench/run-oracle`, `Cargo.lock` and two site
+files, and no scenario below runs ts-r-run, so these are main's numbers. They are the README's
+`bench:main` table (`node scripts/readme-bench.mjs main`) and the site's Linux sections
+(`landing/data/bench.json`: `check-linux`, `build-linux`, `lint-linux`). Medians of the
+`runs` in `scenarios.toml` (30 for version-startup, 10 for build-three-x10, 3 for lint-trpc, 5
+for the rest); peak memory was not measured, and problems were not compared.
+
+| Scenario | ts-r | ts-r, second variant | Reference |
+|---|---:|---:|---:|
+| version-startup | 2.03 ms | | esbuild 3.93 ms; tsc 7 61.3 ms |
+| check-trpc | 474.4 ms | warm 401.0 ms | tsc 7 979.0 ms; repo tsc 5,176.7 ms |
+| check-date-fns | 998.4 ms | warm 1,020.4 ms | tsc 7 1,980.1 ms; repo tsc 1,970.2 ms |
+| check-rxjs | 1,202.1 ms | warm 140.9 ms | tsc 7 6,513.9 ms; repo tsc 14,249.3 ms |
+| build-three-x10 | 962.9 ms | cached 484.6 ms | esbuild 1,409.8 ms |
+| lint-trpc | 838.1 ms | no types 43.8 ms | ESLint 11,278.7 ms |
+| lint-trpc-same-rules | 30.6 ms | cold config 2,850.7 ms; typed, empty cache 3,588.1 ms | ESLint 4,005.4 ms; typed 10,790.1 ms |
+| lint-date-fns | 186.6 ms | | oxlint 1,103.3 ms |
+| parse-dom-dts | pending (no `--parse-only`) | | esbuild 40.6 ms; oxc-parser 94.7 ms; tsc 7 165.0 ms |
+| run-startup | not run (was pending) | | node --experimental-strip-types 112.1 ms; tsx 216.4 ms |
+
+The gate flagged check-rxjs's warm run (+24.8% against the base); the confirming re-run, PR
+first, gave 1,150.4 ms cold and 124.2 ms warm (-5.0% and -3.7%), so it passed. The saved
+history barely helped on tRPC and not at all on date-fns here, where the laptop run below had
+23 and 78 ms: not investigated yet.
+
 ## Headline run (2026-10-16)
 
-The numbers on the site (`landing/data/bench.json`) and in
+The shared-laptop numbers on the site (`landing/data/bench.json`) and in
 [docs/metrics.md](../docs/metrics.md). Shared macOS arm64 laptop (16 cores, 48 GB, other jobs
 running), release build of `m7/bench-oss`, 4 threads, every command under `scripts/limit.sh`.
 `RAYON_NUM_THREADS=4 cargo xtask bench --repos trpc,date-fns,rxjs,typeorm,playwright,three-x10,excalidraw --memory`
@@ -485,8 +515,9 @@ Bundler (`ts_r_build`):
 
 10. **three.js x10 bundles agree.** Both IIFEs load in Node with 10 copies x 443 exports and the
     same export names and `typeof`s; ts-r-build's output is 7.88 MB against esbuild's 7.71 MB
-    (+2.2%), source maps 33.1 MB against 33.4 MB. Cold, ts-r-build is slower than esbuild here;
-    with its disk cache it is level (see the table).
+    (+2.2%), source maps 33.1 MB against 33.4 MB. Cold, ts-r-build was slower than esbuild in
+    this run; with its disk cache it was level (see the table). Later runs: level cold on the
+    laptop (three.js x10 bundler run) and 1.5x faster on the dedicated Linux run.
 
 Language server (`ts_r_lsp`):
 

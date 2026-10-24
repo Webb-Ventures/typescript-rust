@@ -7,11 +7,15 @@ Alpha: releases are on npm under the `next` dist-tag.
 
 Speed and memory are measured on pinned public repos ([bench/repos.toml](../bench/repos.toml)):
 **excalidraw** (a Vite + React app, about 500 modules), **tRPC**, **date-fns**, **RxJS**,
-**TypeORM**, **Playwright** and **three.js x10**, on a shared macOS arm64 laptop (16 cores,
-48 GB) with 4 threads while other jobs ran, so treat timings as approximate. Each number comes
-from the files listed under [Sources](#sources); `cargo xtask bench --repos` reproduces them.
+**TypeORM**, **Playwright** and **three.js x10**. The main table is from a shared macOS arm64
+laptop (16 cores, 48 GB) with 4 threads while other jobs ran, so treat its timings as
+approximate; [the dedicated Linux table](#on-a-dedicated-linux-machine-24-oct-2026) is newer and
+is the one the README quotes. Each number comes from the files listed under [Sources](#sources);
+`cargo xtask bench --repos` reproduces them.
 
 ## Speed and memory
+
+Shared macOS arm64 laptop, 16 Oct 2026 unless a footnote says otherwise:
 
 | Tool | Replaces | Measure | ts-r | Baseline | Speed | Memory |
 |---|---|---|---|---|---|---|
@@ -66,9 +70,28 @@ Read with these caveats:
   rules, 1 type-aware); the ESLint server ran them.
 - `ts-r-run` vs tsx 4.23: 29 vs 79 ms for hello.ts, 101 vs 270 ms for 1,000 modules (Node 24.21.0, median of 15 runs; commit e92e486).
 
+### On a dedicated Linux machine (24 Oct 2026)
+
+The review box's bench of pull request #42 (`d8a6a97`, merged as `8b6c630`; its code differs
+from main's at `0697824` only in `ts_r_run`): linux-x86_64, four dedicated cores, medians
+(10 runs for three.js x10, 30 for `--version`, 5 for the rest, 3 for lint-trpc), peak memory
+not measured. Recorded in [bench/README.md](../bench/README.md), "Dedicated Linux run".
+
+| Tool | Baseline | Measure | ts-r | Baseline | Speed |
+|---|---|---|---|---|---|
+| `ts-r-check` | tsc 7.0.2 | tRPC `packages/server` | 474.4 ms | 979.0 ms | **2.1×** |
+| | | date-fns `pkgs/core` | 998.4 ms | 1,980.1 ms | 2.0× |
+| | | RxJS `packages/rxjs` | 1,202.1 ms | 6,513.9 ms | **5.4×** |
+| `ts-r-build` | esbuild 0.28.2 | three.js x10, no cache / cached | 962.9 / 484.6 ms | 1,409.8 ms | 1.5× / 2.9× |
+| `ts-r-lint` | ESLint | tRPC, same 48 rules, config evaluated each run / cached | 2,850.7 / 30.6 ms | 4,005.4 ms | 1.4× / 131× |
+| `ts-r` | esbuild 0.28.2 | `--version` | 2.03 ms | 3.93 ms | 1.9× |
+
+With its saved history and nothing changed, ts-r-check took 401.0 ms on tRPC, 1,020.4 ms on
+date-fns and 140.9 ms on RxJS in this run (on the laptop on 16 Oct: 23, 78 and 57 ms).
+
 ### Incremental checking (history)
 
-`ts-r-check` with its saved history and nothing changed: tRPC 23 ms, date-fns 78 ms, RxJS 57 ms,
+`ts-r-check` with its saved history and nothing changed (laptop, 16 Oct): tRPC 23 ms, date-fns 78 ms, RxJS 57 ms,
 TypeORM 126 ms, Playwright 40 ms (cold: 108-592 ms). The one-file-edit runs were measured on a
 private app before the switch to public repos and are not re-measured yet.
 
@@ -78,7 +101,7 @@ private app before the switch to public repos and are not re-measured yet.
 |---|---|
 | Release profile (fat LTO) vs thin LTO | 7% smaller, 2% faster (20 excalidraw rebuilds) |
 | PGO on top | 3% faster (20 excalidraw rebuilds), 26% larger (opt-in; trained before training moved to the public repos) |
-| npm package, packed (0.1.0-alpha.3, macOS arm64) | `ts-r-lint` 4.6 MB · `ts-r-check` 6.0 MB · `ts-r-lsp` 6.8 MB · all seven tools 27.2 MB (Linux x64 a little larger) |
+| npm package, packed (0.1.0-alpha.3, the macOS arm64 tarballs on npm) | `ts-r-lint` 4.6 MB · `ts-r-check` 6.0 MB · `ts-r-lsp` 6.8 MB · all seven tools 27.2 MB (Linux x64 a little larger) |
 | Minified output vs esbuild, top 1,000 packages | 2.9% smaller in total over 914 packages; median ratio 0.993 (ecosystem/STATUS.md) |
 | `parse<T>` runtime | 510 B gzipped (budget 0.5 KB) |
 
@@ -112,8 +135,9 @@ private app before the switch to public repos and are not re-measured yet.
 
 Each number is recorded with its method in the crate or file that owns it:
 
-- Public-repo runs (check, lint, build, editor, 2026-10-16; three.js x10 again 2026-10-21):
-  [bench/README.md](../bench/README.md) and `landing/data/bench.json`.
+- Public-repo runs (check, lint, build, editor, 2026-10-16; three.js x10 again 2026-10-21;
+  the dedicated Linux run, 2026-10-24): [bench/README.md](../bench/README.md) and
+  `landing/data/bench.json`.
 - Dev server: `crates/ts_r_hmr/AGENTS.md` (excalidraw against Vite, `bench/dev/dev.mjs`).
 - Lint correctness: `docs/design/0006-lint.md`, `crates/ts_r_lsp/AGENTS.md`.
 - Build: `docs/design/0008-bundler.md`, `bench/esbuild-oracle/README.md`.
