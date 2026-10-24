@@ -431,7 +431,7 @@ impl BuildContext {
         };
         let dynamic_files: Vec<String> = dynamic_entries
             .iter()
-            .map(|&t| self.entry_file_name(&graph.modules[t as usize].path, &outbase, None))
+            .map(|&t| self.dynamic_file_name(&graph.modules[t as usize]))
             .collect();
         timer.lap("link");
         let pl = plan(&PlanInput {
@@ -648,6 +648,31 @@ impl BuildContext {
             .trim_start_matches("./")
             .trim_start_matches('/')
             .to_owned();
+        format!("{n}{}", self.opts.out_extension_js)
+    }
+
+    /// The file of a module that only `import()` makes an entry: esbuild names it with the
+    /// chunk template (`[name]-[hash]`, `[name]` the file's stem, no `[dir]`), observed with
+    /// esbuild 0.28.2 (`import('./sub/c')` gives `c-HASH.js`). The hash covers the module's
+    /// preparation key and path, so two `index.js` files in different folders differ.
+    fn dynamic_file_name(&self, m: &crate::graph::Module) -> String {
+        let file = path::file_name(&m.path);
+        let stem = match file.rsplit_once('.') {
+            Some((s, _)) if !s.is_empty() => s,
+            _ => file,
+        };
+        let mut h = blake3::Hasher::new();
+        h.update(&m.prep_key);
+        h.update(m.pretty.as_bytes());
+        let hash = crate::hash_text(h.finalize().as_bytes());
+        let n = self
+            .opts
+            .chunk_names
+            .replace("[dir]/", "")
+            .replace("[dir]", "")
+            .replace("[name]", stem)
+            .replace("[hash]", &hash);
+        let n = n.trim_start_matches("./").trim_start_matches('/');
         format!("{n}{}", self.opts.out_extension_js)
     }
 

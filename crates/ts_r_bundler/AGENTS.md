@@ -124,6 +124,9 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   entries' common directory, `..` written `_.._`. The replacement can shift source map
   columns after it on the same line. `--public-path` also prefixes cross-chunk imports
   (`plan::chunk_import`).
+- **A module only `import()` reaches is named like a chunk** (`bundle::dynamic_file_name`):
+  `--chunk-names` (default `[name]-[hash]`, `[name]` the file's stem, `[dir]` dropped), not
+  `--entry-names`, as esbuild 0.28.2 does (`import('./sub/c')` gives `out/c-HASH.js`).
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
   isn't a file is a glob (sorted, bounded, skipping directories the pattern cannot match).
   Reaching a traversal size or depth limit is an error, never a partial expansion. CSS

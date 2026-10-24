@@ -184,5 +184,14 @@ fn public_path_prefixes_chunk_imports() {
     o.public_path = "/www/".into();
     let r = build(&fs, o);
     let js = output(&r, "out/a.js");
-    assert!(js.contains("import(\"/www/b.js\")"), "{js}");
+    // A module only `import()` reaches is named with the chunk template, `[name]-[hash]`.
+    assert!(js.contains("import(\"/www/b-"), "{js}");
+    let b = r
+        .outputs
+        .iter()
+        .map(|f| f.path.as_str())
+        .find(|p| p.contains("/out/b-"))
+        .expect("b chunk");
+    let name = b.rsplit('/').next().unwrap_or("");
+    assert!(js.contains(&format!("\"/www/{name}\"")), "{js}");
 }
