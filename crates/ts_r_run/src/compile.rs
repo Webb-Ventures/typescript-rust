@@ -60,7 +60,9 @@ pub fn is_compiled_path(path: &str) -> bool {
 }
 
 /// The format of `path` given its package type: `.mts` → ESM, `.cts` → CommonJS, else the
-/// `package.json` `type`, else Node's syntax detection (ES module syntax → ESM).
+/// `package.json` `type`, else Node's syntax detection (ES module syntax → ESM). Like tsx, a
+/// file in a `"type": "module"` package that has no ES module syntax and assigns CommonJS
+/// exports runs as CommonJS (`require` alone works in ES output, through `createRequire`).
 fn format_of(path: &str, pkg: PackageType, ast: &Ast, src: &str) -> Format {
     let lower = path.to_ascii_lowercase();
     if lower.ends_with(".mts") || lower.ends_with(".mjs") {
@@ -70,7 +72,13 @@ fn format_of(path: &str, pkg: PackageType, ast: &Ast, src: &str) -> Format {
         return Format::Cjs;
     }
     match pkg {
-        PackageType::Module => Format::Esm,
+        PackageType::Module => {
+            if assigns_cjs_exports(src) && !has_module_syntax(ast, src) {
+                Format::Cjs
+            } else {
+                Format::Esm
+            }
+        }
         PackageType::CommonJs => Format::Cjs,
         PackageType::Unspecified => {
             if has_esm_syntax(ast, src) {
@@ -88,10 +96,22 @@ fn format_of(path: &str, pkg: PackageType, ast: &Ast, src: &str) -> Format {
 /// (`require`, `module`, `exports`, `__dirname`, `__filename`) and needs nothing ESM-only
 /// runs as CommonJS, so the two can be mixed in packages without a `type`.
 pub fn has_esm_syntax(ast: &Ast, src: &str) -> bool {
+    if src.contains("import.meta") || has_top_level_await(ast) {
+        return true;
+    }
+    has_value_module_decl(ast) && !uses_cjs_globals(src)
+}
+
+/// Any ES module syntax: a value `import`/`export`, `import.meta` or top-level `await`.
+fn has_module_syntax(ast: &Ast, src: &str) -> bool {
+    src.contains("import.meta") || has_value_module_decl(ast) || has_top_level_await(ast)
+}
+
+/// A value `import` or `export` declaration at the top level.
+fn has_value_module_decl(ast: &Ast) -> bool {
     let Node::Program { stmts } = *ast.node(ast.root) else {
         return false;
     };
-    let mut module_syntax = false;
     for &s in ast.list(stmts) {
         let n = *ast.node(s);
         let esm = match n {
@@ -106,14 +126,14 @@ pub fn has_esm_syntax(ast: &Ast, src: &str) -> bool {
             }
         };
         if esm {
-            module_syntax = true;
-            break;
+            return true;
         }
     }
-    if src.contains("import.meta") || has_top_level_await(ast) {
-        return true;
-    }
-    module_syntax && !uses_cjs_globals(src)
+    false
+}
+
+fn assigns_cjs_exports(src: &str) -> bool {
+    src.contains("module.exports") || src.contains("exports.")
 }
 
 fn uses_cjs_globals(src: &str) -> bool {
@@ -362,6 +382,13 @@ mod tests {
             Format::Cjs
         );
         assert_eq!(run("a.ts", cjs, PackageType::Module).format, Format::Esm);
+        let exports = "import path = require('node:path');\nmodule.exports = { b: path.sep };\n";
+        assert_eq!(
+            run("a.ts", exports, PackageType::Module).format,
+            Format::Cjs
+        );
+        let both = "export const a = 1;\nmodule.exports.b = 2;\n";
+        assert_eq!(run("a.ts", both, PackageType::Module).format, Format::Esm);
         assert_eq!(run("a.ts", esm, PackageType::CommonJs).format, Format::Cjs);
         assert_eq!(run("a.mts", cjs, PackageType::CommonJs).format, Format::Esm);
         assert_eq!(run("a.cts", esm, PackageType::Module).format, Format::Cjs);
