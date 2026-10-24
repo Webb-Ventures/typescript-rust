@@ -52,7 +52,10 @@ Read, in this order, and keep the exact wording you may need to quote:
    breach in a diff.
 4. [references/areas.md](references/areas.md): what matters in each area and track (checker
    parity, lint oracle, bundler, dev server, LSP, sound mode, ecosystem, site, CI).
-5. Code comments and module docs in the files changed (`//!` docs often list observed tsc or
+5. [references/false-positives.md](references/false-positives.md): the findings this reviewer
+   got wrong before, and the evidence each pattern needs. Every candidate is checked against it
+   in step 4.
+6. Code comments and module docs in the files changed (`//!` docs often list observed tsc or
    ESLint behaviour the code must keep).
 
 ## 3. Review through these lenses
@@ -87,7 +90,40 @@ For each candidate, independently (a subagent per candidate when available):
    rule finding.
 4. Check it is not silenced on purpose: a `// SAFETY:` comment with a crate AGENTS.md note,
    an `#[allow]` with a reason, an explicit "observed tsc behaviour" note, a design record.
-5. Score with this rubric (verbatim):
+5. **Behaviour the oracle defines.** ts-r's reference is what the pinned tool does on the
+   input: tsc 7.0.2, typescript-eslint/ESLint, esbuild 0.28.2, Vite (`upstream/UPSTREAM.json`).
+   Not the ECMAScript or TypeScript specification, not "this is valid code", and not what the
+   base commit did. For a candidate about ts-r's output (a diagnostic reported or missing,
+   emitted code, a lint report or fix, a bundle, dev-server behaviour), ask where the output
+   it expects comes from:
+   - **From the code itself: a broken mechanism.** The code's own rule (its comments, names,
+     tests, the rule or design note it implements, another path doing the same job) or a plain
+     requirement on any output (valid code, deterministic, no panic) says one thing, and the
+     trace shows the code doing another. Comment text scanned as code, a check that misses a
+     case its own rule covers, two paths that disagree, a cached result that depends on
+     evaluation order, a feature only one build enables, an error path that skips the retry.
+     The trace is the evidence; score it normally.
+   - **From outside the code: a parity claim.** The code applies its rule as written (a check
+     reports this diagnostic, a fix rewrites this input) and the candidate says the pinned tool
+     would not, because the specification allows the input, it is valid JavaScript, the fix
+     looks unsafe, or the base accepted it. A special case the change adds for this very input
+     (a match arm, a name it maps, a flag it sets) is the code's rule too: a candidate saying
+     that special case is wrong is a parity claim, even when another path disagrees with it.
+     Only the oracle's output settles that. Find it for the failure input (a baseline or fixture
+     in the repo, an AGENTS.md "observed rule", a test or commit recording it; interactively,
+     run `bench/node_modules/.bin/tsc` under `scripts/limit.sh`) and state it in the body.
+     Without it the score is at most 50. Six of this reviewer's wrong findings were parity
+     claims posted at 90-100 ([references/false-positives.md](references/false-positives.md),
+     pattern 1).
+6. **Try to refute it.** Write down the strongest reason the code could be right as it is (the
+   oracle does the same, an earlier commit chose it, a caller guarantees the input never
+   occurs, the threat model excludes the attacker) and check that reason. Compare the
+   candidate with every pattern in [references/false-positives.md](references/false-positives.md).
+   A candidate that survives keeps its score; one that does not is dropped.
+7. **Security**: name who controls the input, what they gain and why the existing boundary
+   (README threat model, area notes) does not already stop it. Report only the part that
+   holds.
+8. Score with this rubric (verbatim):
    - **0**: Not confident at all. This is a false positive that doesn't stand up to light
      scrutiny, or is a pre-existing issue.
    - **25**: Somewhat confident. This might be a real issue, but may also be a false positive.
@@ -103,7 +139,7 @@ For each candidate, independently (a subagent per candidate when available):
    - **100**: Absolutely certain. The agent double checked the issue, and confirmed that it is
      definitely a real issue, that will happen frequently in practice. The evidence directly
      confirms this.
-6. Drop everything below **80**. Merge duplicates (same root cause → one finding at the most
+9. Drop everything below **80**. Merge duplicates (same root cause → one finding at the most
    useful location).
 
 ### Not findings
@@ -116,7 +152,9 @@ For each candidate, independently (a subagent per candidate when available):
   record, AGENTS.md "observed rules", test baseline updated on purpose).
 - Pedantic style, naming, comment wording, missing docs or tests in general (unless a rule
   requires them, for example pathological-input regression tests for lexer/parser loops).
-- Speculative issues ("could be slow", "might race") without a concrete scenario.
+- Speculative issues ("could be slow", "might race") without a concrete scenario. A
+  performance finding names the input size where it matters and a fix that keeps the output
+  identical.
 - Issues in lines the PR did not touch.
 
 ## Output
@@ -125,7 +163,8 @@ Every finding has: a short title; severity (`critical` data loss, crash/hang on 
 security, wrong output shipped by default · `high` wrong diagnostics/output in common code,
 broken rule with real cost · `medium` real but narrower · `low` minor but real); category; the
 file and line range **in the head version**; a body that states the problem, the failure
-scenario and the fix; the rule quoted when it is a rule finding; and confidence.
+scenario and the fix; the rule quoted when it is a rule finding; for behaviour the oracle
+defines, what the oracle does on the failure input and where that is recorded; and confidence.
 
 - **Interactive:** print `### Code review` then a numbered list, each item
   `**severity** title`, `path:start-end`, the body, and the quoted rule. If nothing survives:

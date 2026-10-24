@@ -72,6 +72,10 @@ what you answered before.
 Read the review summary body as well as the inline threads — it usually says
 which findings the reviewer considers blocking.
 
+`bot_fixes` lists the threads the ts-r review bot fixed and resolved by itself
+(its reply starts "Fixed in [`<sha>`] by Codex"), until someone replies after
+the fix. Nobody else looks at those, so step 4a does.
+
 ## 3. If no review has landed yet, watch for one
 
 ```
@@ -117,6 +121,29 @@ For each finding, in severity order:
 
 Never accept a finding because it is phrased confidently, and never reject one
 because fixing it is inconvenient.
+
+**Behaviour the oracle defines.** In this repo a finding that ts-r reports the
+wrong diagnostic, emits the wrong code or lints wrongly is a claim about tsc 7,
+ESLint, esbuild or Vite, not about the language specification. Run the pinned
+tool on the finding's input (`bench/node_modules/.bin/tsc --noEmit --pretty
+false <options> <file>`, under `scripts/limit.sh`; ESLint's recorded output is
+in `crates/ts_r_lint/tests/oracle/rules/`) and quote its output in the reply.
+Every wrong finding the ts-r review bot has posted so far was one where the
+oracle does what ts-r does.
+
+### 4a. Check the review bot's own fixes
+
+For each entry in `bot_fixes`, check the bot's commit (`fix_commit`) as you would
+a finding: was the finding right (the oracle, as above), and does the change hold
+(`git show <fix_commit> -- <files>`, the crate's tests at the PR head, the oracle
+on the finding's input)? One commit fixes every finding of a run, so judge each
+finding's part on its own.
+
+- It holds: reply `Checked.` with what you ran (no `--resolve`: it is resolved).
+- It is wrong: undo only that finding's part in a new commit whose message says
+  why (`Regex group names: a leading escape is TS1514, as in tsc 7`), keep a test
+  that asserts the oracle's output, push, and reply on the thread with the
+  commit and the oracle's output.
 
 ## 5. Action the confirmed findings
 
@@ -175,8 +202,14 @@ The flow that gets the approval:
    `reply.mjs … --thread <root_id> --body-file … --resolve` (resolves, then replies).
 3. For a finding you judge **wrong**, **partly right** or **out of scope**: reply
    without `--resolve`, and leave it for the user to resolve or reopen; say so in
-   your report. The bot will not approve while it is open.
-4. Post the summary with `reply.mjs … --summary` (it carries the refresh marker).
+   your report. The bot will not approve while it is open. A thread where the bot
+   itself replied "judged this finding wrong" is the same case: check its
+   evidence and give your verdict.
+4. For every finding (or bot fix) you judge **wrong** or **partly right**, add it
+   to `.agents/plugins/code-review/skills/ts-r-review/references/false-positives.md`
+   in the same push, as that file's "Adding an entry" says. The reviewer reads
+   that list before scoring, so this is how it stops repeating a mistake.
+5. Post the summary with `reply.mjs … --summary` (it carries the refresh marker).
 
 The skill must run as a user in the repo's `CODE_REVIEW_USERS` with write access:
 resolutions by someone without write access do not count towards the approval,

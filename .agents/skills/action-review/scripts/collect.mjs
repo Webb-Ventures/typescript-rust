@@ -6,9 +6,11 @@
 //
 // Threads you have answered and resolved threads are left out, so re-running
 // after a second review round only surfaces what is new. --all keeps them.
+// Threads the ts-r review bot fixed and resolved itself are listed apart, in
+// bot_fixes, until someone replies after the bot's fix: those fixes need checking too.
 import { parseArgs } from "node:util";
 
-import { fail, ghGraphql, ghJson, ghJsonAll, isAnsweredByYou, isNoise } from "./gh.mjs";
+import { botFixToCheck, fail, ghGraphql, ghJson, ghJsonAll, isAnsweredByYou, isNoise } from "./gh.mjs";
 
 const THREAD_QUERY = `
 query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
@@ -77,10 +79,26 @@ for (const comment of comments) {
 }
 
 const threads = [];
+const botFixes = [];
 for (const [rootId, root] of roots) {
   const thread = replies.get(rootId).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const answered = isAnsweredByYou(root, thread, you);
   const state = states.get(rootId) ?? {};
+  const fixCommit = botFixToCheck(thread);
+  if (fixCommit) {
+    botFixes.push({
+      root_id: rootId,
+      url: root.html_url,
+      path: root.path,
+      line: root.line ?? root.original_line,
+      start_line: root.start_line,
+      commit_id: root.commit_id,
+      fix_commit: fixCommit,
+      resolved: state.resolved ?? false,
+      body: root.body,
+      fix_reply: thread.at(-1).body,
+    });
+  }
 
   if (!values.all && (answered || state.resolved)) continue;
 
@@ -125,7 +143,7 @@ console.log(
         base_ref: pr.base.ref,
         url: pr.html_url,
       },
-      counts: { threads_total: roots.size, threads_returned: threads.length },
+      counts: { threads_total: roots.size, threads_returned: threads.length, bot_fixes: botFixes.length },
       review_summaries: reviews
         .filter((r) => (r.body ?? "").trim() && !isNoise(r))
         .map((r) => ({
@@ -144,6 +162,7 @@ console.log(
           body: c.body,
         })),
       threads,
+      bot_fixes: botFixes,
     },
     null,
     2,

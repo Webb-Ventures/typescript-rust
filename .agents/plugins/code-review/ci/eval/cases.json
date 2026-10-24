@@ -1,0 +1,378 @@
+{
+  "$comment": "Past ts-r-review findings with a known verdict, grouped by the review run (PR head) that posted them. Replay a run with eval/score.cjs; see README \"Measuring accuracy\".",
+  "cases": [
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 11,
+      "head": "0ad6a4934896bfd3d426f81a2cdec526c0662b36",
+      "base_ref": "m1/config-resolver",
+      "findings": [
+        {
+          "id": "88a64cfbaad9",
+          "title": "Enforce containment before serving dependency files",
+          "path": "crates/ts_r_hmr/src/resolve.rs",
+          "start_line": 195,
+          "end_line": 196,
+          "severity": "critical",
+          "category": "security",
+          "confidence": 100,
+          "verdict": "partly",
+          "evidence": "The /@modules/ path escape was real; symlinks inside the root are the owner's and allowed."
+        },
+        {
+          "id": "a7c222b387a1",
+          "title": "Enable ordered JSON objects for conditional exports",
+          "path": "crates/ts_r_hmr/Cargo.toml",
+          "start_line": 15,
+          "end_line": 15,
+          "severity": "high",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "ce2814dedd78",
+          "title": "Mark initial preparation failures for retry",
+          "path": "crates/ts_r_hmr/src/server.rs",
+          "start_line": 853,
+          "end_line": 855,
+          "severity": "high",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "0e27d9b82d75",
+          "title": "Add required resource guards to generated-input harnesses",
+          "path": "crates/ts_r_dev/tests/latency.rs",
+          "start_line": 95,
+          "end_line": 100,
+          "severity": "high",
+          "category": "resource-limits",
+          "confidence": 100,
+          "verdict": "confirmed"
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 30,
+      "head": "bf50d027e6b101295362871a73f5d24d3550ae73",
+      "base_ref": "m7/ecosystem",
+      "findings": [
+        {
+          "id": "c16704ba8566",
+          "title": "Preserve the established type for bare var redeclarations",
+          "path": "crates/ts_r_checker/src/redeclare.rs",
+          "start_line": 172,
+          "end_line": 172,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "wrong",
+          "evidence": "tsc 7.0.2 reports TS2403 at the second `n` of `var n: number; var n;`."
+        },
+        {
+          "id": "343122aeb05c",
+          "title": "Keep budget-dependent results out of the shared relation cache",
+          "path": "crates/ts_r_checker/src/relate.rs",
+          "start_line": 699,
+          "end_line": 704,
+          "severity": "medium",
+          "category": "determinism",
+          "confidence": 95,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "ee3b9394b128",
+          "title": "Count external literal element reads of private members",
+          "path": "crates/ts_r_checker/src/unused.rs",
+          "start_line": 1029,
+          "end_line": 1032,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 90,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "6a199a208d4c",
+          "title": "Skip comments when locating abstract member modifiers",
+          "path": "crates/ts_r_checker/src/abstracts.rs",
+          "start_line": 156,
+          "end_line": 164,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 46,
+      "head": "3335d50f37a5343cf6ef1af0a9a1df47e564c38f",
+      "base_ref": "l4/editor-actions",
+      "findings": [
+        {
+          "id": "981beae6fed7",
+          "title": "Keep quoted exports distinct from the internal export-assignment name",
+          "path": "crates/ts_r_binder/src/names.rs",
+          "start_line": 94,
+          "end_line": 98,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 90,
+          "verdict": "wrong",
+          "evidence": "tsc 7.0.2 reports TS2305: a string export named `export=` is the export assignment."
+        },
+        {
+          "id": "80565b955546",
+          "title": "Cycle-check namespace instantiation lookups",
+          "path": "crates/ts_r_binder/src/binder.rs",
+          "start_line": 3458,
+          "end_line": 3459,
+          "severity": "critical",
+          "category": "performance",
+          "confidence": 100,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "7a18cd2d57d3",
+          "title": "Keep a recursion limit separate from the export-star search budget",
+          "path": "crates/ts_r_binder/src/program.rs",
+          "start_line": 738,
+          "end_line": 738,
+          "severity": "critical",
+          "category": "resource-limits",
+          "confidence": 90,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "02fae37ccda9",
+          "title": "Include source lib references in history invalidation",
+          "path": "crates/ts_r_checker/src/program.rs",
+          "start_line": 489,
+          "end_line": 490,
+          "severity": "high",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 47,
+      "head": "805c4e5ba5e147bfe514eab5d9d45bd5b9f249a0",
+      "base_ref": "m5/checker-parity-2",
+      "findings": [
+        {
+          "id": "a2351ab59787",
+          "title": "Require a string argument before fixing anchored regex tests",
+          "path": "crates/ts_r_lint/src/rules/ts_prefer_string_starts_ends_with.rs",
+          "start_line": 272,
+          "end_line": 275,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 95,
+          "verdict": "wrong",
+          "evidence": "typescript-eslint fixes `/^bar/.test(a + b)` to `(a + b).startsWith(\"bar\")` (crates/ts_r_lint/tests/oracle/rules/ts-prefer-string-starts-ends-with.json)."
+        },
+        {
+          "id": "f87be2df1740",
+          "title": "Serialize empty and multiline patterns safely in regexp fixes",
+          "path": "crates/ts_r_lint/src/rules/ts_prefer_regexp_exec.rs",
+          "start_line": 87,
+          "end_line": 89,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "850f6770f750",
+          "title": "Check inherited flags before replacing match with exec",
+          "path": "crates/ts_r_lint/src/rules/ts_prefer_regexp_exec.rs",
+          "start_line": 113,
+          "end_line": 118,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "829080f23dcc",
+          "title": "Saturate type-use counts before recursive multiplication overflows",
+          "path": "crates/ts_r_lint/src/rules/ts_no_unnecessary_type_parameters.rs",
+          "start_line": 387,
+          "end_line": 387,
+          "severity": "medium",
+          "category": "panic-on-input",
+          "confidence": 100,
+          "verdict": "confirmed"
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 72,
+      "head": "8d062def48da3b8b0288d7a1811dccf5ec801227",
+      "base_ref": "m8/checker-jsx",
+      "findings": [
+        {
+          "id": "ce8afa2e3f80",
+          "title": "Tie this aliases to their receiver binding",
+          "path": "crates/ts_r_checker/src/flow.rs",
+          "start_line": 2032,
+          "end_line": 2032,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 98,
+          "verdict": "wrong",
+          "evidence": "tsc 7.0.2 --strict accepts the reproduction and its arrow variant."
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 93,
+      "head": "2464f927fd287f9f35eac1752d19127b37c661d6",
+      "base_ref": "m8/checker-grammar",
+      "findings": [
+        {
+          "id": "00bd59ba7f7f",
+          "title": "Compare unit values before reducing intersections to never",
+          "path": "crates/ts_r_checker/src/symtype.rs",
+          "start_line": 1204,
+          "end_line": 1205,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 95,
+          "verdict": "wrong",
+          "evidence": "tsc 7.0.2 reports TS2488 with --lib es2015 --target es2015."
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/tsc-rust",
+      "pr": 105,
+      "head": "9e6d11b3e120026fd642058607ab3376432b73da",
+      "base_ref": "m8/review-box-public",
+      "findings": [
+        {
+          "id": "f7ee3a2794ba",
+          "title": "Enforce CI approval outside the PR-controlled workflow",
+          "path": ".github/workflows/ci.yml",
+          "start_line": 68,
+          "end_line": 69,
+          "severity": "medium",
+          "category": "ci",
+          "confidence": 95,
+          "verdict": "partly",
+          "evidence": "A fork PR can edit ci.yml; the boundary is the repository approval setting."
+        },
+        {
+          "id": "e71b5751fa1e",
+          "title": "Scan binary contents before publishing",
+          "path": ".github/public-sync/sync.sh",
+          "start_line": 33,
+          "end_line": 35,
+          "severity": "high",
+          "category": "security",
+          "confidence": 95,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "5a11dce3b7e4",
+          "title": "Import exported base blobs before applying the three-way patch",
+          "path": ".github/public-sync/sync.sh",
+          "start_line": 85,
+          "end_line": 88,
+          "severity": "high",
+          "category": "bug",
+          "confidence": 95,
+          "verdict": "confirmed"
+        },
+        {
+          "id": "a2c7772e3f83",
+          "title": "Include rename sources when constructing sync-back patches",
+          "path": ".public/.github/scripts/sync-back.sh",
+          "start_line": 67,
+          "end_line": 67,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed"
+        }
+      ]
+    },
+    {
+      "repo": "Webb-Ventures/typescript-rust",
+      "pr": 39,
+      "head": "efba58d17b846a874f3583638ee582df64bfabc9",
+      "base_ref": "main",
+      "findings": [
+        {
+          "id": "e4954e73744e",
+          "title": "Accept Unicode escapes at the start of regex group names",
+          "path": "crates/ts_r_lexer/src/regex.rs",
+          "start_line": 714,
+          "end_line": 719,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 95,
+          "verdict": "wrong",
+          "evidence": "tsc 7.0.2 reports TS1514 at the backslash of `/(?<\\u{61}>x)/u`; the bot fix 4362d15 was reverted in 3cd16f3."
+        },
+        {
+          "id": "7ce4519da636",
+          "title": "Keep optional-chain tagged templates fatal to builds",
+          "path": "crates/ts_r_parser/src/expr.rs",
+          "start_line": 1359,
+          "end_line": 1363,
+          "severity": "high",
+          "category": "bug",
+          "confidence": 100,
+          "verdict": "confirmed",
+          "evidence": "Fixed by the bot in 4362d15; the fix was checked and kept."
+        },
+        {
+          "id": "dfe88a516d6d",
+          "title": "Use indexed membership for regex capture names",
+          "path": "crates/ts_r_lexer/src/regex.rs",
+          "start_line": 701,
+          "end_line": 701,
+          "severity": "medium",
+          "category": "performance",
+          "confidence": 95,
+          "verdict": "confirmed",
+          "evidence": "Fixed by the bot in 4362d15; the fix was checked and kept."
+        },
+        {
+          "id": "1143b77e1b25",
+          "title": "Preserve lexer trivia handling when finding import commas",
+          "path": "crates/ts_r_checker/src/expr.rs",
+          "start_line": 10589,
+          "end_line": 10591,
+          "severity": "medium",
+          "category": "bug",
+          "confidence": 95,
+          "verdict": "confirmed",
+          "evidence": "Fixed by the bot in 4362d15; the fix was checked and kept."
+        },
+        {
+          "id": "03a9977d6b71",
+          "title": "Preserve allocation-free comparison for ordinary JSX tags",
+          "path": "crates/ts_r_parser/src/jsx.rs",
+          "start_line": 185,
+          "end_line": 186,
+          "severity": "medium",
+          "category": "performance",
+          "confidence": 95,
+          "verdict": "confirmed",
+          "evidence": "Fixed by the bot in 4362d15; the fix was checked and kept."
+        }
+      ]
+    }
+  ]
+}
