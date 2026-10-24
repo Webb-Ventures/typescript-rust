@@ -69,13 +69,21 @@ version; it tags `main` `vVERSION`. Nothing publishes automatically, and a run w
 (the tool packages, `@ts-r.dev/cli` and `@ts-r.dev/typescript`) at once, each with
 `npm publish --provenance --access public --tag <latest|next>`. A failed platform phase stops the
 run before any front goes out. Versions already on npm are skipped, so a re-run publishes only
-what is missing.
-`repository.url` in every package must name the
+what is missing. `repository.url` in every package must name the
 GitHub repository that runs the workflow, or npm rejects the provenance statement
 (`--repository`, default `$GITHUB_REPOSITORY`).
 
+Dist-tags and readmes: npmjs.com and `npm view <package> readme` show the readme the registry
+stored with the publish that last set `latest`; a publish under `next` (or a later
+`npm dist-tag add`) doesn't change it. A stable release publishes under `latest`. A prerelease
+publishes under `next`, except for a package with no stable version on npm yet (all of them
+during the alpha): that one publishes under `latest` and then gets `next` too
+(`npm dist-tag add`, which npm 11.21+ does with trusted publishing), so both tags name the
+newest release and its readme is the one shown. A failed `dist-tag add` is a warning naming the
+command to run by hand; a re-run retries it.
+
 The workflow publishes with npm trusted publishing (OIDC): no long-lived token. The npm job
-needs `id-token: write`, npm 11.5.1 or newer (installed explicitly) and a GitHub-hosted runner
+needs `id-token: write`, npm 11.21 or newer (installed explicitly; 11.5.1 for publishing, 11.21 for `npm dist-tag add`) and a GitHub-hosted runner
 (`ubuntu-latest`; npm doesn't accept self-hosted runners). npm
 only lets you add a trusted publisher to a package that already exists, so a package's first
 publish needs a token: when secret `NPM_TOKEN` is set the run uses it, otherwise OIDC. The

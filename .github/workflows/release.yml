@@ -173,6 +173,8 @@ jobs:
             fi
             echo "::warning::CHANGELOG.md has no entry for v$version"
           fi
+          # A prerelease of a package with no stable version on npm still publishes under latest
+          # (and then gets next): .github/scripts/npm-publish.sh says why.
           npm_tag=latest
           case "$version" in *-*) npm_tag=next ;; esac
           {
@@ -480,13 +482,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: npm CLI 11.5.1 or newer (trusted publishing)
+      - name: npm CLI 11.21 or newer (trusted publishing, and npm dist-tag add with it)
         run: |
           set -euo pipefail
-          npm install -g "npm@^11.5.1"
+          npm install -g "npm@^11.21.0"
           v=$(npm --version)
-          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map((n) => parseInt(n, 10)); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$v"; then
-            echo "::error::npm $v is older than 11.5.1, which trusted publishing needs"
+          if ! node -e 'const [a, b] = process.argv[1].split(".").map((n) => parseInt(n, 10)); process.exit(a > 11 || (a === 11 && b >= 21) ? 0 : 1)' "$v"; then
+            echo "::error::npm $v is older than 11.21.0, which trusted publishing for npm dist-tag needs"
             exit 1
           fi
           echo "npm $v"
