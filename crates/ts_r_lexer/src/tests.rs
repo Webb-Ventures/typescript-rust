@@ -570,6 +570,30 @@ fn jsx_modes() {
     assert!(lx.diagnostics.is_empty());
 }
 
+/// JSX names take `-` and escaped identifier parts (tsc's scanJsxIdentifier); an escape
+/// anywhere marks the token `ESCAPED`, and an escaped keyword becomes a plain name.
+#[test]
+fn jsx_identifier_escapes() {
+    let src = r"<a-\u0063-d \u{76}ar>";
+    let mut lx = Lexer::new(src);
+    assert_eq!(lx.next_token(), T::Lt);
+    assert_eq!(lx.next_token(), T::Ident);
+    assert_eq!(lx.rescan_jsx_identifier(), T::Ident);
+    assert_eq!(lx.token_text(), r"a-\u0063-d");
+    assert!(lx.token().flags.has(TokenFlags::ESCAPED));
+    assert_eq!(lx.ident_value(lx.token()), "a-c-d");
+    assert_eq!(lx.next_token(), T::Var);
+    assert_eq!(lx.rescan_jsx_identifier(), T::Ident);
+    assert!(!lx.token().flags.has(TokenFlags::ESCAPED_KEYWORD));
+    assert_eq!(lx.next_token(), T::Gt);
+    let mut lx = Lexer::new("<data-x>");
+    lx.next_token();
+    lx.next_token();
+    lx.rescan_jsx_identifier();
+    assert!(!lx.token().flags.has(TokenFlags::ESCAPED));
+    assert!(lx.diagnostics.is_empty());
+}
+
 #[test]
 fn checkpoint_rewind() {
     let mut lx = Lexer::new("a /* c */ b c");

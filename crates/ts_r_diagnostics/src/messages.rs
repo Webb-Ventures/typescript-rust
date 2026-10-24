@@ -231,6 +231,7 @@ messages! {
     JSX_COMMA_EXPRESSION = 18007 Error "JSX expressions may not use the comma operator. Did you mean to write an array?";
     JSX_NO_CLOSING_TAG = 17008 Error "JSX element '{0}' has no corresponding closing tag.";
     JSX_EXPECTED_CLOSING_TAG = 17002 Error "Expected corresponding JSX closing tag for '{0}'.";
+    JSX_NAME_UNICODE_ESCAPE = 17021 Error "Unicode escape sequence cannot appear here.";
     JSX_FRAGMENT_NO_CLOSING = 17014 Error "JSX fragment has no corresponding closing tag.";
     JSX_EXPECTED_CLOSING_FRAGMENT = 17015 Error "Expected corresponding closing tag for JSX fragment.";
     ARROW_THIS_PARAMETER = 2730 Error "An arrow function cannot have a 'this' parameter.";

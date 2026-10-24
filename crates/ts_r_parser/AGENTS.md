@@ -368,6 +368,10 @@ Files:
     `Seq` led by a zero-width `Missing` (tsc's synthesized comma: no TS2695).
     `</` (no space between) is one closing-tag token as in tsc: never a `<` operator,
     no expression (TS1109) and no statement start (TS1128, both characters skipped).
+  - JSX tag, member and attribute names take `-` and `\u` escapes (`rescan_jsx_identifier`).
+    A name with an escape is decoded (`<\u0061></a>` closes; tags compare by decoded
+    names, `jsx_tag_key`) and is TS17021 on the whole name, a syntax error (tsc
+    `parser.go` parseIdentifierNameErrorOnUnicodeEscapeSequence).
     `<:` starts no tag (TS1109); other bad tag starts are tags with a missing name.
   - `Identifier expected.` at the end of the file is reported after the last token,
     except after `?.`.

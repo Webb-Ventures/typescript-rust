@@ -2976,3 +2976,28 @@ fn tsc_syntax_errors_keep_lenient() {
     check("let t = `\\01`; const a;", &[1487], &[1487]);
     check("const a;", &[], &[]);
 }
+
+/// Unicode escapes in JSX tag and attribute names: decoded (so `<\u0061></a>` closes) and
+/// TS17021 on the whole name, a syntax error (tsc 7, unicodeEscapesInJsxtags).
+#[test]
+fn jsx_name_unicode_escapes_are_ts17021() {
+    let errs = |src: &str| {
+        let r = parse(src, SourceKind::Tsx);
+        r.diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start, d.span.end))
+            .collect::<Vec<_>>()
+    };
+    // 0         1         2
+    // 012345678901234567890123456
+    assert_eq!(errs(r"<\u0061></a>;"), vec![(17021, 1, 7)]);
+    assert_eq!(errs(r"<a-\u0063></a-c>;"), vec![(17021, 1, 9)]);
+    assert_eq!(errs(r"<x.\u0076ideo />;"), vec![(17021, 3, 13)]);
+    assert_eq!(
+        errs(r"<v data-\u0076 \u0073rc='' />;"),
+        vec![(17021, 3, 14), (17021, 15, 23)]
+    );
+    assert_eq!(errs(r"<a></\u{61}>;"), vec![(17021, 5, 11)]);
+    assert_eq!(errs(r"<a></b>;")[0].0, 17002);
+    assert!(errs("<a-b c-d='' />;").is_empty());
+}
