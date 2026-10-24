@@ -66,6 +66,9 @@ pub enum Loader {
     Base64,
     DataUrl,
     Binary,
+    /// A `Uint8Array` of the file's bytes, through `Uint8Array.fromBase64` (what an import
+    /// `with { type: 'bytes' }` loads; not selectable with `--loader`).
+    Bytes,
 }
 
 impl Loader {
@@ -105,6 +108,7 @@ impl Loader {
             Loader::Base64 => "base64",
             Loader::DataUrl => "dataurl",
             Loader::Binary => "binary",
+            Loader::Bytes => "bytes",
         }
     }
 }

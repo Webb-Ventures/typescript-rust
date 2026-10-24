@@ -414,7 +414,9 @@ impl<'a> Checker<'a> {
                 .and_then(|m| mode_resolutions.get(&(containing.to_owned(), spec.to_owned(), m)))
                 .or_else(|| resolutions.get(&(containing.to_owned(), spec.to_owned())))
                 .and_then(|r| r.as_ref())
-                .filter(|r| r.included)
+                // A file found outside the program is passed too (the link leaves it
+                // unresolved; augmenting it is TS2665, not the binder's TS2664).
+                .filter(|r| r.included || !r.arbitrary_extension)
                 .map(|r| r.resolved.clone())
         });
         let level = parent.map_or(0, |p| p.level + 1);

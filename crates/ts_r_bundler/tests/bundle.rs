@@ -1215,10 +1215,10 @@ fn minified_commonjs_wrapper_parameters_are_mangled() {
     let code = file(&r, "/proj/out/main.cjs");
     assert!(!code.contains("module.exports={y"), "{code}");
     assert!(!code.contains("function(exports"), "{code}");
-    // Wrappers are arrows unless the module uses its own `this` (d.cjs) or `arguments`
-    // (e.cjs).
-    assert!(code.matches("=>{").count() >= 3, "{code}");
-    assert_eq!(code.matches("(function(").count(), 2, "{code}");
+    // Wrappers are arrows unless the module uses its own `arguments` (e.cjs); top-level
+    // `this` (d.cjs) is `exports`.
+    assert!(code.matches("=>{").count() >= 4, "{code}");
+    assert_eq!(code.matches("(function(").count(), 1, "{code}");
     if have_node() {
         assert_eq!(
             run_node("min-cjs-params", &r, "main.cjs"),
@@ -1545,4 +1545,561 @@ fn javascript_wins_over_typescript_inside_node_modules() {
     ] {
         assert!(code.contains(want) && !code.contains(not), "{code}");
     }
+}
+
+#[test]
+fn import_phases_are_only_bundled_as_external_esm_imports() {
+    // esbuild: `import defer` / `import source` (and `import.defer()` / `import.source()`)
+    // stay imports of external modules in ESM output; anything else is an error.
+    let fs = project(&[
+        (
+            "entry.js",
+            "import defer * as a from './foo.json';\n\
+             import defer * as b from './foo.json' with { type: 'json' };\n\
+             import source c from './foo.json';\n\
+             console.log(a, b, c, import.defer('./foo.json'));\n",
+        ),
+        ("foo.json", "{}"),
+    ]);
+    let messages = |format: Format, external: bool| {
+        let mut o = opts(&["entry.js"]);
+        o.format = Some(format);
+        if external {
+            o.external = vec!["*.json".into()];
+        }
+        let r = BuildContext::new(o, Arc::new(fs.clone()))
+            .expect("options")
+            .build();
+        let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
+        (errors, r)
+    };
+    let (errors, _) = messages(Format::Cjs, true);
+    assert_eq!(
+        errors,
+        [
+            "Bundling deferred imports with the \"cjs\" output format is not supported",
+            "Bundling deferred imports with the \"cjs\" output format is not supported",
+            "Bundling source phase imports with the \"cjs\" output format is not supported",
+            "Bundling deferred imports with the \"cjs\" output format is not supported",
+        ]
+    );
+    let (errors, _) = messages(Format::Iife, false);
+    assert_eq!(errors.len(), 4, "{errors:?}");
+    assert!(errors[0].contains("\"iife\" output format"), "{errors:?}");
+    let (errors, _) = messages(Format::Esm, false);
+    assert_eq!(
+        errors[2],
+        "Bundling with source phase imports is not supported unless they are external"
+    );
+    let (errors, r) = messages(Format::Esm, true);
+    assert!(errors.is_empty(), "{errors:?}");
+    let code = file(&r, "/proj/out/entry.js");
+    // Each import keeps its phase and attributes, as its own statement.
+    for want in [
+        "import defer * as foo from \"./foo.json\";",
+        "import defer * as foo2 from \"./foo.json\" with { type: \"json\" };",
+        "import source foo_default from \"./foo.json\";",
+        "import.defer('./foo.json')",
+    ] {
+        assert!(code.contains(want), "{want}\n{code}");
+    }
+}
+
+#[test]
+fn an_entry_point_given_twice_is_built_once() {
+    let fs = project(&[("entry.js", "console.log(123);\n")]);
+    for bundle in [true, false] {
+        let mut o = opts(&["entry.js", "entry.js"]);
+        o.bundle = bundle;
+        let r = run_build(&fs, o);
+        let paths: Vec<&str> = r.outputs.iter().map(|o| o.path.as_str()).collect();
+        assert_eq!(paths, ["/proj/out/entry.js"]);
+    }
+    // Different output names are different entry points.
+    let mut o = opts(&["entry.js", "entry.js"]);
+    o.entry_points[1].name = Some("other".into());
+    let r = run_build(&fs, o);
+    assert_eq!(r.outputs.len(), 2);
+}
+
+#[test]
+fn a_css_entry_without_bundling_is_a_css_output() {
+    let fs = project(&[
+        ("entry.js", "export let x = 1;\n"),
+        ("entry.css", "a { color: red }\n"),
+    ]);
+    let mut o = opts(&["entry.js", "entry.css"]);
+    o.bundle = false;
+    let r = run_build(&fs, o);
+    assert_eq!(file(&r, "/proj/out/entry.css"), "a { color: red }\n");
+    assert!(file(&r, "/proj/out/entry.js").contains("x = 1"));
+}
+
+#[test]
+fn package_json_must_be_strict_json_when_bundling() {
+    // esbuild (like Node) fails on a comment or a trailing comma in package.json, where tsc
+    // and the tsconfig reader accept both.
+    let build = |pkg: &str| {
+        let fs = project(&[
+            ("entry.js", "import fn from 'demo';\nconsole.log(fn());\n"),
+            ("node_modules/demo/package.json", pkg),
+            ("node_modules/demo/index.js", "module.exports = () => 1;\n"),
+        ]);
+        let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+            .expect("options")
+            .build();
+        r.errors()
+            .map(|m| format!("{}: {}", m.file.clone().unwrap_or_default(), m.text))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        build("{\n  // note\n  \"a\": 1\n}"),
+        ["node_modules/demo/package.json: JSON does not support comments"]
+    );
+    assert_eq!(
+        build("{ \"a\": [1, 2,], \"b\": \"//,}\" }"),
+        ["node_modules/demo/package.json: JSON does not support trailing commas"]
+    );
+    assert!(build("{ \"a\": \"// not a comment, ]\" }").is_empty());
+}
+
+#[test]
+fn a_bigint_in_a_json_file_is_an_error() {
+    let fs = project(&[
+        ("entry.js", "import d from './d.json';\nconsole.log(d);\n"),
+        ("d.json", "{ \"ok\": \"12n\", \"bad\": [123n] }"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+        .expect("options")
+        .build();
+    let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("Unexpected \"123n\" in JSON"),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn an_import_with_a_type_attribute_is_its_own_module_instance() {
+    // esbuild: `with { type }` picks the loader (json, text, bytes) whatever the extension,
+    // and makes a separate instance; `assert { ... }` is ignored.
+    let fs = project(&[
+        (
+            "entry.js",
+            "import x from './data.json';\n\
+             import y from './data.json' assert { type: 'json' };\n\
+             import z from './data.json' with { type: 'json' };\n\
+             import t from './foo.js' with { type: 'text' };\n\
+             import b from './foo.js' with { type: 'bytes' };\n\
+             import j from './foo.js' with { type: 'json' };\n\
+             console.log(x === y, x !== z, t, b, j);\n",
+        ),
+        ("data.json", "{ \"works\": true }"),
+        ("foo.js", "{ \"json\": 1 }"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+        .expect("options")
+        .build();
+    assert!(r.errors().next().is_none(), "{:?}", r.messages);
+    let out: String = r.outputs.iter().map(|o| o.text()).collect();
+    assert!(out.contains("// data.json with { type: 'json' }"), "{out}");
+    assert!(out.contains("Uint8Array.fromBase64("), "{out}");
+    assert!(out.contains("\"{ \\\"json\\\": 1 }\""), "{out}");
+    assert!(out.matches("require_data").count() >= 2, "{out}");
+}
+
+#[test]
+fn attributed_json_namespace_has_only_the_complete_default_value() {
+    for (i, value) in [
+        r#"{"__esModule":true,"x":1,"default":2}"#,
+        r#"{"__proto__":123,"x":1}"#,
+        "[1,2]",
+        "123",
+        "null",
+    ]
+    .iter()
+    .enumerate()
+    {
+        for minify in [false, true] {
+            let fs = project(&[
+                (
+                    "entry.js",
+                    "import data, * as ns from './data.txt' with { type: 'json' };\n\
+                     console.log(JSON.stringify(data), data === ns.default, Object.keys(ns).join(','), typeof Object.getOwnPropertyDescriptor(ns, 'default').get);\n",
+                ),
+                ("data.txt", value),
+            ]);
+            let mut o = opts(&["entry.js"]);
+            o.minify_syntax = minify;
+            o.minify_whitespace = minify;
+            o.minify_identifiers = minify;
+            let r = run_build(&fs, o);
+            if have_node() {
+                assert_eq!(
+                    run_node(&format!("attributed-json-{i}-{minify}"), &r, "entry.js"),
+                    format!("{value} true default function\n")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn json_computed_proto_keys_remain_named_exports() {
+    for (i, json) in [
+        r#"{"__proto__":123,"x":1}"#,
+        r#"{"\u005f_proto__":123,"nested":{"__proto__":456},"x":1}"#,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let fs = project(&[
+            (
+                "entry.js",
+                "import data, { __proto__ as p, x } from './data.json';\n\
+                 export { __proto__ as forwarded } from './data.json';\n\
+                 console.log(p, x, Object.prototype.hasOwnProperty.call(data, '__proto__'));\n",
+            ),
+            ("data.json", json),
+        ]);
+        let r = run_build(&fs, opts(&["entry.js"]));
+        if have_node() {
+            assert_eq!(
+                run_node(&format!("json-named-proto-{i}"), &r, "entry.js"),
+                "123 1 true\n"
+            );
+        }
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "import { missing } from './data.json'; console.log(missing);",
+        ),
+        ("data.json", r#"{"__proto__":123}"#),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+        .expect("options")
+        .build();
+    assert!(r.errors().any(|m| m.text.contains("No matching export")));
+}
+
+#[test]
+fn a_json_import_with_a_type_attribute_has_only_a_default_export() {
+    let errors = |entry: &str| {
+        let fs = project(&[("entry.js", entry), ("data.json", "{ \"foo\": 123 }")]);
+        let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+            .expect("options")
+            .build();
+        r.errors().map(|m| m.text.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        errors(
+            "import x, { foo as x2 } from './data.json';\n\
+             import y, { foo as y2 } from './data.json' with { type: 'json' };\n\
+             console.log(x, x2, y, y2);\n"
+        ),
+        ["No matching export in \"data.json with { type: 'json' }\" for import \"foo\""]
+    );
+    // Attributes a bundle cannot honour fail the scan.
+    assert_eq!(
+        errors(
+            "import w from './data.json' with { kind: 'json' };\n\
+             import v from './data.json' with { type: 'css' };\n\
+             console.log(w, v);\n"
+        ),
+        [
+            "Importing with the \"kind\" attribute is not supported",
+            "Importing with a type attribute of \"css\" is not supported",
+        ]
+    );
+}
+
+#[test]
+fn a_cycle_of_named_re_exports_is_an_error() {
+    let errors = |files: &[(&str, &str)]| {
+        let r = BuildContext::new(opts(&["entry.js"]), Arc::new(project(files)))
+            .expect("options")
+            .build();
+        let mut e: Vec<String> = r
+            .errors()
+            .map(|m| format!("{}: {}", m.file.clone().unwrap_or_default(), m.text))
+            .collect();
+        e.sort();
+        e
+    };
+    // The cycle is reported where it closes on the way from each exported name (esbuild
+    // also reports it from every other import on it).
+    assert_eq!(
+        errors(&[
+            (
+                "entry.js",
+                "export {a as b} from './foo';\nexport {c as d} from './foo';\n"
+            ),
+            (
+                "foo.js",
+                "export {b as c} from './entry';\nexport {d as a} from './entry';\n"
+            ),
+        ]),
+        [
+            "foo.js: Detected cycle while resolving import \"b\"",
+            "foo.js: Detected cycle while resolving import \"d\"",
+        ]
+    );
+    // Two `export *` paths to one module are not a cycle, and neither is an `export *` loop.
+    assert!(
+        errors(&[
+            (
+                "entry.js",
+                "export * from './p';\nexport * from './q';\nexport * from './entry';\n"
+            ),
+            ("p.js", "export {x} from './r';\n"),
+            ("q.js", "export {x} from './r';\n"),
+            ("r.js", "export const x = 1;\n"),
+        ])
+        .is_empty()
+    );
+}
+
+#[test]
+fn a_jsx_factory_of_this_is_the_module_this() {
+    // `--jsx-factory=this.h`: top-level `this` of an ES module is `undefined`.
+    let fs = project(&[("entry.jsx", "export {};\nconsole.log(<div />);\n")]);
+    let mut o = opts(&["entry.jsx"]);
+    o.jsx.factory = Some("this.h".into());
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("(void 0).h(\"div\""), "{code}");
+}
+
+#[test]
+fn jsx_dev_applies_to_a_tsconfig_react_jsx() {
+    let fs = project(&[
+        ("entry.tsx", "console.log(<><div /></>);\n"),
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions": {"jsx": "react-jsx"}}"#,
+        ),
+    ]);
+    let mut o = opts(&["entry.tsx"]);
+    o.jsx.dev = true;
+    o.external = vec!["react/jsx-dev-runtime".into()];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("from \"react/jsx-dev-runtime\""), "{code}");
+}
+
+#[test]
+fn a_missing_tsconfig_override_is_an_error() {
+    let fs = project(&[("entry.ts", "console.log(1);\n")]);
+    let mut o = opts(&["entry.ts"]);
+    o.tsconfig = Some("missing/tsconfig.json".into());
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
+    assert_eq!(
+        errors,
+        ["Cannot find tsconfig file \"missing/tsconfig.json\""]
+    );
+}
+
+#[test]
+fn top_level_this_of_a_commonjs_file_is_its_exports() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "const lib = require('./lib.js');\nconsole.log(lib.a, lib.b);\n",
+        ),
+        (
+            "lib.js",
+            "this.a = 1;\n(() => { this.b = 2; })();\nfunction f() { return this; }\n",
+        ),
+        ("own.js", "var exports = {};\nthis.c = 3;\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("exports.a = 1"), "{code}");
+    assert!(code.contains("exports.b = 2"), "{code}");
+    assert!(code.contains("return this"), "{code}");
+    if have_node() {
+        assert_eq!(run_node("this_is_exports", &r, "entry.js").trim(), "1 2");
+    }
+    // A file with its own `exports` keeps `this`.
+    let r = run_build(&fs, opts(&["own.js"]));
+    assert!(file(&r, "/proj/out/own.js").contains("this.c = 3"));
+}
+
+#[test]
+fn javascript_accessor_fields_are_lowered_for_a_year_target() {
+    let fs = project(&[(
+        "entry.js",
+        "class Foo {\n  accessor one = 1;\n  static accessor #two = 2;\n  static two() { return Foo.#two; }\n}\nconsole.log(new Foo().one, Foo.two());\n",
+    )]);
+    let mut o = opts(&["entry.js"]);
+    o.target = Some(2022);
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(!code.contains("accessor "), "{code}");
+    if have_node() {
+        assert_eq!(run_node("js_accessor", &r, "entry.js").trim(), "1 2");
+    }
+    // Without a target the syntax is kept.
+    let r = run_build(&fs, opts(&["entry.js"]));
+    assert!(file(&r, "/proj/out/entry.js").contains("accessor one"));
+}
+
+#[test]
+fn tsconfig_jsx_preserve_is_ignored() {
+    // As in esbuild, the output is JavaScript: only `--jsx=preserve` keeps JSX.
+    let fs = project(&[
+        ("entry.tsx", "console.log(<div />);\n"),
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions": {"jsx": "preserve"}}"#,
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["entry.tsx"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("React.createElement(\"div\""), "{code}");
+    let mut o = opts(&["entry.tsx"]);
+    o.jsx.mode = Some("preserve".into());
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/entry.js").contains("<div />"));
+}
+
+#[test]
+fn external_imports_keep_evaluation_order() {
+    // `foo` is imported before `./bar`, whose own external `bar` loads after it, even
+    // though bar.js is placed first in the bundle.
+    let fs = project(&[
+        (
+            "entry.js",
+            "export {default as foo} from 'foo';\nexport {bar} from './bar';\n",
+        ),
+        ("bar.js", "export {default as bar} from 'bar';\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.external = vec!["foo".into(), "bar".into()];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    let foo = code.find("from \"foo\"").expect(code);
+    let bar = code.find("from \"bar\"").expect(code);
+    assert!(foo < bar, "{code}");
+}
+
+#[test]
+fn json_namespace_imports_are_es_namespaces() {
+    // `default` is the whole value, even with an `__esModule` key, and like every other
+    // property of an ES namespace it is a getter. A `__proto__` key is a property.
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "import * as ns from './a.json';\nimport b from './b.json';\n\
+             console.log(Object.getOwnPropertyDescriptor(ns, 'default').get !== undefined, \
+             ns.default.__esModule, Object.keys(b));\n",
+        ),
+        ("a.json", r#"{"__esModule": true, "x-y": 1}"#),
+        ("b.json", r#"{"__proto__": {"foo": 1}}"#),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    assert_eq!(
+        run_node("json-ns", &r, "entry.js"),
+        "true true [ '__proto__' ]\n"
+    );
+}
+
+#[test]
+fn imported_scripts_are_commonjs_and_missing_exports_do_not_include_files() {
+    // A `.js` file with no ESM syntax is CommonJS when something imports from it, so its
+    // `default` is `module.exports`; an `.mjs` one is an ES module without exports. Reading
+    // a missing export does not pull a `sideEffects: false` ES module into the bundle.
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "import * as js from './foo/a.js';\nimport * as mjs from './foo/b.mjs';\n\
+             import * as meta from './foo/c.js';\n\
+             console.log(js.default, mjs.default, mjs.nope, meta.nope);\n",
+        ),
+        ("foo/package.json", r#"{"sideEffects": false}"#),
+        ("foo/a.js", "console.log('js');\n"),
+        ("foo/b.mjs", "console.log('mjs');\n"),
+        ("foo/c.js", "console.log('meta', typeof import.meta);\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    assert_eq!(
+        run_node("cjs-scripts", &r, "entry.js"),
+        "js\n{} undefined undefined undefined\n"
+    );
+}
+
+#[test]
+fn glob_entry_points_expand_to_matching_files() {
+    let fs = project(&[
+        ("src/a.js", "console.log('a');\n"),
+        ("src/deep/b.js", "console.log('b');\n"),
+        ("src/c.ts", "console.log('c');\n"),
+    ]);
+    let r = run_build(&fs, opts(&["/proj/**/*.js"]));
+    let mut paths: Vec<&str> = r.outputs.iter().map(|f| f.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["/proj/out/a.js", "/proj/out/deep/b.js"]);
+    let r = run_build(&fs, opts(&["src/*.js"]));
+    assert_eq!(r.outputs.len(), 1);
+    let ctx = BuildContext::new(opts(&["nope/*.js"]), Arc::new(fs.clone())).expect("options");
+    assert!(ctx.build().has_errors());
+}
+
+#[test]
+fn an_export_named_proto_is_a_namespace_property() {
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "const lib = require('./lib.mjs');\nimport * as ns from './lib2.mjs';\n\
+             console.log(lib.__proto__, Object.keys(ns));\n",
+        ),
+        ("lib.mjs", "export const __proto__ = 123;\n"),
+        ("lib2.mjs", "const x = 1;\nexport { x as __proto__ };\n"),
+    ]);
+    for minify in [false, true] {
+        let mut o = opts(&["entry.js"]);
+        o.format = Some(Format::Cjs);
+        o.minify_syntax = minify;
+        o.minify_whitespace = minify;
+        let r = run_build(&fs, o);
+        assert_eq!(
+            run_node("proto-export", &r, "entry.js"),
+            "123 [ '__proto__' ]\n"
+        );
+    }
+}
+
+#[test]
+fn exported_const_enums_keep_their_object() {
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "foo.ts",
+            "import { Foo, Baz } from './bar';\nconst enum Bar { A = 1, B = 2 }\n\
+             console.log(Foo['%/*'], Foo.Y, Baz.Z, Bar.A, Bar.B);\n",
+        ),
+        (
+            "bar.ts",
+            "export const enum Foo { '%/*' = 1, Y = 'y' }\nconst enum Baz { Z = 3 }\n\
+             export { Baz };\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["foo.ts"]));
+    assert_eq!(run_node("const-enum-export", &r, "foo.js"), "1 y 3 1 2\n");
 }

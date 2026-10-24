@@ -166,6 +166,11 @@ export function dropInPeerRange(range, dropIn) {
   return dropIn.includes('-') ? `${range} || ${dropIn}` : range;
 }
 
+/// ts-r's MIT license, shipped in every package.
+function copyLicense(dest) {
+  fs.copyFileSync(path.join(repo, 'LICENSE'), path.join(dest, 'LICENSE'));
+}
+
 function binaryDir(opts, triple, host) {
   if (opts.binDir) return opts.binDir;
   if (opts.artifacts) return path.join(opts.artifacts, triple);
@@ -199,7 +204,8 @@ function buildPlatformPackage(opts, tool, triple, src, version) {
   fs.mkdirSync(path.join(dest, 'bin'), { recursive: true });
   fs.copyFileSync(from, path.join(dest, 'bin', exe));
   fs.chmodSync(path.join(dest, 'bin', exe), 0o755);
-  const files = ['bin', 'README.md'];
+  copyLicense(dest);
+  const files = ['bin', 'README.md', 'LICENSE'];
   if (tool.libs) {
     // The binary looks for lib.*.d.ts in <exe dir>/../lib (ts_r_checker::LibStore::locate).
     const libs = fs.readdirSync(opts.libDir).filter((f) => /^lib\..*\.d\.ts$/.test(f)).sort();
@@ -219,7 +225,7 @@ function buildPlatformPackage(opts, tool, triple, src, version) {
     name,
     version,
     description: `The ${tool.binary} binary for ${t.suffix}. Installed automatically by ${tool.front}; don't depend on it directly.`,
-    license: 'MIT OR Apache-2.0',
+    license: 'MIT',
     repository: repository(opts, 'npm'),
     os: [t.os],
     cpu: [t.cpu],
@@ -241,11 +247,11 @@ function frontPackageJson(opts, tool, version) {
     name: tool.front,
     version,
     description: `ts-r ${tool.about}. Prebuilt native binary, no install scripts.`,
-    license: 'MIT OR Apache-2.0',
+    license: 'MIT',
     repository: repository(opts, 'npm'),
     keywords: ['typescript', 'ts-r', tool.id, 'rust'],
     bin: { [tool.binary]: `bin/${tool.binary}.js` },
-    files: [`bin/${tool.binary}.js`, 'README.md', ...(tool.matcher ? [MATCHER] : [])],
+    files: [`bin/${tool.binary}.js`, 'README.md', 'LICENSE', ...(tool.matcher ? [MATCHER] : [])],
     engines: { node: '>=18' },
     optionalDependencies: Object.fromEntries(Object.values(TARGETS).map((t) => [`@ts-r.dev/${tool.id}-${t.suffix}`, version])),
     'ts-r': { binary: tool.binary, platformPrefix: `@ts-r.dev/${tool.id}-`, ...(tool.version === false ? { version: false } : {}) },
@@ -270,6 +276,7 @@ function copyMatcher(dest) {
 function buildToolFront(opts, tool, version) {
   const dest = path.join(opts.out, 'fronts', tool.id);
   writeShim(dest, tool);
+  copyLicense(dest);
   if (tool.matcher) copyMatcher(dest);
   writeJson(path.join(dest, 'package.json'), frontPackageJson(opts, tool, version));
   fs.writeFileSync(
@@ -302,6 +309,7 @@ function buildLauncher(opts, version) {
   writeJson(path.join(dest, 'package.json'), pkg);
   fs.copyFileSync(path.join(npmDir, 'ts-r', 'README.md'), path.join(dest, 'README.md'));
   copyMatcher(dest);
+  copyLicense(dest);
   return { name: pkg.name, dir: dest, kind: 'front' };
 }
 
@@ -311,6 +319,7 @@ function buildDropIn(opts, version) {
   for (const d of ['bin', 'lib']) copyDir(path.join(src, d), path.join(dest, d));
   fs.chmodSync(path.join(dest, 'bin', 'tsc'), 0o755);
   fs.copyFileSync(path.join(src, 'README.md'), path.join(dest, 'README.md'));
+  copyLicense(dest);
   const pkg = readJson(path.join(src, 'package.json'));
   pkg.version = dropInVersion(pkg['ts-r'].typescript, version);
   pkg.repository = repository(opts, 'npm/typescript');

@@ -35,7 +35,13 @@ needed beyond the TypeScript/JSX transform of [0002](0002-transform-and-codegen.
    parse, run `ts_r_transform` with module format `Preserve` (types, enums, decorators, JSX),
    apply `--define` (plus esbuild's automatic `process.env.NODE_ENV` for browser bundles), fold
    constants (`ts_r_minify::fold`, so dead `NODE_ENV` branches never reach the import scan),
-   and analyse scopes.
+   and analyse scopes. Binary loaders use `FileSystem::read_bytes`: the real file system
+   returns original bytes without text decoding; the default implementation supports
+   text-backed file systems by encoding their text as UTF-8. JSON loading retains original
+   top-level object keys for export discovery before rewriting `__proto__` as a computed
+   JavaScript property. JSON namespaces always expose the complete value through a default
+   getter; a `type: 'json'` import attribute limits the namespace to that default export,
+   even if the value has an `__esModule` property.
 3. **Scan** (`scan.rs`) into `ModuleMeta` (`meta.rs`): import records (static, re-export,
    `require`, `import()`; with "inside try" flags), top-level *parts* (one per statement with
    the symbols it declares and uses, namespace member uses and side-effect flag), imports,
@@ -118,6 +124,10 @@ short bundle-wide names. `--minify-syntax` runs `compress` (statement merging, `
 
 ### CLI (`ts-r-build`)
 
+Entry globs skip directories the pattern cannot match and fail with a diagnostic when a
+traversal size or depth limit prevents complete expansion. Entry deduplication uses resolved
+path and output name, preserving the order of the first occurrence.
+
 esbuild flag syntax for: `--bundle --outdir --outfile --format --platform --target --minify
 --minify-whitespace --minify-identifiers --minify-syntax --sourcemap[=linked|inline|external|both]
 --sources-content --splitting --external:X --packages=external --define:K=V --loader:.ext=L
@@ -181,7 +191,7 @@ linked batch runs under Node.
 
 ### Results (M3, Apple M-series, 4 threads)
 
-- esbuild oracle: 643 of 746 compared cases pass (86.2%); see the oracle README.
+- esbuild oracle: 742 of 779 compared cases pass (95.3%); see the oracle README.
 - A private app's server-rendered smoke entry (1983 modules; historical, no longer run):
   ts-r-build 65 ms without and 55 ms with the persistent cache, esbuild 86 ms; +2.7% size.
 
