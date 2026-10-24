@@ -7,8 +7,9 @@
 //! imported by dependencies (the bundler's batch reads CSS through [`bundle_css`]). This is
 //! a scanner, not a CSS parser: comments and strings are skipped, everything else is copied.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
+use crate::css_refs::{rewrite_refs, skip_string, starts_with_ci, statement_end};
 use crate::http;
 use crate::resolve::normalize;
 
@@ -26,6 +27,20 @@ struct Spent {
     bytes: usize,
 }
 
+/// What a stylesheet's references mean: how its files are read, where an `@import` points
+/// and what a `url()` becomes. The dependency rules are [`bundle_css`]'s; the dev server has
+/// its own for app CSS (aliases, the public directory, the base).
+pub trait CssHost {
+    /// A stylesheet's text, `None` if it can't be read.
+    fn read(&mut self, file: &Path) -> Option<String>;
+    /// The file an `@import` target in `importer` names, `None` to keep the `@import` (it
+    /// is hoisted to the top, where `@import` is valid).
+    fn import(&mut self, target: &str, importer: &Path) -> Option<PathBuf>;
+    /// The new value of a `url()` or `image-set()` reference in `importer` (unquoted,
+    /// unescaped), `None` to keep it.
+    fn url(&mut self, raw: &str, importer: &Path) -> Option<String>;
+}
+
 /// `file`'s CSS with relative `@import`s inlined and relative `url()`s replaced by
 /// `url_of(<absolute file>)`. Imports that can't be read (remote, missing, cyclic) are kept
 /// and hoisted to the top, where `@import` is valid; past the depth or size limits an
@@ -36,31 +51,64 @@ pub fn bundle_css(
     url_of: &dyn Fn(&Path) -> String,
 ) -> Option<String> {
     let css = read(file)?;
+    Some(bundle_text(file, &css, &mut DepHost { read, url_of }))
+}
+
+/// [`bundle_css`] for CSS already read (`file` names it, for relative references), with
+/// `host` deciding what imports and urls mean.
+pub fn bundle_text(file: &Path, css: &str, host: &mut dyn CssHost) -> String {
     let mut hoisted = Vec::new();
     let mut stack = vec![file.to_path_buf()];
     let mut spent = Spent::default();
-    let body = inline(
-        file,
-        &css,
-        read,
-        url_of,
-        &mut stack,
-        &mut spent,
-        &mut hoisted,
-    );
+    let body = inline(file, css, host, &mut stack, &mut spent, &mut hoisted);
     if hoisted.is_empty() {
-        return Some(body);
+        return body;
     }
     let mut out = hoisted.join("\n");
     out.push('\n');
     out.push_str(&body);
-    Some(out)
+    out
+}
+
+/// Dependency CSS: relative references only, files under their own directory.
+struct DepHost<'a> {
+    read: &'a dyn Fn(&Path) -> Option<String>,
+    url_of: &'a dyn Fn(&Path) -> String,
+}
+
+impl CssHost for DepHost<'_> {
+    fn read(&mut self, file: &Path) -> Option<String> {
+        (self.read)(file)
+    }
+
+    fn import(&mut self, target: &str, importer: &Path) -> Option<PathBuf> {
+        let dir = importer.parent().unwrap_or(Path::new("/"));
+        is_relative_ref(target).then(|| normalize(&dir.join(strip_query(target))))
+    }
+
+    fn url(&mut self, raw: &str, importer: &Path) -> Option<String> {
+        if !is_relative_ref(raw) {
+            return None;
+        }
+        let dir = importer.parent().unwrap_or(Path::new("/"));
+        let (path_part, suffix) = match raw.find(['?', '#']) {
+            Some(k) => (&raw[..k], &raw[k..]),
+            None => (raw, ""),
+        };
+        let abs = normalize(&dir.join(path_part));
+        Some(format!("{}{suffix}", (self.url_of)(&abs)))
+    }
 }
 
 /// The URL a dependency file is served at, without absolute paths: `/<path>` under the
 /// root, otherwise `/@ts-r/up/<n>/<path>` (relative to the root's `n`-th ancestor; the server
 /// serves only files inside a `node_modules` directory that way).
 pub fn asset_url(root: &Path, file: &Path) -> String {
+    http::percent_encode_path(&asset_path(root, file))
+}
+
+/// [`asset_url`] without the percent-encoding (CSS quotes what needs it).
+pub fn asset_path(root: &Path, file: &Path) -> String {
     let r: Vec<Component<'_>> = root.components().collect();
     let f: Vec<Component<'_>> = file.components().collect();
     let common = r.iter().zip(&f).take_while(|(a, b)| a == b).count();
@@ -71,9 +119,9 @@ pub fn asset_url(root: &Path, file: &Path) -> String {
         .collect();
     let rest = rest.join("/");
     if up == 0 {
-        http::percent_encode_path(&format!("/{rest}"))
+        format!("/{rest}")
     } else {
-        http::percent_encode_path(&format!("/@ts-r/up/{up}/{rest}"))
+        format!("/@ts-r/up/{up}/{rest}")
     }
 }
 
@@ -88,17 +136,20 @@ fn is_relative_ref(v: &str) -> bool {
 fn inline(
     file: &Path,
     css: &str,
-    read: &dyn Fn(&Path) -> Option<String>,
-    url_of: &dyn Fn(&Path) -> String,
-    stack: &mut Vec<std::path::PathBuf>,
+    host: &mut dyn CssHost,
+    stack: &mut Vec<PathBuf>,
     spent: &mut Spent,
     hoisted: &mut Vec<String>,
 ) -> String {
-    let dir = file.parent().unwrap_or(Path::new("/"));
     let b = css.as_bytes();
     let mut out = String::with_capacity(css.len());
     let mut i = 0;
+    // Text from here up to the next statement handled below still needs its references
+    // rewritten.
     let mut copied = 0;
+    let refs = |out: &mut String, text: &str, host: &mut dyn CssHost| {
+        out.push_str(&rewrite_refs(text, &mut |raw| host.url(raw, file)));
+    };
     while i < b.len() {
         match b[i] {
             b'/' if b.get(i + 1) == Some(&b'*') => {
@@ -108,7 +159,7 @@ fn inline(
             b'@' if starts_with_ci(&b[i + 1..], b"charset") => {
                 // `@charset` is only valid first in a file; inlined files drop theirs.
                 let end = statement_end(b, i);
-                out.push_str(&css[copied..i]);
+                refs(&mut out, &css[copied..i], host);
                 i = end;
                 copied = end;
             }
@@ -119,10 +170,10 @@ fn inline(
             {
                 let end = statement_end(b, i);
                 let stmt = css[i + 7..end].trim().trim_end_matches(';').trim();
-                out.push_str(&css[copied..i]);
-                match import_target(stmt) {
-                    Some((target, conditions)) if is_relative_ref(target) => {
-                        let path = normalize(&dir.join(strip_query(target)));
+                refs(&mut out, &css[copied..i], host);
+                let target = import_target(stmt);
+                match target.and_then(|(t, c)| Some((t, c, host.import(t, file)?))) {
+                    Some((target, conditions, path)) => {
                         // A cycle is already included; too deep, too much or unreadable
                         // can't be.
                         let cyclic = stack.contains(&path);
@@ -131,11 +182,11 @@ fn inline(
                             && spent.bytes < MAX_INLINED_BYTES;
                         if cyclic {
                             // nothing to add
-                        } else if let Some(text) = within.then(|| read(&path)).flatten() {
+                        } else if let Some(text) = within.then(|| host.read(&path)).flatten() {
                             spent.imports += 1;
                             spent.bytes += text.len();
                             stack.push(path.clone());
-                            let body = inline(&path, &text, read, url_of, stack, spent, hoisted);
+                            let body = inline(&path, &text, host, stack, spent, hoisted);
                             stack.pop();
                             out.push_str(&wrap(conditions, &body));
                         } else {
@@ -145,86 +196,20 @@ fn inline(
                             ));
                         }
                     }
-                    _ => hoisted.push(format!("@import {stmt};")),
+                    None => hoisted.push(format!("@import {stmt};")),
                 }
                 i = end;
                 copied = end;
             }
-            b'u' | b'U'
-                if starts_with_ci(&b[i..], b"url(") && (i == 0 || !is_ident_byte(b[i - 1])) =>
-            {
-                let open = i + 4;
-                let Some(close) = css[open..].find(')').map(|e| open + e) else {
-                    break;
-                };
-                let inner = css[open..close].trim();
-                let value = inner
-                    .strip_prefix(['"', '\''])
-                    .and_then(|s| s.strip_suffix(['"', '\'']))
-                    .unwrap_or(inner);
-                if is_relative_ref(value) {
-                    let (path_part, suffix) = match value.find(['?', '#']) {
-                        Some(k) => (&value[..k], &value[k..]),
-                        None => (value, ""),
-                    };
-                    let abs = normalize(&dir.join(path_part));
-                    out.push_str(&css[copied..i]);
-                    out.push_str(&format!("url(\"{}{suffix}\")", url_of(&abs)));
-                    copied = close + 1;
-                }
-                i = close + 1;
-            }
             _ => i += 1,
         }
     }
-    out.push_str(&css[copied.min(css.len())..]);
+    refs(&mut out, &css[copied.min(css.len())..], host);
     out
-}
-
-fn is_ident_byte(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'-' || c == b'_'
-}
-
-fn starts_with_ci(hay: &[u8], needle: &[u8]) -> bool {
-    hay.len() >= needle.len() && hay[..needle.len()].eq_ignore_ascii_case(needle)
 }
 
 fn strip_query(s: &str) -> &str {
     s.split(['?', '#']).next().unwrap_or(s)
-}
-
-/// Index just past a quoted string starting at `i`.
-fn skip_string(b: &[u8], i: usize, q: u8) -> usize {
-    let mut j = i + 1;
-    while j < b.len() {
-        match b[j] {
-            b'\\' => j += 2,
-            c if c == q || c == b'\n' => return j + 1,
-            _ => j += 1,
-        }
-    }
-    b.len()
-}
-
-/// Index just past the `;` ending the at-rule starting at `i` (strings and parens skipped).
-fn statement_end(b: &[u8], i: usize) -> usize {
-    let mut j = i;
-    let mut depth = 0usize;
-    while j < b.len() {
-        match b[j] {
-            q @ (b'"' | b'\'') => {
-                j = skip_string(b, j, q);
-                continue;
-            }
-            b'(' => depth += 1,
-            b')' => depth = depth.saturating_sub(1),
-            b';' if depth == 0 => return j + 1,
-            b'{' | b'}' if depth == 0 => return j,
-            _ => {}
-        }
-        j += 1;
-    }
-    b.len()
 }
 
 /// `"x.css" screen` / `url(x.css) layer(base)` → (`x.css`, `screen` / `layer(base)`).
@@ -312,7 +297,6 @@ fn wrap(conditions: &str, body: &str) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     fn run(files: &[(&str, &str)], entry: &str) -> String {
         let map: HashMap<PathBuf, String> = files
@@ -346,7 +330,7 @@ mod tests {
         );
         assert!(!out.contains("@charset"), "{out}");
         assert!(
-            out.contains(".base { src: url(\"/@ts-r/up/1/node_modules/ui/fonts/f.woff2\"), url(data:font/woff2;base64,AA) }"),
+            out.contains(".base { src: url('/@ts-r/up/1/node_modules/ui/fonts/f.woff2'), url(data:font/woff2;base64,AA) }"),
             "{out}"
         );
         // The cycle back to style.css is dropped (it is already included).
@@ -356,7 +340,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains("url(\"/@ts-r/up/1/node_modules/ui/dist/img/dot.svg?x#y\")"),
+            out.contains("url(/@ts-r/up/1/node_modules/ui/dist/img/dot.svg?x#y)"),
             "{out}"
         );
         assert!(out.contains("/* url(not-me.png) */"), "{out}");

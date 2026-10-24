@@ -107,6 +107,11 @@ fn handle_change(
 ) {
     let path = &change.path;
     let url = server::url_for_file(&shared.root, path);
+    shared
+        .changed_at
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(path.clone(), timestamp);
     // `.env*`: new values everywhere, so the page reloads (Vite restarts its server).
     if let Some(dir) = &shared.env_options.dir
         && crate::env::is_env_file(dir, path)
@@ -172,8 +177,24 @@ fn handle_change(
             Err(message) => shared.log(&format!("handleHotUpdate failed: {message}")),
         }
     }
+    // A file a page's `<style>` reads or references: the page reloads.
+    let page = shared
+        .html_deps
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, deps)| deps.binary_search(path).is_ok())
+        .map(|(page, _)| page.clone())
+        .min();
+    if let Some(page) = page {
+        let page_url = server::url_for_file(&shared.root, &page);
+        out.files.push(url.clone());
+        out.full_reload = Some(Some(page_url));
+        return;
+    }
+    // A page reloads, unless it is also a module (`import x from './a.html?raw'`).
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if (ext == "html" || ext == "htm") && path.starts_with(&shared.root) {
+    if (ext == "html" || ext == "htm") && path.starts_with(&shared.root) && own.is_none() {
         out.files.push(url.clone());
         out.full_reload = Some(Some(url));
         return;
@@ -255,22 +276,48 @@ fn handle_change(
         }
     }
 
+    if kind == ModuleKind::Css {
+        css_changed(
+            shared,
+            id,
+            &node_url,
+            (linked_css, served_as_js),
+            timestamp,
+            timing,
+            out,
+        );
+        return;
+    }
     let t = Instant::now();
-    if kind == ModuleKind::Css && linked_css {
+    propagate(shared, id, false, timestamp, out);
+    timing.graph += t.elapsed();
+}
+
+/// A stylesheet changed (its file, or one it imports or references): a `<link>`ed one is
+/// swapped in place, one imported from JS updates like a module.
+fn css_changed(
+    shared: &Shared,
+    id: ModuleId,
+    url: &str,
+    (linked, as_js): (bool, bool),
+    timestamp: u64,
+    timing: &mut UpdateTiming,
+    out: &mut Outcome,
+) {
+    let t = Instant::now();
+    if linked {
         out.updates.push(json!({
             "type": "css-update",
-            "path": node_url,
-            "acceptedPath": node_url,
+            "path": url,
+            "acceptedPath": url,
             "timestamp": timestamp,
             "explicitImportRequired": false,
             "isWithinCircularImport": false,
         }));
     }
-    if kind == ModuleKind::Css && !served_as_js {
-        timing.graph += t.elapsed();
-        return;
+    if as_js {
+        propagate(shared, id, false, timestamp, out);
     }
-    propagate(shared, id, false, timestamp, out);
     timing.graph += t.elapsed();
 }
 
@@ -286,11 +333,17 @@ fn reprepare(
     if out.full_reload.is_some() {
         return;
     }
-    let (file, url, kind) = {
+    let (file, url, kind, css_use, pruned) = {
         let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let n = g.node(id);
-        (n.file.clone(), n.url.clone(), n.kind)
+        let css_use = (n.linked_css, n.served_as_js);
+        (n.file.clone(), n.url.clone(), n.kind, css_use, n.pruned)
     };
+    if kind == ModuleKind::Css && !pruned {
+        out.files.push(url.clone());
+        css_changed(shared, id, &url, css_use, timestamp, timing, out);
+        return;
+    }
     if kind != ModuleKind::Script {
         return;
     }

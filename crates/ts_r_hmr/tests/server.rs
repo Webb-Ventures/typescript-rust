@@ -98,7 +98,7 @@ fn serves_html_modules_deps_and_static_files() {
     let f = start();
     let (status, h, body) = f.get("/");
     assert_eq!(status, 200);
-    assert_eq!(header(&h, "content-type"), Some("text/html; charset=utf-8"));
+    assert_eq!(header(&h, "content-type"), Some("text/html"));
     assert!(body.contains("<script type=\"module\" src=\"/@ts-r/client\"></script>"));
 
     let (status, h, main) = f.get("/src/main.js");
@@ -221,6 +221,29 @@ fn serves_html_modules_deps_and_static_files() {
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_str::<Value>(&stats).unwrap()["count"], 0);
     assert!(f.server.module_count() >= 6);
+}
+
+#[test]
+fn denied_files_case_html_fallback_and_asset_queries() {
+    let f = start();
+    std::fs::write(f.app.path().join(".env"), "SECRET=1\n").unwrap();
+    std::fs::write(f.app.path().join("about.html"), "<p>about</p>").unwrap();
+    assert_eq!(f.get("/.env").0, 403);
+    let html = [("Accept", "text/html")];
+    let (status, h, body) = http_get(f.server.addr(), "/about", &html);
+    assert_eq!(
+        (status, header(&h, "content-type")),
+        (200, Some("text/html"))
+    );
+    assert!(body.contains("<p>about</p>"), "{body}");
+    // `fetch` accepts `*/*`: it gets the fallback page too.
+    let (status, _, body) = http_get(f.server.addr(), "/missing", &[("Accept", "*/*")]);
+    assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
+    // A public file matches only in its own case (the disk may not care).
+    let (status, _, body) = f.get("/ROBOTS.TXT");
+    assert_eq!(status, 404, "{body}");
+    let (_, _, js) = f.get("/src/logo.svg?import&no-inline&x=1");
+    assert!(js.contains("\"/src/logo.svg?no-inline&x=1\""), "{js}");
 }
 
 #[test]

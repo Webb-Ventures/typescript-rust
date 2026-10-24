@@ -174,6 +174,9 @@ pub fn apply_dev_options(
         Value::String(s) => config.public_dir = Some(config.root.join(s)),
         _ => {}
     }
+    if let Some(n) = dev["assetsInlineLimit"].as_u64() {
+        config.assets_inline_limit = n;
+    }
     for p in dev["assetsInclude"].as_array().into_iter().flatten() {
         let added = match (p["glob"].as_str(), p["regex"].as_str()) {
             (Some(g), _) => config.assets_include.add_glob(g, &config.root),

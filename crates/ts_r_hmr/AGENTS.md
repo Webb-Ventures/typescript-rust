@@ -33,7 +33,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
 | `timing.rs` | per-step latency records, `/@ts-r/stats` |
 | `cache.rs` | `TransformCache`: memory + `ts_r_cache` namespace `dev-transform` |
 | `deps.rs` | dependency optimizer: scan from `index.html`, one batch via `bundle_batch`, cache (namespace `dev-deps`), `/@ts-r/deps/`, re-batch on miss |
-| `css.rs` | dependency CSS: `@import` inlining, `url()` → served URLs (`asset_url`) |
+| `css.rs` | CSS bundling behind a `CssHost` (read, `@import` target, `url()` rewrite); dependency CSS (`bundle_css`, `asset_url`) |
+| `css_refs.rs` | finds and rewrites file references in CSS: `url()`, `image-set()` candidates (not in comments, strings or `@import`) |
+| `server/app_css.rs` | app CSS host: Vite-style reference resolution, served URLs under the base, data URLs, dependencies for HMR |
+| `html_urls.rs` | page URLs: the base on asset attributes, `srcset`, `meta` images, classic-script `import('...')`, `<style>`/`style=""` through the CSS host |
 | `plugin.rs` | `PluginHost` seam, `/@id/` plugin-module URLs |
 | `http.rs`, `ws.rs` | HTTP/1.1 and RFC 6455 framing (server and client roles) |
 | `net.rs` | `Duplex` (owned reader + writer over TCP or TLS), outbound `connect`, `tls` (rustls server/client configs) |
@@ -180,9 +183,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
 - **URLs are stored without `base`.** The graph, the HMR payloads (`path`, `acceptedPath`)
   and cached transforms are base-less; the base is added only when text leaves the server
   (`Shared::public_url`: rewritten imports, the client URL, the hot prelude, CSS-as-JS,
-  `html_with_base` on `src`/`href` of script/link/img/source/video/audio/track). Requests
-  have the base stripped (`strip_base`): `/` redirects (302) to the base; other paths outside
-  the base are still served (lenient, so dependency batch URLs keep working).
+  page URLs through `html_urls::rewrite`). Requests have the base stripped (`strip_base`): `/`
+  redirects (302) to the base; any other path outside the base that isn't a server path
+  (`/@...`) is a 404, an HTML page with a link to the based URL when the request accepts HTML,
+  else text (`vite: packages/vite/src/node/server/middlewares/base.ts`).
 - **Request order:** WebSocket upgrade (protocol `vite-hmr` → HMR; else a `ws: true` proxy
   rule → tunnel; else HMR), CORS preflight (`OPTIONS` → 204), proxy (matched on the raw URL,
   before the base is stripped), base, routes. Every non-proxied response goes through
@@ -204,7 +208,41 @@ are cached by content hash. Change `cache_id` when output for the same input can
   deleted file matching a module's patterns (`Shared::glob_watches`) re-prepares that module
   and propagates like an edit. Aliases in patterns go through the plugin `resolveId` (pre).
 - **The public dir** (`public/` unless `publicDir`) is served at the base, before source files;
-  importing `/x.png` from it gives its URL (`?import`), never a module.
+  importing `/x.png` from it gives its URL (`?import`, `encodeURI`d), never a module, and
+  `?inline` gives its data URL. A public file matches only in the case it is written in
+  (`ICON.png` doesn't serve `icon.png` on a case-insensitive disk). A file without an
+  extension is sent with no `Content-Type`.
+- **Never served from the root:** `.env`, `.env.*`, `*.crt`, `*.pem` and anything under
+  `.git` (403), like Vite's default `server.fs.deny`.
+- **HTML fallback** (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`): a
+  GET that matched nothing and accepts `text/html` or `*/*` (not `/favicon.ico`) gets the page
+  `<path>.html` when it exists, else the root `index.html`. Pages are sent as `text/html` (no
+  charset, as Vite does).
+- **App CSS** (`server/app_css.rs`, `vite: packages/vite/src/node/plugins/css.ts`,
+  `urlResolver`/`rewriteCssUrls`/`rewriteCssImageSet`): linked and JS-imported stylesheets in
+  the root, and a page's `<style>` blocks and `style` attributes, have `@import`s inlined
+  (resolved like references, through aliases and packages) and every `url()`/`image-set()`
+  reference rewritten. A reference is URL-decoded; a public file becomes `<base><path>`;
+  otherwise it is resolved (`/x` from the root, `./x` and `x` from the stylesheet, then the
+  plugins' `resolveId` rewrites and the resolver). `?inline`, and an SVG under
+  `assetsInlineLimit` with no fragment and no `?no-inline`, become data URLs; anything else is
+  its served URL with the base, the query and fragment kept and `t=<last change>` once the
+  file has changed. An unresolved reference is kept as written. Quoting follows Vite: an
+  unquoted value that needs quotes gets `'...'`, a quoted one keeps its quote.
+  Every file read or referenced is a watch dependency of the stylesheet (and of the page,
+  for its `<style>`s: changing one reloads the page).
+- **Page URLs** (`html_urls.rs`, `vite: packages/vite/src/node/server/middlewares/indexHtml.ts`
+  `processNodeUrl`, `packages/vite/src/node/assetSource.ts`): the attributes that name files
+  (Vite's table: `src`, `srcset`, `href` of `link`/`image`/`use`, `imagesrcset`, `data`,
+  `poster`, `content` of image `meta`s) and the string argument of `import('...')` in classic
+  inline scripts get the base when root-absolute; relative ones too, for the root `index.html`
+  served at another URL. `vite-ignore` elements are left alone (the attribute is removed).
+- **Asset import URLs** (`asset_export_url`, `vite: packages/vite/src/node/plugins/asset.ts`
+  `fileToDevUrl`): `import x from './a.svg?no-inline&foo=bar'` exports
+  `<base>/a.svg?no-inline&foo=bar`: the path `encodeURI`d, the query kept without `import`,
+  `url` and `t`. The same rule applies when a plugin module of a known asset falls back to
+  the default load. `assetsInlineLimit` (number form; ts-r-dev reads it from the Vite config)
+  sets the SVG inline limit.
 - **Plugins are optional and cheap when absent.** Every hook call is skipped unless
   `PluginHost::hooks()` says some plugin has it (`Shared::plugin_hooks`, read once). With
   hooks, a module costs one batched `resolveId` call per stage, one `transform` call per stage
@@ -342,14 +380,14 @@ wrapper ~0.6, browser ~2.4).
   multi-page `build.rollupOptions.input`); imports behind non-literal `import(expr)` are found
   only on request (re-batch + reload).
 - Non-literal dynamic `import(expr)` isn't rewritten (bare specifiers in it fail); an HTML
-  change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app (source) CSS
-  `@import` and CSS modules (`.module.css`) aren't handled and `url()` is made absolute only
-  (dependency CSS is bundled, see above). Dependency CSS isn't watched (only linked packages).
+  change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app
+  (source) CSS, CSS modules (`.module.css`) and preprocessor `@import`s (`.scss`, ...) aren't
+  handled. Dependency CSS isn't watched (only linked packages).
 - `new URL(`./${name}.png`, import.meta.url)` (a template with expressions) isn't turned into
   a glob as Vite does; only string literals are resolved. `import.meta.glob` needs literal
   arguments (as in Vite).
 - `base`: dependency batch files and dependency CSS-as-JS still link `/@ts-r/...` without
-  the base; they work only because paths outside the base are served.
+  the base; they work only because server paths (`/@...`) outside the base are still served.
 - Proxy: no `configure`, `bypass`, `agent`, `auth` options or `xfwd`; `cors.origin` as a
   function falls back to the default. No `server.hmr` options (port, path, overlay) yet.
 - Output differs cosmetically from Vite's (quote style of rewritten imports, Vite reprints

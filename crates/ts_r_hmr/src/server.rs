@@ -18,7 +18,7 @@
 //! | `/@ts-r/stats` | latency stats JSON |
 //! | `/@ts-r/ping` | 204, for reconnecting clients |
 //! | `/@ts-r/env` (`/@vite/env`) | the global `define`s (also prepended to the client) |
-//! | anything else | static file from `public/`, then the root, then plugin middlewares, then the SPA fallback |
+//! | anything else | static file from `public/` (exact case), then the root (not `.env*`, keys, `.git`), then plugin middlewares, then the HTML fallback (`<path>.html`, else `index.html`) |
 //!
 //! Before routing: `server.cors` (preflights answered), `server.proxy` (matching requests
 //! forwarded), then `base` is stripped (`/` redirects to the base; URLs outside the base
@@ -58,6 +58,8 @@ use crate::transform::{
 };
 use crate::watch::{self, DebounceOptions, FileWatcher, WatchAdder};
 use crate::ws;
+
+mod app_css;
 
 const CLIENT_JS: &str = include_str!("client/client.js");
 
@@ -120,6 +122,9 @@ pub struct DevConfig {
     pub public_dir: Option<PathBuf>,
     /// `assetsInclude`: more files served as assets (a URL), not as plugin modules.
     pub assets_include: crate::glob::PathFilter,
+    /// `build.assetsInlineLimit`: SVGs smaller than this many bytes are inlined as data
+    /// URLs (the only assets Vite inlines in dev).
+    pub assets_inline_limit: u64,
     /// `server.headers`, added to every response that isn't proxied.
     pub headers: Vec<(String, String)>,
     pub cors: Cors,
@@ -197,6 +202,7 @@ impl DevConfig {
             define: Vec::new(),
             public_dir: Some(PathBuf::from("public")),
             assets_include: crate::glob::PathFilter::default(),
+            assets_inline_limit: crate::assets::SVG_INLINE_LIMIT as u64,
             headers: Vec::new(),
             cors: Cors::default(),
             proxy: Vec::new(),
@@ -290,6 +296,7 @@ pub(crate) struct Shared {
     pub root: PathBuf,
     pub public_dir: Option<PathBuf>,
     pub assets_include: crate::glob::PathFilter,
+    pub assets_inline_limit: u64,
     pub base: String,
     pub env_options: EnvOptions,
     /// Reloaded when an env file changes.
@@ -332,6 +339,12 @@ pub(crate) struct Shared {
     pub watch_adder: OnceLock<WatchAdder>,
     /// Directories outside the root already being watched.
     pub watched_outside: Mutex<HashMap<PathBuf, bool>>,
+    /// When each changed file last changed (an update's timestamp): stylesheets add it to
+    /// the URLs of the files they reference, so the browser fetches the new version.
+    pub changed_at: Mutex<HashMap<PathBuf, u64>>,
+    /// The files each page's `<style>` blocks and `style` attributes read or reference: a
+    /// change to one reloads the page.
+    pub html_deps: Mutex<HashMap<PathBuf, Vec<PathBuf>>>,
 }
 
 impl Shared {
@@ -354,6 +367,15 @@ impl Shared {
     }
 
     /// A root-absolute URL as the browser must request it (with the base).
+    /// The timestamp of the update that last changed `file`, if one did.
+    pub(crate) fn changed_at(&self, file: &Path) -> Option<u64> {
+        self.changed_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(file)
+            .copied()
+    }
+
     pub fn public_url(&self, url: &str) -> String {
         with_base(&self.base, url)
     }
@@ -559,6 +581,7 @@ impl DevServer {
         let shared = Arc::new(Shared {
             public_dir: config.public_dir.as_ref().map(|d| root.join(d)),
             assets_include: config.assets_include.clone(),
+            assets_inline_limit: config.assets_inline_limit,
             base,
             env_options,
             env: RwLock::new(Arc::new(env)),
@@ -597,6 +620,8 @@ impl DevServer {
             logger: config.logger.clone(),
             watch_adder: OnceLock::new(),
             watched_outside: Mutex::default(),
+            changed_at: Mutex::default(),
+            html_deps: Mutex::default(),
         });
         let watcher = if config.watch {
             let s = Arc::clone(&shared);
@@ -836,7 +861,43 @@ fn handle_connection(shared: &Arc<Shared>, stream: TcpStream) -> io::Result<()> 
         }
         if shared.base != "/" {
             match strip_base(&shared.base, &mut req) {
-                BaseMatch::Inside | BaseMatch::Outside => {}
+                BaseMatch::Inside => {}
+                // Outside the base: a 404 that names the URL meant (Vite's base
+                // middleware, `vite: packages/vite/src/node/server/middlewares/base.ts`).
+                // The server's own `/@...` URLs are still served.
+                BaseMatch::Outside if !req.path.starts_with("/@") => {
+                    let _ = http::drain_body(&mut reader, &req)?;
+                    let html = req
+                        .header("accept")
+                        .is_some_and(|a| a.contains("text/html"));
+                    let suggestion = format!("{}{}", shared.base, req.path.trim_start_matches('/'));
+                    let (kind, body) = if html {
+                        let s = http::html_escape(&suggestion);
+                        (
+                            "text/html",
+                            format!(
+                                "The server is configured with a public base URL of {} - did you mean to visit <a href=\"{s}\">{s}</a> instead?",
+                                http::html_escape(&shared.base)
+                            ),
+                        )
+                    } else {
+                        (
+                            "text/plain",
+                            format!(
+                                "The server is configured with a public base URL of {} - did you mean to visit {suggestion} instead?",
+                                shared.base
+                            ),
+                        )
+                    };
+                    let mut resp = Response::new(404, kind, body.into_bytes());
+                    shared.cors.apply(&req, &mut resp);
+                    resp.write_to(&mut writer, head_only, req.keep_alive())?;
+                    if req.keep_alive() {
+                        continue;
+                    }
+                    return Ok(());
+                }
+                BaseMatch::Outside => {}
                 BaseMatch::Redirect => {
                     let _ = http::drain_body(&mut reader, &req)?;
                     let mut resp = Response {
@@ -1079,15 +1140,33 @@ fn route(shared: &Shared, req: &Request) -> Response {
         && let Some(public) = &shared.public_dir
     {
         let p = public.join(&rel);
-        if p.is_file() {
+        if p.is_file() && same_case(&p) {
+            if req.has_query("inline") {
+                return match fs::read(&p) {
+                    Ok(bytes) => {
+                        let ext = ext_of(&p);
+                        let data =
+                            crate::assets::data_url(&ext, render::content_type(&ext), &bytes);
+                        js_response(req, crate::assets::default_export(&data))
+                    }
+                    Err(_) => Response::text(404, "Not found"),
+                };
+            }
             if req.has_query("import") || req.has_query("url") {
-                return js_response(req, crate::assets::default_export(&shared.public_url(path)));
+                let url = http::encode_uri(&shared.public_url(path));
+                return js_response(req, crate::assets::default_export(&url));
             }
             return serve_static(req, &p);
         }
     }
     let file = shared.root.join(&rel);
     if file.is_file() {
+        if denied(&rel) {
+            return Response::text(
+                403,
+                format!("Restricted: {path} is denied by the dev server"),
+            );
+        }
         return serve_file(shared, req, &file, path);
     }
     if file.is_dir() {
@@ -1099,17 +1178,53 @@ fn route(shared: &Shared, req: &Request) -> Response {
     if let Some(resp) = plugin_middleware(shared, req, &[]) {
         return resp;
     }
-    // History-API fallback for client-side routes.
+    // Nothing at this path: a page for it, else the root page (client-side routes). Only
+    // for requests that accept HTML (`*/*` too, like `fetch`), as Vite's HTML fallback
+    // does (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`).
     let wants_html = req
         .header("accept")
-        .is_some_and(|a| a.contains("text/html"));
-    if wants_html && Path::new(path).extension().is_none() {
+        .is_some_and(|a| a.contains("text/html") || a.contains("*/*"));
+    if wants_html && path != "/favicon.ico" {
+        if !path.ends_with(".html") && !path.ends_with('/') {
+            let page = shared.root.join(format!("{}.html", rel.display()));
+            if page.is_file() {
+                return serve_html(shared, req, &page);
+            }
+        }
         let index = shared.root.join("index.html");
         if index.is_file() {
             return serve_html(shared, req, &index);
         }
     }
     Response::text(404, format!("Not found: {path}"))
+}
+
+/// Whether `file` exists with its name in this case (the file system may not care; URLs
+/// do).
+fn same_case(file: &Path) -> bool {
+    match (fs::canonicalize(file), file.file_name()) {
+        (Ok(real), Some(name)) => real.file_name().is_none_or(|r| {
+            r == name
+                || !r
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&name.to_string_lossy())
+        }),
+        _ => true,
+    }
+}
+
+/// Project files the server never serves (Vite's default `server.fs.deny`): `.env` files,
+/// certificates and keys, anything in `.git`.
+fn denied(rel: &Path) -> bool {
+    let name = rel
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    name == ".env"
+        || name.starts_with(".env.")
+        || name.ends_with(".crt")
+        || name.ends_with(".pem")
+        || rel.components().any(|c| c.as_os_str() == ".git")
 }
 
 /// `/@ts-r/up/<n>/<path>` ([`crate::css::asset_url`]): a file in a `node_modules` directory
@@ -1173,9 +1288,18 @@ fn serve_static(req: &Request, file: &Path) -> Response {
         return Response::not_modified(&etag).header("Cache-Control", "no-cache");
     }
     match fs::read(file) {
-        Ok(body) => Response::new(200, render::content_type(&ext_of(file)), body)
-            .header("ETag", etag)
-            .header("Cache-Control", "no-cache"),
+        Ok(body) => {
+            let ext = ext_of(file);
+            let mut r = Response::new(200, render::content_type(&ext), body)
+                .header("ETag", etag)
+                .header("Cache-Control", "no-cache");
+            // A file without an extension has no type to send (Vite's static server sends
+            // none either).
+            if ext.is_empty() {
+                r.headers.retain(|(k, _)| k != "Content-Type");
+            }
+            r
+        }
         Err(_) => Response::text(404, "Not found"),
     }
 }
@@ -1202,14 +1326,28 @@ fn serve_html(shared: &Shared, req: &Request, file: &Path) -> Response {
             format!("transformIndexHtml failed for {}: {message}", req.path),
         ),
         Ok(Ok(html)) => {
-            let html = if shared.base == "/" {
-                html
-            } else {
-                render::html_with_base(&html, &shared.base)
-            };
+            // Relative references of the root page resolve against the request's directory:
+            // under a base, or served for another path, they need the base.
+            let page_url = url_for_file(&shared.root, file);
+            let relative = page_url == "/index.html" && (shared.base != "/" || req.path != "/");
+            let mut host = app_css::AppCss::new(shared);
+            let html = crate::html_urls::rewrite(&html, &shared.base, relative, &mut |css| {
+                host.transform(file, css)
+            });
+            let deps = host.into_deps();
+            {
+                let mut map = shared.html_deps.lock().unwrap_or_else(|e| e.into_inner());
+                if deps.is_empty() {
+                    map.remove(file);
+                } else {
+                    map.insert(file.to_path_buf(), deps);
+                }
+            }
+            // Pages are `text/html` with no charset, as Vite sends them (the page's own
+            // `<meta charset>` decides).
             cacheable(
                 req,
-                "text/html; charset=utf-8",
+                "text/html",
                 render::inject_client_at(&html, &shared.client_url(), &shared.html_inject)
                     .into_bytes(),
                 "no-cache",
@@ -1317,10 +1455,8 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         as_script && !is_module_ext(shared, file, &ext) && ext != "css" && ext != "json";
     if req.has_query("url") || asset_import {
         ensure_asset(shared, file, &url);
-        return js_response(
-            req,
-            crate::assets::default_export(&asset_url(shared, file, &url)),
-        );
+        let out = asset_export_url(shared, file, &url, &req.query);
+        return js_response(req, crate::assets::default_export(&out));
     }
     match ext.as_str() {
         "css" => {
@@ -1368,11 +1504,42 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
 
 /// What an asset import (`import x from './a.png'`, `?url`, `new URL(...)`) evaluates to:
 /// a small SVG's data URL, else the file's URL under the base.
+/// The URL an asset import exports: [`asset_url`] (`?no-inline` never inlines) with its path
+/// `encodeURI`d and the import's other query parameters kept (`?no-inline`, `&foo=bar`), as
+/// Vite's asset plugin does (`vite: packages/vite/src/node/plugins/asset.ts`, `fileToDevUrl`).
+fn asset_export_url(shared: &Shared, file: &Path, url: &str, query: &str) -> String {
+    let out = if http::query_param(query, "no-inline").is_some() {
+        shared.public_url(url)
+    } else {
+        asset_url(shared, file, url)
+    };
+    match out.starts_with("data:") {
+        true => out,
+        false => format!("{}{}", http::encode_uri(&out), asset_postfix(query)),
+    }
+}
+
+/// The query an asset's URL keeps: the request's, without the server's own `import`, `url`
+/// and `t` parameters; `?` and the rest, or empty.
+fn asset_postfix(query: &str) -> String {
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|p| {
+            let k = p.split('=').next().unwrap_or(p);
+            !p.is_empty() && !matches!(k, "import" | "url" | "t")
+        })
+        .collect();
+    match kept.is_empty() {
+        true => String::new(),
+        false => format!("?{}", kept.join("&")),
+    }
+}
+
 fn asset_url(shared: &Shared, file: &Path, url: &str) -> String {
     let ext = ext_of(file);
     if ext == "svg"
         && let Ok(meta) = fs::metadata(file)
-        && crate::assets::inline_by_default(&ext, meta.len())
+        && crate::assets::inline_under(&ext, meta.len(), shared.assets_inline_limit)
         && let Ok(bytes) = fs::read(file)
     {
         return crate::assets::data_url(&ext, render::content_type(&ext), &bytes);
@@ -1407,34 +1574,39 @@ pub(crate) fn kind_for(file: &Path) -> ModuleKind {
 }
 
 fn serve_linked_css(shared: &Shared, req: &Request, file: &Path, url: &str) -> Response {
-    let Ok(css) = fs::read_to_string(file) else {
+    let Some(css) = app_stylesheet(shared, file, url, false) else {
         return Response::text(404, "Not found");
     };
-    {
-        let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-        let id = g.ensure(file, url, ModuleKind::Css);
-        let n = g.node_mut(id);
-        n.linked_css = true;
-        n.pruned = false;
-        set_hash_only(n, Key::of(css.as_bytes()));
-    }
     cacheable(req, "text/css; charset=utf-8", css.into_bytes(), "no-cache")
 }
 
 fn serve_css_module(shared: &Shared, req: &Request, file: &Path, url: &str) -> Response {
-    let Ok(css) = fs::read_to_string(file) else {
+    let Some(css) = app_stylesheet(shared, file, url, true) else {
         return Response::text(404, "Not found");
     };
-    {
-        let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-        let id = g.ensure(file, url, ModuleKind::Css);
-        let n = g.node_mut(id);
-        n.served_as_js = true;
-        n.pruned = false;
-        set_hash_only(n, Key::of(css.as_bytes()));
-    }
-    let css = render::rewrite_css_urls(&css, &shared.public_url(url));
     js_response(req, render::css_module_at(&shared.client_url(), url, &css))
+}
+
+/// A stylesheet of the app with its `@import`s inlined and references rewritten
+/// ([`app_css`]), recorded on its graph node: served as a module or linked, its source's
+/// hash, and the files it depends on.
+fn app_stylesheet(shared: &Shared, file: &Path, url: &str, as_js: bool) -> Option<String> {
+    let source = fs::read_to_string(file).ok()?;
+    let mut host = app_css::AppCss::new(shared);
+    let css = host.transform(file, &source);
+    let deps = host.into_deps();
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    let id = g.ensure(file, url, ModuleKind::Css);
+    let n = g.node_mut(id);
+    if as_js {
+        n.served_as_js = true;
+    } else {
+        n.linked_css = true;
+    }
+    n.pruned = false;
+    set_hash_only(n, Key::of(source.as_bytes()));
+    g.set_watch_deps(id, deps);
+    Some(css)
 }
 
 /// Records a non-script module's content hash (its "prepared" state).
@@ -1603,7 +1775,7 @@ pub(crate) fn prepare_script(
     let mut glob_watches = Vec::new();
     if !hot.globs.is_empty() {
         let importer_id = crate::paths::id(real);
-        let alias = |pattern: &str| glob_alias(shared, pattern, &importer_id);
+        let alias = |pattern: &str| alias_rewrite(shared, pattern, &importer_id);
         let cx = crate::glob::GlobContext {
             root: &shared.root,
             importer: real,
@@ -1776,9 +1948,9 @@ fn with_relative_sources(output: Arc<TransformOutput>, module_id: &str) -> Arc<T
     })
 }
 
-/// `resolve.alias` for a glob pattern, through plugins' pre `resolveId` hooks (where the
+/// `resolve.alias` for a glob pattern or a stylesheet reference, through plugins' pre `resolveId` hooks (where the
 /// sidecar applies the Vite config's aliases).
-fn glob_alias(shared: &Shared, pattern: &str, importer: &str) -> Option<String> {
+fn alias_rewrite(shared: &Shared, pattern: &str, importer: &str) -> Option<String> {
     let host = shared
         .plugins
         .as_deref()
@@ -1841,9 +2013,11 @@ fn new_url_asset(
     } else {
         normalize(&importer.parent()?.join(clean))
     };
-    if !file.is_file() {
-        return None;
-    }
+    // Not a file as written: an alias (`@/x.png`) or a path without its extension.
+    let file = match file.is_file() {
+        true => file,
+        false => app_css::resolve_ref(shared, clean, importer, true)?,
+    };
     let url = url_for_file(&shared.root, &file);
     let out = asset_url(shared, &file, &url);
     let out = if out.starts_with("data:") {
@@ -2357,7 +2531,9 @@ pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<V
     if !id.starts_with('\0') && real.is_absolute() && real.is_file() {
         if KNOWN_ASSETS.contains(&ext_of(real).as_str()) {
             let url = url_for_file(&shared.root, real);
-            return Ok(format!("export default {};\n", render::js_string(&url)).into_bytes());
+            let query = id.split_once('?').map_or("", |(_, q)| q);
+            let out = asset_export_url(shared, real, &url, query);
+            return Ok(crate::assets::default_export(&out).into_bytes());
         }
         return fs::read(real).map_err(|e| format!("{}: {e}", real.display()));
     }
