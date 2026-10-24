@@ -1546,3 +1546,61 @@ fn javascript_wins_over_typescript_inside_node_modules() {
         assert!(code.contains(want) && !code.contains(not), "{code}");
     }
 }
+
+#[test]
+fn import_phases_are_only_bundled_as_external_esm_imports() {
+    // esbuild: `import defer` / `import source` (and `import.defer()` / `import.source()`)
+    // stay imports of external modules in ESM output; anything else is an error.
+    let fs = project(&[
+        (
+            "entry.js",
+            "import defer * as a from './foo.json';\n\
+             import defer * as b from './foo.json' with { type: 'json' };\n\
+             import source c from './foo.json';\n\
+             console.log(a, b, c, import.defer('./foo.json'));\n",
+        ),
+        ("foo.json", "{}"),
+    ]);
+    let messages = |format: Format, external: bool| {
+        let mut o = opts(&["entry.js"]);
+        o.format = Some(format);
+        if external {
+            o.external = vec!["*.json".into()];
+        }
+        let r = BuildContext::new(o, Arc::new(fs.clone()))
+            .expect("options")
+            .build();
+        let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
+        (errors, r)
+    };
+    let (errors, _) = messages(Format::Cjs, true);
+    assert_eq!(
+        errors,
+        [
+            "Bundling deferred imports with the \"cjs\" output format is not supported",
+            "Bundling deferred imports with the \"cjs\" output format is not supported",
+            "Bundling source phase imports with the \"cjs\" output format is not supported",
+            "Bundling deferred imports with the \"cjs\" output format is not supported",
+        ]
+    );
+    let (errors, _) = messages(Format::Iife, false);
+    assert_eq!(errors.len(), 4, "{errors:?}");
+    assert!(errors[0].contains("\"iife\" output format"), "{errors:?}");
+    let (errors, _) = messages(Format::Esm, false);
+    assert_eq!(
+        errors[2],
+        "Bundling with source phase imports is not supported unless they are external"
+    );
+    let (errors, r) = messages(Format::Esm, true);
+    assert!(errors.is_empty(), "{errors:?}");
+    let code = file(&r, "/proj/out/entry.js");
+    // Each import keeps its phase and attributes, as its own statement.
+    for want in [
+        "import defer * as foo from \"./foo.json\";",
+        "import defer * as foo2 from \"./foo.json\" with { type: \"json\" };",
+        "import source foo_default from \"./foo.json\";",
+        "import.defer('./foo.json')",
+    ] {
+        assert!(code.contains(want), "{want}\n{code}");
+    }
+}

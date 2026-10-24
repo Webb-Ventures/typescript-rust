@@ -560,7 +560,10 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                                     if let Target::External(path) = t {
                                         star_reexports.push(format!(
                                             "export *{sp}from{sp}{};",
-                                            Expr::Str(path.clone()).to_text(true)
+                                            Expr::Str(
+                                                crate::graph::split_external(path).0.to_owned()
+                                            )
+                                            .to_text(true)
                                         ));
                                     }
                                 }
@@ -809,14 +812,14 @@ impl Planner<'_> {
     }
 
     fn ext_stem(&self, e: u32) -> String {
-        let path = &self.l.externals[e as usize];
+        let path = crate::graph::split_external(&self.l.externals[e as usize]).0;
         let last = path
             .trim_end_matches('/')
             .rsplit('/')
             .next()
             .unwrap_or(path);
         let base = if path.starts_with('@') || !path.starts_with('.') {
-            path.as_str()
+            path
         } else {
             last
         };

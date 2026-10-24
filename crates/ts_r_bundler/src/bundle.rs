@@ -73,7 +73,7 @@ impl BuildResult {
 }
 
 /// Persistent-cache format version (bump when meta, fragments or plans change shape).
-const CACHE_VERSION: u32 = 6;
+const CACHE_VERSION: u32 = 7;
 
 /// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
 pub struct BuildContext {

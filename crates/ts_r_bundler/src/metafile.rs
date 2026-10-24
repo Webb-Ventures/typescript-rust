@@ -58,7 +58,7 @@ pub fn render(
         for (ri, r) in m.meta.records.iter().enumerate() {
             let (p, external) = match &m.targets[ri] {
                 Target::Module(t) => (graph.modules[*t as usize].pretty.clone(), false),
-                Target::External(e) => (e.clone(), true),
+                Target::External(e) => (crate::graph::split_external(e).0.to_owned(), true),
                 Target::Missing => continue,
             };
             let kind = match r.kind {
@@ -137,10 +137,20 @@ pub fn render(
                     item(&mut body, &p, "import-statement", false);
                 }
                 for x in &c.ext_imports {
-                    item(&mut body, &x.path, "import-statement", true);
+                    item(
+                        &mut body,
+                        crate::graph::split_external(&x.path).0,
+                        "import-statement",
+                        true,
+                    );
                 }
                 for (p, _) in &c.ext_requires {
-                    item(&mut body, p, "require-call", true);
+                    item(
+                        &mut body,
+                        crate::graph::split_external(p).0,
+                        "require-call",
+                        true,
+                    );
                 }
                 // Dynamic imports of other chunks.
                 for &m in &c.modules {

@@ -26,6 +26,34 @@ pub enum Target {
     Missing,
 }
 
+/// The [`Target::External`] string of a static import with a phase (`import defer`) or
+/// import attributes: `path\0phase\0attrs`, so it stays its own import statement in the
+/// output and keeps both. Other imports of an external use the bare path.
+pub fn external_key(path: &str, phase: u8, attrs: &str) -> String {
+    if phase == crate::meta::PHASE_EVALUATION && attrs.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{path}\0{phase}\0{attrs}")
+    }
+}
+
+/// Splits an [`external_key`] into `(path, phase, attrs)`.
+pub fn split_external(key: &str) -> (&str, u8, &str) {
+    let mut it = key.splitn(3, '\0');
+    let path = it.next().unwrap_or(key);
+    let phase = it.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (path, phase, it.next().unwrap_or(""))
+}
+
+/// The word esbuild uses for an import phase in its messages.
+fn phase_words(phase: u8) -> &'static str {
+    if phase == crate::meta::PHASE_DEFER {
+        "deferred imports"
+    } else {
+        "source phase imports"
+    }
+}
+
 /// Prefix of the paths of modules disabled by a `browser` map.
 pub const DISABLED_PREFIX: &str = "(disabled):";
 
@@ -277,9 +305,36 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
         } else {
             resolver.resolve(&r.spec, &dir, kind)
         };
+        if r.phase != crate::meta::PHASE_EVALUATION && ctx.prep.opts.bundle {
+            // esbuild bundles neither phase: such imports must stay imports in ESM output.
+            let fmt = ctx.prep.opts.effective_format();
+            let text = if fmt != crate::Format::Esm {
+                Some(format!(
+                    "Bundling {} with the {:?} output format is not supported",
+                    phase_words(r.phase),
+                    fmt.as_str()
+                ))
+            } else if !matches!(res, Resolution::External(_)) {
+                Some(format!(
+                    "Bundling with {} is not supported unless they are external",
+                    phase_words(r.phase)
+                ))
+            } else {
+                None
+            };
+            if let Some(text) = text {
+                let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
+                messages.push(lines.message(Severity::Error, pretty, r.start, text));
+            }
+        }
         targets.push(match res {
             Resolution::File(f) => RawTarget::Path(f),
-            Resolution::External(e) => RawTarget::External(e),
+            Resolution::External(e) => match r.kind {
+                RecordKind::Import | RecordKind::ReExport => {
+                    RawTarget::External(external_key(&e, r.phase, &r.attrs))
+                }
+                _ => RawTarget::External(e),
+            },
             Resolution::Disabled => RawTarget::Path(format!("{DISABLED_PREFIX}{}", r.spec)),
             Resolution::NotFound(msg) => {
                 let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));

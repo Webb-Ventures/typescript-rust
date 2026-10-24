@@ -32,7 +32,17 @@ pub struct Record {
     pub node: u32,
     /// Inside a `try` block: a missing module is a warning, not an error.
     pub in_try: bool,
+    /// Import phase: [`PHASE_EVALUATION`], [`PHASE_DEFER`] (`import defer`,
+    /// `import.defer()`) or [`PHASE_SOURCE`] (`import source`, `import.source()`).
+    pub phase: u8,
+    /// Import attributes of a static `import`/`export ... from` as printed after `with`
+    /// (`{ type: "json" }`; `assert { ... }` keeps its keyword), empty when there are none.
+    pub attrs: String,
 }
+
+pub const PHASE_EVALUATION: u8 = 0;
+pub const PHASE_DEFER: u8 = 1;
+pub const PHASE_SOURCE: u8 = 2;
 
 /// What an import binding or re-export refers to in the other module.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -171,6 +181,8 @@ impl ModuleMeta {
             w.u32(r.end);
             w.u32(r.node);
             w.u8(r.in_try as u8);
+            w.u8(r.phase);
+            w.str(&r.attrs);
         }
         w.u32(self.imports.len() as u32);
         for i in &self.imports {
@@ -264,6 +276,8 @@ impl ModuleMeta {
                 end: r.u32()?,
                 node: r.u32()?,
                 in_try: r.u8()? != 0,
+                phase: r.u8()?,
+                attrs: r.str()?,
             });
         }
         for _ in 0..r.count()? {
