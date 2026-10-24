@@ -1736,3 +1736,49 @@ fn a_json_import_with_a_type_attribute_has_only_a_default_export() {
         ]
     );
 }
+
+#[test]
+fn a_cycle_of_named_re_exports_is_an_error() {
+    let errors = |files: &[(&str, &str)]| {
+        let r = BuildContext::new(opts(&["entry.js"]), Arc::new(project(files)))
+            .expect("options")
+            .build();
+        let mut e: Vec<String> = r
+            .errors()
+            .map(|m| format!("{}: {}", m.file.clone().unwrap_or_default(), m.text))
+            .collect();
+        e.sort();
+        e
+    };
+    // The cycle is reported where it closes on the way from each exported name (esbuild
+    // also reports it from every other import on it).
+    assert_eq!(
+        errors(&[
+            (
+                "entry.js",
+                "export {a as b} from './foo';\nexport {c as d} from './foo';\n"
+            ),
+            (
+                "foo.js",
+                "export {b as c} from './entry';\nexport {d as a} from './entry';\n"
+            ),
+        ]),
+        [
+            "foo.js: Detected cycle while resolving import \"b\"",
+            "foo.js: Detected cycle while resolving import \"d\"",
+        ]
+    );
+    // Two `export *` paths to one module are not a cycle, and neither is an `export *` loop.
+    assert!(
+        errors(&[
+            (
+                "entry.js",
+                "export * from './p';\nexport * from './q';\nexport * from './entry';\n"
+            ),
+            ("p.js", "export {x} from './r';\n"),
+            ("q.js", "export {x} from './r';\n"),
+            ("r.js", "export const x = 1;\n"),
+        ])
+        .is_empty()
+    );
+}

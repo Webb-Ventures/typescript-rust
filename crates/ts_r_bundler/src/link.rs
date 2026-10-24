@@ -136,6 +136,9 @@ struct Linker<'g> {
     /// when this did not change while computing it, because a cycle cut depends on the
     /// path it was reached from.
     cycle_hits: u64,
+    /// The exports being resolved, innermost last: a named import that leads back to one of
+    /// them is a cycle no module can break (esbuild reports it).
+    resolving: Vec<(ModuleId, u32)>,
 }
 
 /// Links `g` for the user entry modules and (with code splitting) the dynamic-import
@@ -175,6 +178,7 @@ pub fn link(g: &Graph, entries: &[ModuleId], dynamic_entries: &[ModuleId], o: Li
         exists_memo: FxHashMap::default(),
         name_ids: FxHashMap::default(),
         cycle_hits: 0,
+        resolving: Vec::new(),
     };
     for m in &g.modules {
         let mut d: FxHashMap<Sym, Vec<u32>> = FxHashMap::default();
@@ -396,6 +400,12 @@ impl Linker<'_> {
                 Kind::Esm => match name {
                     Imported::Namespace => Binding::Ns(t),
                     Imported::Name(n) => {
+                        let key = (t, self.name_id(n));
+                        if self.resolving.contains(&key) {
+                            self.cycle_hits += 1;
+                            self.report_cycle(m, record, n);
+                            return Binding::Undefined;
+                        }
                         self.ambiguous = false;
                         let r = self.resolve_export(t, n, seen);
                         match r {
@@ -418,6 +428,19 @@ impl Linker<'_> {
             }
             Target::Missing => Binding::Undefined,
         }
+    }
+
+    fn report_cycle(&mut self, m: ModuleId, record: u32, name: &str) {
+        if !self.reported.insert((m, record, name.to_owned())) {
+            return;
+        }
+        let module = &self.g.modules[m as usize];
+        let r = &module.meta.records[record as usize];
+        self.l.messages.push(module.message_at(
+            Severity::Error,
+            r.start,
+            format!("Detected cycle while resolving import {name:?}"),
+        ));
     }
 
     fn report_ambiguous(&mut self, m: ModuleId, record: u32, name: &str) {
@@ -573,7 +596,9 @@ impl Linker<'_> {
             return b;
         }
         let cycles = self.cycle_hits;
+        self.resolving.push(key);
         let b = self.resolve_export_uncached(t, name, seen);
+        self.resolving.pop();
         if self.cycle_hits == cycles {
             let ambiguous = b.is_none() && self.ambiguous;
             self.export_memo.insert(key, (b.clone(), ambiguous));
