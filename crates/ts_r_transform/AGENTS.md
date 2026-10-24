@@ -176,8 +176,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   (`--stored` compares against the stored files without tsc).
 - tsc's emit baselines (upstream checkout in `target/upstream/typescript`):
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE]`.
-  Last run (2026-10-22, 52b87b3): 1,654 match, 80 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
-  syntax errors are skipped); `--filter esDecorators`: 113 match, 27 mismatch.
+  Last run (2026-10-24, parity/binder-emit): 1,673 match, 61 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  syntax errors are skipped); `--filter esDecorators`: 119 match, 21 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
   tsc's emit. Last run: 48/48 packages pass.
