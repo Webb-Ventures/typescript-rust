@@ -1681,9 +1681,43 @@ fn first_error_matches_tsc() {
     ok("let q = { readonly: 1 }; type T = [readonly: string];");
 }
 
+/// In a `.js` file the TS8xxx errors are not parse errors: the checker's grammar errors
+/// (deferred by the parser) are kept next to them, also at one position, and dropped only
+/// for a real syntax error (tsc 7 baseline plainJSGrammarErrors; tsc's command line stops
+/// after any syntactic error, TS8xxx included, so it shows only the TS8xxx there).
+#[test]
+fn js_grammar_errors_stay_next_to_ts8xxx() {
+    use crate::{ParseOptions, TsInJs, parse_with};
+    let report = ParseOptions {
+        ts_in_js: TsInJs::Report,
+    };
+    let cases: &[(&str, &[(u32, u32)])] = &[
+        ("class C { const x = 1 }", &[(8009, 10), (1248, 16)]),
+        ("let o = { m?() { return 1 } };", &[(8009, 11), (1162, 11)]),
+        ("let o = { p?: 1, q!: 2 };", &[(1162, 11), (1255, 18)]),
+        ("class C { get g(); }", &[(8017, 10), (1005, 17)]),
+        // A syntax error: only the TS8xxx and the syntax error stay.
+        (
+            "let o = { m?() { return 1 } };\nlet x = ;",
+            &[(8009, 11), (1109, 39)],
+        ),
+    ];
+    for &(src, want) in cases {
+        let r = parse_with(src, SourceKind::Js, report);
+        let got: Vec<(u32, u32)> = r
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect();
+        assert_eq!(got, want, "for {src:?}");
+    }
+}
+
 /// TypeScript syntax in `.js` files (`TsInJs::Report`): every diagnostic as
 /// (code, line, column), checked against tsc 7.0.2 `--allowJs --checkJs` (one per position;
-/// where tsc reports two at one position, the first).
+/// where tsc reports two at one position, the first). The checker's grammar errors the
+/// parser defers (TS1015, TS1264, TS1540) are kept next to them: tsc's test baselines show
+/// both, its command line stops after the TS8xxx.
 #[test]
 fn ts_in_js_matches_tsc() {
     use crate::{ParseOptions, TsInJs, parse_with};
@@ -1718,9 +1752,11 @@ fn ts_in_js_matches_tsc() {
             "import type { A } from \"./a\";\nexport type { B };",
             &[(8006, 1, 1), (8006, 2, 1)],
         ),
+        // The deferred TS1540 stays next to TS8006 (the checker's error; tsc's command
+        // line stops after the TS8xxx).
         (
             "namespace N {}\nmodule M {}",
-            &[(8006, 1, 11), (8006, 2, 8)],
+            &[(8006, 1, 11), (8006, 2, 8), (1540, 2, 8)],
         ),
         (
             "class D implements I {}\nabstract class E {}",
@@ -1758,9 +1794,10 @@ fn ts_in_js_matches_tsc() {
             "let o = { m(): void {} };\ntry {} catch (e: unknown) {}",
             &[(8010, 1, 16), (8010, 2, 18)],
         ),
+        // TS1264 is the checker's grammar error for `y!` without a type (not a TS8xxx).
         (
             "let x!: number;\nclass F { y!; override m() {} }",
-            &[(8010, 1, 9), (8009, 2, 15)],
+            &[(8010, 1, 9), (1264, 2, 12), (8009, 2, 15)],
         ),
         (
             "abstract class G { abstract m(); protected n() {} public static s = 1; }",
@@ -1781,7 +1818,7 @@ fn ts_in_js_matches_tsc() {
         ),
         (
             "function o(a?: number = 1) {}\nfor (let i: number = 0;;) {}",
-            &[(8009, 1, 13), (8010, 1, 16), (8010, 2, 13)],
+            &[(1015, 1, 12), (8009, 1, 13), (8010, 1, 16), (8010, 2, 13)],
         ),
         (
             "class N { get a(): number { return 1 } set a(v: number) {} }",
@@ -1851,7 +1888,7 @@ fn ts_in_js_matches_tsc() {
         ),
         (
             "declare module M { let x: number; }",
-            &[(8006, 1, 16), (8010, 1, 27)],
+            &[(8006, 1, 16), (1540, 1, 16), (8010, 1, 27)],
         ),
         ("const f = <T,>(x) => x;", &[(8004, 1, 12)]),
         ("const g = <T extends U>(x) => x;", &[(8004, 1, 12)]),
@@ -2610,6 +2647,11 @@ fn recovery_matches_tsc() {
         // Checker grammar errors in object literals.
         ("var q = { h?: 1 };", &[(1162, 1, 12)]),
         ("const foo = { a! }", &[(1255, 1, 16)]),
+        // tsc takes one `?` or `!` after any object member's name (plainJSGrammarErrors).
+        (
+            "const o = { m!() { return 1 }, p!: 2 }",
+            &[(1255, 1, 14), (1255, 1, 33)],
+        ),
         // `await` bindings directly in a class static block (classStaticBlock22).
         ("class C { static { let await: any; } }", &[(1359, 1, 24)]),
         (

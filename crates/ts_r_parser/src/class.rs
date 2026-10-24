@@ -372,7 +372,7 @@ impl<'a> Parser<'a> {
         // and TS1267 for an initialized abstract field (abstractPropertyInitializer).
         let key_span = self.ast.span(key);
         if self.is_constructor_key(key) {
-            self.checker_grammar_error(messages::CONSTRUCTOR_FIELD, key_span);
+            self.deferred_grammar_error_at(messages::CONSTRUCTOR_FIELD, key_span, &[]);
         }
         if modifiers.contains(Modifiers::ABSTRACT) && value.is_some() {
             let name = key_span.text(self.src).to_owned();

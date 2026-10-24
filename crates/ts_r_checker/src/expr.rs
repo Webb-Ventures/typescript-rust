@@ -722,6 +722,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     _ => TypeId::UNRESOLVED,
                 }
             }
+            // `#x` alone (not `#x in o`, see `BinaryOp::In`): TS18016 outside a class,
+            // TS1451 inside (tsc: grammarchecks.go checkGrammarPrivateIdentifierExpression).
+            Node::PrivateName { .. } => {
+                self.private_name_grammar(e, false);
+                TypeId::UNRESOLVED
+            }
             Node::Hole {} => TypeId::UNDEFINED,
             Node::Missing {} => TypeId::ERROR,
             // Without a `JSX` namespace (the factory's or the global one) there is no
@@ -3903,6 +3909,31 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The class declaration enclosing a node.
+    /// The grammar errors of a `#name` expression (`in_left`: the left of `in`, where only
+    /// its place outside a class body is an error).
+    fn private_name_grammar(&mut self, e: Loc, in_left: bool) {
+        if !self.reporting(e.file) || self.has_syntax_errors(e.file) {
+            return;
+        }
+        let parent = self.c.file(e.file).parents().parent(e.node);
+        if self.enclosing_class(e).is_none() {
+            self.error(
+                e,
+                dg::PRIVATE_IDENTIFIERS_ARE_NOT_ALLOWED_OUTSIDE_CLASS_BODIES_18016,
+                &[],
+            );
+        } else if !in_left
+            // `for (#x in o)` is TS2406 instead.
+            && !parent.is_some_and(|p| matches!(self.ast(e.file).node(p), Node::ForIn { .. }))
+        {
+            self.error(
+                e,
+                dg::PRIVATE_IDENTIFIERS_ARE_ONLY_ALLOWED_IN_CLASS_BODIES_AND_MAY_ONLY_BE_USED_AS_PAR_1451,
+                &[],
+            );
+        }
+    }
+
     pub fn enclosing_class(&self, l: Loc) -> Option<Loc> {
         let ast = self.ast(l.file);
         let parents = self.c.file(l.file).parents();
@@ -7947,7 +7978,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 TypeId::BOOLEAN
             }
             BinaryOp::In => {
-                let lt = self.check_expr(ll);
+                let lt = if matches!(self.ast(ll.file).node(ll.node), Node::PrivateName { .. }) {
+                    self.private_name_grammar(ll, true);
+                    TypeId::UNRESOLVED
+                } else {
+                    self.check_expr(ll)
+                };
                 let rt = self.check_expr(rl);
                 let lt = self.check_non_null(ll, lt);
                 let rt = self.check_non_null(rl, rt);
