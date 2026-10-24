@@ -42,6 +42,8 @@ pub struct GlobOptions {
     pub query: String,
     pub base: Option<String>,
     pub exhaustive: bool,
+    /// `caseSensitive: false`: names match ignoring ASCII case.
+    pub ignore_case: bool,
 }
 
 /// A compiled pattern for matching paths later (watching for added/removed files).
@@ -50,6 +52,7 @@ pub struct GlobWatch {
     positive: Vec<Vec<String>>,
     negative: Vec<Vec<String>>,
     exhaustive: bool,
+    ignore_case: bool,
     importer: PathBuf,
 }
 
@@ -63,6 +66,20 @@ impl GlobWatch {
         if !self.exhaustive && !self.allows_hidden(&segs) {
             return false;
         }
+        if self.ignore_case {
+            let lower = |v: &[String]| -> Vec<String> {
+                v.iter().map(|s| s.to_ascii_lowercase()).collect()
+            };
+            let segs = lower(&segs);
+            return self
+                .positive
+                .iter()
+                .any(|p| match_segments(&lower(p), &segs))
+                && !self
+                    .negative
+                    .iter()
+                    .any(|p| match_segments(&lower(p), &segs));
+        }
         self.positive.iter().any(|p| match_segments(p, &segs))
             && !self.negative.iter().any(|p| match_segments(p, &segs))
     }
@@ -72,8 +89,9 @@ impl GlobWatch {
             let hidden = s.starts_with('.') || s == "node_modules";
             !hidden
                 || self.positive.iter().any(|p| {
-                    p.get(i)
-                        .is_some_and(|ps| ps == s || (ps.starts_with('.') && ps != "**"))
+                    p.get(i).is_some_and(|ps| {
+                        *ps == escape_literal(s) || (ps.starts_with('.') && ps != "**")
+                    })
                 })
         })
     }
@@ -168,6 +186,7 @@ pub fn expand(
 ) -> Result<Expanded, (usize, String)> {
     let mut out = Expanded::default();
     let importer_dir = cx.importer.parent().unwrap_or(cx.root);
+    let mut real_root = None;
     for (i, call) in calls.iter().enumerate() {
         let (s, e) = (call.start as usize, call.end as usize);
         let args = code
@@ -180,20 +199,20 @@ pub fn expand(
         };
         let mut positive = Vec::new();
         let mut negative = Vec::new();
-        let mut keyed_root = false;
+        // Keys are relative to the importer (or `base`) only when every pattern is relative
+        // (`./`, `../` or a negation); otherwise they are paths from the root (`/dir/a.js`),
+        // aliased patterns included.
+        let keyed_root = opts.base.is_none() && !patterns.iter().all(|p| p.starts_with(['.', '!']));
         for p in &patterns {
             let (neg, body) = match p.strip_prefix('!') {
                 Some(b) => (true, b),
                 None => (false, p.as_str()),
             };
             let abs = resolve_pattern(body, &base_dir, cx).map_err(|m| (s, m))?;
-            if !neg && body.starts_with('/') {
-                keyed_root = true;
-            }
             let mut expanded = Vec::new();
             expand_braces(&abs, 0, &mut expanded).map_err(|m| (s, m))?;
             for one in expanded {
-                let segs = path_segments(Path::new(&one));
+                let segs = pattern_segments(&one);
                 if neg {
                     negative.push(segs);
                 } else {
@@ -205,6 +224,7 @@ pub fn expand(
             positive,
             negative,
             exhaustive: opts.exhaustive,
+            ignore_case: opts.ignore_case,
             importer: cx.importer.to_path_buf(),
         };
         let mut files: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -218,7 +238,13 @@ pub fn expand(
         };
         let mut entries = Vec::with_capacity(files.len());
         for (j, (key, file)) in files.iter().enumerate() {
-            let spec = format!("{}{query}", relative_specifier(importer_dir, file));
+            // A file reached through a symlink is imported at its real path (as imports
+            // resolve), so it is the same module as a direct import of it.
+            let target = real_path(file, cx.root, &mut real_root);
+            let spec = format!(
+                "{}{query}",
+                relative_specifier(importer_dir, target.as_deref().unwrap_or(file))
+            );
             let value = if opts.eager {
                 let name = format!("__vite_glob_{i}_{j}");
                 match opts.import.as_deref() {
@@ -274,6 +300,17 @@ pub fn expand(
     Ok(out)
 }
 
+/// `file`'s real path under `root` when a symlink inside the root leads to it (`None` when
+/// it is already real or lies outside). `real_root` caches the root's own real path.
+fn real_path(file: &Path, root: &Path, real_root: &mut Option<Option<PathBuf>>) -> Option<PathBuf> {
+    let real_root = real_root
+        .get_or_insert_with(|| fs::canonicalize(root).ok())
+        .as_ref()?;
+    let real = fs::canonicalize(file).ok()?;
+    let mapped = root.join(real.strip_prefix(real_root).ok()?);
+    (mapped != file).then_some(mapped)
+}
+
 /// Turns a pattern body (no `!`) into an absolute path pattern with `/` separators.
 fn resolve_pattern(body: &str, base: &Path, cx: &GlobContext<'_>) -> Result<String, String> {
     if body.starts_with("./") || body.starts_with("../") {
@@ -290,7 +327,20 @@ fn resolve_pattern(body: &str, base: &Path, cx: &GlobContext<'_>) -> Result<Stri
         && r != body
     {
         if Path::new(&r).is_absolute() && Path::new(&r).starts_with(cx.root) {
-            return Ok(r.replace('\\', "/"));
+            // The replacement is a path, not a pattern: its characters are literal. The
+            // tail it shares with the pattern is the user's glob.
+            let r = r.replace('\\', "/");
+            let shared = r
+                .bytes()
+                .rev()
+                .zip(body.bytes().rev())
+                .take_while(|(a, b)| a == b)
+                .count();
+            let mut cut = r.len() - shared;
+            while !r.is_char_boundary(cut) {
+                cut += 1;
+            }
+            return Ok(format!("{}{}", escape_literal(&r[..cut]), &r[cut..]));
         }
         if r.starts_with("./") || r.starts_with("../") || r.starts_with('/') {
             return resolve_pattern(&r, base, cx);
@@ -301,14 +351,115 @@ fn resolve_pattern(body: &str, base: &Path, cx: &GlobContext<'_>) -> Result<Stri
     ))
 }
 
+/// A `#name` pattern through the `imports` field of the nearest `package.json` above
+/// `importer` (Node subpath imports, which Vite applies to glob patterns too): an exact key
+/// maps to its target; a `#prefix*suffix` key to its target with `*` replaced by the part of
+/// the pattern between prefix and suffix (glob characters included). Returns the absolute
+/// path pattern (the package's directory not escaped, like an alias's), or `None` when no
+/// package maps it.
+pub fn subpath_import(pattern: &str, importer: &Path) -> Option<String> {
+    if !pattern.starts_with('#') {
+        return None;
+    }
+    let mut dir = importer.parent();
+    while let Some(d) = dir {
+        let manifest = d.join("package.json");
+        if let Ok(text) = fs::read_to_string(&manifest) {
+            let json: Value = serde_json::from_str(&text).ok()?;
+            let imports = json.get("imports")?.as_object()?;
+            let mut best: Option<(usize, String)> = None;
+            for (key, target) in imports {
+                let Some(target) = import_target(target, 0) else {
+                    continue;
+                };
+                let mapped = if key == pattern {
+                    Some(target.to_owned())
+                } else if let Some((pre, post)) = key.split_once('*')
+                    && pattern.len() >= pre.len() + post.len()
+                    && pattern.starts_with(pre)
+                    && pattern.ends_with(post)
+                {
+                    let middle = &pattern[pre.len()..pattern.len() - post.len()];
+                    Some(target.replace('*', middle))
+                } else {
+                    None
+                };
+                // The longest matching key wins (Node's order for patterns).
+                if let Some(m) = mapped
+                    && best.as_ref().is_none_or(|(len, _)| key.len() > *len)
+                {
+                    best = Some((key.len(), m));
+                }
+            }
+            let (_, target) = best?;
+            let rel = target.strip_prefix("./")?;
+            return Some(format!("{}/{rel}", crate::paths::id(d)));
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+/// The path a subpath import target names: a string, or the first of the `browser`,
+/// `import`, `module` and `default` conditions that names one.
+fn import_target(v: &Value, depth: u32) -> Option<&str> {
+    match v {
+        Value::String(s) => Some(s),
+        Value::Object(m) if depth < 8 => ["browser", "import", "module", "default"]
+            .iter()
+            .find_map(|c| m.get(*c).and_then(|t| import_target(t, depth + 1))),
+        _ => None,
+    }
+}
+
 fn resolve_dir(b: &str, importer_dir: &Path, cx: &GlobContext<'_>) -> Result<PathBuf, String> {
     let p = resolve_pattern(b, importer_dir, cx)?;
     Ok(PathBuf::from(p))
 }
 
-/// `base` joined with a `./`/`../` pattern, normalized (`..` applied), `/` separators.
+/// `s` with every glob character escaped by a backslash, so it matches only itself.
+fn escape_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(
+            c,
+            '*' | '?' | '[' | ']' | '{' | '}' | '(' | ')' | '!' | ',' | '\\'
+        ) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// `s` with backslash escapes removed (a literal pattern segment as a file name).
+fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The `/`-separated segments of an absolute pattern (`\\` is an escape, not a separator).
+fn pattern_segments(p: &str) -> Vec<String> {
+    p.split('/')
+        .filter(|s| !s.is_empty() && *s != ".")
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `base` (a directory, its characters literal) joined with a `./`/`../` pattern,
+/// normalized (`..` applied), `/` separators.
 fn join_pattern(base: &Path, rel: &str) -> String {
-    let mut parts: Vec<String> = path_segments(base);
+    let mut parts: Vec<String> = path_segments(base)
+        .iter()
+        .map(|s| escape_literal(s))
+        .collect();
     for seg in rel.split('/') {
         match seg {
             "" | "." => {}
@@ -350,14 +501,29 @@ fn path_of(segs: &[String]) -> PathBuf {
 
 /// `{a,b}` expansion (nested, bounded) into `out`; an error past [`MAX_ALTERNATIVES`].
 fn expand_braces(p: &str, depth: u32, out: &mut Vec<String>) -> Result<(), String> {
-    let Some(open) = p.find('{') else {
+    let mut escaped = false;
+    let Some(open) = p.char_indices().find_map(|(i, c)| match c {
+        _ if escaped => {
+            escaped = false;
+            None
+        }
+        '\\' => {
+            escaped = true;
+            None
+        }
+        '{' => Some(i),
+        _ => None,
+    }) else {
         return push_alternative(p, out);
     };
     let mut level = 0;
     let mut close = None;
     let mut commas = Vec::new();
+    let mut escaped = false;
     for (i, c) in p[open..].char_indices() {
         match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
             '{' => level += 1,
             '}' => {
                 level -= 1;
@@ -396,8 +562,18 @@ fn push_alternative(p: &str, out: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether a pattern segment has an unescaped wildcard.
 fn has_magic(seg: &str) -> bool {
-    seg.contains(['*', '?', '['])
+    let mut escaped = false;
+    for c in seg.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '*' | '?' | '[' => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Walks from the pattern's literal prefix and records matching files by key.
@@ -410,10 +586,11 @@ fn collect(
     keyed_root: bool,
 ) -> Result<(), String> {
     let prefix_len = pattern.iter().take_while(|s| !has_magic(s)).count();
-    let dir = path_of(&pattern[..prefix_len.min(pattern.len().saturating_sub(1))]);
+    let literal: Vec<String> = pattern.iter().map(|s| unescape(s)).collect();
+    let dir = path_of(&literal[..prefix_len.min(pattern.len().saturating_sub(1))]);
     if prefix_len == pattern.len() {
         // No wildcard at all: one file.
-        let file = path_of(pattern);
+        let file = path_of(&literal);
         if file.is_file() && watch.matches(&file) {
             files.insert(key_for(&file, root, base, keyed_root), file);
         }
@@ -482,8 +659,12 @@ fn collect(
 }
 
 fn key_for(file: &Path, root: &Path, base: &Path, keyed_root: bool) -> String {
-    if keyed_root && let Ok(rel) = file.strip_prefix(root) {
-        return format!("/{}", path_segments(rel).join("/"));
+    if keyed_root {
+        let rel = relative_specifier(root, file);
+        return match rel.strip_prefix("./") {
+            Some(inside) => format!("/{inside}"),
+            None => rel,
+        };
     }
     relative_specifier(base, file)
 }
@@ -657,6 +838,7 @@ pub fn parse_args(text: &str) -> Result<(Vec<String>, GlobOptions), String> {
                 match (k.as_str(), v) {
                     ("eager", Value::Bool(b)) => opts.eager = b,
                     ("exhaustive", Value::Bool(b)) => opts.exhaustive = b,
+                    ("caseSensitive", Value::Bool(b)) => opts.ignore_case = !b,
                     ("import", Value::String(s)) => opts.import = Some(s),
                     ("base", Value::String(s)) => opts.base = Some(s),
                     ("as", Value::String(s)) => {
@@ -950,7 +1132,8 @@ mod tests {
             alias: &no_alias,
         };
         let out = expand(code, &scan_hot(code).globs, &cx).unwrap();
-        let want = ["./src/a.js", "./src/linked/c.js", "./src/sub/b.js"];
+        // Sorted by the path matched; the linked file is imported by its real path.
+        let want = ["./src/a.js", "./other/c.js", "./src/sub/b.js"];
         assert_eq!(out.specifiers[..3], want);
         assert_eq!(out.specifiers[3..], want);
     }
@@ -1040,5 +1223,97 @@ mod tests {
         let bad = "x;\nimport.meta.glob(name)";
         let err = expand(bad, &scan_hot(bad).globs, &cx).unwrap_err();
         assert_eq!(err.0, 3);
+    }
+
+    /// Vite's rules for keys, glob characters in directory names, `caseSensitive`, symlinked
+    /// files and `#` subpath imports.
+    #[test]
+    fn keys_escaping_case_and_subpath_imports() {
+        let dir = TempDir::new("glob-rules");
+        for f in ["src/[id]/a.js", "src/pages/Upper.js", "src/pages/b.js"] {
+            dir.write(f, "export default 1\n");
+        }
+        dir.write(
+            "package.json",
+            r##"{"imports":{"#pages/*":"./src/pages/*","#exact":{"import":"./src/pages/b.js"}}}"##,
+        );
+        let importer = dir.path().join("src/main.js");
+        let no_alias = |_: &str| None;
+        let cx = GlobContext {
+            root: dir.path(),
+            importer: &importer,
+            alias: &no_alias,
+        };
+        // A pattern mixing relative and root-absolute parts keys every file from the root.
+        let code = "const a = import.meta.glob(['./pages/b.js', '/src/pages/Upper.js'])\n\
+            const b = import.meta.glob('./pages/upp*.js', { caseSensitive: false })\n\
+            const c = import.meta.glob('./pages/upp*.js')\n";
+        let out = expand(code, &scan_hot(code).globs, &cx).unwrap();
+        let lines: Vec<&str> = out.code.lines().collect();
+        assert!(
+            lines[0].contains("\"/src/pages/b.js\": () => import(\"./pages/b.js\")"),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[0].contains("\"/src/pages/Upper.js\""), "{}", lines[0]);
+        assert!(lines[1].contains("\"./pages/Upper.js\""), "{}", lines[1]);
+        assert_eq!(lines[2], "const c = /* #__PURE__ */ Object.assign({})");
+        assert!(out.watches[1].matches(&dir.path().join("src/pages/UPPER.js")));
+        assert!(!out.watches[2].matches(&dir.path().join("src/pages/UPPER.js")));
+
+        // Glob characters in the importer's directory name match only themselves.
+        let in_brackets = dir.path().join("src/[id]/main.js");
+        let cx2 = GlobContext {
+            importer: &in_brackets,
+            ..cx
+        };
+        let code = "const a = import.meta.glob('./*.js')\n";
+        let out = expand(code, &scan_hot(code).globs, &cx2).unwrap();
+        assert!(
+            out.code.contains("\"./a.js\": () => import(\"./a.js\")"),
+            "{}",
+            out.code
+        );
+        assert!(out.watches[0].matches(&dir.path().join("src/[id]/new.js")));
+        assert!(!out.watches[0].matches(&dir.path().join("src/i/new.js")));
+
+        // Subpath imports: the longest key wins, conditions pick a target.
+        let root = crate::paths::id(dir.path());
+        assert_eq!(
+            subpath_import("#pages/*.js", &importer).as_deref(),
+            Some(format!("{root}/src/pages/*.js").as_str())
+        );
+        assert_eq!(
+            subpath_import("#exact", &importer).as_deref(),
+            Some(format!("{root}/src/pages/b.js").as_str())
+        );
+        assert_eq!(subpath_import("#nothing", &importer), None);
+        assert_eq!(subpath_import("./pages/*.js", &importer), None);
+    }
+
+    /// A file reached through a symlinked directory inside the root is imported by its real
+    /// path (Vite resolves glob matches to real files).
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_matches_import_the_real_file() {
+        let dir = TempDir::new("glob-link");
+        dir.write("src/real/a.js", "export default 1\n");
+        std::os::unix::fs::symlink(dir.path().join("src/real"), dir.path().join("src/link"))
+            .unwrap();
+        let importer = dir.path().join("src/main.js");
+        let no_alias = |_: &str| None;
+        let cx = GlobContext {
+            root: dir.path(),
+            importer: &importer,
+            alias: &no_alias,
+        };
+        let code = "const a = import.meta.glob('./link/*.js')\n";
+        let out = expand(code, &scan_hot(code).globs, &cx).unwrap();
+        assert!(
+            out.code
+                .contains("\"./link/a.js\": () => import(\"./real/a.js\")"),
+            "{}",
+            out.code
+        );
     }
 }

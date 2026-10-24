@@ -41,8 +41,8 @@ pushes the update to the browser. It speaks Vite's hot-reload protocol, so code 
 - Some `vite.config` options aren't applied: `css.*`, `server.hmr`, `server.fs`,
   `server.watch`, `optimizeDeps.exclude`, and proxy `configure`/`bypass`. Plugins calling
   `this.parse`, `this.load` or `ssrLoadModule` get an error.
-- CSS `@import` and CSS modules (`.module.css`) in app CSS aren't handled.
-- Inline `<script type="module">` in HTML and non-literal `import(expr)` aren't rewritten.
+- CSS modules (`.module.css`) and preprocessor `@import`s in app CSS aren't handled.
+- Non-literal `import(expr)` isn't rewritten.
 - The dependency scan only follows `<script type="module" src>` in `index.html`.
 - Fast Refresh registers only top-level components; an anonymous `export default () => ...`
   isn't registered, so editing it updates its importer instead.

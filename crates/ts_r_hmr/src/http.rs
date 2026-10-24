@@ -213,6 +213,36 @@ pub fn percent_encode_path(s: &str) -> String {
     out
 }
 
+/// JavaScript's `encodeURI`: percent-encodes everything but unreserved characters and the
+/// URI delimiters (`;,/?:@&=+$#`).
+pub fn encode_uri(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &c in s.as_bytes() {
+        if c.is_ascii_alphanumeric() || b"-_.!~*'();,/?:@&=+$#".contains(&c) {
+            out.push(c as char);
+        } else {
+            out.push_str(&format!("%{c:02X}"));
+        }
+    }
+    out
+}
+
+/// Escapes text for HTML (`&`, `<`, `>`, `"`, `'`).
+pub fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// A response ready to write.
 #[derive(Clone, Debug)]
 pub struct Response {

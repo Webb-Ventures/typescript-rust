@@ -17,6 +17,10 @@ struct Fixture {
 }
 
 fn start() -> Fixture {
+    start_with_watch(true)
+}
+
+fn start_with_watch(watch: bool) -> Fixture {
     let app = TempDir::new("srv-app");
     let cache = TempDir::new("srv-cache");
     write_fixture_app(&app);
@@ -24,6 +28,7 @@ fn start() -> Fixture {
     let l = Arc::clone(&log);
     let mut config = DevConfig::new(app.path());
     config.port = 0;
+    config.watch = watch;
     config.cache = CacheMode::Dir(cache.path().to_path_buf());
     config.logger = Some(Arc::new(move |line: &str| {
         l.lock().unwrap().push(line.to_owned())
@@ -38,6 +43,18 @@ fn start() -> Fixture {
 }
 
 impl Fixture {
+    fn notify_modified(&self, path: &str) {
+        self.server.notify_changes(ts_r_hmr::ChangeBatch {
+            changes: vec![ts_r_hmr::FileChange {
+                path: self.app.path().join(path),
+                kind: ts_r_hmr::ChangeKind::Modified,
+                first_event: Instant::now(),
+                first_event_wall: std::time::SystemTime::now(),
+            }],
+            flushed: Instant::now(),
+        });
+    }
+
     fn get(&self, path: &str) -> (u16, Vec<(String, String)>, String) {
         http_get(self.server.addr(), path, &[])
     }
@@ -98,7 +115,7 @@ fn serves_html_modules_deps_and_static_files() {
     let f = start();
     let (status, h, body) = f.get("/");
     assert_eq!(status, 200);
-    assert_eq!(header(&h, "content-type"), Some("text/html; charset=utf-8"));
+    assert_eq!(header(&h, "content-type"), Some("text/html"));
     assert!(body.contains("<script type=\"module\" src=\"/@ts-r/client\"></script>"));
 
     let (status, h, main) = f.get("/src/main.js");
@@ -224,6 +241,52 @@ fn serves_html_modules_deps_and_static_files() {
 }
 
 #[test]
+fn denied_files_case_html_fallback_and_asset_queries() {
+    let f = start();
+    std::fs::write(f.app.path().join(".env"), "SECRET=1\n").unwrap();
+    std::fs::write(f.app.path().join("about.html"), "<p>about</p>").unwrap();
+    assert_eq!(f.get("/.env").0, 403);
+    let html = [("Accept", "text/html")];
+    let (status, h, body) = http_get(f.server.addr(), "/about", &html);
+    assert_eq!(
+        (status, header(&h, "content-type")),
+        (200, Some("text/html"))
+    );
+    assert!(body.contains("<p>about</p>"), "{body}");
+    // `fetch` accepts `*/*`: it gets the fallback page too.
+    let (status, _, body) = http_get(f.server.addr(), "/missing", &[("Accept", "*/*")]);
+    assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
+    // A public file matches only in its own case (the disk may not care).
+    let (status, _, body) = f.get("/ROBOTS.TXT");
+    assert_eq!(status, 404, "{body}");
+    let (_, _, js) = f.get("/src/logo.svg?import&no-inline&x=1");
+    assert!(js.contains("\"/src/logo.svg?no-inline&x=1\""), "{js}");
+    // `//x` is not a file of the root or the public directory: the fallback page.
+    let (status, _, body) = http_get(f.server.addr(), "//robots.txt", &html);
+    assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
+    // A file without an extension has no type to name.
+    std::fs::write(f.app.path().join("LICENSE"), "MIT\n").unwrap();
+    let (status, h, _) = f.get("/LICENSE");
+    assert_eq!((status, header(&h, "content-type")), (200, Some("")));
+    // The client and env modules, under either name and with any query, are the server's
+    // own URLs: imports of them are kept, not resolved as files.
+    std::fs::write(
+        f.app.path().join("src/client-user.js"),
+        "import '/@vite/client';\nimport '/@vite/env?x';\n",
+    )
+    .unwrap();
+    let (status, _, js) = f.get("/src/client-user.js");
+    assert_eq!(status, 200, "{js}");
+    assert!(
+        js.contains("import '/@vite/client';\nimport '/@vite/env?x';"),
+        "{js}"
+    );
+    for url in ["/@vite/client", "/@vite/env?x"] {
+        assert_eq!(f.get(url).0, 200, "{url}");
+    }
+}
+
+#[test]
 fn keep_alive_serves_several_requests_on_one_connection() {
     use std::io::{BufRead, BufReader, Read, Write};
     let f = start();
@@ -286,6 +349,34 @@ fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
 }
 
 #[test]
+fn a_pruned_module_imported_again_is_fetched_fresh() {
+    let f = start();
+    f.app.write("src/child.js", "export const v = 1;\n");
+    let with_child =
+        "import { v } from './child.js';\nconsole.log(v);\nimport.meta.hot.accept();\n";
+    f.app.write("src/parent.js", with_child);
+    let (status, _, body) = f.get("/src/parent.js");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("from '/src/child.js'"), "{body}");
+    assert_eq!(f.get("/src/child.js").0, 200);
+    let mut ws = f.ws();
+    // Dropping the import prunes child.js; the prune carries the update's timestamp.
+    f.app.write("src/parent.js", "import.meta.hot.accept();\n");
+    let update = next_of(&mut ws, "update");
+    let t = update["updates"][0]["timestamp"].as_u64().unwrap();
+    assert_eq!(next_of(&mut ws, "prune")["paths"][0], "/src/child.js");
+    // Restoring it imports child.js with that `?t=`, so the browser doesn't reuse the
+    // disposed instance.
+    f.app.write("src/parent.js", with_child);
+    next_of(&mut ws, "update");
+    let (_, _, body) = f.get("/src/parent.js");
+    assert!(
+        body.contains(&format!("from '/src/child.js?t={t}'")),
+        "{body}"
+    );
+}
+
+#[test]
 fn accepting_a_raw_import_keeps_it_raw_after_an_update() {
     let f = start();
     f.app.write("src/message.txt", "hello");
@@ -323,6 +414,55 @@ fn accepting_a_raw_import_keeps_it_raw_after_an_update() {
     // What the client imports for that update: `?import&t=…&raw`.
     let (_, _, fresh) = f.get(&format!("/src/message.txt?import&t={}&raw", u["timestamp"]));
     assert_eq!(fresh, "export default \"bye\";\n");
+}
+
+#[test]
+fn html_style_dependency_reloads_all_consumers() {
+    let f = start_with_watch(false);
+    f.app.write("shared.css", "body { color: red; }");
+    f.app
+        .write("a.html", "<style>@import './shared.css';</style>");
+    f.app
+        .write("b.html", "<link rel=stylesheet href='/shared.css'>");
+    f.app
+        .write("c.html", "<style>@import './shared.css';</style>");
+    for path in ["/a.html", "/b.html", "/shared.css", "/c.html"] {
+        assert_eq!(f.get(path).0, 200, "{path}");
+    }
+    let mut ws = f.ws();
+    f.app.write("shared.css", "body { color: blue; }");
+    f.notify_modified("shared.css");
+    let m = next_of(&mut ws, "full-reload");
+    assert!(m.get("path").is_none(), "{m}");
+    assert!(f.get("/a.html").2.contains("color: blue"));
+    assert!(f.get("/shared.css").2.contains("color: blue"));
+    assert!(f.get("/c.html").2.contains("color: blue"));
+}
+
+#[test]
+fn regex_export_accepted_by_name_updates_in_place() {
+    let f = start_with_watch(false);
+    f.app.write(
+        "src/entry.js",
+        "import * as ns from './pattern.js'; console.log(ns);",
+    );
+    f.app.write(
+        "src/pattern.js",
+        "export const pattern = /,oops/;\nimport.meta.hot.acceptExports(['pattern']);",
+    );
+    assert_eq!(f.get("/src/entry.js").0, 200);
+    assert_eq!(f.get("/src/pattern.js").0, 200);
+    let mut ws = f.ws();
+    f.app.write(
+        "src/pattern.js",
+        "export const pattern = /,changed/;\nimport.meta.hot.acceptExports(['pattern']);",
+    );
+    f.notify_modified("src/pattern.js");
+    let m = next(&mut ws);
+    assert_eq!(m["type"], "update", "{m}");
+    assert_eq!(m["updates"][0]["type"], "js-update", "{m}");
+    assert_eq!(m["updates"][0]["path"], "/src/pattern.js", "{m}");
+    assert_eq!(m["updates"][0]["acceptedPath"], "/src/pattern.js", "{m}");
 }
 
 #[test]
@@ -463,7 +603,17 @@ fn hot_updates_over_websocket() {
     );
     let m = next_of(&mut ws, "full-reload");
     assert_eq!(m["path"], "/index.html");
+
+    // 10. Deleting the module pruned in an earlier batch: nothing accepts it, so the page
+    //     reloads (Vite keeps it as a module with no importers, a dead end).
+    std::fs::remove_file(f.app.path().join("src/missing.js")).unwrap();
+    assert_eq!(next_of(&mut ws, "full-reload")["type"], "full-reload");
     let log = f.log.lock().unwrap();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("/src/missing.js was deleted and nothing imports it")),
+        "{log:#?}"
+    );
     assert!(
         !log.iter().any(|l| l.contains("missing.js changed")),
         "{log:#?}"

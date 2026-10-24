@@ -108,85 +108,6 @@ pub fn inject_client_at(html: &str, client: &str, extra: &str) -> String {
     }
 }
 
-/// Tags whose root-absolute `src`/`href` get the base (the page's own scripts, styles and
-/// media; not links between pages).
-const BASE_TAGS: &[&str] = &["script", "link", "img", "source", "video", "audio", "track"];
-
-/// Puts `base` in front of root-absolute `src`/`href` attribute values of [`BASE_TAGS`].
-pub fn html_with_base(html: &str, base: &str) -> String {
-    let b = html.as_bytes();
-    let mut out = String::with_capacity(html.len() + 64);
-    let mut at = 0usize;
-    let mut i = 0usize;
-    while let Some(off) = html[i..].find('<') {
-        let start = i + off;
-        let name_end = html[start + 1..]
-            .find(|c: char| !c.is_ascii_alphanumeric())
-            .map_or(html.len(), |j| start + 1 + j);
-        let name = html[start + 1..name_end].to_ascii_lowercase();
-        if html[start..].starts_with("<!--") {
-            i = html[start..]
-                .find("-->")
-                .map_or(html.len(), |j| start + j + 3);
-            continue;
-        }
-        // Walk the attributes up to the tag's `>`, honouring quotes.
-        let mut j = name_end;
-        let rewrite = BASE_TAGS.contains(&name.as_str());
-        while j < b.len() && b[j] != b'>' {
-            if b[j].is_ascii_whitespace() || b[j] == b'/' {
-                j += 1;
-                continue;
-            }
-            let attr_start = j;
-            while j < b.len() && !b"=> \t\r\n/".contains(&b[j]) {
-                j += 1;
-            }
-            let attr = html[attr_start..j].to_ascii_lowercase();
-            if j < b.len() && b[j] == b'=' {
-                j += 1;
-                let (vs, ve) = match b.get(j) {
-                    Some(&q @ (b'"' | b'\'')) => {
-                        let e = html[j + 1..]
-                            .find(q as char)
-                            .map_or(html.len(), |k| j + 1 + k);
-                        (j + 1, e)
-                    }
-                    _ => {
-                        let e = html[j..]
-                            .find(|c: char| c.is_ascii_whitespace() || c == '>')
-                            .map_or(html.len(), |k| j + k);
-                        (j, e)
-                    }
-                };
-                let value = &html[vs..ve];
-                if rewrite
-                    && (attr == "src" || attr == "href")
-                    && value.starts_with('/')
-                    && !value.starts_with("//")
-                    && !value.starts_with(base)
-                {
-                    out.push_str(&html[at..vs]);
-                    out.push_str(base);
-                    out.push_str(&value[1..]);
-                    at = ve;
-                }
-                j = if ve < b.len() && (b[ve] == b'"' || b[ve] == b'\'') {
-                    ve + 1
-                } else {
-                    ve
-                };
-            }
-        }
-        i = (j + 1).min(html.len());
-        if i <= start {
-            break;
-        }
-    }
-    out.push_str(&html[at..]);
-    out
-}
-
 /// Byte index just after the `>` of the first `<name ...>` tag (not `<header>`).
 fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
     let mut from = 0;
@@ -203,7 +124,10 @@ fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
     None
 }
 
-/// A stylesheet as a self-accepting JS module that injects a `<style>` tag.
+/// A stylesheet as a self-accepting JS module that injects a `<style>` tag. A plain
+/// stylesheet exports nothing, like Vite's (the text is `?inline`'s default export). A CSS
+/// module (`x.module.css`) exports an empty class map as its default, so a page importing
+/// one still links: its class names aren't scoped or mapped yet.
 pub fn css_module(url: &str, css: &str) -> String {
     css_module_at(CLIENT_URL, url, css)
 }
@@ -219,76 +143,28 @@ pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
          const __ts_r_css = {};\n\
          __ts_r_update_style(__ts_r_id, __ts_r_css);\n\
          import.meta.hot.accept();\n\
-         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n\
-         export default __ts_r_css;\n",
-        js_string(css)
+         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n{}",
+        js_string(css),
+        if is_css_module(url) {
+            "export default {};\n"
+        } else {
+            ""
+        }
     )
 }
 
-/// Rewrites relative `url(...)` references in CSS to absolute URLs, because a `<style>` tag
-/// resolves them against the page, not the stylesheet.
-pub fn rewrite_css_urls(css: &str, css_url: &str) -> String {
-    let dir = match css_url.rfind('/') {
-        Some(i) => &css_url[..=i],
-        None => "/",
+/// Whether `url` names a CSS module: `.module.` before a stylesheet extension
+/// (`vite: packages/vite/src/node/plugins/css.ts`, the CSS modules pattern).
+pub fn is_css_module(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let Some((stem, ext)) = path.rsplit_once('.') else {
+        return false;
     };
-    let lower = css.to_ascii_lowercase();
-    let mut out = String::with_capacity(css.len());
-    let mut at = 0;
-    let mut search = 0;
-    while let Some(i) = lower[search..].find("url(") {
-        let open = search + i + 4;
-        // A quoted URL may contain `)`: look for it after the closing quote.
-        let from = css_string_end(css, open).unwrap_or(open);
-        let Some(close_rel) = css[from..].find(')') else {
-            break;
-        };
-        let close = from + close_rel;
-        let inner = css[open..close].trim();
-        let (quote, value) = match inner.as_bytes() {
-            [q @ (b'"' | b'\''), .., last] if last == q => {
-                (&inner[..1], &inner[1..inner.len() - 1])
-            }
-            [b'"' | b'\'', ..] => {
-                search = close; // malformed (`url("a" b)`, unterminated): left as written
-                continue;
-            }
-            _ => ("", inner),
-        };
-        let relative = !value.is_empty()
-            && !value.starts_with('/')
-            && !value.starts_with('#')
-            && !value.contains(':');
-        if relative {
-            let joined = join_url(dir, value);
-            out.push_str(&css[at..open]);
-            out.push_str(quote);
-            out.push_str(&joined);
-            out.push_str(quote);
-            at = close;
-        }
-        search = close;
-    }
-    out.push_str(&css[at..]);
-    out
-}
-
-/// When `css[at..]` starts (after whitespace) with a quoted string, the byte offset just past
-/// its closing quote; backslash escapes are skipped. `None` if unquoted or unterminated.
-fn css_string_end(css: &str, at: usize) -> Option<usize> {
-    let bytes = css.as_bytes();
-    let mut i = at + (css[at..].len() - css[at..].trim_start().len());
-    let quote = *bytes.get(i).filter(|&&b| b == b'"' || b == b'\'')?;
-    i += 1;
-    while let Some(&b) = bytes.get(i) {
-        match b {
-            b'\\' => i += 2,
-            b'\n' => return None,
-            _ if b == quote => return Some(i + 1),
-            _ => i += 1,
-        }
-    }
-    None
+    stem.ends_with(".module")
+        && matches!(
+            ext,
+            "css" | "less" | "sass" | "scss" | "styl" | "stylus" | "pcss" | "postcss" | "sss"
+        )
 }
 
 /// Joins a relative URL path onto a directory URL ending in `/`, resolving `.` and `..`.
@@ -465,26 +341,13 @@ mod tests {
         let m = css_module("/src/a.css", "body { content: \"</style>\" }");
         assert!(m.contains("import.meta.hot.accept();"));
         assert!(m.contains("<\\/style>"));
-        assert_eq!(
-            rewrite_css_urls(
-                "a{background:url(./img/x.png)} b{src:url('../f.woff2?v=1')} c{x:url(data:a) url(/abs.png) url(#id)}",
-                "/src/css/main.css"
-            ),
-            "a{background:url(/src/css/img/x.png)} b{src:url('/src/f.woff2?v=1')} c{x:url(data:a) url(/abs.png) url(#id)}"
-        );
+        assert!(!m.contains("export"));
+        let m = css_module("/src/a.module.css?t=1", ".a { color: red }");
+        assert!(m.ends_with("export default {};\n"), "{m}");
+        assert!(is_css_module("/x.module.scss"));
+        assert!(!is_css_module("/module.css"));
+        assert!(!is_css_module("/x.module.css.js"));
         assert_eq!(join_url("/", "../../x"), "/x");
-    }
-
-    #[test]
-    fn css_urls_with_parens_quotes_and_non_ascii() {
-        let css = r#"a{x:url("é).png") y:url('a\').png') z:url( "b" ) w:url("c" d) v:url("é"#;
-        assert_eq!(
-            rewrite_css_urls(css, "/s/m.css"),
-            r#"a{x:url("/s/é).png") y:url('/s/a\').png') z:url("/s/b") w:url("c" d) v:url("é"#
-        );
-        for css in ["url(\"", "url('é", "url(\"é)", "url(\"\\", "url(  \"\n)"] {
-            rewrite_css_urls(css, "/m.css");
-        }
     }
 
     #[test]
@@ -503,14 +366,5 @@ mod tests {
         assert_eq!(content_type("js"), JS_CONTENT_TYPE);
         assert_eq!(content_type("svg"), "image/svg+xml");
         assert_eq!(content_type("weird"), "application/octet-stream");
-    }
-
-    #[test]
-    fn html_urls_get_the_base() {
-        let html = "<!-- <script src=\"/c.js\"> --><link rel=icon href=/f.ico><script type=\"module\" src='/src/m.js'></script><a href=\"/about\">x</a><img src=\"//cdn/x.png\" alt=\"a > b\"><img src=\"/i.png\">";
-        assert_eq!(
-            html_with_base(html, "/app/"),
-            "<!-- <script src=\"/c.js\"> --><link rel=icon href=/app/f.ico><script type=\"module\" src='/app/src/m.js'></script><a href=\"/about\">x</a><img src=\"//cdn/x.png\" alt=\"a > b\"><img src=\"/app/i.png\">"
-        );
     }
 }

@@ -20,6 +20,8 @@ use ts_r_hmr::{
 struct FakeBatch {
     calls: AtomicUsize,
     last: Mutex<Vec<String>>,
+    /// Code appended to every entry.
+    extra: String,
 }
 
 impl DepBundler for FakeBatch {
@@ -59,8 +61,8 @@ impl DepBundler for FakeBatch {
             files.push((
                 name.clone(),
                 file(format!(
-                    "import {{ shared }} from \"./chunk-S.js\";\nexport const name = {:?};\nexport {{ shared }};\n",
-                    d.specifier
+                    "import {{ shared }} from \"./chunk-S.js\";\nexport const name = {:?};\nexport {{ shared }};\n{}",
+                    d.specifier, self.extra
                 )),
             ));
             entries.push(name);
@@ -225,5 +227,48 @@ fn a_dependency_missing_from_the_batch_rebatches_and_reloads() {
         dep_url(&main2, "e0.js"),
         format!("/@ts-r/deps/e0.js?v={new_v}")
     );
+    server.shutdown();
+}
+
+/// `import.meta.glob` in a pre-bundled dependency is expanded when it is served, against the
+/// root (Vite's optimizer keeps the call). The file is not cached for good, and a new match
+/// reloads the page.
+#[test]
+fn globs_in_a_dependency_expand_at_serve_time() {
+    let app = TempDir::new("deps-glob-app");
+    let cache = TempDir::new("deps-glob-cache");
+    write_app(&app);
+    app.write("src/pages/a.js", "export default 1;\n");
+    let fake = Arc::new(FakeBatch {
+        extra: "export const pages = import.meta.glob('/src/pages/*.js');\n".into(),
+        ..FakeBatch::default()
+    });
+    let server = start(&app, &cache, Arc::clone(&fake));
+    let (_, _, main) = http_get(server.addr(), "/src/main.ts", &[]);
+    let alpha = dep_url(&main, "e0.js");
+    let (status, h, entry) = http_get(server.addr(), &alpha, &[]);
+    assert_eq!(status, 200, "{entry}");
+    assert_eq!(header(&h, "cache-control"), Some("no-cache"));
+    assert!(
+        entry.contains("\"/src/pages/a.js\": () => import(\"../../src/pages/a.js\")"),
+        "{entry}"
+    );
+    let mut ws = WsClient::connect(&server.addr().to_string(), "/@ts-r/ws").unwrap();
+    ws.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let hello: Value = serde_json::from_str(&ws.recv_text().unwrap()).unwrap();
+    assert_eq!(hello["type"], "connected");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while server.client_count() == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.write("src/pages/b.js", "export default 2;\n");
+    loop {
+        let m: Value = serde_json::from_str(&ws.recv_text().expect("a reload")).unwrap();
+        if m["type"] == "full-reload" {
+            break;
+        }
+    }
+    let (_, _, entry) = http_get(server.addr(), &alpha, &[]);
+    assert!(entry.contains("\"/src/pages/b.js\""), "{entry}");
     server.shutdown();
 }

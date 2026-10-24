@@ -71,9 +71,15 @@ pub fn svg_data_url(svg: &str) -> Option<String> {
     Some(out)
 }
 
-/// Whether an asset import of `ext` with `len` bytes is inlined by default in dev.
+/// Whether an asset import of `ext` with `len` bytes is inlined by default in dev, with
+/// the default limit.
 pub fn inline_by_default(ext: &str, len: u64) -> bool {
-    ext == "svg" && len < SVG_INLINE_LIMIT as u64
+    inline_under(ext, len, SVG_INLINE_LIMIT as u64)
+}
+
+/// [`inline_by_default`] with the project's limit (`build.assetsInlineLimit`; 0 = never).
+pub fn inline_under(ext: &str, len: u64, limit: u64) -> bool {
+    ext == "svg" && len < limit
 }
 
 /// `export default "<value>";` for asset URLs and texts.

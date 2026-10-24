@@ -83,7 +83,8 @@ from the documented plugin API (no Vite code).
   function, regexes `regex-lite` can't compile).
 - **Dev options from the config** (manifest field `dev`, computed by the sidecar after
   `configResolved`): `mode`, `base`, `define` (expression text; non-string values JSON-encoded), `envPrefix`, `envDir`,
-  `publicDir`, `server.{host,port,strictPort,open,headers,cors,proxy,https}`, applied by
+  `publicDir`, `server.{host,port,strictPort,open,headers,cors,proxy,https}`,
+  `experimental.hmrPartialAccept` (as `hmrPartialAccept`), applied by
   `apply_dev_options`. `envDir`/`publicDir` are kept relative to the root when given relative
   or inside it (checkouts with the same config share the cached manifest) and resolved
   against ts-r-dev's root. A proxy `rewrite` function stays in Node: the rule records its index and
@@ -191,7 +192,8 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 - The latency benchmark uses generated JS; the real-app benchmark (results in `ts_r_hmr`'s
   AGENTS.md) edits one file. Vite's own playground specs run against both servers in
   [`bench/dev-oracle`](../../bench/dev-oracle/README.md); its README lists the failing tests
-  by cause (HMR edge cases, CSS modules/lightningcss, `?worker`, importmap, `server.fs` denial).
+  by cause (importmap, wasm, HMR edge cases, dynamic imports with variables, CSS modules,
+  import attributes).
 - No CSS preprocessors: the excalidraw harness maps `.scss` to an empty stylesheet for both
   servers, so the page renders unstyled.
 - Fast Refresh: components created inside other expressions (object literals, conditionals,

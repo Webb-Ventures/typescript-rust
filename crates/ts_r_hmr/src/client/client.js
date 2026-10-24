@@ -105,11 +105,30 @@ function onMessage(payload, receivedAt) {
       }
       break;
     case "prune":
-      emit("vite:beforePrune", payload);
-      for (const path of payload.paths) {
-        const fn = pruneMap.get(path);
-        if (fn) fn(dataMap.get(path));
-      }
+      // A module the page no longer imports: its dispose callbacks run first, then its
+      // prune callbacks, in order with the updates; then its `hot.data` is dropped.
+      chain = chain.then(async () => {
+        emit("vite:beforePrune", payload);
+        await Promise.all(
+          payload.paths.map((path) => {
+            const dispose = disposeMap.get(path);
+            if (!dispose) return undefined;
+            disposeMap.delete(path);
+            return dispose(dataMap.get(path));
+          }),
+        );
+        try {
+          await Promise.all(
+            payload.paths.map((path) => {
+              const fn = pruneMap.get(path);
+              return fn ? fn(dataMap.get(path)) : undefined;
+            }),
+          );
+        } finally {
+          // A module imported again later starts with fresh `import.meta.hot.data`.
+          for (const path of payload.paths) dataMap.delete(path);
+        }
+      }).catch((e) => console.error(tag, e));
       break;
     case "error":
       emit("vite:error", payload);

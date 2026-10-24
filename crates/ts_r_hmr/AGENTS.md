@@ -33,7 +33,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
 | `timing.rs` | per-step latency records, `/@ts-r/stats` |
 | `cache.rs` | `TransformCache`: memory + `ts_r_cache` namespace `dev-transform` |
 | `deps.rs` | dependency optimizer: scan from `index.html`, one batch via `bundle_batch`, cache (namespace `dev-deps`), `/@ts-r/deps/`, re-batch on miss |
-| `css.rs` | dependency CSS: `@import` inlining, `url()` → served URLs (`asset_url`) |
+| `css.rs` | CSS bundling behind a `CssHost` (read, `@import` target, `url()` rewrite); dependency CSS (`bundle_css`, `asset_url`) |
+| `css_refs.rs` | finds and rewrites file references in CSS: `url()`, `image-set()` candidates (not in comments, strings or `@import`) |
+| `server/app_css.rs` | app CSS host: Vite-style reference resolution, served URLs under the base, data URLs, dependencies for HMR |
+| `html_urls.rs` | page URLs: the base on asset attributes, `srcset`, `meta` images, classic-script `import('...')`, `<style>`/`style=""` through the CSS host |
 | `plugin.rs` | `PluginHost` seam, `/@id/` plugin-module URLs |
 | `http.rs`, `ws.rs` | HTTP/1.1 and RFC 6455 framing (server and client roles) |
 | `net.rs` | `Duplex` (owned reader + writer over TCP or TLS), outbound `connect`, `tls` (rustls server/client configs) |
@@ -63,12 +66,39 @@ are cached by content hash. Change `cache_id` when output for the same input can
   change started the chain (`firstInvalidatedBy`); the client sends it back with
   `vite:invalidate`, and an invalidation whose propagation reaches that module again is a
   full reload, so accept handlers that keep invalidating can't loop.
+- **Partial accept (`hot.acceptExports(names)`, Vite's `experimental.hmrPartialAccept`).**
+  `acceptExports` does not make a module self-accepting by itself: the scanner records the
+  accepted names, merged and sorted over calls, along with the module's export names. A module
+  that accepts all of its exports (or has none) is self-accepting. One that accepts only some
+  is a boundary that also keeps propagating to its importers. With the flag on, the scanner
+  also records which names each import binds (`*` for a namespace or dynamic import, none for
+  a side-effect import or a re-export). An importer that uses only accepted names is skipped.
+  Any other importer is reached as usual, so having no importers is not a dead end here.
+  With the flag off, no bindings are recorded and every importer is reached. Propagation for
+  such a change uses the accept info of the code that is running, which is the *old* code,
+  captured before the new code is prepared. An update applies through the handlers already
+  registered.
+  (`vite: packages/vite/src/node/plugins/importAnalysis.ts`, the `acceptExports` and
+  imported-bindings collection; `vite: packages/vite/src/node/server/hmr.ts`, `propagateUpdate`.)
 - **Graph is built lazily from what the browser requests** (that is the unbundled-ESM graph).
   Nodes are never removed; ids stay valid. Edges are replaced wholesale on each prepare;
   importees that lose their last importer are sent in a `prune` message.
   A pruned module stays `pruned` until something imports or requests it again; changes to
   its file are ignored (a late watcher event from before the prune must not reload the page),
   except that they stamp its `?t=`, so an import restored later fetches the new file.
+  Deleting a module pruned in an *earlier* batch, which doesn't accept itself, is a full
+  reload (Vite keeps the module with no importers: a dead end;
+  `vite: packages/vite/src/node/server/hmr.ts`, `handleHMRUpdate`/`propagateUpdate`); a
+  deletion in the batch that pruned it (import removed and file deleted together) only prunes.
+- **Prune runs the module's dispose callbacks, then its prune callbacks**, after
+  `vite:beforePrune`, queued behind any update in flight; then its `hot.data` is dropped, so
+  a module imported again starts with fresh data (`vite: packages/vite/src/client/client.ts`
+  and `hmr.ts`, `HMRClient.prunePaths`).
+  A newly pruned module takes the update's timestamp, so an import restored later re-fetches
+  it with `?t=` and does not reuse the disposed instance
+  (`vite: packages/vite/src/node/server/hmr.ts`, `handlePrunedModules`).
+- **Full-reload paths are percent-decoded** before they are matched against the page
+  (`vite:` client `full-reload` handling compares decoded paths).
 - **Changes are prepared eagerly** (transform before propagation), so accept info is current and
   the browser's `?t=` fetch is a cache hit. Changes and invalidations are serialized by
   `change_lock`; HTTP serving runs concurrently and only holds the graph lock briefly (never
@@ -94,6 +124,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `timestamp`, `explicitImportRequired`, `isWithinCircularImport`; `full-reload`, `prune`,
   `error`, `custom`). We add only `tsrId` on `update` (clients ignore unknown fields). The
   overlay element is `<vite-error-overlay>`; CSS `<style>` tags carry `data-vite-dev-id`.
+  A stylesheet imported from JS exports nothing (Vite dropped its default export; the text
+  is `?inline`'s default export). A CSS module (`x.module.css`) exports an empty class map
+  as its default, so `import classes from './x.module.css'` still links and the rest of the
+  page runs: a missing export would stop every module on the page.
   Client → server: `custom` events (`vite:invalidate`, `ts-r:applied`, user events). A
   client connecting or disconnecting is passed to the plugin host as Vite's
   `vite:client:connect`/`vite:client:disconnect` events (only when a plugin listens).
@@ -180,9 +214,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
 - **URLs are stored without `base`.** The graph, the HMR payloads (`path`, `acceptedPath`)
   and cached transforms are base-less; the base is added only when text leaves the server
   (`Shared::public_url`: rewritten imports, the client URL, the hot prelude, CSS-as-JS,
-  `html_with_base` on `src`/`href` of script/link/img/source/video/audio/track). Requests
-  have the base stripped (`strip_base`): `/` redirects (302) to the base; other paths outside
-  the base are still served (lenient, so dependency batch URLs keep working).
+  page URLs through `html_urls::rewrite`). Requests have the base stripped (`strip_base`): `/`
+  redirects (302) to the base; any other path outside the base that isn't a server path
+  (`/@...`) is a 404, an HTML page with a link to the based URL when the request accepts HTML,
+  else text (`vite: packages/vite/src/node/server/middlewares/base.ts`).
 - **Request order:** WebSocket upgrade (protocol `vite-hmr` → HMR; else a `ws: true` proxy
   rule → tunnel; else HMR), CORS preflight (`OPTIONS` → 204), proxy (matched on the raw URL,
   before the base is stripped), base, routes. Every non-proxied response goes through
@@ -203,8 +238,66 @@ are cached by content hash. Change `cache_id` when output for the same input can
 - **Glob imports are expanded after the transform cache** (in `prepare_script`), so a new or
   deleted file matching a module's patterns (`Shared::glob_watches`) re-prepares that module
   and propagates like an edit. Aliases in patterns go through the plugin `resolveId` (pre).
+  The rules taken from Vite (`vite: packages/vite/src/node/plugins/importMetaGlob.ts`):
+  keys are relative only when every pattern starts with `.` or `!` and there is no `base`,
+  otherwise root-absolute; glob characters in the importer's (or base's) directory names are
+  escaped, so `src/[id]/` matches only itself; `caseSensitive: false` matches names ignoring
+  ASCII case; a `#x` pattern maps through the nearest `package.json` `imports` (longest key
+  wins; `browser`, `import`, `module`, `default` conditions); a match reached through a
+  symlinked directory inside the root is imported by its real path. A full reload drops the
+  prepared output of modules whose patterns match an added or deleted file, so their next
+  request expands again.
+- **Globs in pre-bundled dependencies** (Vite's optimizer keeps `import.meta.glob` calls) are
+  expanded when the file is served, as if it sat at its URL under the root; such a file is
+  sent with `Cache-Control: no-cache`, and a file added or deleted under its patterns
+  (`Shared::dep_glob_watches`) reloads the page.
 - **The public dir** (`public/` unless `publicDir`) is served at the base, before source files;
-  importing `/x.png` from it gives its URL (`?import`), never a module.
+  importing `/x.png` from it gives its URL (`?import`, `encodeURI`d), never a module, and
+  `?inline` gives its data URL. A public file matches only in the case it is written in
+  (`ICON.png` doesn't serve `icon.png` on a case-insensitive disk). A file without an
+  extension (public or in the root) is sent with an empty `Content-Type`, as Vite's static
+  middleware does.
+- **`//x` is not a file path**: it skips the public and root file serving and gets the HTML
+  fallback (Vite's static middlewares skip URLs that start with `//`).
+- **The server's own modules have two names and any query.** `/@ts-r/client` and
+  `/@vite/client`, `/@ts-r/env` and `/@vite/env` (with or without a query) are served URLs:
+  an import of them is kept under the base, never resolved as a file.
+- **The config's `process.env` writes count.** A `vite.config.*` runs in the plugin sidecar,
+  so variables it sets on `process.env` are returned with the dev options (`processEnv`) and
+  overlaid on the server's environment when `.env` files and prefixes are loaded. The
+  sidecar's `define` also merges `environments.client.define`.
+- **Never served from the root:** `.env`, `.env.*`, `*.crt`, `*.pem` and anything under
+  `.git` (403), like Vite's default `server.fs.deny`.
+- **HTML fallback** (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`): a
+  GET that matched nothing and accepts `text/html` or `*/*` (not `/favicon.ico`) gets the page
+  `<path>.html` when it exists, else the root `index.html`. Pages are sent as `text/html` (no
+  charset, as Vite does).
+- **App CSS** (`server/app_css.rs`, `vite: packages/vite/src/node/plugins/css.ts`,
+  `urlResolver`/`rewriteCssUrls`/`rewriteCssImageSet`): linked and JS-imported stylesheets in
+  the root, and a page's `<style>` blocks and `style` attributes, have `@import`s inlined
+  (resolved like references, through aliases and packages) and every `url()`/`image-set()`
+  reference rewritten. A reference is URL-decoded; a public file becomes `<base><path>`;
+  otherwise it is resolved (`/x` from the root, `./x` and `x` from the stylesheet, then the
+  plugins' `resolveId` rewrites and the resolver). `?inline`, and an SVG under
+  `assetsInlineLimit` with no fragment and no `?no-inline`, become data URLs; anything else is
+  its served URL with the base, the query and fragment kept and `t=<last change>` once the
+  file has changed. An unresolved reference is kept as written. Quoting follows Vite: an
+  unquoted value that needs quotes gets `'...'`, a quoted one keeps its quote.
+  Every file read or referenced is a watch dependency of the stylesheet (and of the page,
+  for its `<style>`s: changing one reloads all connected pages, since retained page
+  dependencies may overlap other pages and linked stylesheets).
+- **Page URLs** (`html_urls.rs`, `vite: packages/vite/src/node/server/middlewares/indexHtml.ts`
+  `processNodeUrl`, `packages/vite/src/node/assetSource.ts`): the attributes that name files
+  (Vite's table: `src`, `srcset`, `href` of `link`/`image`/`use`, `imagesrcset`, `data`,
+  `poster`, `content` of image `meta`s) and the string argument of `import('...')` in classic
+  inline scripts get the base when root-absolute; relative ones too, for the root `index.html`
+  served at another URL. `vite-ignore` elements are left alone (the attribute is removed).
+- **Asset import URLs** (`asset_export_url`, `vite: packages/vite/src/node/plugins/asset.ts`
+  `fileToDevUrl`): `import x from './a.svg?no-inline&foo=bar'` exports
+  `<base>/a.svg?no-inline&foo=bar`: the path `encodeURI`d, the query kept without `import`,
+  `url` and `t`. The same rule applies when a plugin module of a known asset falls back to
+  the default load. `assetsInlineLimit` (number form; ts-r-dev reads it from the Vite config)
+  sets the SVG inline limit.
 - **Plugins are optional and cheap when absent.** Every hook call is skipped unless
   `PluginHost::hooks()` says some plugin has it (`Shared::plugin_hooks`, read once). With
   hooks, a module costs one batched `resolveId` call per stage, one `transform` call per stage
@@ -342,14 +435,14 @@ wrapper ~0.6, browser ~2.4).
   multi-page `build.rollupOptions.input`); imports behind non-literal `import(expr)` are found
   only on request (re-batch + reload).
 - Non-literal dynamic `import(expr)` isn't rewritten (bare specifiers in it fail); an HTML
-  change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app (source) CSS
-  `@import` and CSS modules (`.module.css`) aren't handled and `url()` is made absolute only
-  (dependency CSS is bundled, see above). Dependency CSS isn't watched (only linked packages).
+  change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app
+  (source) CSS, CSS modules (`.module.css`) and preprocessor `@import`s (`.scss`, ...) aren't
+  handled. Dependency CSS isn't watched (only linked packages).
 - `new URL(`./${name}.png`, import.meta.url)` (a template with expressions) isn't turned into
   a glob as Vite does; only string literals are resolved. `import.meta.glob` needs literal
   arguments (as in Vite).
 - `base`: dependency batch files and dependency CSS-as-JS still link `/@ts-r/...` without
-  the base; they work only because paths outside the base are served.
+  the base; they work only because server paths (`/@...`) outside the base are still served.
 - Proxy: no `configure`, `bypass`, `agent`, `auth` options or `xfwd`; `cors.origin` as a
   function falls back to the default. No `server.hmr` options (port, path, overlay) yet.
 - Output differs cosmetically from Vite's (quote style of rewritten imports, Vite reprints

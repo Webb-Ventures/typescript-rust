@@ -21,6 +21,8 @@ struct Outcome {
     full_reload: Option<Option<String>>,
     errored: bool,
     files: Vec<String>,
+    /// When the batch started: a module pruned since then was pruned by this batch.
+    started: Option<Instant>,
 }
 
 /// Handles one settled batch from the watcher.
@@ -49,12 +51,19 @@ pub(crate) fn on_batch(shared: &Shared, batch: ChangeBatch) {
         });
     }
     let timestamp = server::next_timestamp(shared);
-    let mut out = Outcome::default();
+    let mut out = Outcome {
+        started: Some(started),
+        ..Outcome::default()
+    };
     let mut retry_errored = false;
 
     for change in &batch.changes {
         if out.full_reload.is_some() {
-            break;
+            // The page reloads anyway, but a glob importer must not serve its old expansion.
+            if change.kind != ChangeKind::Modified {
+                forget_globs(shared, &globbing(shared, &change.path));
+            }
+            continue;
         }
         handle_change(
             shared,
@@ -97,6 +106,28 @@ pub(crate) fn on_batch(shared: &Shared, batch: ChangeBatch) {
     finish(shared, out, timing);
 }
 
+/// The modules with an `import.meta.glob` pattern matching `path`.
+fn globbing(shared: &Shared, path: &std::path::Path) -> Vec<ModuleId> {
+    let mut ids: Vec<ModuleId> = shared
+        .glob_watches
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, ws)| ws.iter().any(|w| w.matches(path)))
+        .map(|(&id, _)| id)
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Drops the prepared output of `ids`, so their next request expands their globs again.
+fn forget_globs(shared: &Shared, ids: &[ModuleId]) {
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    for &id in ids {
+        g.node_mut(id).prepared = None;
+    }
+}
+
 fn handle_change(
     shared: &Shared,
     change: &FileChange,
@@ -107,6 +138,11 @@ fn handle_change(
 ) {
     let path = &change.path;
     let url = server::url_for_file(&shared.root, path);
+    shared
+        .changed_at
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(path.clone(), timestamp);
     // `.env*`: new values everywhere, so the page reloads (Vite restarts its server).
     if let Some(dir) = &shared.env_options.dir
         && crate::env::is_env_file(dir, path)
@@ -123,16 +159,28 @@ fn handle_change(
     // A file appearing or disappearing under an `import.meta.glob` pattern changes the
     // importer's expansion.
     if change.kind != ChangeKind::Modified {
-        let globbing: Vec<ModuleId> = shared
-            .glob_watches
+        let dep = shared
+            .dep_glob_watches
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .filter(|(_, ws)| ws.iter().any(|w| w.matches(path)))
-            .map(|(&id, _)| id)
-            .collect();
-        for id in globbing {
-            reprepare(shared, id, timestamp, timing, out);
+            .find(|(_, ws)| ws.iter().any(|w| w.matches(path)))
+            .map(|(name, _)| name.clone());
+        if let Some(name) = dep {
+            // Served with its globs expanded; the page fetches it again.
+            shared.log(&format!(
+                "page reload: {url} matches a glob in pre-bundled {name}"
+            ));
+            out.files.push(url.clone());
+            out.full_reload = Some(None);
+        }
+        for id in globbing(shared, path) {
+            if out.full_reload.is_some() {
+                // Re-prepared when the reloaded page asks for it.
+                forget_globs(shared, &[id]);
+            } else {
+                reprepare(shared, id, timestamp, timing, out);
+            }
         }
     }
     // Modules whose transform read this file (types behind `parse<T>`, plugin modules
@@ -172,10 +220,24 @@ fn handle_change(
             Err(message) => shared.log(&format!("handleHotUpdate failed: {message}")),
         }
     }
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    if (ext == "html" || ext == "htm") && path.starts_with(&shared.root) {
+    // A file a page's `<style>` reads or references: the page reloads.
+    let page_uses = shared
+        .html_deps
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .values()
+        .any(|deps| deps.binary_search(path).is_ok());
+    if page_uses {
         out.files.push(url.clone());
-        out.full_reload = Some(Some(url));
+        // Other pages may use it too, including through a linked stylesheet.
+        out.full_reload = Some(None);
+        return;
+    }
+    // A page reloads, unless it is also a module (`import x from './a.html?raw'`).
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if (ext == "html" || ext == "htm") && path.starts_with(&shared.root) && own.is_none() {
+        out.files.push(url.clone());
+        out.full_reload = Some(Some(crate::http::percent_decode(&url)));
         return;
     }
     for d in dependents {
@@ -192,7 +254,24 @@ fn handle_change(
     // browser's instance of the old URL.
     {
         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-        if g.node(id).pruned {
+        let n = g.node(id);
+        if n.pruned {
+            // Deleting a file the page stopped importing in an earlier batch: nothing on the
+            // page accepts it, so the page reloads (Vite still has the module, with no
+            // importers: a dead end). A deletion in the batch that pruned it (the import
+            // removed and the file deleted together) only prunes.
+            let settled = n
+                .pruned_at
+                .zip(out.started)
+                .is_some_and(|(at, started)| at < started);
+            if change.kind == ChangeKind::Removed && settled && !n.self_accepting {
+                shared.log(&format!(
+                    "page reload: {url} was deleted and nothing imports it"
+                ));
+                out.files.push(url);
+                out.full_reload = Some(None);
+                return;
+            }
             g.node_mut(id).last_hmr_timestamp = timestamp;
             return;
         }
@@ -224,6 +303,7 @@ fn handle_change(
         return; // touch, or the second of a double write
     }
     out.files.push(node_url.clone());
+    let old = old_accept(shared, id);
 
     match kind {
         ModuleKind::Script => {
@@ -231,11 +311,7 @@ fn handle_change(
             let result = server::prepare_script(shared, id, path, &source, hash);
             timing.transform += t.elapsed();
             match result {
-                Ok((_, pruned)) => {
-                    let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-                    out.pruned
-                        .extend(pruned.into_iter().map(|p| g.node(p).url.clone()));
-                }
+                Ok((_, pruned)) => note_pruned(shared, pruned, timestamp, out),
                 Err(e) => {
                     shared
                         .graph
@@ -255,22 +331,48 @@ fn handle_change(
         }
     }
 
+    if kind == ModuleKind::Css {
+        css_changed(
+            shared,
+            id,
+            &node_url,
+            (linked_css, served_as_js),
+            timestamp,
+            timing,
+            out,
+        );
+        return;
+    }
     let t = Instant::now();
-    if kind == ModuleKind::Css && linked_css {
+    propagate(shared, id, false, timestamp, out, old);
+    timing.graph += t.elapsed();
+}
+
+/// A stylesheet changed (its file, or one it imports or references): a `<link>`ed one is
+/// swapped in place, one imported from JS updates like a module.
+fn css_changed(
+    shared: &Shared,
+    id: ModuleId,
+    url: &str,
+    (linked, as_js): (bool, bool),
+    timestamp: u64,
+    timing: &mut UpdateTiming,
+    out: &mut Outcome,
+) {
+    let t = Instant::now();
+    if linked {
         out.updates.push(json!({
             "type": "css-update",
-            "path": node_url,
-            "acceptedPath": node_url,
+            "path": url,
+            "acceptedPath": url,
             "timestamp": timestamp,
             "explicitImportRequired": false,
             "isWithinCircularImport": false,
         }));
     }
-    if kind == ModuleKind::Css && !served_as_js {
-        timing.graph += t.elapsed();
-        return;
+    if as_js {
+        propagate(shared, id, false, timestamp, out, None);
     }
-    propagate(shared, id, false, timestamp, out);
     timing.graph += t.elapsed();
 }
 
@@ -286,11 +388,17 @@ fn reprepare(
     if out.full_reload.is_some() {
         return;
     }
-    let (file, url, kind) = {
+    let (file, url, kind, css_use, pruned) = {
         let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let n = g.node(id);
-        (n.file.clone(), n.url.clone(), n.kind)
+        let css_use = (n.linked_css, n.served_as_js);
+        (n.file.clone(), n.url.clone(), n.kind, css_use, n.pruned)
     };
+    if kind == ModuleKind::Css && !pruned {
+        out.files.push(url.clone());
+        css_changed(shared, id, &url, css_use, timestamp, timing, out);
+        return;
+    }
     if kind != ModuleKind::Script {
         return;
     }
@@ -306,6 +414,7 @@ fn reprepare(
         let n = g.node(id);
         (n.prepared.clone(), n.errored)
     };
+    let old = old_accept(shared, id);
     let result = server::prepare_script(shared, id, &file, &source, hash);
     timing.validators += t.elapsed();
     match result {
@@ -320,9 +429,7 @@ fn reprepare(
                 return;
             }
             out.files.push(url);
-            let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-            out.pruned
-                .extend(pruned.into_iter().map(|p| g.node(p).url.clone()));
+            note_pruned(shared, pruned, timestamp, out);
         }
         Err(e) => {
             shared
@@ -338,14 +445,27 @@ fn reprepare(
         }
     }
     let t = Instant::now();
-    propagate(shared, id, false, timestamp, out);
+    propagate(shared, id, false, timestamp, out, old);
     timing.graph += t.elapsed();
 }
 
-/// Runs propagation for `id` and appends the resulting updates (or a full reload).
-fn propagate(shared: &Shared, id: ModuleId, skip_self: bool, timestamp: u64, out: &mut Outcome) {
+/// Runs propagation for `id` and appends the resulting updates (or a full reload). `old`
+/// is what `id` accepted before it was re-prepared (see [`OldAccept`]).
+fn propagate(
+    shared: &Shared,
+    id: ModuleId,
+    skip_self: bool,
+    timestamp: u64,
+    out: &mut Outcome,
+    old: OldAccept,
+) {
     let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-    let p = g.propagate(id, skip_self);
+    let p = match old
+        .filter(|(_, exports)| exports.is_some() || g.node(id).accepted_exports.is_some())
+    {
+        Some(old) => g.propagate_from(id, skip_self, old),
+        None => g.propagate(id, skip_self),
+    };
     if let Some(reason) = &p.full_reload {
         let why = match reason {
             FullReload::NoBoundary { root } => {
@@ -397,6 +517,34 @@ fn propagate(shared: &Shared, id: ModuleId, skip_self: bool, timestamp: u64, out
             }
         }
     }
+}
+
+/// Modules that lost their last importer: their `prune` callbacks run in the browser, and
+/// they take the update's timestamp, so an import restored later fetches a new instance
+/// instead of the browser's old one (`vite: packages/vite/src/node/server/hmr.ts`,
+/// `handlePrunedModules`).
+fn note_pruned(shared: &Shared, pruned: Vec<ModuleId>, timestamp: u64, out: &mut Outcome) {
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    for p in pruned {
+        let n = g.node_mut(p);
+        n.last_hmr_timestamp = timestamp;
+        out.pruned.push(n.url.clone());
+    }
+}
+
+/// What a module accepted (self-accepting, accepted exports) before its new version was
+/// prepared, when it had been prepared before. Vite applies an update with the accept info
+/// of the module's old code (the new code hasn't run yet), so a module that stops accepting
+/// an export still takes that update in place and reloads on the next one. Used only when
+/// the old or the new version calls `acceptExports`.
+type OldAccept = Option<(bool, Option<Vec<String>>)>;
+
+fn old_accept(shared: &Shared, id: ModuleId) -> OldAccept {
+    let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    let n = g.node(id);
+    n.prepared
+        .as_ref()
+        .map(|_| (n.self_accepting, n.accepted_exports.clone()))
 }
 
 /// Sends what a batch (or an invalidation) produced and records its timing.
@@ -540,7 +688,7 @@ fn invalidate(shared: &Shared, url: &str, message: Option<&str>, first: Option<&
         ..Default::default()
     };
     let t = Instant::now();
-    propagate(shared, id, true, timestamp, &mut out);
+    propagate(shared, id, true, timestamp, &mut out, None);
     mark_invalidation_chain(shared, &mut out, first.unwrap_or(url));
     let mut timing = timing;
     timing.graph = t.elapsed();

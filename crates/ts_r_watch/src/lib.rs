@@ -13,6 +13,9 @@
 //!   change, so a late second identical write costs nothing.
 //! - **Delete then recreate** (backup-rename editors): a missing file is re-checked after a
 //!   grace period before being reported as removed.
+//! - **Removing a file reported earlier**: FSEvents keeps a path's flags for a while, so the
+//!   removal of a file created a moment ago arrives flagged as created *and* removed, like a
+//!   temp file. A path this debouncer has already reported as present is reported as removed.
 //!
 //! The quiet window is the latency floor of this step (budget: 1–5 ms), so it is short.
 //!
@@ -33,7 +36,7 @@
 //! Removals are always reported, and an mtime with no sub-second part (a coarse file system,
 //! where the comparison can't be trusted) is always kept.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -128,6 +131,8 @@ pub struct Debouncer {
     pending: BTreeMap<PathBuf, Pending>,
     burst_start: Option<Instant>,
     last_event: Option<Instant>,
+    /// Paths last reported as created or modified (only files that changed while watched).
+    reported: BTreeSet<PathBuf>,
 }
 
 impl Debouncer {
@@ -137,6 +142,7 @@ impl Debouncer {
             pending: BTreeMap::new(),
             burst_start: None,
             last_event: None,
+            reported: BTreeSet::new(),
         }
     }
 
@@ -208,9 +214,14 @@ impl Debouncer {
                     p.grace_until = Some(now + self.opts.grace);
                     continue;
                 }
-                FileState::Empty => Some(ChangeKind::Modified),
+                // Still empty: a new empty file is still a new file.
+                FileState::Empty => Some(if p.saw_create {
+                    ChangeKind::Created
+                } else {
+                    ChangeKind::Modified
+                }),
                 // Created and gone within one burst: an editor's temp file.
-                FileState::Missing if p.saw_create => None,
+                FileState::Missing if p.saw_create && !self.reported.contains(path) => None,
                 FileState::Missing if !in_grace => {
                     p.grace_until = Some(now + self.opts.grace);
                     continue;
@@ -218,6 +229,11 @@ impl Debouncer {
                 FileState::Missing => Some(ChangeKind::Removed),
             };
             done.push(path.clone());
+            if kind.is_some_and(|k| k != ChangeKind::Removed) {
+                self.reported.insert(path.clone());
+            } else {
+                self.reported.remove(path);
+            }
             if let Some(kind) = kind {
                 out.push(FileChange {
                     path: path.clone(),
@@ -696,6 +712,38 @@ mod tests {
         assert!(ignored(Path::new("/p/node_modules/x/index.js")));
         assert!(ignored(Path::new("/p/.git/index")));
         assert!(!ignored(Path::new("/p/src/a.js")));
+    }
+
+    #[test]
+    fn removing_a_reported_file_flagged_as_created_is_a_removal() {
+        // FSEvents' sticky flags: the removal of a file created a moment ago comes as
+        // create + remove, like a temp file, but this one was reported as created.
+        let fs = Fs::new();
+        fs.set("/p/new.js", FileState::Present);
+        let mut d = Debouncer::new(opts());
+        let t0 = Instant::now();
+        let w = SystemTime::now();
+        d.event("/p/new.js".into(), RawKind::Create, t0, w);
+        assert_eq!(d.poll(t0 + ms(3), fs.probe()).len(), 1);
+        fs.set("/p/new.js", FileState::Missing);
+        let t1 = t0 + ms(2000);
+        d.event("/p/new.js".into(), RawKind::Create, t1, w);
+        d.event("/p/new.js".into(), RawKind::Remove, t1, w);
+        assert!(d.poll(t1 + ms(3), fs.probe()).is_empty()); // grace
+        let out = d.poll(t1 + ms(50), fs.probe());
+        assert_eq!(kinds(&out), [("/p/new.js".to_owned(), ChangeKind::Removed)]);
+        // A temp file never reported is still dropped, and a new empty file is created.
+        fs.set("/p/empty.js", FileState::Empty);
+        d.event("/p/empty.js".into(), RawKind::Create, t1 + ms(55), w);
+        assert!(d.poll(t1 + ms(58), fs.probe()).is_empty()); // grace
+        let out = d.poll(t1 + ms(100), fs.probe());
+        assert_eq!(
+            kinds(&out),
+            [("/p/empty.js".to_owned(), ChangeKind::Created)]
+        );
+        d.event("/p/x.tmp".into(), RawKind::Create, t1 + ms(110), w);
+        d.event("/p/x.tmp".into(), RawKind::Remove, t1 + ms(110), w);
+        assert!(d.poll(t1 + ms(120), fs.probe()).is_empty());
     }
 
     #[test]

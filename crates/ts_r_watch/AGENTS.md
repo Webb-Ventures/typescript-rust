@@ -17,6 +17,11 @@ Native file watching with debouncing tuned for editor save patterns, moved out o
 - **Atomic saves, double writes and delete-then-recreate become one change** (see the
   module docs): a burst settles after `quiet` (3 ms) or `max_wait` (30 ms); an empty or
   missing file gets `grace` (40 ms) before it is reported.
+- **A file created and removed within one burst is a temp file, unless it was reported.**
+  FSEvents keeps a path's flags for a while, so deleting a file created a moment ago arrives
+  as create + remove; the debouncer remembers the paths it reported as present (one entry per
+  file changed while watched) and reports those as removed. A new file that is still empty
+  when it settles is reported as created, not modified.
 - **Files untouched since the watch started are not changes.** FSEvents (macOS) replays writes
   made just before the stream started; during `STARTUP_WINDOW` (10 s) a settled change whose
   file's mtime predates the start is dropped. Removals and mtimes without a sub-second part
