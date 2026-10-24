@@ -745,11 +745,23 @@ pub fn prepare_with(
             "The JSX syntax extension is not currently enabled".into(),
         ));
     }
-    let needs_transform = kind.is_typescript() || first_jsx.is_some() || module.is_some();
+    // `accessor` fields of JavaScript files are lowered for an explicit `--target` (they are
+    // newer than every year target ts-r-build emits).
+    let lower_accessors = !kind.is_typescript()
+        && ctx.opts.target.is_some()
+        && ast.nodes.iter().any(|n| {
+            matches!(n, Node::PropertyDef { modifiers, .. } if modifiers.contains(Modifiers::ACCESSOR))
+        });
+    let needs_transform =
+        kind.is_typescript() || first_jsx.is_some() || module.is_some() || lower_accessors;
     if needs_transform && messages.is_empty() {
         let base = ctx.transform_options(path);
         let mut topts = (*base).clone();
         topts.jsx_file_name = display.to_owned();
+        if !kind.is_typescript() {
+            // JavaScript class fields always have define semantics.
+            topts.use_define_for_class_fields = true;
+        }
         if let Some(m) = module {
             topts.module = m;
         }

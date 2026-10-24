@@ -1842,3 +1842,22 @@ fn top_level_this_of_a_commonjs_file_is_its_exports() {
     let r = run_build(&fs, opts(&["own.js"]));
     assert!(file(&r, "/proj/out/own.js").contains("this.c = 3"));
 }
+
+#[test]
+fn javascript_accessor_fields_are_lowered_for_a_year_target() {
+    let fs = project(&[(
+        "entry.js",
+        "class Foo {\n  accessor one = 1;\n  static accessor #two = 2;\n  static two() { return Foo.#two; }\n}\nconsole.log(new Foo().one, Foo.two());\n",
+    )]);
+    let mut o = opts(&["entry.js"]);
+    o.target = Some(2022);
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(!code.contains("accessor "), "{code}");
+    if have_node() {
+        assert_eq!(run_node("js_accessor", &r, "entry.js").trim(), "1 2");
+    }
+    // Without a target the syntax is kept.
+    let r = run_build(&fs, opts(&["entry.js"]));
+    assert!(file(&r, "/proj/out/entry.js").contains("accessor one"));
+}

@@ -122,14 +122,16 @@ class Parser {
     }
     if (this.is('{')) return this.composite(text);
     if (this.is('(')) {
-      // Function call: keep the text, skip the arguments.
+      // Function call: keep the text and the argument tokens.
       let depth = 0;
+      const inner = [];
       do {
         const p = this.next();
         if (p.t === 'p' && (p.v === '(' || p.v === '{' || p.v === '[')) depth++;
         if (p.t === 'p' && (p.v === ')' || p.v === '}' || p.v === ']')) depth--;
+        inner.push(p);
       } while (depth > 0);
-      return { call: text };
+      return { call: text, args: inner.slice(1, -1) };
     }
     if (text === '') throw new Error(`unexpected token ${JSON.stringify(this.peek())}`);
     if (text === 'true') return true;
@@ -276,6 +278,13 @@ function flagsFor(c) {
         }
         break;
       }
+      // `es(2022)`: everything newer than ES2022 is lowered, which is `--target=es2022`.
+      // ts-r-build does not lower below ES2022 yet: those stay skips.
+      case 'UnsupportedJSFeatures':
+        if (v.call === 'es' && v.args.length === 1 && v.args[0].t === 'num' && Number(v.args[0].v) >= 2022) flags.push(`--target=es${v.args[0].v}`);
+        else if (v.call === 'es') why.push(`${k}=es(<2022)`);
+        else why.push(k);
+        break;
       case 'JSBanner': flags.push(`--banner:js=${v}`); break;
       case 'JSX': {
         for (const [jk, jv] of Object.entries(asObject(v))) {
@@ -292,7 +301,8 @@ function flagsFor(c) {
         break;
       }
       case 'EntryPathTemplate':
-      case 'ChunkPathTemplate': {
+      case 'ChunkPathTemplate':
+      case 'AssetPathTemplate': {
         const names = { DirPlaceholder: '[dir]', NamePlaceholder: '[name]', HashPlaceholder: '[hash]', ExtPlaceholder: '[ext]' };
         let t = '';
         for (const part of asList(v)) {
@@ -304,7 +314,7 @@ function flagsFor(c) {
             t += n;
           }
         }
-        flags.push(`--${k === 'EntryPathTemplate' ? 'entry' : 'chunk'}-names=${t}`);
+        flags.push(`--${{ EntryPathTemplate: 'entry', ChunkPathTemplate: 'chunk', AssetPathTemplate: 'asset' }[k]}-names=${t}`);
         break;
       }
       case 'OutputExtensionJS': flags.push(`--out-extension:.js=${v}`); break;
