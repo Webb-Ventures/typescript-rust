@@ -106,7 +106,7 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 96.7% exact (all diagnostics and chains); 207 variants with a diagnostic tsc does not report, 17 of them in tests where tsc reports nothing |
+| tsc's conformance baselines, 12,750 compared test variants | 96.9% exact (all diagnostics and chains); 198 variants with a diagnostic tsc does not report, 10 of them in tests where tsc reports nothing |
 | All 25 private-app tsconfig projects | All 25 match tsc exactly (0 missing, 0 extra) |
 | Ecosystem check stage | 550 packages pass, 159 fail (77.6%) |
 
