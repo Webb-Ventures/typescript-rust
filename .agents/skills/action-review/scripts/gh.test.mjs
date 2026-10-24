@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isAnsweredByYou, isPermanentGhError, REFRESH_MARK, summaryReviewSince, withRefreshMark } from "./gh.mjs";
+import { botFixToCheck, isAnsweredByYou, isPermanentGhError, REFRESH_MARK, REVIEW_BOT, summaryReviewSince, withRefreshMark } from "./gh.mjs";
 
 const YOU = "reece-bts";
 const comment = (author, created) => ({ user: { login: author }, created_at: created });
@@ -77,4 +77,27 @@ test("the skill's summary carries the ts-r review bot's refresh marker, once", a
   const once = withRefreshMark("Fixed 2 of 3 findings.");
   assert.equal(once, `Fixed 2 of 3 findings.\n\n${REFRESH_MARK}`);
   assert.equal(withRefreshMark(once), once);
+});
+
+const SHA = "4362d15a9c9c56a75168b7240f2fcb67b1ade061";
+const botFix = (created) => ({
+  user: { login: REVIEW_BOT },
+  created_at: created,
+  body: `Fixed in [\`4362d15\`](https://github.com/Webb-Ventures/typescript-rust/commit/${SHA}) by Codex for @riley-wv.\n\nInitial escapes now decode.`,
+});
+
+test("a thread the review bot fixed and resolved is a fix to check", () => {
+  assert.equal(botFixToCheck([botFix("T2")]), SHA);
+});
+
+test("a reply after the bot's fix means someone checked it", () => {
+  assert.equal(botFixToCheck([botFix("T2"), comment(YOU, "T3")]), null);
+  assert.equal(botFixToCheck([comment(YOU, "T3"), botFix("T2")]), null);
+});
+
+test("the bot's other replies, and look-alikes from people, are not fixes", () => {
+  const notFixed = { user: { login: REVIEW_BOT }, created_at: "T2", body: "Not fixed by Codex (asked by @riley-wv), so this stays open: ..." };
+  assert.equal(botFixToCheck([notFixed]), null);
+  assert.equal(botFixToCheck([{ ...botFix("T2"), user: { login: "riley" } }]), null);
+  assert.equal(botFixToCheck([]), null);
 });

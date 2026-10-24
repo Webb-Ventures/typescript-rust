@@ -755,12 +755,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             && let Some(s) = self.c.resolve_alias(s)
             && self.c.sym_flags(s).intersects(SymbolFlags::CLASS)
         {
-            if !js {
-                let tps = self.local_type_params(s);
-                if !self.type_arg_count_fits(&tps, args.len()) {
-                    return None;
-                }
+            let tps = self.local_type_params(s);
+            if !js && !self.type_arg_count_fits(&tps, args.len()) {
+                return None;
             }
+            // In JavaScript, defaults of `unknown` or `{}` fill in as `any`.
+            let args = if js && args.len() < tps.len() {
+                self.fill_type_args_in(&tps, &args, true)
+            } else {
+                args
+            };
             let t = self.type_from_symbol_reference(s, &args);
             return Some(self.with_this_arg(t, this_type));
         }
@@ -789,7 +793,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .store()
                 .list_items(self.store().sig(sig).type_params)
                 .to_vec();
-            let filled = self.fill_type_args(&tps, &args);
+            let filled = self.fill_type_args_in(&tps, &args, js);
             let m = self.store().mapper(&tps, &filled);
             self.instantiate_signature_full(sig, m)
         };
@@ -1244,6 +1248,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         for (n, decls) in groups {
+            // `const f: F = () => {}; f[k] = v` with `F` declaring `[k]`: the declared type.
+            let name = self.store().str(n).to_owned();
+            if self.annotated_expando_member(sym, &name).is_some() {
+                let t = self.annotated_expando_values(&decls);
+                let s = self.c.new_synth(
+                    crate::symbols::SynthSym::new(n, SymbolFlags::PROPERTY, 0)
+                        .with_decl(decls.first().copied())
+                        .with_type(t),
+                );
+                out.push((n, s));
+                continue;
+            }
             let mut types = Vec::new();
             for &left in &decls {
                 let Some(assign) = self.c.parent(left) else {
@@ -2106,6 +2122,21 @@ impl<'c, 'a> Ck<'c, 'a> {
         (params, this_type, min, has_rest)
     }
 
+    /// Whether the parameter `p` belongs to a signature written as a type (a function or
+    /// constructor type, or a call, construct or method signature).
+    fn in_type_position(&mut self, p: Loc) -> bool {
+        self.c.parent(p).is_some_and(|s| {
+            matches!(
+                self.node(s),
+                Node::FunctionType { .. }
+                    | Node::ConstructorType { .. }
+                    | Node::MethodSignature { .. }
+                    | Node::CallSignature { .. }
+                    | Node::ConstructSignature { .. }
+            )
+        })
+    }
+
     /// The declared type of a parameter node (annotation, initializer, contextual type or
     /// `any`), including `undefined` for optional parameters.
     pub fn param_type(&mut self, p: Loc) -> TypeId {
@@ -2126,6 +2157,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         if let Some(t) = type_ann {
             let ty = self.type_from_node(Loc::new(p.file, t));
+            // In the true branch of a conditional type a parameter's type can carry the
+            // implied constraint (`number extends T ? (cb: (n: number) => void) => void`
+            // types `n` as `number & T`).
+            let ty = if self.in_type_position(p) {
+                self.with_implied_constraints(Loc::new(p.file, t), ty)
+            } else {
+                ty
+            };
             if optional && !rest {
                 return self.add_optionality(ty);
             }
@@ -2509,8 +2548,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             if f.contains(TypeFlags::INDEXED_ACCESS) {
                 if let TypeKind::IndexedAccess { obj, index } = s.kind(cur) {
-                    // `{ [K in C]: X }[C]` is `X` with `K` replaced by `C`.
-                    if let Some(sub) = self.indexed_mapped_substitution_ext(cur, true)
+                    // `{ [K in C]: X }[C]` is `X` with `K` replaced by `C`, also for a
+                    // concrete `C` indexed by a generic key.
+                    if let Some(sub) = self.mapped_access_substitution(cur)
                         && sub != cur
                     {
                         cur = sub;

@@ -1,0 +1,12 @@
+a.ts(10,9): error TS2322: Type '5' is not assignable to type 'K'.
+  'K' could be instantiated with an arbitrary type which could be unrelated to '5'.
+a.ts(16,9): error TS2322: Type '5' is not assignable to type 'K'.
+  'K' could be instantiated with an arbitrary type which could be unrelated to '5'.
+a.ts(17,9): error TS2322: Type '5' is not assignable to type '"one" & K'.
+  Type '5' is not assignable to type '"one"'.
+a.ts(25,3): error TS2322: Type 'Partial<Foo1>[K]' is not assignable to type 'Foo1[K]'.
+  Type 'Partial<Foo1>' is not assignable to type 'Foo1'.
+    Types of property 'x' are incompatible.
+      Type 'number | undefined' is not assignable to type 'number'.
+        Type 'undefined' is not assignable to type 'number'.
+a.ts(31,3): error TS18048: 'm1' is possibly 'undefined'.

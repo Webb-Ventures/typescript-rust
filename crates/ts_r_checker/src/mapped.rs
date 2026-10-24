@@ -414,6 +414,71 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(self.mapped_template_for(&info, index, false))
     }
 
+    /// A mapped type indexed by any key, generic (`Partial<T>[K]`) or concrete with a
+    /// generic key (`Partial<Foo>[K]`): the template with the key substituted.
+    pub fn mapped_access_substitution(&mut self, t: TypeId) -> Option<TypeId> {
+        self.indexed_mapped_substitution_ext(t, true)
+            .or_else(|| self.concrete_mapped_generic_index_substitution(t))
+    }
+
+    /// `{ [P in C]: X }[I]` for a mapped type with a concrete key set `C`, no name clause and
+    /// no `-?`, indexed by a generic `I`: `X` with `P` replaced by `I` (the constraint of the
+    /// indexed access, so a correlated `handlers[k](arg)` calls `X`'s signature; tsc:
+    /// checker.go, isMappedTypeGenericIndexedAccess, substituteIndexedMappedType).
+    pub fn concrete_mapped_generic_index_substitution(&mut self, t: TypeId) -> Option<TypeId> {
+        let TypeKind::IndexedAccess { obj, index } = self.store().kind(t) else {
+            return None;
+        };
+        let info = self.mapped_info(obj)?;
+        if info.name_node.is_some()
+            || matches!(info.optional, MappedModifier::Remove)
+            || self.is_generic_mapped_type(obj)
+            || !self.is_generic_index_type(index)
+        {
+            return None;
+        }
+        let t = self.mapped_template_for(&info, index, false);
+        if self.c.opts.strict_null_checks
+            && !includes(info.optional)
+            && self.could_access_optional_property(obj, index)
+        {
+            return Some(self.add_optionality(t));
+        }
+        Some(t)
+    }
+
+    /// Whether some optional property of `obj` has a key inside `index`'s base constraint
+    /// (tsc: checker.go, couldAccessOptionalProperty).
+    fn could_access_optional_property(&mut self, obj: TypeId, index: TypeId) -> bool {
+        let c = self.base_constraint(index);
+        if c == TypeId::UNRESOLVED {
+            return false;
+        }
+        let m = self.resolved_members(obj);
+        let names: Vec<StrId> = m.names.to_vec();
+        let props: Vec<SymId> = m.props.to_vec();
+        for (n, p) in names.into_iter().zip(props) {
+            if !self.c.sym_flags(p).intersects(SymbolFlags::OPTIONAL) {
+                continue;
+            }
+            let text = self.store().str(n);
+            if text.starts_with('#') {
+                continue;
+            }
+            let key = if crate::expr::is_numeric_name(text)
+                && let Some(k) = self.numeric_key_type(p)
+            {
+                k
+            } else {
+                self.property_key_type(text)
+            };
+            if self.is_assignable(key, c) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// The alias of the type alias whose body is the mapped type node `l`, with its own type
     /// parameters as arguments.
     fn declared_alias_of_node(&mut self, l: Loc) -> AliasId {
