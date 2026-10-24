@@ -263,12 +263,23 @@ impl Linker<'_> {
     fn compute_kinds(&mut self) {
         let g = self.g;
         let mut required = vec![false; g.modules.len()];
+        // Files something imports a binding from (not a bare `import "x"`).
+        let mut imported = vec![false; g.modules.len()];
         for m in &g.modules {
             for (i, r) in m.meta.records.iter().enumerate() {
                 if r.kind == RecordKind::Require
                     && let Target::Module(t) = m.targets[i]
                 {
                     required[t as usize] = true;
+                }
+            }
+            let reexports = m.meta.exports.iter().filter_map(|(_, e)| match e {
+                ExportTarget::Reexport { record, .. } => Some(*record),
+                ExportTarget::Local(_) => None,
+            });
+            for record in m.meta.imports.iter().map(|b| b.record).chain(reexports) {
+                if let Some(Target::Module(t)) = m.targets.get(record as usize) {
+                    imported[*t as usize] = true;
                 }
             }
         }
@@ -283,6 +294,17 @@ impl Linker<'_> {
             } else if meta.has_esm_syntax {
                 Kind::Esm
             } else if required[i] || m.loader == Loader::Empty {
+                Kind::Cjs
+            } else if imported[i]
+                && !m.node_mode
+                && !meta.uses_import_meta
+                && !meta.has_tla
+                && matches!(m.loader, Loader::Js | Loader::Jsx)
+            {
+                // A script with no ESM syntax that something imports from is CommonJS, as
+                // in esbuild: its namespace is `module.exports` (`default` included). Not
+                // `.mjs`, a `"type": "module"` package or a file using `import.meta` or
+                // top-level await, which are ES modules.
                 Kind::Cjs
             } else {
                 Kind::Esm
@@ -589,7 +611,9 @@ impl Linker<'_> {
         }
         if let Some((b, ambiguous)) = self.export_memo.get(&key).cloned() {
             // The modules below `t` were queued for inclusion when this was computed.
-            self.work.push(Task::Include(t));
+            if b.is_some() {
+                self.work.push(Task::Include(t));
+            }
             if b.is_none() {
                 self.ambiguous = ambiguous;
             }
@@ -599,6 +623,12 @@ impl Linker<'_> {
         self.resolving.push(key);
         let b = self.resolve_export_uncached(t, name, seen);
         self.resolving.pop();
+        // Modules an import passes through are part of the bundle (esbuild keeps the side
+        // effects of re-exporting files even in `sideEffects: false` packages). A missing
+        // export does not pull in a side-effect-free file (`ns.missing` is `undefined`).
+        if b.is_some() {
+            self.work.push(Task::Include(t));
+        }
         if self.cycle_hits == cycles {
             let ambiguous = b.is_none() && self.ambiguous;
             self.export_memo.insert(key, (b.clone(), ambiguous));
@@ -612,9 +642,6 @@ impl Linker<'_> {
         name: &str,
         seen: &mut Seen,
     ) -> Option<Binding> {
-        // Modules an import passes through are part of the bundle (esbuild keeps the side
-        // effects of re-exporting files even in `sideEffects: false` packages).
-        self.work.push(Task::Include(t));
         let meta = &self.g.modules[t as usize].meta;
         if self.l.kinds[t as usize] == Kind::Cjs {
             return Some(Binding::Cjs(t, Some(name.to_owned())));
@@ -854,15 +881,9 @@ impl Linker<'_> {
                     let mut seen = FxHashSet::default();
                     self.ambiguous = false;
                     let r = self.resolve_export(t, prop, &mut seen);
-                    let r = match r {
-                        Some(r) => r,
-                        None => {
-                            // `ns.missing` is `undefined` at run time; not an error.
-                            Binding::Undefined
-                        }
-                    };
+                    // `ns.missing` is `undefined` at run time; not an error.
+                    let r = r.unwrap_or(Binding::Undefined);
                     self.l.ns_members[mi].insert((*s, prop.clone()), r.clone());
-                    self.work.push(Task::Include(t));
                     self.work.push(Task::Binding(r));
                 }
                 other => self.work.push(Task::Binding(other)),

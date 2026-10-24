@@ -1918,3 +1918,30 @@ fn json_namespace_imports_are_es_namespaces() {
     let r = run_build(&fs, opts(&["entry.js"]));
     assert_eq!(run_node("json-ns", &r, "entry.js"), "true true [ '__proto__' ]\n");
 }
+
+#[test]
+fn imported_scripts_are_commonjs_and_missing_exports_do_not_include_files() {
+    // A `.js` file with no ESM syntax is CommonJS when something imports from it, so its
+    // `default` is `module.exports`; an `.mjs` one is an ES module without exports. Reading
+    // a missing export does not pull a `sideEffects: false` ES module into the bundle.
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "import * as js from './foo/a.js';\nimport * as mjs from './foo/b.mjs';\n\
+             import * as meta from './foo/c.js';\n\
+             console.log(js.default, mjs.default, mjs.nope, meta.nope);\n",
+        ),
+        ("foo/package.json", r#"{"sideEffects": false}"#),
+        ("foo/a.js", "console.log('js');\n"),
+        ("foo/b.mjs", "console.log('mjs');\n"),
+        ("foo/c.js", "console.log('meta', typeof import.meta);\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    assert_eq!(
+        run_node("cjs-scripts", &r, "entry.js"),
+        "js\n{} undefined undefined undefined\n"
+    );
+}
