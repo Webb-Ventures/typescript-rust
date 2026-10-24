@@ -3,6 +3,7 @@
 pub mod bundle;
 pub mod chunk;
 pub mod cjs_exports;
+pub mod data_url;
 pub mod expr;
 pub mod features;
 pub mod fscache;

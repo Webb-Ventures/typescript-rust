@@ -38,9 +38,30 @@ pub struct Source {
 
 #[derive(Clone, Debug)]
 pub struct Asset {
-    /// Output path relative to the output directory.
+    /// Output path relative to the output directory, with `[dir]` still in it: the build
+    /// fills it in from the entry points' common directory (`bundle::asset_path`).
     pub rel_path: String,
     pub bytes: Arc<[u8]>,
+    /// What the module's code holds in place of its URL: the build replaces it in each chunk
+    /// with the URL as seen from that chunk (`./a.png`, `../a.png`, or under `public_path`).
+    pub placeholder: String,
+    /// The `?query` / `#hash` the import named the file with; the URL ends with it.
+    pub query: String,
+}
+
+/// The placeholder string for the asset of the module at `path` with contents hash `hash`:
+/// letters, digits and `_` only, so printing and minifying keep it as written.
+pub fn asset_placeholder(path: &str, hash: &[u8; 32]) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(path.as_bytes());
+    h.update(&[0]);
+    h.update(hash);
+    let d = h.finalize();
+    let hex: String = d.as_bytes()[..12]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("__TSR_ASSET_{hex}__")
 }
 
 /// Reads `path` with `loader`. Errors are user-facing messages.
@@ -50,11 +71,21 @@ pub fn load(
     loader: Loader,
     opts: &BuildOptions,
 ) -> Result<Source, String> {
+    // `key` keeps a `?query` suffix for the file loader's URL; the file is read without it.
+    let key = path;
+    let (path, query) = crate::graph::split_query(key);
+    let data = || crate::data_url::decode(path).ok_or_else(|| format!("Invalid data URL: {path}"));
     let read_text = || {
+        if path.starts_with(crate::data_url::PREFIX) {
+            return data().map(|b| String::from_utf8_lossy(&b).into_owned());
+        }
         fs.read_file(path)
             .ok_or_else(|| format!("Could not read from file: {path}"))
     };
     let read_bytes = || -> Result<Vec<u8>, String> {
+        if path.starts_with(crate::data_url::PREFIX) {
+            return data();
+        }
         match fs.read_file(path) {
             Some(t) => Ok(t.into_bytes()),
             None => {
@@ -168,23 +199,21 @@ pub fn load(
                 .asset_names
                 .replace("[name]", stem)
                 .replace("[hash]", &hash_text)
-                .replace("[dir]/", "")
-                .replace("[dir]", "")
                 .replace("[ext]", ext.trim_start_matches('.'))
                 + &ext;
-            let url = if opts.public_path.is_empty() {
-                format!("./{rel}")
-            } else {
-                format!("{}/{rel}", opts.public_path.trim_end_matches('/'))
-            };
-            // The URL comes from `asset_names` and `public_path`, not only the bytes.
+            let placeholder = asset_placeholder(key, &hash);
+            // The output path comes from `asset_names` and `public_path`, not only the bytes.
             let mut key = blake3::Hasher::new();
             key.update(&hash);
-            key.update(url.as_bytes());
-            let mut s = js_value(js_string(&url), *key.finalize().as_bytes());
+            key.update(rel.as_bytes());
+            key.update(&[0]);
+            key.update(opts.public_path.as_bytes());
+            let mut s = js_value(js_string(&placeholder), *key.finalize().as_bytes());
             s.asset = Some(Asset {
                 rel_path: rel,
                 bytes: Arc::from(bytes),
+                placeholder,
+                query: query.to_owned(),
             });
             Ok(s)
         }
@@ -743,6 +772,7 @@ pub fn prepare_with(
     loader: Loader,
     module: Option<ModuleFormat>,
 ) -> Prepared {
+    let path = crate::graph::split_query(path).0;
     let kind = source_kind(path, loader);
     let parsed = ts_r_parser::parse(&src, kind);
     let mut messages = Vec::new();
@@ -1314,7 +1344,7 @@ mod tests {
             (s.hash, s.js.to_string())
         };
         let old = load_with("old/[name]", "");
-        assert!(old.1.contains("./old/a.png"), "{}", old.1);
+        assert!(old.1.contains("__TSR_ASSET_"), "{}", old.1);
         assert_eq!(load_with("old/[name]", ""), old);
         assert_ne!(load_with("new/[name]", "").0, old.0);
         assert_ne!(load_with("old/[name]", "https://cdn").0, old.0);

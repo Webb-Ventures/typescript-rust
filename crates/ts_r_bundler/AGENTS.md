@@ -32,7 +32,7 @@ rename, wrap, compress, print one module to a `Fragment`) → `chunk.rs` (assemb
 `hmr.rs` (feature `hmr`) is the dev server's `DepBundler` (per-specifier `bundle` and the
 code-split `batch` that `ts-r-dev` uses, with source maps whose `sources` are relative to
 the served URL when `DepBundle::serve_root` is set, and CSS outputs passed through);
-`fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
+`data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
 expression builder for generated code; `pool.rs` is the std-thread pool.
 
 ## Invariants
@@ -108,6 +108,19 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   `const`/`let` (`import x = require`) become `var`; without `using`, assigning a module-level
   `const` or `using` binding is an error (`Cannot assign to "x" because it is a constant`),
   since lowering would turn it into a write that silently works.
+- **Module keys that are not plain files** (`graph.rs`): `(disabled):x`, a file plus
+  `WITH_TYPE_SEP` and an import attribute type, a file plus `QUERY_SEP` and the `?query` /
+  `#hash` it was imported with (each suffix is its own module, as in esbuild; the file is
+  read without it), and a `data:` URL whose MIME type is `text/javascript` or
+  `application/json` (`data_url.rs`: loaded from the URL, cannot import relative paths).
+  Strip them (`split_with_type`, `split_query`) before using a key as a path.
+- **File-loader URLs are filled in per chunk** (`bundle.rs`): the module's code holds a
+  placeholder (`prepare::asset_placeholder`, letters and digits only), and after assembly
+  each chunk gets the URL as seen from its own directory (`./a.png`, `../a.png`), or under
+  `--public-path`, plus the import's query. `[dir]` in `--asset-names` is relative to the
+  entries' common directory, `..` written `_.._`. The replacement can shift source map
+  columns after it on the same line. `--public-path` also prefixes cross-chunk imports
+  (`plan::chunk_import`).
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
   isn't a file is a glob (sorted, bounded); CSS entries pass through without `--bundle`; a
   missing `--tsconfig` is an error.

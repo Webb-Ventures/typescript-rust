@@ -9,12 +9,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_config::{FileSystem, path};
 
 use crate::chunk::{ChunkOutput, assemble};
-use crate::graph::{Graph, GraphContext, ModuleCache, ModuleId, Target, build_graph, pretty_path};
+use crate::graph::{
+    Graph, GraphContext, ModuleCache, ModuleId, Target, build_graph, pretty_path, split_with_type,
+};
 use crate::link::{Kind, LinkOptions, link};
 use crate::meta::RecordKind;
 use crate::options::{BuildOptions, Format, Loader};
 use crate::plan::{ModulePlan, PlanInput, plan};
-use crate::prepare::{Defines, PrepareContext, Prepared};
+use crate::prepare::{Asset, Defines, PrepareContext, Prepared};
 use crate::print::{Fragment, print_module};
 use crate::resolve::{Resolution, ResolveKind, Resolver};
 use crate::{Message, Severity, pool};
@@ -517,9 +519,24 @@ impl BuildContext {
             .map(|ci| assemble(ci, &pl, &graph, &by_module, opts, self.threads))
             .collect();
         let mut outputs = Vec::new();
+        // Assets from the file loader: (placeholder, path relative to outdir, bytes).
+        let mut assets: Vec<(&Asset, String)> = Vec::new();
+        for (i, m) in graph.modules.iter().enumerate() {
+            if lk.included[i]
+                && let Some(a) = &m.source.asset
+            {
+                assets.push((a, asset_path(&a.rel_path, &m.path, &outbase)));
+            }
+        }
         // The outputs take the chunks' text (the metafile only needs `module_bytes`).
         for (ci, co) in chunk_outs.iter_mut().enumerate() {
             let file = format!("{outdir}/{}", pl.chunks[ci].file);
+            for (a, rel) in &assets {
+                if co.code.contains(&a.placeholder) {
+                    let url = asset_url(&outdir, &file, rel, &opts.public_path) + &a.query;
+                    co.code = co.code.replace(&a.placeholder, &url);
+                }
+            }
             // A CSS entry point produces only its stylesheet.
             let css_entry = pl.chunks[ci]
                 .entry
@@ -558,13 +575,10 @@ impl BuildContext {
         }
         // Assets from the file loader.
         let mut seen_assets = FxHashSet::default();
-        for (i, m) in graph.modules.iter().enumerate() {
-            if lk.included[i]
-                && let Some(a) = &m.source.asset
-                && seen_assets.insert(a.rel_path.clone())
-            {
+        for (a, rel) in assets {
+            if seen_assets.insert(rel.clone()) {
                 outputs.push(OutputFile {
-                    path: format!("{outdir}/{}", a.rel_path),
+                    path: format!("{outdir}/{rel}"),
                     contents: a.bytes.to_vec(),
                 });
             }
@@ -608,7 +622,7 @@ impl BuildContext {
         if rel_dir == "." {
             rel_dir.clear();
         }
-        let rel_dir = rel_dir.replace("../", "_.._/").replace("..", "_.._");
+        let rel_dir = dotdot_dirs(&rel_dir);
         let file = path::file_name(entry);
         let stem = name
             .map(str::to_owned)
@@ -903,6 +917,49 @@ fn sorted(mut m: Vec<Message>) -> Vec<Message> {
 }
 
 /// Lowest common ancestor directory of the entry files.
+/// A file-loader asset's output path relative to the output directory: `template` (the
+/// asset names with all but `[dir]` filled in) with `[dir]` the directory of `module`
+/// relative to `outbase`, `..` written `_.._` as for entry names.
+fn asset_path(template: &str, module: &str, outbase: &str) -> String {
+    let file = crate::graph::split_query(split_with_type(module).0).0;
+    let mut dir = path::relative(outbase, path::directory_of(file), true);
+    if dir == "." {
+        dir.clear();
+    }
+    let dir = dotdot_dirs(&dir);
+    let n = if dir.is_empty() {
+        template.replace("[dir]/", "").replace("[dir]", "")
+    } else {
+        template.replace("[dir]", &dir)
+    };
+    n.trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_owned()
+}
+
+/// `[dir]` text for a relative directory: each `..` component is written `_.._` (esbuild's
+/// spelling, so output stays inside the output directory).
+fn dotdot_dirs(dir: &str) -> String {
+    dir.split('/')
+        .map(|c| if c == ".." { "_.._" } else { c })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The URL of asset `rel` (relative to `outdir`) from output file `file`: under
+/// `public_path` when set, else relative to the file's directory (`./a.png`, `../a.png`).
+fn asset_url(outdir: &str, file: &str, rel: &str, public_path: &str) -> String {
+    if !public_path.is_empty() {
+        return format!("{}/{rel}", public_path.trim_end_matches('/'));
+    }
+    let r = path::relative(path::directory_of(file), &format!("{outdir}/{rel}"), true);
+    if r.starts_with("../") {
+        r
+    } else {
+        format!("./{r}")
+    }
+}
+
 fn common_dir(entries: &[String]) -> String {
     let mut it = entries.iter();
     let Some(first) = it.next() else {

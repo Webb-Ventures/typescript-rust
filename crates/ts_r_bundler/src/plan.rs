@@ -1017,8 +1017,10 @@ impl Planner<'_> {
                     if splitting {
                         let from = &out.chunks[out.module_chunk[mi].unwrap_or(0)].file;
                         let target_chunk = out.chunks.iter().position(|c| c.entry == Some(*t));
-                        target_chunk
-                            .map(|tc| Expr::Import(relative_import(from, &out.chunks[tc].file)))
+                        target_chunk.map(|tc| {
+                            let to = &out.chunks[tc].file;
+                            Expr::Import(chunk_import(from, to, &self.o.public_path))
+                        })
                     } else {
                         Some(match l.kinds[ti] {
                             Kind::Cjs => {
@@ -1408,6 +1410,17 @@ fn reachable(g: &Graph, l: &Link, e: ModuleId, dynamic: bool) -> Vec<bool> {
         }
     }
     seen
+}
+
+/// The import path from one chunk to another (both relative to the output directory):
+/// under `public_path` when one is set (esbuild prefixes every cross-chunk import with
+/// it, as it does file-loader URLs), else [`relative_import`].
+pub fn chunk_import(from: &str, to: &str, public_path: &str) -> String {
+    if public_path.is_empty() {
+        relative_import(from, to)
+    } else {
+        format!("{}/{to}", public_path.trim_end_matches('/'))
+    }
 }
 
 /// `./x.js`-style import path from one output file to another (both relative to the output

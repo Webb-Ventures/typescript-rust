@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::expr::Expr;
 use crate::graph::{Graph, ModuleId};
 use crate::options::{BuildOptions, Format};
-use crate::plan::{Plan, relative_import};
+use crate::plan::{Plan, chunk_import};
 use crate::print::Fragment;
 use crate::sourcemap::{ChunkMap, encode_fragment};
 
@@ -219,7 +219,7 @@ pub fn assemble(
             }
         }
         for (oc, names) in &c.imports {
-            let path = relative_import(&c.file, &plan.chunks[*oc].file);
+            let path = chunk_import(&c.file, &plan.chunks[*oc].file, &opts.public_path);
             if names.is_empty() {
                 out.stmt(&format!("import{sp}{};", q(&path)));
             } else {
@@ -298,8 +298,9 @@ pub fn assemble(
         let size = Measure::of(&f.code);
         let map = match (&f.map, &ids[i]) {
             (Some(fm), Some(ids)) => {
-                let rel = if ts_r_config::path::is_rooted(&module.path) {
-                    ts_r_config::path::relative(&map_dir, &module.path, true)
+                let file = crate::graph::split_query(&module.path).0;
+                let rel = if ts_r_config::path::is_rooted(file) {
+                    ts_r_config::path::relative(&map_dir, file, true)
                 } else {
                     module.pretty.clone()
                 };
