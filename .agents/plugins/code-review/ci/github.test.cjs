@@ -23,7 +23,7 @@ const findingBody = (id) => `<!-- ts-r-review:finding ${encode({ id, title: `Fin
 function fakeGitHub(threads, opts = {}) {
   let nextComment = 100;
   const state = Object.fromEntries(Object.entries(threads).map(([id, t]) => [id, {
-    id, isResolved: t.resolved, resolvedBy: t.resolvedBy ?? null, commentId: nextComment++, body: t.body ?? findingBody(id),
+    id, isResolved: t.resolved, resolvedBy: t.resolvedBy ?? null, commentId: nextComment++, body: t.body ?? findingBody(id), commit: t.commit ?? null,
   }]));
   // Comments posted by the code under test open new threads, as on GitHub.
   const addThread = (body) => {
@@ -43,7 +43,7 @@ function fakeGitHub(threads, opts = {}) {
       if (query.includes('reviewThreads')) {
         const nodes = Object.values(state).map((t) => ({
           id: t.id, isResolved: t.isResolved, resolvedBy: t.isResolved && t.resolvedBy ? { login: t.resolvedBy } : null,
-          comments: { nodes: [{ databaseId: t.commentId, url: `u/${t.id}`, body: t.body, author: { login: 'ts-r-review' } }] },
+          comments: { nodes: [{ databaseId: t.commentId, url: `u/${t.id}`, body: t.body, author: { login: 'ts-r-review' }, originalCommit: t.commit ? { oid: t.commit } : null }] },
         }));
         return { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes } } } };
       }
@@ -116,10 +116,17 @@ const reviewed = { sha: 'abcdef1234', model: 'm (high)' };
 const changesRequested = [{ state: 'CHANGES_REQUESTED', commit_id: 'abcdef1234' }];
 
 test('listThreads keeps the comment text, without the markers, for the fix prompt', async () => {
-  const { github } = fakeGitHub({ a: { resolved: false } });
+  const { github } = fakeGitHub({ a: { resolved: false, commit: 'abcdef1234' } });
   const [thread] = await review.listThreads(github, 'o', 'r', 3);
   assert.equal(thread.finding.id, 'a');
+  assert.equal(thread.commit, 'abcdef1234');
   assert.equal(thread.text, '**High** · `correctness` · Finding a\n\nWhy a is wrong.');
+});
+
+test('listThreads leaves an unavailable original commit unknown', async () => {
+  const { github } = fakeGitHub({ a: { resolved: false } });
+  const [thread] = await review.listThreads(github, 'o', 'r', 3);
+  assert.equal(thread.commit, null);
 });
 
 test('a review does not auto-resolve a finding that was resolved when it started and reopened since', async () => {

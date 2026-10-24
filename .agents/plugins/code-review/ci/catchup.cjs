@@ -37,6 +37,7 @@ function bareGit({ dir, objects, url, auth = [], identity, env = process.env }) 
     if (result.status !== 0) throw new Error(`git ${what} failed (exit ${result.status})`);
     return result.stdout;
   };
+  const diff = (from, to, file) => out(['diff', '-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', file], 'diff');
   return {
     // The branch's current commit, fetched into `ref`; null if it cannot be fetched.
     fetch(branch, ref) {
@@ -71,7 +72,13 @@ function bareGit({ dir, objects, url, auth = [], identity, env = process.env }) 
       return { ok: pushed.status === 0, moved: pushed.status !== 0 && /\[rejected\]|non-fast-forward|fetch first/.test(said) };
     },
     // The old-side line ranges `diff from to` changes in `file` (hunks).
-    hunks: (from, to, file) => parseHunks(out(['diff', '-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', file], 'diff')),
+    hunks: (from, to, file) => parseHunks(diff(from, to, file)),
+    // Translate an unchanged finding from its review commit to the head Codex fixed.
+    mapLines(from, to, file, start, end) {
+      if (!from || !ok(['merge-base', '--is-ancestor', from, to]) ||
+          !ok(['cat-file', '-e', `${from}:${file}`]) || !ok(['cat-file', '-e', `${to}:${file}`])) return null;
+      return mapLines(diff(from, to, file), start, end);
+    },
   };
 }
 
@@ -86,6 +93,29 @@ function parseHunks(diff) {
     ranges.push(count === 0 ? [start, start + 1] : [start, start + count - 1]);
   }
   return ranges.length > 0 ? ranges : [[0, Infinity]];
+}
+
+// Only unchanged ranges can be mapped with confidence. Edits within a finding, binary diffs
+// and metadata-only changes leave its thread open rather than guessing at its new location.
+function mapLines(diff, start, end) {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) return null;
+  if (!diff.trim()) return [start, end];
+  let offset = 0;
+  let hunks = 0;
+  for (const m of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@/gm)) {
+    hunks += 1;
+    const first = Number(m[1]);
+    const removed = m[2] === undefined ? 1 : Number(m[2]);
+    const added = m[3] === undefined ? 1 : Number(m[3]);
+    if (removed === 0) {
+      if (first >= start && first < end) return null;
+      if (first < start) offset += added;
+    } else {
+      if (first <= end && first + removed > start) return null;
+      if (first + removed <= start) offset += added - removed;
+    }
+  }
+  return hunks > 0 ? [start + offset, end + offset] : null;
 }
 
 const overlaps = (as, bs) => as.some(([a1, a2]) => bs.some(([b1, b2]) => a1 <= b2 && b1 <= a2));
@@ -123,7 +153,8 @@ function pushFix({ git, branch, fix, base, message, attempts = MERGE_ATTEMPTS })
 
 // The ids of fixed findings whose lines the incoming commits (`base`..`incoming`) changed: in the
 // finding's own lines, or where the fix changed its files (`base`..`fix`). Line numbers are the
-// base's. `findings`: [{ id, path, start_line, end_line, files }]. The fix is one commit, so its
+// base's; finding locations are first mapped from their original review `commit` to `base`.
+// `findings`: [{ id, path, start_line, end_line, commit, files }]. The fix is one commit, so its
 // changes are known per file, not per finding: findings fixed in the same file share them, which
 // errs towards leaving a thread open.
 function staleFindings({ git, base, fix, incoming, findings }) {
@@ -136,14 +167,17 @@ function staleFindings({ git, base, fix, incoming, findings }) {
   for (const f of findings) {
     const regions = new Map();
     const add = (file, ranges) => regions.set(file, [...(regions.get(file) ?? []), ...ranges]);
-    if (typeof f.path === 'string' && f.path) {
-      const start = Number(f.start_line) || 0;
-      add(f.path, [[start, Math.max(start, Number(f.end_line) || start)]]);
+    const mapped = typeof f.path === 'string' && f.path
+      ? git.mapLines(f.commit, base, f.path, f.start_line, f.end_line) : null;
+    if (!mapped) {
+      stale.push(f.id);
+      continue;
     }
+    add(f.path, [mapped]);
     for (const file of f.files ?? []) add(file, git.hunks(base, fix, file));
     if ([...regions].some(([file, ranges]) => overlaps(ranges, incomingIn(file)))) stale.push(f.id);
   }
   return stale;
 }
 
-module.exports = { bareGit, pushFix, staleFindings, parseHunks, MERGE_ATTEMPTS };
+module.exports = { bareGit, pushFix, staleFindings, parseHunks, mapLines, MERGE_ATTEMPTS };

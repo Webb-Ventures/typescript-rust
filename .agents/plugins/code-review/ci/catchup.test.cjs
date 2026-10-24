@@ -10,7 +10,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { test } = require('node:test');
 
-const { bareGit, pushFix, staleFindings, parseHunks, MERGE_ATTEMPTS } = require('./catchup.cjs');
+const { bareGit, pushFix, staleFindings, parseHunks, mapLines, MERGE_ATTEMPTS } = require('./catchup.cjs');
 
 const BRANCH = 'feature';
 const lines = (n, tag = '') => Array.from({ length: n }, (_, i) => `line ${i + 1}${tag}`).join('\n') + '\n';
@@ -91,7 +91,7 @@ test('a branch that moved without a conflict is merged into the fix and pushed',
     // Neither side's history was rewritten.
     sh(r.remote, 'merge-base', '--is-ancestor', incoming, out.head);
     // An unrelated finding stays resolvable.
-    const stale = staleFindings({ git: r.git, base: r.base, fix, incoming, findings: [{ id: 'f', path: 'a.txt', start_line: 3, end_line: 3, files: ['a.txt'] }] });
+    const stale = staleFindings({ git: r.git, base: r.base, fix, incoming, findings: [{ id: 'f', path: 'a.txt', start_line: 3, end_line: 3, commit: r.base, files: ['a.txt'] }] });
     assert.deepEqual(stale, []);
   } finally {
     r.cleanup();
@@ -141,11 +141,54 @@ test('a fixed finding whose lines the new commits changed is stale; the others a
     const out = pushFix({ git: r.git, branch: BRANCH, fix, base: r.base, message });
     assert.equal(out.status, 'merged');
     const findings = [
-      { id: 'f1', path: 'a.txt', start_line: 20, end_line: 21, files: ['helper.txt'] },
-      { id: 'f2', path: 'b.txt', start_line: 5, end_line: 5, files: ['b.txt'] },
-      { id: 'f3', path: 'a.txt', start_line: 35, end_line: 35, files: ['a.txt'] },
+      { id: 'f1', path: 'a.txt', start_line: 20, end_line: 21, commit: r.base, files: ['helper.txt'] },
+      { id: 'f2', path: 'b.txt', start_line: 5, end_line: 5, commit: r.base, files: ['b.txt'] },
+      { id: 'f3', path: 'a.txt', start_line: 35, end_line: 35, commit: r.base, files: ['a.txt'] },
     ];
     assert.deepEqual(staleFindings({ git: r.git, base: r.base, fix, incoming, findings }), ['f1', 'f3']);
+  } finally {
+    r.cleanup();
+  }
+});
+
+test('finding locations are mapped from the review commit to the fix base before checking incoming edits', () => {
+  const r = setup({ 'a.txt': lines(40), 'helper.txt': lines(10) });
+  try {
+    const shifted = lines(10, ' (inserted)') + lines(40);
+    const base = commitIn(r.box, { 'a.txt': shifted }, 'insert before the findings', true);
+    sh(r.person, 'pull', '--quiet', '--ff-only', 'origin', BRANCH);
+    const fix = commitIn(r.box, { 'helper.txt': edit(lines(10), 4, 'guarded') }, 'fix through helper');
+    const incoming = commitIn(r.person, { 'a.txt': edit(shifted, 30, 'rewritten') }, 'change the shifted finding', true);
+    const out = pushFix({ git: r.git, branch: BRANCH, fix, base, message });
+    assert.equal(out.status, 'merged');
+    const findings = [
+      { id: 'shifted', path: 'a.txt', start_line: 20, end_line: 20, commit: r.base, files: ['helper.txt'] },
+      { id: 'untouched', path: 'a.txt', start_line: 25, end_line: 26, commit: r.base, files: ['helper.txt'] },
+    ];
+    assert.deepEqual(staleFindings({ git: r.git, base, fix, incoming, findings }), ['shifted']);
+  } finally {
+    r.cleanup();
+  }
+});
+
+test('uncertain finding locations stay open even when the incoming changes are elsewhere', () => {
+  const r = setup({ 'a.txt': lines(40), 'helper.txt': lines(10), 'other.txt': lines(10) });
+  try {
+    const base = commitIn(r.box, { 'a.txt': edit(lines(40), 20, 'changed before fixing') }, 'change the finding', true);
+    sh(r.person, 'pull', '--quiet', '--ff-only', 'origin', BRANCH);
+    const fix = commitIn(r.box, { 'helper.txt': edit(lines(10), 4, 'guarded') }, 'fix through helper');
+    const incoming = commitIn(r.person, { 'other.txt': lines(10, ' (new)') }, 'unrelated change', true);
+    const out = pushFix({ git: r.git, branch: BRANCH, fix, base, message });
+    assert.equal(out.status, 'merged');
+    const finding = { path: 'a.txt', start_line: 20, end_line: 20, files: ['helper.txt'] };
+    const findings = [
+      { ...finding, id: 'changed', commit: r.base },
+      { ...finding, id: 'missing', commit: null },
+      { ...finding, id: 'unavailable', commit: 'a'.repeat(40) },
+      { ...finding, id: 'not-ancestor', commit: incoming },
+      { ...finding, id: 'missing-file', path: 'missing.txt', commit: r.base },
+    ];
+    assert.deepEqual(staleFindings({ git: r.git, base, fix, incoming, findings }), findings.map((f) => f.id));
   } finally {
     r.cleanup();
   }
@@ -209,4 +252,18 @@ test('hunk ranges: changes, deletions, insertions and binary files', () => {
   assert.deepEqual(parseHunks(''), []);
   assert.deepEqual(parseHunks('@@ -3 +3 @@\n-a\n+b\n@@ -10,2 +10,0 @@\n-x\n-y\n@@ -15,0 +14,1 @@\n+z\n'), [[3, 3], [10, 11], [15, 16]]);
   assert.deepEqual(parseHunks('diff --git a/x b/x\nBinary files a/x and b/x differ\n'), [[0, Infinity]]);
+});
+
+test('line mapping accounts for insertions and deletions and rejects uncertain ranges', () => {
+  assert.deepEqual(mapLines('', 20, 21), [20, 21]);
+  assert.deepEqual(mapLines('@@ -19,0 +20,10 @@\n', 20, 21), [30, 31]);
+  assert.deepEqual(mapLines('@@ -3,5 +2,0 @@\n', 20, 21), [15, 16]);
+  assert.deepEqual(mapLines('@@ -3,2 +3,4 @@\n@@ -10,2 +12,0 @@\n', 20, 21), [20, 21]);
+  assert.deepEqual(mapLines('@@ -22 +22,2 @@\n', 20, 21), [20, 21]);
+  assert.equal(mapLines('@@ -20 +20 @@\n', 20, 21), null);
+  assert.equal(mapLines('@@ -19,2 +18,0 @@\n', 20, 21), null);
+  assert.equal(mapLines('@@ -20,0 +21,10 @@\n', 20, 21), null);
+  assert.equal(mapLines('Binary files a/x and b/x differ\n', 20, 21), null);
+  assert.equal(mapLines('old mode 100644\nnew mode 100755\n', 20, 21), null);
+  assert.equal(mapLines('', 0, 1), null);
 });

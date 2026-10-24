@@ -58,7 +58,7 @@ const THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $cu
           id
           isResolved
           resolvedBy { login }
-          comments(first: 1) { nodes { databaseId url body author { login } } }
+          comments(first: 1) { nodes { databaseId url body author { login } originalCommit { oid } } }
         }
       }
     }
@@ -81,7 +81,7 @@ async function listThreads(github, owner, repo, number) {
       // text: the comment as people read it (explanation, rule, suggestion), without the markers.
       const text = first.body.replace(FINDING_RE, '').replace(/\n*<sub>[^\n]*<\/sub>\s*$/, '').trim();
       // resolvedBy: null when the App resolved it (GraphQL types it as a User, which a bot is not).
-      threads.push({ id: node.id, resolved: node.isResolved, resolvedBy: node.resolvedBy?.login ?? null, url: first.url, commentId: first.databaseId, finding, text });
+      threads.push({ id: node.id, resolved: node.isResolved, resolvedBy: node.resolvedBy?.login ?? null, url: first.url, commentId: first.databaseId, commit: first.originalCommit?.oid ?? null, finding, text });
     }
     if (!page.pageInfo.hasNextPage) return threads;
     cursor = page.pageInfo.endCursor;

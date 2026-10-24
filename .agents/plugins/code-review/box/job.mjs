@@ -390,7 +390,7 @@ async function pushFix(github, info, sha) {
       try {
         const findings = (await review.listThreads(github, owner, repo, number))
           .filter((t) => !t.resolved && files.has(t.finding.id))
-          .map(({ finding: f }) => ({ id: f.id, path: f.path, start_line: f.start_line, end_line: f.end_line, files: files.get(f.id) }));
+          .map(({ finding: f, commit }) => ({ id: f.id, path: f.path, start_line: f.start_line, end_line: f.end_line, commit, files: files.get(f.id) }));
         stale = catchup.staleFindings({ git: sharedGit(), base: info.head_sha, fix: sha, incoming: outcome.incoming, findings });
       } catch (error) {
         // Unsure which lines moved: resolve none of them.
