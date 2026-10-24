@@ -95,7 +95,7 @@ function Bars({ t, race = false }: { t: Tile; race?: boolean }) {
 }
 
 // The hero's one moment of motion: the headline benchmark as a race. Static under reduced motion.
-export function Race({ t, sub = 'Shorter is faster. Measured on a real app.' }: { t: Tile; sub?: string }) {
+export function Race({ t, sub = 'Shorter is faster. Measured on open-source code.' }: { t: Tile; sub?: string }) {
   return (
     <figure className="race-card">
       <figcaption>

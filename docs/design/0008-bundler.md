@@ -223,8 +223,9 @@ linked batch runs under Node.
   strings, Yarn PnP. Missing
   diagnostics: assignments to imports and constants, export cycles, strict `package.json`
   JSON. The oracle README lists the remaining failures by cause.
-- Minified output is about 3% larger than esbuild's (no cross-module constant inlining, no
-  `--minify-syntax` rewrites of classes and templates yet).
+- Minified output is 2.9% smaller than esbuild's in total over the top npm packages (median
+  per-package ratio 0.993, `ecosystem/STATUS.md`), but larger on 277 of 914 packages: no
+  cross-module constant inlining, no `--minify-syntax` rewrites of classes and templates yet.
 
 ## Alternatives considered
 

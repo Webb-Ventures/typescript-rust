@@ -21,8 +21,8 @@ and `ts-node` for scripts, servers and tests. Like them, it doesn't check types;
 - `--watch`, which restarts Node when a file of the module graph changes, recovers after a
   syntax error and leaves no processes behind.
 - A warm start that only checks file sizes and times before handing over to Node.
-- Emit that matches tsc 7: all 339 files of the private-app apps and packages compile to
-  the same JavaScript.
+- tsx's own test suite with ts-r-run in place of tsx: 75 of 86 compared cases pass. Node's
+  TypeScript (type stripping) tests: 36 of 36 compared cases pass.
 
 ## How a run works
 

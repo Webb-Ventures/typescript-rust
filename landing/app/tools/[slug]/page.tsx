@@ -84,7 +84,7 @@ export default async function ToolPage({ params }: Props) {
           </ul>
           <p className="lede">{t.intro}</p>
         </div>
-        {tile && <Race t={tile} sub={launched ? 'Shorter is faster.' : 'Shorter is faster. Pre-release build, real app.'} />}
+        {tile && <Race t={tile} sub={launched ? 'Shorter is faster.' : 'Shorter is faster. Pre-release build, public inputs.'} />}
       </section>
 
       <section className="block tool-switch" aria-labelledby="switch-h">
@@ -118,7 +118,7 @@ export default async function ToolPage({ params }: Props) {
       <section className="block" aria-labelledby="measured-h">
         <header className="block-head">
           <h2 id="measured-h">Measured</h2>
-          <p>Every run, on the same reference app as the home page, with the command and commit that recorded it.</p>
+          <p>Every run, on the same pinned public projects as the home page, with the command and commit that recorded it.</p>
         </header>
         {t.sections.map(id => <BenchSection key={id} s={section(id)} />)}
         {rows.length > 0 && (

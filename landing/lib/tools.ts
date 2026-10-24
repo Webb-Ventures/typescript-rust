@@ -91,7 +91,6 @@ Usage: ts-r-dev [root] [options]
       'No CSS bundling; @import is not followed',
       'No lowering below ES2015: const, classes and destructuring are errors at --target=es5',
       'No --mangle-props, --drop, --pure or --keep-names',
-      'Minified output is about 3% larger than esbuild’s',
     ],
     usage: `Usage: ts-r-build [options] [entry points]
 
@@ -121,7 +120,7 @@ Usage: ts-r-dev [root] [options]
       'ts-r-check type-checks a TypeScript project and prints diagnostics in tsc’s format, with tsc’s error codes. Like tsc, it writes JavaScript, source maps and declarations unless noEmit is set; --noEmit only checks. It is the least finished part of ts-r, and it follows one rule: no false positives first.',
     works: [
       'Loading the project from tsconfig.json, including extends, with tsc’s config diagnostics',
-      'Module resolution that matches tsc’s on every resolution of the reference app',
+      'Module resolution that matches tsc’s on all but 10 of 158,174 resolutions in five public repos',
       'Assignability, calls and overloads, generics and inference, unions and narrowing',
       'keyof, mapped, conditional and literal types; classes, declarations and unused-code checks',
       'tsc’s output in both plain and pretty form, with tsc’s exit codes',
@@ -189,7 +188,7 @@ Usage: ts-r-dev [root] [options]
       'tsconfig paths and JSX settings; stack traces mapped back to TypeScript',
       '--watch, which restarts Node when a file in the graph changes',
       'A warm start that only checks file sizes and times before handing over to Node',
-      'Emit that matches tsc 7 on every file of the reference app',
+      '75 of 86 compared tests of tsx’s own suite pass, and 36 of 36 of Node’s type-stripping tests',
     ],
     notYet: [
       'The cache check doesn’t notice a new file that would change a resolution',
@@ -230,7 +229,7 @@ Needs Node 22.15+ (module.registerHooks).`,
     ],
     notYet: [
       'Slower than TypeScript 7’s own LSP to first diagnostics, and per keystroke on two of three measured projects',
-      '22 of 24 reference-app projects fall back to tsserver for diagnostics',
+      'Parity is all or nothing per project: one differing diagnostic sends the project to tsserver',
       'The VS Code extension isn’t packaged yet',
       'Windows is untested',
     ],

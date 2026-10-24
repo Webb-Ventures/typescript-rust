@@ -38,7 +38,6 @@ esbuild, it strips types without checking them. Run [ts-r-check](ts-r-check.md) 
 - IIFE output isn't re-indented, and runtime helpers are repeated per chunk.
 - Not implemented: `import defer` and `import source`, glob `require` and `import()` of
   template strings, Yarn PnP.
-- Minified output is about 3% larger than esbuild's.
 
 The full list is in the design record, [0008 bundler](../../../docs/design/0008-bundler.md).
 
@@ -145,8 +144,8 @@ Correctness:
 - esbuild's end-to-end bundler tests, run against ts-r-build: 832 of 872 compared cases
   pass (95.4%); 13 of the 40 failures are intended differences where ts-r-build follows
   tsc 7.
-- Ecosystem bundle stage: 844 packages pass and 71 fail (92.2%). Minified output is 3.1%
-  larger than esbuild's in total, with a median per-package ratio of 1.048.
+- Ecosystem bundle stage: all 915 compared packages pass (100%). Minified output is 2.9%
+  smaller than esbuild's in total over 914 packages, with a median per-package ratio of 0.993.
 
 Method and commits: [build](/benchmarks/#build),
 [ecosystem](/benchmarks/#ecosystem) and

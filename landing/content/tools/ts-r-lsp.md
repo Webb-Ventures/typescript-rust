@@ -43,7 +43,8 @@ lockfile or the TypeScript version changes. `TS_R_LSP_PARITY=off` turns the chec
 
 - In VS Code, the `ts-r.checker` setting (`auto` by default) sends a project to the ts-r
   backend only when it passes the parity check; other projects use TypeScript. Parity is all
-  or nothing per project: 22 of 24 private-app projects fall back today.
+  or nothing per project, so one differing diagnostic sends the whole project to TypeScript.
+  How many of the public bench projects pass it is not measured yet.
 - Over tsserver, the LSP side has no TypeScript code actions, signature help, document
   symbols, formatting, semantic tokens or inlay hints.
 - Slower than TypeScript 7's own LSP to first diagnostics, and per keystroke on two of the
