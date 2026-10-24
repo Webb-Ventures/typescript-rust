@@ -209,7 +209,7 @@
       "id": "check",
       "nav": "Check vs tsc 7",
       "title": "ts-r-check against tsc 7.0.2",
-      "intro": "Type checking five public projects from the command line, cold (no saved history), against TypeScript 7.0.2's native tsc. These repos do not type-check cleanly under TypeScript 7, and ts-r-check does not report the same diagnostics as tsc on them yet: it reports extra ones on all five (27 on date-fns to 1,333 on RxJS in the last comparison) and misses some of tsc's. It also skips checks it does not implement yet, so these times will move as the checker grows.",
+      "intro": "Type checking five public projects from the command line, cold (no saved history), against TypeScript 7.0.2's native tsc. Some of these repos do not type-check cleanly under TypeScript 7. ts-r-check reports exactly tsc's diagnostics on tRPC, date-fns and TypeORM; on Playwright it reports 2 extra, and on RxJS 6 extra and misses 5 of about 21,900 (2026-10-24, 087afc9). It also skips checks it does not implement yet, so these times will move as the checker grows.",
       "charts": [
         {
           "id": "total",

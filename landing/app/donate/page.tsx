@@ -30,7 +30,7 @@ export default function Donate() {
       <section className="hero" aria-labelledby="title">
         <h1 id="title">Help build ts-r</h1>
         <p className="lede">
-          ts-r will be free and open source. Sponsorship pays for the time to build it: the type checker, the bundler, the linter
+          ts-r is free and open source. Sponsorship pays for the time to build it: the type checker, the bundler, the linter
           and the editor tooling. Every tier includes the perks of the tiers below it.
         </p>
       </section>

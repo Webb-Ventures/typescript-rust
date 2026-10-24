@@ -16,7 +16,7 @@ diagnostics from [ts-r-lint](ts-r-lint.md).
 
 | Backend | When it is used | What you get |
 |---|---|---|
-| ts-r | `ts-r.typeBackend` is `ts-r` (the default), the client speaks LSP, and the lib files are found | The ts-r checker: diagnostics, hover, definition, references, rename, completion, signature help, document symbols, semantic tokens |
+| ts-r | `ts-r.typeBackend` is `ts-r` (the default), the client speaks LSP, and the lib files are found; in VS Code, `ts-r.checker` (see [VS Code](#vs-code)) | The ts-r checker: diagnostics, hover, definition, references, rename, completion, signature help, document symbols, semantic tokens |
 | typescript | `ts-r.typeBackend` is `typescript`, or the ts-r backend can't be used | Your project's own TypeScript: tsserver 5.x or 6.x, or TypeScript 7's native `--lsp --stdio` |
 
 The ts-r checker still misses errors tsc reports (see [ts-r-check](ts-r-check.md)). So when a
@@ -41,19 +41,20 @@ lockfile or the TypeScript version changes. `TS_R_LSP_PARITY=off` turns the chec
 
 ## Not yet
 
-- VS Code windows talk the tsserver protocol and never reach the ts-r backend. They always
-  use TypeScript.
+- In VS Code, the `ts-r.checker` setting (`auto` by default) sends a project to the ts-r
+  backend only when it passes the parity check; other projects use TypeScript. Parity is all
+  or nothing per project: 22 of 24 private-app projects fall back today.
 - Over tsserver, the LSP side has no TypeScript code actions, signature help, document
   symbols, formatting, semantic tokens or inlay hints.
-- The ts-r backend builds a fresh checker on every edit. TSX files with React types are slower
-  per keystroke than tsserver.
-- Hover at a call shows the declared signature, not the resolved one. JSX attributes have no
-  types yet.
+- Slower than TypeScript 7's own LSP to first diagnostics, and per keystroke on two of the
+  three measured public projects (see [Measured](#measured) and the
+  [benchmarks](/benchmarks/)).
+- Hover at a call shows the declared signature, not the resolved one. JSX intrinsic
+  attributes (`<form onSubmit>`) have no symbol for hover or go to definition.
 - Only open files get diagnostics; files that depend on an edited file aren't checked until
   you open them.
-- Parity is all or nothing per project: 22 of 24 private-app projects fall back today.
-- The VS Code extension in `editors/vscode` isn't packaged as a `.vsix` and hasn't been tested
-  inside a running VS Code.
+- The VS Code extension in `editors/vscode` isn't packaged as a `.vsix` yet. It is tested
+  inside VS Code 1.142 (`npm run test:vscode`).
 - Windows is untested.
 
 The full list is in [ts_r_lsp's notes](../../../crates/ts_r_lsp/AGENTS.md).
@@ -95,15 +96,19 @@ OPTIONS
 ## VS Code
 
 The extension in `editors/vscode` makes ts-r-lsp VS Code's tsserver, so the built-in
-TypeScript features keep working on the shared daemon.
+TypeScript features keep working on the shared daemon. Projects that pass the parity check
+are answered by the ts-r checker (diagnostics, hover, completions, definition, references,
+rename, signature help, semantic highlighting, outline); your TypeScript starts on demand only
+for features ts-r doesn't have yet, such as quick fixes and refactorings.
 
 | Setting | Default | Effect |
 |---|---|---|
-| `ts-r.typeBackend` | `ts-r` | Type backend for LSP clients (VS Code windows use TypeScript) |
+| `ts-r.checker` | `auto` | `auto`: ts-r for projects that pass the parity check, your TypeScript for the rest; `on`: ts-r everywhere; `off`: your TypeScript |
 | `ts-r.memoryBudgetMB` | 1500 | Restart the backend above this |
 | `ts-r.idleShutdownMinutes` | 10 | Stop an idle backend (0 = never) |
 | `ts-r.lint.enable` | `auto` | `auto` turns lint off when the ESLint extension is enabled |
 | `ts-r.serverPath` | | Path to `ts-r-lsp` |
+| `ts-r.manageTypeScript` | `true` | Point VS Code's TypeScript at the ts-r stand-in |
 
 The extension looks for the binary in `ts-r.serverPath`, then `TS_R_LSP_BINARY`, then
 `node_modules/@ts-r.dev/lsp-<platform>/bin/`, then `PATH`, then `~/.cargo/bin`. See
