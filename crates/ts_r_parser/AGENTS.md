@@ -164,6 +164,13 @@ Files:
   - Regex pattern and flag errors from the lexer are moved to `regex_errs`
     (`defer_regex_errors`): tsc 7 reports them from the checker, so they are kept only
     without syntax errors, and are never merged with another error at their position.
+    They go to `grammar`; TS1501 and TS1503 (a flag or named group newer than some target,
+    `is_target_regex_error`) go to `grammar` only, and the checker keeps them when the
+    target is older than the one the message names.
+  - Octal and `\8` escapes (TS1487, TS1488) in strings are lexer errors, also listed in
+    `grammar` and in `ParseResult::lenient`: tsc reports them as syntax errors (the checker
+    driver does, from `lenient`), but ESLint's parser and esbuild accept them in sloppy
+    code. In an untagged template they are plain syntax errors (`template_element`).
   - An escaped keyword consumed by `bump` as a keyword is TS1260; one read as a name goes
     through `intern_token`, which marks it (`name_tok`).
 - **Context lives in `Ctx` bits** (`AWAIT`, `YIELD`, `DISALLOW_IN`, `AMBIENT`,
@@ -498,7 +505,7 @@ Dev: `ts_r_testing` (memory cap for tests and examples).
   - Strict-mode-only restrictions beyond reserved words.
 - Recovery on badly broken input is close to tsc, but follow-on errors can differ in count
   and position. The first error usually matches.
-- Regex pattern syntax is not validated (see `ts_r_lexer`).
+- Regex pattern errors have no "Did you mean" suggestions (see `ts_r_lexer`).
 - No incremental re-parse; whole-file only.
 - `parse` runs on one thread. The corpus tool is single-threaded so its numbers are
   per-core throughput.
