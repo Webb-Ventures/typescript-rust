@@ -2,8 +2,8 @@
 //! mapped types, tuples, template literal types, type members, type parameters/arguments.
 
 use ts_r_ast::{
-    JsDocSyntax, JsDocSyntaxKind, KeywordTypeKind, MappedModifier, MethodKind, Modifiers, Node,
-    NodeId, NodeList, Span, TypeOperatorKind, UnaryOp,
+    BinaryOp, JsDocSyntax, JsDocSyntaxKind, KeywordTypeKind, MappedModifier, MethodKind, Modifiers,
+    Node, NodeId, NodeList, Span, TypeOperatorKind, UnaryOp,
 };
 use ts_r_diagnostics::messages;
 use ts_r_lexer::TokenKind as T;
@@ -980,13 +980,13 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        if !self.eat(T::Semi) {
-            self.eat(T::Comma);
-        }
-        // Members after the mapping are an error; skip them.
-        while !matches!(self.kind(), T::RBrace | T::Eof) && !self.aborting() {
-            self.error(messages::UNEXPECTED_TOKEN);
-            self.bump();
+        // tsc reads the end of the mapping as a statement's `;` (a `,` is `';' expected`),
+        // then type members up to the `}`: the checker's TS7061 at the first one.
+        self.semicolon();
+        let members = self.parse_type_member_list(false);
+        if let Some(&first) = self.ast.list(members).first() {
+            let span = self.member_error_span(first);
+            self.deferred_grammar_error_at(messages::MAPPED_TYPE_MEMBERS, span, &[]);
         }
         self.expect_closing(T::RBrace, T::LBrace, open);
         self.finish_node(
@@ -1162,6 +1162,14 @@ impl<'a> Parser<'a> {
         if !self.expect(T::LBrace) {
             return NodeList::EMPTY;
         }
+        let members = self.parse_type_member_list(interface);
+        self.check_mapped_member_names(members);
+        self.expect_closing(T::RBrace, T::LBrace, open);
+        members
+    }
+
+    /// The members of an interface, type literal or mapped type, up to the closing `}`.
+    fn parse_type_member_list(&mut self, interface: bool) -> NodeList {
         let mark = self.scratch.len();
         self.with_ctx(
             Ctx::TYPE,
@@ -1189,9 +1197,40 @@ impl<'a> Parser<'a> {
                 })
             },
         );
-        let members = self.finish_list(mark);
-        self.expect_closing(T::RBrace, T::LBrace, open);
-        members
+        self.finish_list(mark)
+    }
+
+    /// TS7061 at the first of `members` (of a class, interface or type literal) when one of
+    /// them is a property named by a computed `in` expression (`[P in K]: T`, a mapped type
+    /// written where members go; tsc: grammarchecks.go, checkGrammarProperty). Deferred:
+    /// tsc reports it only in a file without syntax errors. Once per list.
+    pub(crate) fn check_mapped_member_names(&mut self, members: NodeList) {
+        let mapped = self.ast.list(members).iter().any(|&m| {
+            let key = match *self.ast.node(m) {
+                Node::PropertySignature { key, .. } | Node::PropertyDef { key, .. } => key,
+                _ => return false,
+            };
+            matches!(*self.ast.node(key), Node::ComputedKey { expr }
+                if matches!(*self.ast.node(expr), Node::Binary { op: BinaryOp::In, .. }))
+        });
+        if mapped && let Some(&first) = self.ast.list(members).first() {
+            let span = self.member_error_span(first);
+            self.deferred_grammar_error_at(messages::MAPPED_TYPE_MEMBERS, span, &[]);
+        }
+    }
+
+    /// Where tsc reports an error on a member: the name of a property, the whole member
+    /// otherwise (scanner.go, GetErrorRangeForNode).
+    pub(crate) fn member_error_span(&self, m: NodeId) -> Span {
+        match *self.ast.node(m) {
+            Node::PropertySignature { key, .. } | Node::PropertyDef { key, .. } => {
+                self.ast.span(key)
+            }
+            Node::MethodDef { key, kind, .. } if kind != MethodKind::Constructor => {
+                self.ast.span(key)
+            }
+            _ => self.ast.span(m),
+        }
     }
 
     fn parse_type_member(&mut self, interface: bool) -> Option<NodeId> {

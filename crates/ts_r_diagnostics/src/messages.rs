@@ -130,6 +130,7 @@ messages! {
     REST_ELEMENT_INITIALIZER = 1186 Error "A rest element cannot have an initializer.";
     REST_ELEMENT_PROPERTY_NAME = 2566 Error "A rest element cannot have a property name.";
     REST_ELEMENT_NOT_LAST = 2462 Error "A rest element must be last in a destructuring pattern.";
+    MAPPED_TYPE_MEMBERS = 7061 Error "A mapped type may not declare properties or methods.";
     MERGE_CONFLICT_MARKER = 1185 Error "Merge conflict marker encountered.";
     FILE_APPEARS_TO_BE_BINARY = 1490 Error "File appears to be binary.";
     DECLARATION_OR_STATEMENT_EXPECTED = 1128 Error "Declaration or statement expected.";

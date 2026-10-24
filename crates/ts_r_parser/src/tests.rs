@@ -2920,3 +2920,37 @@ fn target_regex_errors_are_grammar_only() {
     assert_eq!(codes(&r.grammar), vec![1503, 1501, 1500]);
     assert_eq!(codes(&r.syntax_errors()), Vec::<u32>::new());
 }
+
+/// Members after a mapping in a mapped type, and `[P in K]` keys in an interface, type
+/// literal or class, are TS7061 (deferred) at the first member's name, once per list. A `,`
+/// after the mapping is `';' expected` (tsc 7, observed).
+#[test]
+fn mapped_type_members_are_ts7061() {
+    let all = |src: &str| {
+        let r = parse(src, SourceKind::Ts);
+        let f = |ds: &[Diagnostic]| {
+            ds.iter()
+                .map(|d| (d.code, d.span.start))
+                .collect::<Vec<_>>()
+        };
+        (f(&r.diagnostics), f(&r.grammar))
+    };
+    // 0         1         2         3         4
+    // 0123456789012345678901234567890123456789012345
+    let (d, g) = all("type A = { [K in X]: 1; b: 2; c(): void };");
+    assert_eq!(d, vec![(7061, 24)]);
+    assert_eq!(g, d);
+    let (d, _) = all("type B = { [K in X]: 1, };");
+    assert_eq!(d, vec![(1005, 22)]);
+    let (d, g) = all("interface I { a: 1; [P in X]: 1; [Q in X]: 2 }");
+    assert_eq!(d, vec![(7061, 14)]);
+    assert_eq!(g, d);
+    let (d, g) = all("class C { [P in X]: 1; }");
+    assert_eq!(d, vec![(7061, 10)]);
+    assert_eq!(g, d);
+    // Methods with `in` keys are not mapped-type members.
+    let (d, _) = all("interface J { [P in X](): void }");
+    assert!(d.iter().all(|&(c, _)| c != 7061), "{d:?}");
+    ok("type M = { [K in X]: 1; };");
+    ok("type N = { readonly [K in X]?: 1 }");
+}

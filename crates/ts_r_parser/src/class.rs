@@ -132,6 +132,7 @@ impl<'a> Parser<'a> {
             },
         );
         let members = self.finish_list(mark);
+        self.check_mapped_member_names(members);
         self.expect_closing(T::RBrace, T::LBrace, open);
         members
     }

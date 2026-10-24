@@ -410,6 +410,13 @@ Files:
     destructuring target (assigned with `=`, or a `for...in`/`for...of` head, nested
     included) is TS1312 at the `=`, computed in `finish` from `shorthand_inits` and
     `pattern_literals` (both rewound with speculation).
+- **Mapped type members** (tsc 7 observed; rule from tsc `internal/parser/parser.go`
+  parseMappedType and `internal/checker/grammarchecks.go` checkGrammarProperty). After
+  `[K in X]: T` a mapped type ends its mapping like a statement (`';' expected` at a `,`),
+  then parses ordinary type members up to `}`; any members are TS7061 at the first one's
+  name (deferred) and are dropped from the tree. A property (not a method) whose computed
+  key is `[P in X]` in an interface, type literal or class is the same TS7061 at the first
+  member of the list, once per list; the checker checks nothing in that key.
 - **Heritage types take their type arguments across a line break.** `extends A<T>` followed by
   a newline and `{` is `ExprWithTypeArgs { expr: A, type_args: <T> }`, as on one line; the
   instantiation expression the member tail builds there is unwrapped (and dropped from the
