@@ -1962,3 +1962,27 @@ fn glob_entry_points_expand_to_matching_files() {
     let ctx = BuildContext::new(opts(&["nope/*.js"]), Arc::new(fs.clone())).expect("options");
     assert!(ctx.build().has_errors());
 }
+
+#[test]
+fn an_export_named_proto_is_a_namespace_property() {
+    if !have_node() {
+        return;
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "const lib = require('./lib.mjs');\nimport * as ns from './lib2.mjs';\n\
+             console.log(lib.__proto__, Object.keys(ns));\n",
+        ),
+        ("lib.mjs", "export const __proto__ = 123;\n"),
+        ("lib2.mjs", "const x = 1;\nexport { x as __proto__ };\n"),
+    ]);
+    for minify in [false, true] {
+        let mut o = opts(&["entry.js"]);
+        o.format = Some(Format::Cjs);
+        o.minify_syntax = minify;
+        o.minify_whitespace = minify;
+        let r = run_build(&fs, o);
+        assert_eq!(run_node("proto-export", &r, "entry.js"), "123 [ '__proto__' ]\n");
+    }
+}
