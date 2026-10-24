@@ -508,7 +508,7 @@ fn calls_import_meta(ast: &mut Ast) -> bool {
 /// hides it from the detection.
 fn hide_esmodule_marker(code: &mut String) {
     const MARKER: &str = "Object.defineProperty(exports, \"__esModule\", { value: true });";
-    let head = code.len().min(1024);
+    let head = code.floor_char_boundary(1024);
     if let Some(at) = code[..head].find(MARKER) {
         code.replace_range(
             at..at + MARKER.len(),
@@ -586,6 +586,8 @@ pub fn decode(data: &[u8]) -> Option<Compiled> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    ts_r_testing::cap_memory!();
 
     fn run(path: &str, src: &str, pkg: PackageType) -> Compiled {
         compile(path, src, &TransformOptions::default(), pkg, false).expect("compiles")
@@ -740,6 +742,19 @@ mod tests {
         let mut code = String::from("let a;\n");
         hide_esmodule_marker(&mut code);
         assert_eq!(code, "let a;\n");
+    }
+
+    #[test]
+    fn commonjs_output_preserves_multibyte_strings_across_the_prefix_limit() {
+        let value = "é".repeat(600);
+        let src = format!("const s = \"{value}\";\n");
+        let opts = TransformOptions {
+            target: ts_r_config::ScriptTarget::ES2022,
+            ..Default::default()
+        };
+        let c = compile("a.cts", &src, &opts, PackageType::Unspecified, false).expect("compiles");
+        assert_eq!(c.format, Format::Cjs);
+        assert!(c.code.contains(&value), "{}", c.code);
     }
 
     #[test]
