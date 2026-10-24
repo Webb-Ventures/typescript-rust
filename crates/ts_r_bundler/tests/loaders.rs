@@ -152,6 +152,73 @@ fn file_loader_paths_are_relative_to_each_chunk() {
 }
 
 #[test]
+fn file_loader_urls_are_escaped() {
+    let fs = project(&[
+        (
+            "entry.js",
+            r#"import url from "./a\"b'c.png?q=\"'\\\n"; console.log(url);"#,
+        ),
+        ("a\"b'c.png", "image"),
+    ]);
+    for public_path in ["", "https://example.com/\"'\\\n"] {
+        for minify in [false, true] {
+            let mut o = opts(&["entry.js"]);
+            o.loaders.insert(".png".into(), Loader::File);
+            o.asset_names = "[name]".into();
+            o.public_path = public_path.into();
+            o.minify_whitespace = minify;
+            o.minify_syntax = minify;
+            o.minify_identifiers = minify;
+            let ctx = BuildContext::new(o, Arc::new(fs.clone())).expect("options");
+            let expected = format!(
+                "{}/a\"b'c.png?q=\"'\\\n",
+                if public_path.is_empty() {
+                    "."
+                } else {
+                    public_path
+                }
+            );
+            for _ in 0..2 {
+                let r = ctx.build();
+                let js = output(&r, "out/entry.js");
+                let parsed = ts_r_parser::parse(js, ts_r_ast::SourceKind::Js);
+                assert!(parsed.diagnostics.is_empty(), "{js}");
+                assert!(parsed.ast.nodes.iter().any(|node| {
+                    matches!(*node, ts_r_ast::Node::StringLit { value } if parsed.ast.atom(value) == expected)
+                }), "{js}");
+                assert!(!js.contains("__TSR_ASSET_"), "{js}");
+            }
+        }
+    }
+}
+
+#[test]
+fn file_loader_many_urls_with_large_entry() {
+    use std::fmt::Write as _;
+
+    let mut fs = MemoryFs::new();
+    let mut entry = String::new();
+    for i in 0..128 {
+        writeln!(entry, "import a{i} from './a{i}.png'; console.log(a{i});").unwrap();
+        fs.add_file(&format!("/proj/a{i}.png"), "image");
+    }
+    let large = "x".repeat(1 << 20);
+    writeln!(entry, "console.log('{large}');").unwrap();
+    fs.add_file("/proj/entry.js", &entry);
+    let mut o = opts(&["entry.js"]);
+    o.loaders.insert(".png".into(), Loader::File);
+    o.asset_names = "[name]".into();
+    let r = build(&fs, o);
+    let js = output(&r, "out/entry.js");
+    assert!(js.contains(&large));
+    assert!(!js.contains("__TSR_ASSET_"));
+    for i in 0..128 {
+        assert!(js.contains(&format!("\"./a{i}.png\"")));
+    }
+    assert_eq!(r.outputs.len(), 129);
+}
+
+#[test]
 fn query_suffixes_are_separate_modules() {
     let fs = project(&[
         (

@@ -78,7 +78,7 @@ impl BuildResult {
 }
 
 /// Persistent-cache format version (bump when meta, fragments or plans change shape).
-const CACHE_VERSION: u32 = 7;
+const CACHE_VERSION: u32 = 8;
 
 /// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
 pub struct BuildContext {
@@ -523,10 +523,10 @@ impl BuildContext {
         timer.lap("print");
         // Assemble.
         let mut chunk_outs: Vec<ChunkOutput> = (0..pl.chunks.len())
-            .map(|ci| assemble(ci, &pl, &graph, &by_module, opts, self.threads))
+            .map(|ci| assemble(ci, &pl, &graph, &by_module, opts, self.threads, &outbase))
             .collect();
         let mut outputs = Vec::new();
-        // Assets from the file loader: (placeholder, path relative to outdir, bytes).
+        // Assets from the file loader, with paths relative to outdir.
         let mut assets: Vec<(&Asset, String)> = Vec::new();
         for (i, m) in graph.modules.iter().enumerate() {
             if lk.included[i]
@@ -538,12 +538,6 @@ impl BuildContext {
         // The outputs take the chunks' text (the metafile only needs `module_bytes`).
         for (ci, co) in chunk_outs.iter_mut().enumerate() {
             let file = format!("{outdir}/{}", pl.chunks[ci].file);
-            for (a, rel) in &assets {
-                if co.code.contains(&a.placeholder) {
-                    let url = asset_url(&outdir, &file, rel, &opts.public_path) + &a.query;
-                    co.code = co.code.replace(&a.placeholder, &url);
-                }
-            }
             // A CSS entry point produces only its stylesheet.
             let css_entry = pl.chunks[ci]
                 .entry
@@ -952,7 +946,7 @@ fn sorted(mut m: Vec<Message>) -> Vec<Message> {
 /// A file-loader asset's output path relative to the output directory: `template` (the
 /// asset names with all but `[dir]` filled in) with `[dir]` the directory of `module`
 /// relative to `outbase`, `..` written `_.._` as for entry names.
-fn asset_path(template: &str, module: &str, outbase: &str) -> String {
+pub(crate) fn asset_path(template: &str, module: &str, outbase: &str) -> String {
     let file = crate::graph::split_query(split_with_type(module).0).0;
     let mut dir = path::relative(outbase, path::directory_of(file), true);
     if dir == "." {
@@ -980,7 +974,7 @@ fn dotdot_dirs(dir: &str) -> String {
 
 /// The URL of asset `rel` (relative to `outdir`) from output file `file`: under
 /// `public_path` when set, else relative to the file's directory (`./a.png`, `../a.png`).
-fn asset_url(outdir: &str, file: &str, rel: &str, public_path: &str) -> String {
+pub(crate) fn asset_url(outdir: &str, file: &str, rel: &str, public_path: &str) -> String {
     if !public_path.is_empty() {
         return format!("{}/{rel}", public_path.trim_end_matches('/'));
     }
