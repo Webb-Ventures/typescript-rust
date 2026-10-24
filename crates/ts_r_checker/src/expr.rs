@@ -1283,7 +1283,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             let through_alias = self.c.sym_flags(s).intersects(SymbolFlags::ALIAS);
             self.check_const_enum_reference(e, sym, through_alias);
         }
-        let declared = self.type_of_symbol(sym);
+        // `import * as ns` of a callable `export =` (or an ES module's of a CommonJS
+        // one) has its own namespace object type.
+        let declared = if sym != s && self.is_namespace_import(s) {
+            self.type_of_symbol(s)
+        } else {
+            self.type_of_symbol(sym)
+        };
         let f = self.c.sym_flags(sym);
         if f.intersects(SymbolFlags::VARIABLE) && !f.intersects(SymbolFlags::ALIAS) {
             return self.narrowed_identifier_type(e, sym, declared, name);

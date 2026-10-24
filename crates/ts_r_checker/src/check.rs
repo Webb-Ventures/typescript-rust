@@ -8685,10 +8685,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                         _ => continue,
                     };
-                    // A re-exported `default` may be synthesized, as for a default import.
+                    // A re-exported or renamed `default` may be synthesized, as for a
+                    // default import.
                     if self.c.export_of(module_sym, &name).is_some()
                         || (name == "default"
-                            && matches!(ast.node(s), Node::ExportSpecifier { .. })
                             && self.c.opts.allow_synthetic_default_imports
                             && (self.c.export_of(module_sym, "export=").is_some()
                                 || self.c.can_have_synthetic_default(file, module_sym)))

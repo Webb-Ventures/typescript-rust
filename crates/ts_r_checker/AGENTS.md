@@ -1752,7 +1752,20 @@ Files, by layer:
 - **Re-exported `default`** (`export { default } from "./b"`) of a module without one is
   TS2305 unless a default can be synthesized, as for a default import (TS1192): synthetic
   defaults allowed and the module has `export =` or may have a synthetic default
-  (`reexport_missing_default`).
+  (`reexport_missing_default`). `import { default as d }` is a default import too
+  (`synthetic_default_module` accepts the named `default`).
+- **Namespace imports of callable `export =`** (`namespace_import_module_type`; tsc:
+  checker.go resolveESModuleSymbol, getTypeWithSyntheticDefaultImportType,
+  cloneTypeAsModuleType): `import * as ns` (not `export * as ns`) of a module whose
+  `export =` value has call or construct signatures or a `default` property, or of a
+  CommonJS file from an ES module under the Node kinds, is typed as the value's
+  properties and index signatures without its signatures (so `ns()` is TS2349), plus
+  `default: <value>` when the module can have a synthetic default
+  (`namespace_import_synthetic_default`, no `allowSyntheticDefaultImports` gate: Node
+  ESM-to-CJS always, ESM-to-ESM never, TS sources only with `export =`, declaration files
+  unless the `default` (a property of the `export =` value's type) is declared as a default
+  export, or `__esModule` is exported). The view prints `typeof X` for a class, enum or
+  namespace entity (`ObjectFlags::MODULE` on the literal), its structure for a function.
 - **A synthetic default overrides a real one** (`node_commonjs_default_module`, resolved in
   `resolve_alias`; tsc: checker.go getTargetOfModuleDefault, canHaveSyntheticDefault):
   under `node16`..`nodenext` a default import, `{ default }` import or `default` re-export

@@ -891,25 +891,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             ObjectKind::Anonymous { decl, kind, .. } if decl.0 == u32::MAX => {
                 let sym = SymId(decl.1);
                 match kind {
-                    anon::CLASS_STATIC | anon::NAMESPACE => {
-                        let f = self.c.sym_flags(sym);
-                        if f.intersects(SymbolFlags::MODULE_FILE) {
-                            let name = self.c.sym_name(sym).to_owned();
-                            let path = if let Some(d) = self.c.first_decl(sym) {
-                                let p = self.c.file(d.file).path.clone();
-                                if self.c.bound(d.file).file_symbol.0 == 0 && name == "__file" {
-                                    strip_ts_ext(&p)
-                                } else {
-                                    name.trim_matches('"').to_owned()
-                                }
-                            } else {
-                                name
-                            };
-                            return format!("typeof import(\"{path}\")");
-                        }
-                        let n = self.class_static_name(sym);
-                        format!("typeof {}", self.qualified_name(sym, n))
-                    }
+                    anon::CLASS_STATIC | anon::NAMESPACE => self.typeof_symbol_name(sym),
                     anon::SYMBOL_FUNCTION => {
                         let f = self.c.sym_flags(sym);
                         if f.intersects(SymbolFlags::NAMESPACE) || self.has_expando(sym) {
@@ -924,8 +906,36 @@ impl<'c, 'a> Ck<'c, 'a> {
             ObjectKind::Mapped { .. } if self.is_generic_mapped_type(t) => {
                 self.print_mapped(t, depth, stack)
             }
+            // A namespace import's view of a class, enum or namespace (`import * as ns`
+            // of an `export =`): named by the symbol.
+            ObjectKind::Literal { sym }
+                if o.flags.contains(ts_r_types::ObjectFlags::MODULE) && sym != SymId::NONE =>
+            {
+                self.typeof_symbol_name(sym)
+            }
             _ => self.print_structure(t, depth, stack),
         }
+    }
+
+    /// `typeof C` / `typeof NS` / `typeof import("m")` for a class, namespace or module.
+    fn typeof_symbol_name(&mut self, sym: SymId) -> String {
+        let f = self.c.sym_flags(sym);
+        if f.intersects(SymbolFlags::MODULE_FILE) {
+            let name = self.c.sym_name(sym).to_owned();
+            let path = if let Some(d) = self.c.first_decl(sym) {
+                let p = self.c.file(d.file).path.clone();
+                if self.c.bound(d.file).file_symbol.0 == 0 && name == "__file" {
+                    strip_ts_ext(&p)
+                } else {
+                    name.trim_matches('"').to_owned()
+                }
+            } else {
+                name
+            };
+            return format!("typeof import(\"{path}\")");
+        }
+        let n = self.class_static_name(sym);
+        format!("typeof {}", self.qualified_name(sym, n))
     }
 
     /// What a type met again while printed (or nested past the print depth) prints: `any`

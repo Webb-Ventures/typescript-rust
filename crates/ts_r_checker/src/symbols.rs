@@ -1461,14 +1461,17 @@ impl<'a> Checker<'a> {
         let SymKind::Binder(file, local) = self.sym_kind(s) else {
             return None;
         };
-        let info = self.bound(file).alias(local)?;
-        let ts_r_binder::AliasTarget::Module {
-            request,
-            import: ts_r_binder::ImportName::Default,
-        } = info.target
-        else {
+        let b = self.bound(file);
+        let info = b.alias(local)?;
+        let ts_r_binder::AliasTarget::Module { request, import } = info.target else {
             return None;
         };
+        // `import { default as d }` is a default import too.
+        match import {
+            ts_r_binder::ImportName::Default => {}
+            ts_r_binder::ImportName::Named(n) if b.name_text(self.ast(file), n) == "default" => {}
+            _ => return None,
+        }
         let m = self.module_target_symbol(self.link.module_target(file, request))?;
         self.can_have_synthetic_default(file, m).then_some(m)
     }
@@ -1638,6 +1641,27 @@ impl<'a> Checker<'a> {
             }
         }
         self.export_of(m, "__esModule").is_none()
+    }
+
+    /// Under `node16`..`nodenext`, whether an ES module `importer` imports the CommonJS
+    /// file module `m` (not JSON).
+    pub fn esm_imports_cjs(&self, importer: FileId, m: SymId) -> bool {
+        use ts_r_config::ModuleKind as M;
+        if !matches!(
+            self.opts.module,
+            M::Node16 | M::Node18 | M::Node20 | M::NodeNext
+        ) || !self.file(importer).esm_format
+        {
+            return false;
+        }
+        match self.sym_kind(m) {
+            SymKind::Binder(f, l) => {
+                self.bound(f).file_symbol == l
+                    && !self.file(f).is_json()
+                    && !self.file(f).esm_format
+            }
+            _ => false,
+        }
     }
 
     /// Under `node16`..`nodenext`, whether an ES module `importer` imports the file module
