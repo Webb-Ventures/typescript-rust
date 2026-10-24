@@ -148,16 +148,21 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   on the worker that checked the file (so node types are cached): `locate` (offset to node,
   name to symbols: bindings, references, members via the object's type, qualified names,
   import/export specifiers, shorthands, destructuring keys, component JSX attributes),
-  `hover` (tsserver-style display string, narrowed type at expressions, JSDoc as markdown),
+  `hover` (tsserver-style display string, narrowed type at expressions, JSDoc as markdown;
+  an import alias shows its target as tsc 7 does: `(alias) function name(...)` under the
+  local name, no `import` line),
   `complete` (members after `.` from the object's apparent type, or a namespace's exports;
   scope locals innermost first, globals, keywords; with a typed prefix, auto-imports of the
   project's own modules' exports with the import edit in the file's style: quotes,
   semicolons, `.js` extensions (always in an ES module under `node16`/`nodenext`), joining
   an existing import; `completionItem/resolve` adds
-  the hover line and docs, routed by `data.uri`), `signature` (the enclosing call or `new`,
-  active parameter from top-level commas, labels with UTF-16 parameter offsets, JSDoc),
-  `nav` (definition through aliases and module specifiers, type definition, references,
-  highlights, prepareRename/rename with shorthand expansion; references scan non-lib,
+  the hover line and docs, routed by `data.uri`), `signature` (the enclosing call, `new` or
+  tagged template, active parameter from top-level commas or the `${}` holding the cursor,
+  labels with UTF-16 parameter offsets, no `new` prefix, the resolved instantiation of a
+  generic signature, JSDoc),
+  `nav` (definition through aliases and module specifiers, to the overload a call resolves
+  to, type definition, references, highlights (write kind only where a value is stored:
+  assignments, initialised declarations, `this.x += 1`), prepareRename/rename with shorthand expansion; references scan non-lib,
   non-`node_modules` files whose text contains the name, including string-literal element
   accesses `o["x"]`), `outline` (document symbols,
   semantic tokens with TypeScript's legend). A checker panic is caught per request and per
@@ -554,6 +559,8 @@ TS_R_LSP_TEST_TS6=<node_modules with typescript 5/6> \
 TS_R_LSP_TEST_TS7=<node_modules with typescript 7>   \
   scripts/limit.sh -- cargo test -p ts_r_lsp --test real_typescript
 scripts/limit.sh -- cargo run --release -p ts_r_lsp --example two_windows -- <repo>
+# parity with tsc 7 --lsp on TypeScript's fourslash tests (bench/lsp-oracle/README.md)
+scripts/limit.sh --time-s 1500 -- node bench/lsp-oracle/run.mjs --jobs 4
 # L4: record tsserver's answers for the action fixtures (TypeScript 6 from private-app)
 scripts/limit.sh -- node crates/ts_r_lsp/tests/oracle/actions.js <typescript/lib dir> [names]
 # organize imports on a whole project, tsserver vs ts-r
@@ -642,8 +649,9 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features: hover at a call shows the declared signature, not the resolved one (tsserver
-  shows `f<string>(x: string)`); JSX intrinsic attributes (`<form onSubmit>`) have no symbol
+- Features (the fourslash oracle lists the rest by cause: bench/lsp-oracle/README.md): hover
+  at a call shows the declared signature, not the resolved one (tsserver shows
+  `f<string>(x: string)`); JSX intrinsic attributes (`<form onSubmit>`) have no symbol
   (the checker does not type JSX yet); references do not follow renaming imports
   (`import { a as b }`: uses of `b`) or contextually typed object literal properties.
   Completions: no module-specifier path completions, no bracket-notation members
