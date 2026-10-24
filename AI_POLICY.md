@@ -50,6 +50,9 @@ commit messages, commit authors and committers, and `Co-authored-by` trailers.
 - **A false match?** For example, a file or a word that only looks like a model name. Say so in
   a comment. A maintainer can reopen the pull request and add the `ai-policy:exempt` label,
   which skips the check.
+- **Dependabot.** Its own pull requests are not checked: GitHub writes them, and they quote
+  the updated packages' release notes, which can name any model. Commits anyone else pushes
+  onto such a pull request are checked as usual.
 - **Found later?** Work that turns out to come from a model outside the list is closed or
   reverted, whether or not the check caught it.
 - Repeatedly submitting such work after it has been closed is treated as a

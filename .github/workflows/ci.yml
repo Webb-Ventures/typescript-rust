@@ -4,6 +4,9 @@ name: CI
 # member of the organization, or a login in the CODE_REVIEW_USERS variable). For anyone else's
 # pull request the first job fails until a trusted user approves its latest commit (an
 # approving review); ci-approval.yml then re-runs it. A new push needs a new approval.
+# Dependabot's pull requests (.github/dependabot.yml) run straight away: their branches are in
+# this repository and GitHub gives their runs a read-only token and no secrets, which is all
+# this workflow needs. A dependency update is new code too: review it before approving.
 #
 # What runs, and what it costs:
 # - Stacked PRs: only the top PR of a stack runs CI (a PR is the top when no open PR is based on
@@ -79,12 +82,17 @@ jobs:
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           trusted() { # login, author association
             case "$2" in OWNER | MEMBER) return 0 ;; esac
             jq -e --arg u "$1" 'index($u) != null' <<<"$TRUSTED" >/dev/null
           }
           if trusted "$AUTHOR" "$ASSOCIATION"; then exit 0; fi
+          # Dependabot's version updates (.github/dependabot.yml): GitHub opens them from a branch
+          # here, and their runs get a read-only token and no secrets. Its PRs still need a
+          # maintainer's approving review to merge.
+          if [ "$AUTHOR" = 'dependabot[bot]' ] && [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then exit 0; fi
           # An approving review on the head commit by a trusted user (a re-run sees new reviews).
           while read -r login association; do
             if [ -n "$login" ] && trusted "$login" "$association"; then

@@ -4,6 +4,8 @@ name: AI policy
 # OpenAI's and Meta's Muse models) in its title, description, branch, author, commit messages,
 # commit authors or co-author trailers, with a comment saying what matched. A maintainer can
 # reopen a false match and label it ai-policy:exempt. Script: .github/scripts/ai-policy.mjs.
+# Dependabot's own pull requests pass: GitHub writes them, and they quote the updated packages'
+# release notes, which can name any model. Commits anyone else pushes onto one are still checked.
 #
 # pull_request_target, so it can comment on and close pull requests from forks: it checks out
 # the base branch (this file and the script as merged) and only reads the pull request through

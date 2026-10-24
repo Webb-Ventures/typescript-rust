@@ -11,6 +11,10 @@ name: Pages
 # the organization, or a login in the CODE_REVIEW_USERS variable). Anyone else's pull request
 # fails its first job until a trusted user approves its latest commit; ci-rerun.yml then re-runs
 # it. Fork pull requests get a read-only token and no secrets, and are never previewed.
+# Dependabot's pull requests build straight away (as in ci.yml); they get a read-only token and
+# only Dependabot secrets, so the build runs without POSTHOG_KEY and they are never previewed
+# (dependabot[bot] is not a preview author, and the preview job skips without Cloudflare
+# credentials anyway).
 # Previews: a pull request from this repository whose author is in the PREVIEW_AUTHORS repository
 # variable (comma-separated logins; default riley-wv) is also deployed to a Cloudflare Worker at
 # https://preview-pr-<n>.ts-r.dev/ and linked in a PR comment. preview-cleanup.yml deletes it
@@ -71,12 +75,17 @@ jobs:
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           trusted() { # login, author association
             case "$2" in OWNER | MEMBER) return 0 ;; esac
             jq -e --arg u "$1" 'index($u) != null' <<<"$TRUSTED" >/dev/null
           }
           if trusted "$AUTHOR" "$ASSOCIATION"; then exit 0; fi
+          # Dependabot's version updates (.github/dependabot.yml): GitHub opens them from a branch
+          # here, and their runs get a read-only token and no secrets. Its PRs still need a
+          # maintainer's approving review to merge.
+          if [ "$AUTHOR" = 'dependabot[bot]' ] && [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then exit 0; fi
           while read -r login association; do
             if [ -n "$login" ] && trusted "$login" "$association"; then
               echo "::notice::@$login approved $HEAD_SHA for the site build."

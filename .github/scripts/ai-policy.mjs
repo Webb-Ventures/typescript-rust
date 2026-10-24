@@ -3,6 +3,8 @@
 // OpenAI's or Meta's Muse, anywhere in its title, description, branch name, author, commit
 // messages, commit authors or co-author trailers, is closed with a comment. A maintainer
 // can reopen it and add the `ai-policy:exempt` label for a false match.
+// Dependabot's pull requests are checked only for commits someone else pushed onto them
+// (DEPENDABOT below).
 //
 // Runs from ai-policy.yml on pull_request_target with the base branch checked out: it reads the
 // pull request through the API and never runs the pull request's code.
@@ -41,15 +43,27 @@ export function findViolations(fields) {
   return out;
 }
 
+// Dependabot's own pull requests: GitHub writes their title, branch, description and commits,
+// and quotes the updated packages' release notes and commit lists in them, where a model name
+// can appear without crediting anyone (a library adding Gemini support, say). The PR author is
+// set by GitHub and only the repository's writers can push to its branches, so for a PR opened
+// by Dependabot its own fields and commits are skipped; anyone else's commits pushed onto it
+// are still checked.
+export const DEPENDABOT = 'dependabot[bot]';
+
 /** The fields of a pull request and its commits that count as attribution. */
 export function attributionFields(pull, commits) {
-  const fields = [
-    { where: 'title', text: pull.title },
-    { where: 'description', text: pull.body },
-    { where: 'branch name', text: pull.head?.ref },
-    { where: 'author', text: pull.user?.login },
-  ];
+  const byDependabot = pull.user?.login === DEPENDABOT;
+  const fields = byDependabot
+    ? []
+    : [
+        { where: 'title', text: pull.title },
+        { where: 'description', text: pull.body },
+        { where: 'branch name', text: pull.head?.ref },
+        { where: 'author', text: pull.user?.login },
+      ];
   for (const c of commits) {
+    if (byDependabot && c.author?.login === DEPENDABOT) continue;
     const id = c.sha?.slice(0, 7) ?? 'commit';
     fields.push({ where: `commit ${id} message`, text: c.commit?.message });
     fields.push({ where: `commit ${id} author`, text: [c.commit?.author?.name, c.commit?.author?.email, c.author?.login].filter(Boolean).join(' ') });

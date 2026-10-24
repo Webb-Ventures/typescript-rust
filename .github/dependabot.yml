@@ -1,0 +1,179 @@
+# Dependabot version updates: one weekly pass (Monday morning, Sydney time) per package root.
+# Minor and patch updates of a root come as one grouped pull request; a major update comes on
+# its own, so a breaking change can be reviewed (and reverted) apart from the routine ones.
+#
+# Every pull request is labelled changelog:skip (the release notes leave dependency bumps out)
+# and dependencies (once that label exists; Dependabot ignores labels the repository lacks).
+# Titles follow the repository's "<area>: <what>" style through the commit-message prefix.
+#
+# Not watched, on purpose:
+# - crates/*/tests/fixtures/: test inputs. Their package.json files and node_modules are
+#   committed as they are and must never move.
+# - npm/: package templates. The build script (npm/scripts/build-packages.mjs) writes their
+#   versions and dependencies from the workspace version at release time.
+#
+# Oracle pins: the reference tools whose versions must match upstream/UPSTREAM.json (esbuild,
+# TypeScript, Vite, typescript-eslint) are ignored below. They move only through the
+# upstream-sync process (`cargo xtask upstream bump` / `cargo xtask upstream sync`, the
+# upstream-sync skill), which re-pins UPSTREAM.json, re-runs the oracles and updates the numbers
+# that quote them in the same pull request.
+#
+# How these pull requests get through CI and the AI policy check: .github/workflows/ci.yml,
+# pages.yml and ai-policy.yml (search for dependabot).
+
+version: 2
+
+updates:
+  # The Rust workspace (crates/* and xtask) and its Cargo.lock.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Australia/Sydney
+    # New releases wait a few days before Dependabot proposes them (yanked or compromised
+    # versions are usually caught by then). Security updates are not delayed.
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - changelog:skip
+    commit-message:
+      prefix: Deps
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  # The workflows' actions. They are pinned by major tag (actions/checkout@v4), so the updates
+  # are major versions; they come together so paired actions (upload-artifact and
+  # download-artifact, cache and cache/restore) move as one.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Australia/Sydney
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - changelog:skip
+    commit-message:
+      prefix: CI
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The website (ts-r.dev).
+  - package-ecosystem: npm
+    directory: /landing
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Australia/Sydney
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - changelog:skip
+    commit-message:
+      prefix: Site
+    groups:
+      landing-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # The drop-in's fallback TypeScript: stays at the TypeScript version pinned in
+      # upstream/UPSTREAM.json, so the site's parity check compares ts-r with the oracle.
+      # Moves only through the upstream-sync process (cargo xtask upstream bump).
+      - dependency-name: typescript
+      # ts-r's own drop-in: bumped with each ts-r release (landing/AGENTS.md, Dogfooding ts-r).
+      - dependency-name: "@ts-r.dev/typescript"
+
+  # The VS Code extension.
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Australia/Sydney
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - changelog:skip
+    commit-message:
+      prefix: VS Code
+    groups:
+      vscode-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Must match engines.vscode (^1.90.0): newer types let the extension call APIs that the
+      # oldest supported VS Code lacks, and vsce refuses to package it. Move both together.
+      - dependency-name: "@types/vscode"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      # The Node major of the Electron that VS Code 1.90 ships (Node 20).
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+
+  # The benchmark reference tools (bench/package.json). Only oxc-parser and tsx are free to
+  # move; the rest are oracle pins.
+  - package-ecosystem: npm
+    directory: /bench
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Australia/Sydney
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - changelog:skip
+    commit-message:
+      prefix: Bench
+    groups:
+      bench-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Oracle pins: each matches upstream/UPSTREAM.json (esbuild is also the bundler oracle in
+      # bench/esbuild-oracle, typescript the tsc 7 reference, vite the dev-server reference).
+      # They move only through the upstream-sync process (cargo xtask upstream bump / sync, the
+      # upstream-sync skill), which updates UPSTREAM.json, the oracle numbers and the docs that
+      # quote these versions.
+      - dependency-name: esbuild
+      - dependency-name: typescript
+      - dependency-name: vite
+      # Pinned with Vite (bench/README.md, bench/dev/dev.mjs): moves when Vite does.
+      - dependency-name: "@vitejs/plugin-react"
+      # The lint oracle (UPSTREAM.json typescript-eslint), should it be installed here.
+      - dependency-name: typescript-eslint
+      - dependency-name: "@typescript-eslint/*"
+
+  # The code-review box's dispatcher (.agents/plugins/code-review/box, built into its image).
+  - package-ecosystem: npm
+    directory: /.agents/plugins/code-review/box
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Australia/Sydney
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - changelog:skip
+    commit-message:
+      prefix: Review box
+    groups:
+      review-box-minor-patch:
+        update-types: [minor, patch]
