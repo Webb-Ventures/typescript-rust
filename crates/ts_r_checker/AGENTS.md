@@ -427,7 +427,14 @@ Files, by layer:
   declaration (or the type-determining accessor) is reported. TS7022 (unannotated
   variables, `noImplicitAny`) uses the same records but only for cycles made of
   `Resolving::Type` steps alone, outside loops, with no function in the initializer: our
-  eager function and loop-flow checking makes cycles tsc does not have.
+  eager function and loop-flow checking makes cycles tsc does not have. The one exception
+  is a cycle of variable types and plain class methods' inferred return types (`next() {
+  return v; }` with `for (var v of new It())`): tsc finds it too, and reports the variable
+  (TS7022) and each method at its name (TS7023, `report_circular_return` reading the
+  method symbol's own signature; `is_class_method_sig`). A cycle through a method with no
+  variable step is still not reported.
+- TS7039 (`noImplicitAny`): a mapped type without a template (`{ [P in "bar"] }`), at the
+  mapped type (tsc: checker.go, checkMappedType, reportImplicitAny).
 - TS7023 for getters (`report_circular_getter` in `check.rs`, `noImplicitAny`): a getter
   without a return type annotation whose property type (inferred from its body, no setter
   annotation) is circular is reported at its name, once per getter. Only cycles made of

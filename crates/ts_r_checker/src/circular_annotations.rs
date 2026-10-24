@@ -162,11 +162,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         // differs from tsc.
         // An accessor, method or function on the cycle is reported by tsc as its implicit
         // return type (TS7023).
+        // A class method's inferred return type on the cycle (`next() { return v; }` with
+        // `for (var v of new It)`) is one tsc also finds; it reports both.
         if implicit
-            && !path.iter().all(|r| {
-                matches!(r, Resolving::Type(s) if !self.c.sym_flags(*s).intersects(
-                    SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION
-                ))
+            && !path.iter().all(|r| match *r {
+                Resolving::Type(s) => !self.c.sym_flags(s).intersects(
+                    SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION,
+                ),
+                Resolving::Return(g) => self.is_class_method_sig(g),
+                _ => false,
             })
         {
             return;
@@ -181,6 +185,35 @@ impl<'c, 'a> Ck<'c, 'a> {
             dg::_0_IS_REFERENCED_DIRECTLY_OR_INDIRECTLY_IN_ITS_OWN_TYPE_ANNOTATION_2502
         };
         self.error(Loc::new(file, name), info, &[&shown]);
+    }
+
+    /// Whether `sig` is the signature of a plain class method (not an accessor), declared
+    /// with a body and without a return type annotation.
+    pub(crate) fn is_class_method_sig(&self, sig: ts_r_types::SigId) -> bool {
+        let Some(d) = self.store().sig(sig).decl.and_then(Loc::unpack) else {
+            return false;
+        };
+        let ast = self.ast(d.file);
+        // The declaration is the method itself or its function value.
+        let method = match *ast.node(d.node) {
+            Node::MethodDef { .. } => Some(d),
+            _ => self.c.parent(d).filter(
+                |p| matches!(*ast.node(p.node), Node::MethodDef { value, .. } if value == d.node),
+            ),
+        };
+        let Some(m) = method else { return false };
+        matches!(
+            *ast.node(m.node),
+            Node::MethodDef {
+                kind: ts_r_ast::MethodKind::Method,
+                ..
+            }
+        ) && self.c.parent(m).is_some_and(|c| {
+            matches!(
+                ast.node(c.node),
+                Node::ClassDecl { .. } | Node::ClassExpr { .. }
+            )
+        })
     }
 
     /// A step of a resolution cycle that tsc does not take: an inferred return type (its

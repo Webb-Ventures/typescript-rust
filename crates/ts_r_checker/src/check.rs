@@ -2070,12 +2070,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.report_circular_getter(p, key, l);
             return;
         }
+        let method = self.signature_from_decl(l);
+        let method = self.is_class_method_sig(method);
         let name = match *ast.node(l.node) {
             Node::FunctionDecl { name, .. } => name,
-            Node::FunctionExpr { name: Some(n), .. } => Some(n),
-            // Methods and accessors are not reported: their `this` and member types
-            // resolve in a different order from tsc's here, which finds no cycle.
+            Node::FunctionExpr { name: Some(n), .. } if !method => Some(n),
+            // Methods are reported only on cycles of variable types and method return
+            // types: through `this` and member types they resolve in a different order
+            // from tsc's here, which finds no cycle.
             _ => match parent.map(|p| *ast.node(p.node)) {
+                Some(Node::MethodDef { key, .. }) if method => Some(key),
                 Some(Node::VarDeclarator {
                     name,
                     init: Some(i),
@@ -2084,7 +2088,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => return,
             },
         };
-        let sig = self.signature_from_decl(l);
+        let mut sig = self.signature_from_decl(l);
+        // A method's type reads the signature declared by the method node itself.
+        if method
+            && let Some(p) = parent
+            && let Some(sym) = self.c.sym_of_decl(p)
+        {
+            let t = self.type_of_symbol(sym);
+            if let Some(&s) = self
+                .signatures_of(t, crate::members::SigKind::Call)
+                .iter()
+                .find(|&&s| self.store().sig(s).decl.and_then(Loc::unpack) == Some(p))
+            {
+                sig = s;
+            }
+        }
         self.return_type_of(sig);
         if !self.circular.contains(&Resolving::Return(sig)) {
             return;
@@ -2109,11 +2127,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         };
         if path.is_empty()
-            || path.iter().any(|r| match *r {
-                Resolving::Return(s) => !named_function(self, s),
-                Resolving::Node(_) => false,
-                _ => true,
-            })
+            || (!method
+                && path.iter().any(|r| match *r {
+                    Resolving::Return(s) => !named_function(self, s),
+                    Resolving::Node(_) => false,
+                    _ => true,
+                }))
+            || (method
+                && (!path.iter().any(|r| matches!(r, Resolving::Type(_)))
+                    || path.iter().any(|r| match *r {
+                        Resolving::Return(s) => !self.is_class_method_sig(s),
+                        Resolving::Type(s) => self.c.sym_flags(s).intersects(
+                            SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION,
+                        ),
+                        _ => true,
+                    })))
         {
             return;
         }
@@ -9023,7 +9051,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_circular_type_alias(file, n);
                 self.check_intrinsic_type_alias(file, n);
             }
-            if let Node::MappedType { .. } = node {
+            if let Node::MappedType { ty, .. } = node {
+                // A mapped type without a template maps every key to an implicit `any`.
+                if ty.is_none() && self.c.opts.no_implicit_any && self.reporting(file) {
+                    self.error(
+                        Loc::new(file, n),
+                        dg::MAPPED_OBJECT_TYPE_IMPLICITLY_HAS_AN_ANY_TEMPLATE_TYPE_7039,
+                        &[],
+                    );
+                }
                 self.check_mapped_type_keys(Loc::new(file, n));
             }
             if let Node::Rest { arg } = node {
