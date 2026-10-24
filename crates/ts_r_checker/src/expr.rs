@@ -532,17 +532,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // error, so not next to syntax errors or the call's TS1326
                 // (importWithTypeArguments).
                 let start = self.c.span(e).start;
+                let type_args = self
+                    .c
+                    .file(e.file)
+                    .grammar
+                    .iter()
+                    .any(|d| d.code == 1326 && d.span.start == start);
                 let no_dynamic = phase == ts_r_ast::ImportPhase::Evaluation
                     && self.c.opts.module == ts_r_config::ModuleKind::ES2015
                     && self.reporting(e.file)
                     && !self.c.file(e.file).kind.is_declaration()
                     && !self.has_syntax_errors(e.file)
-                    && !self
-                        .c
-                        .file(e.file)
-                        .grammar
-                        .iter()
-                        .any(|d| d.code == 1326 && d.span.start == start);
+                    && !type_args;
                 if no_dynamic {
                     self.error(
                         e,
@@ -569,6 +570,41 @@ impl<'c, 'a> Ck<'c, 'a> {
                         &[&shown],
                     );
                 }
+                use ts_r_config::ModuleKind as M;
+                let old_module = !matches!(
+                    self.c.opts.module,
+                    M::ESNext
+                        | M::Node16
+                        | M::Node18
+                        | M::Node20
+                        | M::NodeNext
+                        | M::Preserve
+                        | M::AMD
+                        | M::UMD
+                        | M::System
+                );
+                // `import(x,)` and `import(x, {},)`: TS1009 below the modules that take
+                // import attributes (checkGrammarImportCallExpression).
+                if old_module
+                    && !no_dynamic
+                    && !verbatim_cjs
+                    && !type_args
+                    && phase == ts_r_ast::ImportPhase::Evaluation
+                    && self.reporting(e.file)
+                    && !self.has_syntax_errors(e.file)
+                    && !self.c.file(e.file).kind.is_declaration()
+                    && let Some(comma) = trailing_comma_at(
+                        &self.c.file(e.file).text,
+                        self.c.span(at(options.unwrap_or(arg))).end as usize,
+                    )
+                {
+                    self.error_span(
+                        e.file,
+                        Span::new(comma as u32, comma as u32 + 1),
+                        dg::TRAILING_COMMA_NOT_ALLOWED_1009,
+                        &[],
+                    );
+                }
                 if let Some(o) = options {
                     let ot = self.check_expr(at(o));
                     // The options must fit the global `ImportCallOptions | undefined`.
@@ -579,22 +615,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let target = self.union2(g, TypeId::UNDEFINED);
                         self.check_assignable_with_elaboration(ot, target, at(o), None);
                     }
-                    use ts_r_config::ModuleKind as M;
                     if !no_dynamic
                         && self.reporting(e.file)
                         && !self.c.file(e.file).kind.is_declaration()
-                        && !matches!(
-                            self.c.opts.module,
-                            M::ESNext
-                                | M::Node16
-                                | M::Node18
-                                | M::Node20
-                                | M::NodeNext
-                                | M::Preserve
-                                | M::AMD
-                                | M::UMD
-                                | M::System
-                        )
+                        && old_module
                     {
                         self.error(
                             at(o),
@@ -10450,4 +10474,28 @@ pub(crate) enum IndexKeyKind {
 /// The `exports` identifier (the JavaScript CommonJS export object, by syntax).
 fn is_exports_identifier(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
     crate::nodes::ident_text(ast, n) == Some("exports")
+}
+
+/// The position of a `,` right after `from` in `text` that only trivia separates from a
+/// closing `)` (an argument list's trailing comma).
+fn trailing_comma_at(text: &str, from: usize) -> Option<usize> {
+    let skip = |mut i: usize| -> usize {
+        let b = text.as_bytes();
+        loop {
+            match (b.get(i), b.get(i + 1)) {
+                (Some(c), _) if c.is_ascii_whitespace() => i += 1,
+                (Some(b'/'), Some(b'/')) => {
+                    i = text[i..].find('\n').map_or(b.len(), |n| i + n);
+                }
+                (Some(b'/'), Some(b'*')) => {
+                    i = text[i + 2..].find("*/").map_or(b.len(), |n| i + 2 + n + 2);
+                }
+                _ => return i,
+            }
+        }
+    };
+    let comma = skip(from);
+    (text.as_bytes().get(comma) == Some(&b',')
+        && text.as_bytes().get(skip(comma + 1)) == Some(&b')'))
+    .then_some(comma)
 }

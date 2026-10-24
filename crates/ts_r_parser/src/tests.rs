@@ -2440,7 +2440,8 @@ fn recovery_matches_tsc() {
             "function f() { for await (const x of []); }\nclass C { static { for await (const x of []); } }\nasync function g() { for await (const x of []); }",
             &[(1103, 1, 20), (18038, 2, 24)],
         ),
-        ("import(p,);\nimport(p, {},);", &[(1009, 1, 9)]),
+        // A trailing comma in an import call is the checker's (it depends on `module`).
+        ("import(p,);\nimport(p, {},);", &[]),
         // Import calls take an argument list (importAssertion1, importCallExpressionSpread).
         (
             "import(...a);\nimport();\nimport('./0', {}, {});",

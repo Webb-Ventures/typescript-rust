@@ -1055,7 +1055,7 @@ impl<'a> Parser<'a> {
         // An argument list as in a call (importAssertion1, plainJSGrammarErrors): the
         // checker's rules are grammar errors here. A third argument and later ones are
         // dropped (tsc: TS1450, a message, not an error).
-        let (args, trailing) = self.with_ctx(0, NESTED_CLEAR, |p| {
+        let (args, _) = self.with_ctx(0, NESTED_CLEAR, |p| {
             p.parse_delimited(List::ArgumentExpressions, |p| {
                 let s = p.start();
                 if p.eat(T::DotDotDot) {
@@ -1073,14 +1073,7 @@ impl<'a> Parser<'a> {
         let list = self.ast.list(args);
         let arg = list.first().copied();
         let options = list.get(1).copied();
-        if let (Some(_), None, Some(comma)) = (arg, options, trailing) {
-            // `import(x,)` (dynamicImportTrailingComma); `import(x, {},)` is fine.
-            self.deferred_grammar_error_at(
-                messages::TRAILING_COMMA_NOT_ALLOWED,
-                Span::new(comma, comma + 1),
-                &[],
-            );
-        }
+        // A trailing comma (`import(x,)`) is the checker's TS1009: it depends on `module`.
         let arg = arg.unwrap_or_else(|| {
             let pos = self.prev_end.saturating_sub(1);
             self.add_node(Span::at(pos), Node::Missing {})

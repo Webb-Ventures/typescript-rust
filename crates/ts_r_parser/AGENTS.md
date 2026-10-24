@@ -253,13 +253,15 @@ Files:
   module names outside ambient contexts (TS1035), and in a namespace TS1319/1194/1147.
   Also: `export <modifiers> export =` (TS1120), `module N` (TS1540 per name), `if (x);`
   (TS1313), `for await` outside an async function (TS1103; TS18038 in a static block,
-  told apart by `Jump::StaticBlock`), `import(x,)` (TS1009), generator overloads (TS1222),
+  told apart by `Jump::StaticBlock`), generator overloads (TS1222),
   definite assignment `!` (TS1255/1263/1264), abstract accessor bodies (TS1318) and index
   signature trailing commas (TS1025). Nothing under a `with` body is checked.
 - **Import calls take an argument list.** `import(...)` parses its arguments like a call:
   the first is the specifier, the second the options, later ones are parsed and dropped
   (tsc's TS1450 for them, and for `import()`, is a checker message). A spread argument is
-  TS1325 and `import(x,)` TS1009, both deferred. `import` followed by neither `(` nor `.`
+  TS1325, deferred. A trailing comma (`import(x,)`, `import(x, {},)`) is not the parser's:
+  the checker reports TS1009 below the modules that take import attributes
+  (tsc: grammarchecks.go checkGrammarImportCallExpression). `import` followed by neither `(` nor `.`
   in an expression is `Expression expected` without consuming it, so the import
   declaration after it parses. A named import or export list ends at the first token
   that is not a name, string or `,`.
