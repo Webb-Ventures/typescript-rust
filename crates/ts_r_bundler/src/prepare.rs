@@ -608,6 +608,8 @@ impl PrepareContext {
             Some(_) => JsxMode::Classic,
             None => match tsconfig_jsx {
                 Some(JsxEmit::React) | None => JsxMode::Classic,
+                // `--jsx-dev` picks the development runtime for `"jsx": "react-jsx"` too.
+                Some(JsxEmit::ReactJsx) if jsx.dev => JsxMode::AutomaticDev,
                 Some(JsxEmit::ReactJsx) => JsxMode::Automatic,
                 Some(JsxEmit::ReactJsxDev) => JsxMode::AutomaticDev,
                 Some(JsxEmit::Preserve) | Some(JsxEmit::ReactNative) => JsxMode::Preserve,
@@ -822,6 +824,31 @@ pub fn prepare_with(
                 ast.span(r).start,
                 "Top-level return cannot be used inside an ECMAScript module".into(),
             ));
+        }
+    }
+    // Top-level `this` of a CommonJS file is its `exports` object: when bundling it becomes
+    // `exports`, so the file is wrapped as CommonJS (as esbuild does). Not for `.mjs`/`.mts`,
+    // files with a top-level `await` (modules), or a file that declares its own `exports`.
+    if !strict
+        && ctx.opts.bundle
+        && !path.ends_with(".mjs")
+        && !path.ends_with(".mts")
+        && ast.nodes.iter().any(|n| matches!(n, Node::This {}))
+    {
+        let (this, _, tla) = top_level_this_and_return(&ast);
+        let own_exports = || {
+            let scopes = Scopes::analyze(&ast, strict);
+            scopes
+                .module_symbols()
+                .iter()
+                .any(|&s| ast.atom(scopes.symbol(s).name) == "exports")
+        };
+        if !this.is_empty() && !tla && !(src.contains("exports") && own_exports()) {
+            for id in this {
+                let at = ast.span(id).start;
+                let exports = build::ident(&mut ast, "exports", at);
+                build::replace(&mut ast, id, exports);
+            }
         }
     }
     let mut scopes = Scopes::analyze(&ast, strict);

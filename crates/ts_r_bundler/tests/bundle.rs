@@ -1215,10 +1215,10 @@ fn minified_commonjs_wrapper_parameters_are_mangled() {
     let code = file(&r, "/proj/out/main.cjs");
     assert!(!code.contains("module.exports={y"), "{code}");
     assert!(!code.contains("function(exports"), "{code}");
-    // Wrappers are arrows unless the module uses its own `this` (d.cjs) or `arguments`
-    // (e.cjs).
-    assert!(code.matches("=>{").count() >= 3, "{code}");
-    assert_eq!(code.matches("(function(").count(), 2, "{code}");
+    // Wrappers are arrows unless the module uses its own `arguments` (e.cjs); top-level
+    // `this` (d.cjs) is `exports`.
+    assert!(code.matches("=>{").count() >= 4, "{code}");
+    assert_eq!(code.matches("(function(").count(), 1, "{code}");
     if have_node() {
         assert_eq!(
             run_node("min-cjs-params", &r, "main.cjs"),
@@ -1781,4 +1781,64 @@ fn a_cycle_of_named_re_exports_is_an_error() {
         ])
         .is_empty()
     );
+}
+
+#[test]
+fn a_jsx_factory_of_this_is_the_module_this() {
+    // `--jsx-factory=this.h`: top-level `this` of an ES module is `undefined`.
+    let fs = project(&[("entry.jsx", "export {};\nconsole.log(<div />);\n")]);
+    let mut o = opts(&["entry.jsx"]);
+    o.jsx.factory = Some("this.h".into());
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("(void 0).h(\"div\""), "{code}");
+}
+
+#[test]
+fn jsx_dev_applies_to_a_tsconfig_react_jsx() {
+    let fs = project(&[
+        ("entry.tsx", "console.log(<><div /></>);\n"),
+        ("tsconfig.json", r#"{"compilerOptions": {"jsx": "react-jsx"}}"#),
+    ]);
+    let mut o = opts(&["entry.tsx"]);
+    o.jsx.dev = true;
+    o.external = vec!["react/jsx-dev-runtime".into()];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("from \"react/jsx-dev-runtime\""), "{code}");
+}
+
+#[test]
+fn a_missing_tsconfig_override_is_an_error() {
+    let fs = project(&[("entry.ts", "console.log(1);\n")]);
+    let mut o = opts(&["entry.ts"]);
+    o.tsconfig = Some("missing/tsconfig.json".into());
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
+    assert_eq!(
+        errors,
+        ["Cannot find tsconfig file \"missing/tsconfig.json\""]
+    );
+}
+
+#[test]
+fn top_level_this_of_a_commonjs_file_is_its_exports() {
+    let fs = project(&[
+        ("entry.js", "const lib = require('./lib.js');\nconsole.log(lib.a, lib.b);\n"),
+        ("lib.js", "this.a = 1;\n(() => { this.b = 2; })();\nfunction f() { return this; }\n"),
+        ("own.js", "var exports = {};\nthis.c = 3;\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("exports.a = 1"), "{code}");
+    assert!(code.contains("exports.b = 2"), "{code}");
+    assert!(code.contains("return this"), "{code}");
+    if have_node() {
+        assert_eq!(run_node("this_is_exports", &r, "entry.js").trim(), "1 2");
+    }
+    // A file with its own `exports` keeps `this`.
+    let r = run_build(&fs, opts(&["own.js"]));
+    assert!(file(&r, "/proj/out/own.js").contains("this.c = 3"));
 }

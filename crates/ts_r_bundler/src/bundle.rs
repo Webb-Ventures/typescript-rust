@@ -278,6 +278,16 @@ impl BuildContext {
         if let Err(e) = opts.validate() {
             return BuildResult::fail(vec![Message::new(Severity::Error, None, e)]);
         }
+        if let Some(t) = &opts.tsconfig {
+            let full = path::resolve(&opts.working_dir, t);
+            if !self.prep.resolver.fs().file_exists(&full) {
+                let text = format!(
+                    "Cannot find tsconfig file {:?}",
+                    pretty_path(&opts.working_dir, &full)
+                );
+                return BuildResult::fail(vec![Message::new(Severity::Error, None, text)]);
+            }
+        }
         let (entries, entry_names) = match self.resolve_entries() {
             Ok(e) => e,
             Err(m) => return BuildResult::fail(m),
