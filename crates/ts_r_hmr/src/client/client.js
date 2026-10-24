@@ -22,6 +22,7 @@ let socket;
 const outbox = [];
 
 function connect() {
+  console.debug(`${tag} connecting...`);
   const proto = location.protocol === "https:" ? "wss" : "ws";
   socket = new WebSocket(`${proto}://${location.host}${wsPath}`, "vite-hmr");
   socket.addEventListener("open", () => {
@@ -157,7 +158,10 @@ async function applyUpdate(payload, receivedAt) {
   }
 }
 
-async function fetchUpdate({ path, acceptedPath, timestamp, explicitImportRequired, isWithinCircularImport }) {
+// The module that started the invalidation chain the running accept callbacks belong to.
+let firstInvalidatedBy;
+
+async function fetchUpdate({ path, acceptedPath, timestamp, explicitImportRequired, isWithinCircularImport, firstInvalidatedBy: first }) {
   const mod = hotModules.get(path);
   if (!mod) return; // not loaded in this page
   const isSelf = path === acceptedPath;
@@ -182,8 +186,13 @@ async function fetchUpdate({ path, acceptedPath, timestamp, explicitImportRequir
     }
   }
   return () => {
-    for (const { deps, fn } of callbacks) {
-      fn(deps.map((d) => (d === acceptedPath ? fresh : undefined)));
+    firstInvalidatedBy = first;
+    try {
+      for (const { deps, fn } of callbacks) {
+        fn(deps.map((d) => (d === acceptedPath ? fresh : undefined)));
+      }
+    } finally {
+      firstInvalidatedBy = undefined;
     }
     console.debug(`${tag} hot updated: ${isSelf ? path : `${acceptedPath} via ${path}`}`);
   };
@@ -206,7 +215,10 @@ function updateLinkedCss({ path, timestamp }) {
         new Promise((resolve) => {
           staleLinks.add(el);
           const next = el.cloneNode();
-          next.href = new URL(path + "?t=" + timestamp, location.href).href;
+          // Keeps the link's own query (`?param=x`), with `t` replaced.
+          const url = new URL(el.href, location.href);
+          url.searchParams.delete("t");
+          next.href = url.pathname + (url.search ? url.search + "&" : "?") + "t=" + timestamp;
           const done = () => {
             el.remove();
             resolve();
@@ -296,7 +308,7 @@ export function createHotContext(ownerPath) {
     decline() {},
     invalidate(message) {
       emit("vite:invalidate", { path: ownerPath, message });
-      send({ type: "custom", event: "vite:invalidate", data: { path: ownerPath, message } });
+      send({ type: "custom", event: "vite:invalidate", data: { path: ownerPath, message, firstInvalidatedBy } });
       console.debug(`${tag} invalidate ${ownerPath}${message ? `: ${message}` : ""}`);
     },
     on(event, fn) {

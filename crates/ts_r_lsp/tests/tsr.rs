@@ -829,10 +829,8 @@ fn hover_shows_types_and_docs() {
     let (env, mut c) = nav_env("hover");
     let ub = env.uri("src/b.ts");
     let h = hover_text(&mut c, &ub, 1, 11);
-    assert!(
-        h.contains("(alias) len(s: string): number\nimport len"),
-        "{h}"
-    );
+    assert!(h.contains("(alias) function len(s: string): number"), "{h}");
+    assert!(!h.contains("import len"), "{h}");
     assert!(h.contains("Length of a string."), "{h}");
     let h = hover_text(&mut c, &ub, 3, 12);
     assert!(h.contains("(property) Point.x: number"), "{h}");
@@ -1149,6 +1147,164 @@ fn completions_and_signature_help() {
         s["signatures"][0]["documentation"]["value"],
         "Length of a string."
     );
+    c.shutdown();
+}
+
+/// Function values list `Function`'s members; non-arrow function bodies see `arguments`;
+/// declaration names get no list.
+#[test]
+fn completion_function_members_and_arguments() {
+    if !libs_present() {
+        return;
+    }
+    let text =
+        "function f(a: number) {\n  const g = () => a;\n  g;\n}\nf.;\nconst h = () => 1;\nh;\n";
+    let env = Env::new(
+        "complete-fn",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["label"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 2)));
+    for want in ["apply", "bind", "call", "length", "name", "toString"] {
+        assert!(l.iter().any(|x| x == want), "{want} missing: {l:?}");
+    }
+    // Inside `f` (also through the arrow `g`), but not at the top level.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 3)));
+    assert!(l.iter().any(|x| x == "arguments"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 1)));
+    assert!(!l.iter().any(|x| x == "arguments"), "{l:?}");
+    // Names being declared get no list.
+    for (line, ch) in [(0, 10), (0, 12), (1, 9)] {
+        let l = labels(&result(
+            &mut c,
+            "textDocument/completion",
+            at(&uc, line, ch),
+        ));
+        assert!(l.is_empty(), "{line}:{ch} {l:?}");
+    }
+    c.shutdown();
+}
+
+/// Signature help shows a generic call's instantiated signature, constructors without
+/// `new`, and tagged templates (the template text is argument 0).
+#[test]
+fn signature_help_instantiated_construct_and_tagged() {
+    if !libs_present() {
+        return;
+    }
+    let text = "function f<T>(x: T, y: string): T { return x; }\nf(1, \"\");\nclass B { constructor(a: number) {} }\nnew B();\nfunction t(s: TemplateStringsArray, a: number, b: string) {}\nt`x ${1} y ${\"z\"}`;\n";
+    let env = Env::new(
+        "signature-kinds",
+        &[("tsconfig.json", TSCONFIG), ("src/s.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/s.ts");
+    let u = env.uri("src/s.ts");
+    let help = |c: &mut ScriptedClient, line: u32, ch: u32| -> (String, Value) {
+        let s = result(c, "textDocument/signatureHelp", at(&u, line, ch));
+        let label = s["signatures"][0]["label"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        (label, s["activeParameter"].clone())
+    };
+    assert_eq!(
+        help(&mut c, 1, 5),
+        ("f(x: 1, y: string): 1".into(), json!(1))
+    );
+    assert_eq!(help(&mut c, 3, 6), ("B(a: number): B".into(), json!(0)));
+    let tagged = "t(s: TemplateStringsArray, a: number, b: string): void";
+    assert_eq!(help(&mut c, 5, 3), (tagged.into(), json!(0)));
+    assert_eq!(help(&mut c, 5, 6), (tagged.into(), json!(1)));
+    assert_eq!(help(&mut c, 5, 15), (tagged.into(), json!(2)));
+    c.shutdown();
+}
+
+/// Highlight kinds follow tsc 7 (a declaration that gives no value reads; `this.x += 1`
+/// writes), and a call goes to the overload it resolves to.
+#[test]
+fn highlight_kinds_and_overload_definitions() {
+    if !libs_present() {
+        return;
+    }
+    let text = "interface I { m(): void; p: string }\nclass C {\n  a;\n  b = 1;\n  constructor() { this.a += 1; }\n}\nlet v;\nconst w = 1;\nfunction f(x: number): number;\nfunction f(x: string): string;\nfunction f(x: any) { return x; }\nf(\"s\");\n";
+    let env = Env::new(
+        "highlight-kinds",
+        &[("tsconfig.json", TSCONFIG), ("src/k.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/k.ts");
+    let u = env.uri("src/k.ts");
+    let kinds = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let h = result(c, "textDocument/documentHighlight", at(&u, line, ch));
+        let mut v: Vec<(u64, u64)> = h
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| {
+                (
+                    x["range"]["start"]["line"].as_u64().unwrap(),
+                    x["kind"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(kinds(&mut c, 0, 14), vec![(0, 2)]); // m(): void
+    assert_eq!(kinds(&mut c, 0, 25), vec![(0, 2)]); // p: string
+    assert_eq!(kinds(&mut c, 2, 2), vec![(2, 2), (4, 3)]); // a; and this.a += 1
+    assert_eq!(kinds(&mut c, 3, 2), vec![(3, 3)]); // b = 1
+    assert_eq!(kinds(&mut c, 4, 4), vec![(4, 2)]); // constructor
+    assert_eq!(kinds(&mut c, 6, 4), vec![(6, 2)]); // let v;
+    assert_eq!(kinds(&mut c, 7, 6), vec![(7, 3)]); // const w = 1
+    let d = result(&mut c, "textDocument/definition", at(&u, 11, 0));
+    let lines: Vec<u64> = d
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    assert_eq!(lines, vec![9], "{d}");
+    c.shutdown();
+}
+
+/// tsc 7 shows an alias under its own name, without an `import` line.
+#[test]
+fn hover_alias_uses_local_name() {
+    if !libs_present() {
+        return;
+    }
+    let b = "import { type Point as P, len } from \"./a.js\";\nimport * as ns from \"./a.js\";\nlet q: P | undefined;\nlen; ns;\n";
+    let env = Env::new(
+        "hover-alias",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", NAV_A),
+            ("src/b.ts", b),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let h = hover_text(&mut c, &ub, 2, 7);
+    assert!(h.contains("(alias) interface P"), "{h}");
+    let h = hover_text(&mut c, &ub, 3, 1);
+    assert!(h.contains("(alias) function len(s: string): number"), "{h}");
+    let h = hover_text(&mut c, &ub, 3, 6);
+    assert!(h.contains("(alias) namespace ns"), "{h}");
+    assert!(!h.contains("import "), "{h}");
     c.shutdown();
 }
 

@@ -180,8 +180,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 
 - Vite plugins: the seam gaps in [`ts_r_hmr`](../ts_r_hmr/AGENTS.md#gaps) apply; `this.parse`,
   `this.load`, `ssrLoadModule` throw; `server.moduleGraph` is a stub; `server.watcher` only
-  sees changes that reach `handleHotUpdate`; inline `<script type="module">` tags a plugin
-  injects aren't import-rewritten. The sidecar costs ~25 ms to start with inline plugins and
+  sees changes that reach `handleHotUpdate`; `this.addWatchFile` is a no-op. The sidecar costs ~25 ms to start with inline plugins and
   ~80–440 ms when the config imports `vite` (cold disk cache); with a cached manifest that happens in the background after "ready".
 - From `vite.config`: no `css.*` (preprocessor options, CSS modules), `server.hmr`,
   `server.fs`, `server.watch`, `optimizeDeps.exclude`/`esbuildOptions`, proxy
@@ -190,7 +189,9 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
   OS reclaiming resources (the transform cache flushes on drop only when the server stops
   normally; unflushed entries are just misses next time).
 - The latency benchmark uses generated JS; the real-app benchmark (results in `ts_r_hmr`'s
-  AGENTS.md) edits one file. Vite's HMR test projects aren't wired up.
+  AGENTS.md) edits one file. Vite's own playground specs run against both servers in
+  [`bench/dev-oracle`](../../bench/dev-oracle/README.md); its README lists the failing tests
+  by cause (HMR edge cases, CSS modules/lightningcss, `?worker`, importmap, `server.fs` denial).
 - No CSS preprocessors: the excalidraw harness maps `.scss` to an empty stylesheet for both
   servers, so the page renders unstyled.
 - Fast Refresh: components created inside other expressions (object literals, conditionals,

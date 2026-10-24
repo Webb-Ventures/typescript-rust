@@ -191,7 +191,11 @@ fn check_program_impl<'a>(
         if f.is_lib {
             continue;
         }
-        for d in ts_r_parser::without_grammar(&f.syntax, &f.grammar) {
+        // `lenient`: octal escapes in strings, syntax errors to tsc.
+        for d in ts_r_parser::without_grammar(&f.syntax, &f.grammar)
+            .into_iter()
+            .chain(f.lenient.iter().cloned())
+        {
             if d.is_error() && !CHECKER_GRAMMAR_CODES.contains(&d.code) {
                 broken[i] = true;
             }

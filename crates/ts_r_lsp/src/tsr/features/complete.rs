@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use ts_r_ast::{Ast, Node, NodeId};
 use ts_r_binder::{SymbolFacts, SymbolFlags, meaning};
+use ts_r_checker::checker::GlobalType;
+use ts_r_checker::members::SigKind;
 use ts_r_checker::{Checker, Ck, Loc};
 use ts_r_config::{CompilerOptions, ModuleResolution, RealFs};
 use ts_r_diagnostics::FileId;
@@ -179,6 +181,13 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     }
     let anchor = node.unwrap_or(ast.root);
     let parent = c.file(file).parents().parent(anchor);
+    // A name being declared (`var a|`, `function f|`, `catch (e|`) gets no list.
+    if let Some(p) = parent
+        && matches!(ast.node(anchor), Node::Ident { .. })
+        && declares(ast.node(p), anchor)
+    {
+        return (Context::None, prefix);
+    }
     let types_only = matches!(ast.node(anchor), Node::Ident { .. })
         && parent.is_some_and(|p| matches!(ast.node(p), Node::TypeRef { .. }));
     let values_only = matches!(ast.node(anchor), Node::Ident { .. })
@@ -191,6 +200,25 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
         },
         prefix,
     )
+}
+
+/// Whether `name` is the name a declaration `parent` introduces.
+fn declares(parent: &Node, name: NodeId) -> bool {
+    match *parent {
+        Node::VarDeclarator { name: n, .. }
+        | Node::Interface { name: n, .. }
+        | Node::TypeAlias { name: n, .. }
+        | Node::Enum { name: n, .. }
+        | Node::Module { name: n, .. }
+        | Node::TypeParam { name: n, .. }
+        | Node::Param { pattern: n, .. } => n == name,
+        Node::FunctionDecl { name: n, .. }
+        | Node::ClassDecl { name: n, .. }
+        | Node::ClassExpr { name: n, .. }
+        | Node::FunctionExpr { name: n, .. }
+        | Node::CatchClause { param: n, .. } => n == Some(name),
+        _ => false,
+    }
 }
 
 fn in_comment(ast: &Ast, offset: u32) -> bool {
@@ -293,6 +321,17 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                     "kind": item_kind(c, s),
                     "sortText": SORT_LOCAL,
                     "data": data("s", &name),
+                }));
+            }
+            if !types_only
+                && has_arguments(c, Loc::new(cx.file, anchor))
+                && seen.insert("arguments".to_string())
+            {
+                items.push(json!({
+                    "label": "arguments",
+                    "kind": 6,
+                    "sortText": SORT_LOCAL,
+                    "data": data("s", "arguments"),
                 }));
             }
             // Globals do not hide auto-imports (tsserver offers both); locals do.
@@ -398,7 +437,32 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
     }
     let t = ck.check_expr(obj);
     let a = ck.apparent_type(t);
-    let props = ck.properties_of(a);
+    let mut props = ck.properties_of(a);
+    // Callable and constructable values also have `Function`'s members (`apply`, `bind`,
+    // `call`, ...), through `CallableFunction`/`NewableFunction` under `strictBindCallApply`.
+    let call = !ck.signatures_of(a, SigKind::Call).is_empty();
+    if call || !ck.signatures_of(a, SigKind::Construct).is_empty() {
+        let strict = if !c.opts.strict_bind_call_apply {
+            None
+        } else if call {
+            ck.global_type(GlobalType::CallableFunction)
+        } else {
+            ck.global_type(GlobalType::NewableFunction)
+        };
+        for ft in [strict, ck.global_type(GlobalType::Function)]
+            .into_iter()
+            .flatten()
+        {
+            if ft == a {
+                continue;
+            }
+            for (n, s) in ck.properties_of(ft) {
+                if !props.iter().any(|(m, _)| *m == n) {
+                    props.push((n, s));
+                }
+            }
+        }
+    }
     let store = ck.store();
     let mut out: Vec<(String, SymId)> = props
         .into_iter()
@@ -407,6 +471,29 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+/// Whether `arguments` is in scope at `l`: inside a function that is not an arrow function
+/// (arrows see their parent's), and not reached through a class member initializer.
+fn has_arguments(c: &Checker<'_>, l: Loc) -> bool {
+    let ast = c.ast(l.file);
+    let parents = c.file(l.file).parents();
+    let mut cur = parents.parent(l.node);
+    for _ in 0..100_000 {
+        let Some(n) = cur else { return false };
+        match ast.node(n) {
+            Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => return true,
+            Node::PropertyDef { .. }
+            | Node::StaticBlock { .. }
+            | Node::ClassDecl { .. }
+            | Node::ClassExpr { .. } => {
+                return false;
+            }
+            _ => {}
+        }
+        cur = parents.parent(n);
+    }
+    false
 }
 
 /// Names visible at `l`: every enclosing scope's locals, innermost first.

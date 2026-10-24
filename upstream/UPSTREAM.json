@@ -9,12 +9,38 @@
     "date": "2026-08-08",
     "uses": "bundler/transform test suites as oracles; bench reference tool"
   },
+  "node": {
+    "repo": "nodejs/node",
+    "version": "24.21.0",
+    "tag": "v24.21.0",
+    "branch": "v24.x",
+    "commit": "955266bfdd854cd280dffd47548673914484e4c0",
+    "uses": "type-stripping test fixtures as data for the ts-r-run oracle (bench/run-oracle); the Node the oracle runs on",
+    "sync": [
+      "/LICENSE",
+      "/test/fixtures/typescript/",
+      "/test/es-module/test-typescript*.mjs"
+    ]
+  },
   "test262": {
     "repo": "tc39/test262",
     "branch": "main",
     "commit": "d53ebc8b1931d9f1541e43d59650776e4b766248",
     "date": "2026-10-13",
     "uses": "ECMAScript parser conformance (test/ and harness/)"
+  },
+  "tsx": {
+    "repo": "privatenumber/tsx",
+    "npm": "tsx",
+    "version": "4.23.15",
+    "tag": "v4.23.15",
+    "commit": "ca66105a17a2a4c6503fe3a12b5b9ec408286011",
+    "date": "2026-09-20",
+    "uses": "test suite as data for the ts-r-run oracle (bench/run-oracle); bench reference tool",
+    "sync": [
+      "/LICENSE",
+      "/tests/"
+    ]
   },
   "typescript": {
     "repo": "microsoft/TypeScript",
@@ -24,7 +50,7 @@
     "commit": "1e4744d68260a7cb91b62b12edc3f6a2187faaf1",
     "date": "2026-07-08",
     "npmGitHead": "2bd066d87f5bafd315be9f40889d0a60b9e58e0b",
-    "uses": "conformance/compiler tests and baselines, lib.*.d.ts, diagnostic messages; `tsc` at this version is the oracle",
+    "uses": "conformance/compiler tests and baselines, lib.*.d.ts, diagnostic messages; `tsc` at this version is the oracle; fourslash tests (tests/cases/fourslash) as data for the ts-r-lsp oracle (bench/lsp-oracle)",
     "sync": [
       "/LICENSE.txt",
       "/ThirdPartyNoticeText.txt",
@@ -64,6 +90,10 @@
     "tag": "v8.3.4",
     "commit": "b6c20f6a8126d8561891e5fb9368e8fc9da37538",
     "date": "2026-10-08",
-    "uses": "dev server / HMR behaviour and plugin API tests (ts-r-dev); bench reference tool"
+    "uses": "dev server / HMR behaviour and plugin API tests (ts-r-dev); playground specs as data for the ts-r-dev oracle (bench/dev-oracle); bench reference tool",
+    "sync": [
+      "/LICENSE",
+      "/playground/"
+    ]
   }
 }

@@ -69,12 +69,30 @@ pub(crate) fn decode_identifier(text: &str) -> String {
     out
 }
 
-/// An invalid escape: the byte offset to report at and the message.
-pub(crate) type EscapeError = (usize, DiagnosticMessage);
+/// An invalid escape: the byte range to report (offsets into the cooked text), the message
+/// and its argument (`'\x05'` for an octal escape, `'\8'` for `\8`).
+#[derive(Debug)]
+pub(crate) struct EscapeError {
+    pub at: usize,
+    pub end: usize,
+    pub msg: DiagnosticMessage,
+    pub arg: Option<String>,
+}
+
+impl EscapeError {
+    fn at(at: usize, msg: DiagnosticMessage) -> Self {
+        EscapeError {
+            at,
+            end: at + 1,
+            msg,
+            arg: None,
+        }
+    }
+}
 
 /// Cooks string or template text (without delimiters). On invalid escapes returns the best
 /// effort value and every escape's error, in order (`"\u{r}\u{n}"` has two).
-pub(crate) fn cook(raw: &str, template: bool) -> Result<String, (String, Vec<EscapeError>)> {
+pub(crate) fn cook(raw: &str) -> Result<String, (String, Vec<EscapeError>)> {
     let b = raw.as_bytes();
     let mut out = String::with_capacity(raw.len());
     let mut err: Vec<EscapeError> = Vec::new();
@@ -119,10 +137,11 @@ pub(crate) fn cook(raw: &str, template: bool) -> Result<String, (String, Vec<Esc
                 let next_digit = b.get(i).is_some_and(|d| d.is_ascii_digit());
                 if e == b'0' && !next_digit {
                     push(&mut out, &mut high, '\0');
-                } else if template {
-                    err.push((esc_start, messages::OCTAL_LITERALS_NOT_ALLOWED));
                 } else {
-                    // Legacy octal escape: up to three digits, value <= 0o377.
+                    // A legacy octal escape (`\5`, `\05`, `\177`): `\0`-`\3` take up to two
+                    // more octal digits, `\4`-`\7` one, so the value stays <= 0o377. `\08` is
+                    // `\0` then `8`. tsc reports it in strings and untagged templates
+                    // (tsc/internal/scanner/scanner.go scanEscapeSequence).
                     let mut v = (e - b'0') as u32;
                     let max_len = if e <= b'3' { 2 } else { 1 };
                     let mut n = 0;
@@ -136,15 +155,23 @@ pub(crate) fn cook(raw: &str, template: bool) -> Result<String, (String, Vec<Esc
                             _ => break,
                         }
                     }
+                    err.push(EscapeError {
+                        at: esc_start,
+                        end: i,
+                        msg: messages::OCTAL_ESCAPE_NOT_ALLOWED,
+                        arg: Some(format!("\\x{v:02x}")),
+                    });
                     push(&mut out, &mut high, char::from_u32(v).unwrap_or('\u{FFFD}'));
                 }
             }
             b'8' | b'9' => {
-                if template {
-                    err.push((esc_start, messages::OCTAL_LITERALS_NOT_ALLOWED));
-                } else {
-                    push(&mut out, &mut high, e as char);
-                }
+                err.push(EscapeError {
+                    at: esc_start,
+                    end: i,
+                    msg: messages::INVALID_ESCAPE_SEQUENCE,
+                    arg: Some(format!("\\{}", e as char)),
+                });
+                push(&mut out, &mut high, e as char);
             }
             b'x' => {
                 match (
@@ -162,7 +189,7 @@ pub(crate) fn cook(raw: &str, template: bool) -> Result<String, (String, Vec<Esc
                     (first, _) => {
                         // Reported at the first character that is not a hex digit.
                         let at = if first.is_some() { i + 1 } else { i };
-                        err.push((at, messages::HEXADECIMAL_DIGIT_EXPECTED));
+                        err.push(EscapeError::at(at, messages::HEXADECIMAL_DIGIT_EXPECTED));
                     }
                 }
             }
@@ -209,7 +236,7 @@ pub(crate) fn cook(raw: &str, template: bool) -> Result<String, (String, Vec<Esc
                         } else {
                             (p, messages::HEXADECIMAL_DIGIT_EXPECTED)
                         };
-                        err.push((at, msg));
+                        err.push(EscapeError::at(at, msg));
                         i = p.max(i);
                         if b.get(i) == Some(&b'}')
                             && msg.code != messages::INVALID_UNICODE_ESCAPE.code
@@ -335,24 +362,52 @@ mod tests {
 
     #[test]
     fn cooking() {
-        assert_eq!(cook(r"a\nb", false).unwrap(), "a\nb");
+        assert_eq!(cook(r"a\nb").unwrap(), "a\nb");
         assert_eq!(
-            cook(concat!(r"\x41", "\\", "u0042", r"\u{43}"), false).unwrap(),
+            cook(concat!(r"\x41", "\\", "u0042", r"\u{43}")).unwrap(),
             "ABC"
         );
+        assert_eq!(cook(concat!("\\", "uD83D", "\\", "uDE00")).unwrap(), "😀");
+        assert_eq!(cook(r"\uD83D").unwrap(), "\u{FFFD}");
+        assert_eq!(cook("a\\\nb").unwrap(), "ab");
+        assert_eq!(cook(r"\0").unwrap(), "\0");
+        assert_eq!(cook(r"\q").unwrap(), "q");
+        // Legacy octal escapes cook to their value but are errors (TS1487 / TS1488).
+        let octal = |raw: &str| {
+            let (v, errs) = cook(raw).unwrap_err();
+            let e: Vec<_> = errs
+                .iter()
+                .map(|e| (e.at, e.end, e.msg.code, e.arg.clone().unwrap_or_default()))
+                .collect();
+            (v, e)
+        };
         assert_eq!(
-            cook(concat!("\\", "uD83D", "\\", "uDE00"), false).unwrap(),
-            "😀"
+            octal(r"\101"),
+            ("A".into(), vec![(0, 4, 1487, r"\x41".into())])
         );
-        assert_eq!(cook(r"\uD83D", false).unwrap(), "\u{FFFD}");
-        assert_eq!(cook("a\\\nb", false).unwrap(), "ab");
-        assert_eq!(cook(r"\101", false).unwrap(), "A");
-        assert_eq!(cook(r"\0", false).unwrap(), "\0");
-        assert_eq!(cook(r"\q", false).unwrap(), "q");
-        assert!(cook(r"\01", true).is_err());
-        assert!(cook(r"\xZ", false).is_err());
-        assert!(cook(r"\u{110000}", false).is_err());
-        assert_eq!(cook("a\r\nb", true).unwrap(), "a\nb");
+        assert_eq!(
+            octal(r"\08"),
+            ("\08".into(), vec![(0, 2, 1487, r"\x00".into())])
+        );
+        assert_eq!(
+            octal(r"\0018"),
+            ("\u{1}8".into(), vec![(0, 4, 1487, r"\x01".into())])
+        );
+        assert_eq!(
+            octal(r"\477"),
+            ("'7".into(), vec![(0, 3, 1487, r"\x27".into())])
+        );
+        assert_eq!(
+            octal(r"\877"),
+            ("877".into(), vec![(0, 2, 1488, r"\8".into())])
+        );
+        assert_eq!(
+            octal(r"a\9"),
+            ("a9".into(), vec![(1, 3, 1488, r"\9".into())])
+        );
+        assert!(cook(r"\xZ").is_err());
+        assert!(cook(r"\u{110000}").is_err());
+        assert_eq!(cook("a\r\nb").unwrap(), "a\nb");
         assert_eq!(decode_identifier(concat!("\\", "u0061b", r"\u{63}")), "abc");
     }
 }

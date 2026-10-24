@@ -2075,8 +2075,8 @@ impl<'a> Parser<'a> {
             Ok(c) => (self.ast.intern(&c), false),
             Err(_) => {
                 if !tagged {
-                    for (at, msg) in self.lx.template_escape_errors(tok) {
-                        self.error_at(msg, at, &[]);
+                    for d in self.lx.template_escape_errors(tok) {
+                        self.push_diag(d);
                     }
                 }
                 (Atom::EMPTY, true)
