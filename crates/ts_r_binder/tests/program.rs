@@ -103,6 +103,33 @@ fn script_globals_merge_and_conflict_across_files() {
     );
 }
 
+/// tsc 7 (`noSymbolForMergeCrash`): a global an interface and a non-instantiated namespace
+/// declare, then a type alias in a later file, is TS2649 at the alias only; the other order
+/// is an ordinary duplicate.
+#[test]
+fn conflict_with_a_namespace_only_global_is_ts2649() {
+    let f = build(&[
+        ("initial.ts", "interface A { }\nnamespace A {}\n"),
+        ("final.ts", "type A = {}\n"),
+    ]);
+    let p = link(&f);
+    assert_eq!(diags(&f, &p), ["final.ts(1,6) TS2649"]);
+    assert_eq!(p.global("A").expect("merged").symbols.len(), 1);
+    let f = build(&[
+        ("first.ts", "type A = {}\n"),
+        ("second.ts", "interface A { }\nnamespace A {}\n"),
+    ]);
+    let p = link(&f);
+    assert_eq!(
+        diags(&f, &p),
+        [
+            "first.ts(1,6) TS2300",
+            "second.ts(1,11) TS2300",
+            "second.ts(2,11) TS2300"
+        ]
+    );
+}
+
 #[test]
 fn modules_do_not_contribute_globals_but_declare_global_does() {
     let f = build(&[
@@ -306,6 +333,30 @@ fn module_augmentation_merges_and_unresolved_is_reported() {
             "base.ts(2,14) TS2451"
         ]
     );
+}
+
+#[test]
+fn value_augmentation_of_a_variable_with_a_type_only_namespace_is_ts2649() {
+    // tsc 7: augmentExportEquals7. A type-only augmentation of the same entity is fine.
+    let lib = "declare var lib: () => void;\ndeclare namespace lib {}\nexport = lib;\n";
+    let f = build(&[
+        ("lib.d.ts", lib),
+        (
+            "ext.ts",
+            "import * as lib from \"./lib\";\ndeclare module \"./lib\" {\n    export function fn(): void;\n}\n",
+        ),
+    ]);
+    let p = link(&f);
+    assert_eq!(diags(&f, &p), ["ext.ts(2,16) TS2649"]);
+    let f = build(&[
+        ("lib.d.ts", lib),
+        (
+            "ext.ts",
+            "import * as lib from \"./lib\";\ndeclare module \"./lib\" {\n    export interface I {}\n}\n",
+        ),
+    ]);
+    let p = link(&f);
+    assert!(diags(&f, &p).is_empty());
 }
 
 #[test]

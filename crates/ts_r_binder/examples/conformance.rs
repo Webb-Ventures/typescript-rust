@@ -32,6 +32,17 @@ fn compared(code: u32) -> bool {
 
 type Diag = (String, u32, u32, u32, String);
 
+/// Parse errors that do not make a file "broken" for the driver: tsc reports them from its
+/// checker (`ts_r_checker::driver::CHECKER_GRAMMAR_CODES`).
+const CHECKER_GRAMMAR_CODES: [u32; 17] = [
+    5076, 1106, 1497, 1164, 8002, 8003, 8004, 8005, 8008, 8009, 8010, 8011, 8012, 8013, 8016, 8017,
+    8037,
+];
+
+/// The binder's TS1xxx codes the driver keeps in a file with syntax errors (tsc's binder
+/// reports them whatever the parser found; `ts_r_checker::driver::BINDER_CODES`).
+const BINDER_CODES: &[u32] = &[1100, 1101, 1102, 1184, 1210, 1215, 1314, 1315, 1316, 1344];
+
 struct Test {
     name: String,
     options: Vec<(String, String)>,
@@ -340,7 +351,11 @@ fn run(test: &Test) -> BTreeSet<Diag> {
         };
         let p = ts_r_parser::parse(src, kind);
         let b = bind(&p.ast, src, &opts);
-        parsed.push((name.clone(), src.as_str(), p.ast, b));
+        let broken = p
+            .syntax_errors()
+            .iter()
+            .any(|d| d.is_error() && !CHECKER_GRAMMAR_CODES.contains(&d.code));
+        parsed.push((name.clone(), src.as_str(), p.ast, b, broken));
     }
     let mut out = BTreeSet::new();
     let fmt_name = |n: &str| n.trim_start_matches("./").to_owned();
@@ -351,7 +366,13 @@ fn run(test: &Test) -> BTreeSet<Diag> {
         .iter()
         .find(|(k, _)| k == "checkjs")
         .map(|(_, v)| v.trim() == "true");
-    let compared = |name: &str, code: u32| {
+    let compared = |i: usize, code: u32| {
+        let name = parsed[i].0.as_str();
+        // Driver rule for files with syntax errors: the binder's TS1xxx errors other than
+        // `BINDER_CODES` wait for a clean parse (reserved words, duplicate properties).
+        if parsed[i].4 && (1000..2000).contains(&code) && !BINDER_CODES.contains(&code) {
+            return false;
+        }
         if !SourceKind::from_path(name).is_typescript() {
             match check_js {
                 Some(false) => return false,
@@ -361,13 +382,10 @@ fn run(test: &Test) -> BTreeSet<Diag> {
         }
         compared(code)
     };
-    let lines: Vec<LineIndex> = parsed
-        .iter()
-        .map(|(_, s, _, _)| LineIndex::new(s))
-        .collect();
-    for (i, (name, src, _, b)) in parsed.iter().enumerate() {
+    let lines: Vec<LineIndex> = parsed.iter().map(|(_, s, ..)| LineIndex::new(s)).collect();
+    for (i, (name, src, _, b, _)) in parsed.iter().enumerate() {
         for d in &b.diagnostics {
-            if compared(name, d.code) {
+            if compared(i, d.code) {
                 let lc = lines[i].line_col_utf16(src, d.span.start);
                 out.insert((
                     fmt_name(name),
@@ -407,7 +425,7 @@ fn run(test: &Test) -> BTreeSet<Diag> {
     let files: Vec<ProgramFile> = parsed
         .iter()
         .zip(&paths)
-        .map(|((_, src, ast, b), path)| ProgramFile {
+        .map(|((_, src, ast, b, _), path)| ProgramFile {
             path: path.as_str(),
             ast,
             src,
@@ -416,7 +434,7 @@ fn run(test: &Test) -> BTreeSet<Diag> {
         .collect();
     let program = Program::link_with(files, &resolver);
     for d in &program.diagnostics {
-        if compared(&parsed[d.file.0 as usize].0, d.code) {
+        if compared(d.file.0 as usize, d.code) {
             let i = d.file.0 as usize;
             let (name, src, ..) = &parsed[i];
             let lc = lines[i].line_col_utf16(src, d.span.start);

@@ -49,7 +49,14 @@ texts), `dump.rs`.
 - **Augmenting an `export =` entity without namespace meaning** (a variable or class; not
   an enum, nor anything merged with a namespace) reports TS2671 at the augmentation's name
   and drops it (its target becomes `Unresolved`). A lone function is not reported yet (tsc 7's
-  CLI does, its conformance baseline `augmentExportEquals2` does not).
+  CLI does, its conformance baseline `augmentExportEquals2` does not). A variable merged
+  with a type-only namespace does have namespace meaning: an augmentation of it that declares
+  values is TS2649 at the augmentation's name instead, and is dropped too (`augmentExportEquals7`).
+- **A global conflicting with a type-only namespace** (`namespace A { interface I {} }` then
+  `declare var A` in a later file) is TS2649 at the later declaration, not TS2300, and the
+  later symbol is not merged (tsc 7: `mergeSymbol` in checker.go). ts-r marks an instantiated
+  namespace `VALUE_MODULE | NAMESPACE_MODULE`, so "type-only" is `NAMESPACE_MODULE` without
+  `VALUE_MODULE`.
 - **`export =` lookups by text work**: `Names::find("export=")` is the reserved
   `Name::EXPORT_EQUALS` even when the file has a string atom `"export="` (typescript.d.ts
   has `ExportEquals = "export="`; checked before atoms), so `resolve_export` reaches an `export =`
@@ -176,11 +183,14 @@ texts), `dump.rs`.
 - Conformance (needs `cargo xtask upstream sync`):
   `cargo build --release -j 4 -p ts_r_binder --example conformance` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- target/release/examples/conformance [filter]`.
-  Compares the binder's codes (2300, 2451, 2567, 2528, 2397, 2435, 2436, 2664, 2668, 2669, 2671, 5061, 1100-1215 strict
+  Compares the binder's codes (2300, 2451, 2567, 2528, 2397, 2435, 2436, 2649, 2664, 2668, 2669, 2671, 5061, 1100-1215 strict
   mode, 1101, 1102, 1114, 1117, 1344, 7027, 7028) per test variant with the baselines and
-  writes mismatches to `target/binder-conformance.txt`.
-  Current (2026-10-22, 52b87b3): 12783 variants; 462 expect binder diagnostics, 410 match exactly; 1718 of 1837
-  expected diagnostics matched (119 missing, 75 extra).
+  writes mismatches to `target/binder-conformance.txt`. Like the checker's driver, it drops
+  TS1xxx codes outside the binder's own (`BINDER_CODES`) in a file whose parse has errors
+  other than checker grammar codes (`CHECKER_GRAMMAR_CODES`); keep both lists in step with
+  `crates/ts_r_checker/src/driver.rs`.
+  Current (2026-10-24, parity/binder-emit): 12783 variants; 464 expect binder diagnostics, 416 match exactly; 1718 of 1839
+  expected diagnostics matched (121 missing, 19 extra).
 - Corpus: `cargo build --release -j 4 -p ts_r_binder --example corpus` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- /usr/bin/time -l target/release/examples/corpus ../private-app`.
   private-app (691 project files + 5219 `node_modules` declaration files, 48 MB):

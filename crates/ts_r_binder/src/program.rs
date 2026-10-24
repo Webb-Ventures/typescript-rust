@@ -389,6 +389,28 @@ impl<'a> Program<'a> {
             if !entry.symbols.is_empty()
                 && (alias_clash || entry.flags.intersects(excl) || entry.excludes.intersects(flags))
             {
+                // A global that a non-instantiated namespace declares (`interface A {}` +
+                // `namespace A {}`) does not report a later conflicting file's declaration
+                // as a duplicate: tsc reports TS2649 at that declaration's name only and
+                // keeps the existing symbol (tsc: checker/checker.go, mergeSymbol).
+                if depth == 0
+                    && !members
+                    && !alias_clash
+                    && !it.umd
+                    && entry.symbols.iter().any(|r| {
+                        let f = self.file(r.file).bound.symbol(r.symbol).flags;
+                        f.intersects(SymbolFlags::NAMESPACE_MODULE)
+                            && !f.intersects(SymbolFlags::VALUE_MODULE)
+                    })
+                {
+                    if let Some((file, span)) = self.decl_spans(it.r, false).into_iter().next() {
+                        diags.push(
+                            Diagnostic::new(m::AUGMENT_WITH_VALUE_EXPORTS, span, &[&it.name])
+                                .with_file(file),
+                        );
+                    }
+                    continue;
+                }
                 let enum_conflict = (flags.intersects(SymbolFlags::ENUM)
                     || entry.flags.intersects(SymbolFlags::ENUM))
                     && !flags.intersects(SymbolFlags::ENUM_MEMBER);
@@ -486,6 +508,34 @@ impl<'a> Program<'a> {
             // baseline `augmentExportEquals2` does not.
             let ef = self.file(entity.file);
             let flags = ef.bound.symbol(entity.symbol).flags;
+            // TS2649 (tsc checker/checker.go mergeModuleAugmentation, mergeSymbol): a
+            // variable merged with a type-only namespace has namespace meaning, so the
+            // augmentation merges into it; an augmentation that declares values then
+            // conflicts with the variable, and since the target is a namespace tsc reports
+            // the value exports rather than a duplicate.
+            if flags.intersects(SymbolFlags::VARIABLE)
+                && flags.contains(SymbolFlags::NAMESPACE_MODULE)
+                && !flags.intersects(SymbolFlags::VALUE_MODULE)
+                && self.declares_values(aug)
+            {
+                let f = self.file(aug.file);
+                for &d in f.bound.decls(aug.symbol) {
+                    if let Node::Module { name, .. } = *f.ast.node(d)
+                        && let Node::StringLit { value } = *f.ast.node(name)
+                    {
+                        diags.push(
+                            Diagnostic::new(
+                                m::AUGMENT_WITH_VALUE_EXPORTS,
+                                f.ast.span(name),
+                                &[f.ast.atom(value)],
+                            )
+                            .with_file(aug.file),
+                        );
+                    }
+                }
+                dropped.push(i);
+                continue;
+            }
             if flags.intersects(SymbolFlags::NAMESPACE | SymbolFlags::FUNCTION)
                 || !flags.intersects(SymbolFlags::VARIABLE | SymbolFlags::CLASS)
             {
@@ -512,6 +562,16 @@ impl<'a> Program<'a> {
             self.augmentations[i].1 = ModuleTarget::Unresolved;
         }
         self.diagnostics.extend(diags);
+    }
+
+    /// Whether an augmentation's exports include a value (it is an instantiated module).
+    fn declares_values(&self, aug: SymbolRef) -> bool {
+        let f = self.file(aug.file);
+        let t = f.bound.symbol(aug.symbol).exports;
+        f.bound
+            .table(t)
+            .iter()
+            .any(|&(_, s)| f.bound.symbol(s).flags.intersects(SymbolFlags::VALUE))
     }
 
     /// Merges the exports of modules declared or augmented in several places.
