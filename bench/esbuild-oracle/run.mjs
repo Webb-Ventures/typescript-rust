@@ -94,6 +94,12 @@ class Parser {
   value() {
     let v = this.operand();
     while (this.is('+') && typeof v === 'string') { this.next(); v += this.operand(); }
+    // `compat.A | compat.B`: a set of flags.
+    if (this.is('|')) {
+      const or = [v];
+      while (this.is('|')) { this.next(); or.push(this.operand()); }
+      return { or };
+    }
     return v;
   }
 
@@ -209,6 +215,9 @@ function loadCases() {
 
 const IGNORED_OPTIONS = new Set(['OmitRuntimeForTests', 'NeedsMetafile', 'ASCIIOnly', 'LegalComments', 'ProfilerNames', 'LineLimit', 'SourceMap', 'AbsOutputBase']);
 
+// `ClassPrivateStaticField` -> `class-private-static-field` (esbuild's CLI feature names).
+const kebab = (s) => s.replace(/[A-Z]/g, (c, i) => (i ? '-' : '') + c.toLowerCase());
+
 function flagsFor(c) {
   const s = c.spec;
   const why = [];
@@ -278,13 +287,15 @@ function flagsFor(c) {
         }
         break;
       }
-      // `es(2022)`: everything newer than ES2022 is lowered, which is `--target=es2022`.
-      // ts-r-build does not lower below ES2022 yet: those stay skips.
-      case 'UnsupportedJSFeatures':
-        if (v.call === 'es' && v.args.length === 1 && v.args[0].t === 'num' && Number(v.args[0].v) >= 2022) flags.push(`--target=es${v.args[0].v}`);
-        else if (v.call === 'es') why.push(`${k}=es(<2022)`);
-        else why.push(k);
+      // `es(2019)`: everything newer than ES2019 is unsupported, which is `--target=es2019`.
+      // `compat.ClassField | compat.Arrow`: those features, `--supported:class-field=false`.
+      case 'UnsupportedJSFeatures': {
+        if (v.call === 'es' && v.args.length === 1 && v.args[0].t === 'num') { flags.push(`--target=es${v.args[0].v}`); break; }
+        const set = v.or ?? [v];
+        if (!set.every((f) => f.ident?.startsWith('compat.'))) { why.push(k); break; }
+        for (const f of set) flags.push(`--supported:${kebab(f.ident.slice(7))}=false`);
         break;
+      }
       case 'JSBanner': flags.push(`--banner:js=${v}`); break;
       case 'JSX': {
         for (const [jk, jv] of Object.entries(asObject(v))) {

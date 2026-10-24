@@ -272,9 +272,62 @@ impl Lower<'_, '_> {
     // ---- super ----
 
     /// The index in `fns` of the lowered async method whose `super` the current code sees.
+    /// Only code in lowered async functions reads `super` through `_super`: in a function
+    /// that is not lowered itself, only its lowered async arrows do.
     pub fn super_ctx(&self) -> Option<usize> {
         let i = self.fns.iter().rposition(|f| !f.arrow)?;
-        self.fns[i].sup.is_some().then_some(i)
+        let lowered = self.fns[i..].iter().any(|f| f.lower_await || f.async_gen);
+        (self.fns[i].sup.is_some() && lowered).then_some(i)
+    }
+
+    /// True if an async arrow in `body` (outside nested non-arrow functions) reads or writes
+    /// a `super` property.
+    pub fn super_in_async_arrow(&self, body: NodeId) -> bool {
+        let mut stack = vec![body];
+        while let Some(id) = stack.pop() {
+            match self.n(id) {
+                Node::FunctionDecl { .. }
+                | Node::FunctionExpr { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. } => continue,
+                Node::Arrow { flags, .. }
+                    if flags.contains(FnFlags::ASYNC) && self.has_super_property(id) =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+            stack.extend(self.tx.ast.children(id));
+        }
+        false
+    }
+
+    /// The names of the `super.x` properties `body` uses (outside nested non-arrow
+    /// functions), in source order.
+    pub fn super_names(&self, body: NodeId) -> Vec<Atom> {
+        let mut names = Vec::new();
+        let mut stack = vec![body];
+        while let Some(id) = stack.pop() {
+            match self.n(id) {
+                Node::FunctionDecl { .. }
+                | Node::FunctionExpr { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. } => continue,
+                Node::Member { obj, prop, .. } if self.n(obj) == Node::Super {} => {
+                    if let Node::Ident { name } = self.n(prop)
+                        && !names.contains(&name)
+                    {
+                        names.push(name);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            let mut kids = self.tx.ast.children(id);
+            kids.reverse();
+            stack.extend(kids);
+        }
+        names
     }
 
     /// `super.x` or `super[k]` (parentheses skipped) in a lowered async method.

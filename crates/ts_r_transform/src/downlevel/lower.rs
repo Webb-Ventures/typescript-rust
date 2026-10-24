@@ -764,10 +764,22 @@ impl Lower<'_, '_> {
         let is_gen = flags.contains(FnFlags::GENERATOR);
         let lower_await = is_async && !is_gen && self.below(ScriptTarget::ES2017);
         let async_gen = is_async && is_gen && self.below(ScriptTarget::ES2018);
-        let sup = (method.is_some() && (lower_await || async_gen)).then(|| SuperUse {
-            assign: self.assigns_super(body),
-            ..SuperUse::default()
-        });
+        let sup = if method.is_some() && (lower_await || async_gen) {
+            Some(SuperUse {
+                assign: self.assigns_super(body),
+                ..SuperUse::default()
+            })
+        } else if !arrow && self.below(ScriptTarget::ES2017) && self.super_in_async_arrow(body) {
+            // A function that is not lowered but holds a lowered async arrow using `super`
+            // declares `_super` itself, naming every `super.x` it reads (observed).
+            Some(SuperUse {
+                assign: self.assigns_super(body),
+                names: self.super_names(body),
+                ..SuperUse::default()
+            })
+        } else {
+            None
+        };
         self.fns.push(FnCtx {
             arrow,
             lower_await,
@@ -813,6 +825,10 @@ impl Lower<'_, '_> {
             self.lower_async(id, method, ctx);
         } else if async_gen {
             self.lower_async_gen(id, method, ctx);
+        } else if let Some(sup) = &ctx.sup {
+            let at = self.at(id);
+            let decls = self.super_decls(sup, at);
+            self.prepend_body(id, decls, false);
         }
     }
 

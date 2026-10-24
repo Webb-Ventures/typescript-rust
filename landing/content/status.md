@@ -21,7 +21,7 @@ number disappears from its source, so the table can't silently go stale).
 | --- | --- | --- |
 | [`ts-r-run`](tools/ts-r-run.md) | Runs TypeScript on Node 22.15+; passes 75 of 86 compared tests of tsx's own suite and 36 of 36 of Node's type-stripping tests | Only the entry's tsconfig is used; Windows untested |
 | [`ts-r-dev`](tools/ts-r-dev.md) | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling | No CSS preprocessors; some `vite.config` options and plugin APIs; HTTP/1.1 only |
-| [`ts-r-build`](tools/ts-r-build.md) | esbuild's CLI flags, ESM/CJS/IIFE, splitting, minify, source maps, `--watch` | No plugins, no CSS bundling, no lowering below ES2022 |
+| [`ts-r-build`](tools/ts-r-build.md) | esbuild's CLI flags, ESM/CJS/IIFE, splitting, minify, source maps, `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | [`ts-r-check`](tools/ts-r-check.md) | tsc's codes and messages; 97.0% of conformance tests exact; 3 of 6 public bench projects match exactly | No "Did you mean" suggestions on regular expression errors (TS1369); some inference and narrowing; emits like tsc unless `--noEmit` |
 | [`ts-r-lint`](tools/ts-r-lint.md) | 154 rules (51 type-aware) matching 15,495 of 15,517 of ESLint's own tests; ESLint flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint unsupported |
 | [`ts-r-lsp`](tools/ts-r-lsp.md) | Shared server per workspace; lint; our checker or your TypeScript as the type backend | Slower than TypeScript 7's LSP to first diagnostics; most projects fall back to your TypeScript for diagnostics |

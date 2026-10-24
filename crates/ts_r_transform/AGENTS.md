@@ -153,6 +153,16 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   parameter is one name per function, named after its hoisted temporaries
   (`Lower::setter_param`, the setter listed in `Lower::transparent`). Private names that
   no class declares, or in object literal keys, print as nothing (`this.`; errors, as tsc).
+  A logical assignment to a private name (`this.#x ??= v`) reads once and sets only when the
+  operator says so (`get(...) ?? set(..., v)`); below ES2020 the `??` is lowered too, and an
+  `**=` below ES2016 goes through `Math.pow` (`private.rs`).
+- **`super` in an async arrow of a plain method** (below ES2017): the arrow becomes an
+  `__awaiter` generator, which can't see `super`, so the enclosing method gets the same
+  `_super` object of `super` property getters an async method gets (`super_in_async_arrow`,
+  `super_names`, `es2017.rs`); only code inside lowered async functions reads through it.
+- **Bundler-only options**: `TransformOptions::default_class_name` names an anonymous
+  `export default class` that ES2022 lowering must name (the bundler passes `<stem>_default`,
+  esbuild's name); tsc never sets it (`None`).
 - **Static blocks the TypeScript transform synthesizes** for a static initializer or a key
   capture are listed in `Tx::inline_static`: below ES2022 they become a statement after the
   class (`C.x = 1;`, `_a = k`), source static blocks an IIFE. Push every such block there.

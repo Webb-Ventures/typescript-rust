@@ -1,7 +1,7 @@
 //! esbuild-style argument parsing: `--flag`, `--flag=value`, `--flag:key=value`.
 
 use ts_r_bundler::{
-    BuildOptions, EntryPoint, Format, Loader, Platform, SourceMapMode, parse_target,
+    BuildOptions, EntryPoint, Feature, Format, Loader, Platform, SourceMapMode, parse_target,
 };
 
 pub const HELP: &str = "\
@@ -21,7 +21,8 @@ Simple options:
   --platform=...            Platform target (browser | node | neutral)
   --sourcemap               Emit a source map
   --splitting               Enable code splitting (requires --format=esm)
-  --target=...              Environment target (es2022, esnext, node18, chrome110, ...)
+  --target=...              Environment target (es5..es2025, esnext, node18, chrome110,
+                            ...); newer syntax is lowered
   --watch                   Rebuild when a source file changes
 
 Advanced options:
@@ -45,10 +46,11 @@ Advanced options:
   --minify-syntax           Use equivalent but shorter syntax
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
-  --public-path=...         Prefix for file-loader URLs
+  --public-path=...         Prefix for file-loader URLs and chunk imports
   --resolve-extensions=...  Comma-separated list of implicit extensions
   --sourcemap=...           linked | external | inline | both
   --sources-content=false   Omit sourcesContent in source maps
+  --supported:F=false       Treat syntax feature F (esbuild's names) as unsupported
   --tree-shaking=...        Force tree shaking on or off (true | false)
   --tsconfig=...            Use this tsconfig.json instead of the nearest one
   --threads=N               Worker threads (default: TS_R_THREADS or all cores, max 8)
@@ -156,6 +158,12 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
                     } else {
                         o.footer = Some(v);
                     }
+                }
+                "supported" => {
+                    let f = Feature::parse(key).ok_or_else(|| {
+                        format!("{key:?} is not a valid feature name for the \"supported\" setting")
+                    })?;
+                    o.supported.push((f, bool_value(name, value)?));
                 }
                 "out-extension" => {
                     let v = value.ok_or_else(|| format!("missing \"=\" in {arg:?}"))?;

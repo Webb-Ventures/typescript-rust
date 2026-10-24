@@ -32,7 +32,7 @@ rename, wrap, compress, print one module to a `Fragment`) → `chunk.rs` (assemb
 `hmr.rs` (feature `hmr`) is the dev server's `DepBundler` (per-specifier `bundle` and the
 code-split `batch` that `ts-r-dev` uses, with source maps whose `sources` are relative to
 the served URL when `DepBundle::serve_root` is set, and CSS outputs passed through);
-`fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
+`data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
 expression builder for generated code; `pool.rs` is the std-thread pool.
 
 ## Invariants
@@ -91,6 +91,48 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   exports a const enum keeps the enum object (`preserveConstEnums`, as `isolatedModules`
   does), since its importers are transformed apart from it; JS `accessor` fields are lowered
   under an explicit `--target`; tsconfig `"jsx": "preserve"` is ignored when bundling.
+- **Targets are feature sets** (`features.rs`): `--target=esN` is every esbuild feature
+  newer than year N (ES5 = 2014), and `--supported:<feature>=false` adds or removes one.
+  Lowering goes by year through `ts_r_transform`: the oldest unsupported feature it can lower
+  sets the year (`Features::lower_year`), so output may lower more than esbuild's but runs
+  the same. ES2015-level syntax esbuild won't lower (`const`/`let`, classes, destructuring,
+  default/rest parameters, `for-of`, generators, async without generators, spread) and a
+  top-level `await` without `top-level-await` are build errors with esbuild's messages
+  (`lowering::errors`); arrows and template literals stay as written.
+  A BigInt literal in a value below `bigint` is a warning, not an error: "Big integer
+  literals are not available in the configured target environment and may crash at
+  run-time" (`lowering::bigint_literals`); literals in types are erased and not reported.
+  esbuild also prints it as `/* @__PURE__ */ BigInt("123")`, which ts-r-build doesn't yet
+  (it keeps `123n`). Observed behaviour: esbuild 0.28.2 and
+  its `bundler_lower_test.go`, `bundler_default_test.go`,
+  `bundler_loader_test.go` expectations.
+- **Feature switches that change output, not syntax** (`prepare.rs`, `plan.rs`, `print.rs`):
+  without `import-meta`, `import.meta` (also the one JSX's automatic runtime builds) is one
+  empty object per module (`var import_meta = {}`) with a warning per use; without
+  `arbitrary-module-namespace-names`, a string import or export name that is not an
+  identifier is an error only where ESM output keeps it (entries and what they `export *`,
+  external imports; `lowering::string_names`); without `object-extensions` a JSON
+  `"__proto__"` key stays a plain key; without `const-and-let` the transform's own
+  `const`/`let` (`import x = require`) become `var`; without `using`, assigning a module-level
+  `const` or `using` binding is an error (`Cannot assign to "x" because it is a constant`),
+  since lowering would turn it into a write that silently works.
+- **Module keys that are not plain files** (`graph.rs`): `(disabled):x`, a file plus
+  `WITH_TYPE_SEP` and an import attribute type, a file plus `QUERY_SEP` and the `?query` /
+  `#hash` it was imported with (each suffix is its own module, as in esbuild; the file is
+  read without it), and a `data:` URL whose MIME type is `text/javascript` or
+  `application/json` (`data_url.rs`: loaded from the URL, cannot import relative paths).
+  Strip them (`split_with_type`, `split_query`) before using a key as a path.
+- **File-loader URLs are filled in per chunk** (`chunk.rs`): the module's cached code holds a
+  placeholder (`prepare::asset_placeholder`, letters and digits only). During assembly,
+  only its loader fragment is copied and its whole placeholder string literal is replaced
+  by the escaped URL as seen from the chunk's directory (`./a.png`, `../a.png`), or under
+  `--public-path`, plus the import's query. `[dir]` in `--asset-names` is relative to the
+  entries' common directory, `..` written `_.._`. The replacement can shift source map
+  columns after it on the same line. `--public-path` also prefixes cross-chunk imports
+  (`plan::chunk_import`).
+- **A module only `import()` reaches is named like a chunk** (`bundle::dynamic_file_name`):
+  `--chunk-names` (default `[name]-[hash]`, `[name]` the file's stem, `[dir]` dropped), not
+  `--entry-names`, as esbuild 0.28.2 does (`import('./sub/c')` gives `out/c-HASH.js`).
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
   isn't a file is a glob (sorted, bounded, skipping directories the pattern cannot match).
   Reaching a traversal size or depth limit is an error, never a partial expansion. CSS

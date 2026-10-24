@@ -9,6 +9,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::expr::Expr;
+use crate::features::Feature;
 use crate::graph::{DISABLED_PREFIX, Graph, ModuleId, Target};
 use crate::link::{Binding, Kind, Link, Wrap};
 use crate::meta::{Imported, PartKind, RecordKind, Sym, SymKind};
@@ -79,8 +80,9 @@ pub struct ModulePlan {
     /// bindings, around `top_reserved` (every other top-level name of the file).
     pub own_top_level: bool,
     pub top_reserved: Vec<String>,
-    /// Replace `import.meta` with `{}` (non-ESM output).
-    pub import_meta_empty: bool,
+    /// The module's `var import_meta = {};` that every `import.meta` refers to (non-ESM
+    /// output, or `import-meta` unsupported); empty = keep `import.meta`.
+    pub import_meta: String,
     pub mangle: bool,
     pub minify_syntax: bool,
     pub compact: bool,
@@ -253,6 +255,7 @@ struct Planner<'a> {
     wrapper: Vec<String>,
     ns_name: Vec<String>,
     default_name: Vec<String>,
+    import_meta: Vec<String>,
     /// (importer, CommonJS module) -> `import_x` name.
     import_vars: FxHashMap<(ModuleId, ModuleId), String>,
     /// External id -> CommonJS `import_x` var / ESM locals.
@@ -381,6 +384,7 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         wrapper: vec![String::new(); n],
         ns_name: vec![String::new(); n],
         default_name: vec![String::new(); n],
+        import_meta: vec![String::new(); n],
         import_vars: FxHashMap::default(),
         ext_var: FxHashMap::default(),
         ext_locals: FxHashMap::default(),
@@ -741,6 +745,15 @@ impl Planner<'_> {
         }
         let stem = self.stem(m);
         let unwrapped = self.unwrapped == Some(m);
+        // esbuild declares an empty object per module for `import.meta` where the output
+        // can't have it, and warns at each use (`prepare.rs`).
+        if self.g.modules[mi].meta.uses_import_meta
+            && (self.format != Format::Esm || self.o.unsupported().has(Feature::ImportMeta))
+        {
+            let n = self.names.alloc("import_meta");
+            self.owner.insert(n.clone(), m);
+            self.import_meta[mi] = n;
+        }
         match l.wrap[mi] {
             Wrap::Cjs if unwrapped => {}
             Wrap::Cjs => {
@@ -1004,8 +1017,10 @@ impl Planner<'_> {
                     if splitting {
                         let from = &out.chunks[out.module_chunk[mi].unwrap_or(0)].file;
                         let target_chunk = out.chunks.iter().position(|c| c.entry == Some(*t));
-                        target_chunk
-                            .map(|tc| Expr::Import(relative_import(from, &out.chunks[tc].file)))
+                        target_chunk.map(|tc| {
+                            let to = &out.chunks[tc].file;
+                            Expr::Import(chunk_import(from, to, &self.o.public_path))
+                        })
                     } else {
                         Some(match l.kinds[ti] {
                             Kind::Cjs => {
@@ -1061,6 +1076,12 @@ impl Planner<'_> {
         }
         // Prologue: static imports in order, then anything else bindings need.
         let mut prologue = Vec::new();
+        if !self.import_meta[mi].is_empty() {
+            prologue.push(PrologueStmt::Var(
+                self.import_meta[mi].clone(),
+                Expr::Object(Vec::new()),
+            ));
+        }
         let mut declared: FxHashSet<ModuleId> = FxHashSet::default();
         let mut inited: FxHashSet<ModuleId> = FxHashSet::default();
         let node_mode = l.node_mode[mi];
@@ -1239,7 +1260,7 @@ impl Planner<'_> {
             helper_esm: self.helper_names[Helper::Esm as usize].clone(),
             own_top_level: self.unwrapped == Some(m),
             top_reserved: Vec::new(),
-            import_meta_empty: self.format != Format::Esm,
+            import_meta: self.import_meta[mi].clone(),
             mangle: self.o.minify_identifiers,
             minify_syntax: self.o.minify_syntax,
             compact: self.o.minify_whitespace,
@@ -1386,6 +1407,17 @@ fn reachable(g: &Graph, l: &Link, e: ModuleId, dynamic: bool) -> Vec<bool> {
         }
     }
     seen
+}
+
+/// The import path from one chunk to another (both relative to the output directory):
+/// under `public_path` when one is set (esbuild prefixes every cross-chunk import with
+/// it, as it does file-loader URLs), else [`relative_import`].
+pub fn chunk_import(from: &str, to: &str, public_path: &str) -> String {
+    if public_path.is_empty() {
+        relative_import(from, to)
+    } else {
+        format!("{}/{to}", public_path.trim_end_matches('/'))
+    }
 }
 
 /// `./x.js`-style import path from one output file to another (both relative to the output

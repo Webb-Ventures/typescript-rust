@@ -3,12 +3,15 @@
 pub mod bundle;
 pub mod chunk;
 pub mod cjs_exports;
+pub mod data_url;
 pub mod expr;
+pub mod features;
 pub mod fscache;
 pub mod graph;
 #[cfg(feature = "hmr")]
 pub mod hmr;
 pub mod link;
+pub mod lowering;
 pub mod meta;
 pub mod metafile;
 pub mod options;
@@ -22,6 +25,7 @@ pub mod scan;
 pub mod sourcemap;
 
 pub use bundle::{BuildContext, BuildResult, BuildStats, OutputFile, build};
+pub use features::{Feature, Features};
 pub use options::*;
 
 use std::fmt;

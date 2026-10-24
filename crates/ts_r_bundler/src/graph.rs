@@ -62,6 +62,16 @@ pub const DISABLED_PREFIX: &str = "(disabled):";
 /// the loader the type names (`json`, `text` or `bytes`) whatever the file's extension.
 pub const WITH_TYPE_SEP: &str = "\0with:";
 
+/// Joins a file to the `?query` or `#hash` its import named it with (`./file.txt?foo`):
+/// esbuild gives each suffix its own module instance, and the file loader's URL keeps it.
+pub const QUERY_SEP: &str = "\0query:";
+
+/// A module file (after [`split_with_type`]) and its `?query` / `#hash` suffix, if any
+/// ([`QUERY_SEP`]).
+pub fn split_query(p: &str) -> (&str, &str) {
+    p.split_once(QUERY_SEP).unwrap_or((p, ""))
+}
+
 /// A module key's file and its import attribute `type`, if any ([`WITH_TYPE_SEP`]).
 pub fn split_with_type(key: &str) -> (&str, Option<&str>) {
     match key.split_once(WITH_TYPE_SEP) {
@@ -225,8 +235,10 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
                         .unwrap_or_else(|e| e.into_inner())
                         .insert(q.clone());
                     if new {
-                        if !q.starts_with(DISABLED_PREFIX) {
-                            queue(split_with_type(q).0.to_owned());
+                        if !q.starts_with(DISABLED_PREFIX)
+                            && !q.starts_with(crate::data_url::PREFIX)
+                        {
+                            queue(split_query(split_with_type(q).0).0.to_owned());
                         }
                         sp.spawn(q.clone());
                     }
@@ -340,15 +352,28 @@ pub fn pretty_path(wd: &str, p: &str) -> String {
     if let Some(rest) = p.strip_prefix(DISABLED_PREFIX) {
         return format!("{DISABLED_PREFIX}{rest}");
     }
+    if p.starts_with(crate::data_url::PREFIX) {
+        return format!("<{p}>");
+    }
     let r = path::relative(wd, p, true);
     if r.is_empty() { p.to_owned() } else { r }
+}
+
+/// `./x`, `../x`, `.` or `..`.
+fn is_relative(spec: &str) -> bool {
+    spec.starts_with("./") || spec.starts_with("../") || spec == "." || spec == ".."
 }
 
 fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     let loaded = load_module(ctx, p, wd);
     let resolver = &ctx.prep.resolver;
-    let p = split_with_type(p).0;
-    let dir = path::directory_of(p).to_owned();
+    let p = split_query(split_with_type(p).0).0;
+    let is_data = p.starts_with(crate::data_url::PREFIX);
+    let dir = if is_data {
+        String::new()
+    } else {
+        path::directory_of(p).to_owned()
+    };
     let mut messages = Vec::new();
     let mut targets = Vec::with_capacity(loaded.meta.records.len());
     let pretty = &loaded.pretty;
@@ -360,6 +385,9 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
         };
         let res = if p.starts_with(DISABLED_PREFIX) {
             Resolution::NotFound(String::new())
+        } else if is_data && is_relative(&r.spec) {
+            // A `data:` URL module has no directory to resolve against.
+            Resolution::NotFound(format!("Could not resolve {:?}", r.spec))
         } else {
             resolver.resolve(&r.spec, &dir, kind)
         };
@@ -432,6 +460,8 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     }
     let (side_effects, node_mode) = if p.starts_with(DISABLED_PREFIX) {
         (false, false)
+    } else if is_data {
+        (true, false)
     } else {
         let pkg = resolver.package_scope(&dir);
         let lower = p.to_ascii_lowercase();
@@ -464,7 +494,8 @@ fn prep_key(ctx: &GraphContext<'_>, p: &str, source: &Source) -> [u8; 32] {
 }
 
 fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
-    let (p, with_type) = split_with_type(key);
+    let (full, with_type) = split_with_type(key);
+    let (p, query) = split_query(full);
     if let Some(changed) = ctx.changed
         && !changed.contains(p)
         && let Some(l) = ctx
@@ -483,22 +514,23 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
         Some("json") => Loader::Json,
         Some("text") => Loader::Text,
         Some(_) => Loader::Bytes,
-        None => opts.loader_for(p),
+        None => crate::data_url::loader(p).unwrap_or_else(|| opts.loader_for(p)),
     };
     let fs = ctx.prep.resolver.fs();
     let mut messages = Vec::new();
     let pretty = match with_type {
-        Some(t) => format!("{} with {{ type: '{t}' }}", pretty_path(wd, p)),
-        None => pretty_path(wd, p),
+        Some(t) => format!("{}{query} with {{ type: '{t}' }}", pretty_path(wd, p)),
+        None => format!("{}{query}", pretty_path(wd, p)),
     };
-    let loaded = if !disabled && with_type.is_none() && !opts.has_loader(p) {
+    let data = p.starts_with(crate::data_url::PREFIX);
+    let loaded = if !disabled && !data && with_type.is_none() && !opts.has_loader(p) {
         let name = p.rsplit('/').next().unwrap_or(p);
         let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
         Err(format!(
             "No loader is configured for \".{ext}\" files: {pretty}"
         ))
     } else {
-        prepare::load(fs.as_ref(), p, loader, opts)
+        prepare::load(fs.as_ref(), full, loader, opts)
     };
     let source = match loaded {
         Ok(s) => s,
