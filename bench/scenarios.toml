@@ -31,7 +31,7 @@ input_hint = "run `cargo xtask upstream sync --minimal`"
   ours = true
   cmd = "{bin}/ts-r-check --parse-only {input}"
   requires = ["{bin}/ts-r-check"]
-  pending = "no parse-only entry point until the parser lands (M1)"
+  pending = "ts-r-check has no --parse-only flag yet; the parser is measured in-process instead (parse_corpus, bench/README.md)"
 
   [[scenario.tool]]
   name = "oxc-parser"
@@ -53,14 +53,13 @@ input_hint = "run `cargo xtask upstream sync --minimal`"
 [[scenario]]
 id = "run-startup"
 title = "ts-r run: start-up of a small TypeScript script"
-measures = "Wall time to run bench/fixtures/hello.ts. Target: <= tsx."
+measures = "Wall time to run bench/fixtures/hello.ts through the launcher (ts-r run, which starts ts-r-run on Node). Target: <= tsx."
 
   [[scenario.tool]]
   name = "ts-r"
   ours = true
   cmd = "{bin}/ts-r run bench/fixtures/hello.ts"
-  requires = ["{bin}/ts-r"]
-  pending = "ts-r-run does not exist yet"
+  requires = ["{bin}/ts-r", "{bin}/ts-r-run"]
 
   [[scenario.tool]]
   name = "tsx"
