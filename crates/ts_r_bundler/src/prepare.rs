@@ -874,6 +874,18 @@ pub fn prepare_with(
             }
         }
     }
+    // A BigInt literal below its target stays as written; esbuild warns that it may crash.
+    if unsupported.has(crate::features::Feature::Bigint) {
+        for at in crate::lowering::bigint_literals(&ast) {
+            let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+            late.push(lines.message(
+                Severity::Warning,
+                display,
+                at,
+                "Big integer literals are not available in the configured target environment and may crash at run-time".into(),
+            ));
+        }
+    }
     // JavaScript files go through the transform when the target needs lowering.
     let lower_js = !kind.is_typescript()
         && crate::lowering::js_needs_lowering(&ast, lowering_target(unsupported));

@@ -58,10 +58,6 @@ pub fn errors(ast: &Ast, unsupported: Features) -> Vec<(u32, String)> {
         let at = ast.span(id).start;
         let has = |f| unsupported.has(f);
         let msg = match n {
-            Node::BigIntLit { .. } if has(Feature::Bigint) => Some(
-                "Big integer literals are not available in the configured target environment"
-                    .into(),
-            ),
             Node::VarDecl {
                 kind: VarKind::Const,
                 ..
@@ -139,6 +135,32 @@ pub fn errors(ast: &Ast, unsupported: Features) -> Vec<(u32, String)> {
         ast.for_each_child(id, |c| stack.push((c, top)));
     }
     out.sort_by_key(|&(at, _)| at);
+    out
+}
+
+/// The offsets of the BigInt literals in values of `ast` (not in types or `declare`d code), in
+/// source order. Below `bigint` esbuild warns at each one that it may crash at run time, and
+/// still builds.
+pub fn bigint_literals(ast: &Ast) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut stack = vec![ast.root];
+    while let Some(id) = stack.pop() {
+        let n = *ast.node(id);
+        if ts_r_transform::is_type_kind(n.kind()) || n.modifiers().contains(Modifiers::DECLARE) {
+            continue;
+        }
+        if matches!(
+            n,
+            Node::Interface { .. } | Node::TypeAlias { .. } | Node::FunctionDecl { body: None, .. }
+        ) {
+            continue;
+        }
+        if let Node::BigIntLit { .. } = n {
+            out.push(ast.span(id).start);
+        }
+        ast.for_each_child(id, |c| stack.push(c));
+    }
+    out.sort_unstable();
     out
 }
 

@@ -99,8 +99,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   default/rest parameters, `for-of`, generators, async without generators, spread) and a
   top-level `await` without `top-level-await` are build errors with esbuild's messages
   (`lowering::errors`); arrows and template literals stay as written.
-  BigInt literals are build errors whenever `bigint` is unsupported; type-only literals
-  are erased and do not require runtime support. Observed behaviour: esbuild 0.28.2 and
+  A BigInt literal in a value below `bigint` is a warning, not an error: "Big integer
+  literals are not available in the configured target environment and may crash at
+  run-time" (`lowering::bigint_literals`); literals in types are erased and not reported.
+  esbuild also prints it as `/* @__PURE__ */ BigInt("123")`, which ts-r-build doesn't yet
+  (it keeps `123n`). Observed behaviour: esbuild 0.28.2 and
   its `bundler_lower_test.go`, `bundler_default_test.go`,
   `bundler_loader_test.go` expectations.
 - **Feature switches that change output, not syntax** (`prepare.rs`, `plan.rs`, `print.rs`):
