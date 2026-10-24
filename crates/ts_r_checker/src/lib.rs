@@ -73,6 +73,7 @@ pub mod uncalled;
 pub mod unions;
 pub mod unused;
 pub mod variance;
+pub mod widening_errors;
 pub mod yield_any;
 
 pub use checker::{CheckOptions, Checker, Ck, LayerError, Loc};

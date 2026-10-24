@@ -1072,6 +1072,23 @@ impl<'c, 'a> Ck<'c, 'a> {
             if let Some(i) = init {
                 let il = Loc::new(file, i);
                 let mut t = self.check_expr(il);
+                // `let x = null` evolves and `let xs = []` is an evolving array instead.
+                if type_ann.is_none()
+                    && declared != TypeId::AUTO
+                    && self.widening_errors_enabled(file)
+                    && !matches!(
+                        ast.node(crate::nodes::skip_parens(ast, i)),
+                        Node::ArrayLit { elements } if ast.list(*elements).is_empty()
+                    )
+                {
+                    let name = self.c.text(nl).to_owned();
+                    self.report_widening_declaration(
+                        nl,
+                        crate::widening_errors::WideningDecl::Variable,
+                        &name,
+                        t,
+                    );
+                }
                 if let Some(ta) = type_ann {
                     // A function initializer carries the variable's expando properties
                     // (`const f: Fn = () => 1; f.only = ...`).
@@ -1118,6 +1135,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(i) = init {
             let il = Loc::new(file, i);
             let t = self.check_expr(il);
+            if type_ann.is_none() && self.widening_errors_enabled(file) {
+                self.report_binding_widening(nl, t);
+            }
             // An empty pattern under `strictNullChecks` only asks for a non-nullish value
             // (`const {}: undefined = 1` is TS2532 alone; tsc: `checkVariableLikeDeclaration`).
             let empty = match *ast.node(nl.node) {
@@ -1959,6 +1979,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.check_param(Loc::new(file, p), is_expr);
         }
         self.report_circular_return(l, parts);
+        self.check_return_widening(l, parts);
         let Some(body) = parts.body else { return };
         let bl = Loc::new(file, body);
         let expression_body =
@@ -2871,6 +2892,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // with its literals widened (`f: (a: number) => void = (a = "") => {}` is an
                 // error, `(a: 1 | 2) => void = (a = 3) => {}` is not; observed, tsc 7).
                 self.check_assignable_with_elaboration(it, ctx, Loc::new(file, pattern), Some(il));
+            }
+            if type_ann.is_none()
+                && matches!(ast.node(pattern), Node::Ident { .. })
+                && self.widening_errors_enabled(file)
+                && !(in_expr_fn && self.contextual_param_type(p).is_some())
+            {
+                let name = self.c.text(Loc::new(file, pattern)).to_owned();
+                self.report_widening_declaration(
+                    p,
+                    crate::widening_errors::WideningDecl::Parameter,
+                    &name,
+                    it,
+                );
             }
         }
         if !matches!(ast.node(pattern), Node::Ident { .. }) {
@@ -4253,6 +4287,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                     if let Some(v) = value {
                         let vl = Loc::new(file, v);
                         let t = self.check_expr(vl);
+                        if type_ann.is_none()
+                            && self.widening_errors_enabled(file)
+                            && let Some(name) = key_text(ast, key)
+                        {
+                            self.report_widening_declaration(
+                                Loc::new(file, key),
+                                crate::widening_errors::WideningDecl::Member,
+                                &name,
+                                t,
+                            );
+                        }
                         if type_ann.is_some()
                             && let Some(d) = declared
                         {

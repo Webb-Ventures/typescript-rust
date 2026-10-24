@@ -444,6 +444,20 @@ Files, by layer:
   `useDefineForClassFields`, unless the constructor assigns it. TS2816 (`check_this`):
   `this` in a static field value (arrows included) of a class with legacy
   (`experimentalDecorators`) class decorators.
+- **Widening implicit-any errors** (`widening_errors.rs`; only under noImplicitAny without
+  strictNullChecks, TypeScript files). A declaration whose unannotated initializer type still
+  holds a widening `null`/`undefined` reports once it widens to `any`: TS7005 for variables,
+  TS7031 for binding elements (walked over the unwidened initializer, element by element),
+  TS7006 for parameters with an initializer, TS7008 for class properties. Before that, the
+  type is searched: a union with an empty-object member stays silent, arrays and tuples look
+  at their elements, and an object literal's own `null`/`undefined` property reports TS7018
+  at that property instead (`{ x: null }` is TS7018 on `x`, not TS7005). Functions with no
+  return annotation check their returns (and yields) the same way: TS7010/TS7055 at the name
+  (a function's, or a method's/getter's key), TS7011/TS7025 at a nameless function, skipped
+  when a contextual signature gives a non-generic return or yield type
+  (`widening_implicit_any`; tsc: checker.go, reportErrorsFromWidening and
+  reportWideningErrorsInType). Not done: a property coming out of a spread over a union is
+  not traced back to its literal (noImplicitAnyUnionNormalizedObjectLiteral1).
 - Implicitly `any` interface and type literal members (`implicit_members.rs`): TS7008 for
   property signatures, TS7032/TS7033 for accessor signatures with no annotation in the
   pair; a getter types its setter's parameter (no TS7006). Files with syntax errors are
