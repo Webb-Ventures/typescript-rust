@@ -462,7 +462,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 continue;
             }
             let text = self.store().str(n);
-            if text.starts_with("__@") || text.starts_with('#') {
+            if text.starts_with('#') {
                 continue;
             }
             let key = if crate::expr::is_numeric_name(text)
@@ -470,7 +470,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 k
             } else {
-                self.store().string_literal(text, false)
+                self.property_key_type(text)
             };
             if self.is_assignable(key, c) {
                 return true;

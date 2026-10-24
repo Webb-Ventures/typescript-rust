@@ -2757,9 +2757,9 @@ Files, by layer:
   itself not generic) has its template with the key put in as its constraint:
   `OptionHandlers[K]` is `(option: Options & { kind: K }) => string`. Under strict null
   checks it gains `| undefined` when the mapped type is optional (`?` or homomorphic over
-  optional properties) and some optional property's literal key fits the key's base
-  constraint. This is the base constraint of such an access, the constraint used when it is
-  a relation source (also inside a union target and as a member of a source intersection),
+  optional properties) and some optional property's literal or unique-symbol key fits the
+  key's base constraint. This is the base constraint of such an access, the constraint used
+  when it is a relation source (also inside a union target and as a member of a source intersection),
   but not the shape it is reported as (tsc: checker.go, getIndexedAccessType's mapped-type
   branch, substituteIndexedMappedType, couldAccessOptionalProperty,
   getEffectiveConstraintOfIntersection; `concrete_mapped_generic_index_substitution`).
