@@ -8,7 +8,9 @@
   test runner) and `tests/utils/tsx` (how the suite spawns the tool). Each spec runs twice:
   first with the subject set to tsx 4.23.15 (`bench/node_modules/tsx`, the reference), then
   with `ts-r-run`. Only tests that pass with tsx are compared, and a compared test passes when
-  it also passes with `ts-r-run`.
+  it also passes with `ts-r-run`. Tests that run a file through tsx's loader flags (`node
+  --import tsx <file>`, `node --require tsx/cjs <file>`) keep those flags for tsx and run
+  `ts-r-run <file>` for `ts-r-run`, which has one way to run a file.
 - **node**: every `spawnPromisified(process.execPath, [...])` call in Node 24.21.0's
   `test/es-module/test-typescript*.mjs`. Its arguments are evaluated against a copy of
   `test/fixtures/typescript/`, and the case runs under Node, under tsx and under `ts-r-run` with
@@ -33,27 +35,29 @@ node bench/run-oracle/fails.mjs --skips [REGEX]  # skips with their reasons
 
 Tests are skipped when they fail with tsx itself in this setup, or when they test something
 `ts-r-run` does not offer by design: the Node API (`tsx/esm/api`, `register()`), the REPL,
-watch mode, `--eval`/`--print`/stdin, the pty shell, and assertions on tsx's own transform
-output, cache or error text. In the node source, cases are skipped when Node and tsx disagree
-(type stripping only, versus a full transform), or when the arguments are not literal.
+watch mode, `--eval`/`--print`/stdin, the pty shell, `--version`/`--help` text, and
+assertions on tsx's own transform output, cache or error text. `process-interact.ts` tests
+the suite's own helper and never runs tsx. In the node source, cases are skipped when Node
+and tsx disagree (type stripping only, versus a full transform), or when the arguments are
+not literal.
 `results.json` lists every skip reason.
 
 ## Results
 
-1a31bee (2026-10-24, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
+23aedd7 (2026-10-24, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
 
-- tsx: **84 of 86 compared cases pass (97.7%)**; 49 skipped.
+- tsx: **98 of 100 compared cases pass (98.0%)**; 35 skipped.
 - node: **36 of 36 compared cases pass (100%)**; 53 skipped.
 
 | tsx spec | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
 | smoke | 11 | 2 | 0 |
 | tsconfig | 19 | 0 | 0 |
-| cli | 12 | 0 | 11 |
+| cli | 13 | 0 | 10 |
 | commonjs-mode-contracts | 8 | 0 | 0 |
-| resolution-priority | 5 | 0 | 4 |
-| version-sensitive | 29 | 0 | 22 |
-| loaders | 0 | 0 | 2 |
+| resolution-priority | 9 | 0 | 0 |
+| version-sensitive | 36 | 0 | 15 |
+| loaders | 2 | 0 | 0 |
 | api, api-declarations, esm-hook-resolve, node-capabilities, process-interact, pty-shell, repl, transform, transform-cache, watch | 0 | 0 | 10 |
 
 | Node test file | Pass | Fail | Skip |
@@ -84,3 +88,4 @@ Remaining tsx failures by cause:
 | resolution inside packages (TypeScript swap and nested `main` in `node_modules`, `exports` get the swap only), tsconfig `paths`/`baseUrl` for JavaScript parents with `.json` targets, JSON without import attributes, ES syntax in CommonJS-scope `.js`, `module.exports` in TypeScript in a `type: module` package, `.jsx` without `allowJs` uses `React.createElement`, fatal `--tsconfig` errors, empty directories as missing modules | 86 | 75 | 49 | 87.2% | 36 | 36 | 53 |
 | signal relay with a listener hidden from `listenerCount`, `--enable-source-maps` for `--test` | 86 | 79 | 49 | 91.9% | 36 | 36 | 53 |
 | format detection (only top-level `await` forces ESM), `import.meta` and a hidden `__esModule` marker in CommonJS output, `?query` instances, `import()` default unwrap, syntax errors behind `import()` deferred to load time, `TransformError` for `require` of top-level `await`, JSON named exports, no type stripping of preload output in `node_modules` | 86 | 84 | 49 | 97.7% | 36 | 36 | 53 |
+| the loader-flag cases (`--import tsx`, `--require tsx/cjs`) and `tsx --test` brought in; `ts-r-run --test` without a file, `require('..')` to a package's TypeScript index | 100 | 98 | 35 | 98.0% | 36 | 36 | 53 |

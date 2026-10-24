@@ -4,7 +4,8 @@
 // DEBUG); TS_R_ORACLE_SUBJECT=ts-r-run runs the ts-r-run binary (TS_R_ORACLE_TSR) with the same
 // arguments, cwd and env. `supports` describes Node 24 (the oracle's Node); every flag is set
 // by hand because tsx's own capability table is tsx source, which the oracle never loads.
-// Tests that use tsx's loader, API or CLI path directly are skipped before they run.
+// Tests that use tsx's API or CLI path directly are skipped before they run; tests that run a
+// file through tsx's loader flags run `ts-r-run <file>` instead.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +66,16 @@ const track = (child) => {
   return child;
 };
 
+/** A file run through tsx's loader flags (tsx) or ts-r-run (ts-r-run). */
+const loader = (flags, args, cwd) => {
+  if (subject === 'tsx') {
+    return track(execaNode(args[0], args.slice(1), {
+      cwd, nodePath: process.execPath, nodeOptions: flags, reject: false, all: true,
+    }));
+  }
+  return track(execa(tsrRun, args, { cwd, reject: false, all: true }));
+};
+
 /** The old single-call API (`tsx({ args, cwd })`). */
 export const tsx = (options) => track(run(options.args, { cwd: options.cwd, nodePath: options.nodePath }));
 
@@ -99,7 +110,10 @@ export const createNode = async () => {
       const options = isCwd ? { cwd: cwdOrOptions } : { ...cwdOrOptions };
       return track(run(args, options));
     },
-    cjsPatched: () => skip("tsx's CommonJS register (--require tsx/cjs)"),
-    hook: () => skip("tsx's ESM loader (--import tsx)"),
+    // `node --require tsx/cjs <file>` and `node --import tsx <file>` run a program the way
+    // `tsx <file>` does; ts-r-run has one way to run a file, so its subject is
+    // `ts-r-run <file>`. tsx's reference keeps the loader flags upstream uses.
+    cjsPatched: (args, cwd) => loader(['--require', tsxCjsPath], args, cwd),
+    hook: (args, cwd) => loader(['--import', tsxEsmPath], args, cwd),
   };
 };

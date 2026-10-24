@@ -34,15 +34,12 @@ const SUITES = {
 /** Tests the oracle can't compare, by what they exercise. Checked before a test runs. */
 const SOURCE_SKIPS = [
   [/\btsxEsm\w*Path|\btsxCjs\w*Path/, "tsx-only: tsx's API (tsx/esm/api, tsx/cjs/api, register())"],
-  [/\.hook\(|\bhook\(\[/, "tsx-only: tsx's ESM loader (--import tsx)"],
-  [/cjsPatched/, "tsx-only: tsx's CommonJS register (--require tsx/cjs)"],
   [/ptyShell|\bshell\.type/, 'tsx-only: interactive pty shell'],
 ];
 const NAME_SKIPS = [
   [/^CLI > (argv > )?(version|help)\b/, "tsx-only: tsx's --version / --help text"],
   [/^CLI > eval & print\b/, 'not in ts-r-run: --eval / --print (ts-r-run runs a file)'],
   [/\bwatch\b/i, "tsx-only: `tsx watch` (ts-r-run's --watch is a different CLI)"],
-  [/\b(--test|test runner)\b/i, "tsx-only: `tsx --test` (Node's test runner through tsx)"],
 ];
 
 runner.selected = (name) => !filter || filter.test(name);
