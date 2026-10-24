@@ -28,6 +28,8 @@ pub struct Source {
     pub css: Option<Arc<str>>,
     /// Bytes to emit as a separate file (the `file` loader).
     pub asset: Option<Asset>,
+    /// Top-level JSON object keys before rewriting JavaScript-only computed properties.
+    pub json_keys: Option<Arc<[String]>>,
     /// Hash of the raw file contents and loader, and of anything else `js` depends on (the
     /// `file` loader's URL). Part of the module's preparation key.
     pub hash: [u8; 32],
@@ -52,12 +54,8 @@ pub fn load(
             .ok_or_else(|| format!("Could not read from file: {path}"))
     };
     let read_bytes = || -> Result<Vec<u8>, String> {
-        match fs.read_file(path) {
-            Some(t) => Ok(t.into_bytes()),
-            None => {
-                std::fs::read(path).map_err(|e| format!("Could not read from file: {path}: {e}"))
-            }
-        }
+        fs.read_bytes(path)
+            .ok_or_else(|| format!("Could not read from file: {path}"))
     };
     let hash_of = |bytes: &[u8]| {
         let mut h = blake3::Hasher::new();
@@ -70,6 +68,7 @@ pub fn load(
         js: Arc::from(format!("module.exports = {expr};\n")),
         css: None,
         asset: None,
+        json_keys: None,
         hash,
     };
     match loader {
@@ -81,6 +80,7 @@ pub fn load(
                 js: Arc::from(text),
                 css: None,
                 asset: None,
+                json_keys: None,
                 hash,
             })
         }
@@ -101,7 +101,13 @@ pub fn load(
                 // JSON is a JavaScript expression; parenthesize so `{` isn't a block.
                 format!("(\n{}\n)", computed_proto_keys(text.trim_end()))
             };
-            Ok(js_value(body, hash))
+            let mut source = js_value(body, hash);
+            source.json_keys = parsed
+                .root
+                .as_ref()
+                .and_then(Value::as_object)
+                .map(|members| members.iter().map(|m| m.key.clone()).collect());
+            Ok(source)
         }
         Loader::Text => {
             let text = read_text()?;
@@ -183,6 +189,7 @@ pub fn load(
                 js: Arc::from(""),
                 css: Some(Arc::from(text)),
                 asset: None,
+                json_keys: None,
                 hash,
             })
         }
@@ -190,6 +197,7 @@ pub fn load(
             js: Arc::from(""),
             css: None,
             asset: None,
+            json_keys: None,
             hash: hash_of(b""),
         }),
     }

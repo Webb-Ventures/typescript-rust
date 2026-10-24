@@ -508,6 +508,7 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
                 js: Arc::from(""),
                 css: None,
                 asset: None,
+                json_keys: None,
                 hash: [0; 32],
             }
         }

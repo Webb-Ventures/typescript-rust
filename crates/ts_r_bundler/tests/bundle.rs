@@ -1710,6 +1710,81 @@ fn an_import_with_a_type_attribute_is_its_own_module_instance() {
 }
 
 #[test]
+fn attributed_json_namespace_has_only_the_complete_default_value() {
+    for (i, value) in [
+        r#"{"__esModule":true,"x":1,"default":2}"#,
+        r#"{"__proto__":123,"x":1}"#,
+        "[1,2]",
+        "123",
+        "null",
+    ]
+    .iter()
+    .enumerate()
+    {
+        for minify in [false, true] {
+            let fs = project(&[
+                (
+                    "entry.js",
+                    "import data, * as ns from './data.txt' with { type: 'json' };\n\
+                     console.log(JSON.stringify(data), data === ns.default, Object.keys(ns).join(','), typeof Object.getOwnPropertyDescriptor(ns, 'default').get);\n",
+                ),
+                ("data.txt", value),
+            ]);
+            let mut o = opts(&["entry.js"]);
+            o.minify_syntax = minify;
+            o.minify_whitespace = minify;
+            o.minify_identifiers = minify;
+            let r = run_build(&fs, o);
+            if have_node() {
+                assert_eq!(
+                    run_node(&format!("attributed-json-{i}-{minify}"), &r, "entry.js"),
+                    format!("{value} true default function\n")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn json_computed_proto_keys_remain_named_exports() {
+    for (i, json) in [
+        r#"{"__proto__":123,"x":1}"#,
+        r#"{"\u005f_proto__":123,"nested":{"__proto__":456},"x":1}"#,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let fs = project(&[
+            (
+                "entry.js",
+                "import data, { __proto__ as p, x } from './data.json';\n\
+                 export { __proto__ as forwarded } from './data.json';\n\
+                 console.log(p, x, Object.prototype.hasOwnProperty.call(data, '__proto__'));\n",
+            ),
+            ("data.json", json),
+        ]);
+        let r = run_build(&fs, opts(&["entry.js"]));
+        if have_node() {
+            assert_eq!(
+                run_node(&format!("json-named-proto-{i}"), &r, "entry.js"),
+                "123 1 true\n"
+            );
+        }
+    }
+    let fs = project(&[
+        (
+            "entry.js",
+            "import { missing } from './data.json'; console.log(missing);",
+        ),
+        ("data.json", r#"{"__proto__":123}"#),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+        .expect("options")
+        .build();
+    assert!(r.errors().any(|m| m.text.contains("No matching export")));
+}
+
+#[test]
 fn a_json_import_with_a_type_attribute_has_only_a_default_export() {
     let errors = |entry: &str| {
         let fs = project(&[("entry.js", entry), ("data.json", "{ \"foo\": 123 }")]);

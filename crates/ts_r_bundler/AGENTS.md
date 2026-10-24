@@ -75,6 +75,7 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   adding the fragments one by one (`add_fragment`); a unit test holds them equal.
 - **Module identity includes how it is imported.** An import with a `type` attribute gets its
   own module (key `path\0with:type`, loader from the attribute; `bytes` is `Loader::Bytes`).
+  Binary loaders use `FileSystem::read_bytes`, preserving invalid UTF-8 and UTF-16 BOMs.
   External imports are keyed `path\0phase\0attrs` (`import defer`/`import source` and
   attributes are kept), and keep source evaluation order (`plan::external_order`).
 - **Module kinds** (`link::compute_kinds`): a JS file with no ESM syntax that something
@@ -82,15 +83,18 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   A re-export cycle is an error (`Detected cycle while resolving import "x"`). Top-level
   `this` in a CommonJS file is `exports`.
 - **JSON** imported as a namespace gives an ES namespace whose `default` is a getter
-  (`__tsrToEsm(mod, 2)`); a `"__proto__"` key or export name is always the computed key
+  (`__tsrToEsm(mod, 2)`); attributed JSON exposes only that default getter (mode 3),
+  regardless of a JSON `__esModule` property. The loader retains original top-level object
+  keys for export discovery; a `"__proto__"` key or export name is always the computed key
   `["__proto__"]`, never a prototype. package.json is strict JSON (errors, not guesses).
 - **Per-file transform choices are pure functions of the file**: a TypeScript file that
   exports a const enum keeps the enum object (`preserveConstEnums`, as `isolatedModules`
   does), since its importers are transformed apart from it; JS `accessor` fields are lowered
   under an explicit `--target`; tsconfig `"jsx": "preserve"` is ignored when bundling.
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
-  isn't a file is a glob (sorted, bounded); CSS entries pass through without `--bundle`; a
-  missing `--tsconfig` is an error.
+  isn't a file is a glob (sorted, bounded, skipping directories the pattern cannot match).
+  Reaching a traversal size or depth limit is an error, never a partial expansion. CSS
+  entries pass through without `--bundle`; a missing `--tsconfig` is an error.
 - **Resolution**: a `package.json` `exports` target or import of `./x.js` that is missing
   falls back to `./x.ts`/`./x.tsx` (`.jsx` tries `.ts` first); esbuild's dual-package rule
   (require picks `main`) applies only with the default main fields.
@@ -99,7 +103,7 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   loads, one more thread reads module files ahead of the workers (`CachedFs::read_ahead`)
   as the calling thread waits: opening files is costly and contended in the kernel on
   macOS, and one reader beats every worker opening its own (three.js x10: graph 110 to
-  75 ms). Each file is still read once through the inner file system; nothing read ahead
+  75 ms). Each text file is still read once through the inner file system; nothing read ahead
   outlives the graph phase.
 - A one-shot CLI build ends with `BuildContext::finish_and_leak` (flush the disk cache,
   leak the rest): never call it where the context or process lives on.
