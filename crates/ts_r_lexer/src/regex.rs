@@ -21,6 +21,8 @@
 //! - Nesting (groups, `v`-mode classes) deeper than [`MAX_DEPTH`] is not checked: such a
 //!   pattern gets no errors rather than a stack overflow.
 
+use std::collections::HashSet;
+
 use ts_r_diagnostics::{DiagnosticMessage, messages as m};
 
 use crate::{chars, regex_props as props};
@@ -86,7 +88,7 @@ pub(crate) fn validate(src: &str, start: usize, end: usize, flags: u8) -> Vec<Re
         named_groups: has_named_group(&b[start..end]),
         may_strings: false,
         groups: 0,
-        specifiers: Vec::new(),
+        specifiers: HashSet::new(),
         references: Vec::new(),
         backreferences: Vec::new(),
         scopes: Vec::new(),
@@ -173,14 +175,14 @@ struct Validator<'a> {
     /// Capturing groups, named or not.
     groups: u32,
     /// Names of the named groups.
-    specifiers: Vec<String>,
+    specifiers: HashSet<String>,
     /// `\k<name>`: the name's span and the name.
     references: Vec<(usize, usize, String)>,
     /// `\1`: its digits' span and value.
     backreferences: Vec<(usize, usize, u64)>,
     /// The group names of each enclosing alternative: two groups may share a name only in
     /// different alternatives.
-    scopes: Vec<Vec<String>>,
+    scopes: Vec<HashSet<String>>,
     /// Without `u`: the second UTF-16 unit of the astral character at `pos`.
     pending_low: u32,
     depth: u32,
@@ -277,7 +279,7 @@ impl Validator<'_> {
             return;
         }
         loop {
-            self.scopes.push(Vec::new());
+            self.scopes.push(HashSet::new());
             self.alternative(in_group);
             self.scopes.pop();
             if !self.eat(b'|') {
@@ -702,13 +704,13 @@ impl Validator<'_> {
             self.error(start, self.pos, m::REGEX_DUPLICATE_GROUP_NAME);
         } else {
             if let Some(scope) = self.scopes.last_mut() {
-                scope.push(name.clone());
+                scope.insert(name.clone());
             }
-            self.specifiers.push(name);
+            self.specifiers.insert(name);
         }
     }
 
-    /// An identifier at `pos` (its later characters may be unicode escapes), or nothing.
+    /// An identifier at `pos` (its characters may be unicode escapes), or nothing.
     fn identifier(&mut self) -> String {
         let mut name = String::new();
         match self.char_at(self.pos) {
@@ -716,6 +718,13 @@ impl Validator<'_> {
                 name.push(c);
                 self.pos += c.len_utf8();
             }
+            Some('\\') => match self.peek_unicode_escape() {
+                Some((c, len)) if chars::is_id_start(c) => {
+                    name.push(c);
+                    self.pos += len;
+                }
+                _ => return name,
+            },
             _ => return name,
         }
         loop {

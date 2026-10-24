@@ -515,6 +515,57 @@ fn regex_class_sets() {
 }
 
 #[test]
+fn regex_escaped_group_names() {
+    for escape in [concat!("\\", "u0061"), concat!("\\", "u{61}")] {
+        for src in [
+            format!("/(?<{escape}>x)\\k<a>/u"),
+            format!("/(?<a>x)\\k<{escape}>/u"),
+            format!("/(?<{escape}>x)\\k<{escape}>/u"),
+        ] {
+            let errors = regex_errors(&src);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            assert!(errors[0].starts_with("1503@"), "{src}: {errors:?}");
+        }
+        let src = format!("/(?<{escape}>x)(?<a>y)/u");
+        assert!(regex_errors(&src).iter().any(|e| e.starts_with("1515@")));
+    }
+    for src in [
+        concat!("/(?<", "\\", "u0030>x)/u"),
+        concat!("/(?<a>x)\\k<", "\\", "u0030>/u"),
+    ] {
+        assert!(regex_errors(src).iter().any(|e| e.starts_with("1514@")));
+    }
+}
+
+#[test]
+fn regex_many_group_names() {
+    use std::fmt::Write;
+
+    let mut pattern = String::new();
+    for i in 0..50_000 {
+        write!(pattern, "(?<g{i:05}>a)").unwrap();
+    }
+    for i in 0..50_000 {
+        write!(pattern, "\\k<g{i:05}>").unwrap();
+    }
+    let errors = regex::validate(&pattern, 0, pattern.len(), regex::FLAG_U);
+    assert_eq!(errors.len(), 50_000);
+    assert!(errors.iter().all(|e| e.msg.code == 1503));
+
+    for (src, duplicate) in [
+        ("/(?<a>x)((?<a>y)|(?<b>z))/", true),
+        ("/((?<a>x)|(?<a>y))/", false),
+        ("/(?<a>x)|((?<a>y))/", false),
+    ] {
+        assert_eq!(
+            regex_errors(src).iter().any(|e| e.starts_with("1515@")),
+            duplicate,
+            "{src}"
+        );
+    }
+}
+
+#[test]
 fn regex_pathological_patterns() {
     // Deep nesting is not checked rather than overflowing the stack.
     for pattern in ["(".repeat(100_000), "[".repeat(100_000)] {

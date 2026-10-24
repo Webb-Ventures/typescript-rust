@@ -2870,8 +2870,9 @@ shares levels; the driver takes any checker (`check_program_with`, `check_files`
 
 ## Dependencies
 
-`ts_r_span`, `ts_r_ast`, `ts_r_parser`, `ts_r_binder`, `ts_r_diagnostics`, `ts_r_config`,
-`ts_r_resolver`, `ts_r_types`, `rustc-hash`. Dev: `ts_r_testing` (memory cap), `ts_r_emit`
+`ts_r_span`, `ts_r_ast`, `ts_r_lexer` (trivia-aware import comma detection), `ts_r_parser`,
+`ts_r_binder`, `ts_r_diagnostics`, `ts_r_config`, `ts_r_resolver`, `ts_r_types`, `rustc-hash`.
+Dev: `ts_r_testing` (memory cap), `ts_r_emit`
 (the conformance example's declaration diagnostics; a dev-dependency cycle, which examples
 and integration tests allow: they link the one library build).
 

@@ -182,16 +182,18 @@ impl<'a> Parser<'a> {
                 self.parse_jsx_tag_name()
             };
             let open_text = self.ast.span(name).text(self.src);
-            let (open_key, close_key) = (self.jsx_tag_key(name), self.jsx_tag_key(cname));
-            let parent_key = parent_name.map(|n| self.jsx_tag_key(n));
-            if open_key != close_key && parent_key.is_some_and(|p| p == close_key) {
+            let names_match = open_text == self.ast.span(cname).text(self.src)
+                || self.jsx_tag_key(name) == self.jsx_tag_key(cname);
+            if !names_match
+                && parent_name.is_some_and(|n| self.jsx_tag_key(n) == self.jsx_tag_key(cname))
+            {
                 // `<a><b>x</a>`: the closing tag is the parent's; this element is unclosed
                 // (as in tsc 7, only for the direct parent).
                 self.rewind(cp);
                 let span = self.ast.span(name);
                 self.error_at(messages::JSX_NO_CLOSING_TAG, span, &[open_text]);
             } else {
-                if open_key != close_key {
+                if !names_match {
                     let span = self.ast.span(cname);
                     self.error_at(messages::JSX_EXPECTED_CLOSING_TAG, span, &[open_text]);
                 }

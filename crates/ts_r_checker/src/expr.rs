@@ -10582,23 +10582,12 @@ fn is_exports_identifier(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
 /// The position of a `,` right after `from` in `text` that only trivia separates from a
 /// closing `)` (an argument list's trailing comma).
 fn trailing_comma_at(text: &str, from: usize) -> Option<usize> {
-    let skip = |mut i: usize| -> usize {
-        let b = text.as_bytes();
-        loop {
-            match (b.get(i), b.get(i + 1)) {
-                (Some(c), _) if c.is_ascii_whitespace() => i += 1,
-                (Some(b'/'), Some(b'/')) => {
-                    i = text[i..].find('\n').map_or(b.len(), |n| i + n);
-                }
-                (Some(b'/'), Some(b'*')) => {
-                    i = text[i + 2..].find("*/").map_or(b.len(), |n| i + 2 + n + 2);
-                }
-                _ => return i,
-            }
-        }
-    };
-    let comma = skip(from);
-    (text.as_bytes().get(comma) == Some(&b',')
-        && text.as_bytes().get(skip(comma + 1)) == Some(&b')'))
-    .then_some(comma)
+    use ts_r_lexer::{Lexer, TokenKind};
+    let mut lexer = Lexer::new(text);
+    lexer.seek(from as u32);
+    if lexer.next_token() != TokenKind::Comma {
+        return None;
+    }
+    let comma = lexer.token().span().start as usize;
+    (lexer.next_token() == TokenKind::RParen).then_some(comma)
 }
