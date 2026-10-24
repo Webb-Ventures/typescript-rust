@@ -40,23 +40,57 @@ every skip reason.
 
 ## Results
 
-8c14f29 (2026-10-24, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`, 27 s): **685 of
-2550 compared tests pass (26.9%)**; 3694 of 9216 queries agree. 3769 of the 6319 test files
-are skipped (3698 verify no compared feature).
+4eda074 (2026-10-24, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`, 27 s):
+**795 of 2549 compared tests pass (31.2%)**; 4050 of 9094 queries agree.
+3770 of the 6319 test files are skipped (3698 verify no compared feature, 123 get no answer
+from either server). Up from 685 of 2550 at 8c14f29: 110 tests fixed, none regressed.
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 192 | 326 | 20 | 1420 / 2513 |
-| completion | 239 | 820 | 74 | 789 / 3037 |
+| hover | 198 | 320 | 20 | 1446 / 2513 |
+| completion | 293 | 765 | 75 | 905 / 2915 |
 | references | 72 | 273 | 12 | 628 / 1443 |
 | rename | 85 | 91 | 13 | 267 / 549 |
-| definition | 42 | 125 | 25 | 288 / 528 |
-| signatureHelp | 42 | 110 | 24 | 234 / 658 |
-| highlights | 13 | 104 | 20 | 58 / 431 |
+| definition | 45 | 122 | 25 | 297 / 528 |
+| signatureHelp | 78 | 74 | 24 | 406 / 658 |
+| highlights | 24 | 93 | 20 | 91 / 431 |
 | typeDefinition | 0 | 16 | 3 | 10 / 57 |
+
+Remaining failures by cause (example tests in parentheses):
+
+- **Type display (ts_r_checker)**, most hover and many signature-help failures: type aliases
+  printed expanded or not where tsc differs, no `... N more ...` truncation
+  (`quickInfoCanBeTruncated`), mapped and intersection types, `typeof import("...")` with an
+  absolute path, `| undefined` added to optional parameters (`signatureHelp_unionType`),
+  module-qualified names (`qualifyModuleTypeNames`: `m.c`), type predicates printed as
+  `boolean` (`signatureHelpOnTypePredicates`), merged class and namespace aliases.
+- **Highlights (ts_r_lsp)**: keyword occurrences (`switch`/`case`/`break`, `if`/`else`,
+  `async`/`await`, `return`, modifiers, `this`: the `getOccurrences*` tests), members
+  inherited across classes, `export { x as y }` names, JSX tag names.
+- **References and rename (ts_r_lsp)**: default exports, arbitrary module namespace names,
+  constructors (`findAllRefsOfConstructor2`), import types (`findAllRefs_importType_named`),
+  JSDoc `@typedef`, string literal types (`renameStringLiteralTypes2`), the extra edits tsc
+  makes when renaming a default import.
+- **Definition (ts_r_lsp)**: `override` to the base member (`goToDefinitionOverriddenMember*`),
+  keywords (`return`, `await`, `yield`, `case`), ambient and shorthand module names,
+  contextually typed object literal properties, labels, meta properties, JSX.
+- **Completion (ts_r_lsp)**: no module-specifier or path completions (locals are listed inside
+  import strings: `completionForStringLiteral*Import*`), no string-literal-type completions,
+  private `#` names, JSX attributes.
+- **Signature help (ts_r_lsp)**: type-argument help (`f<|`, `signatureHelpTypeArguments`),
+  `super(` calls (`signatureHelpForSuperCalls1`), JSX (`tsxSignatureHelp1`), rest tuples
+  expanded into parameters (`signatureHelpExpandedRestTuples`), contextual signatures for a
+  callback argument (`signatureHelp_contextual`), the active overload after an argument that
+  rules one out (`signatureHelpOnOverloadsDifferentArity`), generic overloads other than the
+  resolved one shown uninstantiated.
+- **Type definition (ts_r_lsp)**: every test fails on at least one marker; ts-r answers nothing
+  on a declaration's own name (`goToTypeDefinition3`, `goToTypeDefinitionModifiers`) and on
+  module names (`goToTypeDefinitionModule`), and goes to the enum rather than the enum member
+  (`goToTypeDefinitionEnumMembers`).
 
 ## Run history
 
 | Commit | Date | Pass | Compared | Rate | Change |
 | --- | --- | ---: | ---: | ---: | --- |
 | 8c14f29 | 2026-10-24 | 685 | 2550 | 26.9% | First run |
+| 4eda074 | 2026-10-24 | 795 | 2549 | 31.2% | Tagged templates, instantiated and `new`-less signature help; `Function` members and `arguments` completions; tsc 7 alias hover; highlight kinds; overload definitions |
