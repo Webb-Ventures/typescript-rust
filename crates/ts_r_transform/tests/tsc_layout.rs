@@ -127,6 +127,12 @@ fn using_top_level() {
     check("using_top_level");
 }
 
+/// At ESNext every `using` stays as written, a top-level one followed by exports too.
+#[test]
+fn using_esnext() {
+    check("using_esnext");
+}
+
 /// Private names below ES2022: `WeakMap`/`WeakSet` storage, method functions, the helper
 /// calls for reads, writes, compound and update operators, calls and `#x in o`, aliases.
 #[test]

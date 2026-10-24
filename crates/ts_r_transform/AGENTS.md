@@ -60,7 +60,7 @@ Preserve}` is per file. `hmr::TsTransform` (feature `hmr`) implements `ts_r_hmr:
 | `build_errors.rs` | which parse errors fail a build (esbuild's rule, observed) |
 | `downlevel/` | lowering for targets below ES2022 (record 0012, E5): `lower.rs` is the one walk (function contexts, hoisted temporaries, unique names), `operators.rs` (ES2021 logical assignment and separators, ES2019 catch, ES2016 `**`), `es2020.rs` (`?.`, `??`), `es2018.rs` (async generators, `for await`, object spread), `rest.rs` (object rest), `template.rs` (tagged templates with invalid escapes: `__makeTemplateObject`), `es2017.rs` (async functions, `_super`, `arguments`), `es2022.rs` (class statics after the class, class aliases, `Reflect.get` / `Reflect.set` for static `super`, `useDefineForClassFields` defines, private member storage), `private.rs` (private name
 uses: `__classPrivateFieldGet`/`Set`/`In`, receivers captured for compound and update
-operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await using` below ESNext and a module's top-level `using` followed by exports at ESNext: `env`/`try`, hoisted declarations, regrouped exports, CommonJS `void 0` list order); `mod.rs` `unlowered` lists output syntax newer than the target (TSR2003) |
+operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await using` below ESNext; at ESNext tsc 7 keeps every `using`, a module's top-level one followed by exports too: `env`/`try`, hoisted declarations, regrouped exports, CommonJS `void 0` list order); `mod.rs` `unlowered` lists output syntax newer than the target (TSR2003) |
 | `hmr.rs` | dev-server adapter (feature `hmr`) |
 
 ## Invariants
