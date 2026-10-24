@@ -49,6 +49,9 @@ Exit codes: tool's own (exec), 127 tool not installed, 126 exec failed, 2 usage 
   `tests/cli.rs` (Unix) copies the built binary into a sandbox with fake shell-script tools and
   an isolated `TS_R_CACHE_DIR`/`PATH`, covering arg/exit-code passthrough, search order,
   pinning, `ci` output and failure modes, doctor, exec failure.
+- Against the real tools: [`bench/cli-oracle`](../../bench/cli-oracle/README.md) runs
+  `ts-r <tool> args` next to `ts-r-<tool> args` on a fixture project (exit code, stdout,
+  stderr) and checks the launcher's own commands (37 of 37 passthrough, 13 of 13 launcher).
 - Manual: `cargo run -p ts_r_cli -- doctor`.
 
 ## Gaps
