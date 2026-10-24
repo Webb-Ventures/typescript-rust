@@ -179,12 +179,9 @@ pub(crate) fn run(
     crate::enums::prepass(&mut tx);
     tx.program();
     let using = using.and_then(|_| {
-        // Every `using` is lowered below ESNext; at ESNext only a top level followed by
-        // exports.
-        crate::downlevel::using::run(&mut tx, opts.target < ts_r_config::ScriptTarget::ESNext);
-        crate::downlevel::using::remaining(&*tx.ast)
-            .filter(|_| opts.target < ts_r_config::ScriptTarget::ESNext)
-            .map(|s| (s, "'using' declaration"))
+        // Every `using` is lowered below ESNext (and none at ESNext).
+        crate::downlevel::using::run(&mut tx);
+        crate::downlevel::using::remaining(&*tx.ast).map(|s| (s, "'using' declaration"))
     });
     if opts.target < ts_r_config::ScriptTarget::ES2022 {
         crate::downlevel::lower::run(&mut tx);

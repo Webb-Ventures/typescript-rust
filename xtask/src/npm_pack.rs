@@ -199,8 +199,11 @@ fn check_packs(packs: &[Pack]) -> Vec<String> {
             ));
         }
         let has = |f: &str| p.files.iter().any(|x| x == f);
-        if !has("package.json") || !has("README.md") {
-            problems.push(format!("{} lacks package.json or README.md", p.name));
+        if !has("package.json") || !has("README.md") || !has("LICENSE") {
+            problems.push(format!(
+                "{} lacks package.json, README.md or LICENSE",
+                p.name
+            ));
         }
         if p.kind == "platform" {
             let tool = p

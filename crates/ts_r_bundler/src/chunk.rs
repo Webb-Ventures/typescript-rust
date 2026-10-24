@@ -163,6 +163,19 @@ pub fn assemble(
             ));
         }
         for x in &c.ext_imports {
+            // A phase (`import defer * as ns`) or attributes (`with { type: "json" }`) are
+            // kept as written: such imports have their own entry (`graph::external_key`).
+            let (path, phase, attrs) = crate::graph::split_external(&x.path);
+            let from = if attrs.is_empty() {
+                q(path)
+            } else {
+                format!("{}{sp}{attrs}", q(path))
+            };
+            let kw = match phase {
+                crate::meta::PHASE_DEFER => "import defer",
+                crate::meta::PHASE_SOURCE => "import source",
+                _ => "import",
+            };
             let mut clause: Vec<String> = Vec::new();
             if let Some(d) = &x.default {
                 clause.push(d.clone());
@@ -188,21 +201,21 @@ pub fn assemble(
             }
             if let Some(ns) = &x.namespace {
                 if clause.is_empty() {
-                    out.stmt(&format!("import * as {ns} from{sp}{};", q(&x.path)));
+                    out.stmt(&format!("{kw} * as {ns} from{sp}{from};"));
                     continue;
                 }
-                out.stmt(&format!("import * as {ns} from{sp}{};", q(&x.path)));
+                out.stmt(&format!("{kw} * as {ns} from{sp}{from};"));
             }
             if clause.is_empty() {
                 if x.namespace.is_none() {
-                    out.stmt(&format!("import{sp}{};", q(&x.path)));
+                    out.stmt(&format!("import{sp}{from};"));
                 }
             } else {
                 let clause = clause.join(if compact { "," } else { ", " });
                 // A default-import binding is an identifier: `from` needs a space after it
                 // even when minified (`import o from"node:os"`).
                 let gap = if clause.ends_with('}') { sp } else { " " };
-                out.stmt(&format!("import {clause}{gap}from{sp}{};", q(&x.path)));
+                out.stmt(&format!("{kw} {clause}{gap}from{sp}{from};"));
             }
         }
         for (oc, names) in &c.imports {
@@ -230,6 +243,7 @@ pub fn assemble(
     }
     if plan.format != Format::Esm {
         for (path, var) in &c.ext_requires {
+            let path = crate::graph::split_external(path).0;
             if var.is_empty() {
                 out.stmt(&format!("require({});", q(path)));
             } else {

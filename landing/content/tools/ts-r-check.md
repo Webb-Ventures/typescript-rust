@@ -40,18 +40,13 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 
 ## Not yet
 
-- JSX element and attribute types.
-- Evolving arrays (`let xs = []`).
-- Implicit `any` in binding patterns (TS7031) and `this` parameter checks.
-- Reverse mapped types: inferring `T` from `{ [K in keyof T]: Box<T[K]> }`.
-- `keyof X` and indexed-access aliases print expanded (`"a" | "b"` where tsc prints
-  `keyof Foo`).
-- Circular base classes (TS2310) and some heritage checks.
-- TypeScript syntax in `.js` files: the TS8xxx errors such as [TS8002](../errors/TS8002.md)
-  aren't reported. ts-r-check parses `.js` files with the plain JavaScript grammar and reports
-  a syntax error at the same place instead.
-- Program-level compiler-option checks such as [TS5052](../errors/TS5052.md) aren't printed
-  yet.
+- Regular expression pattern errors: only the flags of a regex literal are checked, so errors
+  such as TS1507 and TS1515 aren't reported. Octal escapes in strings (TS1487) aren't reported
+  either.
+- Some inference: contextual types that flow through a reverse mapped type print wider than
+  tsc's (`number | T["a"]` where tsc prints `number`).
+- Some relation and narrowing results differ from tsc's, mostly in TS2322, TS2339 and TS2345:
+  415 of tsc's 12,750 conformance test variants (3.3%) don't match exactly.
 
 The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.md).
 
@@ -111,12 +106,12 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 96.7% exact (all diagnostics and chains); 209 variants with a diagnostic tsc does not report, 17 of them in tests where tsc reports nothing |
+| tsc's conformance baselines, 12,750 compared test variants | 96.7% exact (all diagnostics and chains); 207 variants with a diagnostic tsc does not report, 17 of them in tests where tsc reports nothing |
 | All 25 private-app tsconfig projects | All 25 match tsc exactly (0 missing, 0 extra) |
 | Ecosystem check stage | 550 packages pass, 159 fail (77.6%) |
 
 Most extra diagnostics in the ecosystem run are TS2344, TS2305, TS2694 and TS2304. Some of
-the 937 conformance extras are runner artefacts, such as tests for module kinds tsc 7 removed,
+the 220 conformance extras are runner artefacts, such as tests for module kinds tsc 7 removed,
 which have no baseline.
 
 Speed and memory on public projects (`cargo xtask bench --repos`, cold check, no history;

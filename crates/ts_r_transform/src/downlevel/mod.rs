@@ -180,50 +180,22 @@ pub(crate) fn using_needing_lowering(
     target: ScriptTarget,
 ) -> Option<(Span, &'static str)> {
     // `using` / `await using`: native only for ESNext (observed: ES2022-ES2025 get
-    // `__addDisposableResource`).
-    if target < ScriptTarget::ESNext {
-        for raw in 1..ast.node_count() as u32 {
-            let Some(id) = NodeId::from_raw(raw) else {
-                continue;
-            };
-            if let Node::VarDecl {
-                kind: VarKind::Using | VarKind::AwaitUsing,
-                ..
-            } = *ast.node(id)
-            {
-                return Some((ast.span(id), "'using' declaration"));
-            }
-        }
+    // `__addDisposableResource`). At ESNext tsc 7 keeps every `using` as written, a
+    // top-level one followed by exports too (its ESNext chain has no `using` transform:
+    // tsc/internal/transformers/estransforms/definitions.go).
+    if target >= ScriptTarget::ESNext {
         return None;
     }
-    // At ESNext a top-level `using` followed by an exported declaration is still lowered:
-    // the export must be hoisted out of the `try` block tsc wraps the module body in
-    // (observed: `export const`/`export default` after `using`; `export { }` lists and
-    // exports before the `using` stay native).
-    let Node::Program { stmts } = *ast.node(ast.root) else {
-        return None;
-    };
-    let mut using: Option<Span> = None;
-    for &s in ast.list(stmts) {
-        let n = *ast.node(s);
-        if let Some(at) = using {
-            let exported = match n {
-                Node::ExportDefaultExpr { .. } => true,
-                Node::Interface { .. } | Node::TypeAlias { .. } => false,
-                _ => {
-                    let m = n.modifiers();
-                    m.contains(Modifiers::EXPORT) && !m.contains(Modifiers::DECLARE)
-                }
-            };
-            if exported {
-                return Some((at, "top-level 'using' declaration followed by exports"));
-            }
-        } else if let Node::VarDecl {
+    for raw in 1..ast.node_count() as u32 {
+        let Some(id) = NodeId::from_raw(raw) else {
+            continue;
+        };
+        if let Node::VarDecl {
             kind: VarKind::Using | VarKind::AwaitUsing,
             ..
-        } = n
+        } = *ast.node(id)
         {
-            using = Some(ast.span(s));
+            return Some((ast.span(id), "'using' declaration"));
         }
     }
     None

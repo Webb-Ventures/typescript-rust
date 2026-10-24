@@ -38,6 +38,7 @@ messages! {
     CANNOT_REDECLARE_BLOCK_SCOPED = 2451 Error "Cannot redeclare block-scoped variable '{0}'.";
     MULTIPLE_DEFAULT_EXPORTS = 2528 Error "A module cannot have multiple default exports.";
     ENUM_MERGE_CONFLICT = 2567 Error "Enum declarations can only merge with namespace or other enum declarations.";
+    AUGMENT_WITH_VALUE_EXPORTS = 2649 Error "Cannot augment module '{0}' with value exports because it resolves to a non-module entity.";
     INVALID_AUGMENTATION_MODULE = 2664 Error "Invalid module name in augmentation, module '{0}' cannot be found.";
     AUGMENT_NON_MODULE_ENTITY = 2671 Error "Cannot augment module '{0}' because it resolves to a non-module entity.";
     EXPORT_ON_AMBIENT_MODULE = 2668 Error "'export' modifier cannot be applied to ambient modules and module augmentations since they are always visible.";
