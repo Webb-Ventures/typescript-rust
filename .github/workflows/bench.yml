@@ -2,8 +2,9 @@ name: Bench
 
 # Hands the bench to the review box on the tailnet and exits, like the code review: the box runs
 # bench/scenarios.toml and the PR repo set (trpc, date-fns, rxjs, three-x10) for the PR and for its
-# base branch on four CPU cores of its own, re-measures any flagged scenario with the PR first,
-# and fails the gate only on a regression beyond max_regression and noise_sigmas in both runs.
+# base branch on one slot of CPU cores of its own (the box may run several PRs' benches at once,
+# one per slot), re-measures any flagged scenario with the PR first, and fails the gate only on a
+# regression beyond max_regression and noise_sigmas in both runs.
 # Progress (queued, running and its phase, results) shows in the PR's bench comment, and the
 # result as the "Bench (review box)" commit status. The box keeps the pinned repos, package
 # stores, crates and both release builds between runs, and skips code that already passed
