@@ -738,6 +738,9 @@ pub struct Ck<'c, 'a> {
     /// object literal gained a sibling's missing property; later stand-ins of the name are
     /// ordered by its declaration (tsc shares one stand-in per name).
     pub(crate) undefined_prop_origin: FxHashMap<ts_r_types::StrId, SymId>,
+    /// The object literal whose spreads produced each spread result (or member of a union
+    /// of them): what tsc gives the result as its symbol, read by widening errors.
+    pub(crate) spread_owner: FxHashMap<TypeId, Loc>,
     /// Widened object literal types.
     pub(crate) widened: FxHashMap<TypeId, TypeId>,
     /// [`Ck::reduced_type`] results.
@@ -896,6 +899,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             fn_types: FxHashMap::default(),
             widened: FxHashMap::default(),
             undefined_prop_origin: FxHashMap::default(),
+            spread_owner: FxHashMap::default(),
             reduced: FxHashMap::default(),
             flow_depth: 0,
             depth: 0,

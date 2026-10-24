@@ -463,8 +463,12 @@ Files, by layer:
   (a function's, or a method's/getter's key), TS7011/TS7025 at a nameless function, skipped
   when a contextual signature gives a non-generic return or yield type
   (`widening_implicit_any`; tsc: checker.go, reportErrorsFromWidening and
-  reportWideningErrorsInType). Not done: a property coming out of a spread over a union is
-  not traced back to its literal (noImplicitAnyUnionNormalizedObjectLiteral1).
+  reportWideningErrorsInType). A spread result belongs to the object literal that made it
+  (`spread_owner`, what tsc gives it as its symbol), carries the widening trait of its
+  property types, and an optional right property merged into a widening left one keeps the
+  left's declaration, so `{ p: null, ...f() }` reports TS7018 at `p`. Spreading an optional
+  property drops its `undefined` without strict null checks too (tsc: checker.go,
+  getSpreadType, removeMissingOrUndefinedType).
 - Implicitly `any` interface and type literal members (`implicit_members.rs`): TS7008 for
   property signatures, TS7032/TS7033 for accessor signatures with no annotation in the
   pair; a getter types its setter's parameter (no TS7006). Files with syntax errors are
