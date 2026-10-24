@@ -123,7 +123,7 @@
         "software": "ts-r-build release build of PR #42's head d8a6a97 (merged as 8b6c630), benchmarked against main at 0697824: the two differ only in ts_r_run, which no scenario here runs, with --threads=4; esbuild 0.28.2 pinned in bench/package.json, with its default threads",
         "input": "three.js x10 at the commit pinned in bench/repos.toml (bench/entry.js, minified IIFE with source maps)",
         "command": "The review box's pull request bench (bench.yml): cargo xtask bench --repos trpc,date-fns,rxjs,three-x10",
-        "commit": "8b6c630",
+        "commit": "1a20ed6",
         "sources": ["bench/README.md", "bench/scenarios.toml", "README.md"]
       }
     },
@@ -238,7 +238,7 @@
         "software": "ts-r-lint release build of PR #42's head d8a6a97 (merged as 8b6c630), benchmarked against main at 0697824: the two differ only in ts_r_run, which no scenario here runs, with 4 threads; ESLint, typescript-eslint and oxlint from each repo's lockfile",
         "input": "tRPC packages/server/src and packages/client/src (147 files) and date-fns pkgs/core/src at the commits pinned in bench/repos.toml; the restricted tRPC configs are written by bench/js/eslint-same-rules.mjs",
         "command": "The review box's pull request bench (bench.yml): cargo xtask bench --repos trpc,date-fns,rxjs,three-x10",
-        "commit": "8b6c630",
+        "commit": "1a20ed6",
         "sources": ["bench/README.md", "bench/scenarios.toml", "bench/js/eslint-same-rules.mjs"]
       }
     },
@@ -315,7 +315,7 @@
         "software": "ts-r-check release build of PR #42's head d8a6a97 (merged as 8b6c630), benchmarked against main at 0697824: the two differ only in ts_r_run, which no scenario here runs; TypeScript 7.0.2 (native tsc) pinned in bench/package.json; each repo's own TypeScript",
         "input": "tRPC packages/server, date-fns pkgs/core and RxJS packages/rxjs at the commits pinned in bench/repos.toml",
         "command": "The review box's pull request bench (bench.yml): cargo xtask bench --repos trpc,date-fns,rxjs,three-x10",
-        "commit": "8b6c630",
+        "commit": "1a20ed6",
         "sources": ["bench/README.md", "bench/scenarios.toml", "README.md"]
       }
     },
