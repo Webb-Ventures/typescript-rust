@@ -2954,3 +2954,25 @@ fn mapped_type_members_are_ts7061() {
     ok("type M = { [K in X]: 1; };");
     ok("type N = { readonly [K in X]?: 1 }");
 }
+
+/// `tsc_syntax_errors` keeps syntax errors and lenient ones (octal escapes in strings), which
+/// `without_grammar` drops, in position order. (A deferred grammar error is kept only
+/// without lexer or syntax errors, so it never meets a lenient one.)
+#[test]
+fn tsc_syntax_errors_keep_lenient() {
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    let check = |src: &str, syntax: &[u32], tsc: &[u32]| {
+        let r = parse(src, SourceKind::Ts);
+        assert_eq!(codes(&r.syntax_errors()), syntax, "{src}");
+        let got = crate::tsc_syntax_errors(&r.diagnostics, &r.grammar, &r.lenient);
+        assert_eq!(codes(&got), tsc, "{src}");
+    };
+    check("const a; let s = \"\\01\";", &[], &[1487]);
+    check(
+        "let s = \"\\01\"; let x = 1 +; \"\\8\"",
+        &[1109],
+        &[1487, 1109, 1488],
+    );
+    check("let t = `\\01`; const a;", &[1487], &[1487]);
+    check("const a;", &[], &[]);
+}

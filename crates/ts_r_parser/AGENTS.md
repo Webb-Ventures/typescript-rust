@@ -168,9 +168,10 @@ Files:
     `is_target_regex_error`) go to `grammar` only, and the checker keeps them when the
     target is older than the one the message names.
   - Octal and `\8` escapes (TS1487, TS1488) in strings are lexer errors, also listed in
-    `grammar` and in `ParseResult::lenient`: tsc reports them as syntax errors (the checker
-    driver does, from `lenient`), but ESLint's parser and esbuild accept them in sloppy
-    code. In an untagged template they are plain syntax errors (`template_element`).
+    `grammar` and in `ParseResult::lenient`: tsc reports them as syntax errors, but
+    ESLint's parser and esbuild accept them in sloppy code. Every tsc-facing consumer (the
+    checker driver, `ts-r-check --noCheck`, the incremental history) takes a file's syntax
+    errors from `tsc_syntax_errors(diagnostics, grammar, lenient)`, never `without_grammar`. In an untagged template they are plain syntax errors (`template_element`).
   - An escaped keyword consumed by `bump` as a keyword is TS1260; one read as a name goes
     through `intern_token`, which marks it (`name_tok`).
 - **Context lives in `Ctx` bits** (`AWAIT`, `YIELD`, `DISALLOW_IN`, `AMBIENT`,

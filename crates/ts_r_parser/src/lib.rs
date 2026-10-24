@@ -64,19 +64,43 @@ pub fn without_grammar(diagnostics: &[Diagnostic], grammar: &[Diagnostic]) -> Ve
     let mut rest = grammar;
     diagnostics
         .iter()
+        .filter(|d| !in_sorted(&mut rest, d))
+        .cloned()
+        .collect()
+}
+
+/// The syntax errors tsc reports for a file (what stops checking, and all a `noCheck`
+/// build reports): `diagnostics` without `grammar`, but with `lenient` (octal escapes in
+/// strings, which are in `grammar` for the build tools). All three are sorted by starting
+/// position, and so is the result. Every tsc-facing caller (the checker driver,
+/// `ts-r-check --noCheck`, the incremental history) goes through this.
+pub fn tsc_syntax_errors(
+    diagnostics: &[Diagnostic],
+    grammar: &[Diagnostic],
+    lenient: &[Diagnostic],
+) -> Vec<Diagnostic> {
+    let (mut g, mut l) = (grammar, lenient);
+    diagnostics
+        .iter()
         .filter(|d| {
-            let skip = rest
-                .iter()
-                .take_while(|g| g.span.start < d.span.start)
-                .count();
-            rest = &rest[skip..];
-            !rest
-                .iter()
-                .take_while(|g| g.span.start == d.span.start)
-                .any(|g| g == *d)
+            let in_grammar = in_sorted(&mut g, d);
+            !in_grammar || in_sorted(&mut l, d)
         })
         .cloned()
         .collect()
+}
+
+/// Whether `d` is in `rest` (sorted by start), dropping the entries before `d` from `rest`.
+/// Calls must come in order of position.
+fn in_sorted(rest: &mut &[Diagnostic], d: &Diagnostic) -> bool {
+    let skip = rest
+        .iter()
+        .take_while(|g| g.span.start < d.span.start)
+        .count();
+    *rest = &rest[skip..];
+    rest.iter()
+        .take_while(|g| g.span.start == d.span.start)
+        .any(|g| g == d)
 }
 
 /// TS1501 (a regex flag needs a newer target) and TS1503 (named groups need ES2018): kept in
