@@ -185,7 +185,7 @@ fn refusals() {
 
 /// Syntax the lowering does not handle yet is refused per file (TSR2003), here a private
 /// member as a `for...of` destructuring target below ES2022; other files are still emitted
-/// (`using` is lowered, as is a top-level `using` followed by exports at ESNext).
+/// (`using` is lowered below ESNext and kept as written at ESNext).
 #[test]
 fn unlowered_syntax_refused() {
     let config = |t: &str| {

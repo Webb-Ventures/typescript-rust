@@ -23,6 +23,12 @@ comments don't count). Three oracles:
 - every `.ts`/`.tsx` file of a real monorepo (private-app `apps/` and `packages/`, compiled
   with `tsc -p` per tsconfig).
 
+Exception: static `super` calls in class-decorated classes preserve JavaScript receivers
+and optional short-circuiting, including parenthesized callees. Observed tsc 7.0.2 output
+drops the optional check on `super.m?.()` and the receiver on `(super.m)()`; these forms
+instead use `Reflect.get(..)?.call(_classThis)` and `Reflect.get(..).call(_classThis)`.
+`tests/runtime/es_decorated_super_calls.ts` in `ts_r_transform` checks runtime semantics.
+
 Everything sits on the index-based AST of [0001-ast.md](0001-ast.md). Output targets ES2022 and
 later only.
 

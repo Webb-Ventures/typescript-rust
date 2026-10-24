@@ -16,8 +16,8 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 - 154 rules: all 64 rules of ESLint 10's `recommended` set, the typescript-eslint 8.71
   `recommended` and `strict` rules, and a few more. 51 of them are type-aware and get their
   types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
-- The published ESLint and typescript-eslint tests for those rules: 15,471 of 15,517 cases
-  match (8,597 of 8,597 for rules without types, 6,874 of 6,920 for type-aware rules).
+- The published ESLint and typescript-eslint tests for those rules: 15,495 of 15,517 cases
+  match (8,597 of 8,597 for rules without types, 6,898 of 6,920 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
 - `eslint-disable` comments and `/* eslint */` inline config, with reports of unused disable
@@ -51,6 +51,7 @@ Options:
   -o, --output-file <path>      Write the report to a file
   --threads <n>                 Worker threads (default: min(4, cores))
   --rule <name>                 Only run this rule (repeatable)
+  --no-type-check               Do not run type-aware rules (no tsconfig program)
   --no-gitignore                Do not honour .gitignore files
   --no-warn-ignored             Do not warn about ignored files named explicitly
   --no-inline-config            Ignore eslint-disable and /* eslint */ comments
