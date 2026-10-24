@@ -27,6 +27,7 @@ pub mod env;
 pub mod glob;
 pub mod graph;
 mod hmr;
+pub mod html_proxy;
 pub mod http;
 pub mod net;
 pub mod paths;

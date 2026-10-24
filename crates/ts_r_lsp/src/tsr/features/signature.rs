@@ -1,5 +1,5 @@
-//! Signature help: the signatures of the call (or `new`) whose argument list holds the
-//! cursor, with the active parameter.
+//! Signature help: the signatures of the call, `new` or tagged template whose argument list
+//! holds the cursor, with the active parameter.
 
 use super::Ctx;
 use super::hover::jsdoc_markdown;
@@ -17,11 +17,9 @@ const MAX_SIGNATURES: usize = 20;
 pub fn signature_help(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let c = cx.checker;
     let ast = c.ast(cx.file);
-    let text = c.file(cx.file).text.as_str();
-    let Some((call, callee, open, kind)) = enclosing_call(ck, cx.file, offset) else {
+    let Some((call, callee, active_param, kind)) = enclosing_call(ck, cx.file, offset) else {
         return Value::Null;
     };
-    let active_param = top_level_commas(text, open + 1, offset);
     let t = ck.check_expr(Loc::new(cx.file, callee));
     let sigs = ck.signatures_of(t, kind);
     if sigs.is_empty() {
@@ -30,12 +28,26 @@ pub fn signature_help(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Val
     let name = callee_name(ast, callee);
     let args = match *ast.node(call) {
         Node::Call { args, .. } | Node::New { args, .. } => ast.list(args).len(),
+        Node::TaggedTemplate { quasi, .. } => match *ast.node(quasi) {
+            Node::TemplateLit { parts } => ast.list(parts).len() / 2 + 1,
+            _ => 1,
+        },
         _ => 0,
     };
+    // A generic signature the call resolved to is shown instantiated (`f(x: number): number`
+    // for `f<T>(x: T): T` called with a number).
+    let resolved = ck.resolved_signature(Loc::new(cx.file, call));
     let mut out = Vec::new();
     let mut active_sig = None;
     for (i, &sig) in sigs.iter().take(MAX_SIGNATURES).enumerate() {
-        let (label, params, rest, n) = signature_label(ck, sig, &name, kind);
+        let shown = resolved
+            .filter(|&r| {
+                let s = ck.store();
+                s.sig(r).target.map(|t| t.0) == Some(sig)
+                    && s.list_items(s.sig(r).type_params).is_empty()
+            })
+            .unwrap_or(sig);
+        let (label, params, rest, n) = signature_label(ck, shown, &name);
         if active_sig.is_none() && (rest || n > active_param as usize) && n >= args.min(n) {
             active_sig = Some(i);
         }
@@ -62,8 +74,8 @@ pub fn signature_help(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Val
     })
 }
 
-/// The innermost call or `new` whose parentheses contain `offset`:
-/// `(call, callee, offset of '(', kind)`.
+/// The innermost call, `new` or tagged template whose arguments contain `offset`:
+/// `(call, callee, active argument index, kind)`.
 fn enclosing_call(
     ck: &Ck<'_, '_>,
     file: FileId,
@@ -86,6 +98,13 @@ fn enclosing_call(
                 has_args: true,
                 ..
             } => (callee, type_args, SigKind::Construct),
+            Node::TaggedTemplate { tag, quasi, .. } => {
+                if let Some(arg) = template_argument(text, ast.span(quasi).start, offset) {
+                    return Some((n, tag, arg, SigKind::Call));
+                }
+                cur = parents.parent(n);
+                continue;
+            }
             _ => {
                 cur = parents.parent(n);
                 continue;
@@ -101,12 +120,78 @@ fn enclosing_call(
         if p < text.len() && text[p] == b'(' && (p as u32) < offset {
             let closed = span.end as usize > p && text.get(span.end as usize - 1) == Some(&b')');
             if !closed || offset < span.end {
-                return Some((n, callee, p as u32, kind));
+                let text = c.file(file).text.as_str();
+                return Some((
+                    n,
+                    callee,
+                    top_level_commas(text, p as u32 + 1, offset),
+                    kind,
+                ));
             }
         }
         cur = parents.parent(n);
     }
     None
+}
+
+/// The tag argument at `offset` in the template starting at `start` (its backtick): 0 in the
+/// template text, `i` inside the `i`-th `${...}`. `None` before the opening backtick or after
+/// the closing one.
+fn template_argument(text: &[u8], start: u32, offset: u32) -> Option<u32> {
+    #[derive(Clone, Copy)]
+    enum Mode {
+        Text,
+        Expr(u32),
+    }
+    if text.get(start as usize) != Some(&b'`') || offset <= start {
+        return None;
+    }
+    let end = (offset as usize).min(text.len());
+    let mut stack = vec![Mode::Text];
+    let mut arg = 0;
+    let mut i = start as usize + 1;
+    while i < end {
+        let b = text[i];
+        match stack.last_mut()? {
+            Mode::Text => match b {
+                b'\\' => i += 1,
+                b'`' => {
+                    stack.pop();
+                    if stack.is_empty() {
+                        return None;
+                    }
+                }
+                b'$' if text.get(i + 1) == Some(&b'{') && i + 1 < end => {
+                    if stack.len() == 1 {
+                        arg += 1;
+                    }
+                    stack.push(Mode::Expr(0));
+                    i += 1;
+                }
+                _ => {}
+            },
+            Mode::Expr(depth) => match b {
+                b'{' => *depth += 1,
+                b'}' if *depth == 0 => {
+                    stack.pop();
+                }
+                b'}' => *depth -= 1,
+                b'`' => stack.push(Mode::Text),
+                q @ (b'"' | b'\'') => {
+                    i += 1;
+                    while i < end && text[i] != q && text[i] != b'\n' {
+                        if text[i] == b'\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    Some(if stack.len() == 1 { 0 } else { arg })
 }
 
 /// Commas at nesting depth 0 between `from` and `to` (skipping strings and comments).
@@ -157,19 +242,14 @@ fn callee_name(ast: &Ast, callee: NodeId) -> String {
     }
 }
 
-/// `name<T>(a: A, b?: B): R`, the parameters' label offsets (UTF-16), whether the last
-/// parameter is a rest parameter, and the parameter count.
+/// `name<T>(a: A, b?: B): R` (construct signatures too: no `new`), the parameters' label
+/// offsets (UTF-16), whether the last parameter is a rest parameter, and the parameter count.
 fn signature_label(
     ck: &mut Ck<'_, '_>,
     sig: SigId,
     name: &str,
-    kind: SigKind,
 ) -> (String, Vec<Value>, bool, usize) {
-    let mut label = String::new();
-    if kind == SigKind::Construct {
-        label.push_str("new ");
-    }
-    label.push_str(name);
+    let mut label = name.to_string();
     let d = ck.store().sig(sig);
     let tps: Vec<TypeId> = ck.store().list_items(d.type_params).to_vec();
     let params = d.params.to_vec();
@@ -264,5 +344,24 @@ mod tests {
         let t = "f(a, [b, c], \"x,y\", g(1, 2), ";
         assert_eq!(top_level_commas(t, 2, t.len() as u32), 4);
         assert_eq!(top_level_commas("f(/* , */ a", 2, 11), 0);
+    }
+
+    #[test]
+    fn template_argument_counts_substitutions() {
+        let t = b"f `a ${ x } b ${ g `c ${ 1 }` } d`;";
+        let at = |s: &str| t.windows(s.len()).position(|w| w == s.as_bytes()).unwrap() as u32;
+        assert_eq!(template_argument(t, 2, 2), None); // before the backtick
+        assert_eq!(template_argument(t, 2, 4), Some(0)); // in the text
+        assert_eq!(template_argument(t, 2, at("$")), Some(0));
+        assert_eq!(template_argument(t, 2, at("$") + 1), Some(0)); // between `$` and `{`
+        assert_eq!(template_argument(t, 2, at("x")), Some(1));
+        assert_eq!(template_argument(t, 2, at("} b")), Some(1)); // before the `}`
+        assert_eq!(template_argument(t, 2, at(" b")), Some(0));
+        assert_eq!(template_argument(t, 2, at("1")), Some(2)); // in the nested template
+        assert_eq!(template_argument(t, 2, at(" d")), Some(0));
+        assert_eq!(template_argument(t, 2, at(";")), None); // after the closing backtick
+        // Unterminated templates; an escaped `\${` is text.
+        assert_eq!(template_argument(b"f `${ a } ${ b", 2, 14), Some(2));
+        assert_eq!(template_argument(b"f `${ a } \\${ b", 2, 15), Some(0));
     }
 }

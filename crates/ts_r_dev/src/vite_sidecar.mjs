@@ -222,7 +222,8 @@ function context(plugin) {
   const name = plugin?.name ?? 'ts-r-dev'
   return {
     meta,
-    environment: { name: 'client', mode: 'dev', config: resolved, logger },
+    // `hot` lets hotUpdate hooks send custom events (`this.environment.hot.send`).
+    environment: { name: 'client', mode: 'dev', config: resolved, logger, get hot() { return ws }, get moduleGraph() { return moduleGraph } },
     async resolve(source, importer, options = {}) {
       const skip = options.skipSelf === false ? null : plugin
       for (const h of sorted(active, 'resolveId')) {
@@ -438,6 +439,22 @@ function rootRelative(dir) {
   return rel.startsWith('..') || path.isAbsolute(rel) ? dir : rel || '.'
 }
 
+/**
+ * `assetsInclude` as data: a glob that doesn't start with `**` is resolved from the working
+ * directory (as Vite's filter does) and sent root-relative; a RegExp as its source and flags.
+ */
+function assetsIncludePatterns(value) {
+  const out = []
+  for (const p of [value ?? []].flat()) {
+    if (p instanceof RegExp) out.push({ regex: p.source, flags: p.flags })
+    else if (typeof p === 'string') {
+      const glob = p.startsWith('**') ? p : rootRelative(path.resolve(p)).split(path.sep).join('/')
+      out.push({ glob })
+    }
+  }
+  return out
+}
+
 function devOptions() {
   const s = resolved.server ?? {}
   const define = {}
@@ -455,6 +472,7 @@ function devOptions() {
     envPrefix: Array.isArray(envPrefix) ? envPrefix.map(String) : [String(envPrefix)],
     envDir: config.envDir === false ? false : typeof config.envDir === 'string' ? rootRelative(config.envDir) : null,
     publicDir: config.publicDir === false ? false : typeof config.publicDir === 'string' ? rootRelative(config.publicDir) : null,
+    assetsInclude: assetsIncludePatterns(config.assetsInclude),
     server: {
       host,
       port: typeof s.port === 'number' ? s.port : null,
@@ -782,13 +800,27 @@ async function start() {
     }
   }
   for (const after of post) await after()
-  for (const h of sorted(active, 'buildStart')) {
-    try {
-      await h.fn.call(context(h.plugin), {})
-    } catch (e) {
-      throw new Error(hookError(h.plugin, e))
-    }
+  // buildStart is a parallel hook: handlers start together, except a `sequential: true`
+  // one, which waits for those before it and finishes before the next start.
+  let batch = []
+  const flush = async () => {
+    await Promise.all(batch)
+    batch = []
   }
+  for (const h of sorted(active, 'buildStart')) {
+    const run = async () => {
+      try {
+        await h.fn.call(context(h.plugin), {})
+      } catch (e) {
+        throw new Error(hookError(h.plugin, e))
+      }
+    }
+    if (h.plugin.buildStart?.sequential) {
+      await flush()
+      await run()
+    } else batch.push(run())
+  }
+  await flush()
   const stages = (name) => new Set(sorted(active, name).map(stageOf))
   const resolveStages = stages('resolveId')
   const transformStages = stages('transform')

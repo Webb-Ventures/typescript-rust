@@ -11,7 +11,9 @@ Design and measurements: [../../docs/design/0002-transform-and-codegen.md](../..
 prebuild|hook] [--node <bin>] [node flags] <file> [args...]`. Unknown flags before the file
 go to Node (`-r`, `--require`, `--import`, `--env-file`, `-C`, `--conditions`, ... take the next
 argument). Internal modes: `--compile <file>` (prints `esm`/`cjs`, a newline, the code; used by
-the preload for files the graph walk missed) and `--serve` (the hook strategy's compiler).
+the preload for files the graph walk missed), `--resolve <parent> <specifier>` (prints the
+tsconfig `paths`/`baseUrl` target or nothing; used by the preload for plain JavaScript
+parents) and `--serve` (the hook strategy's compiler).
 Env: `TS_R_RUN_THREADS`, `TS_R_CACHE_DIR`. Exit code: Node's (exec on Unix); 1 for compile
 errors (printed tsc-style), 2 for usage errors. Needs Node 22.15+ (`module.registerHooks`).
 
@@ -21,6 +23,9 @@ errors (printed tsc-style), 2 for usage errors. Needs Node 22.15+ (`module.regis
    size and mtime, exec Node with the recorded manifest. Nothing else runs.
 2. `Project::load`: nearest `tsconfig.json` (no `include` globbing), `TransformOptions` for
    running (target ≥ ES2022, JSX runtime, no `importHelpers`), resolver in bundler mode.
+   A `--tsconfig` that can't be read or whose `extends` is missing stops the run
+   (`project::FATAL_CONFIG_CODES`, TS5083/TS6053, printed tsc-style, exit 1); a detected
+   tsconfig with the same errors is ignored, as under tsx.
 3. `graph::build`: breadth-first from the entry, each level compiled in parallel; every file
    through `ts_r_cache` (namespace `run`, `graph::CACHE_FORMAT`). Specifiers come from the
    transformed tree (`compile::collect_specs`): type-only imports are never followed.
@@ -49,10 +54,23 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   (`ts_r_transform::build_errors`, the same rule as ts-r-build).
 - **Node semantics for module format**: `.mts`/`.cts`, then `package.json` `type`, then
   syntax detection (`compile::has_esm_syntax`); ES syntax mixed with CommonJS globals runs as
-  CommonJS (tsx compatibility). Change both the doc comment and the tests when this changes.
-- **Only relative specifiers and tsconfig `paths` are resolved by ts-r-run**; bare package
-  specifiers stay with Node (runtime conditions, `exports`). Declaration files are never
-  resolution targets.
+  CommonJS (tsx compatibility). Also for tsx: a file in a `"type": "module"` package with no
+  ES syntax that assigns `module.exports`/`exports.` runs as CommonJS, and the preload
+  compiles a `.js` file with ES syntax that Node would run as CommonJS (`"type": "commonjs"`,
+  or typeless and using CommonJS globals) instead of letting Node fail on it. Change both the
+  doc comment and the tests when this changes.
+- **Only relative specifiers, tsconfig `paths` and `baseUrl` are resolved by the graph**
+  (`Project::resolve`; `baseUrl`, which tsc 7 dropped, because tsx still honours it). Bare
+  package specifiers stay with Node (runtime conditions, `exports`). When Node fails, the
+  preload's fallback tries what tsx tries: the `.js` → `.ts` swap, then (not for targets of
+  `exports`/`imports`) added extensions, a directory's nested `package.json` `main` and its
+  index, `.ts` first in local code and `.js` first inside node_modules. A plain JavaScript
+  parent outside node_modules asks `--resolve` for `paths`/`baseUrl`. Declaration files are
+  never resolution targets.
+- **JSON imports need no import attribute** (the preload adds `type: 'json'`, as under tsx).
+- **JSX**: with no `jsx` option, a `jsxFactory`/`jsxFragmentFactory` means the classic
+  runtime, otherwise automatic. `.jsx` files get the tsconfig's JSX options only with
+  `allowJs`; without it they use `React.createElement` (`Project::plain_jsx`, in the cache key).
 - **No absolute paths in cache payloads**: the source map's `sources` is the file's base name
   (resolved against the module URL by Node); `react-jsxdev` is downgraded to `react-jsx`.
 - **Cache keys** include `graph::build_fingerprint()` (exe size + mtime), the options'
@@ -70,6 +88,12 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
 - `cargo test -p ts_r_run`: unit tests for format detection, specifier collection, payload
   round trip, syntax errors, inline maps, CLI parsing, manifest layout, stamps,
   `parallel_map`, resolution policy.
+- `tests/node.rs`: small projects run in Node under `scripts/limit.sh`, one per tsx behaviour
+  the run oracle found missing (package resolution, lenient `.js`, JSON, `paths`/`baseUrl`
+  from JavaScript, `module.exports` in a module package, `.jsx` without `allowJs`, a fatal
+  `--tsconfig`). Skipped when Node is missing.
+- Parity oracle: [`bench/run-oracle`](../../bench/run-oracle/README.md) runs tsx's own suite and
+  Node's TypeScript tests against ts-r-run (`node bench/run-oracle/run.mjs`; numbers there).
 - `tests/guard.rs`: `parse<T>` end to end (the `ts_r_guard` fixture app run in Node under
   `scripts/limit.sh`, compared with its `expected.txt`; guard errors; a type edit reaching a
   cached run). Skips the Node parts when Node is missing.
@@ -111,3 +135,16 @@ watching for `--watch`, same version and features as `ts_r_hmr`). Dev: `ts_r_tes
   `Child::kill` only.
 - Only the entry's tsconfig is used for every file (like tsx); per-package tsconfigs in a
   monorepo are ignored.
+- From the run oracle (bench/run-oracle/README.md has the cases):
+  - No signal relay: ts-r-run execs Node, so tsx's relay tests (exit 130 after a second
+    Ctrl-C, a child that ignores SIGINT) don't apply.
+  - A syntax error in a file reached only by a dynamic `import()` stops the run up front
+    (the invariant above); tsx fails only that import, at run time.
+  - `--test` reporter locations aren't mapped to `.ts` lines in its failure output.
+  - Hook strategy: the preload's resolve fallback, lenient `.js` and `--resolve` are only in
+    the prebuild preload (`js/hooks.mjs`).
+  - Transform gaps (`ts_r_transform`): `import.meta` is kept verbatim in CommonJS output,
+    `require` isn't defined in ES output and the CommonJS `__esModule` marker shows up in an
+    ES namespace import.
+  - `require()` of a `.js` module with top-level `await` fails with Node's
+    `ERR_REQUIRE_ASYNC_MODULE`; tsx throws its own `TransformError` (not copied).

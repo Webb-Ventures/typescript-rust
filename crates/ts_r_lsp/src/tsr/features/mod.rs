@@ -104,7 +104,7 @@ pub fn handle<'c, 'p>(
                 .map(|r| {
                     json!({
                         "range": lines.range(text, r.start, r.end),
-                        "kind": if r.is_decl || r.is_write { 3 } else { 2 },
+                        "kind": if r.is_write { 3 } else { 2 },
                     })
                 })
                 .collect();

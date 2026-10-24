@@ -20,6 +20,7 @@ use ts_r_hmr::{
 struct Host {
     server: Mutex<Option<ServerHandle>>,
     hot_calls: Mutex<Vec<(String, Vec<String>)>>,
+    client_events: Mutex<Vec<String>>,
 }
 
 impl PluginHost for Host {
@@ -110,6 +111,10 @@ impl PluginHost for Host {
         Ok(None)
     }
 
+    fn client_event(&self, event: &str, _data: &Value) {
+        self.client_events.lock().unwrap().push(event.to_owned());
+    }
+
     fn middleware(&self, req: &Request, body: &[u8]) -> Result<Option<Response>, String> {
         Ok((req.path == "/api/x").then(|| {
             Response::text(200, format!("mw {} {}", req.method, body.len()))
@@ -130,6 +135,21 @@ fn wait_for_hot_call(host: &Host, file: &str, urls: &[String]) {
             Instant::now() < deadline,
             "no handleHotUpdate({file}, {urls:?}): {calls:?}"
         );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Waits (10 s at most) until the server reported `event` to the plugin host.
+fn wait_for_client_event(host: &Host, event: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !host
+        .client_events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| e == event)
+    {
+        assert!(Instant::now() < deadline, "no {event}");
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -225,6 +245,8 @@ fn plugin_hooks_run_at_their_points() {
     while server.client_count() == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }
+    // A page's socket opening reaches `server.ws.on('vite:client:connect')`.
+    wait_for_client_event(&host, "vite:client:connect");
     // The file behind `a.data?upper` changes: the plugin module is re-loaded and updated
     // through main.js (self-accepting). Each step waits for its own effects rather than taking
     // the next message as its result, so a stray event can't stand in for the write.
@@ -245,6 +267,8 @@ fn plugin_hooks_run_at_their_points() {
             break;
         }
     }
+    drop(ws);
+    wait_for_client_event(&host, "vite:client:disconnect");
     server.shutdown();
 }
 

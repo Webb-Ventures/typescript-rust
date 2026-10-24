@@ -473,7 +473,12 @@ pub(crate) fn on_client_message(shared: &Shared, text: &str) {
             let Some(path) = v["data"]["path"].as_str() else {
                 return;
             };
-            invalidate(shared, path, v["data"]["message"].as_str());
+            invalidate(
+                shared,
+                path,
+                v["data"]["message"].as_str(),
+                v["data"]["firstInvalidatedBy"].as_str(),
+            );
         }
         Some(event) => {
             // `server.ws.on(event)` listeners in plugins.
@@ -489,9 +494,28 @@ pub(crate) fn on_client_message(shared: &Shared, text: &str) {
     }
 }
 
+/// A page's socket opened or closed: `vite:client:connect` / `vite:client:disconnect` for
+/// plugins listening with `server.ws.on`.
+pub(crate) fn on_client_lifecycle(shared: &Shared, connected: bool) {
+    if let Some(host) = shared
+        .plugins
+        .as_deref()
+        .filter(|_| shared.plugin_hooks.client_events)
+    {
+        let event = if connected {
+            "vite:client:connect"
+        } else {
+            "vite:client:disconnect"
+        };
+        host.client_event(event, &Value::Null);
+    }
+}
+
 /// `import.meta.hot.invalidate()`: the module can't take the update itself; hand it to
-/// its importers.
-fn invalidate(shared: &Shared, url: &str, message: Option<&str>) {
+/// its importers. `first` is the module that started a chain of invalidations (an accept
+/// callback that ran for an invalidation and invalidated again); an update that would
+/// re-run it is a loop, so the page reloads instead.
+fn invalidate(shared: &Shared, url: &str, message: Option<&str>, first: Option<&str>) {
     let _serial = shared.change_lock.lock().unwrap_or_else(|e| e.into_inner());
     let Some(id) = shared
         .graph
@@ -517,9 +541,27 @@ fn invalidate(shared: &Shared, url: &str, message: Option<&str>) {
     };
     let t = Instant::now();
     propagate(shared, id, true, timestamp, &mut out);
+    mark_invalidation_chain(shared, &mut out, first.unwrap_or(url));
     let mut timing = timing;
     timing.graph = t.elapsed();
     finish(shared, out, timing);
+}
+
+/// Tags an invalidation's updates with the module that started the chain, or turns them
+/// into a page reload when one of them would re-run that module.
+fn mark_invalidation_chain(shared: &Shared, out: &mut Outcome, first: &str) {
+    if out.full_reload.is_some() {
+        return;
+    }
+    if out.updates.iter().any(|u| u["path"] == first) {
+        shared.log(&format!("page reload: invalidation loop back to {first}"));
+        out.updates.clear();
+        out.full_reload = Some(None);
+        return;
+    }
+    for u in &mut out.updates {
+        u["firstInvalidatedBy"] = json!(first);
+    }
 }
 
 /// Broadcasts an error and remembers it for clients that connect later.

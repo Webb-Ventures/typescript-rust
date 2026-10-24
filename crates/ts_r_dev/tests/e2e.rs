@@ -106,12 +106,20 @@ fn hot_updates_in_headless_chrome() {
         "getComputedStyle(document.getElementById('app')).color === 'rgb(0, 0, 255)'",
         T,
     );
+    // The link's own query survives the swap; only `t` changes.
+    cdp.eval("document.querySelector('link[rel=stylesheet]').href = '/src/global.css?keep=1'")
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
     app.write(
         "src/global.css",
         "body { background-color: rgb(4, 5, 6); }\n",
     );
     cdp.wait_for(
         "getComputedStyle(document.body).backgroundColor === 'rgb(4, 5, 6)'",
+        T,
+    );
+    cdp.wait_for(
+        "/[?]keep=1&t=\\d+$/.test(document.querySelector('link[rel=stylesheet]').href)",
         T,
     );
     assert_eq!(cdp.eval(&same_page).unwrap(), true);

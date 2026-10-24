@@ -79,6 +79,53 @@ impl GlobWatch {
     }
 }
 
+/// Path patterns matched against absolute file paths (`assetsInclude`): globs that are
+/// absolute or start with `**` (match anywhere), with `{a,b}` groups, and regexes over the
+/// `/`-separated path.
+#[derive(Clone, Debug, Default)]
+pub struct PathFilter {
+    globs: Vec<Vec<String>>,
+    regexes: Vec<regex_lite::Regex>,
+}
+
+impl PathFilter {
+    /// Adds a glob; a relative one (not `**`) is resolved from `base`.
+    pub fn add_glob(&mut self, pattern: &str, base: &Path) -> Result<(), String> {
+        let pattern = pattern.replace('\\', "/");
+        let absolute = if pattern.starts_with("**") || Path::new(&pattern).is_absolute() {
+            pattern
+        } else {
+            join_pattern(base, &pattern)
+        };
+        let mut alts = Vec::new();
+        expand_braces(&absolute, 0, &mut alts)?;
+        for a in alts {
+            let segs = a
+                .split('/')
+                .filter(|s| !s.is_empty() && *s != ".")
+                .map(str::to_owned)
+                .collect();
+            self.globs.push(segs);
+        }
+        Ok(())
+    }
+
+    pub fn add_regex(&mut self, re: regex_lite::Regex) {
+        self.regexes.push(re);
+    }
+
+    pub fn matches(&self, file: &Path) -> bool {
+        if self.globs.is_empty() && self.regexes.is_empty() {
+            return false;
+        }
+        let segs = path_segments(file);
+        self.globs.iter().any(|g| match_segments(g, &segs)) || {
+            let id = crate::paths::id(file);
+            self.regexes.iter().any(|r| r.is_match(&id))
+        }
+    }
+}
+
 /// One expanded module: code with the calls replaced, the line-1 prelude of eager imports,
 /// and the edits (for source map shifting).
 #[derive(Clone, Debug, Default)]
@@ -815,6 +862,28 @@ mod tests {
     use super::*;
     use crate::scan::scan_hot;
     use crate::testutil::TempDir;
+
+    #[test]
+    fn path_filter_matches_globs_and_regexes() {
+        let root = Path::new("/app");
+        let mut f = PathFilter::default();
+        assert!(!f.matches(Path::new("/app/a.unknown")));
+        f.add_glob("**/*.unknown", root).unwrap();
+        f.add_glob("./nested/*.{custom,other}", root).unwrap();
+        f.add_regex(cors_regex(r"\.gltf$"));
+        assert!(f.matches(Path::new("/app/deep/x/a.unknown")));
+        assert!(f.matches(Path::new("/app/nested/b.custom")));
+        assert!(f.matches(Path::new("/app/nested/b.other")));
+        assert!(!f.matches(Path::new("/app/b.custom")));
+        assert!(!f.matches(Path::new("/app/nested/deeper/b.custom")));
+        assert!(f.matches(Path::new("/app/models/m.gltf")));
+        assert!(!f.matches(Path::new("/app/a.js")));
+        assert!(f.add_glob(&"{a,b,c,d}".repeat(6), root).is_err());
+    }
+
+    fn cors_regex(source: &str) -> regex_lite::Regex {
+        crate::cors::js_regex(source, "").unwrap()
+    }
 
     fn segs(p: &str) -> Vec<String> {
         p.split('/')
