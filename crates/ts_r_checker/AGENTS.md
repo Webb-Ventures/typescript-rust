@@ -468,7 +468,10 @@ Files, by layer:
 - TS2310 (`check_circular_interface_bases`): every interface declaration with an
   `extends` clause whose symbol's bases lead back to it (`has_circular_bases`). Classes
   get TS2506 instead. A class `extends` naming an interface with no value
-  (`extends_interface_only`) is TS2689 and its expression is not checked. An `implements`
+  (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
+  type of the first `extends` clause is checked; the rest of `extends A, B` and a second
+  `extends` clause are grammar errors only (tsc: checker.go, checkClassLikeDeclaration
+  through GetExtendsHeritageClauseElement). An `implements`
   or interface `extends` element that is not an identifier or a dotted chain of them (a
   call, an optional chain `a?.B`) is TS2500 / TS2499 at the expression, besides the
   reference's own errors (`check_heritage_entity_name`; tsc: checker/checker.go).
@@ -1109,7 +1112,10 @@ Files, by layer:
   (`!`), `T | undefined` (postfix `?`) or `T | null | undefined` (prefix `?`), with
   `strictNullChecks`; `any`, `unknown`, `never`, `void` and `undefined` as they are. Like
   grammar errors they are dropped in files with syntax errors (driver). A primitive type
-  name used as a value (`f(number)`) is TS2693, not TS2304/TS2552. A type-only `Promise`,
+  name used as a value (`f(number)`) is TS2693, not TS2304/TS2552. A missing `await`
+  whose parent is a call (`await(p)` outside an async function) is TS2311. A missing named
+  import written as a string literal shows with its quotes in TS2305/TS2724
+  (`'"missing"'`; `name_messages_misc`). A type-only `Promise`,
   `Symbol`, `Map`, `WeakMap`, `Set` or `WeakSet` read as a value is TS2585 (suggesting
   `lib` es2015) instead of TS2693 (`type_as_value_info`; tsc: checker/checker.go,
   checkAndReportErrorForUsingTypeAsValue).

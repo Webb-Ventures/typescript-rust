@@ -1921,6 +1921,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.error(e, info, &[name, lib]);
             return;
         }
+        // `await(x)` outside an async function calls a name `await` (any name `await`
+        // whose parent is a call; tsc: checker.go,
+        // getCannotFindNameDiagnosticForName).
+        if name == "await"
+            && self
+                .c
+                .parent(e)
+                .is_some_and(|p| matches!(self.ast(e.file).node(p.node), Node::Call { .. }))
+        {
+            self.error(
+                e,
+                dg::CANNOT_FIND_NAME_0_DID_YOU_MEAN_TO_WRITE_THIS_IN_AN_ASYNC_FUNCTION_2311,
+                &[name],
+            );
+            return;
+        }
         if self.in_with_body(e) {
             // tsc: every name in a `with` block is `any`.
             return;

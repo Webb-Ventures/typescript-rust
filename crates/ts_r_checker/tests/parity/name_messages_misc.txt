@@ -1,0 +1,7 @@
+a.ts(1,10): error TS2305: Module '"./b"' has no exported member '"missing"'.
+a.ts(1,26): error TS2305: Module '"./b"' has no exported member '""'.
+a.ts(3,15): error TS2311: Cannot find name 'await'. Did you mean to write this in an async function?
+a.ts(6,17): error TS2304: Cannot find name 'A'.
+a.ts(6,19): error TS1172: 'extends' clause already seen.
+a.ts(7,17): error TS2304: Cannot find name 'E'.
+a.ts(7,20): error TS1174: Classes can only extend a single class.

@@ -4191,33 +4191,33 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.check_private_name_static_clash(file, members);
         self.check_accessor_pair_modifiers(file, members);
         self.check_static_function_name_conflicts(l, members);
-        for &h in ast.list(heritage) {
-            let Node::HeritageClause { kind, types } = *ast.node(h) else {
-                continue;
-            };
-            if kind == HeritageKind::Extends {
-                for (i, &t) in ast.list(types).iter().enumerate() {
-                    if let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(t) {
-                        // `class C extends I` with `I` an interface (no value): TS2689
-                        // instead of the expression's errors.
-                        if self.extends_interface_only(Loc::new(file, expr)) {
-                            if self.reporting(file) {
-                                let text = self.c.text(Loc::new(file, expr)).to_owned();
-                                self.error(
-                                    Loc::new(file, expr),
-                                    dg::CANNOT_EXTEND_AN_INTERFACE_0_DID_YOU_MEAN_IMPLEMENTS_2689,
-                                    &[&text],
-                                );
-                            }
-                            continue;
-                        }
-                        let et = self.check_expr(Loc::new(file, expr));
-                        if i == 0 {
-                            self.check_base_constructor_type(Loc::new(file, expr), et);
-                            self.check_class_extends_type_args(Loc::new(file, t), expr, type_args);
-                        }
-                    }
+        // Only the first type of the first `extends` clause is the base; the others
+        // (`extends A, B`, `extends A extends B`, both grammar errors) are never checked.
+        let base_node = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+            Node::HeritageClause {
+                kind: HeritageKind::Extends,
+                types,
+            } => ast.list(types).first().copied(),
+            _ => None,
+        });
+        if let Some(t) = base_node
+            && let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(t)
+        {
+            // `class C extends I` with `I` an interface (no value): TS2689 instead of the
+            // expression's errors.
+            if self.extends_interface_only(Loc::new(file, expr)) {
+                if self.reporting(file) {
+                    let text = self.c.text(Loc::new(file, expr)).to_owned();
+                    self.error(
+                        Loc::new(file, expr),
+                        dg::CANNOT_EXTEND_AN_INTERFACE_0_DID_YOU_MEAN_IMPLEMENTS_2689,
+                        &[&text],
+                    );
                 }
+            } else {
+                let et = self.check_expr(Loc::new(file, expr));
+                self.check_base_constructor_type(Loc::new(file, expr), et);
+                self.check_class_extends_type_args(Loc::new(file, t), expr, type_args);
             }
         }
         if let Some(sym) = self.c.sym_of_decl(l) {
@@ -8831,6 +8831,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         module_sym: ts_r_types::SymId,
     ) {
         let m = format!("\"{spec}\"");
+        // A string-literal import name (`import { "a b" as x }`) shows with its quotes.
+        let shown = if matches!(self.ast(at.file).node(at.node), Node::StringLit { .. }) {
+            self.c.text(at).to_owned()
+        } else {
+            name.to_owned()
+        };
         let eq = self.c.export_of(module_sym, "export=");
         let holder = match eq {
             Some(e) => self.c.resolve_alias(e).unwrap_or(e),
@@ -8849,7 +8855,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.error(
                 at,
                 dg::_0_HAS_NO_EXPORTED_MEMBER_NAMED_1_DID_YOU_MEAN_2_2724,
-                &[&m, name, &sug],
+                &[&m, &shown, &sug],
             );
             return;
         }
@@ -8923,7 +8929,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
-        self.error(at, dg::MODULE_0_HAS_NO_EXPORTED_MEMBER_1_2305, &[&m, name]);
+        self.error(
+            at,
+            dg::MODULE_0_HAS_NO_EXPORTED_MEMBER_1_2305,
+            &[&m, &shown],
+        );
     }
 
     /// A module-level local (not exported) named `name` in any declaration of the module
