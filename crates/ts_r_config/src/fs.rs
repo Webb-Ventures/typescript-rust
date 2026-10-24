@@ -41,6 +41,10 @@ pub struct FileStamp {
 pub trait FileSystem: Send + Sync {
     /// Reads a UTF-8 text file. `None` when missing or unreadable.
     fn read_file(&self, path: &str) -> Option<String>;
+    /// Reads original file bytes. Text-backed file systems use their UTF-8 contents.
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        self.read_file(path).map(String::into_bytes)
+    }
     /// True when `path` is a file (following symlinks).
     fn file_exists(&self, path: &str) -> bool;
     /// True when `path` is a directory (following symlinks).
@@ -85,6 +89,9 @@ impl<T: FileSystem + ?Sized> FileSystem for Arc<T> {
     fn read_file(&self, path: &str) -> Option<String> {
         (**self).read_file(path)
     }
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        (**self).read_bytes(path)
+    }
     fn file_exists(&self, path: &str) -> bool {
         (**self).file_exists(path)
     }
@@ -117,6 +124,9 @@ impl<T: FileSystem + ?Sized> FileSystem for Arc<T> {
 impl<T: FileSystem + ?Sized> FileSystem for &T {
     fn read_file(&self, path: &str) -> Option<String> {
         (**self).read_file(path)
+    }
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        (**self).read_bytes(path)
     }
     fn file_exists(&self, path: &str) -> bool {
         (**self).file_exists(path)
@@ -207,6 +217,10 @@ impl FileSystem for RealFs {
     fn read_file(&self, path: &str) -> Option<String> {
         let bytes = std::fs::read(Self::native(path)).ok()?;
         Some(decode_text(bytes))
+    }
+
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        std::fs::read(Self::native(path)).ok()
     }
 
     fn file_exists(&self, path: &str) -> bool {

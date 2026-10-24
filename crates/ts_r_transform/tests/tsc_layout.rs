@@ -127,6 +127,18 @@ fn using_top_level() {
     check("using_top_level");
 }
 
+/// At ESNext every `using` stays as written, a top-level one followed by exports too.
+#[test]
+fn using_esnext() {
+    check("using_esnext");
+}
+
+/// A decorated anonymous default class under CommonJS takes the module's `default_1`.
+#[test]
+fn legacy_decorated_default_cjs() {
+    check("legacy_decorated_default_cjs");
+}
+
 /// Private names below ES2022: `WeakMap`/`WeakSet` storage, method functions, the helper
 /// calls for reads, writes, compound and update operators, calls and `#x in o`, aliases.
 #[test]
@@ -162,4 +174,12 @@ fn multiline_comments_keep_return_and_throw_operands_parenthesized() {
             }
         }
     }
+}
+
+/// Static fields and blocks of a class-decorated derived class read `super` through
+/// `Reflect.get(_classSuper, k, _classThis)` (calls through `.call`, tags through `.bind`);
+/// an anonymous heritage is `(0, e)`, and static blocks alone don't name the class.
+#[test]
+fn es_decorated_statics() {
+    check("es_decorated_statics");
 }

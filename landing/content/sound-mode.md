@@ -221,7 +221,7 @@ Use only one. Configuring sound mode in more than one of them is
   fixes for several rules, including "Add `@ts-r-unsafe` with a reason".
 - **Problem matchers.** Matchers written for tsc look for `error TS` and miss `TSR` codes, so
   ts-r ships its own. In VS Code tasks, use `"problemMatcher": "$ts-r"` (from the ts-r
-  extension). In GitHub Actions, add `echo "::add-matcher::node_modules/ts-r/problem-matcher.json"`
+  extension). In GitHub Actions, add `echo "::add-matcher::node_modules/@ts-r.dev/cli/problem-matcher.json"`
   before running `ts-r-check`. Both read `TS` and `TSR` errors.
 - **ts-r-build, ts-r-dev and ts-r-run** don't run the checker; they expand `parse<T>` calls.
   Planned, not built yet: `ts-r-build` reads the last check result, fails when a sound file's

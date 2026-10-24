@@ -3,7 +3,7 @@
 //! whether it has side effects.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use ts_r_ast::{Ast, MetaPropKind, Modifiers, Node, NodeId, NodeList, VarKind};
+use ts_r_ast::{Ast, ImportPhase, MetaPropKind, Modifiers, Node, NodeId, NodeList, VarKind};
 use ts_r_minify::fold::binding_idents;
 use ts_r_minify::purity::Purity;
 use ts_r_minify::{ScopeId, ScopeKind, Scopes, SymbolKind, build};
@@ -74,21 +74,25 @@ pub fn scan(p: &Prepared, annotations: bool) -> ModuleMeta {
             Node::ImportDecl {
                 type_only: false,
                 source,
+                phase,
+                attributes,
                 ..
-            } => Some((RecordKind::Import, source)),
+            } => Some((RecordKind::Import, source, phase_code(phase), attributes)),
             Node::ExportNamed {
                 type_only: false,
                 source: Some(source),
+                attributes,
                 ..
             }
             | Node::ExportAll {
                 type_only: false,
                 source,
+                attributes,
                 ..
-            } => Some((RecordKind::ReExport, source)),
+            } => Some((RecordKind::ReExport, source, PHASE_EVALUATION, attributes)),
             _ => None,
         };
-        let Some((kind, source)) = rec_kind else {
+        let Some((kind, source, phase, attributes)) = rec_kind else {
             continue;
         };
         let Some(spec) = ast.name_of(source) else {
@@ -103,6 +107,10 @@ pub fn scan(p: &Prepared, annotations: bool) -> ModuleMeta {
             end: span.end,
             node: s.raw(),
             in_try: false,
+            phase,
+            attrs: attributes
+                .map(|a| attributes_text(ast, a))
+                .unwrap_or_default(),
         });
         stmt_records.insert(s.raw(), idx);
         if let Node::ImportDecl { specifiers, .. } = *ast.node(s) {
@@ -472,10 +480,12 @@ impl Walker<'_> {
                             end: span.end,
                             node: id.raw(),
                             in_try: flags & IN_TRY != 0,
+                            phase: PHASE_EVALUATION,
+                            attrs: String::new(),
                         });
                     }
                 }
-                Node::ImportCall { arg, .. } => {
+                Node::ImportCall { arg, phase, .. } => {
                     if let Some(spec) = string_arg(ast, arg) {
                         let span = ast.span(arg);
                         part.records.push(m.records.len() as u32);
@@ -486,6 +496,8 @@ impl Walker<'_> {
                             end: span.end,
                             node: id.raw(),
                             in_try: flags & IN_TRY != 0 || self.guarded.contains(&id.raw()),
+                            phase: phase_code(phase),
+                            attrs: String::new(),
                         });
                     }
                 }
@@ -524,6 +536,46 @@ impl Walker<'_> {
             // Source order when popping.
             self.stack[start..].reverse();
         }
+    }
+}
+
+fn phase_code(phase: ImportPhase) -> u8 {
+    match phase {
+        ImportPhase::Evaluation => PHASE_EVALUATION,
+        ImportPhase::Defer => PHASE_DEFER,
+        ImportPhase::Source => PHASE_SOURCE,
+    }
+}
+
+/// Import attributes as printed after the specifier, without the leading space:
+/// `with { type: "json" }` (or `assert { ... }`), empty when there are none.
+fn attributes_text(ast: &Ast, id: NodeId) -> String {
+    let Node::ImportAttributes { assert, entries } = *ast.node(id) else {
+        return String::new();
+    };
+    let mut parts = Vec::new();
+    for &e in ast.list(entries) {
+        let Node::ImportAttribute { key, value } = *ast.node(e) else {
+            continue;
+        };
+        let (Some(k), Some(v)) = (ast.name_of(key), ast.name_of(value)) else {
+            continue;
+        };
+        let k = if matches!(ast.node(key), Node::Ident { .. }) {
+            k.to_owned()
+        } else {
+            crate::expr::Expr::Str(k.to_owned()).to_text(true)
+        };
+        parts.push(format!(
+            "{k}: {}",
+            crate::expr::Expr::Str(v.to_owned()).to_text(true)
+        ));
+    }
+    let kw = if assert { "assert" } else { "with" };
+    if parts.is_empty() {
+        format!("{kw} {{}}")
+    } else {
+        format!("{kw} {{ {} }}", parts.join(", "))
     }
 }
 

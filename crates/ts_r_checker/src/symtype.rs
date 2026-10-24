@@ -217,6 +217,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             if let Some(v) = self.json_import_type(s, t) {
                 return v;
             }
+            if let Some(v) = self.namespace_import_module_type(s, t) {
+                return v;
+            }
             if !self.c.has_meaning(t, meaning::VALUE) {
                 if let Some(v) = self.alias_merged_value(s) {
                     return self.type_of_symbol(v);
@@ -313,6 +316,163 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The value of a named import whose export is only a type, taken from the property of
     /// the module's `export =` value of that name (see `Checker::export_equals_member`).
+    /// `import * as ns from "m"` where `m` is `export =` a callable or constructable value
+    /// (or one with a `default` property), or an ES module importing a CommonJS one under
+    /// the Node module kinds: the namespace object is the value's properties without its
+    /// signatures, plus a synthetic `default` (the value itself) when `m` can have a
+    /// synthetic default (tsc: checker.go resolveESModuleSymbol,
+    /// getTypeWithSyntheticDefaultImportType, cloneTypeAsModuleType). `None`: the value's
+    /// own type.
+    fn namespace_import_module_type(&mut self, s: SymId, t: SymId) -> Option<TypeId> {
+        let (file, request) = self.namespace_import_request(s)?;
+        let m = self
+            .c
+            .module_target_symbol(self.c.link.module_target(file, request))?;
+        let esm_cjs = self.c.esm_imports_cjs(file, m);
+        if self.c.export_of(m, "export=").is_none() && !esm_cjs {
+            return None;
+        }
+        if !self.c.has_meaning(t, meaning::VALUE) {
+            return None;
+        }
+        let ty = self.type_of_symbol(t);
+        if !self
+            .store()
+            .flags(ty)
+            .intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION | TypeFlags::UNION)
+            && !esm_cjs
+        {
+            return None;
+        }
+        let has_sigs = !self
+            .signatures_of(ty, crate::members::SigKind::Call)
+            .is_empty()
+            || !self
+                .signatures_of(ty, crate::members::SigKind::Construct)
+                .is_empty();
+        if !has_sigs && !esm_cjs && self.property_of_type(ty, "default").is_none() {
+            return None;
+        }
+        let mut props: Vec<(ts_r_types::StrId, SymId)> = Vec::new();
+        let mut index = Vec::new();
+        if self
+            .store()
+            .flags(ty)
+            .intersects(TypeFlags::OBJECT | TypeFlags::INTERSECTION)
+        {
+            props = self.properties_of(ty);
+            index = self.resolved_members(ty).index.to_vec();
+        }
+        if self.namespace_import_synthetic_default(file, m, ty) {
+            let name = self.store().intern_str("default");
+            props.retain(|&(n, _)| n != name);
+            let dp = self
+                .c
+                .new_synth(SynthSym::new(name, SymbolFlags::PROPERTY, 0).with_type(ty));
+            props.push((name, dp));
+        }
+        // Printed `typeof C` for a class, enum or namespace (tsc keeps the symbol; a
+        // function's view prints its structure).
+        // The `export =` entity names the view (`t` may be the module).
+        let t = match self.c.export_of(m, "export=") {
+            Some(eq) => self.c.resolve_alias(eq).unwrap_or(eq),
+            None => t,
+        };
+        let named = self.c.sym_flags(t).intersects(
+            SymbolFlags::CLASS
+                | SymbolFlags::ENUM
+                | SymbolFlags::VALUE_MODULE
+                | SymbolFlags::MODULE_FILE,
+        );
+        Some(self.store().literal_object(
+            t,
+            if named {
+                ObjectFlags::MODULE
+            } else {
+                ObjectFlags::NONE
+            },
+            ResolvedMembers::new(props, Vec::new(), Vec::new(), index),
+            TypeTraits::NONE,
+        ))
+    }
+
+    /// Whether `import * as ns` in `importer` of module `m` (`ty`: its value's type) gets a
+    /// synthetic `default` (tsc: checker.go canHaveSyntheticDefault, which namespace
+    /// imports consult without the `allowSyntheticDefaultImports` gate): an ES module
+    /// importing a CommonJS one under the Node module kinds always does, an ES module
+    /// importing an ES module never; TypeScript sources only with `export =`; JavaScript
+    /// files when they are CommonJS without `__esModule`; declaration files and ambient
+    /// modules unless their `default` (a property of the `export =` value's type when
+    /// there is one) is declared as a default export, or they export `__esModule`.
+    fn namespace_import_synthetic_default(
+        &mut self,
+        importer: ts_r_diagnostics::FileId,
+        m: SymId,
+        ty: TypeId,
+    ) -> bool {
+        if self.c.esm_imports_cjs(importer, m) {
+            return true;
+        }
+        if self.c.esm_imports_esm(importer, m) {
+            return false;
+        }
+        if let crate::symbols::SymKind::Binder(f, l) = self.c.sym_kind(m)
+            && self.c.bound(f).file_symbol == l
+            && !self.c.file(f).is_declaration()
+        {
+            if !self.c.file(f).is_js() {
+                return self.c.export_of(m, "export=").is_some();
+            }
+            return self.c.bound(f).commonjs && self.c.export_of(m, "__esModule").is_none();
+        }
+        let eq = self.c.export_of(m, "export=").is_some();
+        let export = |ck: &mut Self, name: &str| {
+            if eq {
+                ck.property_of_type(ty, name)
+            } else {
+                ck.c.export_of(m, name)
+            }
+        };
+        if let Some(d) = export(self, "default") {
+            let syntactic = self.c.decls(d).into_iter().any(|l| {
+                let n = self.ast(l.file).node(l.node);
+                matches!(
+                    n,
+                    Node::ExportDefaultExpr { .. } | Node::ExportSpecifier { .. }
+                ) || n.modifiers().contains(Modifiers::DEFAULT)
+            });
+            if syntactic {
+                return false;
+            }
+        }
+        export(self, "__esModule").is_none()
+    }
+
+    /// Whether alias `s` is an `import * as ns` (not `export * as ns`).
+    pub(crate) fn is_namespace_import(&self, s: SymId) -> bool {
+        self.namespace_import_request(s).is_some()
+    }
+
+    fn namespace_import_request(&self, s: SymId) -> Option<(ts_r_diagnostics::FileId, u32)> {
+        let crate::symbols::SymKind::Binder(file, local) = self.c.sym_kind(s) else {
+            return None;
+        };
+        let info = self.c.bound(file).alias(local)?;
+        let ts_r_binder::AliasTarget::Module {
+            request,
+            import: ts_r_binder::ImportName::Namespace,
+        } = info.target
+        else {
+            return None;
+        };
+        let d = self.c.first_decl(s)?;
+        matches!(
+            self.ast(d.file).node(d.node),
+            Node::ImportNamespaceSpecifier { .. }
+        )
+        .then_some((file, request))
+    }
+
     pub fn export_equals_member_type(&mut self, s: SymId) -> Option<TypeId> {
         let (eq, name) = self.c.export_equals_member(s)?;
         let et = self.type_of_symbol(eq);

@@ -418,13 +418,18 @@ Checker (`ts_r_checker`, `ts_r_check`, `ts_r_config`, `ts_r_parser`):
 5. **rxjs `packages/rxjs`:** 21,887 diagnostics agree; 31 only ours (TS7006 11, TS2345 4,
    TS2769 4, TS2532 3, TS2322 3), 21 only tsc's (TS2345 9, TS2344 5, TS2684 4); was 21,007,
    1,333 and 901. Most of the rest come from relating rxjs's globally augmented `Observable`
-   against generic constraints (variance through deep structures).
+   against generic constraints (variance through deep structures). Measured again on
+   2026-10-24 at `087afc9`: tsc 21,908, ts-r 21,909; 21,903 agree, 6 only ours (TS2339 in
+   `packages/test/src/assertions.ts`), 5 only tsc's (TS2344 in `*.spec.ts`).
 6. **playwright:** all 13 of tsc's diagnostics (missing generated files, TS2307) match, plus
    24 only ours (TS2322 9, TS2769 5, TS7053 2; was 814): overload resolution in `clock.ts`,
    `program.ts` and `network.ts`, `ElementHandle<T>` and `CommandReturnValues[T]` indexed
    returns, readonly tuples under `satisfies`, and a few JSX contexts. With the whole program
    checked the cold check now takes 2.34 s against tsc 7's 0.73 s (it was 575 ms when most
-   bodies were not checked).
+   bodies were not checked). Measured again on 2026-10-24 at `087afc9`: all 13 of tsc's match,
+   plus 2 only ours (TS2604 on a `Story` JSX element in `packages/html-reporter/tests/main.tsx`
+   and `packages/web/playwright/gallery/main.tsx`). tRPC, date-fns and TypeORM match tsc 7
+   exactly (0, 0 and 31 diagnostics).
 
 Linter (`ts_r_lint`):
 

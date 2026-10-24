@@ -12,7 +12,11 @@ const { OWN, findRealTypeScript, findTsrCheck } = require('./real.cjs');
 
 const PREFIX = '@ts-r.dev/typescript:';
 // Flags that only print something: passed to TypeScript without a note.
-const INFO_FLAGS = new Set(['-v', '--version', '-h', '--help', '--all', '-?']);
+const INFO_FLAGS = new Set(['-v', '--version', '-h', '--help', '--all', '-?', '--showconfig']);
+// Emit options that do nothing when set to `false` under noEmit (Next.js's type check passes
+// `--declarationMap false --emitDeclarationOnly false`). Only the `false` form is taken; any
+// other value goes to TypeScript.
+const EMIT_OFF_FLAGS = new Set(['-d', '--declaration', '--declarationmap', '--emitdeclarationonly', '--sourcemap', '--inlinesourcemap', '--inlinesources']);
 
 function note(msg) {
   if (!process.env.TS_R_TSC_QUIET) process.stderr.write(`${PREFIX} ${msg}\n`);
@@ -22,9 +26,13 @@ function verbose(msg) {
   if (process.env.TS_R_TSC_VERBOSE) process.stderr.write(`${PREFIX} ${msg}\n`);
 }
 
-/** tsc's command line, reduced to what ts-r-check supports. Option names are case-insensitive. */
+/**
+ * tsc's command line, reduced to what ts-r-check supports. Option names are case-insensitive.
+ * `passed` holds the accepted options other than -p, --noEmit and --pretty, as given: both
+ * checkers get them, in the parity run and after it.
+ */
 function parseArgs(argv) {
-  const r = { project: null, noEmit: null, pretty: null, unsupported: [] };
+  const r = { project: null, noEmit: null, pretty: null, passed: [], unsupported: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const lower = a.toLowerCase();
@@ -43,6 +51,11 @@ function parseArgs(argv) {
       r.noEmit = bool();
     } else if (lower === '--pretty') {
       r.pretty = bool();
+    } else if (EMIT_OFF_FLAGS.has(lower) && argv[i + 1] === 'false') {
+      r.passed.push(a, argv[++i]);
+    } else if (lower === '--tsbuildinfofile' && i + 1 < argv.length) {
+      // Both checkers write their .tsbuildinfo there (each reads the other's as out of date).
+      r.passed.push(a, argv[++i]);
     } else {
       r.unsupported.push(a);
     }
@@ -161,11 +174,15 @@ function cacheRoot() {
   return path.join(os.homedir(), '.cache', 'ts-r');
 }
 
-/** Parity is cached per tsconfig (and what it extends), lockfile, TypeScript and ts-r-check. */
-function parityKey(config, configFiles, real, tsrCheck) {
+/**
+ * Parity is cached per tsconfig (and what it extends), lockfile, TypeScript, ts-r-check and the
+ * options passed to both checkers.
+ */
+function parityKey(config, configFiles, real, tsrCheck, args) {
   const h = crypto.createHash('sha256');
-  h.update('parity-v1\0');
+  h.update('parity-v2\0');
   h.update(`${config}\0${real.version}\0${OWN.version}\0`);
+  h.update(`${JSON.stringify(checkArgs(args))}\0`);
   try {
     const st = fs.statSync(tsrCheck);
     h.update(`${st.size}\0${st.mtimeMs}\0`);
@@ -246,14 +263,24 @@ function runReal(real, argv, why) {
 }
 
 // `-p` exactly as given (or none: both tools then find the nearest tsconfig the same way), so
-// diagnostic paths come out relative to the working directory just like tsc's.
-function projectArgs(args) {
-  return args.project !== null ? ['-p', args.project] : [];
+// diagnostic paths come out relative to the working directory just like tsc's; then the other
+// accepted options, as given.
+function checkArgs(args) {
+  return [...(args.project !== null ? ['-p', args.project] : []), ...args.passed];
 }
 
-// ts-r-check doesn't read `pretty` from tsconfig, so the effective setting is always passed.
+// The effective setting is always passed, so the parity run and later runs agree on it.
 function tsrArgs(args, pretty) {
-  return [...projectArgs(args), '--noEmit', '--sound=off', '--pretty', String(pretty)];
+  return [...checkArgs(args), '--noEmit', '--sound=off', '--pretty', String(pretty)];
+}
+
+// tsc 7's default for --pretty, as observed: a non-empty NO_COLOR turns it off, else a non-empty
+// FORCE_COLOR turns it on (Next.js sets FORCE_COLOR=1 when its own output is a terminal), else
+// it follows whether stdout is a terminal. tsc 7 ignores `pretty` in tsconfig.
+function defaultPretty(env = process.env, isTTY = process.stdout.isTTY) {
+  if (env.NO_COLOR) return false;
+  if (env.FORCE_COLOR) return true;
+  return Boolean(isTTY);
 }
 
 async function main() {
@@ -278,7 +305,7 @@ async function main() {
   const tsrCheck = findTsrCheck();
   if (!tsrCheck) return runReal(real, argv, `the ts-r-check binary for ${process.platform}-${process.arch} isn't installed`);
   const shownConfig = path.relative(process.cwd(), config) || config;
-  const pretty = args.pretty !== null ? args.pretty : read.options.pretty === false ? false : Boolean(process.stdout.isTTY);
+  const pretty = args.pretty !== null ? args.pretty : defaultPretty();
   if (mode === 'ts-r') return run(tsrCheck, tsrArgs(args, pretty));
   if (!real) {
     note(`TypeScript wasn't found, so ${shownConfig} has no parity check; using ts-r-check.`);
@@ -286,7 +313,7 @@ async function main() {
   }
 
   const dir = path.join(cacheRoot(), 'typescript', 'parity');
-  const key = parityKey(config, read.files, real, tsrCheck);
+  const key = parityKey(config, read.files, real, tsrCheck, args);
   const cacheFile = path.join(dir, `${key}.json`);
   let parity = null;
   try {
@@ -302,7 +329,7 @@ async function main() {
   }
 
   // First run: both checkers, side by side, in tsc's plain format; compare; remember.
-  const plain = [...projectArgs(args), '--noEmit', '--pretty', 'false'];
+  const plain = [...checkArgs(args), '--noEmit', '--pretty', 'false'];
   const t0 = Date.now();
   const [ours, theirs] = await Promise.all([
     capture(tsrCheck, [...plain, '--sound=off']),
@@ -375,6 +402,6 @@ function cli() {
   });
 }
 
-module.exports = { cli, parseArgs, parseJsonc, diagnostics, multisetDiff, readConfig };
+module.exports = { cli, parseArgs, parseJsonc, diagnostics, multisetDiff, readConfig, defaultPretty };
 
 if (require.main === module) cli();

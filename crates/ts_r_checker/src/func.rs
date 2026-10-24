@@ -2545,7 +2545,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 }
 
 /// `yield` expressions of a generator body (not of nested functions or classes).
-fn collect_yields(ast: &ts_r_ast::Ast, n: NodeId, out: &mut Vec<NodeId>, depth: u32) {
+pub(crate) fn collect_yields(ast: &ts_r_ast::Ast, n: NodeId, out: &mut Vec<NodeId>, depth: u32) {
     if depth > 500 {
         return;
     }

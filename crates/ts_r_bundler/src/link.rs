@@ -136,6 +136,9 @@ struct Linker<'g> {
     /// when this did not change while computing it, because a cycle cut depends on the
     /// path it was reached from.
     cycle_hits: u64,
+    /// The exports being resolved, innermost last: a named import that leads back to one of
+    /// them is a cycle no module can break (esbuild reports it).
+    resolving: Vec<(ModuleId, u32)>,
 }
 
 /// Links `g` for the user entry modules and (with code splitting) the dynamic-import
@@ -175,6 +178,7 @@ pub fn link(g: &Graph, entries: &[ModuleId], dynamic_entries: &[ModuleId], o: Li
         exists_memo: FxHashMap::default(),
         name_ids: FxHashMap::default(),
         cycle_hits: 0,
+        resolving: Vec::new(),
     };
     for m in &g.modules {
         let mut d: FxHashMap<Sym, Vec<u32>> = FxHashMap::default();
@@ -259,12 +263,23 @@ impl Linker<'_> {
     fn compute_kinds(&mut self) {
         let g = self.g;
         let mut required = vec![false; g.modules.len()];
+        // Files something imports a binding from (not a bare `import "x"`).
+        let mut imported = vec![false; g.modules.len()];
         for m in &g.modules {
             for (i, r) in m.meta.records.iter().enumerate() {
                 if r.kind == RecordKind::Require
                     && let Target::Module(t) = m.targets[i]
                 {
                     required[t as usize] = true;
+                }
+            }
+            let reexports = m.meta.exports.iter().filter_map(|(_, e)| match e {
+                ExportTarget::Reexport { record, .. } => Some(*record),
+                ExportTarget::Local(_) => None,
+            });
+            for record in m.meta.imports.iter().map(|b| b.record).chain(reexports) {
+                if let Some(Target::Module(t)) = m.targets.get(record as usize) {
+                    imported[*t as usize] = true;
                 }
             }
         }
@@ -279,6 +294,17 @@ impl Linker<'_> {
             } else if meta.has_esm_syntax {
                 Kind::Esm
             } else if required[i] || m.loader == Loader::Empty {
+                Kind::Cjs
+            } else if imported[i]
+                && !m.node_mode
+                && !meta.uses_import_meta
+                && !meta.has_tla
+                && matches!(m.loader, Loader::Js | Loader::Jsx)
+            {
+                // A script with no ESM syntax that something imports from is CommonJS, as
+                // in esbuild: its namespace is `module.exports` (`default` included). Not
+                // `.mjs`, a `"type": "module"` package or a file using `import.meta` or
+                // top-level await, which are ES modules.
                 Kind::Cjs
             } else {
                 Kind::Esm
@@ -396,6 +422,12 @@ impl Linker<'_> {
                 Kind::Esm => match name {
                     Imported::Namespace => Binding::Ns(t),
                     Imported::Name(n) => {
+                        let key = (t, self.name_id(n));
+                        if self.resolving.contains(&key) {
+                            self.cycle_hits += 1;
+                            self.report_cycle(m, record, n);
+                            return Binding::Undefined;
+                        }
                         self.ambiguous = false;
                         let r = self.resolve_export(t, n, seen);
                         match r {
@@ -418,6 +450,19 @@ impl Linker<'_> {
             }
             Target::Missing => Binding::Undefined,
         }
+    }
+
+    fn report_cycle(&mut self, m: ModuleId, record: u32, name: &str) {
+        if !self.reported.insert((m, record, name.to_owned())) {
+            return;
+        }
+        let module = &self.g.modules[m as usize];
+        let r = &module.meta.records[record as usize];
+        self.l.messages.push(module.message_at(
+            Severity::Error,
+            r.start,
+            format!("Detected cycle while resolving import {name:?}"),
+        ));
     }
 
     fn report_ambiguous(&mut self, m: ModuleId, record: u32, name: &str) {
@@ -446,17 +491,19 @@ impl Linker<'_> {
     fn report_missing(&mut self, m: ModuleId, record: u32, name: &str, target: ModuleId) {
         let module = &self.g.modules[m as usize];
         let tmod = &self.g.modules[target as usize];
-        // TypeScript files may import types that were not elided (isolated modules), and
-        // modules without exports yield `undefined` (esbuild warns).
-        let ts = matches!(module.loader, Loader::Ts | Loader::Tsx)
-            || matches!(tmod.loader, Loader::Ts | Loader::Tsx);
-        if ts {
+        // A TypeScript file may export types, which an import in isolation cannot tell from
+        // values, and a TypeScript re-export may forward one: both are dropped silently, like
+        // esbuild. A value import in a TypeScript file from a JavaScript one must exist (the
+        // transform has already removed imports used only as types). Modules without exports
+        // yield `undefined` (esbuild warns).
+        let r = &module.meta.records[record as usize];
+        let ts = |l: Loader| matches!(l, Loader::Ts | Loader::Tsx);
+        if ts(tmod.loader) || (ts(module.loader) && r.kind == RecordKind::ReExport) {
             return;
         }
         if !self.reported.insert((m, record, name.to_owned())) {
             return;
         }
-        let r = &module.meta.records[record as usize];
         let no_exports = tmod.loader != Loader::Json
             && tmod.meta.exports.is_empty()
             && tmod.meta.star_exports.is_empty();
@@ -564,14 +611,24 @@ impl Linker<'_> {
         }
         if let Some((b, ambiguous)) = self.export_memo.get(&key).cloned() {
             // The modules below `t` were queued for inclusion when this was computed.
-            self.work.push(Task::Include(t));
+            if b.is_some() {
+                self.work.push(Task::Include(t));
+            }
             if b.is_none() {
                 self.ambiguous = ambiguous;
             }
             return b;
         }
         let cycles = self.cycle_hits;
+        self.resolving.push(key);
         let b = self.resolve_export_uncached(t, name, seen);
+        self.resolving.pop();
+        // Modules an import passes through are part of the bundle (esbuild keeps the side
+        // effects of re-exporting files even in `sideEffects: false` packages). A missing
+        // export does not pull in a side-effect-free file (`ns.missing` is `undefined`).
+        if b.is_some() {
+            self.work.push(Task::Include(t));
+        }
         if self.cycle_hits == cycles {
             let ambiguous = b.is_none() && self.ambiguous;
             self.export_memo.insert(key, (b.clone(), ambiguous));
@@ -585,9 +642,6 @@ impl Linker<'_> {
         name: &str,
         seen: &mut Seen,
     ) -> Option<Binding> {
-        // Modules an import passes through are part of the bundle (esbuild keeps the side
-        // effects of re-exporting files even in `sideEffects: false` packages).
-        self.work.push(Task::Include(t));
         let meta = &self.g.modules[t as usize].meta;
         if self.l.kinds[t as usize] == Kind::Cjs {
             return Some(Binding::Cjs(t, Some(name.to_owned())));
@@ -695,8 +749,12 @@ impl Linker<'_> {
         for n in names {
             let mut seen = FxHashSet::default();
             self.ambiguous = false;
-            if let Some(b) = self.resolve_export(m, &n, &mut seen) {
-                out.push((n, b));
+            match self.resolve_export(m, &n, &mut seen) {
+                // A TypeScript re-export of a missing name forwarded a type: not a property.
+                Some(Binding::Undefined)
+                    if matches!(self.g.modules[m as usize].loader, Loader::Ts | Loader::Tsx) => {}
+                Some(b) => out.push((n, b)),
+                None => {}
             }
         }
         out
@@ -823,15 +881,9 @@ impl Linker<'_> {
                     let mut seen = FxHashSet::default();
                     self.ambiguous = false;
                     let r = self.resolve_export(t, prop, &mut seen);
-                    let r = match r {
-                        Some(r) => r,
-                        None => {
-                            // `ns.missing` is `undefined` at run time; not an error.
-                            Binding::Undefined
-                        }
-                    };
+                    // `ns.missing` is `undefined` at run time; not an error.
+                    let r = r.unwrap_or(Binding::Undefined);
                     self.l.ns_members[mi].insert((*s, prop.clone()), r.clone());
-                    self.work.push(Task::Include(t));
                     self.work.push(Task::Binding(r));
                 }
                 other => self.work.push(Task::Binding(other)),
@@ -906,17 +958,12 @@ impl Linker<'_> {
 }
 
 /// Top-level keys of a JSON module whose value is an object (`None` for other modules).
-fn json_keys(module: &crate::graph::Module) -> Option<Vec<String>> {
+fn json_keys(module: &crate::graph::Module) -> Option<&[String]> {
     if module.loader != Loader::Json {
         return None;
     }
-    // The JSON loader's source is `module.exports = (\n<json>\n);`.
-    let js = &module.source.js;
-    let body = js
-        .strip_prefix("module.exports = (")?
-        .trim_end()
-        .strip_suffix(");")?;
-    let parsed = ts_r_config::jsonc::parse(body, &module.path);
-    let members = parsed.root?.as_object()?.to_vec();
-    Some(members.into_iter().map(|m| m.key).collect())
+    if module.default_only {
+        return Some(&[]);
+    }
+    module.source.json_keys.as_deref()
 }

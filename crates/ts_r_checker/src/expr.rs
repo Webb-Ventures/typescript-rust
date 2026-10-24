@@ -1313,7 +1313,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             let through_alias = self.c.sym_flags(s).intersects(SymbolFlags::ALIAS);
             self.check_const_enum_reference(e, sym, through_alias);
         }
-        let declared = self.type_of_symbol(sym);
+        // `import * as ns` of a callable `export =` (or an ES module's of a CommonJS
+        // one) has its own namespace object type.
+        let declared = if sym != s && self.is_namespace_import(s) {
+            self.type_of_symbol(s)
+        } else {
+            self.type_of_symbol(sym)
+        };
         let f = self.c.sym_flags(sym);
         if f.intersects(SymbolFlags::VARIABLE) && !f.intersects(SymbolFlags::ALIAS) {
             return self.narrowed_identifier_type(e, sym, declared, name);
@@ -1943,6 +1949,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if let Some((info, lib)) = missing_types_hint(name) {
             self.error(e, info, &[name, lib]);
+            return;
+        }
+        // `await(x)` outside an async function calls a name `await` (any name `await`
+        // whose parent is a call; tsc: checker.go,
+        // getCannotFindNameDiagnosticForName).
+        if name == "await"
+            && self
+                .c
+                .parent(e)
+                .is_some_and(|p| matches!(self.ast(e.file).node(p.node), Node::Call { .. }))
+        {
+            self.error(
+                e,
+                dg::CANNOT_FIND_NAME_0_DID_YOU_MEAN_TO_WRITE_THIS_IN_AN_ASYNC_FUNCTION_2311,
+                &[name],
+            );
             return;
         }
         if self.in_with_body(e) {
@@ -3605,7 +3627,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.store().flags(apparent).intersects(TypeFlags::ANY) {
             return TypeId::ANY;
         }
-        let found = self.property_of_type_id(nt, name_id);
+        let found = self.property_of_type_id(nt, name_id).filter(|&p| {
+            !(is_write && self.c.sym_check_flags(p) & check_flags::WRITE_PARTIAL != 0)
+        });
         // A static `#private` field belongs to its class's constructor only: a derived
         // class's `typeof Child` does not have it (observed: TS2339).
         if let Some(p) = found
@@ -4938,6 +4962,42 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(out)
     }
 
+    /// The object of an element write, widened as tsc widens it: a union's object literal
+    /// members become regular, and with an empty object among them the union is
+    /// subtype-reduced (`(o || {})["a"] = 1` writes to `{}`; tsc: checker.go,
+    /// getWidenedTypeWithContext).
+    fn widened_write_target(&mut self, t: TypeId) -> TypeId {
+        if !self.store().flags(t).contains(TypeFlags::UNION)
+            || !self
+                .store()
+                .traits(t)
+                .contains(TypeTraits::CONTAINS_OBJECT_LITERAL)
+        {
+            return t;
+        }
+        let w = self.widened_type(t);
+        if !self.store().flags(w).contains(TypeFlags::UNION) {
+            return w;
+        }
+        // A widened empty literal is no object literal type any more (the subtype rule for
+        // object literal targets no longer keeps its siblings apart from it).
+        let mut ms = self.store().members_of_union(w).to_vec();
+        let mut empty = false;
+        for m in &mut ms {
+            if self.is_empty_object_type(*m) {
+                empty = true;
+                if self.is_object_literal_type(*m) {
+                    *m = TypeId::EMPTY_OBJECT;
+                }
+            }
+        }
+        if empty {
+            self.union_with(&ms, Reduction::Subtype, AliasId::NONE)
+        } else {
+            w
+        }
+    }
+
     pub fn element_access(
         &mut self,
         e: Loc,
@@ -4964,6 +5024,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.store().is_error(nt) {
             return TypeId::ERROR;
         }
+        let nt = if is_write {
+            self.widened_write_target(nt)
+        } else {
+            nt
+        };
         // Any element of `never` is `never`, quietly (observed).
         if nt == TypeId::NEVER {
             return TypeId::NEVER;
@@ -5085,7 +5150,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A literal key: a property.
         if let Some(name) = self.property_name_of_type(itr) {
             let nid = self.store().intern_str(&name);
-            if let Some(p) = self.property_of_type_id(nt, nid) {
+            if let Some(p) = self.property_of_type_id(nt, nid).filter(|&p| {
+                !(is_write && self.c.sym_check_flags(p) & check_flags::WRITE_PARTIAL != 0)
+            }) {
                 if is_write && self.is_readonly_write(e, p) {
                     // A unique-symbol key shows as tsc names the property (`[g]`).
                     let shown = match self.c.symbol_key_display(&name) {
@@ -7004,7 +7071,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let sym = SymId::NONE;
         self.store().literal_object(
             sym,
-            ObjectFlags::OBJECT_LITERAL,
+            ObjectFlags::OBJECT_LITERAL | ObjectFlags::CONTAINS_SPREAD,
             ResolvedMembers::new(props, Vec::new(), Vec::new(), index),
             TypeTraits::CONTAINS_OBJECT_LITERAL,
         )

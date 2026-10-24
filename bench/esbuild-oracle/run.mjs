@@ -122,14 +122,16 @@ class Parser {
     }
     if (this.is('{')) return this.composite(text);
     if (this.is('(')) {
-      // Function call: keep the text, skip the arguments.
+      // Function call: keep the text and the argument tokens.
       let depth = 0;
+      const inner = [];
       do {
         const p = this.next();
         if (p.t === 'p' && (p.v === '(' || p.v === '{' || p.v === '[')) depth++;
         if (p.t === 'p' && (p.v === ')' || p.v === '}' || p.v === ']')) depth--;
+        inner.push(p);
       } while (depth > 0);
-      return { call: text };
+      return { call: text, args: inner.slice(1, -1) };
     }
     if (text === '') throw new Error(`unexpected token ${JSON.stringify(this.peek())}`);
     if (text === 'true') return true;
@@ -276,7 +278,48 @@ function flagsFor(c) {
         }
         break;
       }
+      // `es(2022)`: everything newer than ES2022 is lowered, which is `--target=es2022`.
+      // ts-r-build does not lower below ES2022 yet: those stay skips.
+      case 'UnsupportedJSFeatures':
+        if (v.call === 'es' && v.args.length === 1 && v.args[0].t === 'num' && Number(v.args[0].v) >= 2022) flags.push(`--target=es${v.args[0].v}`);
+        else if (v.call === 'es') why.push(`${k}=es(<2022)`);
+        else why.push(k);
+        break;
       case 'JSBanner': flags.push(`--banner:js=${v}`); break;
+      case 'JSX': {
+        for (const [jk, jv] of Object.entries(asObject(v))) {
+          const parts = jv && jv.type === 'config.DefineExpr' ? asObject(jv).Parts : null;
+          const dotted = parts && parts.items ? asList(parts).join('.') : null;
+          if (jk === 'Parse') {} // .jsx entries are parsed as JSX anyway
+          else if (jk === 'Preserve' && jv === true) flags.push('--jsx=preserve');
+          else if (jk === 'AutomaticRuntime' && jv === true) flags.push('--jsx=automatic');
+          else if (jk === 'Development' && jv === true) flags.push('--jsx-dev');
+          else if (jk === 'Factory' && dotted) flags.push(`--jsx-factory=${dotted}`);
+          else if (jk === 'Fragment' && dotted) flags.push(`--jsx-fragment=${dotted}`);
+          else why.push(`JSX.${jk}`);
+        }
+        break;
+      }
+      case 'EntryPathTemplate':
+      case 'ChunkPathTemplate':
+      case 'AssetPathTemplate': {
+        const names = { DirPlaceholder: '[dir]', NamePlaceholder: '[name]', HashPlaceholder: '[hash]', ExtPlaceholder: '[ext]' };
+        let t = '';
+        for (const part of asList(v)) {
+          const po = asObject(part);
+          t += po.Data ?? '';
+          if (po.Placeholder) {
+            const n = names[po.Placeholder.ident?.replace('config.', '')];
+            if (!n) { why.push(`${k}.${po.Placeholder.ident}`); break; }
+            t += n;
+          }
+        }
+        flags.push(`--${{ EntryPathTemplate: 'entry', ChunkPathTemplate: 'chunk', AssetPathTemplate: 'asset' }[k]}-names=${t}`);
+        break;
+      }
+      case 'OutputExtensionJS': flags.push(`--out-extension:.js=${v}`); break;
+      // The input root is only known per tool run: buildAndRun fills it in.
+      case 'TSConfigPath': flags.push(`--tsconfig=\0IN${v}`); break;
       default: why.push(k);
     }
   }
@@ -321,7 +364,8 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
   const outFlag = plan.out.file ? `--outfile=${path.join(outRoot, plan.out.file)}` : `--outdir=${path.join(outRoot, plan.out.dir)}`;
   const meta = path.join(caseDir, `${tool}-meta.json`);
   const extra = tool === 'tsr' ? ['--no-cache'] : [];
-  const b = await run(bin, [...entries, ...plan.flags, outFlag, `--metafile=${meta}`, '--log-level=error', ...extra], cwd, 30000);
+  const flags = plan.flags.map((f) => (f.includes('\0IN') ? f.replace(/\0IN(.*)$/, (_, p) => path.join(inRoot, p)) : f));
+  const b = await run(bin, [...entries, ...flags, outFlag, `--metafile=${meta}`, '--log-level=error', ...extra], cwd, 30000);
   if (b.code !== 0) return { built: false, log: (b.stderr || '').slice(0, 2000), signal: b.signal };
   // Entry outputs, in entry order.
   let outputs = [];
