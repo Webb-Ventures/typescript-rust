@@ -2040,6 +2040,18 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Fills missing type arguments with defaults (instantiated by the previous arguments)
     /// or `unknown`-like placeholders.
     pub fn fill_type_args(&mut self, params: &[TypeId], args: &[TypeId]) -> Vec<TypeId> {
+        self.fill_type_args_in(params, args, false)
+    }
+
+    /// [`Self::fill_type_args`]; with `js_implicit_any` (a JavaScript class's `extends`
+    /// clause), a default of `unknown` or `{}` fills in as `any` (tsc:
+    /// `fillMissingTypeArguments` in `checker.go`).
+    pub fn fill_type_args_in(
+        &mut self,
+        params: &[TypeId],
+        args: &[TypeId],
+        js_implicit_any: bool,
+    ) -> Vec<TypeId> {
         // Parameters not filled yet map to the error type, so a default that refers to a
         // later parameter (`<T, U = V, V = C>`) gets a silent error type there.
         let given = args.len().min(params.len());
@@ -2047,6 +2059,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         out.resize(params.len(), TypeId::ERROR);
         for i in given..params.len() {
             out[i] = match self.type_param_default(params[i]) {
+                Some(d)
+                    if js_implicit_any
+                        && (d == TypeId::UNKNOWN || self.is_empty_anonymous_object(d)) =>
+                {
+                    TypeId::ANY
+                }
                 Some(d) => {
                     let m = self.store().mapper(params, &out);
                     self.instantiate(d, m)

@@ -755,12 +755,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             && let Some(s) = self.c.resolve_alias(s)
             && self.c.sym_flags(s).intersects(SymbolFlags::CLASS)
         {
-            if !js {
-                let tps = self.local_type_params(s);
-                if !self.type_arg_count_fits(&tps, args.len()) {
-                    return None;
-                }
+            let tps = self.local_type_params(s);
+            if !js && !self.type_arg_count_fits(&tps, args.len()) {
+                return None;
             }
+            // In JavaScript, defaults of `unknown` or `{}` fill in as `any`.
+            let args = if js && args.len() < tps.len() {
+                self.fill_type_args_in(&tps, &args, true)
+            } else {
+                args
+            };
             let t = self.type_from_symbol_reference(s, &args);
             return Some(self.with_this_arg(t, this_type));
         }
@@ -789,7 +793,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .store()
                 .list_items(self.store().sig(sig).type_params)
                 .to_vec();
-            let filled = self.fill_type_args(&tps, &args);
+            let filled = self.fill_type_args_in(&tps, &args, js);
             let m = self.store().mapper(&tps, &filled);
             self.instantiate_signature_full(sig, m)
         };
@@ -1244,6 +1248,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         for (n, decls) in groups {
+            // `const f: F = () => {}; f[k] = v` with `F` declaring `[k]`: the declared type.
+            let name = self.store().str(n).to_owned();
+            if self.annotated_expando_member(sym, &name).is_some() {
+                let t = self.annotated_expando_values(&decls);
+                let s = self.c.new_synth(
+                    crate::symbols::SynthSym::new(n, SymbolFlags::PROPERTY, 0)
+                        .with_decl(decls.first().copied())
+                        .with_type(t),
+                );
+                out.push((n, s));
+                continue;
+            }
             let mut types = Vec::new();
             for &left in &decls {
                 let Some(assign) = self.c.parent(left) else {

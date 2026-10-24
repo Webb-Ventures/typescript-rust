@@ -857,6 +857,10 @@ Files, by layer:
   check reaches the literal fixes their contexts (`fix_nested_contexts`). A single candidate never fixes; a single
   generic candidate whose other arguments fail is instantiated without its
   context-sensitive arguments too.
+- **Inference between type operators.** `S[K]` to `T[L]` infers `S` to `T` and `K` to `L`;
+  `keyof S` to `keyof T` infers `S` to `T` contravariantly (tsc: inference.go,
+  inferFromTypes), so `find<T, K extends keyof T>(o: T[K]): [T, K]` called with an `A[B]`
+  gives `[A, B]`.
 - **Inference priorities.** Candidates through homomorphic mapped types and to the branches
   of a conditional target are weak (used only without other candidates); inferences from
   the call's contextual type to the return type come last (only for parameters the
@@ -1100,6 +1104,9 @@ Files, by layer:
   (`Expected A<T> type arguments ...`), or TS8027 when some parameters have defaults (tsc 7
   prints `D<T, U>-<min>`), at the `extends` expression, under `noImplicitAny` only. Without
   it nothing is reported and the missing arguments are `any` (`js_extends_type_args`).
+  Without type arguments, a parameter's default of `unknown` or `{}` fills in as `any` too
+  (`fill_type_args_in`; `class C extends Foo` over `Foo<T = {}>` gives `props: any`; tsc:
+  checker.go, fillMissingTypeArguments with isJavaScriptImplicitAny).
 - **JSDoc on object literal members.** `/** @type {T} */ a: v` (or a shorthand `a`): the
   property has type `T`, `v` is contextually typed by `T` and checked against it at the key
   (`jsdoc_typed_property`). A method's `@type` without call signature is TS8030 (as for a
@@ -1546,8 +1553,12 @@ Files, by layer:
   checked for excess properties against `T`'s constraint.
 - **Annotated expandos.** `f.x = v` declares an expando on an annotated `const f: Fn =
   () => ...` too: the variable keeps its annotation, the function initializer gets the
-  properties (checked against `Fn`), and a property `Fn` declares takes `Fn`'s type and
-  contextual type.
+  properties (checked against `Fn`), and a property `Fn` declares is contextually typed by
+  `Fn`'s member and has the type of its values widened as in a mutable location
+  (`annotated_expando_values`): `f.done = true` under `done: true` stays `true`, and
+  `f.done = false` is `false`, failing both the assignment and the annotation. Late-bound
+  expandos (`f[sym] = v`, `f[k] = v` with `k` a literal) follow the same rule when `Fn`
+  declares the key (tsc: checker.go, getAssignmentDeclarationInitializerType).
 - **Generic signatures in context.** Two instantiations of one declared generic signature
   (a method read through `ZodNumber` and through `ZodType<unknown>`) first relate with their
   type parameters identified; failing that, and for any other generic source, type

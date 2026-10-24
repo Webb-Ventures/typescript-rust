@@ -328,7 +328,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         && self.annotated_expando_type(s).is_none()
                         // `this.x = v` in a method: typed by a constructor's `@type`.
                         && !(is_this_member(ast, left) && self.jsdoc_expando_type(s).is_some())
-                }) || self.is_late_expando(Loc::new(f, left))
+                }) || self.is_unannotated_late_expando(Loc::new(f, left))
                     || self.assigns_inferred_this_property(Loc::new(f, left))
                 {
                     return None;
@@ -398,14 +398,29 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
-    /// Whether `left` (`f[k]`) is a late-bound expando assignment target.
-    fn is_late_expando(&self, left: Loc) -> bool {
+    /// Whether `left` (`f[k]`) is a late-bound expando assignment target whose host's
+    /// annotation does not declare the key (one it declares types the value).
+    fn is_unannotated_late_expando(&mut self, left: Loc) -> bool {
         let b = self.c.bound(left.file);
-        let Node::Index { obj, .. } = *self.ast(left.file).node(left.node) else {
+        let Node::Index { obj, index, .. } = *self.ast(left.file).node(left.node) else {
             return false;
         };
-        b.resolved(obj)
+        if !b
+            .resolved(obj)
             .is_some_and(|t| b.late_expandos.binary_search(&(t, left.node)).is_ok())
+        {
+            return false;
+        }
+        let Some(host) = self
+            .c
+            .resolve_ident(Loc::new(left.file, obj), ts_r_binder::meaning::VALUE)
+        else {
+            return true;
+        };
+        let Some(name) = self.late_bound_name(Loc::new(left.file, index)) else {
+            return true;
+        };
+        self.annotated_expando_member(host, &name).is_none()
     }
 
     /// Narrows a union contextual type of an object literal by the literal's discriminant
