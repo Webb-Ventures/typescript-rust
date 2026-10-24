@@ -8,7 +8,8 @@
 //! ```
 //!
 //! `f` maps a file to `[format (0 ESM, 1 CJS), start, end]`, byte offsets into the code
-//! after the newline; `r` holds the specifiers ts-r-run resolved. The name is the BLAKE3
+//! after the newline; `r` holds the specifiers ts-r-run resolved; `e`, when present, maps a
+//! module only loaded lazily that failed to compile to its rendered errors. The name is the BLAKE3
 //! hash of the contents, so an unchanged graph is never rewritten.
 //!
 //! Stamp (`<key>.stamp`, key from the tool build, entry and flags): the manifest path, then
@@ -83,7 +84,20 @@ pub fn render(g: &Graph) -> Vec<u8> {
         }
         index.push('}');
     }
-    index.push_str("}}\n");
+    index.push('}');
+    if !g.deferred.is_empty() {
+        index.push_str(",\"e\":{");
+        for (i, (path, error)) in g.deferred.iter().enumerate() {
+            if i > 0 {
+                index.push(',');
+            }
+            json_string(&mut index, path);
+            index.push(':');
+            json_string(&mut index, error);
+        }
+        index.push('}');
+    }
+    index.push_str("}\n");
     let mut out = Vec::with_capacity(index.len() + offset);
     out.extend_from_slice(index.as_bytes());
     for m in &g.modules {
@@ -207,12 +221,14 @@ mod tests {
                     format: Format::Esm,
                     code: "import './b.js';\n".into(),
                     resolved: vec![("./b.js".into(), Arc::from("/p/b.ts"))],
+                    eager: vec![Arc::from("/p/b.ts")],
                 },
                 Module {
                     path: "/p/\"b\".ts".into(),
                     format: Format::Cjs,
                     code: "x\n".into(),
                     resolved: Vec::new(),
+                    eager: Vec::new(),
                 },
             ],
             ..Graph::default()

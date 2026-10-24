@@ -1,8 +1,11 @@
 //! `ts-r-run` end to end on small projects, for the tsx behaviours the run oracle
 //! (`bench/run-oracle`) found missing: resolution inside packages, plain JavaScript with ES
 //! syntax in CommonJS scope, JSON without import attributes, tsconfig `paths` and `baseUrl`
-//! from JavaScript parents, and fatal `--tsconfig` errors. Each case writes its files to a
-//! scratch directory and runs under `scripts/limit.sh`. Skipped when Node is missing.
+//! from JavaScript parents, fatal `--tsconfig` errors, `--test` locations, the signal relay,
+//! `import.meta` and the `__esModule` marker in CommonJS output, `?query` instances, syntax
+//! errors behind `import()`, `require` of top-level `await`, the `import()` default unwrap,
+//! JSON named exports, and TypeScript inside packages. Each case writes its files to a scratch
+//! directory and runs under `scripts/limit.sh`. Skipped when Node is missing.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -282,4 +285,167 @@ fn an_unresponsive_program_is_killed_on_sigint() {
         return;
     };
     assert_eq!(out.status.code(), Some(130));
+}
+
+#[test]
+fn import_meta_runs_in_commonjs_output() {
+    let files = [
+        ("package.json", r#"{ "type": "commonjs" }"#),
+        (
+            "main.ts",
+            "import { name } from './a';\nconst m: ImportMeta = import.meta;\nconsole.log(name, m.url.endsWith('/main.ts'), m.filename === __filename, typeof module);\n",
+        ),
+        ("a.ts", "export const name: string = 'a';\n"),
+    ];
+    let Some(out) = run("import-meta-cjs", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "a true true object\n");
+}
+
+#[test]
+fn compiled_commonjs_hides_its_esmodule_marker_from_named_exports() {
+    let files = [
+        ("package.json", r#"{ "type": "module" }"#),
+        (
+            "main.ts",
+            "import * as ns from './a.cts';\nconsole.log(Object.keys(ns).sort().join());\n",
+        ),
+        ("a.cts", "export const x: number = 1;\n"),
+    ];
+    let Some(out) = run("esmodule-marker", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "default,module.exports,x\n");
+}
+
+#[test]
+fn a_query_makes_a_commonjs_module_of_its_own() {
+    let files = [
+        ("package.json", r#"{ "type": "commonjs" }"#),
+        (
+            "main.ts",
+            "import { n as a } from './count?a';\nimport { n as b } from './count?b';\nimport { n as c } from './count?a';\nconsole.log(a, b, c);\n",
+        ),
+        (
+            "count.ts",
+            "const g = globalThis as { hits?: number };\ng.hits = (g.hits ?? 0) + 1;\nexport const n: number = g.hits;\nconsole.log(import.meta.url.slice(import.meta.url.indexOf('?')));\n",
+        ),
+    ];
+    let Some(out) = run("query-cjs", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "?a\n?b\n1 2 1\n");
+}
+
+#[test]
+fn a_syntax_error_behind_import_throws_only_when_loaded() {
+    let files = [
+        ("package.json", r#"{ "type": "module" }"#),
+        (
+            "main.ts",
+            "console.log('start');\nawait import('./broken').catch((e) => console.log(e.name, e.message.startsWith('Transform failed')));\n",
+        ),
+        ("broken.ts", "const = ;\n"),
+    ];
+    let Some(out) = run("lazy-error", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "start\nTransformError true\n");
+    // A static import of the same file still stops the run before Node starts.
+    let files = [
+        ("package.json", r#"{ "type": "module" }"#),
+        ("main.ts", "import './broken';\nconsole.log('start');\n"),
+        ("broken.ts", "const = ;\n"),
+    ];
+    let Some(out) = run("eager-error", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn requiring_top_level_await_is_a_transform_error() {
+    let files = [
+        ("package.json", r#"{ "type": "commonjs" }"#),
+        (
+            "main.ts",
+            "try { require('./tla.mts'); } catch (e) { console.log((e as Error).name, (e as Error).message.startsWith('Top-level await')); }\n",
+        ),
+        ("tla.mts", "await Promise.resolve();\nexport {};\n"),
+    ];
+    let Some(out) = run("tla-require", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "TransformError true\n");
+}
+
+#[test]
+fn dynamic_import_unwraps_compiled_es_modules_and_json_has_named_exports() {
+    let files = [
+        ("package.json", r#"{ "type": "module" }"#),
+        (
+            "main.ts",
+            "import * as j from './j.json';\nconst m = await import('pkg');\nconst p = await import('./plain.mjs');\nconsole.log(m.default, m.named, j['loaded-file'], p.ok);\n",
+        ),
+        ("j.json", r#"{ "loaded-file": "json", "default": 0 }"#),
+        (
+            "plain.mjs",
+            "const m = await import ('pkg');\nexport const ok = m.default === 1;\n",
+        ),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "name": "pkg", "type": "commonjs" }"#,
+        ),
+        (
+            "node_modules/pkg/index.js",
+            "export const named = 2;\nexport default 1;\n",
+        ),
+    ];
+    let Some(out) = run("import-interop", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "1 2 json true\n");
+}
+
+#[test]
+fn require_finds_typescript_in_packages_and_takes_file_urls() {
+    let files = [
+        ("package.json", r#"{ "type": "commonjs" }"#),
+        (
+            "main.ts",
+            "const { a } = require('pkg/a.js');\nconst url = require('node:url').pathToFileURL(__dirname + '/b.ts').href;\nconsole.log(a, require(url).b);\n",
+        ),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "name": "pkg", "type": "commonjs" }"#,
+        ),
+        ("node_modules/pkg/a.ts", "export const a: string = 'a';\n"),
+        ("b.ts", "export const b: string = 'b';\n"),
+    ];
+    let Some(out) = run("require-ts-pkg", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "a b\n");
+}
+
+#[test]
+fn an_import_of_typescript_in_a_package_is_not_type_stripped_by_node() {
+    let files = [
+        ("package.json", r#"{ "type": "module" }"#),
+        (
+            "main.ts",
+            "import { a } from 'pkg/a.js';\nconsole.log(a);\n",
+        ),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "name": "pkg", "type": "commonjs" }"#,
+        ),
+        ("node_modules/pkg/a.ts", "export const a: string = 'a';\n"),
+    ];
+    let Some(out) = run("pkg-ts-import", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "a\n");
 }

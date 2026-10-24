@@ -3,7 +3,10 @@
 
 use std::io::IsTerminal as _;
 
-use ts_r_ast::{Ast, Modifiers, Node, NodeId, SourceKind};
+use ts_r_ast::{
+    Ast, BinaryOp, FnFlags, ImportPhase, MetaPropKind, Modifiers, Node, NodeId, NodeList,
+    SourceKind, UnaryOp,
+};
 use ts_r_codegen::{CodegenOptions, Layout, PrintHints, SourceMapOptions};
 use ts_r_diagnostics::{Renderer, format_pretty};
 use ts_r_span::SourceText;
@@ -40,6 +43,9 @@ pub struct Spec {
     pub text: String,
     /// Loaded with `require()` (CommonJS resolution and conditions) rather than `import`.
     pub require: bool,
+    /// Only loaded when the program gets there: every use is an `import()` or a `require()`
+    /// inside a function.
+    pub lazy: bool,
 }
 
 /// A compiled file.
@@ -93,13 +99,14 @@ fn format_of(path: &str, pkg: PackageType, ast: &Ast, src: &str) -> Format {
 /// Whether the file is an ES module by syntax once types are erased: a value
 /// `import`/`export` (type-only declarations don't count), `import.meta` or top-level
 /// `await`. Like tsx, a file that has ES module syntax but also uses CommonJS globals
-/// (`require`, `module`, `exports`, `__dirname`, `__filename`) and needs nothing ESM-only
-/// runs as CommonJS, so the two can be mixed in packages without a `type`.
+/// (`require`, `module`, `exports`, `__dirname`, `__filename`) runs as CommonJS, so the two
+/// can be mixed in packages without a `type`; only top-level `await` needs an ES module
+/// (`import.meta` is emulated in CommonJS output, [`IMPORT_META`]).
 pub fn has_esm_syntax(ast: &Ast, src: &str) -> bool {
-    if src.contains("import.meta") || has_top_level_await(ast) {
+    if has_top_level_await(ast) {
         return true;
     }
-    has_value_module_decl(ast) && !uses_cjs_globals(src)
+    (src.contains("import.meta") || has_value_module_decl(ast)) && !uses_cjs_globals(src)
 }
 
 /// Any ES module syntax: a value `import`/`export`, `import.meta` or top-level `await`.
@@ -175,12 +182,14 @@ fn has_top_level_await(ast: &Ast) -> bool {
 /// the transformed tree.
 fn collect_specs(ast: &Ast) -> Vec<Spec> {
     let mut out: Vec<Spec> = Vec::new();
-    let mut stack: Vec<NodeId> = vec![ast.root];
+    // (node, inside a function)
+    let mut stack: Vec<(NodeId, bool)> = vec![(ast.root, false)];
     let lit = |id: NodeId| match *ast.node(id) {
         Node::StringLit { value } => Some(ast.atom(value).to_owned()),
         _ => None,
     };
-    while let Some(id) = stack.pop() {
+    while let Some((id, in_fn)) = stack.pop() {
+        let mut inner = in_fn;
         match *ast.node(id) {
             Node::ImportDecl { source, .. }
             | Node::ExportAll { source, .. }
@@ -192,6 +201,7 @@ fn collect_specs(ast: &Ast) -> Vec<Spec> {
                     out.push(Spec {
                         text,
                         require: false,
+                        lazy: false,
                     });
                 }
                 continue;
@@ -201,6 +211,7 @@ fn collect_specs(ast: &Ast) -> Vec<Spec> {
                     out.push(Spec {
                         text,
                         require: false,
+                        lazy: true,
                     });
                 }
             }
@@ -213,18 +224,33 @@ fn collect_specs(ast: &Ast) -> Vec<Spec> {
                     out.push(Spec {
                         text,
                         require: true,
+                        lazy: in_fn,
                     });
                 }
             }
+            Node::FunctionDecl { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::MethodDef { .. } => inner = true,
             _ => {}
         }
-        ast.for_each_child(id, |c| stack.push(c));
+        ast.for_each_child(id, |c| stack.push((c, inner)));
     }
-    // Source order (the stack visits children last-first), without duplicates.
+    // Source order (the stack visits children last-first), without duplicates; a specifier
+    // is lazy only when every use of it is.
     out.reverse();
-    let mut seen = rustc_hash::FxHashSet::default();
-    out.retain(|s| seen.insert((s.text.clone(), s.require)));
-    out
+    let mut at: rustc_hash::FxHashMap<(String, bool), usize> = rustc_hash::FxHashMap::default();
+    let mut specs: Vec<Spec> = Vec::with_capacity(out.len());
+    for s in out {
+        match at.get(&(s.text.clone(), s.require)) {
+            Some(&i) => specs[i].lazy &= s.lazy,
+            None => {
+                at.insert((s.text.clone(), s.require), specs.len());
+                specs.push(s);
+            }
+        }
+    }
+    specs
 }
 
 /// The options one file is transformed with: the project's options with the file's module
@@ -256,6 +282,11 @@ pub fn compile(
     }
     let mut ast = parsed.ast;
     let format = format_of(path, pkg, &ast, src);
+    let emulate_meta =
+        format == Format::Cjs && src.contains("import.meta") && calls_import_meta(&mut ast);
+    if src.contains("import") {
+        unwrap_dynamic_imports(&mut ast);
+    }
     let opts = file_options(base, format);
     let result = ts_r_transform::transform(&mut ast, src, &opts);
     let specs = collect_specs(&ast);
@@ -281,6 +312,16 @@ pub fn compile(
     };
     let printed = ts_r_codegen::print_with(&ast, src, &codegen, &hints);
     let mut code = printed.code;
+    if format == Format::Cjs {
+        hide_esmodule_marker(&mut code);
+    }
+    if emulate_meta {
+        if !code.ends_with('\n') {
+            code.push('\n');
+        }
+        code.push_str(IMPORT_META);
+        code.push('\n');
+    }
     if let Some(map) = printed.map {
         if !code.ends_with('\n') {
             code.push('\n');
@@ -294,6 +335,186 @@ pub fn compile(
         code,
         specs,
     })
+}
+
+/// What `import.meta` becomes in CommonJS output (tsx runs such files too): a call of a
+/// function appended to the file, hoisted, that makes the object once. `url` is the file's URL;
+/// the preload swaps [`IMPORT_META_URL`] for the module's own URL when that has a query or a
+/// hash (`./config.ts?x=1` is a module of its own, with that URL).
+pub const IMPORT_META: &str = "function __ts_r_import_meta() { return __ts_r_import_meta.m ??= \
+     { url: /*ts-r-run:url*/require(\"node:url\").pathToFileURL(__filename).href, \
+     filename: __filename, dirname: __dirname }; }";
+
+/// The `url` expression in [`IMPORT_META`] (`js/hooks.mjs` has the same text).
+pub const IMPORT_META_URL: &str =
+    "/*ts-r-run:url*/require(\"node:url\").pathToFileURL(__filename).href";
+
+/// Every `import(x)` becomes `import(x).then((m) => m.default && typeof m.default == "object" &&
+/// "__esModule" in m.default ? m.default : m)`, as under tsx: the namespace of a CommonJS module
+/// whose `module.exports` is a compiled ES module (it has `__esModule`) is that object, so
+/// `(await import('./cjs.js')).default` is the module's default export, not its exports. The
+/// function is written inline (not a shared helper) because code can be `eval`ed from a
+/// function's text. `import.defer()` and `import.source()` are left as they are.
+fn unwrap_dynamic_imports(ast: &mut Ast) {
+    let mut found = Vec::new();
+    let mut stack = vec![ast.root];
+    while let Some(id) = stack.pop() {
+        if let Node::ImportCall {
+            phase: ImportPhase::Evaluation,
+            ..
+        } = *ast.node(id)
+        {
+            found.push(id);
+        }
+        ast.for_each_child(id, |c| stack.push(c));
+    }
+    if found.is_empty() {
+        return;
+    }
+    let names = Names {
+        then: ast.intern("then"),
+        m: ast.intern("m"),
+        default: ast.intern("default"),
+        object: ast.intern("object"),
+        marker: ast.intern("__esModule"),
+    };
+    for id in found {
+        let span = ast.span(id);
+        let call = ast.add(*ast.node(id), span);
+        let prop = ast.add(Node::Ident { name: names.then }, span);
+        let callee = ast.add(
+            Node::Member {
+                obj: call,
+                optional: false,
+                prop,
+            },
+            span,
+        );
+        let f = interop_arrow(ast, &names, span);
+        let args = ast.add_list(&[f]);
+        *ast.node_mut(id) = Node::Call {
+            callee,
+            optional: false,
+            type_args: None,
+            args,
+        };
+    }
+}
+
+struct Names {
+    then: ts_r_ast::Atom,
+    m: ts_r_ast::Atom,
+    default: ts_r_ast::Atom,
+    object: ts_r_ast::Atom,
+    marker: ts_r_ast::Atom,
+}
+
+fn interop_arrow(ast: &mut Ast, n: &Names, span: ts_r_span::Span) -> NodeId {
+    let m = |ast: &mut Ast| ast.add(Node::Ident { name: n.m }, span);
+    let m_default = |ast: &mut Ast| {
+        let obj = m(ast);
+        let prop = ast.add(Node::Ident { name: n.default }, span);
+        ast.add(
+            Node::Member {
+                obj,
+                optional: false,
+                prop,
+            },
+            span,
+        )
+    };
+    let binary = |ast: &mut Ast, left, op, right| ast.add(Node::Binary { left, op, right }, span);
+    let has = m_default(ast);
+    let arg = m_default(ast);
+    let type_of = ast.add(
+        Node::Unary {
+            op: UnaryOp::TypeOf,
+            arg,
+        },
+        span,
+    );
+    let object = ast.add(Node::StringLit { value: n.object }, span);
+    let is_object = binary(ast, type_of, BinaryOp::Eq, object);
+    let marker = ast.add(Node::StringLit { value: n.marker }, span);
+    let target = m_default(ast);
+    let marked = binary(ast, marker, BinaryOp::In, target);
+    let both = binary(ast, has, BinaryOp::LogicalAnd, is_object);
+    let test = binary(ast, both, BinaryOp::LogicalAnd, marked);
+    let cons = m_default(ast);
+    let alt = m(ast);
+    let body = ast.add(Node::Conditional { test, cons, alt }, span);
+    let pattern = m(ast);
+    let none: NodeList = ast.add_list(&[]);
+    let param = ast.add(
+        Node::Param {
+            decorators: none,
+            modifiers: Modifiers::default(),
+            rest: false,
+            pattern,
+            optional: false,
+            type_ann: None,
+            init: None,
+        },
+        span,
+    );
+    let params = ast.add_list(&[param]);
+    ast.add(
+        Node::Arrow {
+            flags: FnFlags::EXPRESSION_BODY,
+            type_params: None,
+            params,
+            return_type: None,
+            body,
+        },
+        span,
+    )
+}
+
+/// Turns every `import.meta` into `__ts_r_import_meta()`; false when there is none.
+fn calls_import_meta(ast: &mut Ast) -> bool {
+    let mut found = Vec::new();
+    let mut stack = vec![ast.root];
+    while let Some(id) = stack.pop() {
+        if let Node::MetaProperty {
+            kind: MetaPropKind::ImportMeta,
+        } = *ast.node(id)
+        {
+            found.push(id);
+            continue;
+        }
+        ast.for_each_child(id, |c| stack.push(c));
+    }
+    if found.is_empty() {
+        return false;
+    }
+    let name = ast.intern("__ts_r_import_meta");
+    for id in found {
+        let span = ast.span(id);
+        let callee = ast.add(Node::Ident { name }, span);
+        let args = ast.add_list(&[]);
+        *ast.node_mut(id) = Node::Call {
+            callee,
+            optional: false,
+            type_args: None,
+            args,
+        };
+    }
+    true
+}
+
+/// The CommonJS transform marks the exports with `__esModule` in the form Node's CommonJS
+/// export detection reads, so an ES namespace import of the file would list `__esModule`
+/// (tsx's output doesn't). The parenthesised name keeps the marker for `require` callers and
+/// hides it from the detection.
+fn hide_esmodule_marker(code: &mut String) {
+    const MARKER: &str = "Object.defineProperty(exports, \"__esModule\", { value: true });";
+    let head = code.len().min(1024);
+    if let Some(at) = code[..head].find(MARKER) {
+        code.replace_range(
+            at..at + MARKER.len(),
+            "Object.defineProperty(exports, (\"__esModule\"), { value: true });",
+        );
+    }
 }
 
 fn render_errors(path: &str, src: &str, diags: &[&ts_r_diagnostics::Diagnostic]) -> String {
@@ -311,7 +532,8 @@ fn render_errors(path: &str, src: &str, diags: &[&ts_r_diagnostics::Diagnostic])
     out
 }
 
-// ---- cache payload: [format u8][spec count u32]{[require u8][len u32][utf8]}[code] ----
+// ---- cache payload: [format u8][spec count u32]{[flags u8][len u32][utf8]}[code] ----
+// flags: 1 = require, 2 = lazy.
 
 pub fn encode(c: &Compiled) -> Vec<u8> {
     let mut out = Vec::with_capacity(c.code.len() + 16 + c.specs.len() * 24);
@@ -321,7 +543,7 @@ pub fn encode(c: &Compiled) -> Vec<u8> {
     });
     out.extend_from_slice(&(c.specs.len() as u32).to_le_bytes());
     for s in &c.specs {
-        out.push(u8::from(s.require));
+        out.push(u8::from(s.require) | (u8::from(s.lazy) << 1));
         out.extend_from_slice(&(s.text.len() as u32).to_le_bytes());
         out.extend_from_slice(s.text.as_bytes());
     }
@@ -343,12 +565,13 @@ pub fn decode(data: &[u8]) -> Option<Compiled> {
     let mut at = 5;
     let mut specs = Vec::with_capacity(n.min(4096));
     for _ in 0..n {
-        let require = *data.get(at)? != 0;
+        let flags = *data.get(at)?;
         let len = u32_at(data, at + 1)?;
         let text = std::str::from_utf8(data.get(at + 5..at + 5 + len)?).ok()?;
         specs.push(Spec {
             text: text.to_owned(),
-            require,
+            require: flags & 1 != 0,
+            lazy: flags & 2 != 0,
         });
         at += 5 + len;
     }
@@ -485,6 +708,49 @@ mod tests {
                 .contains("//# sourceMappingURL=data:application/json;base64,")
         );
         assert!(!c.code.contains("/abs/dir"));
+    }
+
+    #[test]
+    fn dynamic_import_unwraps_a_compiled_es_module_default() {
+        let c = run(
+            "a.ts",
+            "export const f = () => import('./b');\n",
+            PackageType::Module,
+        );
+        assert!(c.code.contains("\"__esModule\" in"), "{}", c.code);
+        assert!(c.code.contains(".then("), "{}", c.code);
+        // Source phase imports and the static graph are left alone.
+        let c = run(
+            "a.ts",
+            "import { x } from './b';\nexport { x };\n",
+            PackageType::Module,
+        );
+        assert!(!c.code.contains(".then("), "{}", c.code);
+    }
+
+    #[test]
+    fn commonjs_output_hides_the_esmodule_marker_from_export_detection() {
+        let c = run(
+            "a.cts",
+            "export const x: number = 1;\n",
+            PackageType::Module,
+        );
+        assert_eq!(c.format, Format::Cjs);
+        assert!(c.code.contains("(\"__esModule\")"), "{}", c.code);
+        let mut code = String::from("let a;\n");
+        hide_esmodule_marker(&mut code);
+        assert_eq!(code, "let a;\n");
+    }
+
+    #[test]
+    fn import_meta_in_commonjs_output_is_emulated() {
+        let c = run(
+            "a.cts",
+            "export const u: string = import.meta.url;\n",
+            PackageType::Module,
+        );
+        assert_eq!(c.format, Format::Cjs);
+        assert!(!c.code.contains("import.meta"), "{}", c.code);
     }
 
     #[test]
