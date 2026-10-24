@@ -37,6 +37,7 @@ const REJECTED_GRAMMAR: &[u32] = &[
     1248,  // `const` class member
     1317,  // rest parameter property
     1325,  // `import(...a)`
+    1358,  // tagged template in an optional chain
     1359,  // `await` as a name where it is an operator
     1492,  // `using {a} = x`
     1189,  // `for (x = 1 in o)`: accepted for a sloppy-mode `var x` (`for_in_var_heads`)
@@ -273,6 +274,28 @@ mod tests {
         ] {
             assert!(fails(src, kind), "{src}");
         }
+    }
+
+    #[test]
+    fn optional_chain_tagged_templates_fail_a_build() {
+        for src in ["a?.b`x`;", "a?.[b]`x`;", "a?.()`x`;"] {
+            for kind in [SourceKind::Js, SourceKind::Ts] {
+                let parsed = ts_r_parser::parse(src, kind);
+                assert!(parsed.grammar.iter().any(|d| d.code == 1358), "{src}");
+                assert!(
+                    build_errors(&parsed).iter().any(|d| d.code == 1358),
+                    "{src}"
+                );
+            }
+        }
+        assert!(!fails("(a?.b)`x`;", SourceKind::Ts));
+        let out = crate::transpile(
+            "a.ts",
+            "const a = { b: () => 'ok' }; a?.b`x`;",
+            &crate::TransformOptions::default(),
+            &ts_r_codegen::CodegenOptions::default(),
+        );
+        assert!(out.build_errors.iter().any(|d| d.code == 1358));
     }
 
     #[test]
