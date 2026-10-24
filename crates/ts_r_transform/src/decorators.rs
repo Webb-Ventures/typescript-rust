@@ -291,10 +291,16 @@ pub(crate) fn emit_decl(tx: &mut Tx, id: NodeId, info: Info, out: &mut Vec<NodeI
     let is_default = p.modifiers.contains(Modifiers::DEFAULT);
     let source_name = p.name;
     // A name is needed to refer to the class.
+    let cjs_top = tx.opts.is_cjs() && tx.ns_stack.is_empty() && tx.list_depth == 0;
     let name_atom = match p.name {
         Some(n) => tx.atom_of(n).unwrap_or(Atom::EMPTY),
         None => {
-            let a = tx.fresh("default", true);
+            // CommonJS named the anonymous default already (`default_1`, its hoisting
+            // prepass): the decorated class takes that name rather than a second one.
+            let a = match crate::cjs::default_name(tx) {
+                Some(a) if cjs_top => a,
+                _ => tx.fresh("default", true),
+            };
             let n = tx.ident_atom(a, at);
             p.name = Some(n);
             a

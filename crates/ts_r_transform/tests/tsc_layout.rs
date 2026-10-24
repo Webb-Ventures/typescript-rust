@@ -133,6 +133,12 @@ fn using_esnext() {
     check("using_esnext");
 }
 
+/// A decorated anonymous default class under CommonJS takes the module's `default_1`.
+#[test]
+fn legacy_decorated_default_cjs() {
+    check("legacy_decorated_default_cjs");
+}
+
 /// Private names below ES2022: `WeakMap`/`WeakSet` storage, method functions, the helper
 /// calls for reads, writes, compound and update operators, calls and `#x in o`, aliases.
 #[test]
