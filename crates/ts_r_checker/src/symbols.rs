@@ -72,6 +72,9 @@ pub mod check_flags {
     pub const MAPPED: u32 = 1 << 18;
     /// A mapped type property made required by `-?`: `undefined` is removed from its type.
     pub const STRIP_OPTIONAL: u32 = 1 << 19;
+    /// A union property some object literal member lacks (read there as `undefined`): a
+    /// write through the union does not find it (tsc widens the object first).
+    pub const WRITE_PARTIAL: u32 = 1 << 20;
 }
 
 /// A symbol created by the checker.

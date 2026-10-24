@@ -2338,6 +2338,14 @@ Files, by layer:
   private or protected one only when they all share a declaration (`union_origins_accessible`):
   `Public | Protected` has no `member`, `Foo | (Foo & Bar)` has `foo`. Indexed access types
   on unions check their keys like those on objects (TS2339) (`union_property_accessibility`).
+- **Missing properties of object literal union members.** A union member that is an object
+  literal type (not built by a spread, `ObjectFlags::CONTAINS_SPREAD`) and lacks a property
+  reads it as `undefined`: `(o || {}).color` is `string | undefined`, not TS2339. The union
+  property carries `WRITE_PARTIAL`, and a write does not find it (TS2339 / TS7053). An element
+  write first widens its object: a union with an empty object member is subtype-reduced, so
+  `(o || {})["color"] = 1` reports on `{}` (`union_object_literal_missing_prop`; tsc:
+  checker.go, createUnionOrIntersectionProperty and checkPropertyAccessExpressionOrQualifiedName
+  widening an assignment target).
 - **Assignment pattern properties.** An object assignment pattern's property that the source
   lacks is TS2339 at its key (`check_destructured_assignment_property`). There is no error
   when the property has a default and the source is a fresh literal, or when a union source

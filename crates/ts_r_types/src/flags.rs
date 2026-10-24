@@ -192,7 +192,8 @@ bitset! {
         const ARRAY_LITERAL = 1 << 9;
         /// The literal contains a computed or spread member: no excess property check.
         const OBJECT_REST_OR_SPREAD = 1 << 10;
-        /// Members known only after instantiation of a generic signature.
+        /// An object literal type built by a spread (`{ ...x }`): its members need not be
+        /// the literal's own, so a union does not read its missing ones as `undefined`.
         const CONTAINS_SPREAD = 1 << 11;
         /// A JS literal (`any`-like members).
         const JS_LITERAL = 1 << 12;
