@@ -228,30 +228,48 @@ impl BuildContext {
         }
     }
 
-    /// Absolute entry paths.
-    fn resolve_entries(&self) -> Result<Vec<String>, Vec<Message>> {
+    /// Absolute entry paths and their output names (`name=path`). An entry point given
+    /// twice with the same name is built once, as in esbuild.
+    fn resolve_entries(&self) -> Result<(Vec<String>, Vec<Option<String>>), Vec<Message>> {
         let wd = &self.opts.working_dir;
         let mut out = Vec::new();
+        let mut names: Vec<Option<String>> = Vec::new();
         let mut errs = Vec::new();
         for e in &self.opts.entry_points {
             let abs = path::resolve(wd, &e.path);
             let fs = self.prep.resolver.fs();
-            if fs.file_exists(&abs) {
-                out.push(fs.realpath(&abs));
+            let resolved = if fs.file_exists(&abs) {
+                fs.realpath(&abs)
+            } else {
+                // Like esbuild: a path that is not an existing file resolves as an import
+                // path (so `pkg` is a package and `./entry` probes extensions).
+                match self.prep.resolver.resolve(&e.path, wd, ResolveKind::Import) {
+                    Resolution::File(f) => f,
+                    _ => {
+                        errs.push(Message::new(
+                            Severity::Error,
+                            None,
+                            format!("Could not resolve {:?}", e.path),
+                        ));
+                        continue;
+                    }
+                }
+            };
+            if out
+                .iter()
+                .zip(&names)
+                .any(|(p, n)| *p == resolved && *n == e.name)
+            {
                 continue;
             }
-            // Like esbuild: a path that is not an existing file resolves as an import
-            // path (so `pkg` is a package and `./entry` probes extensions).
-            match self.prep.resolver.resolve(&e.path, wd, ResolveKind::Import) {
-                Resolution::File(f) => out.push(f),
-                _ => errs.push(Message::new(
-                    Severity::Error,
-                    None,
-                    format!("Could not resolve {:?}", e.path),
-                )),
-            }
+            out.push(resolved);
+            names.push(e.name.clone());
         }
-        if errs.is_empty() { Ok(out) } else { Err(errs) }
+        if errs.is_empty() {
+            Ok((out, names))
+        } else {
+            Err(errs)
+        }
     }
 
     /// Runs a build.
@@ -260,13 +278,13 @@ impl BuildContext {
         if let Err(e) = opts.validate() {
             return BuildResult::fail(vec![Message::new(Severity::Error, None, e)]);
         }
-        let entries = match self.resolve_entries() {
+        let (entries, entry_names) = match self.resolve_entries() {
             Ok(e) => e,
             Err(m) => return BuildResult::fail(m),
         };
         let (outdir, outfile_name) = self.output_location(&entries);
         if !opts.bundle {
-            return self.transform_only(&entries, &outdir, outfile_name.as_deref());
+            return self.transform_only(&entries, &entry_names, &outdir, outfile_name.as_deref());
         }
         let trusted = self
             .trusted
@@ -356,9 +374,7 @@ impl BuildContext {
             None => entries
                 .iter()
                 .enumerate()
-                .map(|(i, e)| {
-                    self.entry_file_name(e, &outbase, opts.entry_points[i].name.as_deref())
-                })
+                .map(|(i, e)| self.entry_file_name(e, &outbase, entry_names[i].as_deref()))
                 .collect(),
         };
         let dynamic_files: Vec<String> = dynamic_entries
@@ -575,6 +591,7 @@ impl BuildContext {
     fn transform_only(
         &self,
         entries: &[String],
+        names: &[Option<String>],
         outdir: &str,
         outfile: Option<&str>,
     ) -> BuildResult {
@@ -590,6 +607,26 @@ impl BuildContext {
                 Err(m) => return Err(vec![Message::new(Severity::Error, None, m)]),
             };
             let pretty = pretty_path(&wd, &e);
+            if let Some(css) = &source.css {
+                // A CSS entry is its own `.css` output (copied: there is no CSS printer).
+                let file = match outfile {
+                    Some(f) => f.to_owned(),
+                    None => {
+                        let js = self.entry_file_name(&e, &outbase, names[i].as_deref());
+                        let stem = js
+                            .strip_suffix(opts.out_extension_js.as_str())
+                            .unwrap_or(&js);
+                        format!("{stem}.css")
+                    }
+                };
+                let full = format!("{outdir}/{file}");
+                let meta = (pretty, css.len(), full.clone(), css.len());
+                let out = OutputFile {
+                    path: full,
+                    contents: css.as_bytes().to_vec(),
+                };
+                return Ok((vec![out], Vec::new(), meta));
+            }
             let format = opts.effective_format();
             let module = match (opts.format, format) {
                 (Some(_), Format::Cjs | Format::Iife) => {
@@ -620,7 +657,7 @@ impl BuildContext {
             }
             let file = match outfile {
                 Some(f) => f.to_owned(),
-                None => self.entry_file_name(&e, &outbase, opts.entry_points[i].name.as_deref()),
+                None => self.entry_file_name(&e, &outbase, names[i].as_deref()),
             };
             let mut ast = prepared.ast.clone();
             if opts.minify_syntax || opts.minify_identifiers {

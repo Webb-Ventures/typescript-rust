@@ -1604,3 +1604,33 @@ fn import_phases_are_only_bundled_as_external_esm_imports() {
         assert!(code.contains(want), "{want}\n{code}");
     }
 }
+
+#[test]
+fn an_entry_point_given_twice_is_built_once() {
+    let fs = project(&[("entry.js", "console.log(123);\n")]);
+    for bundle in [true, false] {
+        let mut o = opts(&["entry.js", "entry.js"]);
+        o.bundle = bundle;
+        let r = run_build(&fs, o);
+        let paths: Vec<&str> = r.outputs.iter().map(|o| o.path.as_str()).collect();
+        assert_eq!(paths, ["/proj/out/entry.js"]);
+    }
+    // Different output names are different entry points.
+    let mut o = opts(&["entry.js", "entry.js"]);
+    o.entry_points[1].name = Some("other".into());
+    let r = run_build(&fs, o);
+    assert_eq!(r.outputs.len(), 2);
+}
+
+#[test]
+fn a_css_entry_without_bundling_is_a_css_output() {
+    let fs = project(&[
+        ("entry.js", "export let x = 1;\n"),
+        ("entry.css", "a { color: red }\n"),
+    ]);
+    let mut o = opts(&["entry.js", "entry.css"]);
+    o.bundle = false;
+    let r = run_build(&fs, o);
+    assert_eq!(file(&r, "/proj/out/entry.css"), "a { color: red }\n");
+    assert!(file(&r, "/proj/out/entry.js").contains("x = 1"));
+}
