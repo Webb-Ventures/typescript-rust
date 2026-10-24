@@ -25,4 +25,4 @@
 ## Checklist
 
 - [ ] No code copied or translated from tsc, esbuild, ESLint or any other tool (the from-scratch rule in `AGENTS.md`)
-- [ ] I have read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) and agree to license this contribution under MIT OR Apache-2.0
+- [ ] I have read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) and agree to license this contribution under MIT

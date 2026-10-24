@@ -340,7 +340,7 @@ jobs:
             cp "$up"/tsc/internal/bundled/libs/*.d.ts "dist/$name/lib/"
             cp "$up/LICENSE.txt" "dist/$name/lib/TypeScript-LICENSE.txt"
             cp "$up/ThirdPartyNoticeText.txt" "dist/$name/lib/TypeScript-ThirdPartyNoticeText.txt"
-            cp README.md "dist/$name/"
+            cp README.md LICENSE "dist/$name/"
             echo "$triple: $([ "$pgo_ok" = true ] && echo PGO || echo dist)" >> "$GITHUB_STEP_SUMMARY"
           done
           rm -rf target/pgo/profiles

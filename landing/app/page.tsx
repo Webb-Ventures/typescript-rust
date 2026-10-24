@@ -34,7 +34,7 @@ const structuredData = {
       applicationSubCategory: 'TypeScript compiler, bundler, linter and language server',
       operatingSystem: 'macOS, Linux, Windows',
       softwareVersion: site.mode === 'launched' ? 'alpha' : 'coming soon',
-      license: ['https://spdx.org/licenses/MIT.html', 'https://spdx.org/licenses/Apache-2.0.html'],
+      license: 'https://spdx.org/licenses/MIT.html',
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
       publisher: { '@id': `${site.url}/#org` },
       featureList: TOOLS.map(t => `${t.name}: replaces ${t.replaces}`),

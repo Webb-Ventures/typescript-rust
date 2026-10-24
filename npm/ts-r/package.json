@@ -2,7 +2,7 @@
   "name": "@ts-r.dev/cli",
   "version": "0.0.0",
   "description": "Fast TypeScript tooling written in Rust: runner, dev server, bundler, linter, type checker and language server",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Webb-Ventures/typescript-rust.git",
@@ -15,7 +15,8 @@
   "files": [
     "bin/ts-r.js",
     "problem-matcher.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=18"

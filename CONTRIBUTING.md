@@ -88,6 +88,6 @@ focused pull requests are reviewed fastest.
 
 ## Licensing
 
-ts-r is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE). Unless you say
-otherwise, any contribution you submit is licensed the same way, with no additional terms or
+ts-r is MIT licensed ([LICENSE](LICENSE)). Contributions are accepted under MIT: unless you say
+otherwise, any contribution you submit is licensed under MIT, with no additional terms or
 conditions. Only submit work you have the right to license like this.
