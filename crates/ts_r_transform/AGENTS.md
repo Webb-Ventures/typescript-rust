@@ -67,6 +67,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 
 - **tsc 7 emit is the spec**, observed through the oracles below; tsc's source may be read
   to understand a rule, never translated (root AGENTS.md). A behaviour change needs a fixture (or a baseline) proving tsc does it.
+  Exception: optional and parenthesized static `super` calls in class-decorated classes
+  preserve the receiver and short-circuiting, even where tsc 7.0.2 loses them (record 0002).
 - **In place, children first**: visit children, then `replace(ast, slot, new)`; never hold a
   `&Node` across a mutation (nodes are `Copy`; read, then write).
 - **Synthesized nodes have empty spans**; a synthesized node's start is its source-map hint.

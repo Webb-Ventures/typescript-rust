@@ -1698,14 +1698,29 @@ fn replace_super_reads(tx: &mut Tx, root: NodeId, this: Atom, sup: Atom) {
         let at = tx.at(n);
         match tx.n(n) {
             Node::Call {
-                callee,
-                optional: false,
+                mut callee,
+                optional,
                 type_args,
                 args,
-            } if is_super_prop(tx, callee) => {
+            } => {
+                while let Node::Paren { expr } = tx.n(callee) {
+                    callee = expr;
+                }
+                if !is_super_prop(tx, callee) {
+                    tx.ast.for_each_child(n, |c| stack.push(c));
+                    continue;
+                }
                 stack.extend(tx.items(args));
                 let get = super_get(tx, callee, this, sup, &mut stack);
-                let f = tx.member(get, "call", at);
+                let prop = tx.ident("call", at);
+                let f = tx.mk(
+                    Node::Member {
+                        obj: get,
+                        optional,
+                        prop,
+                    },
+                    at,
+                );
                 let mut list = vec![tx.ident_atom(this, at)];
                 list.extend(tx.items(args));
                 let args = tx.new_list(&list);
