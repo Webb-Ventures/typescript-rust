@@ -1243,7 +1243,7 @@ impl<'a> Parser<'a> {
             || (self.at(T::Implements) && keyword == "extends")
         {
             let span = Span::at(self.prev_end);
-            self.error_at(messages::LIST_CANNOT_BE_EMPTY, span, &[keyword]);
+            self.deferred_grammar_error_at(messages::LIST_CANNOT_BE_EMPTY, span, &[keyword]);
             return NodeList::EMPTY;
         }
         let mark = self.scratch.len();

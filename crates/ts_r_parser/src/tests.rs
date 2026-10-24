@@ -1681,9 +1681,43 @@ fn first_error_matches_tsc() {
     ok("let q = { readonly: 1 }; type T = [readonly: string];");
 }
 
+/// In a `.js` file the TS8xxx errors are not parse errors: the checker's grammar errors
+/// (deferred by the parser) are kept next to them, also at one position, and dropped only
+/// for a real syntax error (tsc 7 baseline plainJSGrammarErrors; tsc's command line stops
+/// after any syntactic error, TS8xxx included, so it shows only the TS8xxx there).
+#[test]
+fn js_grammar_errors_stay_next_to_ts8xxx() {
+    use crate::{ParseOptions, TsInJs, parse_with};
+    let report = ParseOptions {
+        ts_in_js: TsInJs::Report,
+    };
+    let cases: &[(&str, &[(u32, u32)])] = &[
+        ("class C { const x = 1 }", &[(8009, 10), (1248, 16)]),
+        ("let o = { m?() { return 1 } };", &[(8009, 11), (1162, 11)]),
+        ("let o = { p?: 1, q!: 2 };", &[(1162, 11), (1255, 18)]),
+        ("class C { get g(); }", &[(8017, 10), (1005, 17)]),
+        // A syntax error: only the TS8xxx and the syntax error stay.
+        (
+            "let o = { m?() { return 1 } };\nlet x = ;",
+            &[(8009, 11), (1109, 39)],
+        ),
+    ];
+    for &(src, want) in cases {
+        let r = parse_with(src, SourceKind::Js, report);
+        let got: Vec<(u32, u32)> = r
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect();
+        assert_eq!(got, want, "for {src:?}");
+    }
+}
+
 /// TypeScript syntax in `.js` files (`TsInJs::Report`): every diagnostic as
 /// (code, line, column), checked against tsc 7.0.2 `--allowJs --checkJs` (one per position;
-/// where tsc reports two at one position, the first).
+/// where tsc reports two at one position, the first). The checker's grammar errors the
+/// parser defers (TS1015, TS1264, TS1540) are kept next to them: tsc's test baselines show
+/// both, its command line stops after the TS8xxx.
 #[test]
 fn ts_in_js_matches_tsc() {
     use crate::{ParseOptions, TsInJs, parse_with};
@@ -1718,9 +1752,11 @@ fn ts_in_js_matches_tsc() {
             "import type { A } from \"./a\";\nexport type { B };",
             &[(8006, 1, 1), (8006, 2, 1)],
         ),
+        // The deferred TS1540 stays next to TS8006 (the checker's error; tsc's command
+        // line stops after the TS8xxx).
         (
             "namespace N {}\nmodule M {}",
-            &[(8006, 1, 11), (8006, 2, 8)],
+            &[(8006, 1, 11), (8006, 2, 8), (1540, 2, 8)],
         ),
         (
             "class D implements I {}\nabstract class E {}",
@@ -1758,9 +1794,10 @@ fn ts_in_js_matches_tsc() {
             "let o = { m(): void {} };\ntry {} catch (e: unknown) {}",
             &[(8010, 1, 16), (8010, 2, 18)],
         ),
+        // TS1264 is the checker's grammar error for `y!` without a type (not a TS8xxx).
         (
             "let x!: number;\nclass F { y!; override m() {} }",
-            &[(8010, 1, 9), (8009, 2, 15)],
+            &[(8010, 1, 9), (1264, 2, 12), (8009, 2, 15)],
         ),
         (
             "abstract class G { abstract m(); protected n() {} public static s = 1; }",
@@ -1781,7 +1818,7 @@ fn ts_in_js_matches_tsc() {
         ),
         (
             "function o(a?: number = 1) {}\nfor (let i: number = 0;;) {}",
-            &[(8009, 1, 13), (8010, 1, 16), (8010, 2, 13)],
+            &[(1015, 1, 12), (8009, 1, 13), (8010, 1, 16), (8010, 2, 13)],
         ),
         (
             "class N { get a(): number { return 1 } set a(v: number) {} }",
@@ -1851,7 +1888,7 @@ fn ts_in_js_matches_tsc() {
         ),
         (
             "declare module M { let x: number; }",
-            &[(8006, 1, 16), (8010, 1, 27)],
+            &[(8006, 1, 16), (1540, 1, 16), (8010, 1, 27)],
         ),
         ("const f = <T,>(x) => x;", &[(8004, 1, 12)]),
         ("const g = <T extends U>(x) => x;", &[(8004, 1, 12)]),
@@ -2440,7 +2477,8 @@ fn recovery_matches_tsc() {
             "function f() { for await (const x of []); }\nclass C { static { for await (const x of []); } }\nasync function g() { for await (const x of []); }",
             &[(1103, 1, 20), (18038, 2, 24)],
         ),
-        ("import(p,);\nimport(p, {},);", &[(1009, 1, 9)]),
+        // A trailing comma in an import call is the checker's (it depends on `module`).
+        ("import(p,);\nimport(p, {},);", &[]),
         // Import calls take an argument list (importAssertion1, importCallExpressionSpread).
         (
             "import(...a);\nimport();\nimport('./0', {}, {});",
@@ -2609,6 +2647,11 @@ fn recovery_matches_tsc() {
         // Checker grammar errors in object literals.
         ("var q = { h?: 1 };", &[(1162, 1, 12)]),
         ("const foo = { a! }", &[(1255, 1, 16)]),
+        // tsc takes one `?` or `!` after any object member's name (plainJSGrammarErrors).
+        (
+            "const o = { m!() { return 1 }, p!: 2 }",
+            &[(1255, 1, 14), (1255, 1, 33)],
+        ),
         // `await` bindings directly in a class static block (classStaticBlock22).
         ("class C { static { let await: any; } }", &[(1359, 1, 24)]),
         (
@@ -2919,4 +2962,85 @@ fn target_regex_errors_are_grammar_only() {
     assert_eq!(codes(&r.diagnostics), vec![1500]);
     assert_eq!(codes(&r.grammar), vec![1503, 1501, 1500]);
     assert_eq!(codes(&r.syntax_errors()), Vec::<u32>::new());
+}
+
+/// Members after a mapping in a mapped type, and `[P in K]` keys in an interface, type
+/// literal or class, are TS7061 (deferred) at the first member's name, once per list. A `,`
+/// after the mapping is `';' expected` (tsc 7, observed).
+#[test]
+fn mapped_type_members_are_ts7061() {
+    let all = |src: &str| {
+        let r = parse(src, SourceKind::Ts);
+        let f = |ds: &[Diagnostic]| {
+            ds.iter()
+                .map(|d| (d.code, d.span.start))
+                .collect::<Vec<_>>()
+        };
+        (f(&r.diagnostics), f(&r.grammar))
+    };
+    // 0         1         2         3         4
+    // 0123456789012345678901234567890123456789012345
+    let (d, g) = all("type A = { [K in X]: 1; b: 2; c(): void };");
+    assert_eq!(d, vec![(7061, 24)]);
+    assert_eq!(g, d);
+    let (d, _) = all("type B = { [K in X]: 1, };");
+    assert_eq!(d, vec![(1005, 22)]);
+    let (d, g) = all("interface I { a: 1; [P in X]: 1; [Q in X]: 2 }");
+    assert_eq!(d, vec![(7061, 14)]);
+    assert_eq!(g, d);
+    let (d, g) = all("class C { [P in X]: 1; }");
+    assert_eq!(d, vec![(7061, 10)]);
+    assert_eq!(g, d);
+    // Methods with `in` keys are not mapped-type members.
+    let (d, _) = all("interface J { [P in X](): void }");
+    assert!(d.iter().all(|&(c, _)| c != 7061), "{d:?}");
+    ok("type M = { [K in X]: 1; };");
+    ok("type N = { readonly [K in X]?: 1 }");
+}
+
+/// `tsc_syntax_errors` keeps syntax errors and lenient ones (octal escapes in strings), which
+/// `without_grammar` drops, in position order. (A deferred grammar error is kept only
+/// without lexer or syntax errors, so it never meets a lenient one.)
+#[test]
+fn tsc_syntax_errors_keep_lenient() {
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    let check = |src: &str, syntax: &[u32], tsc: &[u32]| {
+        let r = parse(src, SourceKind::Ts);
+        assert_eq!(codes(&r.syntax_errors()), syntax, "{src}");
+        let got = crate::tsc_syntax_errors(&r.diagnostics, &r.grammar, &r.lenient);
+        assert_eq!(codes(&got), tsc, "{src}");
+    };
+    check("const a; let s = \"\\01\";", &[], &[1487]);
+    check(
+        "let s = \"\\01\"; let x = 1 +; \"\\8\"",
+        &[1109],
+        &[1487, 1109, 1488],
+    );
+    check("let t = `\\01`; const a;", &[1487], &[1487]);
+    check("const a;", &[], &[]);
+}
+
+/// Unicode escapes in JSX tag and attribute names: decoded (so `<\u0061></a>` closes) and
+/// TS17021 on the whole name, a syntax error (tsc 7, unicodeEscapesInJsxtags).
+#[test]
+fn jsx_name_unicode_escapes_are_ts17021() {
+    let errs = |src: &str| {
+        let r = parse(src, SourceKind::Tsx);
+        r.diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start, d.span.end))
+            .collect::<Vec<_>>()
+    };
+    // 0         1         2
+    // 012345678901234567890123456
+    assert_eq!(errs(r"<\u0061></a>;"), vec![(17021, 1, 7)]);
+    assert_eq!(errs(r"<a-\u0063></a-c>;"), vec![(17021, 1, 9)]);
+    assert_eq!(errs(r"<x.\u0076ideo />;"), vec![(17021, 3, 13)]);
+    assert_eq!(
+        errs(r"<v data-\u0076 \u0073rc='' />;"),
+        vec![(17021, 3, 14), (17021, 15, 23)]
+    );
+    assert_eq!(errs(r"<a></\u{61}>;"), vec![(17021, 5, 11)]);
+    assert_eq!(errs(r"<a></b>;")[0].0, 17002);
+    assert!(errs("<a-b c-d='' />;").is_empty());
 }

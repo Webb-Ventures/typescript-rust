@@ -84,12 +84,12 @@ pub fn is_plain_js(program: &ProgramFiles, i: usize) -> bool {
 /// (observed in tsc's baselines and probes; other errors, such as TS2300, TS2304 and
 /// TS17004, are not reported).
 pub const PLAIN_JS_CODES: &[u32] = &[
-    1009, 1013, 1014, 1029, 1030, 1031, 1042, 1044, 1048, 1049, 1053, 1054, 1089, 1090, 1091, 1097,
-    1100, 1101, 1102, 1104, 1105, 1106, 1107, 1111, 1113, 1114, 1115, 1116, 1123, 1155, 1156, 1162,
-    1171, 1172, 1174, 1182, 1184, 1186, 1188, 1189, 1190, 1191, 1193, 1197, 1200, 1210, 1211, 1213,
-    1214, 1215, 1248, 1255, 1258, 1262, 1308, 1312, 1325, 1344, 1358, 1359, 1451, 1473, 1474, 2451,
-    2462, 2480, 2492, 2501, 2528, 2566, 2803, 2839, 5076, 17012, 18006, 18012, 18013, 18016, 18030,
-    18038, 18041,
+    1005, 1009, 1013, 1014, 1029, 1030, 1031, 1042, 1044, 1048, 1049, 1053, 1054, 1089, 1090, 1091,
+    1097, 1100, 1101, 1102, 1104, 1105, 1106, 1107, 1111, 1113, 1114, 1115, 1116, 1123, 1155, 1156,
+    1162, 1171, 1172, 1174, 1182, 1184, 1186, 1188, 1189, 1190, 1191, 1193, 1197, 1200, 1210, 1211,
+    1213, 1214, 1215, 1248, 1255, 1258, 1262, 1308, 1312, 1325, 1344, 1358, 1359, 1451, 1473, 1474,
+    2451, 2462, 2480, 2492, 2501, 2528, 2566, 2803, 2839, 5076, 17012, 18006, 18012, 18013, 18016,
+    18030, 18038, 18041,
 ];
 
 /// `d` as tsc 7 reports it in a plain JavaScript file, if it does: an unknown `#name`
@@ -191,11 +191,7 @@ fn check_program_impl<'a>(
         if f.is_lib {
             continue;
         }
-        // `lenient`: octal escapes in strings, syntax errors to tsc.
-        for d in ts_r_parser::without_grammar(&f.syntax, &f.grammar)
-            .into_iter()
-            .chain(f.lenient.iter().cloned())
-        {
+        for d in ts_r_parser::tsc_syntax_errors(&f.syntax, &f.grammar, &f.lenient) {
             if d.is_error() && !CHECKER_GRAMMAR_CODES.contains(&d.code) {
                 broken[i] = true;
             }

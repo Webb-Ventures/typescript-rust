@@ -1103,36 +1103,31 @@ impl<'a> Lexer<'a> {
         kind
     }
 
-    /// Extends the current identifier or keyword token with JSX name characters (`-`), e.g.
-    /// `data-id` or `aria-label`. The result is an `Ident`.
+    /// Extends the current identifier or keyword token with JSX name characters (`-`, and
+    /// identifier parts with `\u` escapes, as tsc's scanner does), e.g. `data-id`,
+    /// `aria-label` or `a-\u0063`. The result is an `Ident`; it is `ESCAPED` when any part
+    /// has an escape (the parser reports TS17021 there).
     pub fn rescan_jsx_identifier(&mut self) -> TokenKind {
         if !self.tok.kind.is_identifier_or_keyword() {
             return self.tok.kind;
         }
-        let b = self.bytes;
-        let mut i = self.tok.end as usize;
-        let mut extended = false;
+        self.pos = self.tok.end as usize;
+        let mut flags = self.tok.flags.0;
         loop {
-            match b.get(i) {
-                Some(b'-') => {
-                    extended = true;
-                    i += 1;
-                }
-                Some(&c) if chars::is_ascii_ident_part(c) => i += 1,
-                Some(&c) if c >= 0x80 => match self.char_at(i) {
-                    Some(ch) if chars::is_id_part(ch) => i += ch.len_utf8(),
-                    _ => break,
-                },
-                _ => break,
+            if self.bytes.get(self.pos) == Some(&b'-') {
+                self.pos += 1;
+                continue;
+            }
+            let before = self.pos;
+            self.scan_identifier_rest(&mut flags, false);
+            if self.pos == before {
+                break;
             }
         }
-        if extended || i != self.tok.end as usize {
-            self.tok.end = i as u32;
-            self.pos = i;
-            self.tok.kind = TokenKind::Ident;
-        } else if self.tok.kind != TokenKind::Ident {
-            self.tok.kind = TokenKind::Ident;
-        }
+        self.tok.end = self.pos as u32;
+        // A name now, never a keyword (`<v\u0061r>` is TS17021 only).
+        self.tok.flags = TokenFlags(flags & !TokenFlags::ESCAPED_KEYWORD);
+        self.tok.kind = TokenKind::Ident;
         self.tok.kind
     }
 
