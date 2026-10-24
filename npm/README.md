@@ -12,7 +12,7 @@ Every package also ships ts-r's `LICENSE` (MIT).
 | `@ts-r.dev/<tool>-<platform>` (7 tools x 8 platforms) | `bin/<binary>`; check and lsp also `lib/lib.*.d.ts` + TypeScript's license | nothing; `os`/`cpu`/`libc` fields |
 | `@ts-r.dev/run`, `dev`, `build`, `check`, `lint`, `lsp` | the shim as `bin/ts-r-<tool>.js` | its 8 platform packages (optional) |
 | `ts-r` | the shim as `bin/ts-r.js` (the launcher) | `@ts-r.dev/cli-<platform>` (optional) and the six tool packages |
-| `@ts-r.dev/typescript` | `bin/tsc`, `lib/` (routing, parity check, API re-exports) | `@ts-r.dev/check`; peer `typescript@^7` |
+| `@ts-r.dev/typescript` | `bin/tsc`, `lib/` (routing, parity check, API re-exports) | `@ts-r.dev/check`; peer `typescript@^7.0.0`, plus its own version when it is a prerelease |
 
 Tools: `cli` (the `ts-r` launcher), `run`, `dev`, `build`, `check`, `lint`, `lsp`. Platforms:
 `darwin-arm64`, `darwin-x64`, `linux-arm64-gnu`, `linux-arm64-musl`, `linux-x64-gnu`,
@@ -20,8 +20,12 @@ Tools: `cli` (the `ts-r` launcher), `run`, `dev`, `build`, `check`, `lint`, `lsp
 that tool's binary for one platform and nothing else (P8: no tool needs another).
 
 All packages share one version (the workspace version), except `@ts-r.dev/typescript`, whose version
-is TypeScript's `major.minor` with a patch encoding the ts-r version (ts-r 0.3.1 ->
-`7.0.3001`), so `"typescript": "npm:@ts-r.dev/typescript@^7"` resolves.
+is TypeScript's `major.minor` with a patch encoding the ts-r version and ts-r's prerelease label
+(ts-r 0.3.1 -> `7.0.3001`, 0.1.0-alpha.3 -> `7.0.1000-alpha.3`), so a stable one matches
+`"typescript": "npm:@ts-r.dev/typescript@^7"`. A prerelease matches no plain range (semver), so
+during the alpha the docs pin exact versions or use the `next` tag. The build adds the drop-in's
+own prerelease version to its `typescript` peer range (`dropInPeerRange`): installed in place of
+TypeScript the peer resolves to the drop-in itself, and without that npm fails with ERESOLVE.
 
 ## Layout
 
@@ -67,13 +71,21 @@ version; it tags `main` `vVERSION`. Nothing publishes automatically, and a run w
 (the tool packages, `@ts-r.dev/cli` and `@ts-r.dev/typescript`) at once, each with
 `npm publish --provenance --access public --tag <latest|next>`. A failed platform phase stops the
 run before any front goes out. Versions already on npm are skipped, so a re-run publishes only
-what is missing.
-`repository.url` in every package must name the
+what is missing. `repository.url` in every package must name the
 GitHub repository that runs the workflow, or npm rejects the provenance statement
 (`--repository`, default `$GITHUB_REPOSITORY`).
 
+Dist-tags and readmes: npmjs.com and `npm view <package> readme` show the readme the registry
+stored with the publish that last set `latest`; a publish under `next` (or a later
+`npm dist-tag add`) doesn't change it. A stable release publishes under `latest`. A prerelease
+publishes under `next`, except for a package with no stable version on npm yet (all of them
+during the alpha): that one publishes under `latest` and then gets `next` too
+(`npm dist-tag add`, which npm 11.21+ does with trusted publishing), so both tags name the
+newest release and its readme is the one shown. A failed `dist-tag add` is a warning naming the
+command to run by hand; a re-run retries it.
+
 The workflow publishes with npm trusted publishing (OIDC): no long-lived token. The npm job
-needs `id-token: write`, npm 11.5.1 or newer (installed explicitly) and a GitHub-hosted runner
+needs `id-token: write`, npm 11.21 or newer (installed explicitly; 11.5.1 for publishing, 11.21 for `npm dist-tag add`) and a GitHub-hosted runner
 (`ubuntu-latest`; npm doesn't accept self-hosted runners). npm
 only lets you add a trusted publisher to a package that already exists, so a package's first
 publish needs a token: when secret `NPM_TOKEN` is set the run uses it, otherwise OIDC. The

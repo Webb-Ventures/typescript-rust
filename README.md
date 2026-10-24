@@ -68,10 +68,13 @@ TypeScript on that project, and hands everything else to your TypeScript:
 ```jsonc
 // package.json
 "devDependencies": {
-  "typescript": "npm:@ts-r.dev/typescript@^7",
+  "typescript": "npm:@ts-r.dev/typescript@next",
   "typescript-real": "npm:typescript@^7.0.0"
 }
 ```
+
+During the alpha, use `@next` or an exact version (`@7.0.1000-alpha.3`): a range like `^7`
+doesn't match prerelease versions.
 
 The details are in [npm/typescript/README.md](npm/typescript/README.md). Packages and platforms
 are in [npm/ts-r/README.md](npm/ts-r/README.md).
