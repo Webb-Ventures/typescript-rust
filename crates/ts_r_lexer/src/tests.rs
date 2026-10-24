@@ -515,6 +515,56 @@ fn regex_class_sets() {
 }
 
 #[test]
+fn regex_escaped_group_names() {
+    // tsc 7 (observed) starts a group name only with an identifier character, not an
+    // escape: a name that starts with `\u` is TS1514 at the backslash, and no group gets
+    // that name. Later characters may be escapes.
+    for (src, expected) in [
+        (
+            r"/(?<\u0061>x)\k<a>/u",
+            "1514@4..4 1503@3..4(ES2018) 1532@16..17(a)",
+        ),
+        (r"/(?<a>x)\k<\u{61}>/u", "1503@3..6(ES2018) 1514@11..11"),
+        (
+            r"/(?<\u{61}>x)(?<a>y)/u",
+            "1514@4..4 1503@3..4(ES2018) 1503@15..18(ES2018)",
+        ),
+        (r"/(?<\u0030>x)/u", "1514@4..4 1503@3..4(ES2018)"),
+        (r"/(?<a\u0062>x)\k<ab>/u", "1503@3..12(ES2018)"),
+    ] {
+        assert_eq!(regex_errors(src).join(" "), expected, "{src}");
+    }
+}
+
+#[test]
+fn regex_many_group_names() {
+    use std::fmt::Write;
+
+    let mut pattern = String::new();
+    for i in 0..50_000 {
+        write!(pattern, "(?<g{i:05}>a)").unwrap();
+    }
+    for i in 0..50_000 {
+        write!(pattern, "\\k<g{i:05}>").unwrap();
+    }
+    let errors = regex::validate(&pattern, 0, pattern.len(), regex::FLAG_U);
+    assert_eq!(errors.len(), 50_000);
+    assert!(errors.iter().all(|e| e.msg.code == 1503));
+
+    for (src, duplicate) in [
+        ("/(?<a>x)((?<a>y)|(?<b>z))/", true),
+        ("/((?<a>x)|(?<a>y))/", false),
+        ("/(?<a>x)|((?<a>y))/", false),
+    ] {
+        assert_eq!(
+            regex_errors(src).iter().any(|e| e.starts_with("1515@")),
+            duplicate,
+            "{src}"
+        );
+    }
+}
+
+#[test]
 fn regex_pathological_patterns() {
     // Deep nesting is not checked rather than overflowing the stack.
     for pattern in ["(".repeat(100_000), "[".repeat(100_000)] {
@@ -567,6 +617,30 @@ fn jsx_modes() {
     assert_eq!(lx.token_text(), " &amp; ");
     assert_eq!(lx.next_jsx_child(), T::Lt);
     assert_eq!(lx.next_token(), T::Slash);
+    assert!(lx.diagnostics.is_empty());
+}
+
+/// JSX names take `-` and escaped identifier parts (tsc's scanJsxIdentifier); an escape
+/// anywhere marks the token `ESCAPED`, and an escaped keyword becomes a plain name.
+#[test]
+fn jsx_identifier_escapes() {
+    let src = r"<a-\u0063-d \u{76}ar>";
+    let mut lx = Lexer::new(src);
+    assert_eq!(lx.next_token(), T::Lt);
+    assert_eq!(lx.next_token(), T::Ident);
+    assert_eq!(lx.rescan_jsx_identifier(), T::Ident);
+    assert_eq!(lx.token_text(), r"a-\u0063-d");
+    assert!(lx.token().flags.has(TokenFlags::ESCAPED));
+    assert_eq!(lx.ident_value(lx.token()), "a-c-d");
+    assert_eq!(lx.next_token(), T::Var);
+    assert_eq!(lx.rescan_jsx_identifier(), T::Ident);
+    assert!(!lx.token().flags.has(TokenFlags::ESCAPED_KEYWORD));
+    assert_eq!(lx.next_token(), T::Gt);
+    let mut lx = Lexer::new("<data-x>");
+    lx.next_token();
+    lx.next_token();
+    lx.rescan_jsx_identifier();
+    assert!(!lx.token().flags.has(TokenFlags::ESCAPED));
     assert!(lx.diagnostics.is_empty());
 }
 

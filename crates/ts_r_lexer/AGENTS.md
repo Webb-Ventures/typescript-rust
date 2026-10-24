@@ -14,7 +14,7 @@ flags, start, end }` (8 bytes), and `token_text()` / `text(span)` return the sli
   - `split_less_than` turns `<<` into `<` in type arguments; `split_star_eq` turns `*=`
     into `*` (the JSDoc type `*=`).
   - `rescan_slash_as_regex`, `rescan_template_continuation` (after `}` in `${}`).
-  - `next_jsx_child`, `rescan_jsx_identifier` (dashed names), `next_jsx_attribute_value`.
+  - `next_jsx_child`, `rescan_jsx_identifier` (dashed names and `\u` escapes, `ESCAPED` when any), `next_jsx_attribute_value`.
 - Values are decoded on demand:
   - `ident_value` decodes escapes.
   - `string_value` and `template_cooked` (a `Result`: tagged templates may keep an invalid escape).

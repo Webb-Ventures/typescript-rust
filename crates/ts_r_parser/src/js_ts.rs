@@ -53,6 +53,9 @@ impl Parser<'_> {
             w.visit(id);
         }
         let out = w.out;
+        // tsc reports these apart from the parse errors (`getJSSyntacticDiagnosticsForFile`):
+        // they do not stop the checker's grammar errors (plainJSGrammarErrors).
+        self.grammar_diags += out.len() as u32;
         self.diags.extend(out);
     }
 }
@@ -137,16 +140,15 @@ impl Walk<'_> {
             Node::MethodDef {
                 decorators,
                 key,
-                optional,
                 value,
                 ..
             } => {
-                self.modifiers(id);
+                self.member_modifiers(id);
                 self.push_list(decorators);
                 self.stack.push(key);
-                if optional {
-                    self.question_after(ast.span(key).end);
-                }
+                // Not `if optional`: an object-literal method keeps no `optional` flag
+                // (`{ m?() {} }` is TS1162 there), but tsc still reports its `?` as TS8009.
+                self.question_after(ast.span(key).end);
                 self.function(value, span.start);
             }
             Node::PropertyDef {
@@ -157,7 +159,7 @@ impl Walk<'_> {
                 value,
                 ..
             } => {
-                self.modifiers(id);
+                self.member_modifiers(id);
                 self.push_list(decorators);
                 self.stack.push(key);
                 if optional {
@@ -315,8 +317,18 @@ impl Walk<'_> {
 
     /// TS8009 at each TypeScript-only modifier keyword written on `id`.
     fn modifiers(&mut self, id: NodeId) {
+        self.modifiers_in(id, TS_ONLY);
+    }
+
+    /// Class members: `const` is TypeScript-only there too (`class C { const x = 1 }`,
+    /// which the parser also reports as TS1248).
+    fn member_modifiers(&mut self, id: NodeId) {
+        self.modifiers_in(id, TS_ONLY.union(Modifiers::CONST));
+    }
+
+    fn modifiers_in(&mut self, id: NodeId, ts_only: Modifiers) {
         for t in self.ast.modifier_tokens_of(id) {
-            if TS_ONLY.intersects(t.flag) {
+            if ts_only.intersects(t.flag) {
                 let text = self
                     .src
                     .get(t.span.start as usize..t.span.end as usize)

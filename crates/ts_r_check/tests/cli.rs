@@ -1069,3 +1069,65 @@ fn watch_sessions() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Octal and `\8` escapes in strings (`ParseResult::lenient`) are syntax errors to tsc: the
+/// default run (cold history, warm history, and after an edit), `--no-history` and
+/// `--noCheck` all report them and nothing from the checker, as tsc 7 does (observed: the
+/// two errors below, exit 1).
+#[test]
+fn regression_octal_escapes_in_strings_are_syntax_errors_on_every_path() {
+    let lib = "interface Array<T> {}\ninterface Boolean {}\ninterface Function {}\ninterface CallableFunction {}\ninterface NewableFunction {}\ninterface IArguments {}\ninterface Number {}\ninterface Object {}\ninterface RegExp {}\ninterface String {}\n";
+    let src = "let s = \"\\033\";\nlet n: number = \"x\";\nlet t = \"\\8\";\n";
+    let dir = temp_project(
+        "ts-r-check-octal-escapes",
+        &[
+            ("a.ts", src),
+            ("lib.d.ts", lib),
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"target":"es2022","noLib":true,"noEmit":true},"files":["a.ts","lib.d.ts"]}"#,
+            ),
+        ],
+    );
+    let cache = dir.join(".cache");
+    let tsc = "a.ts(1,10): error TS1487: Octal escape sequences are not allowed. Use the syntax '\\x1b'.\na.ts(3,10): error TS1488: Escape sequence '\\8' is not allowed.\n";
+    let with_history = |args: &[&str]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ts-r-check"));
+        cmd.env("TS_R_CACHE_DIR", &cache)
+            .args(["--sound=off", "-p", ".", "--pretty", "false"])
+            .args(args);
+        run(&mut cmd, &dir)
+    };
+    for (what, (out, code)) in [
+        ("cold history", with_history(&[])),
+        ("warm history", with_history(&[])),
+        ("noCheck", with_history(&["--noCheck"])),
+        (
+            "no history",
+            ts_r_check_args(&dir, &["-p", ".", "--pretty", "false"]),
+        ),
+    ] {
+        assert_eq!((out.as_str(), code), (tsc, 1), "{what}");
+    }
+    // An edit goes through the history's fresh-file path.
+    std::fs::write(dir.join("a.ts"), format!("{src}let u = \"\\01\";\n")).unwrap();
+    let (out, code) = with_history(&[]);
+    assert_eq!(
+        (out.as_str(), code),
+        (
+            format!("{tsc}a.ts(4,10): error TS1487: Octal escape sequences are not allowed. Use the syntax '\\x01'.\n").as_str(),
+            1
+        )
+    );
+    // Without them the checker runs.
+    std::fs::write(dir.join("a.ts"), "let n: number = \"x\";\n").unwrap();
+    let (out, code) = with_history(&[]);
+    assert_eq!(
+        (out.as_str(), code),
+        (
+            "a.ts(1,5): error TS2322: Type 'string' is not assignable to type 'number'.\n",
+            1
+        )
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

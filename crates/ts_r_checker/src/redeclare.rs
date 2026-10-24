@@ -879,7 +879,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Node::ComputedKey { expr } = *ast.node(key) else {
                 continue;
             };
-            if crate::nodes::is_literal_computed_key(ast, key)
+            // `[P in K]: T` in a property is the parser's TS7061 instead (checkGrammarProperty).
+            let mapped_like = matches!(
+                ast.node(m),
+                Node::PropertyDef { .. } | Node::PropertySignature { .. }
+            ) && matches!(
+                ast.node(expr),
+                Node::Binary {
+                    op: ts_r_ast::BinaryOp::In,
+                    ..
+                }
+            );
+            if mapped_like
+                || crate::nodes::is_literal_computed_key(ast, key)
                 || crate::nodes::is_entity_name_expr(ast, expr)
             {
                 continue;

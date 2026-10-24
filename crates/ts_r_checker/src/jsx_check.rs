@@ -317,9 +317,13 @@ impl<'c, 'a> Ck<'c, 'a> {
     // Tags
     // -----------------------------------------------------------------------------
 
-    /// The source text of a tag name (`a.b`, `a:b`).
+    /// The source text of a tag name (`a.b`, `a:b`); a plain name is its decoded value
+    /// (`<\u0061>` is `a`, the parser's TS17021).
     pub(crate) fn jsx_tag_text(&self, file: FileId, name: NodeId) -> String {
         let sf = self.c.file(file);
+        if let Node::Ident { name } = *sf.ast.node(name) {
+            return sf.ast.atom(name).to_owned();
+        }
         let s = sf.ast.span(name);
         sf.text
             .get(s.start as usize..s.end as usize)

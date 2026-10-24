@@ -132,6 +132,7 @@ impl<'a> Parser<'a> {
             },
         );
         let members = self.finish_list(mark);
+        self.check_mapped_member_names(members);
         self.expect_closing(T::RBrace, T::LBrace, open);
         members
     }
@@ -371,7 +372,7 @@ impl<'a> Parser<'a> {
         // and TS1267 for an initialized abstract field (abstractPropertyInitializer).
         let key_span = self.ast.span(key);
         if self.is_constructor_key(key) {
-            self.checker_grammar_error(messages::CONSTRUCTOR_FIELD, key_span);
+            self.deferred_grammar_error_at(messages::CONSTRUCTOR_FIELD, key_span, &[]);
         }
         if modifiers.contains(Modifiers::ABSTRACT) && value.is_some() {
             let name = key_span.text(self.src).to_owned();
