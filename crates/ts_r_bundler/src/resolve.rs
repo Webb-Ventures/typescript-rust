@@ -212,7 +212,7 @@ fn side_effects_glob(pattern: &str, rel: &str) -> bool {
 /// Minimal glob: `*` (no `/`), `**` (anything), `?`. Matched over (pattern, string)
 /// positions, one row of the table per pattern position, so a pattern of many `*`s cannot
 /// backtrack exponentially: O(pattern x string) time, O(string) memory.
-fn glob(p: &str, s: &str) -> bool {
+pub(crate) fn glob(p: &str, s: &str) -> bool {
     let (p, s) = (p.as_bytes(), s.as_bytes());
     let n = s.len();
     // rows[i % 4][j]: whether `p[i..]` matches `s[j..]`. Row i reads rows i+1..=i+3.

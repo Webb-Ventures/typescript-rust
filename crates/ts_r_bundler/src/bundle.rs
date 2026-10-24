@@ -238,6 +238,25 @@ impl BuildContext {
         for e in &self.opts.entry_points {
             let abs = path::resolve(wd, &e.path);
             let fs = self.prep.resolver.fs();
+            if e.path.contains('*') && !fs.file_exists(&abs) {
+                // A glob entry: every matching file, in sorted order.
+                let found = glob_entries(&**fs, &abs);
+                if found.is_empty() {
+                    errs.push(Message::new(
+                        Severity::Error,
+                        None,
+                        format!("Could not resolve {:?}", e.path),
+                    ));
+                }
+                for f in found {
+                    let f = fs.realpath(&f);
+                    if !out.iter().zip(&names).any(|(p, n)| *p == f && n.is_none()) {
+                        out.push(f);
+                        names.push(None);
+                    }
+                }
+                continue;
+            }
             let resolved = if fs.file_exists(&abs) {
                 fs.realpath(&abs)
             } else {
@@ -925,4 +944,50 @@ impl Timer {
             eprintln!("[timing] {} | {stats:?}", parts.join(", "));
         }
     }
+}
+
+/// Files matching an absolute entry-point glob (`*` within a name, `**/` any directories),
+/// sorted. The walk starts at the directory before the first wildcard and is bounded in
+/// depth and size.
+fn glob_entries(fs: &dyn FileSystem, pattern: &str) -> Vec<String> {
+    const MAX_DEPTH: usize = 64;
+    const MAX_FILES: usize = 100_000;
+    let Some(star) = pattern.find('*') else {
+        return Vec::new();
+    };
+    let Some(slash) = pattern[..star].rfind('/') else {
+        return Vec::new();
+    };
+    let base = if slash == 0 { "/" } else { &pattern[..slash] };
+    let rest = &pattern[slash + 1..];
+    let mut found = Vec::new();
+    let mut seen = 0usize;
+    let mut stack: Vec<(String, String, usize)> = vec![(base.to_owned(), String::new(), 0)];
+    while let Some((dir, rel, depth)) = stack.pop() {
+        for entry in fs.read_dir(&dir) {
+            seen += 1;
+            if seen > MAX_FILES {
+                break;
+            }
+            let child_rel = if rel.is_empty() {
+                entry.name.clone()
+            } else {
+                format!("{rel}/{}", entry.name)
+            };
+            let child = path::combine(&dir, &entry.name);
+            match entry.kind {
+                ts_r_config::EntryKind::File => {
+                    if crate::resolve::glob(rest, &child_rel) {
+                        found.push(child);
+                    }
+                }
+                ts_r_config::EntryKind::Directory if depth < MAX_DEPTH => {
+                    stack.push((child, child_rel, depth + 1));
+                }
+                ts_r_config::EntryKind::Directory => {}
+            }
+        }
+    }
+    found.sort();
+    found
 }

@@ -1945,3 +1945,20 @@ fn imported_scripts_are_commonjs_and_missing_exports_do_not_include_files() {
         "js\n{} undefined undefined undefined\n"
     );
 }
+
+#[test]
+fn glob_entry_points_expand_to_matching_files() {
+    let fs = project(&[
+        ("src/a.js", "console.log('a');\n"),
+        ("src/deep/b.js", "console.log('b');\n"),
+        ("src/c.ts", "console.log('c');\n"),
+    ]);
+    let r = run_build(&fs, opts(&["/proj/**/*.js"]));
+    let mut paths: Vec<&str> = r.outputs.iter().map(|f| f.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["/proj/out/a.js", "/proj/out/deep/b.js"]);
+    let r = run_build(&fs, opts(&["src/*.js"]));
+    assert_eq!(r.outputs.len(), 1);
+    let ctx = BuildContext::new(opts(&["nope/*.js"]), Arc::new(fs.clone())).expect("options");
+    assert!(ctx.build().has_errors());
+}
