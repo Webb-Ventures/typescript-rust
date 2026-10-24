@@ -36,9 +36,6 @@ use crate::transform::Tx;
 
 struct U<'t, 'a> {
     tx: &'t mut Tx<'a>,
-    /// Lower `using` below the top level too (false at ESNext, where only a top level
-    /// followed by exports is lowered).
-    nested: bool,
     /// Start of the function body whose statements `list` handles next: statements before
     /// it were moved in from outside (constructor field initializers and parameter
     /// properties).
@@ -51,11 +48,10 @@ impl Build for U<'_, '_> {
     }
 }
 
-/// Lowers `using` declarations (every one when `nested`, else only the top level's).
-pub(crate) fn run(tx: &mut Tx, nested: bool) {
+/// Lowers every `using` declaration (below ESNext).
+pub(crate) fn run(tx: &mut Tx) {
     let mut u = U {
         tx,
-        nested,
         body_start: None,
     };
     let root = u.tx.ast.root;
@@ -213,7 +209,7 @@ impl U<'_, '_> {
         let body_start = self.body_start.take();
         match items.iter().position(|&s| self.is_using(s)) {
             Some(i) if top => self.top_level(&items, i, fns),
-            Some(_) if self.nested => self.wrap(&items, body_start, fns),
+            Some(_) => self.wrap(&items, body_start, fns),
             _ => {
                 for &s in &items {
                     self.stmt(s, fns);
@@ -239,7 +235,7 @@ impl U<'_, '_> {
             }
             Node::For {
                 init: Some(init), ..
-            } if self.nested && self.is_using(init) => self.for_using(s, fns),
+            } if self.is_using(init) => self.for_using(s, fns),
             Node::For {
                 init,
                 test,
@@ -251,9 +247,7 @@ impl U<'_, '_> {
                 }
                 self.stmt(body, fns);
             }
-            Node::ForOf { left, .. } if self.nested && self.is_using(left) => {
-                self.for_of_using(s, fns)
-            }
+            Node::ForOf { left, .. } if self.is_using(left) => self.for_of_using(s, fns),
             Node::ForOf {
                 left, right, body, ..
             }
