@@ -1877,3 +1877,23 @@ fn tsconfig_jsx_preserve_is_ignored() {
     let r = run_build(&fs, o);
     assert!(file(&r, "/proj/out/entry.js").contains("<div />"));
 }
+
+#[test]
+fn external_imports_keep_evaluation_order() {
+    // `foo` is imported before `./bar`, whose own external `bar` loads after it, even
+    // though bar.js is placed first in the bundle.
+    let fs = project(&[
+        (
+            "entry.js",
+            "export {default as foo} from 'foo';\nexport {bar} from './bar';\n",
+        ),
+        ("bar.js", "export {default as bar} from 'bar';\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.external = vec!["foo".into(), "bar".into()];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    let foo = code.find("from \"foo\"").expect(code);
+    let bar = code.find("from \"bar\"").expect(code);
+    assert!(foo < bar, "{code}");
+}
