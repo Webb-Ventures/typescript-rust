@@ -19,6 +19,9 @@ use crate::print::{Fragment, print_module};
 use crate::resolve::{Resolution, ResolveKind, Resolver};
 use crate::{Message, Severity, pool};
 
+/// Absolute entry paths and, for each, its output name if one was given.
+type Entries = (Vec<String>, Vec<Option<String>>);
+
 /// A file produced by a build.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputFile {
@@ -230,7 +233,7 @@ impl BuildContext {
 
     /// Absolute entry paths and their output names (`name=path`). An entry point given
     /// twice with the same name is built once, as in esbuild.
-    fn resolve_entries(&self) -> Result<(Vec<String>, Vec<Option<String>>), Vec<Message>> {
+    fn resolve_entries(&self) -> Result<Entries, Vec<Message>> {
         let wd = &self.opts.working_dir;
         let mut out = Vec::new();
         let mut names: Vec<Option<String>> = Vec::new();

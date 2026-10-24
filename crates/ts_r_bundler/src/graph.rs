@@ -93,13 +93,19 @@ fn attribute_type(attrs: &str) -> Result<Option<&'static str>, String> {
         };
         let (k, v) = (unquote(k), unquote(v));
         if k != "type" {
-            return Err(format!("Importing with the {k:?} attribute is not supported"));
+            return Err(format!(
+                "Importing with the {k:?} attribute is not supported"
+            ));
         }
         ty = Some(match v.as_str() {
             "json" => "json",
             "text" => "text",
             "bytes" => "bytes",
-            _ => return Err(format!("Importing with a type attribute of {v:?} is not supported")),
+            _ => {
+                return Err(format!(
+                    "Importing with a type attribute of {v:?} is not supported"
+                ));
+            }
         });
     }
     Ok(ty)

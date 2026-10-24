@@ -864,7 +864,7 @@ pub fn prepare_with(
                 .iter()
                 .any(|&s| ast.atom(scopes.symbol(s).name) == "exports")
         };
-        if !this.is_empty() && !tla && !(src.contains("exports") && own_exports()) {
+        if !this.is_empty() && !tla && (!src.contains("exports") || !own_exports()) {
             for id in this {
                 let at = ast.span(id).start;
                 let exports = build::ident(&mut ast, "exports", at);
@@ -1133,6 +1133,44 @@ fn json_bigint(text: &str) -> Option<&str> {
     None
 }
 
+/// Whether a TypeScript file exports a const enum (`export const enum`, or a const enum named
+/// by a top-level `export { .. }`).
+fn exports_const_enum(ast: &Ast) -> bool {
+    let stmts = build::program_stmts(ast);
+    let mut consts: Vec<&str> = Vec::new();
+    for &s in stmts.iter() {
+        if let Node::Enum {
+            modifiers, name, ..
+        } = *ast.node(s)
+            && modifiers.contains(Modifiers::CONST)
+            && !modifiers.contains(Modifiers::DECLARE)
+        {
+            if modifiers.contains(Modifiers::EXPORT) {
+                return true;
+            }
+            if let Node::Ident { name } = *ast.node(name) {
+                consts.push(ast.atom(name));
+            }
+        }
+    }
+    !consts.is_empty()
+        && stmts.iter().any(|&s| {
+            let Node::ExportNamed {
+                type_only: false,
+                specifiers,
+                source: None,
+                ..
+            } = *ast.node(s)
+            else {
+                return false;
+            };
+            ast.list(specifiers).iter().any(|&sp| {
+                matches!(*ast.node(sp), Node::ExportSpecifier { type_only: false, local, .. }
+                    if matches!(*ast.node(local), Node::Ident { name } if consts.contains(&ast.atom(name))))
+            })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1189,41 +1227,4 @@ mod tests {
             "data:text/plain;charset=utf-8;base64,CgoKCgo="
         );
     }
-}
-
-
-/// Whether a TypeScript file exports a const enum (`export const enum`, or a const enum named
-/// by a top-level `export { .. }`).
-fn exports_const_enum(ast: &Ast) -> bool {
-    let stmts = build::program_stmts(ast);
-    let mut consts: Vec<&str> = Vec::new();
-    for &s in stmts.iter() {
-        if let Node::Enum { modifiers, name, .. } = *ast.node(s)
-            && modifiers.contains(Modifiers::CONST)
-            && !modifiers.contains(Modifiers::DECLARE)
-        {
-            if modifiers.contains(Modifiers::EXPORT) {
-                return true;
-            }
-            if let Node::Ident { name } = *ast.node(name) {
-                consts.push(ast.atom(name));
-            }
-        }
-    }
-    !consts.is_empty()
-        && stmts.iter().any(|&s| {
-            let Node::ExportNamed {
-                type_only: false,
-                specifiers,
-                source: None,
-                ..
-            } = *ast.node(s)
-            else {
-                return false;
-            };
-            ast.list(specifiers).iter().any(|&sp| {
-                matches!(*ast.node(sp), Node::ExportSpecifier { type_only: false, local, .. }
-                    if matches!(*ast.node(local), Node::Ident { name } if consts.contains(&ast.atom(name))))
-            })
-        })
 }

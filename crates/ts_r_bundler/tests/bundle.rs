@@ -1674,7 +1674,10 @@ fn a_bigint_in_a_json_file_is_an_error() {
         .build();
     let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].contains("Unexpected \"123n\" in JSON"), "{errors:?}");
+    assert!(
+        errors[0].contains("Unexpected \"123n\" in JSON"),
+        "{errors:?}"
+    );
 }
 
 #[test]
@@ -1798,7 +1801,10 @@ fn a_jsx_factory_of_this_is_the_module_this() {
 fn jsx_dev_applies_to_a_tsconfig_react_jsx() {
     let fs = project(&[
         ("entry.tsx", "console.log(<><div /></>);\n"),
-        ("tsconfig.json", r#"{"compilerOptions": {"jsx": "react-jsx"}}"#),
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions": {"jsx": "react-jsx"}}"#,
+        ),
     ]);
     let mut o = opts(&["entry.tsx"]);
     o.jsx.dev = true;
@@ -1826,8 +1832,14 @@ fn a_missing_tsconfig_override_is_an_error() {
 #[test]
 fn top_level_this_of_a_commonjs_file_is_its_exports() {
     let fs = project(&[
-        ("entry.js", "const lib = require('./lib.js');\nconsole.log(lib.a, lib.b);\n"),
-        ("lib.js", "this.a = 1;\n(() => { this.b = 2; })();\nfunction f() { return this; }\n"),
+        (
+            "entry.js",
+            "const lib = require('./lib.js');\nconsole.log(lib.a, lib.b);\n",
+        ),
+        (
+            "lib.js",
+            "this.a = 1;\n(() => { this.b = 2; })();\nfunction f() { return this; }\n",
+        ),
         ("own.js", "var exports = {};\nthis.c = 3;\n"),
     ]);
     let r = run_build(&fs, opts(&["entry.js"]));
@@ -1867,7 +1879,10 @@ fn tsconfig_jsx_preserve_is_ignored() {
     // As in esbuild, the output is JavaScript: only `--jsx=preserve` keeps JSX.
     let fs = project(&[
         ("entry.tsx", "console.log(<div />);\n"),
-        ("tsconfig.json", r#"{"compilerOptions": {"jsx": "preserve"}}"#),
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions": {"jsx": "preserve"}}"#,
+        ),
     ]);
     let r = run_build(&fs, opts(&["entry.tsx"]));
     let code = file(&r, "/proj/out/entry.js");
@@ -1916,7 +1931,10 @@ fn json_namespace_imports_are_es_namespaces() {
         ("b.json", r#"{"__proto__": {"foo": 1}}"#),
     ]);
     let r = run_build(&fs, opts(&["entry.js"]));
-    assert_eq!(run_node("json-ns", &r, "entry.js"), "true true [ '__proto__' ]\n");
+    assert_eq!(
+        run_node("json-ns", &r, "entry.js"),
+        "true true [ '__proto__' ]\n"
+    );
 }
 
 #[test]
@@ -1983,7 +2001,10 @@ fn an_export_named_proto_is_a_namespace_property() {
         o.minify_syntax = minify;
         o.minify_whitespace = minify;
         let r = run_build(&fs, o);
-        assert_eq!(run_node("proto-export", &r, "entry.js"), "123 [ '__proto__' ]\n");
+        assert_eq!(
+            run_node("proto-export", &r, "entry.js"),
+            "123 [ '__proto__' ]\n"
+        );
     }
 }
 
