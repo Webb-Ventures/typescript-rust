@@ -1,6 +1,7 @@
 // ts-r-run preload (strategy "hook"): off-thread module.register hooks that ask a
 // long-lived `ts-r-run --serve` process to resolve and compile each module on demand.
 import { register, setSourceMapsSupport } from 'node:module';
+import './relay.mjs';
 
 const env = process.env;
 const data = { bin: env.TS_R_RUN_BIN, tsconfig: env.TS_R_RUN_TSCONFIG ?? '', entry: env.TS_R_RUN_ENTRY ?? '', sourceMaps: env.TS_R_RUN_SOURCE_MAPS !== '0' };

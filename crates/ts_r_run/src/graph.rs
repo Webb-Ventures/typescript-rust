@@ -13,7 +13,7 @@ use crate::compile::{self, Compiled, Format, PackageType};
 use crate::project::Project;
 
 /// Bump when the cache payload or anything that shapes it changes.
-pub const CACHE_FORMAT: u32 = 1;
+pub const CACHE_FORMAT: u32 = 2;
 
 /// Compiles files for one project, through the transpile cache.
 #[derive(Debug)]
@@ -176,6 +176,9 @@ pub struct Module {
     pub code: String,
     /// `(specifier, resolved file)` for the specifiers ts-r-run resolves itself.
     pub resolved: Vec<(String, Arc<str>)>,
+    /// The resolved files loaded as soon as this module runs (not only by an `import()` or
+    /// a `require()` inside a function).
+    pub eager: Vec<Arc<str>>,
 }
 
 #[derive(Debug, Default)]
@@ -184,8 +187,12 @@ pub struct Graph {
     pub modules: Vec<Module>,
     /// Files whose change invalidates the graph: sources, `package.json`s, tsconfigs.
     pub inputs: BTreeSet<String>,
-    /// Rendered errors (syntax errors, unreadable files). Non-empty means don't run.
+    /// Rendered errors (syntax errors, unreadable files) in the modules that load with the
+    /// entry. Non-empty means don't run.
     pub errors: Vec<String>,
+    /// `(file, rendered errors)` for modules only reached by an `import()` or a `require()`
+    /// inside a function: the program runs, and loading one of them throws, as under tsx.
+    pub deferred: Vec<(String, String)>,
 }
 
 type Processed = (Module, Option<String>, Vec<String>);
@@ -194,11 +201,21 @@ fn process(engine: &Engine, path: &str) -> Result<Processed, String> {
     let unit = engine.compile_file(path)?;
     let c = unit.compiled;
     let mut resolved = Vec::new();
+    let mut eager = Vec::new();
     for s in &c.specs {
+        // A query or hash on a path (`./config.ts?v=1`, `@/config.ts?v=1` under `paths`)
+        // names the file without it; the hooks put it back on the URL.
+        let file = match s.text.find(['?', '#']) {
+            Some(cut) if cut > 0 && !s.text.contains(':') => &s.text[..cut],
+            _ => s.text.as_str(),
+        };
         if let Some(t) = engine
             .project
-            .resolve(&s.text, path, s.require || c.format == Format::Cjs)
+            .resolve(file, path, s.require || c.format == Format::Cjs)
         {
+            if !s.lazy {
+                eager.push(t.clone());
+            }
             resolved.push((s.text.clone(), t));
         }
     }
@@ -208,6 +225,7 @@ fn process(engine: &Engine, path: &str) -> Result<Processed, String> {
             format: c.format,
             code: c.code,
             resolved,
+            eager,
         },
         unit.package_json,
         unit.guard_deps,
@@ -275,6 +293,7 @@ pub fn build(engine: &Engine, entry: &str, threads: usize) -> Graph {
     let mut seen: FxHashSet<String> = FxHashSet::default();
     seen.insert(entry.to_owned());
     let mut frontier = vec![entry.to_owned()];
+    let mut failed: Vec<(String, String)> = Vec::new();
     while !frontier.is_empty() {
         let results = parallel_map(&frontier, threads, |p| process(engine, p));
         let mut next = Vec::new();
@@ -293,13 +312,42 @@ pub fn build(engine: &Engine, entry: &str, threads: usize) -> Graph {
                     }
                     g.modules.push(m);
                 }
-                Err(e) => g.errors.push(e),
+                Err(e) => failed.push((path.clone(), e)),
             }
         }
         frontier = next;
     }
     engine.flush();
+    if !failed.is_empty() {
+        let eager = eager_closure(&g.modules, entry);
+        for (path, e) in failed {
+            if eager.contains(path.as_str()) {
+                g.errors.push(e);
+            } else {
+                g.deferred.push((path, e));
+            }
+        }
+    }
     g
+}
+
+/// The files that load with `entry`, following eager edges only.
+fn eager_closure<'a>(modules: &'a [Module], entry: &'a str) -> FxHashSet<&'a str> {
+    let by_path: rustc_hash::FxHashMap<&str, &Module> =
+        modules.iter().map(|m| (m.path.as_str(), m)).collect();
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
+    seen.insert(entry);
+    let mut stack = vec![entry];
+    while let Some(p) = stack.pop() {
+        if let Some(m) = by_path.get(p) {
+            for t in &m.eager {
+                if seen.insert(t) {
+                    stack.push(t);
+                }
+            }
+        }
+    }
+    seen
 }
 
 #[cfg(test)]

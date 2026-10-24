@@ -8,7 +8,9 @@
   test runner) and `tests/utils/tsx` (how the suite spawns the tool). Each spec runs twice:
   first with the subject set to tsx 4.23.15 (`bench/node_modules/tsx`, the reference), then
   with `ts-r-run`. Only tests that pass with tsx are compared, and a compared test passes when
-  it also passes with `ts-r-run`.
+  it also passes with `ts-r-run`. Tests that run a file through tsx's loader flags (`node
+  --import tsx <file>`, `node --require tsx/cjs <file>`) keep those flags for tsx and run
+  `ts-r-run <file>` for `ts-r-run`, which has one way to run a file.
 - **node**: every `spawnPromisified(process.execPath, [...])` call in Node 24.21.0's
   `test/es-module/test-typescript*.mjs`. Its arguments are evaluated against a copy of
   `test/fixtures/typescript/`, and the case runs under Node, under tsx and under `ts-r-run` with
@@ -33,27 +35,29 @@ node bench/run-oracle/fails.mjs --skips [REGEX]  # skips with their reasons
 
 Tests are skipped when they fail with tsx itself in this setup, or when they test something
 `ts-r-run` does not offer by design: the Node API (`tsx/esm/api`, `register()`), the REPL,
-watch mode, `--eval`/`--print`/stdin, the pty shell, and assertions on tsx's own transform
-output, cache or error text. In the node source, cases are skipped when Node and tsx disagree
-(type stripping only, versus a full transform), or when the arguments are not literal.
+watch mode, `--eval`/`--print`/stdin, the pty shell, `--version`/`--help` text, and
+assertions on tsx's own transform output, cache or error text. `process-interact.ts` tests
+the suite's own helper and never runs tsx. In the node source, cases are skipped when Node
+and tsx disagree (type stripping only, versus a full transform), or when the arguments are
+not literal.
 `results.json` lists every skip reason.
 
 ## Results
 
-8699d15 (2026-10-24, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
+23aedd7 (2026-10-24, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
 
-- tsx: **75 of 86 compared cases pass (87.2%)**; 49 skipped.
+- tsx: **98 of 100 compared cases pass (98.0%)**; 35 skipped.
 - node: **36 of 36 compared cases pass (100%)**; 53 skipped.
 
 | tsx spec | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| smoke | 9 | 4 | 0 |
+| smoke | 11 | 2 | 0 |
 | tsconfig | 19 | 0 | 0 |
-| cli | 8 | 4 | 11 |
+| cli | 13 | 0 | 10 |
 | commonjs-mode-contracts | 8 | 0 | 0 |
-| resolution-priority | 5 | 0 | 4 |
-| version-sensitive | 26 | 3 | 22 |
-| loaders | 0 | 0 | 2 |
+| resolution-priority | 9 | 0 | 0 |
+| version-sensitive | 36 | 0 | 15 |
+| loaders | 2 | 0 | 0 |
 | api, api-declarations, esm-hook-resolve, node-capabilities, process-interact, pty-shell, repl, transform, transform-cache, watch | 0 | 0 | 10 |
 
 | Node test file | Pass | Fail | Skip |
@@ -64,35 +68,24 @@ output, cache or error text. In the node source, cases are skipped when Node and
 | test-typescript-module.mjs | 7 | 0 | 3 |
 | test-typescript-transform.mjs | 7 | 0 | 3 |
 
-In the node source, 29 skips are `--eval`, `--print` or stdin cases and 23 are cases where Node
-and tsx disagree. In 14 of those 23 `ts-r-run` matches tsx and in 9 it matches Node.
+In the node source, 29 skips are `--eval`, `--print` or stdin cases and 24 are cases where Node
+and tsx disagree. In 20 of those 24 `ts-r-run` matches tsx and in 4 it matches Node.
 
 Remaining tsx failures by cause:
 
-- **No signal relay** (`ts_r_run`, 3, cli): `ts-r-run` hands the process over to Node rather than
-  running a parent that relays signals, so "Kills child when unresponsive" (exit 130),
-  "Doesn't kill child when responsive" and "Relay signal handler does not affect listenerCount
-  overload" fail.
-- **`--test` locations** (`ts_r_run`, 1, cli): "maps test locations" expects `test at
-  test.ts:4:1` in the test runner's output.
-- **Syntax errors in modules reached only by `import()`** (`ts_r_run`, 2, smoke "from .ts" in
-  `type: module` and untyped packages): the graph compiles every reachable file before running,
-  so `broken-syntax.ts`'s TS1005 stops the run, where tsx raises it when the `import()` runs.
-- **`require` in ES output** (`ts_r_transform`, 2, smoke "from .js"): `import-from-js.js` uses
-  `import.meta` and `() => require('./cjs/index')`, so it is ES and fails with "require is not
-  defined" (only `import x = require()` gets a `require`). In `type: module` it also fails the
-  CommonJS-context assertion in `mjs/index.mjs:7`.
-- **CommonJS output details** (`ts_r_transform`, 2, version-sensitive):
-  - "ESM imports preserve CommonJS-classified TypeScript contracts": `import.meta.url` is kept
-    in CommonJS output (`named/config.ts` in a `type: commonjs` package), so Node's export
-    detection finds no exports ("does not provide an export named 'defineConfig'").
-  - "CJS namespace import shape": the `Object.defineProperty(exports, "__esModule", ...)` marker
-    shows up as an extra `__esModule: true` in the ES namespace.
-- **Top-level `await` behind `require()`** (`ts_r_run`, 1, version-sensitive): `config.js` with
-  top-level `await` in a `type: module` package, required from `.cjs`, fails with Node's
-  `ERR_REQUIRE_ASYNC_MODULE`; tsx throws a `TransformError` there.
+- **`require()` of ES modules** (`ts_r_run` and `ts_r_transform`, 2, smoke "package type:
+  undefined" from `.js` and from `.ts`): tsx compiles every module a `require()` reaches to
+  CommonJS with esbuild's interop, and the smoke test's snapshot has that shape: namespace keys
+  in sorted order with `default` first (`{"cjsContext":true,"default":1,"named":2}`, ours keeps
+  source order), `.mjs` files that see a CommonJS context, an ES package without
+  `__esModule`, and no `ERR_REQUIRE_ESM_RACE_CONDITION` when `cjs/index.cjs` requires
+  `ts/index.ts` after an `import()` of it. `ts-r-run` keeps Node's own `require(esm)` and
+  tsc's interop helpers.
 
 | Run | tsx compared | tsx pass | tsx skip | tsx rate | node compared | node pass | node skip |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | harness only, no `ts_r_run` changes | 90 | 52 | 45 | 57.8% | 36 | 36 | 53 |
 | resolution inside packages (TypeScript swap and nested `main` in `node_modules`, `exports` get the swap only), tsconfig `paths`/`baseUrl` for JavaScript parents with `.json` targets, JSON without import attributes, ES syntax in CommonJS-scope `.js`, `module.exports` in TypeScript in a `type: module` package, `.jsx` without `allowJs` uses `React.createElement`, fatal `--tsconfig` errors, empty directories as missing modules | 86 | 75 | 49 | 87.2% | 36 | 36 | 53 |
+| signal relay with a listener hidden from `listenerCount`, `--enable-source-maps` for `--test` | 86 | 79 | 49 | 91.9% | 36 | 36 | 53 |
+| format detection (only top-level `await` forces ESM), `import.meta` and a hidden `__esModule` marker in CommonJS output, `?query` instances, `import()` default unwrap, syntax errors behind `import()` deferred to load time, `TransformError` for `require` of top-level `await`, JSON named exports, no type stripping of preload output in `node_modules` | 86 | 84 | 49 | 97.7% | 36 | 36 | 53 |
+| the loader-flag cases (`--import tsx`, `--require tsx/cjs`) and `tsx --test` brought in; `ts-r-run --test` without a file, `require('..')` to a package's TypeScript index | 100 | 98 | 35 | 98.0% | 36 | 36 | 53 |

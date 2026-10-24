@@ -59,6 +59,7 @@ Node, so `exports` and runtime conditions behave exactly as they do without ts-r
 ts-r-run: run a TypeScript file with Node
 
 Usage: ts-r-run [options] [node options] <file> [args...]
+       ts-r-run [options] --test [node options]   (Node's test runner, default files)
 
 Options:
   --watch               Restart when a file of the module graph changes

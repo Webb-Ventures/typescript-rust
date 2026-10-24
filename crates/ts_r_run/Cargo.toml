@@ -28,5 +28,8 @@ ts_r_sound = { path = "../ts_r_sound" }
 rustc-hash = "2"
 notify = { version = "8.2", default-features = false, features = ["macos_fsevent"] }
 
+[target.'cfg(unix)'.dependencies]
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
+
 [dev-dependencies]
 ts_r_testing = { path = "../ts_r_testing" }

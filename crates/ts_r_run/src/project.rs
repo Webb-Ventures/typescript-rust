@@ -137,10 +137,9 @@ impl Project {
             base.target = ScriptTarget::ES2022;
         }
         // Node can't run JSX, and the dev runtime needs absolute file names in the output.
-        // With no `jsx` option, a `jsxFactory` or `jsxFragmentFactory` asks for the classic
-        // runtime (as tsx reads it); otherwise JSX uses the automatic runtime.
-        let factory = options.jsx_factory().is_some() || options.jsx_fragment_factory().is_some();
-        if options.jsx().is_none() && factory {
+        // With no `jsx` option JSX is `React.createElement` calls (the classic runtime, as
+        // under tsx); `preserve` and the `react-jsx*` modes use the automatic runtime.
+        if options.jsx().is_none() {
             base.jsx = JsxMode::Classic;
         } else if base.jsx != JsxMode::Classic {
             base.jsx = JsxMode::Automatic;
@@ -276,9 +275,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn jsx_defaults_to_the_automatic_runtime() {
+    fn jsx_defaults_to_the_classic_runtime() {
         let p = Project::from_options(&CompilerOptions::new(), Vec::new());
-        assert_eq!(p.base.jsx, JsxMode::Automatic);
+        assert_eq!(p.base.jsx, JsxMode::Classic);
+        assert_eq!(p.base.jsx_factory, "React.createElement");
         assert!(p.base.target >= ScriptTarget::ES2022);
     }
 

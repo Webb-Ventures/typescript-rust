@@ -75,7 +75,7 @@ const SKIPPED_SPECS = {
   'api-declarations': "tsx's API type declarations",
   'esm-hook-resolve': "imports tsx's source (src/esm/hook)",
   'node-capabilities': "imports tsx's source (src/platform)",
-  'process-interact': "tsx's signal relay through its parent process",
+  'process-interact': "tests the suite's own processInteract helper (never runs tsx)",
   'pty-shell': 'interactive pty shell',
   repl: "tsx's REPL",
   transform: "imports tsx's source (src/utils/transform)",
