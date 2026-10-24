@@ -56,6 +56,19 @@ export function isAnsweredByYou(root, replies, you) {
   return replies.some((comment) => comment.user?.login === you && comment.created_at > lastOther);
 }
 
+// The ts-r review bot fixes findings itself when a maintainer asks it to, replies "Fixed in
+// [`<sha>`](...) by Codex for @<who>." and resolves the thread, so nobody checks those fixes by
+// default (one of its pushed fixes was later reverted for disagreeing with tsc). Returns the fix
+// commit's sha when the thread's last word is such a reply, else null: a reply of yours after it
+// means you checked it.
+export const REVIEW_BOT = "ts-r-review[bot]";
+const BOT_FIX_RE = /^Fixed in \[`[0-9a-f]{7,40}`\]\(https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/commit\/([0-9a-f]{40})\) by Codex for @/;
+export function botFixToCheck(replies) {
+  const last = [...replies].sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1);
+  if (!last || last.user?.login !== REVIEW_BOT) return null;
+  return BOT_FIX_RE.exec(last.body ?? "")?.[1] ?? null;
+}
+
 // Via a file, never `--field`: gh reads a leading `@` as a file reference, so a
 // body can post as a filename. This is the whole reason these scripts exist.
 export function ghPostJson(path, payload) {

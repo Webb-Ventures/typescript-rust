@@ -18,6 +18,7 @@ records, and the checklists in `skills/ts-r-review/references/`.
 | `skills/ts-r-review/SKILL.md` | The review procedure. One source of truth for every model and harness |
 | `skills/ts-r-review/references/ts-r-rules.md` | Root AGENTS.md rules, each with how a breach shows up in a diff |
 | `skills/ts-r-review/references/areas.md` | Where real bugs hide per area: front end, transform, dev server, bundler, lint, checker, sound mode, LSP, ecosystem, site, CI |
+| `skills/ts-r-review/references/false-positives.md` | The findings this reviewer got wrong before, the pattern behind each and the evidence it now needs; the review and fix runs read it, `action-review` adds to it |
 | `commands/code-review.md` | Claude Code entry point: `/ts-r-code-review:code-review [PR \| branch]` |
 | `.claude-plugin/plugin.json` | Claude Code manifest (marketplace: `../.claude-plugin/marketplace.json`) |
 | `.codex-plugin/plugin.json` | Codex manifest (marketplace: `../marketplace.json`) |
@@ -25,6 +26,7 @@ records, and the checklists in `skills/ts-r-review/references/`.
 | `ci/github.cjs` | Posts findings as review threads, keeps the summary comment, resolves in bulk |
 | `ci/bench.cjs` | Keeps the bench comment: progress line, PR-vs-base tables, gate verdict |
 | `ci/catchup.cjs`, `ci/stack.cjs` | After a fix: merge a branch that moved on into it before pushing, then merge it up the stack |
+| `ci/eval/` | Past findings with a person's verdict (`cases.json`) and the scorer for replayed reviews (`score.cjs`); see [Measuring accuracy](#measuring-accuracy) |
 | `box/` | The review box: dispatcher, job containers, egress proxy, compose file, install script, GitHub App setup |
 
 ## Use it locally
@@ -115,8 +117,11 @@ Resolving:
 - **Fix all findings:** tick **Fix and resolve all findings** in the summary comment, or
   comment `/fix-all`. Codex fixes the open findings on the PR branch and pushes one commit as
   `ts-r-review[bot]`. Each fixed finding gets a reply with the commit, what changed and the
-  diff, and is resolved; a finding Codex judges wrong, or that needs a person's decision or a
-  workflow change, gets a reply saying why and stays open. The push does not start a review;
+  diff, what it ran (the oracle on the finding's input, builds and tests), and is resolved. A
+  finding about output tsc, ESLint or esbuild defines is checked against the pinned tool first
+  (`bench/node_modules`, through the runner); one Codex judges wrong gets a reply saying so with
+  the evidence and stays open for a person to agree, and one that needs a person's decision or a
+  workflow change gets a reply saying why and stays open. The push does not start a review;
   comment `@autoreview` to have the fixes checked. Only for open PRs from this repository (the App cannot push to forks;
   there, ticking the box just resolves). The dependencies the lockfiles pin are installed
   first; Codex then builds, tests, lints and formats what it touched before reporting a fix,
@@ -439,7 +444,54 @@ The box runs what the old Actions job ran, on a quieter machine:
 - Model and effort: `MODEL` / `EFFORT` in the box's `config.env`; Codex and Rust versions:
   `CODEX_VERSION` and `RUST_TOOLCHAIN` in `box/Dockerfile` (keep the latter in step with
   `rust-toolchain.toml`, then re-run `box/install.sh`).
-- Output shape: `ci/findings.schema.json` and `ci/github.cjs` together.
+- Output shape: `ci/findings.schema.json` (and `ci/fixes.schema.json` for fixes) and
+  `ci/github.cjs` together. The schemas are read from `main`, `github.cjs` from the box image,
+  so `github.cjs` accepts results without the newer fields (`checks`, status `wrong`).
+- A finding judged wrong goes into `skills/ts-r-review/references/false-positives.md` (and its
+  review run into `ci/eval/cases.json`) in the change that answers it; `ci/eval.test.cjs` checks
+  that every eval case is in the catalogue.
 - Tests: `node --test .agents/plugins/code-review/ci/*.test.cjs` (an in-memory GitHub and git for
   `github.test.cjs` and `stack.test.cjs`; real git against a bare repository in a temp dir for
   `catchup.test.cjs`).
+
+### Measuring accuracy
+
+Every finding a person answers is a measurement: `action-review` replies confirmed, partly
+right, wrong, already handled or out of scope, and the bot's own fix runs reply fixed, not fixed
+or judged wrong. Measured on the first 386 findings (tsc-rust PRs 3-138, typescript-rust PRs
+23-41): 247 confirmed, 110 fixed by the bot with no person checking them, 6 wrong (one of them
+fixed by the bot, then reverted), 2 partly right, 18 unanswered, 1 out of scope and 2 no longer
+reported; of the bot's 36 fix commits, 1 had a
+part reverted (it disagreed with tsc) and 4 broke tests later (2 on Windows only, 2 after the
+merge up the stack). The wrong findings all claimed tsc or ESLint behaviour without evidence of
+what the tool does, which is why the skill now asks for it
+(`skills/ts-r-review/references/false-positives.md`).
+
+To check a change to the skill or prompts against that history, replay the review on each case
+in `ci/eval/cases.json` (the PR head that was reviewed, with **no** previous findings, which
+would hand the model the old ids), save each run's JSON as `<dir>/<repo>-<pr>-<head7>.json`, and
+score them:
+
+```sh
+node .agents/plugins/code-review/ci/eval/score.cjs .agents/plugins/code-review/ci/eval/cases.json <dir>
+```
+
+A better change reports fewer of the wrong or partly right findings again and keeps the
+confirmed ones. Replays vary between runs; compare several runs per variant, not one.
+
+The change that added the oracle rule was measured more cheaply: only the verify-and-score step
+(SKILL.md section 4) was replayed on each of the 27 judged findings in `ci/eval/cases.json`
+(Codex, high effort, read-only, code read through git at the reviewed head), with the case rows
+removed from `false-positives.md` so the rule had to generalise. Kept means confidence 80 or
+more:
+
+| Skill | Wrong kept (of 6) | Partly right kept (of 2) | Confirmed kept (of 19) |
+|---|---|---|---|
+| before this change | 4 | 2 | 19 |
+| first draft: any claim about oracle output needs it recorded | 0 | 1 | 9 |
+| final: only parity claims need it (2 runs) | 2, 2 | 2, 2 | 18, 17 |
+
+The first draft dropped real broken-mechanism findings, which is why the rule now separates
+the two kinds. The parity claims that still pass verification (tsc-rust #46, #72, #93 across
+the runs) are what the fix run's oracle check is for: it runs tsc before changing anything and
+reports `wrong` when tsc agrees with ts-r.
