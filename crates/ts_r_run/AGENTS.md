@@ -14,6 +14,10 @@ argument). Internal modes: `--compile <file>` (prints `esm`/`cjs`, a newline, th
 the preload for files the graph walk missed), `--resolve <parent> <specifier>` (prints the
 tsconfig `paths`/`baseUrl` target or nothing; used by the preload for plain JavaScript
 parents) and `--serve` (the hook strategy's compiler).
+`ts-r-run --test [node flags]` with no file runs Node's test runner on its default patterns
+(which include `.ts` files, as Node strips types by default; not with `--watch`): there is no
+graph to build, so the preload, which each test process inherits, compiles every file when it
+is loaded (`run_tests`), as `tsx --test` does.
 Env: `TS_R_RUN_THREADS`, `TS_R_CACHE_DIR`. Exit code: Node's, or 128 + the signal that ended
 it; 1 for compile
 errors (printed tsc-style), 2 for usage errors. Needs Node 22.15+ (`module.registerHooks`).
@@ -109,7 +113,8 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
 - **Resolution details from tsx's `dist/require-*.mjs` and `register-*.mjs`**: an extensionless
   path never finds `.mts`/`.cts`; `require('pkg/file.js')` finds `pkg/file.ts` (the failed
   bare specifier is looked up in each parent `node_modules/<pkg>`); `require()` takes a
-  `file:` URL; a path with a query that is a file loads it.
+  `file:` URL; a path with a query that is a file loads it; `require('..')` and `require('.')`
+  inside a package get the same fallback as `./x` (a directory's TypeScript index).
 - **JSX**: with no `jsx` option JSX compiles to `React.createElement` calls (the classic
   runtime, honouring `jsxFactory`/`jsxFragmentFactory`), as esbuild does under tsx (tsx's
   smoke test); `preserve` and `react-jsx*` use the automatic runtime. `.jsx` files get the tsconfig's JSX options only with
@@ -149,7 +154,8 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   from JavaScript, `module.exports` in a module package, `.jsx` without `allowJs`, a fatal
   `--tsconfig`, `--test` locations, the signal relay, `import.meta` and the `__esModule`
   marker in CommonJS, `?query` instances, syntax errors behind `import()`, `require` of
-  top-level `await`, the `import()` unwrap, JSON named exports, TypeScript in packages).
+  top-level `await`, the `import()` unwrap, JSON named exports, TypeScript in packages,
+  `require('..')` in a package, `--test` without files).
   Skipped when Node is missing.
 - Parity oracle: [`bench/run-oracle`](../../bench/run-oracle/README.md) runs tsx's own suite and
   Node's TypeScript tests against ts-r-run (`node bench/run-oracle/run.mjs`; numbers there).

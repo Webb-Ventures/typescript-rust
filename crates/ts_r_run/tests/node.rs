@@ -4,7 +4,7 @@
 //! from JavaScript parents, fatal `--tsconfig` errors, `--test` locations, the signal relay,
 //! `import.meta` and the `__esModule` marker in CommonJS output, `?query` instances, syntax
 //! errors behind `import()`, `require` of top-level `await`, the `import()` default unwrap,
-//! JSON named exports, and TypeScript inside packages. Each case writes its files to a scratch
+//! JSON named exports, TypeScript inside packages, and `--test` without files. Each case writes its files to a scratch
 //! directory and runs under `scripts/limit.sh`. Skipped when Node is missing.
 
 use std::path::PathBuf;
@@ -254,6 +254,31 @@ fn test_runner_locations_map_to_typescript_lines() {
     assert!(all.contains("t.test.ts:4:1"), "{all}");
 }
 
+#[test]
+fn test_runner_without_files_finds_typescript_tests() {
+    let files = [
+        (
+            "a.test.ts",
+            "import { test } from 'node:test';\nenum E { A = 1 }\ntest('enum test', () => { if (E.A !== 1) throw new Error(); });\n",
+        ),
+        (
+            "test/b.ts",
+            "import { test } from 'node:test';\nnamespace N { export const x: number = 2; }\ntest('namespace test', () => { if (N.x !== 2) throw new Error(); });\n",
+        ),
+        ("other.ts", "throw new Error('not a test file');\n"),
+    ];
+    let Some(out) = run("test-glob", &files, &["--test"]) else {
+        return;
+    };
+    let all = String::from_utf8_lossy(&out.stdout) + String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{all}");
+    assert!(
+        all.contains("enum test") && all.contains("namespace test"),
+        "{all}"
+    );
+    assert!(all.contains("pass 2"), "{all}");
+}
+
 /// The program signals its parent (ts-r-run), which relays the signal back: a listener of
 /// the program's own runs, and the relay's own listener stays hidden.
 #[cfg(unix)]
@@ -448,4 +473,28 @@ fn an_import_of_typescript_in_a_package_is_not_type_stripped_by_node() {
         return;
     };
     assert_eq!(stdout(&out), "a\n");
+}
+
+#[test]
+fn require_of_a_parent_directory_in_a_package_finds_its_typescript_index() {
+    let files = [
+        ("package.json", r#"{ "type": "commonjs" }"#),
+        ("entry.cjs", "console.log(require('dep').tag);\n"),
+        (
+            "node_modules/dep/package.json",
+            r#"{ "name": "dep", "main": "./lib/sub/entry.js" }"#,
+        ),
+        (
+            "node_modules/dep/lib/index.ts",
+            "export const tag: string = 'ts-index';\n",
+        ),
+        (
+            "node_modules/dep/lib/sub/entry.js",
+            "module.exports = require('..');\n",
+        ),
+    ];
+    let Some(out) = run("require-dotdot", &files, &["entry.cjs"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "ts-index\n");
 }

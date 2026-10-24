@@ -38,6 +38,7 @@ const RELAY: &str = include_str!("js/relay.mjs");
 const HELP: &str = "ts-r-run: run a TypeScript file with Node
 
 Usage: ts-r-run [options] [node options] <file> [args...]
+       ts-r-run [options] --test [node options]   (Node's test runner, default files)
 
 Options:
   --watch               Restart when a file of the module graph changes
@@ -90,6 +91,13 @@ pub struct Cli {
     pub node_args: Vec<String>,
     pub entry: String,
     pub args: Vec<String>,
+}
+
+impl Cli {
+    /// Node's test runner is asked for (`--test` among the Node flags).
+    pub fn runs_tests(&self) -> bool {
+        self.node_args.iter().any(|a| a == "--test")
+    }
 }
 
 /// Node flags whose value is the next argument.
@@ -176,7 +184,8 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
     if let Some(entry) = args.get(i) {
         cli.entry = entry.clone();
         cli.args = args[i + 1..].to_vec();
-    } else if cli.mode == Mode::Run {
+    } else if cli.mode == Mode::Run && (cli.watch || !cli.runs_tests()) {
+        // Only Node's test runner runs without a file: it finds the test files itself.
         return Err(format!("ts-r-run: no file given\n\n{HELP}"));
     }
     Ok(cli)
@@ -215,7 +224,10 @@ pub fn main_with(args: &[String]) -> i32 {
 
 /// The project for the internal modes: the run's entry and tsconfig come from the parent.
 fn engine_from_env(cli: &Cli) -> Engine {
-    let entry = std::env::var("TS_R_RUN_ENTRY").unwrap_or_else(|_| absolute(&cli.entry));
+    let entry = std::env::var("TS_R_RUN_ENTRY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| absolute(&cli.entry));
     let project = Project::load(&entry, tsconfig_from_env(cli).as_deref());
     Engine::new(project, cli.cache, cli.source_maps)
 }
@@ -296,12 +308,15 @@ impl Launch<'_> {
         // Node's test runner reports where each test was declared from the stack of the
         // `test()` call; without Node's own source-map support that is a line of the
         // compiled code. Put the flag first so a later `--no-enable-source-maps` still wins.
-        if self.cli.source_maps && self.cli.node_args.iter().any(|a| a == "--test") {
+        if self.cli.source_maps && self.cli.runs_tests() {
             c.arg("--enable-source-maps");
         }
         c.args(&self.cli.node_args);
         c.arg("--import").arg(import_specifier(&self.preload));
-        c.arg(self.entry).args(&self.cli.args);
+        if !self.entry.is_empty() {
+            c.arg(self.entry);
+        }
+        c.args(&self.cli.args);
         if let Some(m) = &self.manifest {
             c.env("TS_R_RUN_MANIFEST", m);
         }
@@ -412,6 +427,9 @@ pub fn prepare(
 }
 
 fn run(cli: &Cli) -> i32 {
+    if cli.entry.is_empty() {
+        return run_tests(cli);
+    }
     let entry = absolute(&cli.entry);
     if !Path::new(&entry).is_file() {
         eprintln!("ts-r-run: cannot find {}", cli.entry);
@@ -476,6 +494,35 @@ fn run(cli: &Cli) -> i32 {
     let code = run_node(launch.command());
     if !cli.cache {
         // Nothing may stay behind: delete the temporary directory.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    code
+}
+
+/// `ts-r-run --test` with no file: Node's test runner finds the test files with its default
+/// patterns (`.ts` included, as Node strips types by default) and runs each in a child that
+/// inherits the preload; with no manifest the preload compiles every file when it is loaded.
+fn run_tests(cli: &Cli) -> i32 {
+    let dir = state_dir(cli);
+    let hooks = match hooks_dir(&dir) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("ts-r-run: cannot write to {}: {e}", dir.display());
+            return 1;
+        }
+    };
+    let preload = match cli.strategy {
+        Strategy::Prebuild => hooks.join("hooks.mjs"),
+        Strategy::Hook => hooks.join("preload-async.mjs"),
+    };
+    let launch = Launch {
+        cli,
+        entry: "",
+        preload,
+        manifest: None,
+    };
+    let code = run_node(launch.command());
+    if !cli.cache {
         let _ = std::fs::remove_dir_all(&dir);
     }
     code
@@ -551,5 +598,26 @@ mod tests {
         assert_eq!(argv(&c)[0], "--test");
         let c = parse_args(&args("--inspect t.ts")).unwrap();
         assert_eq!(argv(&c)[0], "--inspect");
+    }
+
+    #[test]
+    fn test_runner_needs_no_file() {
+        let c = parse_args(&args("--test --test-reporter=dot")).unwrap();
+        assert_eq!(c.entry, "");
+        let launch = Launch {
+            cli: &c,
+            entry: "",
+            preload: PathBuf::from("/h/hooks.mjs"),
+            manifest: None,
+        };
+        let a: Vec<String> = launch
+            .command()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // The preload is the last argument: no entry follows it.
+        assert!(a.last().is_some_and(|l| l.ends_with("hooks.mjs")), "{a:?}");
+        assert!(parse_args(&args("--watch --test")).is_err());
+        assert!(parse_args(&args("--inspect")).is_err());
     }
 }

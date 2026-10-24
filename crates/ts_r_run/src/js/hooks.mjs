@@ -158,7 +158,7 @@ function candidates(p, swapOnly, order = LOCAL_ORDER, depth = 0) {
 function failedTarget(specifier, parent, error) {
   // `require()` takes no file URL; tsx's does.
   if (specifier.startsWith('file:')) return specifier;
-  if (specifier.startsWith('./') || specifier.startsWith('../') || specifier.startsWith('/')) {
+  if (/^\.\.?(?:\/|$)/.test(specifier) || specifier.startsWith('/')) {
     return parent !== undefined && parent.startsWith('file:') ? new URL(specifier, parent).href : null;
   }
   if (typeof error?.url === 'string' && error.url.startsWith('file:')) return error.url;
