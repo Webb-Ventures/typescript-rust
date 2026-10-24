@@ -38,6 +38,46 @@ fn check(options: &str, src: &str) -> Option<Vec<String>> {
 const STRICT: &str = "\"strict\": true, \"target\": \"es2022\"";
 
 #[test]
+fn import_trailing_comma_skips_lexer_trivia() {
+    let mut src = String::from("declare const path: string;\n");
+    for newline in ["\n", "\r", "\r\n", "\u{2028}", "\u{2029}"] {
+        src.push_str(&format!("import(path, // comment{newline});\n"));
+    }
+    for trivia in ["\u{a0}", "\u{feff}", "/* comment */"] {
+        src.push_str(&format!("import(path{trivia},{trivia});\n"));
+    }
+    src.push_str("import(path /* no comma */);\n");
+    for (module, expected) in [("commonjs", 8), ("esnext", 0)] {
+        let mut fs = MemoryFs::new();
+        fs.set_cwd("/p");
+        fs.add_file("/p/a.ts", &src);
+        fs.add_file(
+            "/p/tsconfig.json",
+            &format!(
+                "{{\"compilerOptions\": {{{STRICT}, \"module\": \"{module}\", \"noLib\": true}}, \"files\": [\"a.ts\"]}}"
+            ),
+        );
+        let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+        let program = load_program(&fs, &cfg.file_names, &cfg.options, None, 1);
+        let result = check_program(&program, CheckRun { threads: 1 });
+        let commas: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == 1009)
+            .collect();
+        assert_eq!(commas.len(), expected, "{module}: {commas:#?}");
+        for diagnostic in commas {
+            let file = &program.files[diagnostic.file.0 as usize];
+            assert_eq!(
+                file.text
+                    .get(diagnostic.span.start as usize..diagnostic.span.end as usize),
+                Some(",")
+            );
+        }
+    }
+}
+
+#[test]
 fn assignability_and_calls() {
     let Some(out) = check(
         STRICT,

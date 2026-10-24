@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 ts_r_span = { path = "../ts_r_span" }
 ts_r_ast = { path = "../ts_r_ast" }
+ts_r_lexer = { path = "../ts_r_lexer" }
 ts_r_parser = { path = "../ts_r_parser" }
 ts_r_binder = { path = "../ts_r_binder" }
 ts_r_diagnostics = { path = "../ts_r_diagnostics" }

@@ -213,11 +213,7 @@ pub fn blocking_syntax(program: &ProgramFiles) -> (Vec<Diagnostic>, bool) {
         if f.is_lib {
             continue;
         }
-        syntax.extend(
-            syntax_only(f)
-                .cloned()
-                .map(|d| d.with_file(FileId(i as u32))),
-        );
+        syntax.extend(syntax_only(f).map(|d| d.with_file(FileId(i as u32))));
     }
     let blocking = syntax
         .iter()
@@ -225,15 +221,11 @@ pub fn blocking_syntax(program: &ProgramFiles) -> (Vec<Diagnostic>, bool) {
     (syntax, blocking)
 }
 
-/// A file's syntax diagnostics without its checker grammar errors.
-pub fn syntax_only(f: &SourceFile) -> impl Iterator<Item = &Diagnostic> {
-    let mut grammar = f.grammar.iter().peekable();
-    f.syntax.iter().filter(move |d| {
-        while grammar.peek().is_some_and(|g| g.span.start < d.span.start) {
-            grammar.next();
-        }
-        grammar.peek().is_none_or(|g| *g != *d)
-    })
+/// A file's syntax diagnostics as tsc reports them: without its checker grammar errors, with
+/// the `lenient` ones (octal escapes in strings), as the checker driver has them
+/// ([`ts_r_parser::tsc_syntax_errors`]).
+pub fn syntax_only(f: &SourceFile) -> impl Iterator<Item = Diagnostic> {
+    ts_r_parser::tsc_syntax_errors(&f.syntax, &f.grammar, &f.lenient).into_iter()
 }
 
 /// Global diagnostics of a program (unresolved `types` entries, ambiguous project roots).
@@ -452,9 +444,7 @@ impl History {
                     used: used_now.remove(&i).unwrap_or_default(),
                     diags,
                     syntax: syntax_only(f)
-                        .map(|d| {
-                            PathDiag::from_diag(program, &d.clone().with_file(FileId(i as u32)))
-                        })
+                        .map(|d| PathDiag::from_diag(program, &d.with_file(FileId(i as u32))))
                         .collect(),
                     references: references[i]
                         .iter()

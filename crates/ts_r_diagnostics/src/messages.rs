@@ -130,6 +130,7 @@ messages! {
     REST_ELEMENT_INITIALIZER = 1186 Error "A rest element cannot have an initializer.";
     REST_ELEMENT_PROPERTY_NAME = 2566 Error "A rest element cannot have a property name.";
     REST_ELEMENT_NOT_LAST = 2462 Error "A rest element must be last in a destructuring pattern.";
+    MAPPED_TYPE_MEMBERS = 7061 Error "A mapped type may not declare properties or methods.";
     MERGE_CONFLICT_MARKER = 1185 Error "Merge conflict marker encountered.";
     FILE_APPEARS_TO_BE_BINARY = 1490 Error "File appears to be binary.";
     DECLARATION_OR_STATEMENT_EXPECTED = 1128 Error "Declaration or statement expected.";
@@ -230,6 +231,7 @@ messages! {
     JSX_COMMA_EXPRESSION = 18007 Error "JSX expressions may not use the comma operator. Did you mean to write an array?";
     JSX_NO_CLOSING_TAG = 17008 Error "JSX element '{0}' has no corresponding closing tag.";
     JSX_EXPECTED_CLOSING_TAG = 17002 Error "Expected corresponding JSX closing tag for '{0}'.";
+    JSX_NAME_UNICODE_ESCAPE = 17021 Error "Unicode escape sequence cannot appear here.";
     JSX_FRAGMENT_NO_CLOSING = 17014 Error "JSX fragment has no corresponding closing tag.";
     JSX_EXPECTED_CLOSING_FRAGMENT = 17015 Error "Expected corresponding closing tag for JSX fragment.";
     ARROW_THIS_PARAMETER = 2730 Error "An arrow function cannot have a 'this' parameter.";

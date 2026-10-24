@@ -100,7 +100,9 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   errors like `check_program` (nothing checked, history unchanged). The parser's checker
   grammar errors (`SourceFile::grammar`) never block: a `FileState`'s `syntax` leaves them
   out and its `diags` carry them, so they are reported only for checked files, as
-  `check_program` does (`incremental::syntax_only`, `Ck::check_source_file`).
+  `check_program` does (`incremental::syntax_only`, `Ck::check_source_file`). Octal escapes
+  in strings (`SourceFile::lenient`) are in `grammar` but are syntax errors to tsc:
+  `syntax_only` keeps them, through `ts_r_parser::tsc_syntax_errors`, like the driver.
   Path-reference diagnostics are stored separately from syntax and semantic diagnostics;
   full checks and lazy replay use the checker's `reference_diagnostics` against the full
   program's paths, refreshing them when the source or its resolutions change.

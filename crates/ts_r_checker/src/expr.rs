@@ -532,17 +532,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // error, so not next to syntax errors or the call's TS1326
                 // (importWithTypeArguments).
                 let start = self.c.span(e).start;
+                let type_args = self
+                    .c
+                    .file(e.file)
+                    .grammar
+                    .iter()
+                    .any(|d| d.code == 1326 && d.span.start == start);
                 let no_dynamic = phase == ts_r_ast::ImportPhase::Evaluation
                     && self.c.opts.module == ts_r_config::ModuleKind::ES2015
                     && self.reporting(e.file)
                     && !self.c.file(e.file).kind.is_declaration()
                     && !self.has_syntax_errors(e.file)
-                    && !self
-                        .c
-                        .file(e.file)
-                        .grammar
-                        .iter()
-                        .any(|d| d.code == 1326 && d.span.start == start);
+                    && !type_args;
                 if no_dynamic {
                     self.error(
                         e,
@@ -569,6 +570,41 @@ impl<'c, 'a> Ck<'c, 'a> {
                         &[&shown],
                     );
                 }
+                use ts_r_config::ModuleKind as M;
+                let old_module = !matches!(
+                    self.c.opts.module,
+                    M::ESNext
+                        | M::Node16
+                        | M::Node18
+                        | M::Node20
+                        | M::NodeNext
+                        | M::Preserve
+                        | M::AMD
+                        | M::UMD
+                        | M::System
+                );
+                // `import(x,)` and `import(x, {},)`: TS1009 below the modules that take
+                // import attributes (checkGrammarImportCallExpression).
+                if old_module
+                    && !no_dynamic
+                    && !verbatim_cjs
+                    && !type_args
+                    && phase == ts_r_ast::ImportPhase::Evaluation
+                    && self.reporting(e.file)
+                    && !self.has_syntax_errors(e.file)
+                    && !self.c.file(e.file).kind.is_declaration()
+                    && let Some(comma) = trailing_comma_at(
+                        &self.c.file(e.file).text,
+                        self.c.span(at(options.unwrap_or(arg))).end as usize,
+                    )
+                {
+                    self.error_span(
+                        e.file,
+                        Span::new(comma as u32, comma as u32 + 1),
+                        dg::TRAILING_COMMA_NOT_ALLOWED_1009,
+                        &[],
+                    );
+                }
                 if let Some(o) = options {
                     let ot = self.check_expr(at(o));
                     // The options must fit the global `ImportCallOptions | undefined`.
@@ -579,22 +615,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let target = self.union2(g, TypeId::UNDEFINED);
                         self.check_assignable_with_elaboration(ot, target, at(o), None);
                     }
-                    use ts_r_config::ModuleKind as M;
                     if !no_dynamic
                         && self.reporting(e.file)
                         && !self.c.file(e.file).kind.is_declaration()
-                        && !matches!(
-                            self.c.opts.module,
-                            M::ESNext
-                                | M::Node16
-                                | M::Node18
-                                | M::Node20
-                                | M::NodeNext
-                                | M::Preserve
-                                | M::AMD
-                                | M::UMD
-                                | M::System
-                        )
+                        && old_module
                     {
                         self.error(
                             at(o),
@@ -697,6 +721,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .unwrap_or(TypeId::UNRESOLVED),
                     _ => TypeId::UNRESOLVED,
                 }
+            }
+            // `#x` alone (not `#x in o`, see `BinaryOp::In`): TS18016 outside a class,
+            // TS1451 inside (tsc: grammarchecks.go checkGrammarPrivateIdentifierExpression).
+            Node::PrivateName { .. } => {
+                self.private_name_grammar(e, false);
+                TypeId::UNRESOLVED
             }
             Node::Hole {} => TypeId::UNDEFINED,
             Node::Missing {} => TypeId::ERROR,
@@ -3903,6 +3933,31 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The class declaration enclosing a node.
+    /// The grammar errors of a `#name` expression (`in_left`: the left of `in`, where only
+    /// its place outside a class body is an error).
+    fn private_name_grammar(&mut self, e: Loc, in_left: bool) {
+        if !self.reporting(e.file) || self.has_syntax_errors(e.file) {
+            return;
+        }
+        let parent = self.c.file(e.file).parents().parent(e.node);
+        if self.enclosing_class(e).is_none() {
+            self.error(
+                e,
+                dg::PRIVATE_IDENTIFIERS_ARE_NOT_ALLOWED_OUTSIDE_CLASS_BODIES_18016,
+                &[],
+            );
+        } else if !in_left
+            // `for (#x in o)` is TS2406 instead.
+            && !parent.is_some_and(|p| matches!(self.ast(e.file).node(p), Node::ForIn { .. }))
+        {
+            self.error(
+                e,
+                dg::PRIVATE_IDENTIFIERS_ARE_ONLY_ALLOWED_IN_CLASS_BODIES_AND_MAY_ONLY_BE_USED_AS_PAR_1451,
+                &[],
+            );
+        }
+    }
+
     pub fn enclosing_class(&self, l: Loc) -> Option<Loc> {
         let ast = self.ast(l.file);
         let parents = self.c.file(l.file).parents();
@@ -7990,7 +8045,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 TypeId::BOOLEAN
             }
             BinaryOp::In => {
-                let lt = self.check_expr(ll);
+                let lt = if matches!(self.ast(ll.file).node(ll.node), Node::PrivateName { .. }) {
+                    self.private_name_grammar(ll, true);
+                    TypeId::UNRESOLVED
+                } else {
+                    self.check_expr(ll)
+                };
                 let rt = self.check_expr(rl);
                 let lt = self.check_non_null(ll, lt);
                 let rt = self.check_non_null(rl, rt);
@@ -10517,4 +10577,17 @@ pub(crate) enum IndexKeyKind {
 /// The `exports` identifier (the JavaScript CommonJS export object, by syntax).
 fn is_exports_identifier(ast: &ts_r_ast::Ast, n: NodeId) -> bool {
     crate::nodes::ident_text(ast, n) == Some("exports")
+}
+
+/// The position of a `,` right after `from` in `text` that only trivia separates from a
+/// closing `)` (an argument list's trailing comma).
+fn trailing_comma_at(text: &str, from: usize) -> Option<usize> {
+    use ts_r_lexer::{Lexer, TokenKind};
+    let mut lexer = Lexer::new(text);
+    lexer.seek(from as u32);
+    if lexer.next_token() != TokenKind::Comma {
+        return None;
+    }
+    let comma = lexer.token().span().start as usize;
+    (lexer.next_token() == TokenKind::RParen).then_some(comma)
 }

@@ -86,7 +86,7 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Area | Result |
 |---|---|
-| Type checker vs tsc's conformance suite (exact diagnostics) | 96.8% of 12,750 compared test variants |
+| Type checker vs tsc's conformance suite (exact diagnostics) | 96.9% of 12,750 compared test variants |
 | Public projects with exactly tsc's diagnostics (tRPC, date-fns, TypeORM, Playwright, RxJS, React Compiler) | 3 of 6: Playwright 2 extra; RxJS 6 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
 | Lint rule oracle (ESLint + typescript-eslint test cases) | 15,495 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,898 / 6,920) |
