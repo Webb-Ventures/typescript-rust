@@ -182,20 +182,17 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
         let new = e.build(&mut ast, at);
         build::replace(&mut ast, rec, new);
     }
-    // 5. `import.meta` outside ES modules.
-    if plan.import_meta_empty {
+    // 5. `import.meta` outside ES modules or below its target: the module's empty object
+    // (also as a JSX factory, which the transform builds as `import.meta`).
+    if !plan.import_meta.is_empty() {
         for raw in 1..count {
             let Some(id) = NodeId::from_raw(raw) else {
                 continue;
             };
-            if let Node::MetaProperty {
-                kind: MetaPropKind::ImportMeta,
-            } = ast.node(id)
-            {
+            if is_import_meta(&ast, id) {
                 let at = ast.span(id).start;
-                let o = build::object(&mut ast, &[], at);
-                let p = build::paren(&mut ast, o, at);
-                build::replace(&mut ast, id, p);
+                let x = build::ident(&mut ast, &plan.import_meta, at);
+                build::replace(&mut ast, id, x);
             }
         }
     }
@@ -550,4 +547,63 @@ fn hoist(ast: &mut Ast, stmts: &[NodeId]) -> (Vec<NodeId>, Vec<NodeId>) {
     }
     outside.extend(fns);
     (outside, inside)
+}
+
+/// `import.meta`, or the `import.meta` member a JSX factory is built as (no identifier is
+/// named `import`).
+pub(crate) fn is_import_meta(ast: &Ast, id: NodeId) -> bool {
+    match *ast.node(id) {
+        Node::MetaProperty {
+            kind: MetaPropKind::ImportMeta,
+        } => true,
+        Node::Member {
+            obj,
+            optional: false,
+            prop,
+        } => {
+            matches!(*ast.node(obj), Node::Ident { name } if ast.atom(name) == "import")
+                && matches!(*ast.node(prop), Node::Ident { name } if ast.atom(name) == "meta")
+        }
+        _ => false,
+    }
+}
+
+/// Non-bundle output with `import-meta` unsupported: every `import.meta` becomes a module-level
+/// empty object, `const import_meta = {};` (`var` when `const` is unsupported too), declared
+/// after the directives, as esbuild does.
+pub(crate) fn empty_import_meta(ast: &mut Ast, kind: VarKind) {
+    let count = ast.nodes.len() as u32;
+    let uses: Vec<NodeId> = (1..count)
+        .filter_map(NodeId::from_raw)
+        .filter(|&id| is_import_meta(ast, id))
+        .collect();
+    if uses.is_empty() {
+        return;
+    }
+    let taken = |n: &str| {
+        ast.nodes
+            .iter()
+            .any(|x| matches!(*x, Node::Ident { name } if ast.atom(name) == n))
+    };
+    let mut name = "import_meta".to_owned();
+    let mut i = 2;
+    while taken(&name) {
+        name = format!("import_meta{i}");
+        i += 1;
+    }
+    for id in uses {
+        let at = ast.span(id).start;
+        let x = build::ident(ast, &name, at);
+        build::replace(ast, id, x);
+    }
+    let o = build::object(ast, &[], 0);
+    let id = build::ident(ast, &name, 0);
+    let decl = build::var_decl(ast, kind, id, Some(o), 0);
+    let mut stmts = build::program_stmts(ast);
+    let at = stmts
+        .iter()
+        .take_while(|&&s| ast.kind(s) == NodeKind::Directive)
+        .count();
+    stmts.insert(at, decl);
+    build::set_program(ast, &stmts);
 }

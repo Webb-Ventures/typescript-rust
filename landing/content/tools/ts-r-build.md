@@ -31,10 +31,13 @@ esbuild, it strips types without checking them. Run [ts-r-check](ts-r-check.md) 
   not followed.
 - No serve mode with `--watch`, and no legal-comment extraction.
 - No `--mangle-props`, `--drop`, `--pure` or `--keep-names`.
-- No syntax lowering: targets below ES2022 are rejected.
+- Syntax lowering goes through tsc 7's down-level passes, so ES2015 is the lowest output.
+  With `--target=es5` (or `--supported:<feature>=false` for an ES2015 feature) `const`,
+  classes, destructuring and similar syntax are errors, as in esbuild; arrows and template
+  literals are kept as written.
 - IIFE output isn't re-indented, and runtime helpers are repeated per chunk.
 - Not implemented: `import defer` and `import source`, glob `require` and `import()` of
-  template strings, imports of `data:` JavaScript, `with { type }` loader overrides, Yarn PnP.
+  template strings, Yarn PnP.
 - Minified output is about 3% larger than esbuild's.
 
 The full list is in the design record, [0008 bundler](../../../docs/design/0008-bundler.md).
@@ -58,7 +61,7 @@ Simple options:
   --platform=...            Platform target (browser | node | neutral)
   --sourcemap               Emit a source map
   --splitting               Enable code splitting (requires --format=esm)
-  --target=...              Environment target (es2022, esnext, node18, chrome110, ...)
+  --target=...              Environment target (es5..es2025, esnext, node18, chrome110, ...)
   --watch                   Rebuild when a source file changes
 
 Advanced options:
@@ -82,10 +85,11 @@ Advanced options:
   --minify-syntax           Use equivalent but shorter syntax
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
-  --public-path=...         Prefix for file-loader URLs
+  --public-path=...         Prefix for file-loader URLs and chunk imports
   --resolve-extensions=...  Comma-separated list of implicit extensions
   --sourcemap=...           linked | external | inline | both
   --sources-content=false   Omit sourcesContent in source maps
+  --supported:F=false       Treat syntax feature F (esbuild's names) as unsupported
   --tree-shaking=...        Force tree shaking on or off (true | false)
   --tsconfig=...            Use this tsconfig.json instead of the nearest one
   --threads=N               Worker threads (default: TS_R_THREADS or all cores, max 8)
@@ -97,7 +101,9 @@ The flags mean what they mean in esbuild. Where ts-r differs:
 - Unknown flags are errors. A few esbuild flags that only change cosmetics, such as
   `--charset`, are accepted and ignored.
 - Without `--outfile` or `--outdir`, the bundle goes to stdout.
-- `--target` must allow at least ES2022. Older targets are an error, not a down-level.
+- `--target` and `--supported` lower through tsc 7's down-level passes, one ECMAScript year
+  at a time: an unsupported feature lowers everything newer than the year before it arrived,
+  so the output may lower more than esbuild's.
 - `--threads` defaults to the `TS_R_THREADS` environment variable, else the number of cores,
   capped at 8.
 - `--no-cache` skips the persistent cache (the `build` namespace in `~/.cache/ts-r`).
@@ -136,8 +142,9 @@ agree: both load in Node with the same exports; ts-r's is 2.2% larger.
 
 Correctness:
 
-- esbuild's end-to-end bundler tests, run against ts-r-build: 742 of 779 compared cases
-  pass (95.3%).
+- esbuild's end-to-end bundler tests, run against ts-r-build: 832 of 872 compared cases
+  pass (95.4%); 13 of the 40 failures are intended differences where ts-r-build follows
+  tsc 7.
 - Ecosystem bundle stage: 844 packages pass and 71 fail (92.2%). Minified output is 3.1%
   larger than esbuild's in total, with a median per-package ratio of 1.048.
 

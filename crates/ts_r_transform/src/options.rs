@@ -82,6 +82,9 @@ pub struct TransformOptions {
     /// separators by its value (`10_000` → `10000`, `0xFF_FF` → `65535`; observed). Others
     /// keep their source text.
     pub strip_numeric_separators: bool,
+    /// The name an anonymous `export default class` gets when lowering has to name it
+    /// (`None`: tsc's `default_1`). The bundler passes its `<file>_default`.
+    pub default_class_name: Option<String>,
 }
 
 impl Default for TransformOptions {
@@ -115,6 +118,7 @@ impl Default for TransformOptions {
             cjs_extension: false,
             preserve_module_marker: true,
             strip_numeric_separators: false,
+            default_class_name: None,
         }
     }
 }
@@ -200,6 +204,7 @@ impl TransformOptions {
             cjs_extension: ext_cjs,
             preserve_module_marker: true,
             strip_numeric_separators: o.target().is_none_or(|t| t < ScriptTarget::ES2021),
+            default_class_name: None,
         }
     }
 

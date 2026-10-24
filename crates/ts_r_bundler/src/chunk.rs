@@ -1,13 +1,14 @@
 //! Chunk assembly: wraps printed fragments with the chunk's imports, runtime helpers,
 //! namespace objects, entry exports and format wrapper, and concatenates source maps.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
 use crate::expr::Expr;
 use crate::graph::{Graph, ModuleId};
 use crate::options::{BuildOptions, Format};
-use crate::plan::{Plan, relative_import};
+use crate::plan::{Plan, chunk_import};
 use crate::print::Fragment;
 use crate::sourcemap::{ChunkMap, encode_fragment};
 
@@ -113,6 +114,7 @@ pub fn assemble(
     fragments: &[Option<Arc<Fragment>>],
     opts: &BuildOptions,
     threads: usize,
+    outbase: &str,
 ) -> ChunkOutput {
     let c = &plan.chunks[ci];
     let compact = opts.minify_whitespace;
@@ -219,7 +221,7 @@ pub fn assemble(
             }
         }
         for (oc, names) in &c.imports {
-            let path = relative_import(&c.file, &plan.chunks[*oc].file);
+            let path = chunk_import(&c.file, &plan.chunks[*oc].file, &opts.public_path);
             if names.is_empty() {
                 out.stmt(&format!("import{sp}{};", q(&path)));
             } else {
@@ -274,8 +276,8 @@ pub fn assemble(
         out.stmt(h);
     }
     let mut map = (opts.sourcemap != crate::options::SourceMapMode::None).then(ChunkMap::new);
-    let map_dir =
-        ts_r_config::path::directory_of(&format!("{}/{}", plan.outdir, c.file)).to_owned();
+    let file = format!("{}/{}", plan.outdir, c.file);
+    let map_dir = ts_r_config::path::directory_of(&file).to_owned();
     // Per fragment, in parallel: where its code ends (lines and last-line columns), and with
     // a map its re-encoded mappings, source path and escaped `sourcesContent` (the costly
     // part of a big chunk's map). They are joined in order below.
@@ -295,11 +297,23 @@ pub fn assemble(
     let measured = crate::pool::map(threads, work, |i| {
         let (m, f) = frags[i];
         let module = &graph.modules[m as usize];
-        let size = Measure::of(&f.code);
+        // Resolve a file loader's URL in its small fragment, before copying it into the chunk.
+        let code = if let Some(a) = &module.source.asset {
+            let rel = crate::bundle::asset_path(&a.rel_path, &module.path, outbase);
+            let url =
+                crate::bundle::asset_url(&plan.outdir, &file, &rel, &opts.public_path) + &a.query;
+            let mut quoted = String::new();
+            ts_r_codegen::literals::quote_string(&url, '"', &mut quoted);
+            Cow::Owned(f.code.replace(&format!("\"{}\"", a.placeholder), &quoted))
+        } else {
+            Cow::Borrowed(f.code.as_str())
+        };
+        let size = Measure::of(&code);
         let map = match (&f.map, &ids[i]) {
             (Some(fm), Some(ids)) => {
-                let rel = if ts_r_config::path::is_rooted(&module.path) {
-                    ts_r_config::path::relative(&map_dir, &module.path, true)
+                let file = crate::graph::split_query(&module.path).0;
+                let rel = if ts_r_config::path::is_rooted(file) {
+                    ts_r_config::path::relative(&map_dir, file, true)
                 } else {
                     module.pretty.clone()
                 };
@@ -312,11 +326,11 @@ pub fn assemble(
             }
             _ => None,
         };
-        (size, map)
+        (code, size, map)
     });
     out.code
         .reserve(frags.iter().map(|(_, f)| f.code.len()).sum::<usize>() + 64);
-    for ((m, f), (size, fmap)) in frags.iter().zip(measured) {
+    for ((m, _), (code, size, fmap)) in frags.iter().zip(measured) {
         let module = &graph.modules[*m as usize];
         if !compact {
             out.line(&format!("// {}", module.pretty));
@@ -326,7 +340,7 @@ pub fn assemble(
             cm.add_encoded(out.line, out.col, si, &enc);
         }
         let start = out.code.len();
-        out.push_measured(&f.code, size);
+        out.push_measured(&code, size);
         result.module_bytes.push((*m, out.code.len() - start));
     }
     for t in &c.tail {

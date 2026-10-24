@@ -500,6 +500,9 @@ impl Resolver {
         if self.is_external_spec(spec) {
             return Resolution::External(spec.to_owned());
         }
+        if spec.starts_with(crate::data_url::PREFIX) && crate::data_url::loader(spec).is_some() {
+            return Resolution::File(spec.to_owned());
+        }
         if spec.starts_with("data:")
             || spec.starts_with("http://")
             || spec.starts_with("https://")
@@ -543,7 +546,11 @@ impl Resolver {
                         && i > 0
                         && let Resolution::File(f) = self.resolve_uncached(&spec[..i], dir, kind)
                     {
-                        return Resolution::File(f);
+                        return Resolution::File(format!(
+                            "{f}{}{}",
+                            crate::graph::QUERY_SEP,
+                            &spec[i..]
+                        ));
                     }
                     Resolution::NotFound(format!("Could not resolve {spec:?}"))
                 }
