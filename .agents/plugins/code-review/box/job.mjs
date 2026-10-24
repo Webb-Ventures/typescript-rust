@@ -11,9 +11,11 @@
 //   codex    no token, OpenAI-only egress     fix in a writable checkout (its git directory is
 //                                             read-only); build and test offline
 //   commit   no token, no network             commit the edits as the App's bot user
-//   push     GitHub token (write), internet  push the commit, reply on and resolve the threads,
-//                                            approve when no finding is left, then merge the
-//                                            commit into the PRs stacked on this one (ci/stack.cjs)
+//   push     GitHub token (write), internet  push the commit (merging the branch's new head into
+//                                            it first if the branch moved on, ci/catchup.cjs),
+//                                            reply on and resolve the threads, approve when no
+//                                            finding is left, then merge the pushed head into the
+//                                            PRs stacked on this one (ci/stack.cjs)
 // And on its own:
 //   resolve  GitHub token (write), internet  resolve or reopen every finding, or refresh the summary;
 //                                            either way the verdict follows the findings; or, with
@@ -37,6 +39,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const require = createRequire(import.meta.url);
 const review = require('./ci/github.cjs');
 const stack = require('./ci/stack.cjs');
+const catchup = require('./ci/catchup.cjs');
 
 const env = process.env;
 const [owner, repo] = env.REPO.split('/');
@@ -312,11 +315,15 @@ function commit() {
   console.log(`Committed ${sha}:\n${staged}`);
 }
 
-// Pushes the fix commit to the PR branch (a fast-forward of the head that was fixed, so it fails
-// if the branch moved on), then replies on and resolves the threads.
+// Pushes the fix commit to the PR branch as a fast-forward of the head that was fixed. If the
+// branch moved on while Codex worked, merges its new head into the fix and pushes the merge
+// (ci/catchup.cjs); a conflict, a rewritten branch or one that keeps moving pushes nothing. Then
+// replies on and resolves the threads, leaving open the fixed ones whose lines the merged
+// commits changed.
 async function push() {
   // A failed fix may have stopped before prepare wrote anything; applyFixes reports it either way.
   env.FIXES_PATH = env.FIX_OUTCOME === 'success' ? `${job}/out/result.json` : '/nonexistent';
+  const github = await octokit();
   if (env.FIX_OUTCOME === 'success') {
     const info = JSON.parse(fs.readFileSync(`${job}/in/pr.json`, 'utf8'));
     const { commit: sha, diffs } = JSON.parse(fs.readFileSync(`${job}/out/commit.json`, 'utf8'));
@@ -326,26 +333,16 @@ async function push() {
     if (sha && info.head_repo !== `${owner}/${repo}`) {
       env.FIX_ERROR = `the PR's branch is in \`${info.head_repo}\`; fixes are only pushed to branches of this repository.`;
     } else if (sha) {
-      const pushed = spawnSync('git', [...authHeader(), '-c', 'core.hooksPath=/dev/null', 'push', '--porcelain',
-        `https://github.com/${owner}/${repo}.git`, `${sha}:refs/heads/${info.head_ref}`], {
-        encoding: 'utf8', env: { ...env, GIT_DIR: `${job}/git`, GIT_TERMINAL_PROMPT: '0' },
-      });
-      // Only git's own output is logged: the command line carries the token.
-      console.log(pushed.stdout, pushed.stderr);
-      if (pushed.status === 0) env.FIX_COMMIT = sha;
-      else env.FIX_ERROR = /non-fast-forward|fetch first|rejected/.test(pushed.stdout + pushed.stderr)
-        ? `\`${info.head_ref}\` moved on while Codex worked; tick the box again to fix the new head.`
-        : 'GitHub refused the push (see the box logs).';
+      await pushFix(github, info, sha);
     }
   }
-  const github = await octokit();
   await review.applyFixes({ github, context: context('fix'), core });
   // 3: GitHub refused the push and the summary says why (the dispatcher keeps the fix).
   if (env.FIX_ERROR) process.exitCode = 3;
   if (env.FIX_COMMIT) {
     const info = JSON.parse(fs.readFileSync(`${job}/in/pr.json`, 'utf8'));
     try {
-      await stack.mergeUpStack({ github, owner, repo, pr: number, branch: info.head_ref, sha: env.FIX_COMMIT, git: stackGit(), core });
+      await stack.mergeUpStack({ github, owner, repo, pr: number, branch: info.head_ref, sha: env.FIX_HEAD || env.FIX_COMMIT, git: stackGit(), core });
     } catch (error) {
       // The fix is pushed and answered; a failure here only leaves the stack for a person.
       core.warning(`merging up the stack stopped: ${error.message}`);
@@ -353,50 +350,105 @@ async function push() {
   }
 }
 
-// Git for merging a fix up the stack, without a checkout: a bare repository in /tmp (the job's
-// git directory is read-only here) that borrows the job's objects, fetches each branch above,
-// merges with merge-tree and pushes the merge commit as a fast-forward.
-function stackGit() {
-  const dir = '/tmp/stack.git';
-  if (!fs.existsSync(dir)) {
-    git(['init', '--quiet', '--bare', dir]);
-    fs.writeFileSync(`${dir}/objects/info/alternates`, `${job}/git/objects\n`);
+// Sets FIX_COMMIT (and FIX_HEAD and FIX_MERGE_PATH when the branch's new commits were merged in
+// first), or FIX_ERROR.
+async function pushFix(github, info, sha) {
+  const branch = info.head_ref;
+  const short = (s) => s.slice(0, 7);
+  const commits = (n) => `${n} new commit${n === 1 ? '' : 's'}`;
+  const message = (head, count) => [
+    `Merge ${branch} head ${short(head)} into the review fixes`,
+    '',
+    `${branch} moved on while Codex fixed the review findings (${commits(count)} since ${short(info.head_sha)}),`,
+    `so the review bot merged its new head into the fix commit ${short(sha)} before pushing.`,
+    '',
+    `Requested by @${env.ACTOR} with "fix and resolve all".`,
+    '',
+  ].join('\n');
+  let outcome;
+  try {
+    outcome = catchup.pushFix({ git: sharedGit(), branch, fix: sha, base: info.head_sha, message });
+  } catch (error) {
+    core.error(error.message);
+    outcome = { status: 'failed' };
   }
-  const run = (args, options = {}) => spawnSync('git', ['--git-dir', dir, '-c', 'core.hooksPath=/dev/null', ...args], {
-    encoding: 'utf8', maxBuffer: 64 << 20, ...options, env: { ...env, GIT_TERMINAL_PROMPT: '0', ...options.env },
+  console.log(`push of ${short(sha)} to ${branch}: ${JSON.stringify(outcome)}`);
+  const again = 'tick the box again to fix the new head.';
+  switch (outcome.status) {
+    case 'pushed':
+      env.FIX_COMMIT = sha;
+      if (outcome.head !== sha) env.FIX_HEAD = outcome.head;
+      return;
+    case 'merged': {
+      env.FIX_COMMIT = sha;
+      env.FIX_HEAD = outcome.head;
+      // The fixed findings whose lines the merged commits changed: replied to, left open.
+      const { results } = JSON.parse(fs.readFileSync(`${job}/out/result.json`, 'utf8'));
+      const files = new Map(results.filter((r) => r.status === 'fixed')
+        .map((r) => [r.id, (r.files ?? []).filter((f) => typeof f === 'string' && f && !f.startsWith('-'))]));
+      let stale;
+      try {
+        const findings = (await review.listThreads(github, owner, repo, number))
+          .filter((t) => !t.resolved && files.has(t.finding.id))
+          .map(({ finding: f, commit }) => ({ id: f.id, path: f.path, start_line: f.start_line, end_line: f.end_line, commit, files: files.get(f.id) }));
+        stale = catchup.staleFindings({ git: sharedGit(), base: info.head_sha, fix: sha, incoming: outcome.incoming, findings });
+      } catch (error) {
+        // Unsure which lines moved: resolve none of them.
+        core.warning(`could not compare the fixed lines with the merged commits: ${error.message}`);
+        stale = [...files.keys()];
+      }
+      fs.writeFileSync('/tmp/merge.json', JSON.stringify({ branch, head: outcome.head, incoming: outcome.incoming, count: outcome.count, stale }));
+      env.FIX_MERGE_PATH = '/tmp/merge.json';
+      return;
+    }
+    case 'conflict': {
+      const files = outcome.files.slice(0, 10).map((f) => `\`${f}\``).join(', ');
+      const more = outcome.files.length > 10 ? ` and ${outcome.files.length - 10} more` : '';
+      env.FIX_ERROR = `\`${branch}\` moved on while Codex worked (${commits(outcome.count)}, up to \`${short(outcome.incoming)}\`), and merging ${outcome.count === 1 ? 'it' : 'them'} into the fixes conflicts${files ? ` in ${files}${more}` : ''}; ${again}`;
+      return;
+    }
+    case 'rewritten':
+      env.FIX_ERROR = `\`${branch}\` was rewritten while Codex worked (its new head \`${short(outcome.incoming)}\` does not contain \`${short(info.head_sha)}\`, the head that was fixed), so the fixes were not merged into it; ${again}`;
+      return;
+    case 'workflows':
+      env.FIX_ERROR = `\`${branch}\` moved on while Codex worked, and merging its ${commits(outcome.count)} into the fixes would change \`.github/workflows\`, which the review bot may not push; ${again}`;
+      return;
+    case 'moved':
+      env.FIX_ERROR = `\`${branch}\` kept moving while Codex worked: it moved again after each of ${outcome.attempts} merges of its new head into the fixes; ${again}`;
+      return;
+    case 'unfetchable':
+      env.FIX_ERROR = `\`${branch}\` moved on while Codex worked, and its new head could not be fetched to merge it into the fixes; ${again}`;
+      return;
+    case 'failed':
+      env.FIX_ERROR = `git failed before anything was pushed to \`${branch}\` (see the box logs); ${again}`;
+      return;
+    default:
+      env.FIX_ERROR = 'GitHub refused the push (see the box logs).';
+  }
+}
+
+// Git for the push step, without a checkout: a bare repository in /tmp (the job's git directory
+// is read-only here) that borrows the job's objects. It pushes the fix, merges a moved branch into
+// it, and merges the result up the stack, all with merge-tree and plain (never forced) pushes.
+let shared = null;
+function sharedGit() {
+  shared ??= catchup.bareGit({
+    dir: '/tmp/stack.git', objects: `${job}/git/objects`, url: `https://github.com/${owner}/${repo}.git`,
+    auth: authHeader(), identity: { name: env.BOT_NAME, email: env.BOT_EMAIL },
   });
-  const url = `https://github.com/${owner}/${repo}.git`;
+  return shared;
+}
+
+// The git work of merging a fix up the stack (ci/stack.cjs), each branch fetched to its own ref.
+function stackGit() {
+  const g = sharedGit();
   return {
-    fetch(pr, branch) {
-      const ref = `refs/stack/${pr}`;
-      const fetched = run([...authHeader(), 'fetch', '--quiet', '--no-tags', url, `+refs/heads/${branch}:${ref}`]);
-      if (fetched.status !== 0) return null;
-      return run(['rev-parse', ref]).stdout.trim() || null;
-    },
-    contains: (commit, sha) => run(['merge-base', '--is-ancestor', sha, commit]).status === 0,
-    merge(ours, theirs) {
-      const merged = run(['merge-tree', '--write-tree', '--name-only', '--no-messages', ours, theirs]);
-      const lines = merged.stdout.split('\n').filter(Boolean);
-      if (merged.status === 0) return { tree: lines[0] };
-      if (merged.status === 1) return { conflicts: [...new Set(lines.slice(1))] };
-      throw new Error(`git merge-tree failed (exit ${merged.status})`);
-    },
-    touches: (commit, tree, p) => run(['diff-tree', '-r', '--name-only', commit, tree, '--', p]).stdout.trim() !== '',
-    commit(tree, parents, message) {
-      const made = run(['commit-tree', tree, ...parents.flatMap((p) => ['-p', p])], {
-        input: message,
-        env: { GIT_AUTHOR_NAME: env.BOT_NAME, GIT_AUTHOR_EMAIL: env.BOT_EMAIL, GIT_COMMITTER_NAME: env.BOT_NAME, GIT_COMMITTER_EMAIL: env.BOT_EMAIL },
-      });
-      if (made.status !== 0) throw new Error(`git commit-tree failed (exit ${made.status})`);
-      return made.stdout.trim();
-    },
-    push(sha, branch) {
-      // Not forced: GitHub takes it only as a fast-forward of the branch as it was fetched.
-      const pushed = run([...authHeader(), 'push', '--porcelain', url, `${sha}:refs/heads/${branch}`]);
-      // Only git's own output is logged: the command line carries the token.
-      console.log(pushed.stdout, pushed.stderr);
-      return pushed.status === 0;
-    },
+    fetch: (pr, branch) => g.fetch(branch, `refs/stack/${pr}`),
+    contains: g.contains,
+    merge: g.merge,
+    touches: g.touches,
+    commit: g.commit,
+    push: (sha, branch) => g.push(sha, branch).ok,
   };
 }
 

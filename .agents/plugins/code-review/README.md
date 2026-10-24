@@ -24,6 +24,7 @@ records, and the checklists in `skills/ts-r-review/references/`.
 | `ci/prompt.md`, `ci/findings.schema.json` | CI prompt and the JSON shape findings come back in |
 | `ci/github.cjs` | Posts findings as review threads, keeps the summary comment, resolves in bulk |
 | `ci/bench.cjs` | Keeps the bench comment: progress line, PR-vs-base tables, gate verdict |
+| `ci/catchup.cjs`, `ci/stack.cjs` | After a fix: merge a branch that moved on into it before pushing, then merge it up the stack |
 | `box/` | The review box: dispatcher, job containers, egress proxy, compose file, install script, GitHub App setup |
 
 ## Use it locally
@@ -121,6 +122,24 @@ Resolving:
   first; Codex then builds, tests, lints and formats what it touched before reporting a fix,
   through a separate runner container (below).
   It cannot add a new dependency (it reports that finding as not fixed and names it).
+- **The branch moved on while Codex worked** (someone pushed, or merged `main` in): the bot
+  fetches the new head, merges it into its fix commit (`Merge <branch> head <sha> into the
+  review fixes`, a merge commit with the fix as first parent, as `ts-r-review[bot]` like the
+  fix itself) and pushes that with a plain push. It never rebases or force-pushes. If the
+  branch moves again before the push lands, it fetches and merges again, up to 3 times
+  (`MERGE_ATTEMPTS` in `ci/catchup.cjs`). The summary says the fix was pushed and how many new
+  commits were merged (a merge of `main` counts as one). Before resolving, each fixed thread
+  is checked against the merged commits: if they changed the finding's own lines, or the
+  lines the fix changed in its files (an identical change on both sides counts, even without
+  a textual conflict), the thread gets the usual reply, says the branch changed those lines,
+  and stays open for a person to check. Nothing is pushed, and nothing is resolved, when:
+  - merging conflicts (the summary lists the files);
+  - the branch was rewritten (its new head no longer contains the head Codex fixed);
+  - it kept moving through every retry;
+  - the merge would change `.github/workflows`.
+
+  Tick the box again to fix the new head. The merge is done with `git merge-tree` in a bare
+  repository, with hooks off and nothing checked out, so nothing in the incoming commits runs.
 - **Stacks:** after a fix is pushed, the bot merges it up the stack, as a person would by
   hand. Every open PR from this repository whose base is the fixed branch gets a merge commit
   of it (`Merge <below> into <branch>`, as `ts-r-review[bot]`), pushed as a fast-forward of
@@ -172,7 +191,7 @@ GitHub event -> Actions job (joins tailnet, POSTs {run_id, pr, comment_id, repo}
 | `codex` (fix) | none | OpenAI only | edits a writable checkout (its git directory stays read-only); no toolchain, npm or installed dependencies, so it builds and tests through `box-run` |
 | `runner` (fix) | none, and no Codex login | none | runs the commands Codex sends with `box-run` (builds, tests, lints, formatters, package scripts) on the shared checkout, offline |
 | `commit` | none | none | commits the edits as `ts-r-review[bot]` (never workflow files) |
-| `push` | write | internet | pushes the commit as a fast-forward of the fixed head, replies on and resolves threads, approves when none is left, merges the commit up the stack |
+| `push` | write | internet | pushes the commit as a fast-forward of the fixed head (or, if the branch moved on, a merge of its new head into the commit), replies on and resolves threads, approves when none is left, merges the pushed head up the stack |
 | `resolve` | write | internet | resolves or reopens every finding, or refreshes the summary; brings the verdict in line |
 | `bench-prepare` | read | internet | refreshes the repo cache, picks the base commit (the base branch's tip) |
 | `bench-checkout` | none | none | checks the PR and its base out in `bench/` (git directories outside the checkouts) |
@@ -276,8 +295,11 @@ Logs: `docker logs ts-r-review-dispatcher-1` and `/srv/ts-r-review/logs/`.
   none of its tokens before anything is posted or pushed. If the login cannot be read, nothing
   runs.
 - For fixes, git runs with the git directory named explicitly and hooks off, so nothing Codex
-  writes into the checkout can change what the commit and push steps do. A push only
-  fast-forwards the head Codex fixed; if the branch moved on, nothing is pushed.
+  writes into the checkout can change what the commit and push steps do. A push is never
+  forced: it fast-forwards the head Codex fixed or, if the branch moved on, the branch's new
+  head, merged into the fix with `git merge-tree` in a bare repository (no checkout, hooks off,
+  so nothing from the new commits runs). The cache holds full history, so no deeper fetch is
+  needed.
 - GitHub App installation tokens are minted per step with only that step's permissions and
   expire within the hour. The App needs Contents write only because GitHub requires it to
   resolve review threads; `GITHUB_TOKEN` cannot. Approving and requesting changes need only
@@ -368,4 +390,6 @@ The box runs what the old Actions job ran, on a quieter machine:
   `CODEX_VERSION` and `RUST_TOOLCHAIN` in `box/Dockerfile` (keep the latter in step with
   `rust-toolchain.toml`, then re-run `box/install.sh`).
 - Output shape: `ci/findings.schema.json` and `ci/github.cjs` together.
-- Tests: `node --test .agents/plugins/code-review/ci/*.test.cjs` (an in-memory GitHub, and git for `stack.test.cjs`).
+- Tests: `node --test .agents/plugins/code-review/ci/*.test.cjs` (an in-memory GitHub and git for
+  `github.test.cjs` and `stack.test.cjs`; real git against a bare repository in a temp dir for
+  `catchup.test.cjs`).
