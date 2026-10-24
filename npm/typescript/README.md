@@ -32,12 +32,14 @@ or `npm install --save-dev typescript@7 @ts-r.dev/typescript@next`. Run it as
 
 ```jsonc
 "devDependencies": {
-  "typescript": "npm:@ts-r.dev/typescript@7.0.1000-alpha.3",
+  "typescript": "npm:@ts-r.dev/typescript@next",
   "typescript-real": "npm:typescript@^7.0.0"
 }
 ```
 
-(`npm:@ts-r.dev/typescript@next` works too.) The `typescript-real` alias is how the drop-in
+(An exact version works too, from the first release after `7.0.1000-alpha.3`: alpha.3 and
+earlier were published with a `typescript` peer range that fails this install with `ERESOLVE`;
+see [Versions](#versions).) The `typescript-real` alias is how the drop-in
 finds your TypeScript when it occupies the `typescript` name itself. Tools that find
 TypeScript by resolving `typescript` from your project, such as `next build`, only use the
 drop-in this way (see [Next.js](#nextjs)).
