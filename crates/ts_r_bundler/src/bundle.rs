@@ -314,6 +314,10 @@ impl BuildContext {
             ..BuildResult::fail(m)
         };
         let mut messages = graph.messages.clone();
+        for mut m in self.prep.resolver.package_json_errors() {
+            m.file = m.file.map(|f| pretty_path(&self.opts.working_dir, &f));
+            messages.push(m);
+        }
         let mut stats = BuildStats {
             modules: graph.modules.len(),
             parsed: gctx.parsed.load(std::sync::atomic::Ordering::Relaxed),

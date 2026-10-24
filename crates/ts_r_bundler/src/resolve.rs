@@ -65,14 +65,59 @@ pub struct Package {
     pub exports: Option<Value>,
     pub imports: Option<Value>,
     pub side_effects: SideEffects,
+    /// The first place the file is not strict JSON (a comment or a trailing comma): esbuild
+    /// fails the build on it, as Node does, while tsc tolerates both. File is absolute.
+    pub syntax_error: Option<crate::Message>,
+}
+
+/// The first comment or trailing comma in `text`, outside strings: what strict JSON rejects
+/// but the JSONC parser accepts.
+fn strict_json_error(text: &str) -> Option<(u32, &'static str)> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    while i < b.len() {
+        let c = b[i];
+        if in_string {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_string = false,
+                _ => {}
+            }
+        } else {
+            match c {
+                b'"' => in_string = true,
+                b'/' if matches!(b.get(i + 1), Some(b'/' | b'*')) => {
+                    return Some((i as u32, "JSON does not support comments"));
+                }
+                b',' => {
+                    let next = b[i + 1..].iter().find(|c| !c.is_ascii_whitespace());
+                    if matches!(next, Some(b'}' | b']')) {
+                        return Some((i as u32, "JSON does not support trailing commas"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 impl Package {
-    fn parse(dir: &str, text: &str) -> Option<Package> {
+    fn parse(dir: &str, file: &str, text: &str) -> Option<Package> {
         let root = jsonc::parse(text, "package.json").root?;
         root.as_object()?;
         let mut p = Package {
             dir: dir.to_owned(),
+            syntax_error: strict_json_error(text).map(|(pos, msg)| {
+                crate::LineIndex::new(text).message(
+                    crate::Severity::Error,
+                    file,
+                    pos,
+                    msg.to_owned(),
+                )
+            }),
             name: root.get("name").and_then(Value::as_str).map(str::to_owned),
             is_module: root.get("type").and_then(Value::as_str) == Some("module"),
             ..Package::default()
@@ -1035,13 +1080,26 @@ impl Resolver {
         let p = self
             .fs
             .read_file(&file)
-            .and_then(|t| Package::parse(dir, &t))
+            .and_then(|t| Package::parse(dir, &file, &t))
             .map(Arc::new);
         self.packages
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .insert(dir.to_owned(), p.clone());
         p
+    }
+
+    /// The strict-JSON errors of every `package.json` read so far, by file. Their `file` is
+    /// absolute.
+    pub fn package_json_errors(&self) -> Vec<crate::Message> {
+        let packages = self.packages.read().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<crate::Message> = packages
+            .values()
+            .flatten()
+            .filter_map(|p| p.syntax_error.clone())
+            .collect();
+        out.sort_by(|a, b| a.file.cmp(&b.file));
+        out
     }
 
     /// The nearest `package.json` at or above `dir`.

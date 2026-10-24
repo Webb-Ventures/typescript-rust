@@ -1634,3 +1634,45 @@ fn a_css_entry_without_bundling_is_a_css_output() {
     assert_eq!(file(&r, "/proj/out/entry.css"), "a { color: red }\n");
     assert!(file(&r, "/proj/out/entry.js").contains("x = 1"));
 }
+
+#[test]
+fn package_json_must_be_strict_json_when_bundling() {
+    // esbuild (like Node) fails on a comment or a trailing comma in package.json, where tsc
+    // and the tsconfig reader accept both.
+    let build = |pkg: &str| {
+        let fs = project(&[
+            ("entry.js", "import fn from 'demo';\nconsole.log(fn());\n"),
+            ("node_modules/demo/package.json", pkg),
+            ("node_modules/demo/index.js", "module.exports = () => 1;\n"),
+        ]);
+        let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+            .expect("options")
+            .build();
+        r.errors()
+            .map(|m| format!("{}: {}", m.file.clone().unwrap_or_default(), m.text))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        build("{\n  // note\n  \"a\": 1\n}"),
+        ["node_modules/demo/package.json: JSON does not support comments"]
+    );
+    assert_eq!(
+        build("{ \"a\": [1, 2,], \"b\": \"//,}\" }"),
+        ["node_modules/demo/package.json: JSON does not support trailing commas"]
+    );
+    assert!(build("{ \"a\": \"// not a comment, ]\" }").is_empty());
+}
+
+#[test]
+fn a_bigint_in_a_json_file_is_an_error() {
+    let fs = project(&[
+        ("entry.js", "import d from './d.json';\nconsole.log(d);\n"),
+        ("d.json", "{ \"ok\": \"12n\", \"bad\": [123n] }"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+        .expect("options")
+        .build();
+    let errors: Vec<String> = r.errors().map(|m| m.text.clone()).collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("Unexpected \"123n\" in JSON"), "{errors:?}");
+}

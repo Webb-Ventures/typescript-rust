@@ -91,6 +91,9 @@ pub fn load(
             if let Some(d) = parsed.diagnostics.first() {
                 return Err(format!("{path}: invalid JSON: {}", d.message));
             }
+            if let Some(lit) = json_bigint(text) {
+                return Err(format!("{path}: Unexpected {lit:?} in JSON"));
+            }
             let hash = hash_of(text.as_bytes());
             let body = if text.trim().is_empty() {
                 "{}".to_owned()
@@ -975,6 +978,37 @@ pub fn file_stem_name(path: &str) -> String {
     names::sanitize(stem)
 }
 
+/// The first BigInt literal (`123n`) outside strings in `text`. The JSONC parser reads it as
+/// a number, but JSON has no BigInt and esbuild rejects it.
+fn json_bigint(text: &str) -> Option<&str> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    while i < b.len() {
+        let c = b[i];
+        if in_string {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_string = false,
+                _ => {}
+            }
+        } else if c == b'"' {
+            in_string = true;
+        } else if c.is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) {
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.') {
+                i += 1;
+            }
+            if b[i - 1] == b'n' {
+                return text.get(start..i);
+            }
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1020,3 +1054,4 @@ mod tests {
         );
     }
 }
+
