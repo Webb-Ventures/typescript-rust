@@ -710,7 +710,8 @@ impl Validator<'_> {
         }
     }
 
-    /// An identifier at `pos` (its characters may be unicode escapes), or nothing.
+    /// An identifier at `pos` (its later characters may be unicode escapes), or nothing: like
+    /// tsc 7, a group name that starts with an escape is not a name (TS1514).
     fn identifier(&mut self) -> String {
         let mut name = String::new();
         match self.char_at(self.pos) {
@@ -718,13 +719,6 @@ impl Validator<'_> {
                 name.push(c);
                 self.pos += c.len_utf8();
             }
-            Some('\\') => match self.peek_unicode_escape() {
-                Some((c, len)) if chars::is_id_start(c) => {
-                    name.push(c);
-                    self.pos += len;
-                }
-                _ => return name,
-            },
             _ => return name,
         }
         loop {

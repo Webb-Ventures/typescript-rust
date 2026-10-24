@@ -516,24 +516,23 @@ fn regex_class_sets() {
 
 #[test]
 fn regex_escaped_group_names() {
-    for escape in [concat!("\\", "u0061"), concat!("\\", "u{61}")] {
-        for src in [
-            format!("/(?<{escape}>x)\\k<a>/u"),
-            format!("/(?<a>x)\\k<{escape}>/u"),
-            format!("/(?<{escape}>x)\\k<{escape}>/u"),
-        ] {
-            let errors = regex_errors(&src);
-            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-            assert!(errors[0].starts_with("1503@"), "{src}: {errors:?}");
-        }
-        let src = format!("/(?<{escape}>x)(?<a>y)/u");
-        assert!(regex_errors(&src).iter().any(|e| e.starts_with("1515@")));
-    }
-    for src in [
-        concat!("/(?<", "\\", "u0030>x)/u"),
-        concat!("/(?<a>x)\\k<", "\\", "u0030>/u"),
+    // tsc 7 (observed) starts a group name only with an identifier character, not an
+    // escape: a name that starts with `\u` is TS1514 at the backslash, and no group gets
+    // that name. Later characters may be escapes.
+    for (src, expected) in [
+        (
+            r"/(?<\u0061>x)\k<a>/u",
+            "1514@4..4 1503@3..4(ES2018) 1532@16..17(a)",
+        ),
+        (r"/(?<a>x)\k<\u{61}>/u", "1503@3..6(ES2018) 1514@11..11"),
+        (
+            r"/(?<\u{61}>x)(?<a>y)/u",
+            "1514@4..4 1503@3..4(ES2018) 1503@15..18(ES2018)",
+        ),
+        (r"/(?<\u0030>x)/u", "1514@4..4 1503@3..4(ES2018)"),
+        (r"/(?<a\u0062>x)\k<ab>/u", "1503@3..12(ES2018)"),
     ] {
-        assert!(regex_errors(src).iter().any(|e| e.starts_with("1514@")));
+        assert_eq!(regex_errors(src).join(" "), expected, "{src}");
     }
 }
 
