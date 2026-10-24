@@ -607,19 +607,23 @@ BASE_BIN="$BENCH_DIR/base/target/release"
 # The reference tools (tsc, ESLint, esbuild, ...) are the same in both runs: measure them once,
 # in the PR's run. Only our tools are gated against the base. PRs from before the flag measure all.
 # With in/reference.json (the dispatcher kept them from a run with the same harness, scenarios and
-# pinned repos), the PR's run measures only ours too, and the kept ones fill the tables.
+# pinned repos), runs whose references can all be reused measure only ours too.
 OURS=''
 if grep -q '"ours-only"' xtask/src/bench.rs; then OURS=--ours-only; fi
 PR_OURS=''
-if [ -n "$OURS" ] && [ -f "$JOB_DIR/in/reference.json" ]; then PR_OURS=$OURS; fi
+PR_REPOS_OURS=''
 phase 'measuring the base'
 cargo xtask bench --bin-dir "$BASE_BIN" --save base --no-fail $OURS
 cargo xtask bench --repos "$BENCH_REPOS" --bin-dir "$BASE_BIN" --save base-repos --no-fail $OURS
+if [ -n "$OURS" ] && [ -f "$JOB_DIR/in/reference.json" ]; then
+  if node /app/job.mjs bench-reference check base; then PR_OURS=$OURS; fi
+  if node /app/job.mjs bench-reference check base-repos; then PR_REPOS_OURS=$OURS; fi
+fi
 phase 'measuring the PR'
 cargo xtask bench --save pr --baseline bench/results/base.json --markdown bench/results/comment.md $PR_OURS
 code=$?
 cargo xtask bench --repos "$BENCH_REPOS" --save pr-repos --baseline bench/results/base-repos.json \
-  --markdown bench/results/comment-repos.md $PR_OURS
+  --markdown bench/results/comment-repos.md $PR_REPOS_OURS
 repos=$?
 confirm() { # <save> [--repos <names>]
   save=$1; shift
@@ -635,7 +639,7 @@ if [ "$repos" = 1 ] && [ -f bench/results/pr-repos-regressions.txt ]; then
   confirm pr-repos --repos "$BENCH_REPOS"; repos=$?
 fi
 [ "$code" != 0 ] || code=$repos
-if [ -n "$PR_OURS" ]; then node /app/job.mjs bench-reference use; elif [ -n "$OURS" ]; then node /app/job.mjs bench-reference store; fi
+if [ -n "$PR_OURS$PR_REPOS_OURS" ]; then node /app/job.mjs bench-reference use; elif [ -n "$OURS" ]; then node /app/job.mjs bench-reference store; fi
 touch bench/results/comment.md
 if [ -f bench/results/comment-repos.md ]; then
   { echo; echo "### Public repos ($BENCH_REPOS)"; echo; cat bench/results/comment-repos.md; } >> bench/results/comment.md
@@ -666,6 +670,15 @@ function benchReference() {
     reusable = benchReuse.reusableTools(fs.readFileSync('bench/scenarios.toml', 'utf8'));
   } catch (error) {
     console.log(`reference tools: no scenarios (${error.message})`);
+    if (process.argv[3] === 'check') process.exitCode = 1;
+    return;
+  }
+  if (process.argv[3] === 'check') {
+    try {
+      process.exitCode = benchReuse.canReuseReference(read(`${results}/${process.argv[4]}.json`), reusable) ? 0 : 1;
+    } catch {
+      process.exitCode = 1;
+    }
     return;
   }
   const runs = [['pr', 'base', 'comment'], ['pr-repos', 'base-repos', 'comment-repos']];

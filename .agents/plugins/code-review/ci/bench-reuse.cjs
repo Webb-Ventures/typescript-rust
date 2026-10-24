@@ -55,6 +55,13 @@ function reusableTools(toml) {
 
 const key = (scenario, tool) => `${scenario.id}\n${tool.name}`;
 
+// Only use --ours-only for a run when all its reference tools can be restored. Otherwise
+// measure the full run, including references whose setup depends on the PR's binaries.
+function canReuseReference(results, reusable) {
+  return Array.isArray(results?.scenarios) && results.scenarios.every((scenario) =>
+    Array.isArray(scenario.tools) && scenario.tools.every((tool) => tool.ours || reusable.has(key(scenario, tool))));
+}
+
 // The reusable reference measurements of a full run (a results file of `cargo xtask bench`), to
 // store: [{ id, tools: [tool result] }]. Null when one of them failed, so a bad run is not
 // reused for days; a skipped one (a missing requirement) is simply not stored.
@@ -106,4 +113,4 @@ function spliceTables(rendered, original, note) {
   return `${String(rendered).slice(0, at)}${String(original).slice(from).replace(/\n*$/, '\n')}\n${note}\n`;
 }
 
-module.exports = { scanBins, reusableTools, referenceOf, mergeReference, spliceTables, OURS_ONLY };
+module.exports = { scanBins, reusableTools, canReuseReference, referenceOf, mergeReference, spliceTables, OURS_ONLY };

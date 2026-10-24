@@ -690,27 +690,27 @@ function readReference(repo, key) {
 const SAFE_NAME = /^[\w .:+/()-]{1,100}$/;
 function storeReference(repo, key, file, sha) {
   if (!key) return;
-  let parsed;
   try {
-    parsed = JSON.parse(readOutFile(file, 4 << 20));
-  } catch {
-    return;
+    const parsed = JSON.parse(readOutFile(file, 4 << 20));
+    if (!parsed || !Array.isArray(parsed.main) || !Array.isArray(parsed.repos)) return;
+    const stat = (s) => s && ['median', 'mean', 'stddev', 'min', 'max', 'p95', 'runs'].every((k) => Number.isFinite(s[k]) && s[k] >= 0);
+    const clean = (list) => (Array.isArray(list) ? list : []).filter((s) => SAFE_NAME.test(s?.id ?? '')).map((s) => ({
+      id: s.id,
+      tools: (Array.isArray(s.tools) ? s.tools : []).filter((t) => SAFE_NAME.test(t?.name ?? '') && t.status === 'ok' && stat(t.stats)).map((t) => ({
+        name: t.name, status: 'ok', stats: Object.fromEntries(['median', 'mean', 'stddev', 'min', 'max', 'p95', 'runs'].map((k) => [k, t.stats[k]])),
+        ...(Number.isFinite(t.max_rss_mb) ? { max_rss_mb: t.max_rss_mb } : {}),
+      })),
+    }));
+    const value = { sha, at: new Date().toISOString().slice(0, 10), main: clean(parsed.main), repos: clean(parsed.repos) };
+    fs.mkdirSync(referenceDir(repo), { recursive: true });
+    fs.writeFileSync(`${referenceDir(repo)}/${key}.json.new`, JSON.stringify(value));
+    fs.renameSync(`${referenceDir(repo)}/${key}.json.new`, `${referenceDir(repo)}/${key}.json`);
+    const files = fs.readdirSync(referenceDir(repo)).filter((f) => f.endsWith('.json'))
+      .map((f) => [fs.statSync(`${referenceDir(repo)}/${f}`).mtimeMs, f]).sort(([a], [b]) => b - a);
+    for (const [, f] of files.slice(50)) fs.rmSync(`${referenceDir(repo)}/${f}`, { force: true });
+  } catch (error) {
+    log(`reference tools: nothing kept (${error.message})`);
   }
-  const stat = (s) => s && ['median', 'mean', 'stddev', 'min', 'max', 'p95', 'runs'].every((k) => Number.isFinite(s[k]) && s[k] >= 0);
-  const clean = (list) => (Array.isArray(list) ? list : []).filter((s) => SAFE_NAME.test(s?.id ?? '')).map((s) => ({
-    id: s.id,
-    tools: (Array.isArray(s.tools) ? s.tools : []).filter((t) => SAFE_NAME.test(t?.name ?? '') && t.status === 'ok' && stat(t.stats)).map((t) => ({
-      name: t.name, status: 'ok', stats: Object.fromEntries(['median', 'mean', 'stddev', 'min', 'max', 'p95', 'runs'].map((k) => [k, t.stats[k]])),
-      ...(Number.isFinite(t.max_rss_mb) ? { max_rss_mb: t.max_rss_mb } : {}),
-    })),
-  }));
-  const value = { sha, at: new Date().toISOString().slice(0, 10), main: clean(parsed.main), repos: clean(parsed.repos) };
-  fs.mkdirSync(referenceDir(repo), { recursive: true });
-  fs.writeFileSync(`${referenceDir(repo)}/${key}.json.new`, JSON.stringify(value));
-  fs.renameSync(`${referenceDir(repo)}/${key}.json.new`, `${referenceDir(repo)}/${key}.json`);
-  const files = fs.readdirSync(referenceDir(repo)).filter((f) => f.endsWith('.json'))
-    .map((f) => [fs.statSync(`${referenceDir(repo)}/${f}`).mtimeMs, f]).sort(([a], [b]) => b - a);
-  for (const [, f] of files.slice(50)) fs.rmSync(`${referenceDir(repo)}/${f}`, { force: true });
 }
 // The binaries the PR's scenarios run (out/bins.json, from the checkout, which runs no PR code).
 function benchBins(dir) {
@@ -777,7 +777,7 @@ async function runBench(job, slot) {
   const mounts = ['-v', `${SLOT}/git:${SLOT}/git:ro`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`, '-v', `${dir}/in:${dir}/in:ro`, '-v', `${dir}/out:${dir}/out`,
     ...['cargo', 'pm', 'npm'].flatMap((sub) => ['-v', `${BENCH}/${sub}:${BENCH}/${sub}`]),
     '-e', `CARGO_HOME=${BENCH}/cargo`, '-e', `TS_R_BENCH_CACHE=${BENCH}/pm`, '-e', `npm_config_cache=${BENCH}/npm`,
-    '-e', `CARGO_BUILD_JOBS=${slot.size}`, '-e', `RAYON_NUM_THREADS=${slot.size}`];
+    '-e', `CARGO_BUILD_JOBS=${Math.min(4, slot.size)}`, '-e', `RAYON_NUM_THREADS=${Math.min(4, slot.size)}`];
   const heavy = [...LOCKED_DOWN, ...cpus, '--memory', BENCH_MEMORY, '--pids-limit', '4096'];
   const offline = ['--network', 'none', '-e', 'CARGO_NET_OFFLINE=true', '-e', 'npm_config_offline=true'];
 

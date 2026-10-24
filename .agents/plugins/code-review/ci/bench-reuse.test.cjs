@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
+const vm = require('node:vm');
 const reuse = require('./bench-reuse.cjs');
 
 const TOML = String.raw`
@@ -102,6 +103,35 @@ test('only reusable, measured reference tools are stored, and nothing after a fa
   const failed = structuredClone(full);
   failed.scenarios[0].tools[1] = { name: 'oxc', ours: false, status: 'failed', reason: 'exit 1' };
   assert.equal(reuse.referenceOf(failed, reusable), null);
+});
+
+test('runs with references that depend on our binaries still measure them on a cache hit', () => {
+  const reusable = reuse.reusableTools(TOML);
+  assert.equal(reuse.canReuseReference({ scenarios: [full.scenarios[0]] }, reusable), true);
+  assert.equal(reuse.canReuseReference(full, reusable), false);
+  const toml = fs.readFileSync(path.join(__dirname, '../../../../bench/scenarios.toml'), 'utf8');
+  const repoRun = { scenarios: [{ id: 'lint-trpc-same-rules', tools: [
+    { name: 'ts-r-lint', ours: true }, { name: 'eslint', ours: false }, { name: 'eslint-typed', ours: false },
+  ] }] };
+  assert.equal(reuse.canReuseReference(repoRun, reuse.reusableTools(toml)), false);
+  assert.equal(reuse.canReuseReference(null, reusable), false);
+});
+
+test('the job checks each baseline before skipping that run\'s reference tools', () => {
+  const source = fs.readFileSync(require.resolve('../box/job.mjs'), 'utf8');
+  const reference = source.slice(source.indexOf('function benchReference()'), source.indexOf('\nconst steps ='));
+  for (const [save, results, expected] of [['base', { scenarios: [full.scenarios[0]] }, 0], ['base-repos', full, 1], ['base', null, 1]]) {
+    const proc = { argv: ['node', 'job.mjs', 'bench-reference', 'check', save] };
+    vm.runInNewContext(`${reference}\nbenchReference();`, {
+      process: proc, benchReuse: reuse,
+      fs: { readFileSync: (file) => {
+        if (file === 'bench/scenarios.toml') return TOML;
+        assert.equal(file, `bench/results/${save}.json`);
+        return JSON.stringify(results);
+      } },
+    });
+    assert.equal(proc.exitCode, expected, save);
+  }
 });
 
 test('an ours-only run gets the stored reference tools back, and its own tools stay', () => {
