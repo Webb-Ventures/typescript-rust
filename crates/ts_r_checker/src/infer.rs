@@ -261,6 +261,24 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         let s = self.store();
+        // Type operators of the same kind infer operand to operand: `S[K]` to `T[L]` infers
+        // `S` to `T` and `K` to `L`; `keyof S` to `keyof T` infers `S` to `T`
+        // contravariantly (tsc: `inferFromTypes` in `inference.go`).
+        match (s.kind(source), s.kind(target)) {
+            (
+                TypeKind::IndexedAccess { obj: so, index: si },
+                TypeKind::IndexedAccess { obj: to, index: ti },
+            ) => {
+                self.infer_from(ctx, so, to, contra, depth + 1);
+                self.infer_from(ctx, si, ti, contra, depth + 1);
+                return;
+            }
+            (TypeKind::Index(so), TypeKind::Index(to)) => {
+                self.infer_from(ctx, so, to, !contra, depth + 1);
+                return;
+            }
+            _ => {}
+        }
         let tf = s.flags(target);
         let sf = s.flags(source);
         if tf.contains(TypeFlags::UNION) {

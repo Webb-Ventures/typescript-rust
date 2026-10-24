@@ -2586,6 +2586,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.union_or_intersection_related(s, t, rel, false) {
                 return true;
             }
+            // The immediate constraint of a concrete mapped type indexed by a generic key
+            // (`Partial<Foo>[K]` is `Foo[K] | undefined`) before the base constraint.
+            if sf.contains(TypeFlags::INDEXED_ACCESS)
+                && let Some(sub) = self.concrete_mapped_generic_index_substitution(s)
+                && sub != s
+                && self.related_to(sub, t, rel, false, None)
+            {
+                return true;
+            }
             let c = self.base_constraint(s);
             if c != s
                 && c != TypeId::UNRESOLVED
@@ -2641,6 +2650,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                 && self.related_to(c, t, rel, false, None)
             {
                 return true;
+            }
+        }
+        // An intersection with a concrete mapped type indexed by a generic key relates
+        // through that member's immediate constraint (`Partial<Foo>[K] & {}` is
+        // `(Foo[K] | undefined) & {}`, so `Foo[K] & {}`; tsc: relater.go,
+        // getEffectiveConstraintOfIntersection).
+        if sf.contains(TypeFlags::INTERSECTION) && rel != RelationKind::Identity {
+            let ms = st.members_of_union(s).to_vec();
+            let mut changed = false;
+            let mut parts = Vec::with_capacity(ms.len());
+            for m in ms {
+                let n = if self.store().flags(m).contains(TypeFlags::INDEXED_ACCESS) {
+                    self.concrete_mapped_generic_index_substitution(m)
+                        .unwrap_or(m)
+                } else {
+                    m
+                };
+                changed |= n != m;
+                parts.push(n);
+            }
+            if changed {
+                let c = self.intersection(&parts);
+                if c != s && self.related_to(c, t, rel, false, None) {
+                    return true;
+                }
             }
         }
         if sf.intersects(TypeFlags::UNION_OR_INTERSECTION)
@@ -2981,9 +3015,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         if s_generic_mapped || t_generic_mapped {
             return true;
         }
-        // `{ [K in C]: X }[C]` relates through `X` with `K` replaced by `C`.
+        // `{ [K in C]: X }[C]` relates through `X` with `K` replaced by `C`, as does a
+        // concrete mapped type indexed by a generic key (`Partial<Foo>[K]` is
+        // `Foo[K] | undefined`).
         if sf.contains(TypeFlags::INDEXED_ACCESS)
-            && let Some(sub) = self.indexed_mapped_substitution(s)
+            && let Some(sub) = self
+                .indexed_mapped_substitution(s)
+                .or_else(|| self.concrete_mapped_generic_index_substitution(s))
             && sub != s
             && self.related_to(sub, t, rel, false, None)
         {

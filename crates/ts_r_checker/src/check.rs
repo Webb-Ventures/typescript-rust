@@ -2079,12 +2079,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.report_circular_getter(p, key, l);
             return;
         }
+        let method = self.signature_from_decl(l);
+        let method = self.is_class_method_sig(method);
         let name = match *ast.node(l.node) {
             Node::FunctionDecl { name, .. } => name,
-            Node::FunctionExpr { name: Some(n), .. } => Some(n),
-            // Methods and accessors are not reported: their `this` and member types
-            // resolve in a different order from tsc's here, which finds no cycle.
+            Node::FunctionExpr { name: Some(n), .. } if !method => Some(n),
+            // Methods are reported only on cycles of variable types and method return
+            // types: through `this` and member types they resolve in a different order
+            // from tsc's here, which finds no cycle.
             _ => match parent.map(|p| *ast.node(p.node)) {
+                Some(Node::MethodDef { key, .. }) if method => Some(key),
                 Some(Node::VarDeclarator {
                     name,
                     init: Some(i),
@@ -2093,7 +2097,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => return,
             },
         };
-        let sig = self.signature_from_decl(l);
+        let mut sig = self.signature_from_decl(l);
+        // A method's type reads the signature declared by the method node itself.
+        if method
+            && let Some(p) = parent
+            && let Some(sym) = self.c.sym_of_decl(p)
+        {
+            let t = self.type_of_symbol(sym);
+            if let Some(&s) = self
+                .signatures_of(t, crate::members::SigKind::Call)
+                .iter()
+                .find(|&&s| self.store().sig(s).decl.and_then(Loc::unpack) == Some(p))
+            {
+                sig = s;
+            }
+        }
         self.return_type_of(sig);
         if !self.circular.contains(&Resolving::Return(sig)) {
             return;
@@ -2118,11 +2136,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         };
         if path.is_empty()
-            || path.iter().any(|r| match *r {
-                Resolving::Return(s) => !named_function(self, s),
-                Resolving::Node(_) => false,
-                _ => true,
-            })
+            || (!method
+                && path.iter().any(|r| match *r {
+                    Resolving::Return(s) => !named_function(self, s),
+                    Resolving::Node(_) => false,
+                    _ => true,
+                }))
+            || (method
+                && (!path.iter().any(|r| matches!(r, Resolving::Type(_)))
+                    || path.iter().any(|r| match *r {
+                        Resolving::Return(s) => !self.is_class_method_sig(s),
+                        Resolving::Type(s) => self.c.sym_flags(s).intersects(
+                            SymbolFlags::ACCESSOR | SymbolFlags::METHOD | SymbolFlags::FUNCTION,
+                        ),
+                        _ => true,
+                    })))
         {
             return;
         }
@@ -3393,6 +3421,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 continue;
                             }
                             match value {
+                                // `{ while }`: a keyword can't be shorthand, the name is
+                                // missing (tsc's `(Missing)` binding element).
+                                Some(v) if matches!(ast.node(v), Node::Missing {}) => {
+                                    names.push(v);
+                                }
                                 Some(v) => stack.push(v),
                                 None => names.push(key),
                             }
@@ -3431,6 +3464,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(pattern.file);
         for n in Self::untyped_binding_names(ast, pattern.node) {
             let l = Loc::new(pattern.file, n);
+            // A renaming (`{ a: b }`, or `{ while }` whose name is missing) in a parameter of
+            // a signature without a body is TS2842's: tsc's checkVariableLikeDeclaration
+            // returns early for it (checker.go), so only resolving the signature reports it.
+            let renamed = self.c.parent(l).is_some_and(|p| {
+                matches!(*ast.node(p.node), Node::BindingProperty { value: Some(v), .. } if v == n)
+            });
+            if renamed && self.in_unresolved_bodyless_signature(l) {
+                continue;
+            }
+            if matches!(ast.node(n), Node::Missing {}) {
+                self.error(
+                    l,
+                    dg::BINDING_ELEMENT_0_IMPLICITLY_HAS_AN_1_TYPE_7031,
+                    &["(Missing)", "any"],
+                );
+                continue;
+            }
             let Some(sym) = self.c.sym_of_decl(l) else {
                 continue;
             };
@@ -3459,6 +3509,47 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
             }
         }
+    }
+
+    /// Whether `n` sits in a parameter of a signature without a body whose parameter types
+    /// nothing resolves while checking: a type-level signature (`({ a: b }) => void`, call,
+    /// construct and method signatures) or a function declaration with no implementation.
+    /// tsc reports a binding element's implicit any when the parameter's type is first
+    /// computed; for a bodyless signature that happens only when an implementation is
+    /// checked against it (or a call resolves it).
+    fn in_unresolved_bodyless_signature(&self, n: Loc) -> bool {
+        let ast = self.ast(n.file);
+        let mut cur = n;
+        for _ in 0..256 {
+            let Some(p) = self.c.parent(cur) else {
+                return false;
+            };
+            if matches!(ast.node(p.node), Node::Param { .. }) {
+                let Some(f) = self.c.parent(p) else {
+                    return false;
+                };
+                if fn_parts(ast, f.node).is_none_or(|parts| parts.body.is_some()) {
+                    return false;
+                }
+                return match ast.node(f.node) {
+                    Node::FunctionDecl { .. } => {
+                        let Some(sym) = self.c.sym_of_decl(f) else {
+                            return false;
+                        };
+                        !self.c.decls(sym).iter().any(|d| {
+                            matches!(
+                                self.c.file(d.file).ast.node(d.node),
+                                Node::FunctionDecl { body: Some(_), .. }
+                            )
+                        })
+                    }
+                    Node::FunctionExpr { .. } => false,
+                    _ => true,
+                };
+            }
+            cur = p;
+        }
+        false
     }
 
     fn declared_without_optionality(&mut self, t: TypeId, p: Loc) -> TypeId {
@@ -5099,7 +5190,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// `t` written at `at` with the constraints implied by enclosing conditional types:
     /// in the true branch of `C extends E ? X : Y` (outside parameter positions that flip
-    /// variance, type variables always) a type that is `C` reads as `C & E`; members of
+    /// variance, type variables always) a type that is `C` reads as `E & C`; members of
     /// an intersection or union are substituted one by one (tsc: checker.go,
     /// getConditionalFlowTypeOfType, getImpliedConstraint).
     pub(crate) fn with_implied_constraints(&mut self, at: Loc, t: TypeId) -> TypeId {
@@ -5162,7 +5253,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = p;
         }
         if !constraints.is_empty() {
-            constraints.insert(0, t);
+            // The constraints come first (`T & number`), as tsc's substitution types read.
+            constraints.push(t);
             return self.intersection(&constraints);
         }
         let s = self.store();
@@ -9033,7 +9125,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_circular_type_alias(file, n);
                 self.check_intrinsic_type_alias(file, n);
             }
-            if let Node::MappedType { .. } = node {
+            if let Node::MappedType { ty, .. } = node {
+                // A mapped type without a template maps every key to an implicit `any`.
+                if ty.is_none() && self.c.opts.no_implicit_any && self.reporting(file) {
+                    self.error(
+                        Loc::new(file, n),
+                        dg::MAPPED_OBJECT_TYPE_IMPLICITLY_HAS_AN_ANY_TEMPLATE_TYPE_7039,
+                        &[],
+                    );
+                }
                 self.check_mapped_type_keys(Loc::new(file, n));
             }
             if let Node::Rest { arg } = node {

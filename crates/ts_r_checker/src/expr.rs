@@ -6418,12 +6418,22 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 // Nor is a spread object, or a union of them (they keep their index
                 // signatures: `{ ...(A | B) }`).
-                if trailing_empty
+                let r = if trailing_empty
                     && self.every_member(sp, |m| self.store().flags(m).contains(TypeFlags::OBJECT))
                 {
-                    return self.fresh_spread_literal(sp, e);
+                    sp
+                } else {
+                    self.spread_types(sp, lit)
+                };
+                if self
+                    .store()
+                    .traits(r)
+                    .contains(TypeTraits::CONTAINS_WIDENING)
+                {
+                    for m in self.union_members(r) {
+                        self.spread_owner.insert(m, e);
+                    }
                 }
-                let r = self.spread_types(sp, lit);
                 self.fresh_spread_literal(r, e)
             }
             None => lit,
@@ -6662,7 +6672,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             ts_r_types::ObjectKind::Literal { sym } => sym,
             _ => SymId::NONE,
         };
-        s.literal_object(sym, flags, rm, TypeTraits::NONE)
+        let traits = s.traits(t) & TypeTraits::CONTAINS_WIDENING;
+        s.literal_object(sym, flags, rm, traits)
     }
 
     /// Whether an object literal can spread a value of type `t` (TS2698 otherwise).
@@ -6994,6 +7005,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.properties_of(left)
         };
         let rprops = self.properties_of(right);
+        let mut widening = self
+            .store()
+            .traits(left)
+            .contains(TypeTraits::CONTAINS_WIDENING);
         for (n, p) in rprops {
             // `private` and `protected` members are not spread, and the left side's
             // property of the same name goes too.
@@ -7016,10 +7031,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.type_of_symbol(p)
             };
             let optional = self.c.sym_flags(p).intersects(SymbolFlags::OPTIONAL);
+            // The left property's declaration, when an optional right one merges into a
+            // left one with a widening type (`{ p: null, ...{ p?: X } }`): tsc's merged
+            // property has both sides' declarations, and widening errors report the left.
+            let mut left_decl = None;
             let ty = if optional {
                 match props.iter().find(|(m, _)| *m == n) {
                     Some(&(_, lp)) => {
                         let lt = self.type_of_symbol(lp);
+                        if self
+                            .store()
+                            .traits(lt)
+                            .contains(TypeTraits::CONTAINS_WIDENING)
+                        {
+                            left_decl = self.c.synth_sym(lp).and_then(|x| x.decl);
+                        }
                         let pt2 = self.remove_missing_undefined(pt);
                         self.union2(lt, pt2)
                     }
@@ -7028,6 +7054,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else {
                 pt
             };
+            widening |= self
+                .store()
+                .traits(ty)
+                .contains(TypeTraits::CONTAINS_WIDENING);
             // Optional when the left side lacks it or has it optional too.
             let mut flags = SymbolFlags::PROPERTY;
             if optional
@@ -7038,7 +7068,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 flags |= SymbolFlags::OPTIONAL;
             }
-            let decl = self.c.synth_sym(p).and_then(|x| x.decl);
+            let decl = left_decl.or_else(|| self.c.synth_sym(p).and_then(|x| x.decl));
             // A copy of a declared property keeps its declarations (as tsc's spread does):
             // declaration emit writes it from its annotation.
             let origins = if decl.is_none() {
@@ -7069,11 +7099,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             i.readonly = false;
         }
         let sym = SymId::NONE;
+        // A widening property type (`null` without strict null checks) makes the spread
+        // widen too, as an object literal's own properties do.
+        let mut traits = TypeTraits::CONTAINS_OBJECT_LITERAL;
+        if widening {
+            traits |= TypeTraits::CONTAINS_WIDENING;
+        }
         self.store().literal_object(
             sym,
             ObjectFlags::OBJECT_LITERAL | ObjectFlags::CONTAINS_SPREAD,
             ResolvedMembers::new(props, Vec::new(), Vec::new(), index),
-            TypeTraits::CONTAINS_OBJECT_LITERAL,
+            traits,
         )
     }
 
@@ -7147,10 +7183,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         out
     }
 
+    /// An optional property's type without `undefined`, also without strict null checks
+    /// (where `undefined` has none of the facts that keep it: `{ p: null, ...{ p?: undefined } }`
+    /// keeps the widening `null`; tsc: checker.go, removeMissingOrUndefinedType).
     fn remove_missing_undefined(&mut self, t: TypeId) -> TypeId {
-        if !self.c.opts.strict_null_checks {
-            return t;
-        }
         self.filter_type(t, |ck, m| {
             !ck.store().flags(m).contains(TypeFlags::UNDEFINED)
         })
