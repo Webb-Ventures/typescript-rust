@@ -19,6 +19,24 @@ fn have_node() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
+/// The major version of the `node` on `PATH` (0 when it can't be read).
+fn node_major() -> u32 {
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| {
+            let v = String::from_utf8_lossy(&o.stdout).into_owned();
+            v.trim()
+                .trim_start_matches('v')
+                .split('.')
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0)
+}
+
 /// Writes `files` into a fresh scratch directory and runs `ts-r-run <args>` there.
 fn run(name: &str, files: &[(&str, &str)], args: &[&str]) -> Option<Output> {
     if !have_node() {
@@ -341,7 +359,14 @@ fn compiled_commonjs_hides_its_esmodule_marker_from_named_exports() {
     let Some(out) = run("esmodule-marker", &files, &["main.ts"]) else {
         return;
     };
-    assert_eq!(stdout(&out), "default,module.exports,x\n");
+    // Node 23+ also exports a CommonJS module's `module.exports` by that name (tsx shows the
+    // same names on each version).
+    let expected = if node_major() >= 23 {
+        "default,module.exports,x\n"
+    } else {
+        "default,x\n"
+    };
+    assert_eq!(stdout(&out), expected);
 }
 
 #[test]

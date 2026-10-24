@@ -282,9 +282,11 @@ function lenientJs(url, bare, context, nextLoad) {
   return { format: format === 1 ? 'commonjs' : 'module', source, shortCircuit: true };
 }
 
+// `conditions` is an array, or a Set in the CommonJS loader of older Node 22.
 const isRequire = (context) => {
-  const c = context.conditions ?? [];
-  return c.includes('require') && !c.includes('import');
+  const c = context.conditions;
+  if (c == null) return false;
+  return Array.isArray(c) ? c.includes('require') && !c.includes('import') : c.has('require') && !c.has('import');
 };
 
 // An ES module in plain JavaScript that calls `import()` is compiled too, so that the result
@@ -324,13 +326,50 @@ function jsonModule(r) {
   return { format: 'module', source, shortCircuit: true };
 }
 
+// A CommonJS module the ES loader runs from source (the entry, which `--import` sends through
+// the ES loader, or a CommonJS file an ES module imports) gets a `require` of the ES loader's
+// own before Node 24.15 (Node 22, 23, 25): it resolves with plain CommonJS rules, before any
+// registered hook, and bypasses `Module.prototype.require`, so none of this file's resolution,
+// `?query` aliases or TransformError renaming would apply to what it loads. Node 24.15+ and 26
+// run such a module with the real `require`. On the older ones, CommonJS loaded by `import`
+// starts by swapping a `require` that lacks `cache` (the real one has it) for one that goes
+// through `module.require`, which is what newer Node runs. The swap goes after the directive
+// prologue, on its line, so no line moves.
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+const swapsRequire = !(nodeMajor >= 26 || (nodeMajor === 24 && nodeMinor >= 15));
+const SWAP_REQUIRE = 'if(typeof require.cache!=="object")require=module.constructor[Symbol.for("ts-r-run:require")](module);';
+const PROLOGUE = /^(?:[ \t]*(?:"[^"\\\n]*"|'[^'\\\n]*')[ \t]*;)*/;
+if (swapsRequire) {
+  Object.defineProperty(Module, Symbol.for('ts-r-run:require'), {
+    value(mod) {
+      const resolver = Module.createRequire(mod.filename);
+      const require = function require(id) {
+        return mod.require(id);
+      };
+      require.resolve = resolver.resolve;
+      require.main = process.mainModule;
+      require.extensions = Module._extensions;
+      require.cache = Module._cache;
+      return require;
+    },
+  });
+}
+
+function withRealRequire(r, context) {
+  if (r.format !== 'commonjs' || r.source == null || isRequire(context)) return r;
+  const text = typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
+  const n = PROLOGUE.exec(text)[0].length;
+  return { ...r, source: text.slice(0, n) + SWAP_REQUIRE + text.slice(n) };
+}
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
     const parent = context.parentURL && aliases.get(context.parentURL);
     return resolveModule(specifier, parent ? { ...context, parentURL: parent } : context, nextResolve);
   },
   load(url, context, nextLoad) {
-    return loadModule(aliases.get(url) ?? url, context, nextLoad);
+    const r = loadModule(aliases.get(url) ?? url, context, nextLoad);
+    return swapsRequire ? withRealRequire(r, context) : r;
   },
 });
 

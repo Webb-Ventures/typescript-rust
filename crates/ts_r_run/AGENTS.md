@@ -110,6 +110,16 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   wrapper maps the `*-typescript` formats Node's CommonJS loader gives a `.ts` file to the
   plain ones for compiled files (Node refuses type stripping inside node_modules, and the code
   is already JavaScript).
+- **CommonJS the ES loader runs gets Node's real `require` on every Node version**: before
+  Node 24.15 (all of 22 and 23, 24.0 to 24.14, 25), a CommonJS module the ES loader runs from
+  source (the entry under `--import`, or CommonJS an ES module imports) gets the loader's own
+  `require`, which resolves before any registered hook and skips `Module.prototype.require`.
+  The preload's `load` hook (`withRealRequire` in `src/js/hooks.mjs`) puts one statement after
+  the directive prologue of such a module, on the same line, swapping a `require` without
+  `cache` for one that calls `module.require`. tsx 4.23.15 prints the same on Node 22 and 24.
+  `isRequire` accepts `context.conditions` as an array or a Set (Node 22.15 passes a Set).
+  Node 23+ lists `module.exports` among the named exports of CommonJS; Node 22 doesn't, and
+  the test asserts per major.
 - **Resolution details from tsx's `dist/require-*.mjs` and `register-*.mjs`**: an extensionless
   path never finds `.mts`/`.cts`; `require('pkg/file.js')` finds `pkg/file.ts` (the failed
   bare specifier is looked up in each parent `node_modules/<pkg>`); `require()` takes a
@@ -200,6 +210,8 @@ install a signal handler, and the crate denies `unsafe`). Dev: `ts_r_testing`.
   hooks limitation); use the default strategy.
 - Windows: tested in CI (the preload normalises `\`); `--watch` stops children with
   `Child::kill` only.
+- `--test` without files on Node 22.15 to 22.17 finds no `.ts` tests: Node's default test
+  patterns include TypeScript only from 22.18 (tsx passes its own patterns there).
 - Only the entry's tsconfig is used for every file (like tsx); per-package tsconfigs in a
   monorepo are ignored.
 - From the run oracle (bench/run-oracle/README.md has the cases):
