@@ -46,12 +46,17 @@ texts), `dump.rs`.
   re-export (tsc 7: `mergeSymbolRexportFunction`). When the module's `export =` is a
   namespace, its exports count as the module's (fastify's `export type { FastifyInstance }`
   inside `namespace fastify`).
-- **Augmenting an `export =` entity without namespace meaning** (a variable or class; not
-  an enum, nor anything merged with a namespace) reports TS2671 at the augmentation's name
+- **Augmenting an `export =` entity without namespace meaning** (a variable or class, or an
+  expression that is no entity name: an object literal, a literal, a function or class
+  expression, JavaScript's `module.exports = {...}`; not an enum, nor anything merged with a
+  namespace) reports TS2671 at the augmentation's name
   and drops it (its target becomes `Unresolved`). A lone function is not reported yet (tsc 7's
   CLI does, its conformance baseline `augmentExportEquals2` does not). A variable merged
   with a type-only namespace does have namespace meaning: an augmentation of it that declares
   values is TS2649 at the augmentation's name instead, and is dropped too (`augmentExportEquals7`).
+- **A resolver path outside the program** (`Program::link` returning a path that is none of
+  its files, an untyped JavaScript package) leaves the request unresolved, but an
+  augmentation of it is not TS2664: the checker reports TS2665 there.
 - **A global conflicting with a type-only namespace** (`namespace A { interface I {} }` then
   `declare var A` in a later file) is TS2649 at the later declaration, not TS2300, and the
   later symbol is not merged (tsc 7: `mergeSymbol` in checker.go). ts-r marks an instantiated
@@ -189,8 +194,8 @@ texts), `dump.rs`.
   TS1xxx codes outside the binder's own (`BINDER_CODES`) in a file whose parse has errors
   other than checker grammar codes (`CHECKER_GRAMMAR_CODES`); keep both lists in step with
   `crates/ts_r_checker/src/driver.rs`.
-  Current (2026-10-24, parity/binder-emit): 12783 variants; 464 expect binder diagnostics, 416 match exactly; 1718 of 1839
-  expected diagnostics matched (121 missing, 19 extra).
+  Current (2026-10-24, parity/binder-emit): 12783 variants; 464 expect binder diagnostics, 418 match exactly; 1720 of 1839
+  expected diagnostics matched (119 missing, 19 extra).
 - Corpus: `cargo build --release -j 4 -p ts_r_binder --example corpus` then
   `scripts/limit.sh --mem-mb 4096 --time-s 600 -- /usr/bin/time -l target/release/examples/corpus ../private-app`.
   private-app (691 project files + 5219 `node_modules` declaration files, 48 MB):

@@ -360,6 +360,46 @@ fn value_augmentation_of_a_variable_with_a_type_only_namespace_is_ts2649() {
 }
 
 #[test]
+fn augmenting_a_module_found_outside_the_program_is_not_ts2664() {
+    // tsc 7: untypedModuleImport_withAugmentation (the checker reports TS2665 instead).
+    let f = build(&[(
+        "a.ts",
+        "declare module \"foo\" {\n    export const x: number;\n}\nimport { x } from \"foo\";\n",
+    )]);
+    let files: Vec<ProgramFile> = vec![ProgramFile {
+        path: &f.names[0],
+        ast: &f.asts[0],
+        src: &f.srcs[0],
+        bound: &f.bound[0],
+    }];
+    let outside = Program::link(files, |spec: &str, _: &str, _: &ModuleRequest| {
+        (spec == "foo").then(|| "/node_modules/foo/index.js".to_owned())
+    });
+    assert!(diags(&f, &outside).is_empty());
+    assert_eq!(diags(&f, &link(&f)), ["a.ts(1,16) TS2664"]);
+}
+
+#[test]
+fn augmenting_an_export_assigned_expression_is_ts2671() {
+    // Observed with tsc 7: `export =` of an object literal, a number or a class or function
+    // expression (and JavaScript's `module.exports = {...}`) cannot be augmented.
+    let f = build(&[
+        ("lit.ts", "class A {}\nexport = { A };\n"),
+        ("num.ts", "export = 42;\n"),
+        (
+            "ns.ts",
+            "namespace N { export const a = 1; }\nexport = N;\n",
+        ),
+        (
+            "i.ts",
+            "import q = require(\"./lit\");\nimport n = require(\"./num\");\nimport s = require(\"./ns\");\ndeclare module \"./lit\" {\n  interface A { b: string }\n}\ndeclare module \"./num\" {\n  interface Q {}\n}\ndeclare module \"./ns\" {\n  interface Q {}\n}\n",
+        ),
+    ]);
+    let p = link(&f);
+    assert_eq!(diags(&f, &p), ["i.ts(4,16) TS2671", "i.ts(7,16) TS2671"]);
+}
+
+#[test]
 fn ambient_modules_merge_and_patterns_match() {
     let f = build(&[
         (

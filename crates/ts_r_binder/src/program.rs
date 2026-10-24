@@ -199,6 +199,8 @@ impl<'a> Program<'a> {
     }
 
     /// Links with a custom resolution function (specifier, containing file, request) → path.
+    /// A path that is not one of `files` means the module was found outside the program (an
+    /// untyped JavaScript package): it stays unresolved, but augmenting it is not TS2664.
     pub fn link(
         files: Vec<ProgramFile<'a>>,
         resolve: impl Fn(&str, &str, &ModuleRequest) -> Option<String>,
@@ -499,8 +501,22 @@ impl<'a> Program<'a> {
                 .filter(|m| !self.augmentations.iter().any(|a| a.0 == *m))
                 .find_map(|m| self.lookup_in(m, |b| b.symbol(m.symbol).exports, "export="));
             let Some(eq) = own else { continue };
-            let Some(entity) = self.resolve_alias(eq) else {
-                continue;
+            // An `export =` of an expression that is no entity name (an object literal, a
+            // function or class expression, `42`; JavaScript's `module.exports = {...}`)
+            // has no namespace meaning either (observed: tsc 7 reports all of them).
+            let expression = self
+                .file(eq.file)
+                .bound
+                .symbol(eq.symbol)
+                .flags
+                .intersects(SymbolFlags::EXPORT_EXPRESSION);
+            let entity = if expression {
+                eq
+            } else {
+                let Some(entity) = self.resolve_alias(eq) else {
+                    continue;
+                };
+                entity
             };
             // Observed (tsc 7 CLI): an entity without namespace meaning is reported (a
             // variable, a class); an enum or a function or class merged with a namespace is
@@ -536,8 +552,9 @@ impl<'a> Program<'a> {
                 dropped.push(i);
                 continue;
             }
-            if flags.intersects(SymbolFlags::NAMESPACE | SymbolFlags::FUNCTION)
-                || !flags.intersects(SymbolFlags::VARIABLE | SymbolFlags::CLASS)
+            if !expression
+                && (flags.intersects(SymbolFlags::NAMESPACE | SymbolFlags::FUNCTION)
+                    || !flags.intersects(SymbolFlags::VARIABLE | SymbolFlags::CLASS))
             {
                 continue;
             }
@@ -739,6 +756,7 @@ impl<'a> Program<'a> {
         for (fi, f) in self.files.iter().enumerate() {
             let b = f.bound;
             let mut v = Vec::with_capacity(b.module_requests.len());
+            let mut outside: Vec<usize> = Vec::new();
             for r in &b.module_requests {
                 let spec = f.ast.atom(r.specifier);
                 let mut target = ModuleTarget::Unresolved;
@@ -765,9 +783,13 @@ impl<'a> Program<'a> {
                     && !(r.in_ambient_module && is_relative(spec))
                     && !(r.in_augmentation && is_relative(spec) && unlisted())
                     && let Some(path) = resolve(spec, f.path, r)
-                    && let Some(&t) = index.get(path.as_str())
                 {
-                    target = ModuleTarget::File(t);
+                    match index.get(path.as_str()) {
+                        Some(&t) => target = ModuleTarget::File(t),
+                        // Found, but not part of the program (an untyped JavaScript
+                        // package): augmenting it is the checker's TS2665, not TS2664.
+                        None => outside.push(v.len()),
+                    }
                 }
                 if target == ModuleTarget::Unresolved
                     && !is_relative(spec)
@@ -792,7 +814,10 @@ impl<'a> Program<'a> {
                 };
                 let target = v[req];
                 // Declaration files tolerate unresolved augmentations.
-                if target == ModuleTarget::Unresolved && !f.ast.source_kind.is_declaration() {
+                if target == ModuleTarget::Unresolved
+                    && !f.ast.source_kind.is_declaration()
+                    && !outside.contains(&req)
+                {
                     for &d in b.decls(s) {
                         if req_of(d).is_some()
                             && let Node::Module { name, .. } = *f.ast.node(d)
