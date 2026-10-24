@@ -199,6 +199,8 @@ impl<'a> Program<'a> {
     }
 
     /// Links with a custom resolution function (specifier, containing file, request) → path.
+    /// A path that is not one of `files` means the module was found outside the program (an
+    /// untyped JavaScript package): it stays unresolved, but augmenting it is not TS2664.
     pub fn link(
         files: Vec<ProgramFile<'a>>,
         resolve: impl Fn(&str, &str, &ModuleRequest) -> Option<String>,
@@ -389,6 +391,28 @@ impl<'a> Program<'a> {
             if !entry.symbols.is_empty()
                 && (alias_clash || entry.flags.intersects(excl) || entry.excludes.intersects(flags))
             {
+                // A global that a non-instantiated namespace declares (`interface A {}` +
+                // `namespace A {}`) does not report a later conflicting file's declaration
+                // as a duplicate: tsc reports TS2649 at that declaration's name only and
+                // keeps the existing symbol (tsc: checker/checker.go, mergeSymbol).
+                if depth == 0
+                    && !members
+                    && !alias_clash
+                    && !it.umd
+                    && entry.symbols.iter().any(|r| {
+                        let f = self.file(r.file).bound.symbol(r.symbol).flags;
+                        f.intersects(SymbolFlags::NAMESPACE_MODULE)
+                            && !f.intersects(SymbolFlags::VALUE_MODULE)
+                    })
+                {
+                    if let Some((file, span)) = self.decl_spans(it.r, false).into_iter().next() {
+                        diags.push(
+                            Diagnostic::new(m::AUGMENT_WITH_VALUE_EXPORTS, span, &[&it.name])
+                                .with_file(file),
+                        );
+                    }
+                    continue;
+                }
                 let enum_conflict = (flags.intersects(SymbolFlags::ENUM)
                     || entry.flags.intersects(SymbolFlags::ENUM))
                     && !flags.intersects(SymbolFlags::ENUM_MEMBER);
@@ -477,8 +501,22 @@ impl<'a> Program<'a> {
                 .filter(|m| !self.augmentations.iter().any(|a| a.0 == *m))
                 .find_map(|m| self.lookup_in(m, |b| b.symbol(m.symbol).exports, "export="));
             let Some(eq) = own else { continue };
-            let Some(entity) = self.resolve_alias(eq) else {
-                continue;
+            // An `export =` of an expression that is no entity name (an object literal, a
+            // function or class expression, `42`; JavaScript's `module.exports = {...}`)
+            // has no namespace meaning either (observed: tsc 7 reports all of them).
+            let expression = self
+                .file(eq.file)
+                .bound
+                .symbol(eq.symbol)
+                .flags
+                .intersects(SymbolFlags::EXPORT_EXPRESSION);
+            let entity = if expression {
+                eq
+            } else {
+                let Some(entity) = self.resolve_alias(eq) else {
+                    continue;
+                };
+                entity
             };
             // Observed (tsc 7 CLI): an entity without namespace meaning is reported (a
             // variable, a class); an enum or a function or class merged with a namespace is
@@ -486,8 +524,37 @@ impl<'a> Program<'a> {
             // baseline `augmentExportEquals2` does not.
             let ef = self.file(entity.file);
             let flags = ef.bound.symbol(entity.symbol).flags;
-            if flags.intersects(SymbolFlags::NAMESPACE | SymbolFlags::FUNCTION)
-                || !flags.intersects(SymbolFlags::VARIABLE | SymbolFlags::CLASS)
+            // TS2649 (tsc checker/checker.go mergeModuleAugmentation, mergeSymbol): a
+            // variable merged with a type-only namespace has namespace meaning, so the
+            // augmentation merges into it; an augmentation that declares values then
+            // conflicts with the variable, and since the target is a namespace tsc reports
+            // the value exports rather than a duplicate.
+            if flags.intersects(SymbolFlags::VARIABLE)
+                && flags.contains(SymbolFlags::NAMESPACE_MODULE)
+                && !flags.intersects(SymbolFlags::VALUE_MODULE)
+                && self.declares_values(aug)
+            {
+                let f = self.file(aug.file);
+                for &d in f.bound.decls(aug.symbol) {
+                    if let Node::Module { name, .. } = *f.ast.node(d)
+                        && let Node::StringLit { value } = *f.ast.node(name)
+                    {
+                        diags.push(
+                            Diagnostic::new(
+                                m::AUGMENT_WITH_VALUE_EXPORTS,
+                                f.ast.span(name),
+                                &[f.ast.atom(value)],
+                            )
+                            .with_file(aug.file),
+                        );
+                    }
+                }
+                dropped.push(i);
+                continue;
+            }
+            if !expression
+                && (flags.intersects(SymbolFlags::NAMESPACE | SymbolFlags::FUNCTION)
+                    || !flags.intersects(SymbolFlags::VARIABLE | SymbolFlags::CLASS))
             {
                 continue;
             }
@@ -512,6 +579,16 @@ impl<'a> Program<'a> {
             self.augmentations[i].1 = ModuleTarget::Unresolved;
         }
         self.diagnostics.extend(diags);
+    }
+
+    /// Whether an augmentation's exports include a value (it is an instantiated module).
+    fn declares_values(&self, aug: SymbolRef) -> bool {
+        let f = self.file(aug.file);
+        let t = f.bound.symbol(aug.symbol).exports;
+        f.bound
+            .table(t)
+            .iter()
+            .any(|&(_, s)| f.bound.symbol(s).flags.intersects(SymbolFlags::VALUE))
     }
 
     /// Merges the exports of modules declared or augmented in several places.
@@ -679,6 +756,7 @@ impl<'a> Program<'a> {
         for (fi, f) in self.files.iter().enumerate() {
             let b = f.bound;
             let mut v = Vec::with_capacity(b.module_requests.len());
+            let mut outside: Vec<usize> = Vec::new();
             for r in &b.module_requests {
                 let spec = f.ast.atom(r.specifier);
                 let mut target = ModuleTarget::Unresolved;
@@ -705,9 +783,13 @@ impl<'a> Program<'a> {
                     && !(r.in_ambient_module && is_relative(spec))
                     && !(r.in_augmentation && is_relative(spec) && unlisted())
                     && let Some(path) = resolve(spec, f.path, r)
-                    && let Some(&t) = index.get(path.as_str())
                 {
-                    target = ModuleTarget::File(t);
+                    match index.get(path.as_str()) {
+                        Some(&t) => target = ModuleTarget::File(t),
+                        // Found, but not part of the program (an untyped JavaScript
+                        // package): augmenting it is the checker's TS2665, not TS2664.
+                        None => outside.push(v.len()),
+                    }
                 }
                 if target == ModuleTarget::Unresolved
                     && !is_relative(spec)
@@ -732,7 +814,10 @@ impl<'a> Program<'a> {
                 };
                 let target = v[req];
                 // Declaration files tolerate unresolved augmentations.
-                if target == ModuleTarget::Unresolved && !f.ast.source_kind.is_declaration() {
+                if target == ModuleTarget::Unresolved
+                    && !f.ast.source_kind.is_declaration()
+                    && !outside.contains(&req)
+                {
                     for &d in b.decls(s) {
                         if req_of(d).is_some()
                             && let Node::Module { name, .. } = *f.ast.node(d)
