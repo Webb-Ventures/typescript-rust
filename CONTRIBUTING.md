@@ -62,8 +62,9 @@ cargo xtask agents-check             # every crate documented, every link resolv
 
 A change to the checker, parser, emitter or linter should also say how it moved the relevant
 oracle, for example the conformance count from `cargo xtask oracle`. A change that could affect
-speed is benchmarked on the pull request: a slowdown beyond the gate in
-[bench/scenarios.toml](bench/scenarios.toml) blocks the merge.
+speed is benchmarked on the pull request (a fork's on GitHub's shared Linux runners): a slowdown
+beyond the gate in [bench/scenarios.toml](bench/scenarios.toml) fails the bench check, which
+reviewers read before merging.
 
 Tests live next to the code (unit tests) or under `crates/<crate>/tests/` (fixtures). Snapshot
 files are plain text, so diffs stay readable.

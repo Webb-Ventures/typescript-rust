@@ -6,8 +6,9 @@
 [![Sponsor](https://img.shields.io/badge/sponsor-ts--r-f0814a?logo=githubsponsors&logoColor=white)](https://ts-r.dev/donate/)
 
 **Fast TypeScript tooling, written from scratch in Rust.** ts-r type-checks, lints, bundles,
-runs and serves TypeScript with the same results as the tools you use today, and faster:
-ts-r-check type-checks the benchmark repos 2–7× faster than tsc 7 ([benchmarks](#benchmarks)). Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
+runs and serves TypeScript, aiming for the same results as the tools you use today, and faster:
+ts-r-check type-checks tRPC, date-fns and RxJS 2.0–6.7× faster than tsc 7 ([benchmarks](#benchmarks)).
+Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
 you can adopt one without the rest.
 
 ```sh
@@ -83,8 +84,10 @@ are in [npm/ts-r/README.md](npm/ts-r/README.md).
 
 Each table shows ts-r's median time per scenario next to the fastest other tool on the same
 workload. Workloads include type-checking pinned open-source repos (tRPC, date-fns, rxjs) and
-bundling three.js ten times over, among others. Every pull request is benchmarked against its
-base on dedicated cores, and a slowdown beyond the gate blocks the merge. Method and scenarios:
+bundling three.js ten times over, among others. Pull requests that change the crates or the
+benchmarks are benchmarked against their base: maintainers' PRs on four dedicated cores of a
+bench machine, fork PRs on GitHub's shared Linux runners. A slowdown beyond the gate fails the
+bench check, which reviewers read before merging. Method and scenarios:
 [bench/README.md](bench/README.md).
 
 ### Unreleased (main)

@@ -51,8 +51,12 @@ published on the npm dist-tag `next` (`npm install --save-dev ts-r@next`). Every
 real projects but has known gaps; the README lists them.
 
 - `ts-r-check` (tsc): tsc 7's diagnostics, emit, project references, `--build` and `--watch`. It
-  matches tsc 7 exactly on 87% of TypeScript's conformance tests and on typeorm, playwright, tRPC,
-  date-fns and the React compiler, and type-checks them 2–7× faster.
+  matches tsc 7 exactly on 87% of TypeScript's conformance tests and on tRPC, date-fns and
+  TypeORM, and type-checks tRPC, date-fns and RxJS 2–7× faster. (Corrected on 2026-10-24: this
+  entry first said it also matched tsc 7 exactly on Playwright and the React compiler, and was
+  2–7× faster on all of them. Measured at `ea41eac`, it reports 2 extra diagnostics on
+  Playwright and 71 extra on the React compiler; the public-repo runs of 2026-10-16 had it 1.04×
+  faster than tsc 7 on TypeORM and 1.2× on Playwright ([bench/README.md](bench/README.md)).)
 - `ts-r-lint` (ESLint, oxlint): 103 ESLint and typescript-eslint rules; flat, oxlint and Biome configs.
 - `ts-r-build` (esbuild, `vite build`): esbuild's CLI; ESM, CJS and IIFE; code splitting,
   minification, source maps.
