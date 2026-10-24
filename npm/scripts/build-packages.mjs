@@ -145,14 +145,25 @@ function checkConsistency() {
   }
 }
 
-/// @ts-r.dev/typescript's version: TypeScript's major.minor, so `npm:@ts-r.dev/typescript@^7` works, and
-/// a patch that encodes the ts-r version (0.3.1 -> 3001, 1.2.3 -> 1002003; prerelease kept).
+/// @ts-r.dev/typescript's version: TypeScript's major.minor and a patch that encodes the ts-r version
+/// (0.3.1 -> 3001, 1.2.3 -> 1002003), with ts-r's prerelease kept. A stable one matches
+/// `npm:@ts-r.dev/typescript@^7`; a prerelease (7.0.1000-alpha.3) matches no plain range, by
+/// semver's rule, so while ts-r is a prerelease it is installed by exact version or dist-tag.
 export function dropInVersion(tsVersion, tsrVersion) {
   const [tsMajor, tsMinor] = tsVersion.split('.');
   const m = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(tsrVersion);
   if (!m) die(`bad ts-r version ${tsrVersion}`);
   const patch = Number(m[1]) * 1_000_000 + Number(m[2]) * 1000 + Number(m[3]);
   return `${tsMajor}.${tsMinor}.${patch}${m[4] || ''}`;
+}
+
+/// The drop-in's `typescript` peer range. Installed in place of TypeScript
+/// (`"typescript": "npm:@ts-r.dev/typescript@..."`) the `typescript` name is the drop-in itself, so
+/// npm checks the peer against the drop-in's own version. A prerelease drop-in doesn't satisfy
+/// `^7.0.0` and npm stops with ERESOLVE, so the range also names that exact version. Real
+/// TypeScript (installed next to the drop-in) still has to match the original range.
+export function dropInPeerRange(range, dropIn) {
+  return dropIn.includes('-') ? `${range} || ${dropIn}` : range;
 }
 
 function binaryDir(opts, triple, host) {
@@ -304,6 +315,7 @@ function buildDropIn(opts, version) {
   pkg.version = dropInVersion(pkg['ts-r'].typescript, version);
   pkg.repository = repository(opts, 'npm/typescript');
   pkg.dependencies['@ts-r.dev/check'] = version;
+  pkg.peerDependencies.typescript = dropInPeerRange(pkg.peerDependencies.typescript, pkg.version);
   pkg['ts-r'].version = version;
   writeJson(path.join(dest, 'package.json'), pkg);
   return { name: pkg.name, dir: dest, kind: 'front', version: pkg.version };

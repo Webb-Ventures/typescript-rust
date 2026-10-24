@@ -5,12 +5,14 @@ A drop-in for the `typescript` package. Its `tsc` type-checks with
 your own TypeScript on that project, and runs your TypeScript for everything else. Its module API
 (`typescript`, `typescript/unstable/*`) is your TypeScript's.
 
-Your real TypeScript (7.x) stays installed: it is a peer dependency, and the fallback for every
-flag, project and API ts-r doesn't cover.
+Your real TypeScript (7.x) stays installed: it is a peer dependency (or the `typescript-real`
+alias), and the fallback for every flag, project and API ts-r doesn't cover.
 
 ## Install
 
-Either way works; undo it by deleting the line(s).
+Either way works; undo it by deleting the line(s). While ts-r is in alpha, name an exact
+version (below, `7.0.1000-alpha.3`; `npm view @ts-r.dev/typescript dist-tags` lists the
+current ones) or the `next` dist-tag, not a range like `^7`: see [Versions](#versions).
 
 **Next to TypeScript** (point `typescript.tsdk`, scripts or tools at this package):
 
@@ -18,24 +20,45 @@ Either way works; undo it by deleting the line(s).
 // package.json
 "devDependencies": {
   "typescript": "^7.0.0",
-  "@ts-r.dev/typescript": "^7"
+  "@ts-r.dev/typescript": "7.0.1000-alpha.3"
 }
 ```
 
-Run it as `npx -p @ts-r.dev/typescript tsc` or `node_modules/@ts-r.dev/typescript/bin/tsc`, or set
+or `npm install --save-dev typescript@7 @ts-r.dev/typescript@next`. Run it as
+`npx -p @ts-r.dev/typescript tsc` or `node_modules/@ts-r.dev/typescript/bin/tsc`, or set
 `"typescript.tsdk": "node_modules/@ts-r.dev/typescript/lib"`.
 
 **In place of TypeScript** (every tool that runs `tsc` or imports `typescript` gets this package):
 
 ```jsonc
 "devDependencies": {
-  "typescript": "npm:@ts-r.dev/typescript@^7",
+  "typescript": "npm:@ts-r.dev/typescript@7.0.1000-alpha.3",
   "typescript-real": "npm:typescript@^7.0.0"
 }
 ```
 
-The `typescript-real` alias is how the drop-in finds your TypeScript when it occupies the
-`typescript` name itself.
+(`npm:@ts-r.dev/typescript@next` works too.) The `typescript-real` alias is how the drop-in
+finds your TypeScript when it occupies the `typescript` name itself. Tools that find
+TypeScript by resolving `typescript` from your project, such as `next build`, only use the
+drop-in this way (see [Next.js](#nextjs)).
+
+### Versions
+
+The version is TypeScript's `major.minor`, a patch that encodes the ts-r version (ts-r
+0.1.0 -> `7.0.1000`, 1.2.3 -> `7.0.1002003`) and ts-r's prerelease label: ts-r
+0.1.0-alpha.3 is `7.0.1000-alpha.3`. By semver's rule, which npm follows, a range like `^7` or
+`^7.0.0` never matches a prerelease; a range only matches prereleases of the exact
+`major.minor.patch` it names itself (`^7.0.1000-alpha.3` matches `7.0.1000-alpha.4`, not
+`7.0.2000-alpha.1`). That is deliberate on npm's side (nobody gets an alpha without asking for
+one), and the drop-in keeps the label so its alphas are marked and ordered the same way as
+ts-r's. So during the alpha, pin an exact version or use `next`; `^7` starts to work with
+ts-r's first stable release.
+
+The `typescript` peer dependency is `^7.0.0` plus the drop-in's own version (for
+`7.0.1000-alpha.3`: `^7.0.0 || 7.0.1000-alpha.3`). Installed in place of TypeScript, the
+`typescript` name is the drop-in itself, so npm checks the peer against the drop-in's version;
+without its own version in the range, an alpha fails that check (`ERESOLVE`). Installed next to
+TypeScript, the peer is your TypeScript and must match `^7.0.0`.
 
 ## What `tsc` does
 

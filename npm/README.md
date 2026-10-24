@@ -10,7 +10,7 @@ What ships to npm and how it is built. User-facing docs are each package's READM
 | `@ts-r.dev/<tool>-<platform>` (7 tools x 8 platforms) | `bin/<binary>`; check and lsp also `lib/lib.*.d.ts` + TypeScript's license | nothing; `os`/`cpu`/`libc` fields |
 | `@ts-r.dev/run`, `dev`, `build`, `check`, `lint`, `lsp` | the shim as `bin/ts-r-<tool>.js` | its 8 platform packages (optional) |
 | `ts-r` | the shim as `bin/ts-r.js` (the launcher) | `@ts-r.dev/cli-<platform>` (optional) and the six tool packages |
-| `@ts-r.dev/typescript` | `bin/tsc`, `lib/` (routing, parity check, API re-exports) | `@ts-r.dev/check`; peer `typescript@^7` |
+| `@ts-r.dev/typescript` | `bin/tsc`, `lib/` (routing, parity check, API re-exports) | `@ts-r.dev/check`; peer `typescript@^7.0.0`, plus its own version when it is a prerelease |
 
 Tools: `cli` (the `ts-r` launcher), `run`, `dev`, `build`, `check`, `lint`, `lsp`. Platforms:
 `darwin-arm64`, `darwin-x64`, `linux-arm64-gnu`, `linux-arm64-musl`, `linux-x64-gnu`,
@@ -18,8 +18,12 @@ Tools: `cli` (the `ts-r` launcher), `run`, `dev`, `build`, `check`, `lint`, `lsp
 that tool's binary for one platform and nothing else (P8: no tool needs another).
 
 All packages share one version (the workspace version), except `@ts-r.dev/typescript`, whose version
-is TypeScript's `major.minor` with a patch encoding the ts-r version (ts-r 0.3.1 ->
-`7.0.3001`), so `"typescript": "npm:@ts-r.dev/typescript@^7"` resolves.
+is TypeScript's `major.minor` with a patch encoding the ts-r version and ts-r's prerelease label
+(ts-r 0.3.1 -> `7.0.3001`, 0.1.0-alpha.3 -> `7.0.1000-alpha.3`), so a stable one matches
+`"typescript": "npm:@ts-r.dev/typescript@^7"`. A prerelease matches no plain range (semver), so
+during the alpha the docs pin exact versions or use the `next` tag. The build adds the drop-in's
+own prerelease version to its `typescript` peer range (`dropInPeerRange`): installed in place of
+TypeScript the peer resolves to the drop-in itself, and without that npm fails with ERESOLVE.
 
 ## Layout
 
