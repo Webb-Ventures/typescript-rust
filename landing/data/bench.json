@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-18",
+  "updated": "2026-10-24",
   "about": "Every number here was measured by the ts-r project and recorded in a commit message, a crate's AGENTS.md or a design record. Each section says what was measured, on what machine and project, how many runs, the command that reproduces it and the commit that recorded it. Pre-alpha: only the pieces that exist today are measured, and the numbers that miss their targets are shown too. Lower is better unless a chart says otherwise.",
   "machines": {
     "mac": "Apple M-series Mac, macOS arm64, release build (the exact chip was not recorded)",

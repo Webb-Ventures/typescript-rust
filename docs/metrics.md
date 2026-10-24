@@ -1,7 +1,9 @@
 # ts-r metrics
 
 Status as of 16 Oct 2026; the correctness rows for the checker, lint and the bundler were
-measured again on 24 Oct 2026 at `087afc9`. Alpha: releases are on npm under the `next` dist-tag.
+measured again on 24 Oct 2026 at `087afc9`, and the ecosystem, public-project, round-trip,
+tsconfig, resolution, sound-mode and incremental rows on 24 Oct 2026 at `ea41eac`.
+Alpha: releases are on npm under the `next` dist-tag.
 
 Speed and memory are measured on pinned public repos ([bench/repos.toml](../bench/repos.toml)):
 **excalidraw** (a Vite + React app, about 500 modules), **tRPC**, **date-fns**, **RxJS**,
@@ -36,7 +38,7 @@ from the files listed under [Sources](#sources); `cargo xtask bench --repos` rep
 | | | TypeORM³ | 548 ms | 567 ms | 1.04× | 2.2× less |
 | | | Playwright³ | 592 ms | 685 ms | 1.2× | 2.4× less |
 | `parse<T>` | typia 9.7.2 | Validation speed | | | 0.85–1.07× | |
-| | | Bundle size, 10 API types | 5.6 KB | 25.5 KB | | 4.5× smaller |
+| | | Bundle size, 10 API types, minified | 5.5 KB | 25.5 KB | | 4.6× smaller (gzipped 2.3 vs 3.3 KB: 1.4×) |
 
 A speed below 1× means ts-r is slower.
 
@@ -74,9 +76,9 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Measure | Value |
 |---|---|
-| Release profile (fat LTO) vs thin LTO | 7% smaller, 2–4% faster |
-| PGO on top | 3–5% faster, 26% larger (opt-in; measured before training moved to the public repos) |
-| npm package, packed | `ts-r-lint` 1.2 MB · `ts-r-check` 2.3 MB · `ts-r-lsp` 3.7 MB · all tools 11.7 MB |
+| Release profile (fat LTO) vs thin LTO | 7% smaller, 2% faster (20 excalidraw rebuilds) |
+| PGO on top | 3% faster (20 excalidraw rebuilds), 26% larger (opt-in; trained before training moved to the public repos) |
+| npm package, packed (0.1.0-alpha.3, macOS arm64) | `ts-r-lint` 4.6 MB · `ts-r-check` 6.0 MB · `ts-r-lsp` 6.8 MB · all seven tools 27.2 MB (Linux x64 a little larger) |
 | Minified output vs esbuild, top 1,000 packages | 2.9% smaller in total over 914 packages; median ratio 0.993 (ecosystem/STATUS.md) |
 | `parse<T>` runtime | 510 B gzipped (budget 0.5 KB) |
 
@@ -85,17 +87,16 @@ private app before the switch to public repos and are not re-measured yet.
 | Area | Result |
 |---|---|
 | Type checker vs tsc's conformance suite (exact diagnostics) | 96.8% of 12,750 compared test variants |
-| private-app projects with exactly tsc's diagnostics | 25 of 25 |
-| private-app diagnostics: extra / missing vs tsc | 0 / 0 |
+| Public projects with exactly tsc's diagnostics (tRPC, date-fns, TypeORM, Playwright, RxJS, React Compiler) | 3 of 6: Playwright 2 extra; RxJS 6 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
 | Lint rule oracle (ESLint + typescript-eslint test cases) | 15,495 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,898 / 6,920) |
-| Lint on private-app, every configured rule (type-aware included) vs ESLint | 26,578 match, 0 missed, 0 extra; 23 of 23 projects pass the parity gate |
-| Parser + printer round trip over tsc's test files | 18,260 files, 0 mismatches |
-| Parse corpus (tsc's tests + private-app) | 0 errors where tsc accepts the file |
+| Lint on TypeORM without types, every configured rule, vs ESLint | 2,174 of ESLint's 7,392 problems match, 2 only ts-r-lint; most of the 5,218 missed (4,928) are jsdoc plugin rules |
+| Parser + printer round trip over tsc's test files | 17,740 files, 0 mismatches (1,472 with syntax errors skipped) |
 | esbuild's bundler test cases | 666 / 746 (324 skipped) |
-| tsconfig error projects matching tsc | 114 / 118 |
-| Sound-mode spec cases | 221 / 221 |
-| Incremental vs full check | identical in all 25 projects; 18,000 random edits (seeds 1–60 × 300) |
+| tsconfig files of the five bench repos vs `tsc --showConfig` and config diagnostics | 114 / 114 `--showConfig`; 111 / 114 diagnostics (3 differ in message text) |
+| Module resolution, the same 114 configs vs `tsc --traceResolution` | 158,174 resolutions, 10 mismatches |
+| Sound-mode spec cases | 234 / 234 |
+| Incremental vs full check, random edits on the history test app (seeds 1–60 × 300) | 37 of 60 seeds match; the other 23 stop on one difference (TS2459 instead of TS2305 after an export is renamed away) |
 
 ### Top 1,000 npm packages (`cargo xtask ecosystem`)
 
@@ -116,7 +117,9 @@ Each number is recorded with its method in the crate or file that owns it:
 - Dev server: `crates/ts_r_hmr/AGENTS.md` (excalidraw against Vite, `bench/dev/dev.mjs`).
 - Lint correctness: `docs/design/0006-lint.md`, `crates/ts_r_lsp/AGENTS.md`.
 - Build: `docs/design/0008-bundler.md`, `bench/esbuild-oracle/README.md`.
-- Checker: `crates/ts_r_checker/AGENTS.md`, `docs/design/0004-types-and-checker.md` (`m5/checker-*`).
+- Checker: `crates/ts_r_checker/AGENTS.md`, `docs/design/0004-types-and-checker.md` (`m5/checker-*`);
+  the public projects: [bench/README.md](../bench/README.md), "Diagnostics against tsc 7".
+- tsconfig and resolution: `crates/ts_r_config/AGENTS.md`, `crates/ts_r_resolver/AGENTS.md`.
 - History: `crates/ts_r_history/AGENTS.md`, `docs/design/0005-history.md`.
 - `parse<T>`: `crates/ts_r_guard/AGENTS.md` (`m6/guard-gaps`).
 - Release builds: `xtask/AGENTS.md` (`m7/release`).
