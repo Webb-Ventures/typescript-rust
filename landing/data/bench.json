@@ -488,7 +488,7 @@
         "software": "ts-r at commit ea41eac; esbuild 0.28.2, Node 24.21.0, tsc 7.0.2",
         "input": "The top 1,000 packages of ecosystem/packages.toml (list of 2026-10-14); one run of 776 s on 2026-10-24",
         "command": "cargo xtask ecosystem --top 1000 --stages parse,transform,bundle,check --tests --jobs 3 (3 packages at a time; see ecosystem/README.md)",
-        "commit": "ea41eac",
+        "commit": "8b5f8ea",
         "sources": ["ecosystem/STATUS.md", "ecosystem/README.md"]
       }
     },
