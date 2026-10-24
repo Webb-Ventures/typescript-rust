@@ -418,8 +418,10 @@ pub fn is_data_path(pattern: &str) -> bool {
         "tests/lib/",
         "tsc/testdata/",
         "src/lib/",
-        "harness/", // test262
-        "test/",    // test262 / other test suites
+        "harness/",    // test262
+        "test/",       // test262, Node's test fixtures
+        "tests/",      // tsx's test suite
+        "playground/", // Vite's playground test projects and their specs
     ];
     DATA_PREFIXES.iter().any(|d| p.starts_with(d))
         || (p.starts_with("tsc/internal/bundled/libs/") && p.ends_with(".d.ts"))
@@ -505,13 +507,21 @@ fn sync(mut args: Args) -> Result<ExitCode> {
     let force = args.flag("force");
     let commit_override = args.opt("commit")?;
     let dest = args.opt("dest")?;
+    let pin_name = args.opt("pin")?.unwrap_or_else(|| "typescript".to_string());
     args.finish()?;
 
     let file = load_pins()?;
-    let ts = ts_pin(&file);
-    let patterns = if minimal { &ts.sync_minimal } else { &ts.sync };
+    let Some(ts) = file.pins.get(&pin_name) else {
+        return Err(format!("no pin named `{pin_name}` in {UPSTREAM_JSON}").into());
+    };
+    let is_ts = pin_name == "typescript";
+    let patterns = if minimal && is_ts {
+        &ts.sync_minimal
+    } else {
+        &ts.sync
+    };
     if patterns.is_empty() {
-        return Err("typescript pin has no sync patterns".into());
+        return Err(format!("{pin_name} pin has no sync patterns").into());
     }
     if let Some(bad) = patterns.iter().find(|p| !is_data_path(p)) {
         return Err(format!(
@@ -523,7 +533,8 @@ fn sync(mut args: Args) -> Result<ExitCode> {
     let commit = commit_override.unwrap_or_else(|| ts.commit.clone());
     let dir = match dest {
         Some(d) => PathBuf::from(d),
-        None => root().join(TS_DIR),
+        None if is_ts => root().join(TS_DIR),
+        None => root().join("target/upstream").join(&pin_name),
     };
 
     ensure_repo(&dir, &ts.repo)?;
@@ -565,12 +576,12 @@ fn sync(mut args: Args) -> Result<ExitCode> {
             .unwrap_or("other");
         *counts.entry(area).or_default() += 1;
     }
-    println!("synced microsoft/TypeScript@{commit} into {}", rel(&dir));
+    println!("synced {}@{commit} into {}", ts.repo, rel(&dir));
     for (area, n) in &counts {
         println!("  {n:>7}  {area}");
     }
 
-    if dest_is_default(&dir) {
+    if is_ts && dest_is_default(&dir) {
         let synced = commit.clone();
         update_compat(|compat| {
             let last = &compat["lastSync"];
@@ -1131,6 +1142,10 @@ mod tests {
         assert!(!is_data_path("/tsc/internal/checker/"));
         assert!(is_data_path("/tsc/internal/bundled/libs/*.d.ts"));
         assert!(!is_data_path("/tsc/internal/bundled/libs/"));
+        assert!(is_data_path("/playground/hmr/"));
+        assert!(is_data_path("/test/fixtures/typescript/"));
+        assert!(!is_data_path("/packages/vite/src/"));
+        assert!(!is_data_path("/src/"));
     }
 
     #[test]

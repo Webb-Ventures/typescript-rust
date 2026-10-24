@@ -33,6 +33,7 @@ fn node_available() -> bool {
 
 const CONFIG: &str = r#"import path from 'node:path'
 const dir = import.meta.dirname
+const order = []
 
 export default ({ command }) => ({
   resolve: { alias: { '@lib': path.join(dir, 'src/lib') } },
@@ -40,12 +41,15 @@ export default ({ command }) => ({
   plugins: [
     {
       name: 'test-virtual',
+      buildStart() { order.push('virtual') },
       resolveId(id) { if (id === 'virtual:greeting') return '\0virtual:greeting' },
       load(id) { if (id === '\0virtual:greeting') return `export const greeting = ${JSON.stringify('hello ' + command)}` },
     },
     {
       name: 'test-pre',
       enforce: 'pre',
+      // buildStart hooks start together; a sequential one waits for them.
+      buildStart: { async handler() { await new Promise((r) => setTimeout(r, 50)); order.push('pre') } },
       transform(code, id) { if (id.endsWith('/typed.ts')) return code + '\nexport const fromPre: number = 41 + 1;\n' },
     },
     [[{
@@ -57,10 +61,12 @@ export default ({ command }) => ({
     }], null, false],
     {
       name: 'test-resolve',
+      buildStart: { sequential: true, handler() { order.push('sequential') } },
       async resolveId(id, importer) { if (id === '~helper') return this.resolve('./helper.ts', importer) },
     },
     {
       name: 'test-md',
+      buildStart() { order.push('md') },
       transform(code, id) { if (id.endsWith('.md')) return 'export default ' + JSON.stringify(code.trim()) },
     },
     {
@@ -82,6 +88,7 @@ export default ({ command }) => ({
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify({ method: req.method, url: req.url }))
         })
+        server.middlewares.use('/api/order', (req, res) => res.end(order.join(',')))
         server.middlewares.use('/api/echo', (req, res) => {
           let body = ''
           req.on('data', (c) => { body += c })
@@ -97,6 +104,12 @@ export default ({ command }) => ({
             if (req.url === '/api/post-hook') res.end('post')
             else next()
           })
+        }
+      },
+      hotUpdate({ file }) {
+        if (file.endsWith('.hot')) {
+          this.environment.hot.send({ type: 'custom', event: 'hot-env', data: path.basename(file) })
+          return []
         }
       },
       handleHotUpdate({ file, server }) {
@@ -124,6 +137,7 @@ if (import.meta.hot) {
   import.meta.hot.accept()
   import.meta.hot.on('notes-changed', (d: { file: string }) => { w.__notes = d.file })
   import.meta.hot.on('pong-plugin', (d: { got: number }) => { w.__pong = d.got })
+  import.meta.hot.on('hot-env', (d: string) => { w.__hotEnv = d })
   w.__ping = (n: number) => import.meta.hot!.send('ping-plugin', { n })
 }
 "#;
@@ -259,6 +273,10 @@ fn vite_plugins_run_in_a_node_sidecar() {
     let (status, _, virt) = http_get(addr, "/@id/__x00__virtual:greeting", &[]);
     assert_eq!(status, 200);
     assert!(virt.contains("hello serve"), "{virt}");
+    assert_eq!(
+        http_get(addr, "/api/order", &[]).2,
+        "virtual,pre,sequential,md"
+    );
     let (status, _, md) = http_get(addr, &md_url, &[]);
     assert_eq!(status, 200, "{md}");
     assert!(md.contains("export default \"# Notes\""), "{md}");
@@ -298,6 +316,9 @@ fn vite_plugins_run_in_a_node_sidecar() {
         // handleHotUpdate: a custom event, no update.
         app.write("src/data.txt", "x");
         cdp.wait_for("window.__notes === 'data.txt'", T);
+        // hotUpdate: `this.environment.hot` sends to the page.
+        app.write("src/data.hot", "x");
+        cdp.wait_for("window.__hotEnv === 'data.hot'", T);
         // A plugin module's file changes: it's re-loaded and re-transformed.
         app.write("src/notes.md", "# Notes v2\n");
         cdp.wait_for(

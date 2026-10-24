@@ -1,0 +1,95 @@
+# Vite playground oracle for ts-r-dev
+
+`run.mjs` treats Vite's playground end-to-end specs as data: it reads the `__tests__/*.spec.ts`
+files in `target/upstream/vite/playground/` (Vite 8.3.4, fetched by `cargo xtask upstream
+sync`), and for every playground it can serve it:
+
+1. copies the playground to `target/dev-oracle/work/<server>/<name>`,
+2. for each spec file, starts a dev server on the copy: Vite 8.3.4 (`vite-serve.mjs`, Vite
+   pinned in `bench/package.json`) or `ts-r-dev`, each under `scripts/limit.sh`,
+3. opens the server's URL in headless Chrome (driven over the DevTools protocol by
+   `cdp.mjs`, not Playwright), and runs the spec's tests in order through small stand-ins for
+   vitest and Vite's `test-utils` (`shim/`), the way Vite's playground setup does,
+4. records pass, fail or skip per test and server in `target/dev-oracle/results.json`.
+
+A test is compared only when it passes against Vite; it passes when it passes against
+ts-r-dev too. Only the specs are used; nothing from Vite's implementation runs in ts-r-dev.
+
+```sh
+cargo build --release -p ts_r_dev -j 4
+(cd bench && ../scripts/limit.sh -- npm ci)
+scripts/limit.sh --mem-mb 4096 --time-s 3600 -- node bench/dev-oracle/run.mjs --jobs 1 \
+  --tsr target/release/ts-r-dev     # --playgrounds assets,hmr reruns some, merged into results.json
+node bench/dev-oracle/fails.mjs [--playground hmr] [--skips]   # list failures
+```
+
+Whole playgrounds are skipped when they have no browser page (SSR), start a custom server
+(`__tests__/serve.ts`), need npm packages that `bench/node_modules` doesn't have (vue, sass,
+react, ...), only have variant specs, test web workers, are build-only (legacy) or use
+`experimental.bundledDev` (hmr-full-bundle-mode). Tests are skipped when they are build-only
+(`isBuild`), assert on the dev server's terminal output, or use Vite's server object.
+Full runs use `--jobs 1`: two playgrounds at once got Chrome killed at its
+2048 MB cap during hmr.
+
+## Results
+
+58a940e (2026-10-24, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47, `--jobs 1`):
+**202 of 322 compared tests pass (62.7%)**; 77 tests are skipped. At 8c14f29 (before the
+fixes in 58a940e, with an older harness that loaded fewer specs) 101 of 254 passed.
+
+| Playground | Pass | Compared | Skip |
+| --- | ---: | ---: | ---: |
+| assets | 46 | 83 | 14 |
+| assets-sanitize | 0 | 2 | 0 |
+| base-conflict | 1 | 1 | 0 |
+| build-old | 3 | 3 | 0 |
+| chunk-importmap | 1 | 10 | 2 |
+| csp | 7 | 7 | 2 |
+| css-codesplit | 0 | 1 | 13 |
+| css-codesplit-cjs | 0 | 0 | 3 |
+| css-lightningcss | 4 | 9 | 4 |
+| css-lightningcss-root | 1 | 1 | 0 |
+| css-no-codesplit | 1 | 1 | 1 |
+| data-uri | 2 | 2 | 2 |
+| define | 0 | 6 | 0 |
+| dynamic-import | 18 | 24 | 5 |
+| dynamic-import-inline | 0 | 0 | 1 |
+| env | 14 | 16 | 1 |
+| env-nested | 3 | 3 | 0 |
+| glob-import | 12 | 25 | 0 |
+| hmr | 37 | 56 | 1 |
+| hmr-root | 1 | 1 | 0 |
+| html | 42 | 45 | 18 |
+| import-attribute | 0 | 2 | 0 |
+| lazy-compilation | 0 | 0 | 2 |
+| minify | 0 | 0 | 3 |
+| module-graph | 0 | 0 | 1 |
+| nested-deps | 1 | 1 | 0 |
+| object-hooks | 1 | 1 | 0 |
+| preserve-symlinks | 2 | 2 | 0 |
+| proxy-bypass | 1 | 2 | 2 |
+| transform-plugin | 0 | 3 | 0 |
+| tsconfig-json | 4 | 5 | 1 |
+| wasm | 0 | 10 | 1 |
+
+Remaining failures by cause:
+
+- **HTML and CSS asset URLs** (assets, 30): `<img src>`/`srcset`/og meta URLs and CSS `url()`
+  (in files, `<style>` and inline styles, `image-set()`, public files) don't get the `/foo/bar`
+  base; `?no-inline`, `?inline` of public files, svg fragments, `new URL('@/...')`.
+- **Serving edge cases** (assets, assets-sanitize, html): 404s for wrong case and outside the
+  base, the HTML fallback, `server.fs` deny (`.env` gives 403 in Vite), `text/plain` charset,
+  special-character file names.
+- **HMR edge cases** (hmr, 19): partial `acceptExports`, invalidating a virtual module, a
+  missing import that appears later, file delete and restore (dispose/prune), circular imports
+  without accept, `this.addWatchFile` (a no-op in the sidecar), link dedupe and full-reload URL
+  encoding.
+- **`define`** (6) and **env expansion** (env, 2; html `%VITE_NUMBER%`): define values don't
+  reach the page; dotenv `expand`.
+- **Not implemented**: importmap (chunk-importmap, 9), wasm imports and `?url` (10), import
+  attributes (2), `?worker`, lightningcss CSS modules (5), proxy `bypass` (1), plugin
+  `moduleType: 'json'` and hook filters (transform-plugin, 3), package and subpath globs
+  (glob-import, 13), an ESM `vite.config.js` in a `"type": "commonjs"` package
+  (css-codesplit-cjs: ts-r-dev exits).
+- **Transform** (owned by ts_r_transform, not ts-r-dev): per-tsconfig `compilerOptions`
+  (tsconfig-json, 1).

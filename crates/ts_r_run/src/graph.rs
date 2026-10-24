@@ -117,8 +117,10 @@ impl Engine {
         pkg: PackageType,
     ) -> Result<Compiled, String> {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        let (options, plain_jsx) = self.project.options_for(path);
         let key = KeyBuilder::new("ts-r-run/compile")
             .str(&self.salt)
+            .u64(u64::from(plain_jsx))
             .str(name)
             .str(match pkg {
                 PackageType::Module => "module",
@@ -134,7 +136,7 @@ impl Engine {
         {
             return Ok(c);
         }
-        let c = compile::compile(path, src, &self.project.base, pkg, self.source_maps)?;
+        let c = compile::compile(path, src, options, pkg, self.source_maps)?;
         if let Some(cache) = &self.cache {
             let _ = cache.put(&key, &compile::encode(&c));
         }
@@ -266,6 +268,10 @@ pub fn build(engine: &Engine, entry: &str, threads: usize) -> Graph {
     g.inputs.extend(engine.project.config_files.iter().cloned());
     // `ts-r.toml` when `[sound.guard]` came from it (an edit must miss the stamp).
     g.inputs.extend(engine.guard_config.iter().cloned());
+    if !engine.project.config_errors.is_empty() {
+        g.errors.push(engine.project.config_errors.clone());
+        return g;
+    }
     let mut seen: FxHashSet<String> = FxHashSet::default();
     seen.insert(entry.to_owned());
     let mut frontier = vec![entry.to_owned()];

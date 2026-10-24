@@ -261,6 +261,13 @@ impl Scanner<'_> {
             }
             if word == b"process" {
                 self.process_env(start, end);
+            } else if word == b"global" || word == b"globalThis" {
+                // `global.process.env.NODE_ENV` and `globalThis.process…` are replaced too.
+                if let Some((a, b)) = self.member(end)
+                    && &self.src[a..b] == b"process"
+                {
+                    self.process_env(start, b);
+                }
             } else if word == b"new" {
                 self.new_url(end);
             }
@@ -968,7 +975,7 @@ const mode = import.meta.env.MODE;
 
     #[test]
     fn node_env_urls_and_globs() {
-        let code = "const a = process.env.NODE_ENV;\nprocess.env.NODE_ENV = 'x';\nif (process.env.NODE_ENV === 'production') {}\nconst b = x.process.env.NODE_ENV + process.env.NODE_ENVX;\nconst s = \"process.env.NODE_ENV\";\n\
+        let code = "const a = process.env.NODE_ENV;\nprocess.env.NODE_ENV = 'x';\nif (process.env.NODE_ENV === 'production') {}\nconst b = x.process.env.NODE_ENV + process.env.NODE_ENVX;\nconst s = \"process.env.NODE_ENV\";\nconst c = [global.process.env.NODE_ENV, globalThis.process.env.NODE_ENV, globalThis.process.env.X];\n\
             const u = new URL('./a.png', import.meta.url);\nconst v = new URL(`./b.svg`, import.meta.url).href;\nconst w = new URL(`./${n}.png`, import.meta.url);\nconst z = new URL('./c.png', base);\n\
             const g = import.meta.glob(['./p/*.js', '!./p/x.js'], { eager: true, query: { a: ')' } });\n";
         let hot = scan_hot(code);
@@ -977,7 +984,15 @@ const mode = import.meta.env.MODE;
             .iter()
             .map(|&(s, e)| &code[s as usize..e as usize])
             .collect();
-        assert_eq!(spans, vec!["process.env.NODE_ENV", "process.env.NODE_ENV"]);
+        assert_eq!(
+            spans,
+            vec![
+                "process.env.NODE_ENV",
+                "process.env.NODE_ENV",
+                "global.process.env.NODE_ENV",
+                "globalThis.process.env.NODE_ENV"
+            ]
+        );
         assert_eq!(
             hot.node_env[1].0 as usize,
             code.find("(process").unwrap() + 1

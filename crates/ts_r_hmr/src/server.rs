@@ -118,6 +118,8 @@ pub struct DevConfig {
     pub define: Vec<(String, String)>,
     /// `publicDir` (relative = from the root); `None` = none.
     pub public_dir: Option<PathBuf>,
+    /// `assetsInclude`: more files served as assets (a URL), not as plugin modules.
+    pub assets_include: crate::glob::PathFilter,
     /// `server.headers`, added to every response that isn't proxied.
     pub headers: Vec<(String, String)>,
     pub cors: Cors,
@@ -160,6 +162,7 @@ impl std::fmt::Debug for DevConfig {
             .field("env_prefix", &self.env_prefix)
             .field("define", &self.define)
             .field("public_dir", &self.public_dir)
+            .field("assets_include", &self.assets_include)
             .field("headers", &self.headers)
             .field("cors", &self.cors)
             .field("proxy", &self.proxy)
@@ -193,6 +196,7 @@ impl DevConfig {
             env_prefix: vec!["VITE_".to_owned()],
             define: Vec::new(),
             public_dir: Some(PathBuf::from("public")),
+            assets_include: crate::glob::PathFilter::default(),
             headers: Vec::new(),
             cors: Cors::default(),
             proxy: Vec::new(),
@@ -285,6 +289,7 @@ impl ModuleError {
 pub(crate) struct Shared {
     pub root: PathBuf,
     pub public_dir: Option<PathBuf>,
+    pub assets_include: crate::glob::PathFilter,
     pub base: String,
     pub env_options: EnvOptions,
     /// Reloaded when an env file changes.
@@ -553,6 +558,7 @@ impl DevServer {
         };
         let shared = Arc::new(Shared {
             public_dir: config.public_dir.as_ref().map(|d| root.join(d)),
+            assets_include: config.assets_include.clone(),
             base,
             env_options,
             env: RwLock::new(Arc::new(env)),
@@ -951,6 +957,7 @@ fn websocket(
         send(&payload.to_string())?;
     }
     drop(last_error);
+    crate::hmr::on_client_lifecycle(shared, true);
     let mut partial = None;
     let result = loop {
         match ws::read_message(&mut reader, &mut partial) {
@@ -975,6 +982,7 @@ fn websocket(
         }
     };
     shared.hub.remove(id);
+    crate::hmr::on_client_lifecycle(shared, false);
     result
 }
 
@@ -1172,16 +1180,21 @@ fn serve_static(req: &Request, file: &Path) -> Response {
     }
 }
 
-fn serve_html(shared: &Shared, req: &Request, file: &Path) -> Response {
+/// An HTML file after `%ENV%` replacement and plugin `transformIndexHtml` hooks.
+fn transformed_html(shared: &Shared, url: &str, file: &Path) -> io::Result<Result<String, String>> {
     let env = shared.env();
-    let html = fs::read_to_string(file).map(|html| {
+    fs::read_to_string(file).map(|html| {
         let html = crate::env::replace_html(&html, &env);
         match &shared.plugins {
-            Some(p) if shared.plugin_hooks.index_html => {
-                p.transform_index_html(&req.path, file, &html)
-            }
+            Some(p) if shared.plugin_hooks.index_html => p.transform_index_html(url, file, &html),
             _ => Ok(html),
         }
+    })
+}
+
+fn serve_html(shared: &Shared, req: &Request, file: &Path) -> Response {
+    let html = transformed_html(shared, &req.path, file).map(|r| {
+        r.map(|html| crate::html_proxy::with_proxies(&html, &url_for_file(&shared.root, file)))
     });
     match html {
         Ok(Err(message)) => Response::text(
@@ -1265,6 +1278,15 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
     let ext = ext_of(file);
     // `?raw` and `?url` of an HTML file are its text and URL as JS, not the page.
     if (ext == "html" || ext == "htm") && !req.has_query("raw") && !req.has_query("url") {
+        // An inline `<script type="module">` of the page, as its own module.
+        if let Some(n) = req
+            .query_value("index")
+            .filter(|_| req.has_query("html-proxy"))
+            .and_then(crate::html_proxy::index_of)
+        {
+            let url = format!("{url_path}?html-proxy&index={n}.js");
+            return serve_script(shared, req, &crate::html_proxy::module_file(file, n), &url);
+        }
         return serve_html(shared, req, file);
     }
     let url = url_path.to_owned();
@@ -1975,7 +1997,14 @@ fn file_pending(shared: &Shared, path: PathBuf, spec_query: &str) -> Pending {
         return Pending::Url(u);
     }
     let kind = kind_for(&path);
-    if shared.plugin_hooks.modules() && is_plugin_import(&path, kind, spec_query) {
+    if shared.plugin_hooks.modules()
+        && is_plugin_import(
+            &path,
+            kind,
+            spec_query,
+            shared.assets_include.matches(&path),
+        )
+    {
         let id = if spec_query.is_empty() {
             crate::paths::id(&path).into_owned()
         } else {
@@ -2046,8 +2075,8 @@ const KNOWN_ASSETS: &[&str] = &[
 
 /// Whether an import of `path` goes through plugin `load`/`transform` hooks as a plugin
 /// module: a query the server doesn't know (`?react`), or a file that is neither a script,
-/// CSS, JSON nor a known asset (`.md`, `.yaml`, `.vue`).
-fn is_plugin_import(path: &Path, kind: ModuleKind, spec_query: &str) -> bool {
+/// CSS, JSON nor a known asset (`.md`, `.yaml`, `.vue`) nor `included` by `assetsInclude`.
+fn is_plugin_import(path: &Path, kind: ModuleKind, spec_query: &str, included: bool) -> bool {
     let unknown_query = spec_query
         .split('&')
         .filter(|p| !p.is_empty())
@@ -2058,6 +2087,7 @@ fn is_plugin_import(path: &Path, kind: ModuleKind, spec_query: &str) -> bool {
     let ext = ext_of(path);
     kind == ModuleKind::Asset
         && spec_query.is_empty()
+        && !included
         && ext != "json"
         && !KNOWN_ASSETS.contains(&ext.as_str())
 }
@@ -2303,6 +2333,14 @@ fn compose_maps(chain: &[Option<String>], input: &TransformInput<'_>) -> Option<
 /// else (Vite's load fallback) a known asset's URL as the default export, else the text of
 /// the file behind the id.
 pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<Vec<u8>, String> {
+    if let Some((page, n)) = crate::html_proxy::split_module_file(file) {
+        let page_url = url_for_file(&shared.root, &page);
+        let html = transformed_html(shared, &page_url, &page)
+            .map_err(|e| format!("{}: {e}", page.display()))??;
+        return crate::html_proxy::script(&html, n)
+            .map(|s| s.as_bytes().to_vec())
+            .ok_or_else(|| format!("{page_url} has no inline module script {n}"));
+    }
     if !plugins::is_plugin_url(url) {
         return fs::read(file).map_err(|e| format!("{}: {e}", file.display()));
     }
@@ -2699,6 +2737,17 @@ pub(crate) fn next_timestamp(shared: &Shared) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assets_include_files_are_assets_not_plugin_modules() {
+        let f = Path::new("/p/app/nested/foo.unknown");
+        let kind = kind_for(f);
+        assert!(is_plugin_import(f, kind, "", false));
+        assert!(!is_plugin_import(f, kind, "", true));
+        // A query the server doesn't know still goes to plugins.
+        assert!(is_plugin_import(f, kind, "react", true));
+        assert!(!is_plugin_import(Path::new("/p/a.png"), kind, "", false));
+    }
 
     #[test]
     fn urls_for_files() {

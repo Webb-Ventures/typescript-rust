@@ -7,7 +7,7 @@ use super::{Ctx, LinesCache, LspLines, decl_span};
 use crate::jsonrpc::codes;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
-use ts_r_ast::Node;
+use ts_r_ast::{MethodKind, Node};
 use ts_r_checker::{Ck, Loc};
 use ts_r_diagnostics::FileId;
 use ts_r_types::{ObjectKind, SymId, TypeFlags, TypeId, TypeKind};
@@ -33,7 +33,44 @@ pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         let s = c.resolve_alias(s).unwrap_or(s);
         decls.extend(c.decls(s));
     }
+    // A call goes to the overload it resolves to.
+    if decls.len() > 1
+        && let Some(d) = called_overload(ck, Loc::new(cx.file, n))
+        && decls.contains(&d)
+    {
+        decls = vec![d];
+    }
     decl_locations(cx, decls)
+}
+
+/// The declaration of the signature a call resolves to, when `name` is the callee (`f(1)`,
+/// `o.m(1)`, `new C()`, ``f`x` ``).
+fn called_overload(ck: &mut Ck<'_, '_>, name: Loc) -> Option<Loc> {
+    let c = ck.c;
+    let mut callee = name.node;
+    let mut p = c.parent(name)?;
+    if let Node::Member { prop, .. } = *c.node(p)
+        && prop == name.node
+    {
+        callee = p.node;
+        p = c.parent(p)?;
+    }
+    let is_callee = match *c.node(p) {
+        Node::Call { callee: x, .. } | Node::New { callee: x, .. } => x == callee,
+        Node::TaggedTemplate { tag, .. } => tag == callee,
+        _ => false,
+    };
+    if !is_callee {
+        return None;
+    }
+    let sig = ck.resolved_signature(p)?;
+    let store = ck.store();
+    let target = store.sig(sig).target.map(|t| t.0).unwrap_or(sig);
+    let (f, n) = store.sig(target).decl?;
+    if f as usize >= c.files.len() {
+        return None;
+    }
+    Some(Loc::new(FileId(f), ck.node_id(n)?))
 }
 
 /// The file a module specifier string resolves to.
@@ -293,7 +330,11 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
                 start: span.start,
                 end: span.end,
                 is_decl: is_decl && p,
-                is_write: is_write(ck, l),
+                is_write: if is_decl && p {
+                    decl_is_write(ck, l)
+                } else {
+                    is_write(ck, l)
+                },
                 shorthand: side,
             });
         }
@@ -349,14 +390,42 @@ fn other(s: ShorthandSide) -> ShorthandSide {
     }
 }
 
-/// Whether the name is assigned (`x = 1`, `x++`).
+/// Whether the name is assigned (`x = 1`, `x++`, `this.x += 1`).
 fn is_write(ck: &Ck<'_, '_>, l: Loc) -> bool {
     let c = ck.c;
-    let Some(p) = c.parent(l) else { return false };
+    let Some(mut p) = c.parent(l) else {
+        return false;
+    };
+    let mut at = l.node;
+    if let Node::Member { prop, .. } = *c.node(p)
+        && prop == l.node
+    {
+        at = p.node;
+        let Some(pp) = c.parent(p) else { return false };
+        p = pp;
+    }
     match *c.node(p) {
-        Node::Assign { left, .. } => left == l.node,
+        Node::Assign { left, .. } => left == at,
         Node::Update { .. } => true,
         _ => false,
+    }
+}
+
+/// Whether a declaration counts as a write (tsc 7's highlight kind): one that gives a value.
+/// Signatures, constructors and fields or variables without an initializer are reads.
+fn decl_is_write(ck: &Ck<'_, '_>, l: Loc) -> bool {
+    let c = ck.c;
+    let Some(p) = c.parent(l) else { return true };
+    match *c.node(p) {
+        Node::PropertySignature { .. } | Node::MethodSignature { .. } => false,
+        Node::PropertyDef { value, .. } => value.is_some(),
+        Node::MethodDef { kind, .. } => kind != MethodKind::Constructor,
+        // `for (const x of xs)` assigns each element.
+        Node::VarDeclarator { init: None, .. } => c
+            .parent(p)
+            .and_then(|d| c.parent(d))
+            .is_some_and(|n| matches!(c.node(n), Node::ForOf { .. } | Node::ForIn { .. })),
+        _ => true,
     }
 }
 
