@@ -9,12 +9,15 @@
 use std::sync::{Arc, RwLock};
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use ts_r_ast::{Ast, BinaryOp, Modifiers, Node, NodeId, NodeKind, SourceKind, Span, UnaryOp};
+use ts_r_ast::{
+    Ast, BinaryOp, Modifiers, Node, NodeId, NodeKind, SourceKind, Span, UnaryOp, VarKind,
+};
 use ts_r_config::jsonc::{self, Value, ValueKind};
 use ts_r_config::{JsxEmit, ScriptTarget};
 use ts_r_minify::{ScopeId, Scopes, SymbolId, SymbolKind, build, names};
 use ts_r_transform::{JsxMode, ModuleFormat, TransformOptions};
 
+use crate::features::Features;
 use crate::options::{BuildOptions, Format, Loader, Platform};
 use crate::resolve::Resolver;
 use crate::{Message, Severity};
@@ -98,8 +101,17 @@ pub fn load(
             let body = if text.trim().is_empty() {
                 "{}".to_owned()
             } else {
-                // JSON is a JavaScript expression; parenthesize so `{` isn't a block.
-                format!("(\n{}\n)", computed_proto_keys(text.trim_end()))
+                // JSON is a JavaScript expression; parenthesize so `{` isn't a block. Below
+                // ES2015 there are no computed keys, and esbuild prints `"__proto__"` as is.
+                let text = text.trim_end();
+                if opts
+                    .unsupported()
+                    .has(crate::features::Feature::ObjectExtensions)
+                {
+                    format!("(\n{text}\n)")
+                } else {
+                    format!("(\n{}\n)", computed_proto_keys(text))
+                }
             };
             Ok(js_value(body, hash))
         }
@@ -554,11 +566,12 @@ impl PrepareContext {
         }
         let t = Arc::new(self.compute_options(config.as_deref()));
         let cache_key: Arc<str> = Arc::from(format!(
-            "{}|{}|{}|{:?}",
+            "{}|{}|{}|{:?}|{}",
             t.cache_key(),
             self.defines.cache_key(),
             self.opts.ignore_annotations,
-            self.opts.effective_format()
+            self.opts.effective_format(),
+            self.opts.unsupported().key()
         ));
         let entry = (t, cache_key);
         self.ts
@@ -587,13 +600,7 @@ impl PrepareContext {
             ),
         };
         t.module = ModuleFormat::Preserve;
-        t.target = match self.opts.target {
-            Some(2022) => ScriptTarget::ES2022,
-            Some(2023) => ScriptTarget::ES2023,
-            Some(2024) => ScriptTarget::ES2024,
-            Some(2025) => ScriptTarget::ES2025,
-            _ => ScriptTarget::ESNext,
-        };
+        t.target = lowering_target(self.opts.unsupported());
         t.rewrite_relative_import_extensions = false;
         let jsx = &self.opts.jsx;
         t.jsx = match jsx.mode.as_deref() {
@@ -638,6 +645,26 @@ impl PrepareContext {
     /// A stable string describing everything that affects preparation of `path`.
     pub fn cache_key(&self, path: &str) -> Arc<str> {
         self.options_entry(path).1
+    }
+}
+
+/// The `ts_r_transform` target that lowers every unsupported feature lowering by year
+/// handles (`features.rs`); ES2015 is the lowest tsc 7 emits.
+pub fn lowering_target(unsupported: Features) -> ScriptTarget {
+    match unsupported.lower_year() {
+        None => ScriptTarget::ESNext,
+        Some(..=2015) => ScriptTarget::ES2015,
+        Some(2016) => ScriptTarget::ES2016,
+        Some(2017) => ScriptTarget::ES2017,
+        Some(2018) => ScriptTarget::ES2018,
+        Some(2019) => ScriptTarget::ES2019,
+        Some(2020) => ScriptTarget::ES2020,
+        Some(2021) => ScriptTarget::ES2021,
+        Some(2022) => ScriptTarget::ES2022,
+        Some(2023) => ScriptTarget::ES2023,
+        Some(2024) => ScriptTarget::ES2024,
+        Some(2025) => ScriptTarget::ES2025,
+        Some(_) => ScriptTarget::ESNext,
     }
 }
 
@@ -749,15 +776,71 @@ pub fn prepare_with(
             "The JSX syntax extension is not currently enabled".into(),
         ));
     }
-    // `accessor` fields of JavaScript files are lowered for an explicit `--target` (they are
-    // newer than every year target ts-r-build emits).
-    let lower_accessors = !kind.is_typescript()
-        && ctx.opts.target.is_some()
-        && ast.nodes.iter().any(|n| {
-            matches!(n, Node::PropertyDef { modifiers, .. } if modifiers.contains(Modifiers::ACCESSOR))
-        });
+    // Syntax the target forbids that lowering does not handle (`lowering.rs`).
+    let unsupported = ctx.opts.unsupported();
+    if messages.is_empty() {
+        for (at, text) in crate::lowering::errors(&ast, unsupported) {
+            let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+            messages.push(lines.message(Severity::Error, display, at, text));
+        }
+    }
+    // Lowering a top-level `using` turns the module's constants into variables, so a write
+    // to one would no longer throw: esbuild makes it an error.
+    if messages.is_empty()
+        && unsupported.has(crate::features::Feature::Using)
+        && build::program_stmts(&ast).iter().any(|&s| {
+            matches!(
+                ast.node(s),
+                Node::VarDecl {
+                    kind: VarKind::Using | VarKind::AwaitUsing,
+                    ..
+                }
+            )
+        })
+    {
+        let scopes = Scopes::analyze(&ast, true);
+        for r in scopes.refs.iter().filter(|r| r.write) {
+            let Some(sym) = r.symbol else { continue };
+            let sym = scopes.symbol(sym);
+            if sym.scope == ScopeId::MODULE
+                && matches!(sym.kind, SymbolKind::Const | SymbolKind::Using)
+            {
+                let name = ast.atom(sym.name);
+                let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+                messages.push(lines.message(
+                    Severity::Error,
+                    display,
+                    ast.span(r.node).start,
+                    format!("Cannot assign to {name:?} because it is a constant"),
+                ));
+            }
+        }
+    }
+    // `import.meta` below its target becomes the module's empty object (`plan.rs`); esbuild
+    // warns at each use in the source.
+    let mut late = Vec::new();
+    if unsupported.has(crate::features::Feature::ImportMeta) {
+        for (i, n) in ast.nodes.iter().enumerate() {
+            if let Node::MetaProperty {
+                kind: ts_r_ast::MetaPropKind::ImportMeta,
+            } = n
+            {
+                let at = ast.spans.get(i).map_or(0, |s| s.start);
+                let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+                late.push(lines.message(
+                    Severity::Warning,
+                    display,
+                    at,
+                    "\"import.meta\" is not available in the configured target environment and will be empty".into(),
+                ));
+            }
+        }
+    }
+    // JavaScript files go through the transform when the target needs lowering.
+    let lower_js = !kind.is_typescript()
+        && crate::lowering::js_needs_lowering(&ast, lowering_target(unsupported));
     let needs_transform =
-        kind.is_typescript() || first_jsx.is_some() || module.is_some() || lower_accessors;
+        kind.is_typescript() || first_jsx.is_some() || module.is_some() || lower_js;
     if needs_transform && messages.is_empty() {
         let base = ctx.transform_options(path);
         let mut topts = (*base).clone();
@@ -769,14 +852,40 @@ pub fn prepare_with(
         if let Some(m) = module {
             topts.module = m;
         }
+        if anonymous_default(&ast).is_some() {
+            // Lowering a class names it as the bundler names the default export.
+            topts.default_class_name = Some(format!("{}_default", file_stem_name(path)));
+        }
         if kind.is_typescript() && exports_const_enum(&ast) {
             // Files are transformed one at a time, so an exported const enum can't be inlined
             // into its importers: keep its object, as `isolatedModules` does.
             topts.preserve_const_enums = true;
         }
         let r = ts_r_transform::transform(&mut ast, &src, &topts);
+        if unsupported.has(crate::features::Feature::ConstAndLet) {
+            // The source has none (`lowering::errors`), so these are the transform's own
+            // (`import x = require()` is `const x`): esbuild declares them with `var`.
+            for n in &mut ast.nodes {
+                if let Node::VarDecl { kind, .. } = n
+                    && matches!(kind, VarKind::Const | VarKind::Let)
+                {
+                    *kind = VarKind::Var;
+                }
+            }
+        }
         erased = r.erased;
         prelude = r.prelude;
+        for (span, what) in &r.unlowered {
+            let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+            messages.push(lines.message(
+                Severity::Error,
+                display,
+                span.start,
+                format!(
+                    "Transforming {what} to the configured target environment is not supported yet"
+                ),
+            ));
+        }
         for d in r.diagnostics {
             if d.is_error() {
                 let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
@@ -784,6 +893,7 @@ pub fn prepare_with(
             }
         }
     }
+    messages.append(&mut late);
     let strict = build::program_stmts(&ast).iter().any(|&s| {
         matches!(
             ast.kind(s),
@@ -894,7 +1004,10 @@ pub fn prepare_with(
     if ctx.opts.bundle || ctx.opts.minify_syntax {
         constant_assignments(&ast, &scopes, ctx.opts.bundle, |at, text| {
             let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
-            messages.push(lines.message(Severity::Error, display, at, text));
+            let m = lines.message(Severity::Error, display, at, text);
+            if !messages.contains(&m) {
+                messages.push(m);
+            }
         });
     }
     let default_sym = anonymous_default(&ast).map(|_| {

@@ -24,6 +24,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::{AssignOp, Atom, BinaryOp, Node, NodeId};
+use ts_r_config::ScriptTarget;
 
 use super::lower::{Group, Lower};
 use crate::builder::Build;
@@ -100,12 +101,9 @@ impl Lower<'_, '_> {
         }
         match self.n(id) {
             Node::Member { .. } => self.private_member(id).is_some(),
-            Node::Assign { op, left, .. } => {
-                !matches!(
-                    op,
-                    AssignOp::OrAssign | AssignOp::AndAssign | AssignOp::CoalesceAssign
-                ) && self.private_member(self.skip_parens(left)).is_some()
-            }
+            // A logical assignment is a compound one too (`set(o, s, get(o, s) ?? v)`, which
+            // always writes: observed, tsc 7.0.2).
+            Node::Assign { left, .. } => self.private_member(self.skip_parens(left)).is_some(),
             Node::Update { arg, .. } => self.private_member(self.skip_parens(arg)).is_some(),
             Node::Call {
                 callee,
@@ -266,8 +264,17 @@ impl Lower<'_, '_> {
                 };
                 let (r1, r2) = self.private_receiver(obj, at);
                 let read = self.private_get(r2, r, at);
-                let bop = compound_op(op);
-                let v = self.binary(read, bop, value, at);
+                // The operator is lowered here too when the target lacks it (the walk does
+                // not revisit what it builds).
+                let v = match compound_op(op) {
+                    BinaryOp::Coalesce if self.below(ScriptTarget::ES2020) => {
+                        self.build_coalesce(id, read, value, false)
+                    }
+                    BinaryOp::Exp if self.below(ScriptTarget::ES2016) => {
+                        self.math_pow(read, value, at)
+                    }
+                    bop => self.binary(read, bop, value, at),
+                };
                 let s = self.private_set(r1, r, v, at);
                 self.put(id, s);
             }

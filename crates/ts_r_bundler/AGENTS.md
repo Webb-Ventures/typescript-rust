@@ -88,6 +88,26 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   exports a const enum keeps the enum object (`preserveConstEnums`, as `isolatedModules`
   does), since its importers are transformed apart from it; JS `accessor` fields are lowered
   under an explicit `--target`; tsconfig `"jsx": "preserve"` is ignored when bundling.
+- **Targets are feature sets** (`features.rs`): `--target=esN` is every esbuild feature
+  newer than year N (ES5 = 2014), and `--supported:<feature>=false` adds or removes one.
+  Lowering goes by year through `ts_r_transform`: the oldest unsupported feature it can lower
+  sets the year (`Features::lower_year`), so output may lower more than esbuild's but runs
+  the same. ES2015-level syntax esbuild won't lower (`const`/`let`, classes, destructuring,
+  default/rest parameters, `for-of`, generators, async without generators, spread) and a
+  top-level `await` without `top-level-await` are build errors with esbuild's messages
+  (`lowering::errors`); arrows and template literals stay as written. Observed behaviour:
+  esbuild 0.28.2 and its `bundler_lower_test.go`, `bundler_default_test.go`,
+  `bundler_loader_test.go` expectations.
+- **Feature switches that change output, not syntax** (`prepare.rs`, `plan.rs`, `print.rs`):
+  without `import-meta`, `import.meta` (also the one JSX's automatic runtime builds) is one
+  empty object per module (`var import_meta = {}`) with a warning per use; without
+  `arbitrary-module-namespace-names`, a string import or export name that is not an
+  identifier is an error only where ESM output keeps it (entries and what they `export *`,
+  external imports; `lowering::string_names`); without `object-extensions` a JSON
+  `"__proto__"` key stays a plain key; without `const-and-let` the transform's own
+  `const`/`let` (`import x = require`) become `var`; without `using`, assigning a module-level
+  `const` or `using` binding is an error (`Cannot assign to "x" because it is a constant`),
+  since lowering would turn it into a write that silently works.
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
   isn't a file is a glob (sorted, bounded); CSS entries pass through without `--bundle`; a
   missing `--tsconfig` is an error.

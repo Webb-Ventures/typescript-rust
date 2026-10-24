@@ -68,7 +68,7 @@ impl Lower<'_, '_> {
         self.put(id, r);
     }
 
-    fn math_pow(&mut self, a: NodeId, b: NodeId, at: u32) -> NodeId {
+    pub(super) fn math_pow(&mut self, a: NodeId, b: NodeId, at: u32) -> NodeId {
         let math = self.ident("Math", at);
         let pow = self.member(math, "pow", at);
         self.call(pow, &[a, b], at)

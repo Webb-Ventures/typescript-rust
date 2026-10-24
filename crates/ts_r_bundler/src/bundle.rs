@@ -9,7 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_config::{FileSystem, path};
 
 use crate::chunk::{ChunkOutput, assemble};
-use crate::graph::{GraphContext, ModuleCache, ModuleId, Target, build_graph, pretty_path};
+use crate::graph::{Graph, GraphContext, ModuleCache, ModuleId, Target, build_graph, pretty_path};
 use crate::link::{Kind, LinkOptions, link};
 use crate::meta::RecordKind;
 use crate::options::{BuildOptions, Format, Loader};
@@ -400,6 +400,13 @@ impl BuildContext {
                 }
             }
         }
+        if format == Format::Esm
+            && opts
+                .unsupported()
+                .has(crate::features::Feature::ArbitraryModuleNamespaceNames)
+        {
+            messages.extend(self.string_name_errors(&graph, &lk.included));
+        }
         if messages.iter().any(Message::is_error) {
             return fail(sorted(messages));
         }
@@ -624,6 +631,59 @@ impl BuildContext {
     }
 
     /// Without `--bundle`: each entry is transformed (and minified) on its own.
+    /// String module names that reach ESM output (`lowering::string_names`): the entries'
+    /// exports and what they `export *`, and imports of external modules.
+    fn string_name_errors(&self, graph: &Graph, included: &[bool]) -> Vec<Message> {
+        let mut exported = vec![false; graph.modules.len()];
+        let mut stack: Vec<ModuleId> = graph.entries.clone();
+        while let Some(m) = stack.pop() {
+            if std::mem::replace(&mut exported[m as usize], true) {
+                continue;
+            }
+            let module = &graph.modules[m as usize];
+            for &r in &module.meta.star_exports {
+                if let Some(Target::Module(t)) = module.targets.get(r as usize) {
+                    stack.push(*t);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for (i, module) in graph.modules.iter().enumerate() {
+            let external = |spec: &str| {
+                module.meta.records.iter().enumerate().any(|(r, rec)| {
+                    rec.spec == spec && matches!(module.targets.get(r), Some(Target::External(_)))
+                })
+            };
+            let has_external = module
+                .targets
+                .iter()
+                .any(|t| matches!(t, Target::External(_)));
+            if !included[i]
+                || !matches!(
+                    module.loader,
+                    Loader::Js | Loader::Jsx | Loader::Ts | Loader::Tsx
+                )
+                || !(exported[i] || has_external)
+            {
+                continue;
+            }
+            let prepared: Arc<Prepared> = match &module.prepared {
+                Some(p) => Arc::clone(p),
+                None => Arc::new(crate::prepare::prepare(
+                    &self.prep,
+                    &module.path,
+                    &module.pretty,
+                    Arc::clone(&module.source.js),
+                    module.loader,
+                )),
+            };
+            for (at, text) in crate::lowering::string_names(&prepared.ast, exported[i], &external) {
+                out.push(module.message_at(Severity::Error, at, text));
+            }
+        }
+        out
+    }
+
     fn transform_only(
         &self,
         entries: &[String],
@@ -681,6 +741,21 @@ impl BuildContext {
             if prepared.messages.iter().any(Message::is_error) {
                 return Err(prepared.messages.clone());
             }
+            if module.is_none()
+                && opts
+                    .unsupported()
+                    .has(crate::features::Feature::ArbitraryModuleNamespaceNames)
+            {
+                let lines = crate::LineIndex::new(&source.js);
+                let errs: Vec<Message> =
+                    crate::lowering::string_names(&prepared.ast, true, &|_| true)
+                        .into_iter()
+                        .map(|(at, text)| lines.message(Severity::Error, &pretty, at, text))
+                        .collect();
+                if !errs.is_empty() {
+                    return Err(errs);
+                }
+            }
             if module.is_some() && crate::scan::scan(&prepared, false).has_tla {
                 return Err(vec![Message::new(
                     Severity::Error,
@@ -696,6 +771,15 @@ impl BuildContext {
                 None => self.entry_file_name(&e, &outbase, names[i].as_deref()),
             };
             let mut ast = prepared.ast.clone();
+            let unsupported = opts.unsupported();
+            if unsupported.has(crate::features::Feature::ImportMeta) {
+                let kind = if unsupported.has(crate::features::Feature::ConstAndLet) {
+                    ts_r_ast::VarKind::Var
+                } else {
+                    ts_r_ast::VarKind::Const
+                };
+                crate::print::empty_import_meta(&mut ast, kind);
+            }
             if opts.minify_syntax || opts.minify_identifiers {
                 let module = prepared.strict;
                 ts_r_minify::minify_ast(
