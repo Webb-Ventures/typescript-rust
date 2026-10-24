@@ -841,6 +841,17 @@ Files, by layer:
   declares no symbols, so under `noImplicitAny` every binding without a default is TS7031
   `any` at its name (tsc 7 reports them the same way; observed in
   destructuringParameterDeclaration1ES5).
+- **Missing and renamed binding names** (`report_implicit_binding_elements`,
+  `in_unresolved_bodyless_signature`; tsc: `checkVariableLikeDeclaration`,
+  `getTypeFromBindingElement` in `checker.go`). A keyword in an object pattern can't be
+  shorthand (`{ while }`): the parser leaves the name missing, and an untyped parameter
+  reports it as TS7031 `'(Missing)'` `any`. tsc reports a binding element's implicit any
+  when the parameter's type is first computed, and skips the type for a renamed element
+  (`{ a: b }`, missing names included) of a function without a body; so in a function
+  declaration none of whose declarations has a body (TS2391), a renamed element gets
+  TS2842 only. An overload with an implementation is checked against it, which computes
+  its parameter types: TS7031 there too (destructuringParameterDeclaration6,
+  parametersSyntaxErrorNoCrash1/2/3).
 - **Where `satisfies` errors go** (`report_satisfies`, `nodes::effective_check_node`; tsc:
   `checkSatisfiesExpression` in `checker.go`, `elaborateError` in `relater.go`). A failed
   `e satisfies T` is first elaborated into `e` (property and element errors keep their own

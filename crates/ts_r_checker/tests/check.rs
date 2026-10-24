@@ -701,6 +701,34 @@ fn implicit_any_missing_names() {
     );
 }
 
+/// A keyword in a binding pattern (`{ while }`) can't be shorthand: its name is missing, and
+/// an untyped pattern reports it as `(Missing)` (destructuringParameterDeclaration6).
+#[test]
+fn implicit_any_missing_binding_names() {
+    let Some(out) = check_through(
+        "a.ts",
+        STRICT,
+        "function a({while}) { }\nfunction c({ class }: { class: number }) { }\n",
+    ) else {
+        return;
+    };
+    let ours: Vec<&String> = out.iter().filter(|d| d.contains("TS7031")).collect();
+    assert_eq!(
+        ours,
+        ["1:18 TS7031: Binding element '(Missing)' implicitly has an 'any' type."]
+    );
+    // A function with no implementation never resolves its parameter types: the renamings
+    // are TS2842's alone (parametersSyntaxErrorNoCrash2).
+    let Some(out) = check_through(
+        "a.ts",
+        STRICT,
+        "export default function getThing( { return 'thing'; }\n",
+    ) else {
+        return;
+    };
+    assert!(out.iter().all(|d| !d.contains("TS7031")), "{out:?}");
+}
+
 /// A `,` where a parameter should start is no parameter: no implicit-any error for it.
 #[test]
 fn implicit_any_skips_comma_parameters() {

@@ -3412,6 +3412,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 continue;
                             }
                             match value {
+                                // `{ while }`: a keyword can't be shorthand, the name is
+                                // missing (tsc's `(Missing)` binding element).
+                                Some(v) if matches!(ast.node(v), Node::Missing {}) => {
+                                    names.push(v);
+                                }
                                 Some(v) => stack.push(v),
                                 None => names.push(key),
                             }
@@ -3450,6 +3455,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(pattern.file);
         for n in Self::untyped_binding_names(ast, pattern.node) {
             let l = Loc::new(pattern.file, n);
+            // A renaming (`{ a: b }`, or `{ while }` whose name is missing) in a parameter of
+            // a signature without a body is TS2842's: tsc's checkVariableLikeDeclaration
+            // returns early for it (checker.go), so only resolving the signature reports it.
+            let renamed = self.c.parent(l).is_some_and(|p| {
+                matches!(*ast.node(p.node), Node::BindingProperty { value: Some(v), .. } if v == n)
+            });
+            if renamed && self.in_unresolved_bodyless_signature(l) {
+                continue;
+            }
+            if matches!(ast.node(n), Node::Missing {}) {
+                self.error(
+                    l,
+                    dg::BINDING_ELEMENT_0_IMPLICITLY_HAS_AN_1_TYPE_7031,
+                    &["(Missing)", "any"],
+                );
+                continue;
+            }
             let Some(sym) = self.c.sym_of_decl(l) else {
                 continue;
             };
@@ -3478,6 +3500,47 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
             }
         }
+    }
+
+    /// Whether `n` sits in a parameter of a signature without a body whose parameter types
+    /// nothing resolves while checking: a type-level signature (`({ a: b }) => void`, call,
+    /// construct and method signatures) or a function declaration with no implementation.
+    /// tsc reports a binding element's implicit any when the parameter's type is first
+    /// computed; for a bodyless signature that happens only when an implementation is
+    /// checked against it (or a call resolves it).
+    fn in_unresolved_bodyless_signature(&self, n: Loc) -> bool {
+        let ast = self.ast(n.file);
+        let mut cur = n;
+        for _ in 0..256 {
+            let Some(p) = self.c.parent(cur) else {
+                return false;
+            };
+            if matches!(ast.node(p.node), Node::Param { .. }) {
+                let Some(f) = self.c.parent(p) else {
+                    return false;
+                };
+                if fn_parts(ast, f.node).is_none_or(|parts| parts.body.is_some()) {
+                    return false;
+                }
+                return match ast.node(f.node) {
+                    Node::FunctionDecl { .. } => {
+                        let Some(sym) = self.c.sym_of_decl(f) else {
+                            return false;
+                        };
+                        !self.c.decls(sym).iter().any(|d| {
+                            matches!(
+                                self.c.file(d.file).ast.node(d.node),
+                                Node::FunctionDecl { body: Some(_), .. }
+                            )
+                        })
+                    }
+                    Node::FunctionExpr { .. } => false,
+                    _ => true,
+                };
+            }
+            cur = p;
+        }
+        false
     }
 
     fn declared_without_optionality(&mut self, t: TypeId, p: Loc) -> TypeId {
