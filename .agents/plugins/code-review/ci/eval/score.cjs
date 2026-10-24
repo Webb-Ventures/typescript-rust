@@ -23,12 +23,40 @@ const sameIssue = (judged, reported) =>
 
 function scoreCase(c, result) {
   const reported = Array.isArray(result?.findings) ? result.findings : [];
-  const rows = c.findings.map((judged) => ({ ...judged, reported: reported.some((r) => sameIssue(judged, r)) }));
+  const rows = c.findings.map((judged) => ({ ...judged, reported: false }));
+  let candidates = [];
+  for (const [r, report] of reported.entries()) {
+    for (const [j, judged] of c.findings.entries()) {
+      if (sameIssue(judged, report)) candidates.push({
+        r, j,
+        distance: Math.abs(Number(report.start_line) - judged.start_line) +
+          Math.abs(Number(report.end_line ?? report.start_line) - judged.end_line),
+      });
+    }
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  const ambiguous = [];
+  while (candidates.length) {
+    const nearest = candidates.filter((p) => p.distance === candidates[0].distance);
+    const usedReports = new Set(nearest.map((p) => p.r));
+    const usedJudged = new Set(nearest.map((p) => p.j));
+    const ties = new Map();
+    for (const p of nearest) {
+      if (nearest.some((q) => q !== p && (q.r === p.r || q.j === p.j))) {
+        if (!ties.has(p.r)) ties.set(p.r, []);
+        ties.get(p.r).push(rows[p.j].id);
+      } else rows[p.j].reported = true;
+    }
+    for (const [r, judged] of ties) ambiguous.push({ reported: r + 1, judged });
+    // Reserve both sides even on a tie: a more distant match cannot settle an ambiguity.
+    candidates = candidates.filter((p) => !usedReports.has(p.r) && !usedJudged.has(p.j));
+  }
   return {
     key: caseKey(c),
     wrong: rows.filter((r) => r.verdict !== 'confirmed'),
     confirmed: rows.filter((r) => r.verdict === 'confirmed'),
     reported: reported.length,
+    ambiguous,
   };
 }
 
@@ -62,6 +90,8 @@ function render(summary) {
     lines.push(`| ${s.key} | ${n(s.wrong)} | ${n(s.confirmed)} | ${s.reported} |`);
   }
   lines.push(`| all | ${summary.wrong_repeated} of ${summary.wrong_total} | ${summary.confirmed_found} of ${summary.confirmed_total} | ${summary.reported} |`);
+  const ambiguous = summary.scored.flatMap((s) => s.ambiguous.map((a) => `${s.key} report ${a.reported}: ${a.judged.join(', ')}`));
+  if (ambiguous.length) lines.push('', 'Ambiguous matches (excluded from verdict counts):', ...ambiguous.map((a) => `- ${a}`));
   if (summary.missing.length) lines.push('', `No result for: ${summary.missing.join(', ')}`);
   return lines.join('\n');
 }
