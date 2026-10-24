@@ -898,7 +898,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
         // Blocking syntax errors: the full path reports them.
         for i in 0..n {
             let blocked = match &parsed[i] {
-                Some(f) if fresh.contains(&i) => syntax_only(f).any(blocking),
+                Some(f) if fresh.contains(&i) => syntax_only(f).any(|d| blocking(&d)),
                 _ => state_idx
                     .get(rels[i])
                     .is_some_and(|&s| m.states[s].1.syntax.iter().any(|d| blocking(&d.diag))),
@@ -1264,13 +1264,13 @@ impl<'a, F: FileSystem> Run<'a, F> {
                 // As `check_program` reports them: related infos keep their file ids.
                 (Some(f), true) => syntax_only(f)
                     .map(|d| PathDiag {
-                        diag: d.clone(),
-                        file: Some(rels[i].to_owned()),
                         related: d
                             .related
                             .iter()
                             .map(|r| rel_ids.get(r.file.0 as usize).map(|s| (*s).to_owned()))
                             .collect(),
+                        diag: d,
+                        file: Some(rels[i].to_owned()),
                     })
                     .collect(),
                 _ => old.map(|s| s.syntax.clone()).unwrap_or_default(),

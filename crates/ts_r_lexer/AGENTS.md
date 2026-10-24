@@ -14,7 +14,7 @@ flags, start, end }` (8 bytes), and `token_text()` / `text(span)` return the sli
   - `split_less_than` turns `<<` into `<` in type arguments; `split_star_eq` turns `*=`
     into `*` (the JSDoc type `*=`).
   - `rescan_slash_as_regex`, `rescan_template_continuation` (after `}` in `${}`).
-  - `next_jsx_child`, `rescan_jsx_identifier` (dashed names), `next_jsx_attribute_value`.
+  - `next_jsx_child`, `rescan_jsx_identifier` (dashed names and `\u` escapes, `ESCAPED` when any), `next_jsx_attribute_value`.
 - Values are decoded on demand:
   - `ident_value` decodes escapes.
   - `string_value` and `template_cooked` (a `Result`: tagged templates may keep an invalid escape).
@@ -55,7 +55,25 @@ flags, start, end }` (8 bytes), and `token_text()` / `text(span)` return the sli
     the end of an unterminated string the escape's error replaces TS1002.
   - In an identifier, a backslash that starts no valid escape ends the identifier and is an
     invalid character (TS1127): `arg\u003` is `arg`, TS1127, `u003`.
-  - Regex flags: unknown TS1499, duplicate TS1500, `u` with `v` TS1502.
+  - Legacy octal escapes in strings and templates are TS1487 (`'\x05'` for `\05`) and
+    `\8`/`\9` TS1488, on the whole escape: `\0`-`\3` take up to two more octal digits,
+    `\4`-`\7` one, `\0` alone is fine and `\08` is `\0` then `8` (tsc:
+    scanner.go scanEscapeSequence). The value is still cooked; tagged templates allow them.
+  - Regex flags: unknown TS1499, duplicate TS1500, `u` with `v` TS1502, and TS1501 with the
+    target a flag needs (`d` es2022, `s` es2018, `v` es2024) for every accepted flag: the
+    checker keeps TS1501 only for older targets.
+  - Regex patterns (`regex.rs`, written from tsc/internal/scanner/regexp.go's rules): the
+    TS1503-TS1537 errors (groups and named groups, modifiers, quantifiers, escapes,
+    backreferences, classes, `v`-mode class sets, `\p{...}`), and TS1487 for octal escapes.
+    It is recursive descent with a depth limit (256; deeper patterns report nothing), errors
+    at one position are kept once, and every loop consumes a character or stops. TS1503
+    (named groups need ES2018) is reported for every named group; the checker filters it by
+    target. No "Did you mean" suggestions (tsc's TS1369 chains).
+  - Unicode property names and values (`regex_props.rs`) are the tables V8 accepts in Node 24
+    (Unicode 17): General_Category, Script/Script_Extensions values with aliases, binary
+    properties and the properties of strings (`v` only). They come from the Unicode
+    `PropertyAliases.txt`/`PropertyValueAliases.txt` data filtered by what `new RegExp`
+    accepts; keep them sorted (`property_tables_are_sorted`).
   - Numbers: a name right after a plain decimal literal is TS1351 on the name, which stays
     its own token (`3in x` is `3 in x`); hex, octal, binary and leading-zero literals are not
     checked, nor a name starting with an escape (the parser's `';' expected`). `0_1` is
@@ -102,11 +120,9 @@ turns the sequence into the character. Build it with `concat!("\\", "u0061")`.
 
 ## Gaps
 
-- Regex *patterns* are only partly validated (`regex.rs`): hex and `\u{}` escapes, a lone `}`
-  or `]` with `u`/`v`, and class ranges out of order. Groups, quantifiers, named groups and
-  property names are not (tsc 7 reports e.g. TS1005 `')' expected` inside a regex). Report
-  only what valid code can never produce; the parser defers all pattern and flag errors.
+- Regex pattern errors carry no "Did you mean" suggestions, and `Katakana_Or_Hiragana` is
+  rejected (V8's table has no such script value). The parser defers all pattern and flag
+  errors (checker errors in tsc 7, only in a file without syntax errors).
 - An unterminated regex ends at the first `)`, `]` or `}` it did not open, or before a
   trailing run of `;`, as observed in tsc.
-- Flag availability by `target` (TS1501) is not reported; the lexer does not know the target.
 - No JSX HTML entity decoding (left to codegen).

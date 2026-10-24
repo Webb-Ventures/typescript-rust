@@ -4,7 +4,7 @@
 
 use ts_r_ast::{Node, NodeId, NodeList, Span};
 use ts_r_diagnostics::messages;
-use ts_r_lexer::TokenKind as T;
+use ts_r_lexer::{TokenFlags, TokenKind as T};
 
 use crate::lists::List;
 use crate::{Ctx, Parser};
@@ -182,10 +182,10 @@ impl<'a> Parser<'a> {
                 self.parse_jsx_tag_name()
             };
             let open_text = self.ast.span(name).text(self.src);
-            let close_text = self.ast.span(cname).text(self.src);
-            let parent_text = parent_name.map(|n| self.ast.span(n).text(self.src));
-            if !jsx_names_equal(open_text, close_text)
-                && parent_text.is_some_and(|p| jsx_names_equal(p, close_text))
+            let names_match = open_text == self.ast.span(cname).text(self.src)
+                || self.jsx_tag_key(name) == self.jsx_tag_key(cname);
+            if !names_match
+                && parent_name.is_some_and(|n| self.jsx_tag_key(n) == self.jsx_tag_key(cname))
             {
                 // `<a><b>x</a>`: the closing tag is the parent's; this element is unclosed
                 // (as in tsc 7, only for the direct parent).
@@ -193,7 +193,7 @@ impl<'a> Parser<'a> {
                 let span = self.ast.span(name);
                 self.error_at(messages::JSX_NO_CLOSING_TAG, span, &[open_text]);
             } else {
-                if !jsx_names_equal(open_text, close_text) {
+                if !names_match {
                     let span = self.ast.span(cname);
                     self.error_at(messages::JSX_EXPECTED_CLOSING_TAG, span, &[open_text]);
                 }
@@ -359,10 +359,49 @@ impl<'a> Parser<'a> {
             return self.missing();
         }
         self.lx.rescan_jsx_identifier();
+        // tsc decodes escapes in JSX names (`<\u0061></a>` closes) but reports them, on the
+        // whole name (parseIdentifierNameErrorOnUnicodeEscapeSequence).
+        if self.tok().flags.has(TokenFlags::ESCAPED) {
+            self.error(messages::JSX_NAME_UNICODE_ESCAPE);
+        }
         let start = self.start();
         let name = self.intern_token();
         self.bump();
         self.finish_node(start, Node::Ident { name })
+    }
+
+    /// A tag name as tsc compares opening and closing tags: names decoded, no trivia
+    /// (`a . b` is `a.b`). Member chains are walked without recursion.
+    fn jsx_tag_key(&self, mut n: NodeId) -> String {
+        let mut parts = Vec::new();
+        while let Node::JsxMemberExpr { obj, prop } = *self.ast.node(n) {
+            parts.push(prop);
+            n = obj;
+        }
+        parts.push(n);
+        let mut out = String::new();
+        for (i, &p) in parts.iter().rev().enumerate() {
+            if i > 0 {
+                out.push('.');
+            }
+            match *self.ast.node(p) {
+                Node::Ident { name } => out.push_str(self.ast.atom(name)),
+                Node::This {} => out.push_str("this"),
+                Node::JsxNamespacedName { ns, name } => {
+                    for (j, part) in [ns, name].into_iter().enumerate() {
+                        if j > 0 {
+                            out.push(':');
+                        }
+                        match *self.ast.node(part) {
+                            Node::Ident { name } => out.push_str(self.ast.atom(name)),
+                            _ => out.push_str(self.ast.span(part).text(self.src)),
+                        }
+                    }
+                }
+                _ => out.push_str(self.ast.span(p).text(self.src)),
+            }
+        }
+        out
     }
 
     fn parse_jsx_attributes(&mut self) -> NodeList {
@@ -450,10 +489,4 @@ impl<'a> Parser<'a> {
             }
         }
     }
-}
-
-/// Compares tag names ignoring whitespace (`a . b` vs `a.b`).
-fn jsx_names_equal(a: &str, b: &str) -> bool {
-    let strip = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
-    a == b || strip(a) == strip(b)
 }

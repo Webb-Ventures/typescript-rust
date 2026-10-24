@@ -68,11 +68,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .cloned()
                 .map(|d| d.with_file(file)),
         );
+        let target = self.c.opts.target;
+        let sf = self.c.file(file);
         diags.extend(
-            self.c
-                .file(file)
-                .grammar
+            sf.grammar
                 .iter()
+                .filter(|d| !ts_r_parser::is_target_regex_error(d) || regex_needs_target(d, target))
+                // Syntax errors (`driver`).
+                .filter(|d| {
+                    let at = sf.lenient.partition_point(|l| l.span.start < d.span.start);
+                    !sf.lenient[at..]
+                        .iter()
+                        .take_while(|l| l.span.start == d.span.start)
+                        .any(|l| l == *d)
+                })
                 .cloned()
                 .map(|d| d.with_file(file)),
         );
@@ -4244,18 +4253,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     value,
                     ..
                 } => {
-                    if let Node::ComputedKey { expr } = *ast.node(key) {
-                        let kt = self.check_expr(Loc::new(file, expr));
-                        // `[P in K]: T` (a mapped type written as a member) is TS7061 there.
-                        if !matches!(
+                    // `[P in K]: T` (a mapped type written as a member) is the parser's
+                    // TS7061, and tsc 7 checks nothing in that key (observed).
+                    if let Node::ComputedKey { expr } = *ast.node(key)
+                        && !matches!(
                             ast.node(expr),
                             Node::Binary {
                                 op: ts_r_ast::BinaryOp::In,
                                 ..
                             }
-                        ) {
-                            let _ = self.check_computed_key_type(Loc::new(file, key), kt);
-                        }
+                        )
+                    {
+                        let kt = self.check_expr(Loc::new(file, expr));
+                        let _ = self.check_computed_key_type(Loc::new(file, key), kt);
                     }
                     let declared = self.c.sym_of_decl(ml).map(|s| self.type_of_symbol(s));
                     // TS7008: no annotation, no initializer and no constructor assignment.
@@ -4605,8 +4615,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                             Node::PropertySignature { .. } | Node::MethodSignature { .. }
                         )
                     {
-                        let kt = self.check_expr(Loc::new(file, expr));
-                        // `[P in K]: T` (a mapped type written as a member) is TS7061 there.
+                        // `[P in K]: T` (a mapped type written as a member) is the parser's
+                        // TS7061, and tsc 7 checks nothing in that key (observed).
                         let mapped_like = matches!(self.node(p), Node::PropertySignature { .. })
                             && matches!(
                                 ast.node(expr),
@@ -4616,6 +4626,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 }
                             );
                         if !mapped_like {
+                            let kt = self.check_expr(Loc::new(file, expr));
                             let _ = self.check_computed_key_type(Loc::new(file, n), kt);
                         }
                     }
@@ -10195,4 +10206,15 @@ fn binding_name_nodes(ast: &ts_r_ast::Ast, n: NodeId) -> Vec<NodeId> {
         }
     }
     names
+}
+
+/// Whether a regex flag or named group (TS1501 / TS1503, from the parser) needs a newer
+/// target than `target`: the message names it (`'es2018'`, `'ES2018'`).
+fn regex_needs_target(d: &Diagnostic, target: ts_r_config::ScriptTarget) -> bool {
+    let needed = d
+        .message
+        .split('\'')
+        .nth(1)
+        .and_then(ts_r_config::ScriptTarget::parse);
+    needed.is_some_and(|needed| target < needed)
 }
