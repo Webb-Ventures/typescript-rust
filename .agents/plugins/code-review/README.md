@@ -179,7 +179,7 @@ GitHub event -> Actions job (joins tailnet, POSTs {run_id, pr, comment_id, repo}
              -> one container per step: prepare -> codex -> publish          (review)
                                            prepare -> deps -> codex (+ runner) -> commit -> push  (fix)
                                            resolve
-                                           bench-prepare -> bench-checkout -> bench-deps -> bench-run  (bench, own lane)
+                                           bench-prepare -> bench-checkout -> bench-deps -> bench-build (base, PR) -> bench-measure  (bench, one per slot)
 ```
 
 | Step | GitHub token | Network | Does |
@@ -194,23 +194,24 @@ GitHub event -> Actions job (joins tailnet, POSTs {run_id, pr, comment_id, repo}
 | `push` | write | internet | pushes the commit as a fast-forward of the fixed head (or, if the branch moved on, a merge of its new head into the commit), replies on and resolves threads, approves when none is left, merges the pushed head up the stack |
 | `resolve` | write | internet | resolves or reopens every finding, or refreshes the summary; brings the verdict in line |
 | `bench-prepare` | read | internet | refreshes the repo cache, picks the base commit (the base branch's tip) |
-| `bench-checkout` | none | none | checks the PR and its base out in `bench/` (git directories outside the checkouts) |
+| `bench-checkout` | none | none | checks the PR and its base out in the slot's directory (git directories outside the checkouts), lists the binaries `bench/scenarios.toml` runs |
 | `bench-deps` | none, and no Codex login | package registries only | crates, the pinned reference tools, `upstream sync --minimal`, the PR repo set and its packages (`--ignore-scripts`) |
-| `bench-run` | none, and no Codex login | none | builds both in release, runs `cargo xtask bench` base then PR, re-measures flagged scenarios PR first |
+| `bench-build` | none, and no Codex login | none | builds one side in release (base, then PR; each sees only its own checkout writable), only the binaries the scenarios run |
+| `bench-measure` | none, and no Codex login | none | runs `cargo xtask bench` base then PR, re-measures flagged scenarios PR first, puts back the kept reference-tool numbers |
 
 Everything lives in `/srv/ts-r-review` on the box:
 
 | Path | What it is |
 |---|---|
-| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for a separate bench box, `LANES` and `BENCH_KEEP_BUILDS` (see [Benches](#benches)) |
+| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for benches, `LANES`, `BENCH_KEEP_BUILDS`, `BENCH_SLOTS`, `BENCH_SLOT_CPUS`, `BENCH_CPUS`, `REVIEW_CPUS`, `BENCH_MEASURE`, `BENCH_MEMORY` and `BENCH_REFERENCE_DAYS` (see [Benches](#benches)) |
 | `secrets/github-app.pem` | The App's private key |
 | `secrets/dispatch-token` | Shared with the workflow as `CODE_REVIEW_DISPATCH_TOKEN` |
 | `codex-home/` | The box's Codex login (`auth.json`); Codex refreshes it in place |
 | `cache/` | A bare clone of each repo (`<owner>__<name>.git`), fetched before every job |
 | `targets/` | A fix run's build directory while it runs (deleted when it ends) |
 | `jobs/`, `logs/` | Per-job working directories (deleted after each job) and container logs (last 200) |
-| `bench/` | Per repo (`<owner>__<name>/`): the bench's PR and base checkouts (sources only between runs), the pinned repos, crates and package stores (`cargo/`, `pm/`, `npm/`), and `passed.json` |
-| `queue.json` | Both lanes' queues; a restart (a redeploy) picks them up, restarting the running jobs |
+| `bench/` | Per repo (`<owner>__<name>/`): one directory per slot (`slot-<n>/`: its PR and base checkouts, sources only between runs unless `BENCH_KEEP_BUILDS=1`), the crates and package stores the slots share (`cargo/`, `pm/`, `npm/`), the kept reference-tool numbers (`reference/`) and `passed.json` |
+| `queue.json` | Both lanes' queues; a restart (a redeploy) picks them up, restarting the running jobs (a bench stopped as moot is not restarted) |
 
 ### Setup
 
@@ -348,39 +349,88 @@ The box runs what the old Actions job ran, on a quieter machine:
   `BENCH_BOX`, else `CODE_REVIEW_BOX`; a box refuses a lane it does not run (421). Both boxes need
   the same tailnet tag rule for `tag:ci`.
 
-- **Own lane, own cores.** Benches queue separately from Codex jobs, one at a time, pinned to
-  four cores (`BENCH_CPUS`, default `2-5`); Codex reviews and fixes run on the other two
-  (`REVIEW_CPUS`, `0-1`), so a bench never waits behind reviews and nothing else is scheduled on
-  its cores. A fix's runner is not pinned (its builds need the cores); a fix that overlaps a
-  bench can add noise, which the confirming re-run catches.
+- **Own lane, own cores.** Benches queue separately from Codex jobs. Each bench runs in a
+  **slot**, a cpuset of its own: the PR and its base are built and measured on the same slot's
+  cores, so the comparison never crosses slots. Codex reviews and fixes run on `REVIEW_CPUS`
+  (`0-1`), so a bench never waits behind reviews and nothing else is scheduled on its cores. A
+  fix's runner is not pinned (its builds need the cores); a fix that overlaps a bench can add
+  noise, which the confirming re-run catches.
+- **Several at once.** Without `BENCH_SLOTS` there is one slot on `BENCH_CPUS` (default `2-5`):
+  one bench at a time, as before. `BENCH_SLOTS=auto` sizes the slots from the cores Docker
+  reports at startup, `BENCH_SLOT_CPUS` (default 4) each, after `REVIEW_CPUS` on a box that also
+  runs reviews (on a 16-core bench box with `LANES=["bench"]`: `0-3`, `4-7`, `8-11`, `12-15`);
+  `BENCH_SLOTS=2` asks for that many; `BENCH_SLOTS=["2-5","6-9"]` lists them. Slots never share
+  a core, and a setting that does not fit (overlapping cpusets, cores the box does not have, a
+  count without a core count) falls back to the one default slot; the dispatcher logs which at
+  startup and `/healthz` shows the slots, their benches and any error. One PR has at most one
+  bench running, and a slot goes back to the PR it ran last (its builds are there), else to one
+  with the same base. Each container gets `BENCH_MEMORY` (default `6g`): slots times that must
+  fit in the box's memory, and each slot keeps its own checkouts and, with
+  `BENCH_KEEP_BUILDS=1`, its own two release builds (a few GB) on disk.
+- **Measured alone.** Slots share the memory bus, the last-level cache and the disk even on
+  disjoint cores. With `BENCH_MEASURE=alone` (the default) a slot measures only while no other
+  slot installs, builds or measures: new work waits for the measurement, the measurement waits
+  for the work already running, so the numbers come from a box as quiet as with one slot, and
+  what overlaps is the fetching, installing and building (most of a run). `BENCH_MEASURE=parallel`
+  lets slots measure side by side for more throughput, at the cost of noise between them: the
+  gate and its confirming re-run stay the same, so that noise can only make a regression harder
+  to confirm or a flaky one easier to flag, never pass a run the gate would fail. Reference
+  numbers are kept per mode, so the two never mix.
 - **Progress.** The PR's bench comment shows the same kind of progress line as the review
-  summary: queued (behind how many), running since when and the phase (fetching, installing,
-  building the base, building the PR, measuring, re-measuring), then the tables and the verdict.
+  summary: queued (behind how many), running since when (and on which cores, with several
+  slots) and the phase (fetching, installing, building the base, building the PR, waiting for
+  another slot, measuring, re-measuring), then the tables and the verdict.
   The result is also the `Bench (review box)` commit status when the App has the "Commit
   statuses: write" permission.
-- **Same gate.** `max_regression` and `noise_sigmas` from `bench/scenarios.toml`, and a flagged
-  scenario fails only if the re-run with the PR measured first flags it too.
+- **Same gate.** `max_regression` and `noise_sigmas` from `bench/scenarios.toml`, every one of
+  our tools measured on both sides with the scenarios' own run counts, and a flagged scenario
+  fails only if the re-run with the PR measured first flags it too.
 - **Caches and cleanup.** The checkouts, crates, pinned repos and package stores stay in
-  `bench/` between runs, so a repeat bench downloads nothing it already has. Builds, bench output
-  and results are deleted when a run ends (and at startup, after a crash), so a finished bench
-  takes no build space; each run builds the base and the PR in release from the cached crates.
-  With `BENCH_KEEP_BUILDS=1` (a box with the disk) both `target/` directories stay: an unchanged
-  base is a no-op build (the checkout leaves unchanged files' mtimes alone) and the PR build
-  recompiles only what changed. Below 8 GB free the builds go anyway.
+  `bench/` between runs, so a repeat bench downloads nothing it already has; the slots share the
+  crates and package stores, and installs (which write them) run one at a time. Builds, bench
+  output and results are deleted when a run ends (and at startup, after a crash), so a finished
+  bench takes no build space; each run builds the base and the PR in release from the cached
+  crates. With `BENCH_KEEP_BUILDS=1` (a box with the disk) both `target/` directories stay: an
+  unchanged base is a no-op build (the checkout leaves unchanged files' mtimes alone) and the PR
+  build recompiles only what changed. Below 8 GB free the idle slots' builds go first.
+- **Only what is measured is built.** `bench-checkout` reads the PR's `bench/scenarios.toml`
+  (from git, before any PR code runs) for the binaries it runs (`{bin}/<name>`, and `ts-r-<sub>`
+  for the launcher's subcommands), and each side builds `cargo build --release --workspace` with
+  a `--bin` for each of those it has. The release profile's whole-program link is what the
+  binaries nobody measures (the language server, the dev server, xtask) cost: about 1.5 to 2
+  minutes a build. Features resolve as for the whole workspace, so the binaries are the same.
 - **Reference tools once.** The base run measures only our tools (`cargo xtask bench --ours-only`);
   tsc, ESLint, esbuild and the rest are measured in the PR's run, which is where the table's
-  "vs fastest" column comes from. The confirming re-runs are ours-only too.
+  "vs fastest" column comes from. The confirming re-runs are ours-only too. Their numbers are
+  kept (`bench/<repo>/reference/`) and a later run reuses them, measuring only ours on both
+  sides, while nothing that could change them changed: the key covers `bench/`, `xtask/`,
+  `upstream/` and `scripts/` at the head, the job image, the slot's cores, the repo set and
+  `BENCH_MEASURE`, and a kept set is used for `BENCH_REFERENCE_DAYS` (default 7; `0` measures
+  them every run). That saves about 5.5 to 6 minutes a run. A reference tool whose scenario uses
+  our binaries (a setup that asks `ts-r-lint` for its rules) is always measured. A run where one
+  failed keeps nothing, a fork's run keeps nothing, and the comment says which run the reused
+  numbers come from. Reference tools are never gated, so a reused row cannot change a verdict.
   Code that already passed against the same base commit (ignoring `.lavish/`, `landing/`, `docs/`
   and the other non-code paths) is not run again. Fix runs delete their build directory when they end too.
-- **A newer push wins.** It replaces the PR's queued bench and stops its running one.
+- **A newer push wins.** Every push hands the new head to the box, which drops the PR's queued
+  bench and stops its running one (its container is removed, and the old head's commit status
+  says it was superseded), then queues the new head. Closing or merging the PR hands it over too, and the
+  box drops its benches without benching anything; a bench that reaches the front of the queue
+  for a PR that closed or moved on meanwhile is not run either. Before, the workflow's single
+  concurrency group per PR let any review or comment event after a push cancel that push's
+  hand-off, so the box kept benching the old head.
 - **PR code runs here.** Unlike a review, a bench builds and runs the PR: `cargo xtask` in
-  `bench-deps` (with registry access through the deps proxy) and everything in `bench-run`
-  (no network). Neither step holds a token or the Codex login, and both get the checkouts' git
-  directories and the repo cache read-only; that is why only trusted authors' PRs are benched
-  automatically, and anyone else's only when a trusted user vouches for them. The
-  repo's bench directory (crates, package stores, the base build) is shared between its runs,
-  so a malicious PR could still skew that repo's later benches; read a stranger's PR before you
-  approve it or comment `/bench`.
+  `bench-deps` (with registry access through the deps proxy) and everything in `bench-build`
+  and `bench-measure` (no network). None of them holds a token or the Codex login; all get the
+  checkouts' git directories, the repo cache and the job's inputs read-only, and only the
+  checkout they need writable (the base's build never sees the PR's checkout writable, and no
+  PR step can write the base's). `passed.json` and the reference store are never mounted, and
+  the dispatcher reads what a step wrote without following links. That is why only trusted
+  authors' PRs are benched automatically, and anyone else's only when a trusted user vouches for
+  them. The crates and package stores are still shared between a repo's runs, and the kept
+  reference numbers come from a PR's run (checked to be names and numbers, never from a fork),
+  so a malicious PR could still skew that repo's later benches or their reference rows; read a
+  stranger's PR before you approve it or comment `/bench`.
 
 ## Changing the review
 

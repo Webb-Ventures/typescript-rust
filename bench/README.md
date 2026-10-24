@@ -188,7 +188,13 @@ cache (pnpm 3.3 GB, Yarn 3.2 GB); a repeat takes about a second, and a fetch aft
 
 PR benches run on the review box (`bench.yml` hands them over; see
 [the plugin README](../.agents/plugins/code-review/README.md#benches)), which keeps the same
-directories, the crates and both release builds in `/srv/ts-r-review/bench` between runs.
+directories, the crates and both release builds in `/srv/ts-r-review/bench` between runs. It
+runs one bench per slot (`BENCH_SLOTS`; one by default), each slot on a cpuset of its own with
+the PR and its base built and measured on the same cores, and by default measures one slot at a
+time while the others build. It builds only the binaries `scenarios.toml` runs, and reuses the
+reference tools' numbers from an earlier run while `bench/`, `xtask/`, `upstream/` and
+`scripts/` are unchanged (the comment says so); our tools are measured on both sides every
+time, so the gate is the same as a local `--baseline` run's.
 
 To clear: `rm -rf ~/.cache/ts-r/bench` (package caches), `cargo xtask bench --clean-repos
 --repos all` (checkouts and stamps), `rm -rf bench/node_modules` (reference tools), or

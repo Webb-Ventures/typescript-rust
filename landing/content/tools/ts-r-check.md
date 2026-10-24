@@ -40,11 +40,13 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 
 ## Not yet
 
-- Regular expression errors don't carry tsc's "Did you mean" suggestions (TS1369).
+- Octal escapes in strings (TS1487) are reported only with `--no-history`, not by a default
+  run or with `--noCheck`. Regular expression errors don't carry tsc's "Did you mean"
+  suggestions (TS1369).
 - Some inference: contextual types that flow through a reverse mapped type print wider than
   tsc's (`number | T["a"]` where tsc prints `number`).
 - Some relation and narrowing results differ from tsc's, mostly in TS2322, TS2339 and TS2345:
-  400 of tsc's 12,750 conformance test variants (3.1%) don't match exactly.
+  385 of tsc's 12,750 conformance test variants (3.0%) don't match exactly.
 
 The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.md).
 
@@ -104,7 +106,7 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 96.9% exact (all diagnostics and chains); 200 variants with a diagnostic tsc does not report, 17 of them in tests where tsc reports nothing |
+| tsc's conformance baselines, 12,750 compared test variants | 97.0% exact (all diagnostics and chains); 191 variants with a diagnostic tsc does not report, 10 of them in tests where tsc reports nothing |
 | Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | 3 of 6 match exactly; Playwright 2 extra; RxJS 6 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
 | Ecosystem check stage | 652 packages pass, 57 fail (92.0%) |
 

@@ -1,0 +1,4 @@
+a.ts(16,7): error TS2322: Type '{ (): void; test: false; }' is not assignable to type 'Bar'.
+  Types of property 'test' are incompatible.
+    Type 'false' is not assignable to type 'true'.
+a.ts(17,1): error TS2322: Type 'false' is not assignable to type 'true'.
