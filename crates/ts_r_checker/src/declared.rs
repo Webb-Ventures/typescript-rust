@@ -540,7 +540,8 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The outer type parameters a type literal or function type node may reference: the
-    /// ones it names. A literal inside a block (where local types can name them
+    /// ones it or the extends type of an enclosing conditional type names (tsc: checker.go,
+    /// isTypeParameterPossiblyReferenced). A literal inside a block (where local types can name them
     /// indirectly) or with a `typeof` query may reference all of them, as may every
     /// parameter not declared in a type parameter list (`this`, mapped and `infer`).
     pub fn referenced_outer_type_params(&mut self, l: Loc) -> Vec<TypeId> {
@@ -562,6 +563,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let parents = self.c.file(l.file).parents();
         // Names of the enclosing type parameter lists' parameters.
         let mut declared: Vec<(TypeId, &str)> = Vec::new();
+        // Roots whose names count as references: the node itself and the extends types
+        // of enclosing conditional types (their constraints can be implied inside).
+        let mut stack = vec![l.node];
         let mut cur = parents.parent(l.node);
         let mut guard = 0;
         while let Some(n) = cur {
@@ -573,6 +577,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::Block { .. } | Node::ModuleBlock { .. } | Node::StaticBlock { .. } => {
                     return outer;
                 }
+                Node::ConditionalType { extends, .. } => stack.push(extends),
                 _ => {}
             }
             if let Some(tp) = type_params_of(ast, n)
@@ -595,7 +600,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = parents.parent(n);
         }
         let mut names: Vec<&str> = Vec::new();
-        let mut stack = vec![l.node];
         let mut steps = 0;
         while let Some(n) = stack.pop() {
             steps += 1;

@@ -2122,6 +2122,21 @@ impl<'c, 'a> Ck<'c, 'a> {
         (params, this_type, min, has_rest)
     }
 
+    /// Whether the parameter `p` belongs to a signature written as a type (a function or
+    /// constructor type, or a call, construct or method signature).
+    fn in_type_position(&mut self, p: Loc) -> bool {
+        self.c.parent(p).is_some_and(|s| {
+            matches!(
+                self.node(s),
+                Node::FunctionType { .. }
+                    | Node::ConstructorType { .. }
+                    | Node::MethodSignature { .. }
+                    | Node::CallSignature { .. }
+                    | Node::ConstructSignature { .. }
+            )
+        })
+    }
+
     /// The declared type of a parameter node (annotation, initializer, contextual type or
     /// `any`), including `undefined` for optional parameters.
     pub fn param_type(&mut self, p: Loc) -> TypeId {
@@ -2142,6 +2157,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         if let Some(t) = type_ann {
             let ty = self.type_from_node(Loc::new(p.file, t));
+            // In the true branch of a conditional type a parameter's type can carry the
+            // implied constraint (`number extends T ? (cb: (n: number) => void) => void`
+            // types `n` as `number & T`).
+            let ty = if self.in_type_position(p) {
+                self.with_implied_constraints(Loc::new(p.file, t), ty)
+            } else {
+                ty
+            };
             if optional && !rest {
                 return self.add_optionality(ty);
             }

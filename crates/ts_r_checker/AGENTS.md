@@ -1344,8 +1344,12 @@ Files, by layer:
   written `O` and `K` (tsc: checker.go, checkIndexedAccessIndexType; the private/protected
   TS4105 is not reported). Both sides are first read with the constraints their position
   implies (tsc: getConditionalFlowTypeOfType): in the true branch of `C extends E ? X : Y`
-  a `C` is `C & E` (unary tuples `[C] extends [E]` too; not through a parameter position
-  unless it is a type variable), `C["a"]` there is `C["a"] & E["a"]`, and the key `K` of a
+  a `C` is `E & C` (constraint first, as tsc prints its substitution types; unary tuples
+  `[C] extends [E]` too; each parameter position on the way up flips variance, and a
+  contravariant position only takes it for a type variable), `C["a"]` there is
+  `C["a"] & E["a"]`. Parameter types of signatures written as types take it too, so in
+  `number extends T ? (cb: (n: number) => void) => void : never` the `n` is `T & number`
+  (two parameter positions: covariant). The key `K` of a
   homomorphic `{ [K in keyof T]: X }` whose `T` is constrained to arrays or tuples is
   `K & (number | `${number}`)` inside `X`. An unconstrained `...infer R` in a rest position
   is indexed as `R & unknown[]`, and a conditional object as its constraint with such an
@@ -1579,7 +1583,9 @@ Files, by layer:
   export names the module in qualified type names (`net.Socket`).
 - **Referenced outer type parameters.** A type literal or function type outside any block
   is instantiated only by the outer type parameters it names (`referenced_outer_type_params`);
-  `typeof` queries, blocks, `this`, mapped and `infer` parameters keep all of them. So
+  `typeof` queries, blocks, `this`, mapped and `infer` parameters keep all of them, and a
+  parameter named in the extends type of an enclosing conditional type counts as named (its
+  implied constraint can appear inside; tsc: isTypeParameterPossiblyReferenced). So
   `(data: { elements: El[] }) => R` doesn't mention `R` in its parameter.
 - **`const` type parameters.** A literal whose contextual type (at its level or any
   enclosing array, spread or property level) is a `const` type parameter, a union or

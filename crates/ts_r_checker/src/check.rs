@@ -5088,7 +5088,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// `t` written at `at` with the constraints implied by enclosing conditional types:
     /// in the true branch of `C extends E ? X : Y` (outside parameter positions that flip
-    /// variance, type variables always) a type that is `C` reads as `C & E`; members of
+    /// variance, type variables always) a type that is `C` reads as `E & C`; members of
     /// an intersection or union are substituted one by one (tsc: checker.go,
     /// getConditionalFlowTypeOfType, getImpliedConstraint).
     pub(crate) fn with_implied_constraints(&mut self, at: Loc, t: TypeId) -> TypeId {
@@ -5151,7 +5151,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = p;
         }
         if !constraints.is_empty() {
-            constraints.insert(0, t);
+            // The constraints come first (`T & number`), as tsc's substitution types read.
+            constraints.push(t);
             return self.intersection(&constraints);
         }
         let s = self.store();
