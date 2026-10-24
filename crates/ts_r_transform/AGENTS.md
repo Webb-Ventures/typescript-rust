@@ -60,13 +60,15 @@ Preserve}` is per file. `hmr::TsTransform` (feature `hmr`) implements `ts_r_hmr:
 | `build_errors.rs` | which parse errors fail a build (esbuild's rule, observed) |
 | `downlevel/` | lowering for targets below ES2022 (record 0012, E5): `lower.rs` is the one walk (function contexts, hoisted temporaries, unique names), `operators.rs` (ES2021 logical assignment and separators, ES2019 catch, ES2016 `**`), `es2020.rs` (`?.`, `??`), `es2018.rs` (async generators, `for await`, object spread), `rest.rs` (object rest), `template.rs` (tagged templates with invalid escapes: `__makeTemplateObject`), `es2017.rs` (async functions, `_super`, `arguments`), `es2022.rs` (class statics after the class, class aliases, `Reflect.get` / `Reflect.set` for static `super`, `useDefineForClassFields` defines, private member storage), `private.rs` (private name
 uses: `__classPrivateFieldGet`/`Set`/`In`, receivers captured for compound and update
-operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await using` below ESNext and a module's top-level `using` followed by exports at ESNext: `env`/`try`, hoisted declarations, regrouped exports, CommonJS `void 0` list order); `mod.rs` `unlowered` lists output syntax newer than the target (TSR2003) |
+operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await using` below ESNext; at ESNext tsc 7 keeps every `using`, a module's top-level one followed by exports too: `env`/`try`, hoisted declarations, regrouped exports, CommonJS `void 0` list order); `mod.rs` `unlowered` lists output syntax newer than the target (TSR2003) |
 | `hmr.rs` | dev-server adapter (feature `hmr`) |
 
 ## Invariants
 
 - **tsc 7 emit is the spec**, observed through the oracles below; tsc's source may be read
   to understand a rule, never translated (root AGENTS.md). A behaviour change needs a fixture (or a baseline) proving tsc does it.
+  Exception: optional and parenthesized static `super` calls in class-decorated classes
+  preserve the receiver and short-circuiting, even where tsc 7.0.2 loses them (record 0002).
 - **In place, children first**: visit children, then `replace(ast, slot, new)`; never hold a
   `&Node` across a mutation (nodes are `Copy`; read, then write).
 - **Synthesized nodes have empty spans**; a synthesized node's start is its source-map hint.
@@ -176,8 +178,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   (`--stored` compares against the stored files without tsc).
 - tsc's emit baselines (upstream checkout in `target/upstream/typescript`):
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE]`.
-  Last run (2026-10-22, 52b87b3): 1,654 match, 80 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
-  syntax errors are skipped); `--filter esDecorators`: 113 match, 27 mismatch.
+  Last run (2026-10-24, parity/binder-emit): 1,673 match, 61 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  syntax errors are skipped); `--filter esDecorators`: 119 match, 21 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
   tsc's emit. Last run: 48/48 packages pass.
@@ -246,8 +248,9 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   object rest (tsc flattens them too) are not handled. Private methods using `super`, and
   private classes evaluated in a loop with an outer `await` or `yield`, are refused (TSR2003).
 - TC39 decorators: static private members of class-decorated classes keep native `#x` (tsc
-  moves them to `__classPrivateFieldGet` storage), `super` in their static members is not
-  rewritten to `Reflect.get(_classSuper, ...)`, and named evaluation only covers
+  moves them to `__classPrivateFieldGet` storage), writes to `super` properties in their
+  static members stay as written (tsc uses `Reflect.set` and temporaries; reads, calls and
+  tags already go through `Reflect.get(_classSuper, k, _classThis)`), and named evaluation only covers
   `x = class {}` / `let x = class {}` (not object literal keys, defaults or destructuring).
 - `module: preserve` adds an `export {}` marker where tsc 7 adds none (tsc never adds it
   under `preserve`; the bundler relies on the marker, so only `.cts`/`.cjs` files and files

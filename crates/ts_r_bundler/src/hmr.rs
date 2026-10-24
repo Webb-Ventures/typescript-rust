@@ -504,6 +504,13 @@ impl Overlay {
 }
 
 impl FileSystem for Overlay {
+    fn read_bytes(&self, p: &str) -> Option<Vec<u8>> {
+        if let Some(c) = self.files.get(p) {
+            return Some(c.as_bytes().to_vec());
+        }
+        self.inner.read_bytes(p)
+    }
+
     fn read_file(&self, p: &str) -> Option<String> {
         if let Some(c) = self.files.get(p) {
             return Some(c.clone());

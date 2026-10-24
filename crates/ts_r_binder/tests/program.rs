@@ -103,6 +103,33 @@ fn script_globals_merge_and_conflict_across_files() {
     );
 }
 
+/// tsc 7 (`noSymbolForMergeCrash`): a global an interface and a non-instantiated namespace
+/// declare, then a type alias in a later file, is TS2649 at the alias only; the other order
+/// is an ordinary duplicate.
+#[test]
+fn conflict_with_a_namespace_only_global_is_ts2649() {
+    let f = build(&[
+        ("initial.ts", "interface A { }\nnamespace A {}\n"),
+        ("final.ts", "type A = {}\n"),
+    ]);
+    let p = link(&f);
+    assert_eq!(diags(&f, &p), ["final.ts(1,6) TS2649"]);
+    assert_eq!(p.global("A").expect("merged").symbols.len(), 1);
+    let f = build(&[
+        ("first.ts", "type A = {}\n"),
+        ("second.ts", "interface A { }\nnamespace A {}\n"),
+    ]);
+    let p = link(&f);
+    assert_eq!(
+        diags(&f, &p),
+        [
+            "first.ts(1,6) TS2300",
+            "second.ts(1,11) TS2300",
+            "second.ts(2,11) TS2300"
+        ]
+    );
+}
+
 #[test]
 fn modules_do_not_contribute_globals_but_declare_global_does() {
     let f = build(&[
@@ -306,6 +333,70 @@ fn module_augmentation_merges_and_unresolved_is_reported() {
             "base.ts(2,14) TS2451"
         ]
     );
+}
+
+#[test]
+fn value_augmentation_of_a_variable_with_a_type_only_namespace_is_ts2649() {
+    // tsc 7: augmentExportEquals7. A type-only augmentation of the same entity is fine.
+    let lib = "declare var lib: () => void;\ndeclare namespace lib {}\nexport = lib;\n";
+    let f = build(&[
+        ("lib.d.ts", lib),
+        (
+            "ext.ts",
+            "import * as lib from \"./lib\";\ndeclare module \"./lib\" {\n    export function fn(): void;\n}\n",
+        ),
+    ]);
+    let p = link(&f);
+    assert_eq!(diags(&f, &p), ["ext.ts(2,16) TS2649"]);
+    let f = build(&[
+        ("lib.d.ts", lib),
+        (
+            "ext.ts",
+            "import * as lib from \"./lib\";\ndeclare module \"./lib\" {\n    export interface I {}\n}\n",
+        ),
+    ]);
+    let p = link(&f);
+    assert!(diags(&f, &p).is_empty());
+}
+
+#[test]
+fn augmenting_a_module_found_outside_the_program_is_not_ts2664() {
+    // tsc 7: untypedModuleImport_withAugmentation (the checker reports TS2665 instead).
+    let f = build(&[(
+        "a.ts",
+        "declare module \"foo\" {\n    export const x: number;\n}\nimport { x } from \"foo\";\n",
+    )]);
+    let files: Vec<ProgramFile> = vec![ProgramFile {
+        path: &f.names[0],
+        ast: &f.asts[0],
+        src: &f.srcs[0],
+        bound: &f.bound[0],
+    }];
+    let outside = Program::link(files, |spec: &str, _: &str, _: &ModuleRequest| {
+        (spec == "foo").then(|| "/node_modules/foo/index.js".to_owned())
+    });
+    assert!(diags(&f, &outside).is_empty());
+    assert_eq!(diags(&f, &link(&f)), ["a.ts(1,16) TS2664"]);
+}
+
+#[test]
+fn augmenting_an_export_assigned_expression_is_ts2671() {
+    // Observed with tsc 7: `export =` of an object literal, a number or a class or function
+    // expression (and JavaScript's `module.exports = {...}`) cannot be augmented.
+    let f = build(&[
+        ("lit.ts", "class A {}\nexport = { A };\n"),
+        ("num.ts", "export = 42;\n"),
+        (
+            "ns.ts",
+            "namespace N { export const a = 1; }\nexport = N;\n",
+        ),
+        (
+            "i.ts",
+            "import q = require(\"./lit\");\nimport n = require(\"./num\");\nimport s = require(\"./ns\");\ndeclare module \"./lit\" {\n  interface A { b: string }\n}\ndeclare module \"./num\" {\n  interface Q {}\n}\ndeclare module \"./ns\" {\n  interface Q {}\n}\n",
+        ),
+    ]);
+    let p = link(&f);
+    assert_eq!(diags(&f, &p), ["i.ts(4,16) TS2671", "i.ts(7,16) TS2671"]);
 }
 
 #[test]

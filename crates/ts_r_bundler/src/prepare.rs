@@ -28,6 +28,8 @@ pub struct Source {
     pub css: Option<Arc<str>>,
     /// Bytes to emit as a separate file (the `file` loader).
     pub asset: Option<Asset>,
+    /// Top-level JSON object keys before rewriting JavaScript-only computed properties.
+    pub json_keys: Option<Arc<[String]>>,
     /// Hash of the raw file contents and loader, and of anything else `js` depends on (the
     /// `file` loader's URL). Part of the module's preparation key.
     pub hash: [u8; 32],
@@ -52,12 +54,8 @@ pub fn load(
             .ok_or_else(|| format!("Could not read from file: {path}"))
     };
     let read_bytes = || -> Result<Vec<u8>, String> {
-        match fs.read_file(path) {
-            Some(t) => Ok(t.into_bytes()),
-            None => {
-                std::fs::read(path).map_err(|e| format!("Could not read from file: {path}: {e}"))
-            }
-        }
+        fs.read_bytes(path)
+            .ok_or_else(|| format!("Could not read from file: {path}"))
     };
     let hash_of = |bytes: &[u8]| {
         let mut h = blake3::Hasher::new();
@@ -70,6 +68,7 @@ pub fn load(
         js: Arc::from(format!("module.exports = {expr};\n")),
         css: None,
         asset: None,
+        json_keys: None,
         hash,
     };
     match loader {
@@ -81,6 +80,7 @@ pub fn load(
                 js: Arc::from(text),
                 css: None,
                 asset: None,
+                json_keys: None,
                 hash,
             })
         }
@@ -91,14 +91,23 @@ pub fn load(
             if let Some(d) = parsed.diagnostics.first() {
                 return Err(format!("{path}: invalid JSON: {}", d.message));
             }
+            if let Some(lit) = json_bigint(text) {
+                return Err(format!("{path}: Unexpected {lit:?} in JSON"));
+            }
             let hash = hash_of(text.as_bytes());
             let body = if text.trim().is_empty() {
                 "{}".to_owned()
             } else {
                 // JSON is a JavaScript expression; parenthesize so `{` isn't a block.
-                format!("(\n{}\n)", text.trim_end())
+                format!("(\n{}\n)", computed_proto_keys(text.trim_end()))
             };
-            Ok(js_value(body, hash))
+            let mut source = js_value(body, hash);
+            source.json_keys = parsed
+                .root
+                .as_ref()
+                .and_then(Value::as_object)
+                .map(|members| members.iter().map(|m| m.key.clone()).collect());
+            Ok(source)
         }
         Loader::Text => {
             let text = read_text()?;
@@ -127,6 +136,16 @@ pub fn load(
                     "Uint8Array.from(atob({}), (c) => c.charCodeAt(0))",
                     js_string(&b)
                 ),
+                hash,
+            ))
+        }
+        Loader::Bytes => {
+            let bytes = read_bytes()?;
+            let hash = hash_of(&bytes);
+            let mut b = String::new();
+            ts_r_codegen::sourcemap::base64_encode(&bytes, &mut b);
+            Ok(js_value(
+                format!("Uint8Array.fromBase64({})", js_string(&b)),
                 hash,
             ))
         }
@@ -170,6 +189,7 @@ pub fn load(
                 js: Arc::from(""),
                 css: Some(Arc::from(text)),
                 asset: None,
+                json_keys: None,
                 hash,
             })
         }
@@ -177,6 +197,7 @@ pub fn load(
             js: Arc::from(""),
             css: None,
             asset: None,
+            json_keys: None,
             hash: hash_of(b""),
         }),
     }
@@ -594,10 +615,16 @@ impl PrepareContext {
             }
             Some(_) => JsxMode::Classic,
             None => match tsconfig_jsx {
-                Some(JsxEmit::React) | None => JsxMode::Classic,
+                // `"jsx": "preserve"` (and `react-native`) in a tsconfig is ignored, as in
+                // esbuild: the output is JavaScript, so JSX is compiled. `--jsx=preserve`
+                // keeps it.
+                Some(JsxEmit::React | JsxEmit::Preserve | JsxEmit::ReactNative) | None => {
+                    JsxMode::Classic
+                }
+                // `--jsx-dev` picks the development runtime for `"jsx": "react-jsx"` too.
+                Some(JsxEmit::ReactJsx) if jsx.dev => JsxMode::AutomaticDev,
                 Some(JsxEmit::ReactJsx) => JsxMode::Automatic,
                 Some(JsxEmit::ReactJsxDev) => JsxMode::AutomaticDev,
-                Some(JsxEmit::Preserve) | Some(JsxEmit::ReactNative) => JsxMode::Preserve,
             },
         };
         if let Some(f) = &jsx.factory {
@@ -730,13 +757,30 @@ pub fn prepare_with(
             "The JSX syntax extension is not currently enabled".into(),
         ));
     }
-    let needs_transform = kind.is_typescript() || first_jsx.is_some() || module.is_some();
+    // `accessor` fields of JavaScript files are lowered for an explicit `--target` (they are
+    // newer than every year target ts-r-build emits).
+    let lower_accessors = !kind.is_typescript()
+        && ctx.opts.target.is_some()
+        && ast.nodes.iter().any(|n| {
+            matches!(n, Node::PropertyDef { modifiers, .. } if modifiers.contains(Modifiers::ACCESSOR))
+        });
+    let needs_transform =
+        kind.is_typescript() || first_jsx.is_some() || module.is_some() || lower_accessors;
     if needs_transform && messages.is_empty() {
         let base = ctx.transform_options(path);
         let mut topts = (*base).clone();
         topts.jsx_file_name = display.to_owned();
+        if !kind.is_typescript() {
+            // JavaScript class fields always have define semantics.
+            topts.use_define_for_class_fields = true;
+        }
         if let Some(m) = module {
             topts.module = m;
+        }
+        if kind.is_typescript() && exports_const_enum(&ast) {
+            // Files are transformed one at a time, so an exported const enum can't be inlined
+            // into its importers: keep its object, as `isolatedModules` does.
+            topts.preserve_const_enums = true;
         }
         let r = ts_r_transform::transform(&mut ast, &src, &topts);
         erased = r.erased;
@@ -809,6 +853,31 @@ pub fn prepare_with(
                 ast.span(r).start,
                 "Top-level return cannot be used inside an ECMAScript module".into(),
             ));
+        }
+    }
+    // Top-level `this` of a CommonJS file is its `exports` object: when bundling it becomes
+    // `exports`, so the file is wrapped as CommonJS (as esbuild does). Not for `.mjs`/`.mts`,
+    // files with a top-level `await` (modules), or a file that declares its own `exports`.
+    if !strict
+        && ctx.opts.bundle
+        && !path.ends_with(".mjs")
+        && !path.ends_with(".mts")
+        && ast.nodes.iter().any(|n| matches!(n, Node::This {}))
+    {
+        let (this, _, tla) = top_level_this_and_return(&ast);
+        let own_exports = || {
+            let scopes = Scopes::analyze(&ast, strict);
+            scopes
+                .module_symbols()
+                .iter()
+                .any(|&s| ast.atom(scopes.symbol(s).name) == "exports")
+        };
+        if !this.is_empty() && !tla && (!src.contains("exports") || !own_exports()) {
+            for id in this {
+                let at = ast.span(id).start;
+                let exports = build::ident(&mut ast, "exports", at);
+                build::replace(&mut ast, id, exports);
+            }
         }
     }
     let mut scopes = Scopes::analyze(&ast, strict);
@@ -975,9 +1044,156 @@ pub fn file_stem_name(path: &str) -> String {
     names::sanitize(stem)
 }
 
+/// The first BigInt literal (`123n`) outside strings in `text`. The JSONC parser reads it as
+/// a number, but JSON has no BigInt and esbuild rejects it.
+/// JSON text used as a JavaScript expression, with each `"__proto__"` key made computed
+/// (`["__proto__"]`): in an object literal the plain key would set the prototype instead
+/// of creating a property, which is what `JSON.parse` does.
+fn computed_proto_keys(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains("__proto__") && !text.contains("\\u") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len() + 4);
+    let mut last = 0;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        while i < b.len() && b[i] != b'"' {
+            i += if b[i] == b'\\' { 2 } else { 1 };
+        }
+        let end = (i + 1).min(b.len());
+        i = end;
+        let mut j = end;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        let raw = text.get(start + 1..end.saturating_sub(1)).unwrap_or("");
+        if j < b.len() && b[j] == b':' && json_string_value(raw) == "__proto__" {
+            out.push_str(&text[last..start]);
+            out.push('[');
+            out.push_str(&text[start..end]);
+            out.push(']');
+            last = end;
+        }
+    }
+    if last == 0 {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    out.push_str(&text[last..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// The value of a JSON string's raw contents (only `\uXXXX` and one-character escapes).
+fn json_string_value(raw: &str) -> String {
+    let mut out = String::new();
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('u') => {
+                let hex: String = chars.by_ref().take(4).collect();
+                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    out.push(ch);
+                }
+            }
+            Some(e) => out.push(e),
+            None => {}
+        }
+    }
+    out
+}
+
+fn json_bigint(text: &str) -> Option<&str> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    while i < b.len() {
+        let c = b[i];
+        if in_string {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_string = false,
+                _ => {}
+            }
+        } else if c == b'"' {
+            in_string = true;
+        } else if c.is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) {
+            let start = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.') {
+                i += 1;
+            }
+            if b[i - 1] == b'n' {
+                return text.get(start..i);
+            }
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Whether a TypeScript file exports a const enum (`export const enum`, or a const enum named
+/// by a top-level `export { .. }`).
+fn exports_const_enum(ast: &Ast) -> bool {
+    let stmts = build::program_stmts(ast);
+    let mut consts: Vec<&str> = Vec::new();
+    for &s in stmts.iter() {
+        if let Node::Enum {
+            modifiers, name, ..
+        } = *ast.node(s)
+            && modifiers.contains(Modifiers::CONST)
+            && !modifiers.contains(Modifiers::DECLARE)
+        {
+            if modifiers.contains(Modifiers::EXPORT) {
+                return true;
+            }
+            if let Node::Ident { name } = *ast.node(name) {
+                consts.push(ast.atom(name));
+            }
+        }
+    }
+    !consts.is_empty()
+        && stmts.iter().any(|&s| {
+            let Node::ExportNamed {
+                type_only: false,
+                specifiers,
+                source: None,
+                ..
+            } = *ast.node(s)
+            else {
+                return false;
+            };
+            ast.list(specifiers).iter().any(|&sp| {
+                matches!(*ast.node(sp), Node::ExportSpecifier { type_only: false, local, .. }
+                    if matches!(*ast.node(local), Node::Ident { name } if consts.contains(&ast.atom(name))))
+            })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_proto_keys_become_computed() {
+        let t = r#"{"a": "__proto__", "__proto__": {"x": 1}, "\u005f_proto__" : 2, "b\"": 3}"#;
+        assert_eq!(
+            computed_proto_keys(t),
+            r#"{"a": "__proto__", ["__proto__"]: {"x": 1}, ["\u005f_proto__"] : 2, "b\"": 3}"#
+        );
+        assert_eq!(computed_proto_keys(r#"{"a": 1}"#), r#"{"a": 1}"#);
+        // Unterminated input does not panic.
+        let _ = computed_proto_keys("\"__proto__\\");
+    }
 
     #[test]
     fn file_loader_hash_covers_the_generated_url() {

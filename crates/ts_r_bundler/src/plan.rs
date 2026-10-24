@@ -12,7 +12,7 @@ use crate::expr::Expr;
 use crate::graph::{DISABLED_PREFIX, Graph, ModuleId, Target};
 use crate::link::{Binding, Kind, Link, Wrap};
 use crate::meta::{Imported, PartKind, RecordKind, Sym, SymKind};
-use crate::options::{BuildOptions, Format, Platform};
+use crate::options::{BuildOptions, Format, Loader, Platform};
 use crate::prepare::file_stem_name;
 use crate::runtime::{Helper, Helpers};
 
@@ -307,7 +307,6 @@ fn unwrapped_entry(input: &PlanInput<'_>, format: Format) -> Option<ModuleId> {
 /// already, CommonJS modules need their own directive, and non-JavaScript loaders print
 /// strict-safe code. A banner would end the directive prologue.
 fn strict_file_ok(input: &PlanInput<'_>, e: ModuleId) -> bool {
-    use crate::options::Loader;
     let (g, l) = (input.graph, input.link);
     input.opts.banner.is_none()
         && g.modules.iter().enumerate().all(|(i, m)| {
@@ -560,7 +559,10 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                                     if let Target::External(path) = t {
                                         star_reexports.push(format!(
                                             "export *{sp}from{sp}{};",
-                                            Expr::Str(path.clone()).to_text(true)
+                                            Expr::Str(
+                                                crate::graph::split_external(path).0.to_owned()
+                                            )
+                                            .to_text(true)
                                         ));
                                     }
                                 }
@@ -641,18 +643,11 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                 }
             }
         }
-        // Externals load in the order their import records appear in the bundle.
+        // Externals load in evaluation order: each module's records in source order, an
+        // internal static import or require walked at its position (as the module it names
+        // runs before the rest of the importer).
         {
-            let mut order: Vec<&str> = Vec::new();
-            for &m in &mods {
-                for t in &g.modules[m as usize].targets {
-                    if let crate::graph::Target::External(x) = t
-                        && !order.contains(&x.as_str())
-                    {
-                        order.push(x);
-                    }
-                }
-            }
+            let order = external_order(g, out.chunks[ci].entry, &mods);
             let rank = |p: &str| order.iter().position(|o| *o == p).unwrap_or(usize::MAX);
             ext_requires.sort_by_key(|(p, _)| rank(p));
             ext_imports.sort_by_key(|x| rank(&x.path));
@@ -809,14 +804,14 @@ impl Planner<'_> {
     }
 
     fn ext_stem(&self, e: u32) -> String {
-        let path = &self.l.externals[e as usize];
+        let path = crate::graph::split_external(&self.l.externals[e as usize]).0;
         let last = path
             .trim_end_matches('/')
             .rsplit('/')
             .next()
             .unwrap_or(path);
         let base = if path.starts_with('@') || !path.starts_with('.') {
-            path.as_str()
+            path
         } else {
             last
         };
@@ -1079,7 +1074,10 @@ impl Planner<'_> {
             let v = this.import_var(m, t);
             let to_esm = this.helper_names[Helper::ToEsm as usize].clone();
             let mut args = vec![Expr::call(&this.wrapper[t as usize], vec![])];
-            if node_mode {
+            let tm = &this.g.modules[t as usize];
+            if tm.loader == Loader::Json {
+                args.push(Expr::Num(if tm.default_only { 3 } else { 2 }));
+            } else if node_mode {
                 args.push(Expr::Num(1));
             }
             refs.insert(this.wrapper[t as usize].clone());
@@ -1404,4 +1402,47 @@ pub fn relative_import(from: &str, to: &str) -> String {
     } else {
         format!("./{rel}")
     }
+}
+
+/// External import keys in evaluation order, walking from the chunk's entry and then its
+/// other modules. Iterative so deep import chains cannot overflow the stack.
+fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) -> Vec<&'g str> {
+    let mut order: Vec<&'g str> = Vec::new();
+    let mut seen: FxHashSet<&'g str> = FxHashSet::default();
+    let mut visited = vec![false; g.modules.len()];
+    for root in entry.into_iter().chain(mods.iter().copied()) {
+        if visited[root as usize] {
+            continue;
+        }
+        visited[root as usize] = true;
+        // (module, next record index)
+        let mut stack: Vec<(ModuleId, usize)> = vec![(root, 0)];
+        while let Some(top) = stack.last_mut() {
+            let (m, i) = *top;
+            let module = &g.modules[m as usize];
+            if i >= module.targets.len() {
+                stack.pop();
+                continue;
+            }
+            top.1 += 1;
+            let dynamic = module
+                .meta
+                .records
+                .get(i)
+                .is_some_and(|r| r.kind == RecordKind::Dynamic);
+            match &module.targets[i] {
+                Target::External(x) => {
+                    if seen.insert(x.as_str()) {
+                        order.push(x.as_str());
+                    }
+                }
+                Target::Module(t) if !dynamic && !visited[*t as usize] => {
+                    visited[*t as usize] = true;
+                    stack.push((*t, 0));
+                }
+                _ => {}
+            }
+        }
+    }
+    order
 }
