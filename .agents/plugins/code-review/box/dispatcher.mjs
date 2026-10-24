@@ -4,10 +4,11 @@
 // request against GitHub's own record of that workflow run in that repository (workflow, event,
 // triggering user; the rules are in ci/trust.cjs), queues the work, keeps a progress line in the
 // PR's summary or bench comment, and runs each step in a fresh container (see job.mjs). Codex
-// jobs and benches are two lanes, each one job at a time, on separate CPU cores (REVIEW_CPUS,
-// BENCH_CPUS) so a bench measures on cores nothing else uses. It acts on GitHub as the ts-r
-// review GitHub App, minting a short-lived installation token for every step, scoped to the
-// job's repository and the step's permissions.
+// jobs and benches are two lanes on separate CPU cores (REVIEW_CPUS, and the bench slots) so a
+// bench measures on cores nothing else uses: Codex jobs one at a time, benches one per slot
+// (BENCH_SLOTS; one slot on BENCH_CPUS by default, see ci/bench-lanes.cjs). It acts on GitHub
+// as the ts-r review GitHub App, minting a short-lived installation token for every step, scoped
+// to the job's repository and the step's permissions.
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -19,6 +20,7 @@ const require = createRequire(import.meta.url);
 const review = require('./ci/github.cjs');
 const benchComment = require('./ci/bench.cjs');
 const trust = require('./ci/trust.cjs');
+const benchLanesLib = require('./ci/bench-lanes.cjs');
 const { Octokit } = await import('octokit');
 
 const env = process.env;
@@ -38,12 +40,42 @@ const BENCH_REPOS = env.BENCH_REPOS ?? 'trpc,date-fns,rxjs,three-x10';
 // Each repo has its own bench directory (checkouts, crates, package stores, passes), so code
 // from one repo's PR never sees another repo's git objects or skews its benches.
 const benchDir = (repo) => `${DATA}/bench/${repo.replace('/', '__')}`;
-// The box has 6 cores: Codex jobs (mostly waiting on the model) get two, benches the other four.
-const REVIEW_CPUS = ['--cpuset-cpus', env.REVIEW_CPUS ?? '0-1'];
-const BENCH_CPUS = ['--cpuset-cpus', env.BENCH_CPUS ?? '2-5'];
 // The lanes this box runs (LANES, default both). A separate bench box serves ["bench"] and the
 // review box ["review"], so a request sent to the wrong one is refused rather than run there.
 const LANES = new Set(JSON.parse(env.LANES ?? '["review","bench"]'));
+// The box has 6 cores: Codex jobs (mostly waiting on the model) get two, benches the other four.
+const REVIEW_CPUS = ['--cpuset-cpus', env.REVIEW_CPUS ?? '0-1'];
+// Bench slots: each runs one bench at a time, the PR and its base both, on a cpuset of its own.
+// Without BENCH_SLOTS there is one, on BENCH_CPUS (default 2-5). With BENCH_SLOTS=auto (or a
+// count) they are sized from the cores Docker reports, BENCH_SLOT_CPUS (default 4) each, after
+// REVIEW_CPUS when this box runs reviews; or BENCH_SLOTS lists the cpusets. A bad setting falls
+// back to the one default slot, logged at startup and shown on /healthz.
+const HOST_CORES = (() => {
+  const result = spawnSync('docker', ['info', '--format', '{{.NCPU}}'], { encoding: 'utf8', timeout: 20_000 });
+  const cores = Number(result.stdout?.trim());
+  return Number.isInteger(cores) && cores > 0 ? cores : null;
+})();
+const SLOTS = benchLanesLib.benchSlots(
+  { slots: env.BENCH_SLOTS, cpus: env.BENCH_CPUS, slotCpus: env.BENCH_SLOT_CPUS, reviewCpus: env.REVIEW_CPUS, review: LANES.has('review') },
+  HOST_CORES,
+);
+// BENCH_MEASURE=alone (the default): a slot measures only while no other slot builds, installs
+// or measures, so its numbers come from a box as quiet as with one slot, and only the builds
+// overlap. BENCH_MEASURE=parallel: slots measure side by side, kept apart only by their cores
+// (they still share the memory bus, the last-level cache and the disk; the confirming re-run,
+// PR first, has to see a regression again). With one slot the two are the same.
+const BENCH_MEASURE = env.BENCH_MEASURE === 'parallel' ? 'parallel' : 'alone';
+// The memory of each bench container (BENCH_MEMORY, default 6g): slots times this must fit.
+const BENCH_MEMORY = /^\d+[kmg]?$/i.test(env.BENCH_MEMORY ?? '') ? env.BENCH_MEMORY : '6g';
+// Reference tools (tsc, ESLint, esbuild, ...) measured on a slot are reused for this many days
+// (BENCH_REFERENCE_DAYS, default 7; 0 measures them every time) while nothing that could change
+// them changed: see referenceKey.
+const REFERENCE_DAYS = Number.isFinite(Number(env.BENCH_REFERENCE_DAYS ?? 7)) ? Number(env.BENCH_REFERENCE_DAYS ?? 7) : 7;
+// The job image's id is part of the reference key (it carries Node and hyperfine).
+const IMAGE_ID = (() => {
+  const result = spawnSync('docker', ['image', 'inspect', '--format', '{{.Id}}', IMAGE], { encoding: 'utf8', timeout: 20_000 });
+  return result.status === 0 ? result.stdout.trim() : null;
+})();
 const MODEL = env.MODEL ?? 'gpt-6.1-sol';
 const EFFORT = env.EFFORT ?? 'high';
 for (const file of [env.GITHUB_APP_KEY_PATH ?? `${DATA}/secrets/github-app.pem`, env.DISPATCH_TOKEN_PATH ?? `${DATA}/secrets/dispatch-token`]) {
@@ -152,8 +184,10 @@ const withCache = (fn) => (fetches = fetches.then(fn, fn));
 // jobs start again from the beginning.
 const QUEUE_FILE = `${DATA}/queue.json`;
 function saveQueue() {
-  const strip = ({ cancelled, container, ...job }) => job;
-  const jobs = [running, ...queue, benchRunning, ...benchQueue].filter(Boolean).map(strip);
+  const strip = ({ cancelled, container, abort, ...job }) => job;
+  // A bench being stopped is moot: it is not started again.
+  const benches = [...benchLanes.slots.map((slot) => slot.job).filter((job) => job && !job.cancelled), ...benchLanes.queue];
+  const jobs = [running, ...queue, ...benches].filter(Boolean).map(strip);
   fs.writeFileSync(`${QUEUE_FILE}.new`, JSON.stringify(jobs, null, 2));
   fs.renameSync(`${QUEUE_FILE}.new`, QUEUE_FILE);
 }
@@ -176,10 +210,10 @@ function restoreQueue() {
     }
     return true;
   });
-  for (const job of jobs) (job.kind === 'bench' ? benchQueue : queue).push(job);
+  for (const job of jobs) (job.kind === 'bench' ? benchLanes.queue : queue).push(job);
   log(`restored ${jobs.length} queued jobs: ${jobs.map(label).join(' ')}`);
   next();
-  nextBench();
+  startBenches();
 }
 
 async function status(repo, pr, text, { fresh = false, busy = false } = {}) {
@@ -408,23 +442,66 @@ function credentialsAbsent(files, logFile, before) {
   return true;
 }
 
-// A bench leaves only what saves downloads: the checkouts' sources, the pinned repos
+// A bench leaves only what saves downloads: the slot's checkouts' sources, the pinned repos
 // (target/bench-repos), the TypeScript lib files (target/upstream), crates and package stores.
 // Builds, bench output and results go when it ends, unless BENCH_KEEP_BUILDS=1 (a box with the
 // disk for them): then the next run's base build is a no-op when the base is unchanged (the
 // checkout leaves unchanged files' mtimes alone) and its PR build recompiles only what changed.
+// That is why a slot goes back to the PR, or else the base, it ran last (ci/bench-lanes.cjs).
 const BENCH_KEPT = new Set(['bench-repos', 'upstream']);
 const KEEP_BUILDS = env.BENCH_KEEP_BUILDS === '1';
-function cleanBench(bench) {
-  for (const name of ['base', 'pr']) {
-    const target = `${bench}/${name}/target`;
-    let entries = [];
+// Steps that run PR code can write the checkouts, so a path in one may lead through a link. This
+// removes `rel` under `root` without following one: a link on the way is removed instead.
+function removeUnder(root, rel) {
+  let at = root;
+  for (const part of rel.split('/')) {
+    at = `${at}/${part}`;
+    let stat;
     try {
-      entries = fs.readdirSync(target);
-    } catch {}
-    if (KEEP_BUILDS) entries = [];
-    for (const entry of entries) if (!BENCH_KEPT.has(entry)) fs.rmSync(`${target}/${entry}`, { recursive: true, force: true });
-    fs.rmSync(`${bench}/${name}/bench/results`, { recursive: true, force: true });
+      stat = fs.lstatSync(at);
+    } catch {
+      return;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      if (at !== `${root}/${rel}` && !stat.isSymbolicLink()) return;
+      break;
+    }
+  }
+  fs.rmSync(at, { recursive: true, force: true });
+}
+// The entries of a directory under `root`, or none if it is not a plain directory there.
+function entriesUnder(root, rel) {
+  let at = root;
+  for (const part of rel.split('/')) {
+    at = `${at}/${part}`;
+    try {
+      const stat = fs.lstatSync(at);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return [];
+    } catch {
+      return [];
+    }
+  }
+  return fs.readdirSync(at);
+}
+function cleanBench(slot) {
+  for (const name of ['base', 'pr']) {
+    if (!KEEP_BUILDS) for (const entry of entriesUnder(slot, `${name}/target`)) if (!BENCH_KEPT.has(entry)) removeUnder(slot, `${name}/target/${entry}`);
+    removeUnder(slot, `${name}/bench/results`);
+  }
+}
+// A file a job step wrote, or null: never through a link, never a FIFO or device (which could
+// block the dispatcher or read something else), and at most `max` bytes.
+function readOutFile(file, max) {
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > max) return null;
+    return fs.readFileSync(fd, 'utf8');
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
@@ -472,10 +549,18 @@ function scheduleRefresh(repo, pr) {
   refreshes.set(key, { first, timer });
 }
 
-// Benches: their own lane, one at a time, on BENCH_CPUS. A newer request for a PR replaces its
-// queued one and stops its running one (a push makes the old head's numbers moot).
-const benchQueue = [];
-let benchRunning = null;
+// Benches: a lane of their own, one bench per slot (SLOTS), each slot on its own cores. Which
+// queued bench starts in which slot, and which benches a newer push or a closed PR makes moot,
+// is in ci/bench-lanes.cjs. The phase lock keeps measurements apart from the other slots' work
+// (BENCH_MEASURE). Each repository's bench directory holds the caches its slots share (crates,
+// package stores; written by one install step at a time), passed.json and the reference store,
+// which no container sees, and slot-<n>/ per slot: the PR and base checkouts with their builds
+// and pinned repos, and their git directories.
+const benchLanes = benchLanesLib.createLanes(SLOTS.slots);
+const phases = benchLanesLib.createPhaseLock(BENCH_MEASURE);
+const slotDir = (repo, id) => `${benchDir(repo)}/slot-${id}`;
+let installs = Promise.resolve();
+const withInstall = (fn) => (installs = installs.then(fn, fn));
 
 async function benchStatus(repo, pr, text, { busy = false, result } = {}) {
   const { owner, name } = split(repo);
@@ -510,80 +595,195 @@ const readPassed = (repo) => {
 };
 const recordPass = (repo, key) => fs.writeFileSync(passedFile(repo), JSON.stringify([...readPassed(repo).filter((k) => k !== key), key].slice(-500)));
 
+// Benches made moot: queued ones are dropped, running ones stopped (their run ends as
+// superseded and frees the slot). Their heads' commit statuses stop saying pending.
+function settleMoot({ dropped = [], stopped = [] }, reason) {
+  for (const job of stopped) {
+    log(`bench ${job.repo}#${job.pr}: stopping the run for ${short(job.head)}: ${reason}`);
+    job.abort?.abort();
+    if (job.container) spawn('docker', ['rm', '-f', job.container], { stdio: 'ignore' });
+  }
+  for (const job of [...dropped, ...stopped]) commitStatus(job.repo, job.head, 'error', `Not benchmarked: ${reason}`, job.runUrl);
+  if (dropped.length || stopped.length) saveQueue();
+}
+
+// What GitHub says about the PR now (read at `asOf`) makes its benches of other heads moot, or
+// all of them once it is closed. Every bench request checks this first, whatever it asks for.
+function supersedeBenches(repo, pull, asOf) {
+  const open = pull.state === 'open';
+  const moot = benchLanesLib.supersede(benchLanes, { repo, pr: pull.number }, { open, head: pull.head.sha, asOf });
+  const reason = open ? `superseded by ${short(pull.head.sha)}` : 'the PR was closed';
+  settleMoot(moot, reason);
+  const gone = [...moot.dropped, ...moot.stopped];
+  if (!open && gone.length) benchStatus(repo, pull.number, `Bench of \`${short(gone[0].head)}\` dropped: the PR was closed.`);
+  if (gone.length) startBenches();
+}
+
 function enqueueBench(job) {
-  const existing = benchQueue.findIndex((j) => samePr(j, job));
-  if (existing >= 0) benchQueue.splice(existing, 1);
-  if (benchRunning && samePr(benchRunning, job) && benchRunning.head !== job.head && !benchRunning.cancelled) {
-    benchRunning.cancelled = true;
-    spawn('docker', ['rm', '-f', benchRunning.container], { stdio: 'ignore' });
-    log(`bench ${job.repo}#${job.pr}: stopping the run for ${short(benchRunning.head)}, ${short(job.head)} replaces it`);
+  job.queuedAt = Date.now();
+  const { replaced, stopped } = benchLanesLib.enqueue(benchLanes, job);
+  settleMoot({ dropped: replaced.filter((j) => j.head !== job.head), stopped }, `superseded by ${short(job.head)}`);
+  startBenches();
+  // Still queued: every slot is busy, or this PR's previous bench is still stopping.
+  if (benchLanes.queue.includes(job)) {
+    const ahead = benchLanesLib.ahead(benchLanes, job);
+    const behind = ahead ? ` behind ${ahead} other bench${ahead === 1 ? '' : 'es'}` : '';
+    benchStatus(job.repo, job.pr, `Bench of \`${short(job.head)}\` against \`${job.baseRef}\` queued${behind} (requested by @${job.by}).`, { busy: true });
+    commitStatus(job.repo, job.head, 'pending', `Queued${behind} on the bench box`, job.runUrl);
   }
-  benchQueue.push(job);
-  const ahead = benchQueue.length - 1 + (benchRunning && !benchRunning.cancelled ? 1 : 0);
-  const behind = ahead ? ` behind ${ahead} other bench${ahead === 1 ? '' : 'es'}` : '';
-  benchStatus(job.repo, job.pr, `Bench of \`${short(job.head)}\` against \`${job.baseRef}\` queued${behind} (requested by @${job.by}).`, { busy: true });
-  commitStatus(job.repo, job.head, 'pending', `Queued${behind} on the bench box`, job.runUrl);
   saveQueue();
-  if (!benchRunning) nextBench();
 }
 
-async function nextBench() {
-  benchRunning = benchQueue.shift() ?? null;
-  saveQueue();
-  if (!benchRunning) return;
-  try {
-    await runBench(benchRunning);
-  } catch (error) {
-    log(`${label(benchRunning)} crashed:`, error.stack);
+// Starts every queued bench a free slot can take; each frees its slot when it ends.
+function startBenches() {
+  for (const { job, slot } of benchLanesLib.assign(benchLanes)) {
+    runBench(job, slot)
+      .catch((error) => log(`${label(job)} crashed:`, error.stack))
+      .finally(() => {
+        benchLanesLib.finish(benchLanes, slot);
+        saveQueue();
+        startBenches();
+      });
   }
-  nextBench();
+  saveQueue();
 }
 
-// Below 8 GB free, the release builds go (rebuilt from cached crates). cleanBench removes them
-// after every run unless BENCH_KEEP_BUILDS is set; this covers a run that died before it could,
-// and a box keeping its builds that runs low.
-function benchDisk(bench, logFile) {
+// Below 8 GB free, the release builds of this slot and of the idle ones go (rebuilt from cached
+// crates). cleanBench removes them after every run unless BENCH_KEEP_BUILDS is set; this covers
+// a run that died before it could, and a box keeping its builds that runs low.
+function benchDisk(repo, slot, logFile) {
   const free = () => {
     const { bavail, bsize } = fs.statfsSync(DATA);
     return (bavail * bsize) / 2 ** 30;
   };
   if (free() < 8) {
     fs.appendFileSync(logFile, `\n=== ${free().toFixed(1)} GB free: removing the release builds\n`);
-    for (const dir of [`${bench}/base/target`, `${bench}/pr/target/release`]) fs.rmSync(dir, { recursive: true, force: true });
+    for (const other of benchLanes.slots.filter((s) => s.id === slot.id || !s.job)) {
+      for (const target of ['base/target', 'pr/target/release']) removeUnder(slotDir(repo, other.id), target);
+    }
   }
   return free() >= 4;
 }
 
-async function runBench(job) {
+// Reference tools are measured once per key, in a PR's run, and reused by later runs on the same
+// slot's cores while fresh. The key covers what could change them: the scenarios, pinned repos,
+// bench packages, fixtures and harness at the head (prepare's ref_key), the job image (Node,
+// hyperfine), the cores, the repo set and the measurement mode. Our tools are always measured,
+// on both sides; only they are gated, so a reused reference row never moves the gate.
+const referenceDir = (repo) => `${benchDir(repo)}/reference`;
+function referenceKey(info, slot) {
+  if (!info.ref_key || !IMAGE_ID || REFERENCE_DAYS <= 0) return null;
+  return crypto.createHash('sha256').update([info.ref_key, IMAGE_ID, slot.cpus, BENCH_REPOS, BENCH_MEASURE].join('\n')).digest('hex').slice(0, 40);
+}
+function readReference(repo, key) {
+  if (!key) return null;
+  const file = `${referenceDir(repo)}/${key}.json`;
+  try {
+    if (Date.now() - fs.statSync(file).mtimeMs > REFERENCE_DAYS * 86_400_000) return null;
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+// The run wrote out/reference.json when it measured the reference tools. It ran PR code, so only
+// names and numbers are kept, checked; the 50 newest keys stay.
+const SAFE_NAME = /^[\w .:+/()-]{1,100}$/;
+function storeReference(repo, key, file, sha) {
+  if (!key) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(readOutFile(file, 4 << 20));
+  } catch {
+    return;
+  }
+  const stat = (s) => s && ['median', 'mean', 'stddev', 'min', 'max', 'p95', 'runs'].every((k) => Number.isFinite(s[k]) && s[k] >= 0);
+  const clean = (list) => (Array.isArray(list) ? list : []).filter((s) => SAFE_NAME.test(s?.id ?? '')).map((s) => ({
+    id: s.id,
+    tools: (Array.isArray(s.tools) ? s.tools : []).filter((t) => SAFE_NAME.test(t?.name ?? '') && t.status === 'ok' && stat(t.stats)).map((t) => ({
+      name: t.name, status: 'ok', stats: Object.fromEntries(['median', 'mean', 'stddev', 'min', 'max', 'p95', 'runs'].map((k) => [k, t.stats[k]])),
+      ...(Number.isFinite(t.max_rss_mb) ? { max_rss_mb: t.max_rss_mb } : {}),
+    })),
+  }));
+  const value = { sha, at: new Date().toISOString().slice(0, 10), main: clean(parsed.main), repos: clean(parsed.repos) };
+  fs.mkdirSync(referenceDir(repo), { recursive: true });
+  fs.writeFileSync(`${referenceDir(repo)}/${key}.json.new`, JSON.stringify(value));
+  fs.renameSync(`${referenceDir(repo)}/${key}.json.new`, `${referenceDir(repo)}/${key}.json`);
+  const files = fs.readdirSync(referenceDir(repo)).filter((f) => f.endsWith('.json'))
+    .map((f) => [fs.statSync(`${referenceDir(repo)}/${f}`).mtimeMs, f]).sort(([a], [b]) => b - a);
+  for (const [, f] of files.slice(50)) fs.rmSync(`${referenceDir(repo)}/${f}`, { force: true });
+}
+// The binaries the PR's scenarios run (out/bins.json, from the checkout, which runs no PR code).
+function benchBins(dir) {
+  try {
+    const bins = JSON.parse(readOutFile(`${dir}/out/bins.json`, 65_536));
+    if (Array.isArray(bins) && bins.length && bins.length < 100 && bins.every((b) => typeof b === 'string' && /^(examples\/)?[A-Za-z0-9_-]{1,64}$/.test(b))) return bins.join(',');
+  } catch {}
+  return '';
+}
+
+async function runBench(job, slot) {
   const { repo, pr, head, baseRef, by, runUrl } = job;
+  const { owner, name } = split(repo);
+  // A bench can wait a long time in the queue: one whose PR closed or moved on is not run.
+  try {
+    const { data: pull } = await (await octokit(repo, READ)).rest.pulls.get({ owner, repo: name, pull_number: pr });
+    if (pull.state !== 'open' || pull.head.sha !== head) {
+      const reason = pull.state !== 'open' ? 'the PR was closed' : `superseded by ${short(pull.head.sha)}`;
+      log(`bench ${repo}#${pr} at ${short(head)} not run: ${reason}`);
+      await commitStatus(repo, head, 'error', `Not benchmarked: ${reason}`, runUrl);
+      if (pull.state !== 'open') await benchStatus(repo, pr, `Bench of \`${short(head)}\` dropped: the PR was closed.`);
+      else await benchStatus(repo, pr, `Bench of \`${short(head)}\` not run: the PR moved on to \`${short(pull.head.sha)}\`; push again or comment /bench to bench it.`);
+      return;
+    }
+  } catch (error) {
+    log(`bench ${repo}#${pr}: could not check the PR (${error.message}); running it`);
+  }
+  if (job.cancelled) return;
+  job.abort = new AbortController();
   const id = jobId(repo, pr);
   const dir = `${DATA}/jobs/${id}-bench`;
   const logFile = `${DATA}/logs/${id}-bench.log`;
   for (const sub of ['in', 'out']) fs.mkdirSync(`${dir}/${sub}`, { recursive: true });
   const BENCH = benchDir(repo);
-  for (const sub of ['cargo', 'pm', 'npm', 'git']) fs.mkdirSync(`${BENCH}/${sub}`, { recursive: true });
-  const base = { REPO: repo, PR_NUMBER: String(pr), JOB_DIR: dir, CACHE_DIR: cacheDir(repo), BENCH_DIR: BENCH, BENCH_REPOS };
+  const SLOT = slotDir(repo, slot.id);
+  for (const sub of ['cargo', 'pm', 'npm']) fs.mkdirSync(`${BENCH}/${sub}`, { recursive: true });
+  for (const sub of ['pr', 'base', 'git']) fs.mkdirSync(`${SLOT}/${sub}`, { recursive: true });
+  const base = { REPO: repo, PR_NUMBER: String(pr), JOB_DIR: dir, CACHE_DIR: cacheDir(repo), BENCH_DIR: SLOT, BENCH_REPOS };
   const started = Date.now();
   const since = utc();
   const title = `Bench of \`${short(head)}\` against \`${baseRef}\``;
-  const progress = async (phase) => job.cancelled || benchStatus(repo, pr, `${title} running since ${since} (requested by @${by}): ${phase}.`, { busy: true });
-  log(`bench ${repo}#${pr} at ${short(head)} for @${by}: ${logFile}`);
+  const where = SLOTS.slots.length > 1 ? ` on cores ${slot.cpus}` : '';
+  const progress = async (phase) => job.cancelled || benchStatus(repo, pr, `${title} running since ${since}${where} (requested by @${by}): ${phase}.`, { busy: true });
+  log(`bench ${repo}#${pr} at ${short(head)} for @${by} in slot ${slot.id} (${slot.cpus}): ${logFile}`);
   await progress('fetching');
   commitStatus(repo, head, 'pending', `Running since ${since} on the bench box`, runUrl);
-  const step = (name, args, envs, timeoutMs) => {
+  const step = (stepName, args, envs, timeoutMs) => {
     if (job.cancelled) return 'cancelled';
-    job.container = `tsr-${name}-${id}`;
+    job.container = `tsr-${stepName}-${id}`;
     return docker(args, { name: job.container, envs: { ...base, ...envs }, timeoutMs, logFile });
   };
-  // Every step that runs code from the PR gets the checkouts and caches, but their git
-  // directories and the repo cache read-only, and never a token.
-  const mounts = ['-v', `${BENCH}:${BENCH}`, '-v', `${BENCH}/git:${BENCH}/git:ro`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`, '-v', `${dir}:${dir}`,
-    '-e', `CARGO_HOME=${BENCH}/cargo`, '-e', `TS_R_BENCH_CACHE=${BENCH}/pm`, '-e', `npm_config_cache=${BENCH}/npm`, '-e', 'CARGO_BUILD_JOBS=4', '-e', 'RAYON_NUM_THREADS=4'];
-  const heavy = [...LOCKED_DOWN, ...BENCH_CPUS, '--memory', '6g', '--pids-limit', '4096'];
+  // Installing and building share the box; measuring waits for a quiet one (BENCH_MEASURE).
+  // A bench stopped while it waits for its turn gives the turn and its slot up at once.
+  const stoppable = { signal: job.abort.signal, aborted: 'cancelled' };
+  const work = (fn) => phases.run('work', fn, () => progress('waiting for another slot to finish measuring'), stoppable);
+  const measure = (fn) => phases.run('measure', fn, () => progress('waiting for the other slots to finish building'), stoppable);
+  // Every step that runs code from the PR gets no token, the git directories and the repo cache
+  // read-only, and only the checkout it needs writable: the base's build sees no PR code, and no
+  // PR step can write the base's build. passed.json and the reference store are never mounted.
+  const cpus = ['--cpuset-cpus', slot.cpus];
+  const checkout = (side, mode = 'rw') => ['-v', `${SLOT}/${side}:${SLOT}/${side}${mode === 'ro' ? ':ro' : ''}`];
+  // in/ and out/ are mounted on their own, so no step can swap them for a link elsewhere; the
+  // dispatcher reads what they write with readOutFile.
+  const mounts = ['-v', `${SLOT}/git:${SLOT}/git:ro`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`, '-v', `${dir}/in:${dir}/in:ro`, '-v', `${dir}/out:${dir}/out`,
+    ...['cargo', 'pm', 'npm'].flatMap((sub) => ['-v', `${BENCH}/${sub}:${BENCH}/${sub}`]),
+    '-e', `CARGO_HOME=${BENCH}/cargo`, '-e', `TS_R_BENCH_CACHE=${BENCH}/pm`, '-e', `npm_config_cache=${BENCH}/npm`,
+    '-e', `CARGO_BUILD_JOBS=${slot.size}`, '-e', `RAYON_NUM_THREADS=${slot.size}`];
+  const heavy = [...LOCKED_DOWN, ...cpus, '--memory', BENCH_MEMORY, '--pids-limit', '4096'];
+  const offline = ['--network', 'none', '-e', 'CARGO_NET_OFFLINE=true', '-e', 'npm_config_offline=true'];
 
   let info = null;
   let code = 2;
-  const prepared = await withCache(async () => step('bench-prepare', ['--network', 'bridge', ...LOCKED_DOWN, '-v', `${dir}:${dir}`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}`, IMAGE, 'node', '/app/job.mjs', 'bench-prepare'],
+  const prepared = await withCache(async () => step('bench-prepare', ['--network', 'bridge', ...LOCKED_DOWN, ...cpus, '-v', `${dir}:${dir}`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}`, IMAGE, 'node', '/app/job.mjs', 'bench-prepare'],
     { GH_TOKEN: await token(repo, READ), HEAD_SHA: head, BASE_REF: baseRef }, 10 * 60_000));
   if (prepared === 0) info = JSON.parse(fs.readFileSync(`${dir}/in/bench.json`, 'utf8'));
   const passKey = info && `${repo}:${info.base_key}-${info.key}`;
@@ -594,49 +794,63 @@ async function runBench(job) {
     outcome = 'already passed';
     await benchStatus(repo, pr, `\`${short(head)}\` has the same code as a commit already benchmarked against the same \`${baseRef}\` code, which passed; not run again.`);
     await commitStatus(repo, head, 'success', 'Same code already passed against this base', runUrl);
-  } else if (info && !benchDisk(BENCH, logFile)) {
+  } else if (info && !benchDisk(repo, slot, logFile)) {
     outcome = 'no disk';
     await benchStatus(repo, pr, `${title} could not run: the bench box is out of disk.`);
     await commitStatus(repo, head, 'error', 'The bench box is out of disk', runUrl);
   } else if (info) {
-    const checkedOut = await step('bench-checkout', ['--network', 'none', ...LOCKED_DOWN, '-v', `${BENCH}:${BENCH}`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`, '-v', `${dir}/in:${dir}/in:ro`, IMAGE, 'node', '/app/job.mjs', 'bench-checkout'], {}, 10 * 60_000);
+    const refKey = referenceKey(info, slot);
+    const reference = readReference(repo, refKey);
+    if (reference) fs.writeFileSync(`${dir}/in/reference.json`, reference);
+    const checkedOut = await work(() => step('bench-checkout', ['--network', 'none', ...LOCKED_DOWN, ...cpus, '-v', `${SLOT}:${SLOT}`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`,
+      '-v', `${dir}/in:${dir}/in:ro`, '-v', `${dir}/out:${dir}/out`, IMAGE, 'node', '/app/job.mjs', 'bench-checkout'], {}, 10 * 60_000));
+    // Only what the PR's scenarios run is built (all of the workspace if that is unknown).
+    const bins = checkedOut === 0 ? benchBins(dir) : '';
     if (checkedOut === 0) await progress('installing the pinned repos and tools');
-    const installed = checkedOut === 0 && await step('bench-deps', ['--network', 'ts-r-review-egress-deps', ...heavy, ...mounts,
-      ...['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy'].flatMap((name) => ['-e', `${name}=http://egress-deps:3128`]),
+    // The caches are shared by the slots: one install at a time writes them.
+    const installed = checkedOut === 0 && await withInstall(() => work(() => step('bench-deps', ['--network', 'ts-r-review-egress-deps', ...heavy, ...checkout('pr'), ...checkout('base', 'ro'), ...mounts,
+      ...['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy'].flatMap((proxy) => ['-e', `${proxy}=http://egress-deps:3128`]),
       // Corepack downloads pnpm and Yarn with Node's own fetch, which uses the proxy only with this.
       '-e', 'NODE_USE_ENV_PROXY=1', '-e', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0',
-      IMAGE, 'node', '/app/job.mjs', 'bench-deps'], {}, 40 * 60_000);
-    if (installed === 0) {
+      IMAGE, 'node', '/app/job.mjs', 'bench-deps'], {}, 40 * 60_000)));
+    let failed = checkedOut !== 0 ? 'the checkout' : installed !== 0 ? 'installing the pinned repos and tools' : null;
+    for (const side of ['base', 'pr']) {
+      if (failed) break;
+      await progress(`building the ${side === 'pr' ? 'PR' : 'base'}`);
+      const built = await work(() => step(`bench-build-${side}`, [...offline, ...heavy, ...checkout(side), ...mounts, IMAGE, 'node', '/app/job.mjs', 'bench-build'],
+        { BENCH_SIDE: side, BENCH_BINS: bins }, 75 * 60_000));
+      if (built !== 0) failed = `building the ${side === 'pr' ? 'PR' : 'base'}`;
+    }
+    if (!failed) {
       // The run writes its phase to out/phase; the comment follows it.
       let shown = '';
       const watch = setInterval(() => {
         let phase = '';
         try {
-          phase = fs.readFileSync(`${dir}/out/phase`, 'utf8').trim();
+          phase = (readOutFile(`${dir}/out/phase`, 4096) ?? '').trim().slice(0, 200);
         } catch {}
         if (phase && phase !== shown) {
           shown = phase;
           progress(phase);
         }
       }, 15_000);
-      await step('bench-run', ['--network', 'none', ...heavy, ...mounts, '-e', 'CARGO_NET_OFFLINE=true', '-e', 'npm_config_offline=true',
-        IMAGE, 'node', '/app/job.mjs', 'bench-run'], {}, 150 * 60_000);
+      await measure(() => step('bench-measure', [...offline, ...heavy, ...checkout('pr'), ...checkout('base', 'ro'), ...mounts, IMAGE, 'node', '/app/job.mjs', 'bench-measure'],
+        {}, 120 * 60_000));
       clearInterval(watch);
       try {
-        code = JSON.parse(fs.readFileSync(`${dir}/out/bench.json`, 'utf8')).code;
+        code = JSON.parse(readOutFile(`${dir}/out/bench.json`, 4096)).code;
       } catch {}
+      // A fork's run does not fill the store that later PRs read.
+      if (!reference && !job.cancelled && !job.fork && (code === 0 || code === 1)) storeReference(repo, refKey, `${dir}/out/reference.json`, head);
     }
     if (job.cancelled) {
       outcome = 'superseded';
     } else {
       outcome = ['passed', 'regression'][code] ?? 'error';
-      let tables = '';
-      try {
-        tables = fs.readFileSync(`${dir}/out/comment.md`, 'utf8');
-      } catch {}
+      const tables = readOutFile(`${dir}/out/comment.md`, 1 << 20) ?? '';
       const duration = `${Math.max(1, Math.round((Date.now() - started) / 60_000))} min`;
-      const done = installed === 0 ? `Benchmarked \`${short(head)}\` against \`${baseRef}\` @ \`${short(info.base)}\` in ${duration}`
-        : `${title} did not run: ${checkedOut === 0 ? 'installing the pinned repos and tools' : 'the checkout'} failed after ${duration}`;
+      const done = !failed ? `Benchmarked \`${short(head)}\` against \`${baseRef}\` @ \`${short(info.base)}\` in ${duration}`
+        : `${title} did not run: ${failed} failed after ${duration}`;
       await benchStatus(repo, pr, `${done} (requested by @${by}).`, {
         result: { sha: head, base: info.base, baseRef, duration, code, log: `logs/${id}-bench.log`, tables },
       });
@@ -649,9 +863,9 @@ async function runBench(job) {
     await commitStatus(repo, head, 'error', 'Fetching the PR failed', runUrl);
   }
   fs.rmSync(dir, { recursive: true, force: true });
-  cleanBench(BENCH);
+  cleanBench(SLOT);
   pruneLogs();
-  log(`bench ${repo}#${pr} done: ${outcome}`);
+  log(`bench ${repo}#${pr} done in slot ${slot.id}: ${outcome}`);
 }
 
 // Requests. The body is only a pointer; what to do and for whom comes from GitHub, and who may
@@ -682,13 +896,15 @@ async function dispatch({ runId, pr, repo, commentId }) {
   const stale = trust.checkRun(run, { repo, workflows: [WORKFLOW, BENCH_WORKFLOW], now: Date.now() });
   if (stale) return stale;
   const actor = run.triggering_actor?.login ?? run.actor?.login;
+  // Benches queued before this moment are judged by the PR as read now (supersedeBenches).
+  const asOf = Date.now();
   const { data: pull } = await github.rest.pulls.get({ owner, repo: name, pull_number: pr });
   const getComment = async () => {
     if (!commentId) return null;
     return (await github.rest.issues.getComment({ owner, repo: name, comment_id: commentId })).data;
   };
   if (!LANES.has(run.path === BENCH_WORKFLOW ? 'bench' : 'review')) return [421, `this box does not run ${run.path === BENCH_WORKFLOW ? 'benches' : 'reviews'}`];
-  if (run.path === BENCH_WORKFLOW) return dispatchBench({ github, run, actor, pull, repo, getComment });
+  if (run.path === BENCH_WORKFLOW) return dispatchBench({ github, run, actor, pull, repo, getComment, asOf });
 
   const comment = run.event === 'issue_comment' ? await getComment() : null;
   const decision = trust.reviewDecision({ run, actor, pull, comment, repo, trusted: TRUSTED });
@@ -737,9 +953,12 @@ async function dispatch({ runId, pr, repo, commentId }) {
 // A bench builds and runs the PR's code (offline, with no token). It runs by itself only for a
 // trusted author's PR from the same repository (the top PR of a stack, as on CI); a trusted
 // user's approval of the head, a trusted user's /bench comment or a manual run starts one for any
-// PR, forks included (ci/trust.cjs).
-async function dispatchBench({ github, run, actor, pull, repo, getComment }) {
+// PR, forks included (ci/trust.cjs). Before any of that, any accepted bench run (a push, the PR
+// closing, a review or comment on it) drops the PR's benches that GitHub says are moot: those of
+// another head, or all of them once the PR is closed. That only stops work, never starts it.
+async function dispatchBench({ github, run, actor, pull, repo, getComment, asOf }) {
   const { owner, name } = split(repo);
+  supersedeBenches(repo, pull, asOf);
   const needs = trust.benchNeeds(run);
   const facts = {};
   if (needs.above && pull.state === 'open') {
@@ -754,8 +973,8 @@ async function dispatchBench({ github, run, actor, pull, repo, getComment }) {
   const decision = trust.benchDecision({ run, actor, pull, repo, trusted: TRUSTED, ...facts });
   if (decision.reject) return decision.reject;
   if (decision.react) await eyes(github, repo, facts.comment);
-  const job = { kind: 'bench', repo, pr: pull.number, head: pull.head.sha, baseRef: pull.base.ref, by: decision.by, runUrl: run.html_url };
-  if (benchRunning && samePr(benchRunning, job) && benchRunning.head === job.head && !benchRunning.cancelled) return [409, 'this head is being benchmarked now'];
+  const job = { kind: 'bench', repo, pr: pull.number, head: pull.head.sha, baseRef: pull.base.ref, by: decision.by, runUrl: run.html_url, fork: pull.head.repo?.full_name !== repo };
+  if (benchLanes.slots.some(({ job: j }) => j && samePr(j, job) && j.head === job.head && !j.cancelled)) return [409, 'this head is being benchmarked now'];
   enqueueBench(job);
   return [202, 'bench queued'];
 }
@@ -764,7 +983,9 @@ const server = http.createServer((req, res) => {
   const reply = (code, text) => res.writeHead(code, { 'content-type': 'text/plain' }).end(`${text}\n`);
   const url = req.url.replace(/^\/code-review/, '');
   const lane = (now, waiting) => `running ${now ? label(now) : 'nothing'}; queued ${waiting.map(label).join(' ') || 'nothing'}`;
-  if (req.method === 'GET' && url === '/healthz') return reply(200, `ok; repos: ${REPOS.join(', ')}; codex: ${lane(running, queue)}; bench: ${lane(benchRunning, benchQueue)}`);
+  const slots = benchLanes.slots.map((s) => `[${s.cpus}] ${s.job ? `${label(s.job)}${s.job.cancelled ? ' (stopping)' : ''}` : 'idle'}`).join(', ');
+  const benches = `slots ${slots}; queued ${benchLanes.queue.map(label).join(' ') || 'nothing'}; measure ${BENCH_MEASURE}${SLOTS.error ? `; BENCH_SLOTS ignored: ${SLOTS.error}` : ''}`;
+  if (req.method === 'GET' && url === '/healthz') return reply(200, `ok; repos: ${REPOS.join(', ')}; codex: ${lane(running, queue)}; bench: ${benches}`);
   if (req.method !== 'POST' || url !== '/jobs') return reply(404, 'not found');
   const auth = Buffer.from(req.headers.authorization ?? '');
   const expected = Buffer.from(`Bearer ${DISPATCH_TOKEN}`);
@@ -810,7 +1031,21 @@ if (!fs.existsSync(benchDir(REPOS[0]))) {
 // Each job mounts its own repo's cache and bench directory, created here so Docker does not
 // create them as root.
 for (const repo of REPOS) for (const dir of [cacheDir(repo), benchDir(repo)]) fs.mkdirSync(dir, { recursive: true });
-for (const repo of REPOS) cleanBench(benchDir(repo));
+for (const repo of REPOS) {
+  const bench = benchDir(repo);
+  // The checkouts of the single lane of before become slot 0's, builds included.
+  if (fs.existsSync(`${bench}/git`) && !fs.existsSync(slotDir(repo, 0))) {
+    fs.mkdirSync(slotDir(repo, 0));
+    for (const sub of ['pr', 'base', 'git']) if (fs.existsSync(`${bench}/${sub}`)) fs.renameSync(`${bench}/${sub}`, `${slotDir(repo, 0)}/${sub}`);
+  }
+  // Slots beyond BENCH_SLOTS (it was lowered) go, with their checkouts and builds.
+  for (const dir of fs.readdirSync(bench)) {
+    const n = /^slot-(\d+)$/.exec(dir);
+    if (n && Number(n[1]) >= benchLanes.slots.length) fs.rmSync(`${bench}/${dir}`, { recursive: true, force: true });
+  }
+  for (const slot of benchLanes.slots) if (fs.existsSync(slotDir(repo, slot.id))) cleanBench(slotDir(repo, slot.id));
+}
+log(`bench slots: ${benchLanes.slots.map((s) => s.cpus).join(' ')} (${HOST_CORES ?? 'unknown'} cores; measure ${BENCH_MEASURE})${SLOTS.error ? `; BENCH_SLOTS ignored: ${SLOTS.error}` : ''}`);
 // Synchronous, so it cannot remove the containers of the jobs restoreQueue starts.
 spawnSync('sh', ['-c', 'docker ps -aq --filter name=^tsr- | xargs -r docker rm -f'], { stdio: 'ignore' });
 server.listen(Number(env.PORT ?? 8787), '0.0.0.0', () => log(`dispatcher for ${REPOS.join(', ')} on :${env.PORT ?? 8787}; trusted: ${[...TRUSTED].join(', ')}`));

@@ -20,12 +20,17 @@
 //   resolve  GitHub token (write), internet  resolve or reopen every finding, or refresh the summary;
 //                                            either way the verdict follows the findings; or, with
 //                                            EVENT=approve, approve the PR (/approve)
-// A bench (bench.yml; its own lane and CPU cores, see the dispatcher's runBench):
+// A bench (bench.yml; its own lane and a slot of CPU cores, see the dispatcher's runBench):
 //   bench-prepare   GitHub token (read), internet  refresh the repo cache, pick the base commit
-//   bench-checkout  no token, no network           check the PR and its base out in BENCH_DIR
+//   bench-checkout  no token, no network           check the PR and its base out in BENCH_DIR (the
+//                                                  slot's), list the binaries the scenarios run
 //   bench-deps      no token, registries           crates, bench tools, pinned repos and their
-//                                                  packages, into BENCH_DIR's caches
-//   bench-run       no token, no network           build both in release, run `cargo xtask bench`
+//                                                  packages, into the shared caches
+//   bench-build     no token, no network           build one side (BENCH_SIDE) in release, only
+//                                                  the binaries listed (BENCH_BINS)
+//   bench-measure   no token, no network           run `cargo xtask bench` on both, re-measure
+//                                                  what it flags, and put back the reference tools
+//                                                  the dispatcher kept (in/reference.json)
 // The dispatcher passes JOB_DIR (in/, repo/, git/, out/), CACHE_DIR (the job's repository's bare
 // cache), REPO (the job's repository, owner/name) and PR_NUMBER, plus the step's own settings.
 // A PR from a fork is fetched as refs/pull/<n>/head, and nothing is ever pushed to a fork.
@@ -38,6 +43,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
 const review = require('./ci/github.cjs');
+const benchReuse = require('./ci/bench-reuse.cjs');
 const stack = require('./ci/stack.cjs');
 const catchup = require('./ci/catchup.cjs');
 
@@ -475,12 +481,21 @@ const benchGit = (name, args) =>
 // Paths that never change a benchmark: the plan, the docs site, the landing page, the docs, the
 // ecosystem harness, agent instructions and unrelated bot code, the workflows, and Markdown anywhere.
 const BENCH_IGNORED = ['.lavish/', 'landing/', 'docs/', 'ecosystem/', '.agents/', '.claude/', '.github/'];
-const BENCH_RUNNER = [`${PLUGIN}/box/dispatcher.mjs`, `${PLUGIN}/box/job.mjs`];
+const BENCH_RUNNER = [`${PLUGIN}/box/dispatcher.mjs`, `${PLUGIN}/box/job.mjs`, `${PLUGIN}/ci/bench-lanes.cjs`, `${PLUGIN}/ci/bench-reuse.cjs`];
 const benchInput = (path) => BENCH_RUNNER.includes(path) || (!BENCH_IGNORED.some((p) => path.startsWith(p)) && !path.endsWith('.md'));
 // A hash of the files at `rev` that can change a benchmark.
 const benchKey = (rev) => {
   const tree = git(['-C', env.CACHE_DIR, 'ls-tree', '-r', '--full-tree', rev]).split('\n')
     .filter((line) => line && benchInput(line.split('\t')[1]));
+  return crypto.createHash('sha256').update(tree.join('\n')).digest('hex').slice(0, 40);
+};
+// A hash of what decides the reference tools' numbers at `rev`: the scenarios, fixtures, bench
+// packages and pinned repos (bench/), the harness (xtask/), the TypeScript pin (upstream/) and
+// the scripts the scenarios call. Our crates are not in it: their changes leave tsc as it was.
+const REFERENCE_INPUTS = ['bench/', 'xtask/', 'upstream/', 'scripts/'];
+const referenceKey = (rev) => {
+  const tree = git(['-C', env.CACHE_DIR, 'ls-tree', '-r', '--full-tree', rev]).split('\n')
+    .filter((line) => line && REFERENCE_INPUTS.some((p) => line.split('\t')[1].startsWith(p)) && !line.endsWith('.md'));
   return crypto.createHash('sha256').update(tree.join('\n')).digest('hex').slice(0, 40);
 };
 
@@ -499,7 +514,8 @@ async function benchPrepare() {
   // the earlier pass.
   const key = benchKey(head);
   const base_key = benchKey(base);
-  fs.writeFileSync(`${job}/in/bench.json`, JSON.stringify({ head, base, base_ref: env.BASE_REF, key, base_key }, null, 2));
+  const ref_key = referenceKey(head);
+  fs.writeFileSync(`${job}/in/bench.json`, JSON.stringify({ head, base, base_ref: env.BASE_REF, key, base_key, ref_key }, null, 2));
   console.log(`Bench #${number}: ${head} against ${env.BASE_REF} @ ${base}.`);
 }
 
@@ -511,6 +527,10 @@ function benchCheckout() {
       fs.mkdirSync(`${BENCH}/git`, { recursive: true });
       git(['clone', '--quiet', '--shared', '--no-checkout', '--separate-git-dir', `${BENCH}/git/${name}`, env.CACHE_DIR, `${BENCH}/${name}`]);
     }
+    // The checkout's pointer to its git directory, which moves with the slot's directory (the
+    // single bench directory of before became slot 0's). Git here never reads it (benchGit).
+    fs.rmSync(`${BENCH}/${name}/.git`, { recursive: true, force: true });
+    fs.writeFileSync(`${BENCH}/${name}/.git`, `gitdir: ${BENCH}/git/${name}\n`);
     // Objects come from this repo's cache alone (the only one the step can see).
     fs.writeFileSync(`${BENCH}/git/${name}/objects/info/alternates`, `${env.CACHE_DIR}/objects\n`);
     benchGit(name, ['checkout', '--quiet', '--force', '--detach', sha]);
@@ -519,6 +539,14 @@ function benchCheckout() {
     fs.rmSync(`${BENCH}/${name}/bench/results`, { recursive: true, force: true });
     console.log(`${name}: ${sha}`);
   }
+  // The binaries the PR's scenarios run, read from git (no PR code has run yet): only they are
+  // built, on both sides. An empty list builds the whole workspace.
+  let bins = [];
+  try {
+    bins = benchReuse.scanBins(benchGit('pr', ['show', `${head}:bench/scenarios.toml`]));
+  } catch {}
+  fs.writeFileSync(`${job}/out/bins.json`, JSON.stringify(bins));
+  console.log(`binaries: ${bins.join(' ') || 'all'}`);
 }
 
 // What the offline run needs, through the registry allowlist. The pinned repos install with
@@ -539,33 +567,59 @@ function benchDeps() {
   }
 }
 
-// bench.yml's old steps, offline: build the base and the PR in release, bench the base, bench the
-// PR against it, and re-measure any flagged scenario with the PR first so that only a regression
-// seen in both orders fails. Writes out/bench.json ({ code }: 0 passed, 1 regression, 2 error),
-// out/comment.md (the tables) and out/phase (progress, which the dispatcher shows on the PR).
-function benchRun() {
+// One side in release, offline: `cargo build --release --workspace`, narrowed to the binaries the
+// scenarios run (BENCH_BINS, from bench-checkout) that this side has. The workspace stays the
+// selected package set, so features resolve as for a full build and each binary is the same; the
+// release profile's whole-program link is what the binaries nobody runs (the language server, the
+// dev server, xtask) cost. Exits 0, or 2 when the build fails.
+function benchBuild() {
+  const side = env.BENCH_SIDE === 'base' ? 'base' : 'pr';
+  const cwd = `${BENCH}/${side}`;
+  const wanted = (env.BENCH_BINS ?? '').split(',').filter(Boolean);
+  let targets = ['--workspace'];
+  if (wanted.length) {
+    const metadata = spawnSync('cargo', ['metadata', '--no-deps', '--format-version', '1', '--locked', '--offline'], { cwd, encoding: 'utf8', maxBuffer: 64 << 20 });
+    try {
+      const have = new Set(JSON.parse(metadata.stdout).packages.flatMap((p) => p.targets).filter((t) => t.kind.includes('bin')).map((t) => t.name));
+      const bins = wanted.filter((b) => have.has(b));
+      if (bins.length) targets = ['--workspace', ...bins.flatMap((b) => ['--bin', b])];
+    } catch {
+      console.log('cargo metadata failed; building the whole workspace');
+    }
+  }
+  const args = ['build', '--release', '--locked', ...targets];
+  console.log(`=== building the ${side === 'pr' ? 'PR' : 'base'}: cargo ${args.join(' ')}`);
+  const result = spawnSync('cargo', args, { cwd, stdio: 'inherit' });
+  process.exit(result.status === 0 ? 0 : 2);
+}
+
+// bench.yml's old steps, offline, on the release builds: bench the base, bench the PR against it,
+// and re-measure any flagged scenario with the PR first so that only a regression seen in both
+// orders fails. Writes out/bench.json ({ code }: 0 passed, 1 regression, 2 error), out/comment.md
+// (the tables), out/phase (progress, which the dispatcher shows on the PR) and, when it measured
+// the reference tools, out/reference.json (for the dispatcher to keep).
+function benchMeasure() {
   const script = String.raw`
 set -u
 phase() { echo "$1" > "$OUT/phase"; echo "=== $1"; }
-cd "$BENCH_DIR/base"
-phase 'building the base'
-cargo build --release --workspace --locked || exit 2
 cd "$BENCH_DIR/pr"
-phase 'building the PR'
-cargo build --release --workspace --locked || exit 2
 BASE_BIN="$BENCH_DIR/base/target/release"
 # The reference tools (tsc, ESLint, esbuild, ...) are the same in both runs: measure them once,
 # in the PR's run. Only our tools are gated against the base. PRs from before the flag measure all.
+# With in/reference.json (the dispatcher kept them from a run with the same harness, scenarios and
+# pinned repos), the PR's run measures only ours too, and the kept ones fill the tables.
 OURS=''
 if grep -q '"ours-only"' xtask/src/bench.rs; then OURS=--ours-only; fi
+PR_OURS=''
+if [ -n "$OURS" ] && [ -f "$JOB_DIR/in/reference.json" ]; then PR_OURS=$OURS; fi
 phase 'measuring the base'
 cargo xtask bench --bin-dir "$BASE_BIN" --save base --no-fail $OURS
 cargo xtask bench --repos "$BENCH_REPOS" --bin-dir "$BASE_BIN" --save base-repos --no-fail $OURS
 phase 'measuring the PR'
-cargo xtask bench --save pr --baseline bench/results/base.json --markdown bench/results/comment.md
+cargo xtask bench --save pr --baseline bench/results/base.json --markdown bench/results/comment.md $PR_OURS
 code=$?
 cargo xtask bench --repos "$BENCH_REPOS" --save pr-repos --baseline bench/results/base-repos.json \
-  --markdown bench/results/comment-repos.md
+  --markdown bench/results/comment-repos.md $PR_OURS
 repos=$?
 confirm() { # <save> [--repos <names>]
   save=$1; shift
@@ -581,6 +635,7 @@ if [ "$repos" = 1 ] && [ -f bench/results/pr-repos-regressions.txt ]; then
   confirm pr-repos --repos "$BENCH_REPOS"; repos=$?
 fi
 [ "$code" != 0 ] || code=$repos
+if [ -n "$PR_OURS" ]; then node /app/job.mjs bench-reference use; elif [ -n "$OURS" ]; then node /app/job.mjs bench-reference store; fi
 touch bench/results/comment.md
 if [ -f bench/results/comment-repos.md ]; then
   { echo; echo "### Public repos ($BENCH_REPOS)"; echo; cat bench/results/comment-repos.md; } >> bench/results/comment.md
@@ -599,9 +654,61 @@ exit "$code"
   console.log(`bench exit ${result.status ?? result.signal} -> ${code}`);
 }
 
+// Inside bench-measure, in the PR checkout. `store`: the reusable reference measurements of the
+// PR's full runs, to out/reference.json. `use`: the kept ones (in/reference.json) put back into
+// the ours-only runs' results, and their tables rendered again with `cargo xtask bench --compare`;
+// the gate paragraph stays the run's own. Any failure leaves the tables as the run wrote them.
+function benchReference() {
+  const results = 'bench/results';
+  const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+  let reusable;
+  try {
+    reusable = benchReuse.reusableTools(fs.readFileSync('bench/scenarios.toml', 'utf8'));
+  } catch (error) {
+    console.log(`reference tools: no scenarios (${error.message})`);
+    return;
+  }
+  const runs = [['pr', 'base', 'comment'], ['pr-repos', 'base-repos', 'comment-repos']];
+  if (process.argv[3] === 'store') {
+    try {
+      const main = benchReuse.referenceOf(read(`${results}/pr.json`), reusable);
+      const repos = fs.existsSync(`${results}/pr-repos.json`) ? benchReuse.referenceOf(read(`${results}/pr-repos.json`), reusable) : [];
+      if (!main || !repos) return console.log('reference tools: one failed; nothing kept');
+      fs.writeFileSync(`${job}/out/reference.json`, JSON.stringify({ main, repos }));
+      console.log(`reference tools: ${[...main, ...repos].reduce((n, s) => n + s.tools.length, 0)} measurements to keep`);
+    } catch (error) {
+      console.log(`reference tools: nothing kept (${error.message})`);
+    }
+    return;
+  }
+  let stored;
+  try {
+    stored = read(`${job}/in/reference.json`);
+  } catch (error) {
+    return console.log(`reference tools: none to reuse (${error.message})`);
+  }
+  const note = `Reference tools (not gated) reused from the bench of \`${String(stored.sha).slice(0, 7)}\` on ${stored.at}: the same harness, scenarios and pinned repos, on the same cores.`;
+  for (const [save, base, md] of runs) {
+    try {
+      if (!fs.existsSync(`${results}/${save}.json`) || !fs.existsSync(`${results}/${md}.md`)) continue;
+      const { results: merged, reused } = benchReuse.mergeReference(read(`${results}/${save}.json`), save === 'pr' ? stored.main : stored.repos, reusable,
+        `not measured in the reused run of ${String(stored.sha).slice(0, 7)}`);
+      fs.writeFileSync(`${results}/${save}-full.json`, `${JSON.stringify(merged, null, 2)}\n`);
+      const render = spawnSync('cargo', ['xtask', 'bench', '--compare', `${results}/${save}-full.json`, '--baseline', `${results}/${base}.json`,
+        '--markdown', `${results}/${save}-full.md`, '--no-fail'], { stdio: ['ignore', 'ignore', 'inherit'] });
+      const table = render.status === 0 && benchReuse.spliceTables(fs.readFileSync(`${results}/${save}-full.md`, 'utf8'), fs.readFileSync(`${results}/${md}.md`, 'utf8'), note);
+      if (table) fs.writeFileSync(`${results}/${md}.md`, table);
+      console.log(`reference tools for ${save}: ${table ? `${reused} reused` : 'the tables could not be rendered again; only ours shown'}`);
+    } catch (error) {
+      console.log(`reference tools for ${save}: not reused (${error.message})`);
+    }
+  }
+}
+
 const steps = {
   prepare, deps, runner, codex: runCodex, publish, commit, push, resolve,
-  'bench-prepare': benchPrepare, 'bench-checkout': benchCheckout, 'bench-deps': benchDeps, 'bench-run': benchRun,
+  'bench-prepare': benchPrepare, 'bench-checkout': benchCheckout, 'bench-deps': benchDeps, 'bench-build': benchBuild,
+  'bench-measure': benchMeasure, 'bench-reference': benchReference,
 };
 if (!steps[process.argv[2]]) {
   console.error(`usage: job.mjs ${Object.keys(steps).join(' | ')}`);
