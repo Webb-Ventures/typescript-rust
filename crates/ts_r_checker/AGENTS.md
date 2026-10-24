@@ -2919,12 +2919,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-22, 47300d06 after the alpha.4 round-3 tracks: JS/JSX, relations,
-  inference and calls, modules and declarations, classes and grammar, flow and circularity;
-  12750 compared variants, 22 s on 4 threads): 12316 exact (96.6%; all diagnostics and
-  chains), 12336 (96.8%) exact on first lines; 220 variants with a diagnostic tsc does not
-  report, 22 of them tests where tsc reports nothing.
-  Earlier: 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-24, e06c936 on parity/checker: export= default views, widening
+  implicit-any errors, class base checks and import-name messages, object literal union
+  reads; 12750 compared variants, 25 s on 4 threads): 12331 exact (96.7%; all diagnostics
+  and chains), 12351 (96.9%) exact on first lines; 209 variants with a diagnostic tsc does
+  not report, 17 of them tests where tsc reports nothing.
+  Earlier: 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
