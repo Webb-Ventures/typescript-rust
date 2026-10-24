@@ -98,8 +98,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   the same. ES2015-level syntax esbuild won't lower (`const`/`let`, classes, destructuring,
   default/rest parameters, `for-of`, generators, async without generators, spread) and a
   top-level `await` without `top-level-await` are build errors with esbuild's messages
-  (`lowering::errors`); arrows and template literals stay as written. Observed behaviour:
-  esbuild 0.28.2 and its `bundler_lower_test.go`, `bundler_default_test.go`,
+  (`lowering::errors`); arrows and template literals stay as written.
+  BigInt literals are build errors whenever `bigint` is unsupported; type-only literals
+  are erased and do not require runtime support. Observed behaviour: esbuild 0.28.2 and
+  its `bundler_lower_test.go`, `bundler_default_test.go`,
   `bundler_loader_test.go` expectations.
 - **Feature switches that change output, not syntax** (`prepare.rs`, `plan.rs`, `print.rs`):
   without `import-meta`, `import.meta` (also the one JSX's automatic runtime builds) is one
@@ -117,9 +119,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   read without it), and a `data:` URL whose MIME type is `text/javascript` or
   `application/json` (`data_url.rs`: loaded from the URL, cannot import relative paths).
   Strip them (`split_with_type`, `split_query`) before using a key as a path.
-- **File-loader URLs are filled in per chunk** (`bundle.rs`): the module's code holds a
-  placeholder (`prepare::asset_placeholder`, letters and digits only), and after assembly
-  each chunk gets the URL as seen from its own directory (`./a.png`, `../a.png`), or under
+- **File-loader URLs are filled in per chunk** (`chunk.rs`): the module's cached code holds a
+  placeholder (`prepare::asset_placeholder`, letters and digits only). During assembly,
+  only its loader fragment is copied and its whole placeholder string literal is replaced
+  by the escaped URL as seen from the chunk's directory (`./a.png`, `../a.png`), or under
   `--public-path`, plus the import's query. `[dir]` in `--asset-names` is relative to the
   entries' common directory, `..` written `_.._`. The replacement can shift source map
   columns after it on the same line. `--public-path` also prefixes cross-chunk imports

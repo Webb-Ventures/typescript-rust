@@ -58,6 +58,10 @@ pub fn errors(ast: &Ast, unsupported: Features) -> Vec<(u32, String)> {
         let at = ast.span(id).start;
         let has = |f| unsupported.has(f);
         let msg = match n {
+            Node::BigIntLit { .. } if has(Feature::Bigint) => Some(
+                "Big integer literals are not available in the configured target environment"
+                    .into(),
+            ),
             Node::VarDecl {
                 kind: VarKind::Const,
                 ..
