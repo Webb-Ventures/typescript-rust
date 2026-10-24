@@ -21,7 +21,7 @@ Simple options:
   --platform=...            Platform target (browser | node | neutral)
   --sourcemap               Emit a source map
   --splitting               Enable code splitting (requires --format=esm)
-  --target=...              Environment target (es2015..es2025, esnext, node18, chrome110,
+  --target=...              Environment target (es5..es2025, esnext, node18, chrome110,
                             ...); newer syntax is lowered
   --watch                   Rebuild when a source file changes
 
@@ -46,7 +46,7 @@ Advanced options:
   --minify-syntax           Use equivalent but shorter syntax
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
-  --public-path=...         Prefix for file-loader URLs
+  --public-path=...         Prefix for file-loader URLs and chunk imports
   --resolve-extensions=...  Comma-separated list of implicit extensions
   --sourcemap=...           linked | external | inline | both
   --sources-content=false   Omit sourcesContent in source maps

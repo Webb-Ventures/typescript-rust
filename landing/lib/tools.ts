@@ -89,7 +89,7 @@ Usage: ts-r-dev [root] [options]
     notYet: [
       'No plugins and no JavaScript config file or API',
       'No CSS bundling; @import is not followed',
-      'No syntax lowering: targets below ES2022 are rejected',
+      'No lowering below ES2015: const, classes and destructuring are errors at --target=es5',
       'No --mangle-props, --drop, --pure or --keep-names',
       'Minified output is about 3% larger than esbuild’s',
     ],

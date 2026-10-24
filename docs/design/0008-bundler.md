@@ -15,8 +15,9 @@ webpack, terser, swc or oxc may be read to understand a rule, never ported.
 
 We match esbuild's **semantics** (what the bundle does when run, which modules and exports
 survive, which errors are reported), not its exact bytes. Our runtime helpers, generated names
-and formatting are our own. Output targets ES2022 and later only, so no syntax lowering is
-needed beyond the TypeScript/JSX transform of [0002](0002-transform-and-codegen.md).
+and formatting are our own. Syntax newer than `--target` / `--supported` is lowered by the
+same per-year down-level passes as tsc emit (`ts_r_transform`), ES2015 at the lowest; ES2015
+syntax that an ES5 target forbids is an error, as in esbuild (`features.rs`, `lowering.rs`).
 
 ## Decision
 
@@ -191,7 +192,8 @@ linked batch runs under Node.
 
 ### Results (M3, Apple M-series, 4 threads)
 
-- esbuild oracle: 742 of 779 compared cases pass (95.3%); see the oracle README.
+- esbuild oracle: 832 of 872 compared cases pass (95.4%), 13 of the 40 failures intended
+  differences where ts-r-build follows tsc 7; see the oracle README.
 - A private app's server-rendered smoke entry (1983 modules; historical, no longer run):
   ts-r-build 65 ms without and 55 ms with the persistent cache, esbuild 86 ms; +2.7% size.
 
@@ -211,13 +213,14 @@ linked batch runs under Node.
 
 - No CSS bundling (CSS imports are concatenated into a sibling `.css` file, `@import` is not
   followed), no plugins, no `--watch` serve mode, no legal-comment extraction.
-- No syntax lowering below the input's syntax (targets below ES2022 are rejected).
+- No lowering below ES2015: `const`, classes, destructuring and the like are errors at
+  `--target=es5`, as in esbuild; arrows and template literals are kept.
 - IIFE output is not re-indented; runtime helpers are repeated per chunk.
 - With several entries and no splitting, tree-shaking liveness is shared across entries.
 - `var` declarations nested in blocks of a lazily wrapped ESM module stay inside its closure.
 - No `--mangle-props`, no `--drop`, no `--pure`, no `--keep-names`.
 - Not implemented: `import defer`/`import source`, glob `require`/`import()` of template
-  strings, imports of `data:` JavaScript, `with { type }` loader overrides, Yarn PnP. Missing
+  strings, Yarn PnP. Missing
   diagnostics: assignments to imports and constants, export cycles, strict `package.json`
   JSON. The oracle README lists the remaining failures by cause.
 - Minified output is about 3% larger than esbuild's (no cross-module constant inlining, no
