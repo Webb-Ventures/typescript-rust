@@ -130,7 +130,7 @@ Usage: ts-r-dev [root] [options]
       'Regular expression pattern errors (TS1507, TS1515 and others; only the flags are checked) and octal escapes (TS1487)',
       'Some inference: contextual types through reverse mapped types',
       'Some relation and narrowing results, mostly in TS2322, TS2339 and TS2345',
-      '419 of 12,750 of tsc’s conformance test variants still differ (3.3%)',
+      '415 of 12,750 of tsc’s conformance test variants still differ (3.3%)',
     ],
     usage: `usage: ts-r-check [-p tsconfig.json] [options]`,
     diff: { file: 'package.json', before: ['"scripts": {'], changes: [['"typecheck": "tsc --noEmit -p tsconfig.json",', '"typecheck": "ts-r-check --noEmit -p tsconfig.json",']], after: ['}'] },
