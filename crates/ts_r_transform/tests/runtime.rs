@@ -10,6 +10,8 @@ use std::process::Command;
 use ts_r_codegen::CodegenOptions;
 use ts_r_transform::{TransformOptions, transform, transpile};
 
+ts_r_testing::cap_memory!();
+
 const TARGETS: &[&str] = &[
     "es2015", "es2016", "es2017", "es2018", "es2019", "es2020", "es2021",
 ];
@@ -100,6 +102,30 @@ fn async_and_rest() {
 #[test]
 fn classes() {
     check("classes");
+}
+
+#[test]
+fn es_decorated_super_calls() {
+    if !node_available() {
+        eprintln!("runtime/es_decorated_super_calls: node not found, skipped");
+        return;
+    }
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/runtime/es_decorated_super_calls.ts");
+    let src = std::fs::read_to_string(&path).unwrap();
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("runtime");
+    std::fs::create_dir_all(&dir).unwrap();
+    for target in ["es2022", "es2020", "es2019", "es2015"] {
+        let opts = TransformOptions::from_json(
+            &format!(r#"{{"target":"{target}","module":"esnext"}}"#),
+            "a.ts",
+        );
+        let out = transpile("a.ts", &src, &opts, &CodegenOptions::default());
+        assert!(!out.has_errors(), "{target}: {:?}", out.diagnostics);
+        let file = dir.join(format!("es_decorated_super_calls.{target}.mjs"));
+        std::fs::write(&file, out.code).unwrap();
+        assert_eq!(run_node(&file), "super calls ok\n", "{target}");
+    }
 }
 
 #[test]
