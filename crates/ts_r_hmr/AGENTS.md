@@ -66,6 +66,20 @@ are cached by content hash. Change `cache_id` when output for the same input can
   change started the chain (`firstInvalidatedBy`); the client sends it back with
   `vite:invalidate`, and an invalidation whose propagation reaches that module again is a
   full reload, so accept handlers that keep invalidating can't loop.
+- **Partial accept (`hot.acceptExports(names)`, Vite's `experimental.hmrPartialAccept`).**
+  `acceptExports` does not make a module self-accepting by itself: the scanner records the
+  accepted names, merged and sorted over calls, along with the module's export names. A module
+  that accepts all of its exports (or has none) is self-accepting. One that accepts only some
+  is a boundary that also keeps propagating to its importers. With the flag on, the scanner
+  also records which names each import binds (`*` for a namespace or dynamic import, none for
+  a side-effect import or a re-export). An importer that uses only accepted names is skipped.
+  Any other importer is reached as usual, so having no importers is not a dead end here.
+  With the flag off, no bindings are recorded and every importer is reached. Propagation for
+  such a change uses the accept info of the code that is running, which is the *old* code,
+  captured before the new code is prepared. An update applies through the handlers already
+  registered.
+  (`vite: packages/vite/src/node/plugins/importAnalysis.ts`, the `acceptExports` and
+  imported-bindings collection; `vite: packages/vite/src/node/server/hmr.ts`, `propagateUpdate`.)
 - **Graph is built lazily from what the browser requests** (that is the unbundled-ESM graph).
   Nodes are never removed; ids stay valid. Edges are replaced wholesale on each prepare;
   importees that lose their last importer are sent in a `prune` message.
@@ -80,6 +94,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `vite:beforePrune`, queued behind any update in flight; then its `hot.data` is dropped, so
   a module imported again starts with fresh data (`vite: packages/vite/src/client/client.ts`
   and `hmr.ts`, `HMRClient.prunePaths`).
+  A newly pruned module takes the update's timestamp, so an import restored later re-fetches
+  it with `?t=` and does not reuse the disposed instance
+  (`vite: packages/vite/src/node/server/hmr.ts`, `handlePrunedModules`).
 - **Full-reload paths are percent-decoded** before they are matched against the page
   (`vite:` client `full-reload` handling compares decoded paths).
 - **Changes are prepared eagerly** (transform before propagation), so accept info is current and

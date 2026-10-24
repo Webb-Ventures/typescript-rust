@@ -83,7 +83,8 @@ from the documented plugin API (no Vite code).
   function, regexes `regex-lite` can't compile).
 - **Dev options from the config** (manifest field `dev`, computed by the sidecar after
   `configResolved`): `mode`, `base`, `define` (expression text; non-string values JSON-encoded), `envPrefix`, `envDir`,
-  `publicDir`, `server.{host,port,strictPort,open,headers,cors,proxy,https}`, applied by
+  `publicDir`, `server.{host,port,strictPort,open,headers,cors,proxy,https}`,
+  `experimental.hmrPartialAccept` (as `hmrPartialAccept`), applied by
   `apply_dev_options`. `envDir`/`publicDir` are kept relative to the root when given relative
   or inside it (checkouts with the same config share the cached manifest) and resolved
   against ts-r-dev's root. A proxy `rewrite` function stays in Node: the rule records its index and

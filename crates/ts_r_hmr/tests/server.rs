@@ -332,6 +332,34 @@ fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
 }
 
 #[test]
+fn a_pruned_module_imported_again_is_fetched_fresh() {
+    let f = start();
+    f.app.write("src/child.js", "export const v = 1;\n");
+    let with_child =
+        "import { v } from './child.js';\nconsole.log(v);\nimport.meta.hot.accept();\n";
+    f.app.write("src/parent.js", with_child);
+    let (status, _, body) = f.get("/src/parent.js");
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("from '/src/child.js'"), "{body}");
+    assert_eq!(f.get("/src/child.js").0, 200);
+    let mut ws = f.ws();
+    // Dropping the import prunes child.js; the prune carries the update's timestamp.
+    f.app.write("src/parent.js", "import.meta.hot.accept();\n");
+    let update = next_of(&mut ws, "update");
+    let t = update["updates"][0]["timestamp"].as_u64().unwrap();
+    assert_eq!(next_of(&mut ws, "prune")["paths"][0], "/src/child.js");
+    // Restoring it imports child.js with that `?t=`, so the browser doesn't reuse the
+    // disposed instance.
+    f.app.write("src/parent.js", with_child);
+    next_of(&mut ws, "update");
+    let (_, _, body) = f.get("/src/parent.js");
+    assert!(
+        body.contains(&format!("from '/src/child.js?t={t}'")),
+        "{body}"
+    );
+}
+
+#[test]
 fn accepting_a_raw_import_keeps_it_raw_after_an_update() {
     let f = start();
     f.app.write("src/message.txt", "hello");

@@ -306,6 +306,7 @@ fn handle_change(
         return; // touch, or the second of a double write
     }
     out.files.push(node_url.clone());
+    let old = old_accept(shared, id);
 
     match kind {
         ModuleKind::Script => {
@@ -313,11 +314,7 @@ fn handle_change(
             let result = server::prepare_script(shared, id, path, &source, hash);
             timing.transform += t.elapsed();
             match result {
-                Ok((_, pruned)) => {
-                    let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-                    out.pruned
-                        .extend(pruned.into_iter().map(|p| g.node(p).url.clone()));
-                }
+                Ok((_, pruned)) => note_pruned(shared, pruned, timestamp, out),
                 Err(e) => {
                     shared
                         .graph
@@ -350,7 +347,7 @@ fn handle_change(
         return;
     }
     let t = Instant::now();
-    propagate(shared, id, false, timestamp, out);
+    propagate(shared, id, false, timestamp, out, old);
     timing.graph += t.elapsed();
 }
 
@@ -377,7 +374,7 @@ fn css_changed(
         }));
     }
     if as_js {
-        propagate(shared, id, false, timestamp, out);
+        propagate(shared, id, false, timestamp, out, None);
     }
     timing.graph += t.elapsed();
 }
@@ -420,6 +417,7 @@ fn reprepare(
         let n = g.node(id);
         (n.prepared.clone(), n.errored)
     };
+    let old = old_accept(shared, id);
     let result = server::prepare_script(shared, id, &file, &source, hash);
     timing.validators += t.elapsed();
     match result {
@@ -434,9 +432,7 @@ fn reprepare(
                 return;
             }
             out.files.push(url);
-            let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-            out.pruned
-                .extend(pruned.into_iter().map(|p| g.node(p).url.clone()));
+            note_pruned(shared, pruned, timestamp, out);
         }
         Err(e) => {
             shared
@@ -452,14 +448,27 @@ fn reprepare(
         }
     }
     let t = Instant::now();
-    propagate(shared, id, false, timestamp, out);
+    propagate(shared, id, false, timestamp, out, old);
     timing.graph += t.elapsed();
 }
 
-/// Runs propagation for `id` and appends the resulting updates (or a full reload).
-fn propagate(shared: &Shared, id: ModuleId, skip_self: bool, timestamp: u64, out: &mut Outcome) {
+/// Runs propagation for `id` and appends the resulting updates (or a full reload). `old`
+/// is what `id` accepted before it was re-prepared (see [`OldAccept`]).
+fn propagate(
+    shared: &Shared,
+    id: ModuleId,
+    skip_self: bool,
+    timestamp: u64,
+    out: &mut Outcome,
+    old: OldAccept,
+) {
     let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-    let p = g.propagate(id, skip_self);
+    let p = match old
+        .filter(|(_, exports)| exports.is_some() || g.node(id).accepted_exports.is_some())
+    {
+        Some(old) => g.propagate_from(id, skip_self, old),
+        None => g.propagate(id, skip_self),
+    };
     if let Some(reason) = &p.full_reload {
         let why = match reason {
             FullReload::NoBoundary { root } => {
@@ -511,6 +520,34 @@ fn propagate(shared: &Shared, id: ModuleId, skip_self: bool, timestamp: u64, out
             }
         }
     }
+}
+
+/// Modules that lost their last importer: their `prune` callbacks run in the browser, and
+/// they take the update's timestamp, so an import restored later fetches a new instance
+/// instead of the browser's old one (`vite: packages/vite/src/node/server/hmr.ts`,
+/// `handlePrunedModules`).
+fn note_pruned(shared: &Shared, pruned: Vec<ModuleId>, timestamp: u64, out: &mut Outcome) {
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    for p in pruned {
+        let n = g.node_mut(p);
+        n.last_hmr_timestamp = timestamp;
+        out.pruned.push(n.url.clone());
+    }
+}
+
+/// What a module accepted (self-accepting, accepted exports) before its new version was
+/// prepared, when it had been prepared before. Vite applies an update with the accept info
+/// of the module's old code (the new code hasn't run yet), so a module that stops accepting
+/// an export still takes that update in place and reloads on the next one. Used only when
+/// the old or the new version calls `acceptExports`.
+type OldAccept = Option<(bool, Option<Vec<String>>)>;
+
+fn old_accept(shared: &Shared, id: ModuleId) -> OldAccept {
+    let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    let n = g.node(id);
+    n.prepared
+        .as_ref()
+        .map(|_| (n.self_accepting, n.accepted_exports.clone()))
 }
 
 /// Sends what a batch (or an invalidation) produced and records its timing.
@@ -654,7 +691,7 @@ fn invalidate(shared: &Shared, url: &str, message: Option<&str>, first: Option<&
         ..Default::default()
     };
     let t = Instant::now();
-    propagate(shared, id, true, timestamp, &mut out);
+    propagate(shared, id, true, timestamp, &mut out, None);
     mark_invalidation_chain(shared, &mut out, first.unwrap_or(url));
     let mut timing = timing;
     timing.graph = t.elapsed();

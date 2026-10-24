@@ -483,6 +483,7 @@ function devOptions() {
     publicDir: config.publicDir === false ? false : typeof config.publicDir === 'string' ? rootRelative(config.publicDir) : null,
     assetsInclude: assetsIncludePatterns(config.assetsInclude),
     assetsInlineLimit: typeof config.build?.assetsInlineLimit === 'number' ? config.build.assetsInlineLimit : null,
+    hmrPartialAccept: config.experimental?.hmrPartialAccept === true,
     server: {
       host,
       port: typeof s.port === 'number' ? s.port : null,

@@ -41,7 +41,7 @@ use crate::cors::Cors;
 use crate::deps::{DepEntry, Deps};
 use crate::env::{Env, EnvOptions};
 use crate::glob::GlobWatch;
-use crate::graph::{ModuleGraph, ModuleId, ModuleKind, ModuleNode};
+use crate::graph::{ImportedBindings, ModuleGraph, ModuleId, ModuleKind, ModuleNode};
 use crate::http::{self, Request, Response};
 use crate::net::Duplex;
 use crate::plugin::{
@@ -128,6 +128,9 @@ pub struct DevConfig {
     /// `build.assetsInlineLimit`: SVGs smaller than this many bytes are inlined as data
     /// URLs (the only assets Vite inlines in dev).
     pub assets_inline_limit: u64,
+    /// `experimental.hmrPartialAccept`: an update of a module that accepts some of its
+    /// exports (`import.meta.hot.acceptExports`) skips the importers that only use those.
+    pub hmr_partial_accept: bool,
     /// `server.headers`, added to every response that isn't proxied.
     pub headers: Vec<(String, String)>,
     pub cors: Cors,
@@ -207,6 +210,7 @@ impl DevConfig {
             public_dir: Some(PathBuf::from("public")),
             assets_include: crate::glob::PathFilter::default(),
             assets_inline_limit: crate::assets::SVG_INLINE_LIMIT as u64,
+            hmr_partial_accept: false,
             headers: Vec::new(),
             cors: Cors::default(),
             proxy: Vec::new(),
@@ -301,6 +305,7 @@ pub(crate) struct Shared {
     pub public_dir: Option<PathBuf>,
     pub assets_include: crate::glob::PathFilter,
     pub assets_inline_limit: u64,
+    pub hmr_partial_accept: bool,
     pub base: String,
     pub env_options: EnvOptions,
     /// Reloaded when an env file changes.
@@ -590,6 +595,7 @@ impl DevServer {
             public_dir: config.public_dir.as_ref().map(|d| root.join(d)),
             assets_include: config.assets_include.clone(),
             assets_inline_limit: config.assets_inline_limit,
+            hmr_partial_accept: config.hmr_partial_accept,
             base,
             env_options,
             env: RwLock::new(Arc::new(env)),
@@ -1967,7 +1973,10 @@ pub(crate) fn prepare_script(
             Target::Url(_) | Target::Dep(_) => None,
         })
         .collect();
-    let pruned = g.set_imports(id, importees, accepted, hot.self_accepting, hot.declined);
+    let (self_accepting, accepted_exports, bindings) =
+        partial_accept(shared, &output, &hot, &targets);
+    let pruned = g.set_imports(id, importees, accepted, self_accepting, hot.declined);
+    g.set_partial_accept(id, accepted_exports, bindings);
     g.set_watch_deps(id, watch_deps);
     let prepared = Arc::new(Prepared {
         hash,
@@ -1981,6 +1990,50 @@ pub(crate) fn prepare_script(
     node.prepared = Some(Arc::clone(&prepared));
     node.errored = false;
     Ok((prepared, pruned))
+}
+
+/// What a module accepts and binds, for partial accept (`import.meta.hot.acceptExports`,
+/// `vite: packages/vite/src/node/plugins/importAnalysis.ts`): accepting every export it
+/// has (or having none) makes it self-accepting; otherwise it keeps the accepted names. The
+/// bindings it imports from each module are recorded only with `hmrPartialAccept` on.
+fn partial_accept(
+    shared: &Shared,
+    output: &TransformOutput,
+    hot: &HotInfo,
+    targets: &[Target],
+) -> (bool, Option<Vec<String>>, Option<ImportedBindings>) {
+    let full = (hot.accepted_exports.is_some() || shared.hmr_partial_accept)
+        .then(|| scan::scan(&output.code));
+    let mut self_accepting = hot.self_accepting;
+    let mut accepted_exports = hot.accepted_exports.clone();
+    if let (Some(names), Some(m)) = (&accepted_exports, &full)
+        && !self_accepting
+        && m.exports.iter().all(|e| names.binary_search(e).is_ok())
+    {
+        self_accepting = true;
+    }
+    if self_accepting {
+        accepted_exports = None;
+    }
+    let bindings = full.filter(|_| shared.hmr_partial_accept).map(|mut m| {
+        m.bindings.sort_by_key(|(at, _)| *at);
+        let mut by_module: BTreeMap<ModuleId, Vec<String>> = BTreeMap::new();
+        for (rec, target) in output.imports.iter().zip(targets) {
+            let Target::Module { id, .. } = target else {
+                continue;
+            };
+            let Ok(at) = m.bindings.binary_search_by_key(&rec.start, |(at, _)| *at) else {
+                continue;
+            };
+            let names = &m.bindings[at].1;
+            let set = by_module.entry(*id).or_default();
+            set.extend(names.iter().cloned());
+            set.sort();
+            set.dedup();
+        }
+        by_module.into_iter().collect()
+    });
+    (self_accepting, accepted_exports, bindings)
 }
 
 /// A map whose single source is the module id (`src/a.tsx`, what the built-in transform

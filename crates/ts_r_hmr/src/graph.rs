@@ -13,6 +13,10 @@ use std::time::Instant;
 /// Index of a module in the [`ModuleGraph`].
 pub type ModuleId = u32;
 
+/// The names a module imports from each of its importees (`*` for a namespace or dynamic
+/// import), for partial accept.
+pub type ImportedBindings = Vec<(ModuleId, Vec<String>)>;
+
 /// How a module is served.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModuleKind {
@@ -42,6 +46,13 @@ pub struct ModuleNode {
     pub self_accepting: bool,
     /// `import.meta.hot.decline()`: any update reaching it reloads the page.
     pub declined: bool,
+    /// `import.meta.hot.acceptExports(names)` without accepting every export: the accepted
+    /// names, sorted. The module is a boundary for its own updates, but the update still
+    /// reaches the importers that use an export outside this list.
+    pub accepted_exports: Option<Vec<String>>,
+    /// What this module imports from each importee (sorted by id; names sorted), recorded
+    /// only with partial accept on (`experimental.hmrPartialAccept`).
+    pub imported_bindings: Option<ImportedBindings>,
     /// Timestamp of the last hot update that invalidated this module (0 = never). Importers
     /// add `?t=<ts>` to its URL so the browser fetches the new instance.
     pub last_hmr_timestamp: u64,
@@ -158,6 +169,8 @@ impl ModuleGraph {
             accepted_deps: Vec::new(),
             self_accepting: kind == ModuleKind::Css,
             declined: false,
+            accepted_exports: None,
+            imported_bindings: None,
             last_hmr_timestamp: 0,
             linked_css: false,
             served_as_js: false,
@@ -244,6 +257,40 @@ impl ModuleGraph {
         pruned
     }
 
+    /// Sets `id`'s partially accepted exports and the bindings it imports from each importee
+    /// (both described on [`ModuleNode`]).
+    pub fn set_partial_accept(
+        &mut self,
+        id: ModuleId,
+        accepted_exports: Option<Vec<String>>,
+        imported_bindings: Option<ImportedBindings>,
+    ) {
+        let node = &mut self.nodes[id as usize];
+        node.accepted_exports = accepted_exports;
+        node.imported_bindings = imported_bindings;
+    }
+
+    /// `importer` uses only exports of `module` that `module` accepts, so an update of
+    /// `module` that it accepts itself doesn't reach `importer`. A module the importer binds
+    /// nothing from (a side-effect import or a re-export) counts as fully accepted.
+    fn uses_only_accepted(
+        &self,
+        importer: ModuleId,
+        module: ModuleId,
+        accepted: &[String],
+    ) -> bool {
+        let Some(bindings) = &self.node(importer).imported_bindings else {
+            return false;
+        };
+        let Ok(at) = bindings.binary_search_by_key(&module, |(m, _)| *m) else {
+            return false;
+        };
+        bindings[at]
+            .1
+            .iter()
+            .all(|n| accepted.binary_search(n).is_ok())
+    }
+
     /// Finds the HMR boundaries for a change to `changed`: walks up importers, stopping at
     /// modules that accept the update (themselves, or the importee the walk came from).
     /// Reaching a module with no importers, or a declining module, means a full reload.
@@ -254,13 +301,27 @@ impl ModuleGraph {
     /// Iterative DFS; each module is expanded once, so the cost is bounded by the part of
     /// the graph above the change, not by the project size.
     pub fn propagate(&self, changed: ModuleId, skip_self: bool) -> Propagation {
+        let start = self.node(changed);
+        let accept = (start.self_accepting, start.accepted_exports.clone());
+        self.propagate_from(changed, skip_self, accept)
+    }
+
+    /// [`ModuleGraph::propagate`] with `changed`'s own acceptance (self-accepting, accepted
+    /// exports) given: an update is applied with what the old version of the module
+    /// accepted, before its new code ran.
+    pub fn propagate_from(
+        &self,
+        changed: ModuleId,
+        skip_self: bool,
+        (self_accepting, accepted_exports): (bool, Option<Vec<String>>),
+    ) -> Propagation {
         let mut out = Propagation::default();
         let start = self.node(changed);
         if start.declined {
             out.full_reload = Some(FullReload::Declined { module: changed });
             return out;
         }
-        if start.self_accepting && !skip_self {
+        if self_accepting && !skip_self {
             out.boundaries.push(Boundary {
                 boundary: changed,
                 accepted_via: changed,
@@ -268,7 +329,16 @@ impl ModuleGraph {
             out.invalidated.push(changed);
             return out;
         }
-        if start.importers.is_empty() {
+        // Partially self-accepting: a boundary that still hands the update on to the
+        // importers using an export it doesn't accept (no importers is no dead end).
+        let start_exports = accepted_exports.filter(|_| !skip_self);
+        if start_exports.is_some() {
+            out.boundaries.push(Boundary {
+                boundary: changed,
+                accepted_via: changed,
+            });
+            out.invalidated.push(changed);
+        } else if start.importers.is_empty() {
             out.full_reload = Some(FullReload::NoBoundary { root: changed });
             return out;
         }
@@ -278,6 +348,9 @@ impl ModuleGraph {
         // (node, index of the next importer to look at)
         let mut stack: Vec<(ModuleId, usize)> = vec![(changed, 0)];
         visit.insert(changed, Visit::OnStack);
+        if start_exports.is_some() {
+            invalidated.insert(changed, ());
+        }
 
         // Marks every module on the current DFS path as invalidated. If the top is already
         // marked, everything below it is too (its path prefix hasn't changed since).
@@ -316,6 +389,14 @@ impl ModuleGraph {
                 mark_chain(&stack, None, &mut invalidated, &mut out.invalidated);
                 continue;
             }
+            let accepted = if node == changed {
+                start_exports.as_deref()
+            } else {
+                self.node(node).accepted_exports.as_deref()
+            };
+            if accepted.is_some_and(|a| self.uses_only_accepted(imp, node, a)) {
+                continue;
+            }
             match visit.get(&imp).copied().unwrap_or(Visit::New) {
                 Visit::OnStack => {
                     out.within_circular = true;
@@ -335,7 +416,10 @@ impl ModuleGraph {
                         visit.insert(imp, Visit::Done);
                         continue;
                     }
-                    if imp_node.importers.is_empty() {
+                    if imp_node.accepted_exports.is_some() {
+                        push_boundary(&mut out.boundaries, imp, imp);
+                        mark_chain(&stack, Some(imp), &mut invalidated, &mut out.invalidated);
+                    } else if imp_node.importers.is_empty() {
                         out.full_reload = Some(FullReload::NoBoundary { root: imp });
                         return out;
                     }
@@ -410,6 +494,25 @@ mod tests {
         fn decline(mut self, name: &str) -> G {
             let id = self.get(name);
             self.g.node_mut(id).declined = true;
+            self
+        }
+
+        /// `name` accepts `exports`; `uses` lists `(importer, bindings)` it is imported with.
+        fn accept_exports(mut self, name: &str, exports: &[&str], uses: &[(&str, &[&str])]) -> G {
+            let id = self.get(name);
+            let list = exports.iter().map(|e| e.to_string()).collect();
+            self.g.node_mut(id).accepted_exports = Some(list);
+            for (importer, names) in uses {
+                let imp = self.get(importer);
+                let names = names.iter().map(|n| n.to_string()).collect();
+                let b = self
+                    .g
+                    .node_mut(imp)
+                    .imported_bindings
+                    .get_or_insert_default();
+                b.push((id, names));
+                b.sort();
+            }
             self
         }
 
@@ -658,5 +761,76 @@ mod tests {
         assert_eq!(g.g.node(main).last_hmr_timestamp, 0);
         assert_eq!(g.g.node(app).last_hmr_timestamp, 42);
         assert_eq!(g.g.node(leaf).last_hmr_timestamp, 42);
+    }
+
+    #[test]
+    fn partial_accept_skips_importers_using_only_accepted_exports() {
+        // main -> target (accepts a, default); main imports a and default from it.
+        let g = G::new(&[("main", &["target"]), ("target", &["dep"])]).accept_exports(
+            "target",
+            &["a", "default"],
+            &[("main", &["a", "default"])],
+        );
+        let (b, inv, p) = g.run("target");
+        assert_eq!(b, vec![("target".to_owned(), "target".to_owned())]);
+        assert_eq!(inv, vec!["target"]);
+        assert!(p.full_reload.is_none());
+        // A change to its dependency stops at it too.
+        let (b, inv, p) = g.run("dep");
+        assert_eq!(b, vec![("target".to_owned(), "target".to_owned())]);
+        assert_eq!(inv, vec!["dep", "target"]);
+        assert!(p.full_reload.is_none());
+    }
+
+    #[test]
+    fn partial_accept_hands_on_to_importers_using_other_exports() {
+        let g = G::new(&[("main", &["named"]), ("named", &["dep"])]).accept_exports(
+            "named",
+            &["b"],
+            &[("main", &["a"])],
+        );
+        for changed in ["named", "dep"] {
+            let (_, _, p) = g.run(changed);
+            assert_eq!(
+                p.full_reload,
+                Some(FullReload::NoBoundary {
+                    root: g.get("main")
+                })
+            );
+        }
+        // Bindings unknown (partial accept off): every importer gets the update.
+        let mut g = G::new(&[("main", &["t"])]).accept_exports("t", &["a"], &[]);
+        assert!(g.run("t").2.full_reload.is_some());
+        let main = g.get("main");
+        g.g.node_mut(main).self_accepting = true;
+        let (b, inv, p) = g.run("t");
+        assert!(p.full_reload.is_none());
+        assert_eq!(
+            b,
+            vec![
+                ("t".to_owned(), "t".to_owned()),
+                ("main".to_owned(), "main".to_owned())
+            ]
+        );
+        assert_eq!(inv, vec!["main", "t"]);
+    }
+
+    #[test]
+    fn partial_accept_side_effect_imports_and_old_acceptance() {
+        // `import './unused'` binds nothing: accepted. No importers is no dead end.
+        let g = G::new(&[("index", &["unused"]), ("lone", &[])])
+            .accept_exports("unused", &[], &[("index", &[])])
+            .accept_exports("lone", &["x"], &[]);
+        assert!(g.run("unused").2.full_reload.is_none());
+        assert!(g.run("lone").2.full_reload.is_none());
+        // The update is applied with what the old version accepted.
+        let g = G::new(&[("main", &["t"])]).accept_exports("t", &["b"], &[("main", &["a"])]);
+        let t = g.get("t");
+        let old = (false, Some(vec!["a".to_owned()]));
+        assert!(g.g.propagate_from(t, false, old).full_reload.is_none());
+        assert!(g.g.propagate(t, false).full_reload.is_some());
+        // `invalidate()` ignores the module's own acceptance.
+        let g = G::new(&[("main", &["t"])]).accept_exports("t", &["a"], &[("main", &["a"])]);
+        assert!(g.g.propagate(g.get("t"), true).full_reload.is_some());
     }
 }

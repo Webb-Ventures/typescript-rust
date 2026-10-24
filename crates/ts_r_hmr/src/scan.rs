@@ -59,6 +59,9 @@ pub struct HotInfo {
     pub self_accepting: bool,
     /// `import.meta.hot.decline()`.
     pub declined: bool,
+    /// `import.meta.hot.acceptExports(...)`: the export names passed (a string or an array
+    /// of strings), merged over every call, sorted. `None` when it is never called.
+    pub accepted_exports: Option<Vec<String>>,
     /// String literals passed to `import.meta.hot.accept("dep", ...)` or `accept([...])`.
     /// Spans point inside the quotes so the server can rewrite them to URLs.
     pub accepted: Vec<ImportRecord>,
@@ -89,6 +92,14 @@ pub struct ModuleScan {
     pub hot: HotInfo,
     /// Saw a static `import` declaration or an `export` keyword (i.e. this is ESM, not CJS).
     pub has_module_syntax: bool,
+    /// The names the module exports (`default` for a default export), in source order.
+    /// `export * from` adds none; `export * as ns from` adds `ns`.
+    pub exports: Vec<String>,
+    /// What each import binds from its module, keyed by the specifier's start offset (the
+    /// [`ImportRecord::start`] of the same import): `*` for a namespace or dynamic import,
+    /// `default`, or the imported names (not the local ones). A side-effect import or a
+    /// re-export (`export ... from`) binds nothing.
+    pub bindings: Vec<(u32, Vec<String>)>,
 }
 
 /// Scans `code` for imports and hot-API usage.
@@ -295,6 +306,7 @@ impl Scanner<'_> {
                     let r = self.skip_trivia(end);
                     if matches!(self.peek(r), b')' | b',') {
                         self.record(q, end, ImportKind::Dynamic);
+                        self.bind(q, vec!["*".to_owned()]);
                     }
                 }
                 // Let the main loop lex the arguments.
@@ -307,6 +319,7 @@ impl Scanner<'_> {
             b'"' | b'\'' => {
                 let end = self.string_end(p);
                 self.record(p, end, ImportKind::Static);
+                self.bind(p, Vec::new());
                 self.out.has_module_syntax = true;
                 self.pos = end;
                 self.last = Last::Value;
@@ -324,6 +337,8 @@ impl Scanner<'_> {
                         b'"' | b'\'' => {
                             let end = self.string_end(q);
                             self.record(q, end, ImportKind::Static);
+                            let names = self.import_bindings(p, q);
+                            self.bind(q, names);
                             self.out.has_module_syntax = true;
                             self.pos = end;
                             self.last = Last::Value;
@@ -336,6 +351,89 @@ impl Scanner<'_> {
                 }
             }
             _ => self.keep_lexing(after),
+        }
+    }
+
+    /// Records what the import whose specifier starts at quote `quote` binds.
+    fn bind(&mut self, quote: usize, names: Vec<String>) {
+        self.out.bindings.push(((quote + 1) as u32, names));
+    }
+
+    /// The bindings of the clause `from..to` of `import <clause> from "x"`: `*` for
+    /// `* as ns`, `default` for a default import, the imported names of `{ a, b as c }`.
+    fn import_bindings(&self, from: usize, to: usize) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut p = from;
+        while p < to {
+            p = self.skip_trivia(p);
+            match self.peek(p) {
+                _ if p >= to => break,
+                b'*' => {
+                    names.push("*".to_owned());
+                    // `* as ns`: the local name is not a default import.
+                    let a = self.skip_trivia(p + 1);
+                    p = if self.word_at(a, b"as") {
+                        let n = self.skip_trivia(a + 2);
+                        self.ident_end(n)
+                    } else {
+                        p + 1
+                    };
+                }
+                b'{' => {
+                    let close = self.matching_brace(p).unwrap_or(to).min(to);
+                    self.named_bindings(p + 1, close, &mut names);
+                    p = close + 1;
+                }
+                c if is_ident_start(c) => {
+                    let end = self.ident_end(p);
+                    if !matches!(&self.src[p..end], b"from" | b"type") {
+                        names.push("default".to_owned());
+                    }
+                    p = end;
+                }
+                _ => p += 1,
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// The imported names of the specifiers between `{` and `}` (`a`, `b as c`, `"x" as y`,
+    /// `type T` skipped).
+    fn named_bindings(&self, from: usize, close: usize, names: &mut Vec<String>) {
+        let mut q = from;
+        while q < close {
+            // One specifier: up to the next comma.
+            let start = self.skip_trivia(q);
+            let mut end = start;
+            while end < close && self.peek(end) != b',' {
+                end = match self.peek(end) {
+                    b'"' | b'\'' => self.string_end(end),
+                    _ => end + 1,
+                };
+            }
+            q = end + 1;
+            let mut first = start;
+            let mut first_end = match self.peek(first) {
+                b'"' | b'\'' => self.string_end(first),
+                c if is_ident_start(c) => self.ident_end(first),
+                _ => continue,
+            };
+            let next = self.skip_trivia(first_end);
+            if &self.src[first..first_end] == b"type" && next < end && !self.word_at(next, b"as") {
+                continue; // `type T`: erased
+            }
+            if matches!(self.peek(first), b'"' | b'\'') {
+                if first_end < first + 2 {
+                    continue;
+                }
+                first += 1;
+                first_end -= 1;
+            }
+            if let Ok(n) = std::str::from_utf8(&self.src[first..first_end]) {
+                names.push(n.to_owned());
+            }
         }
     }
 
@@ -496,7 +594,7 @@ impl Scanner<'_> {
                 }
                 match method {
                     b"accept" => self.accept_args(paren),
-                    b"acceptExports" => self.out.hot.self_accepting = true,
+                    b"acceptExports" => self.accept_exports_args(paren),
                     b"decline" => self.out.hot.declined = true,
                     _ => {}
                 }
@@ -551,6 +649,41 @@ impl Scanner<'_> {
         }
     }
 
+    /// At the `(` of `import.meta.hot.acceptExports(`: the names in its first argument, a
+    /// string or an array of strings.
+    fn accept_exports_args(&mut self, paren: usize) {
+        let mut names = Vec::new();
+        let q = self.skip_trivia(paren + 1);
+        let mut push = |s: &Self, quote: usize, end: usize| {
+            if let Some(rec) = s.make_record(quote, end, ImportKind::Static) {
+                names.push(rec.specifier);
+            }
+        };
+        match self.peek(q) {
+            b'"' | b'\'' => push(self, q, self.string_end(q)),
+            b'[' => {
+                let mut p = q + 1;
+                loop {
+                    p = self.skip_trivia(p);
+                    match self.peek(p) {
+                        b'"' | b'\'' => {
+                            let end = self.string_end(p);
+                            push(self, p, end);
+                            p = end;
+                        }
+                        b',' => p += 1,
+                        _ => break,
+                    }
+                }
+            }
+            _ => {}
+        }
+        let all = self.out.hot.accepted_exports.get_or_insert_with(Vec::new);
+        all.extend(names);
+        all.sort();
+        all.dedup();
+    }
+
     /// After the `export` keyword at `after`.
     fn export(&mut self, after: usize) {
         let p = self.skip_trivia(after);
@@ -559,18 +692,26 @@ impl Scanner<'_> {
                 let mut q = self.skip_trivia(p + 1);
                 if self.word_at(q, b"as") {
                     q = self.skip_trivia(q + 2);
+                    let start = q;
                     q = match self.peek(q) {
                         b'"' | b'\'' => self.string_end(q),
                         _ => self.ident_end(q),
                     };
+                    self.export_name(start, q);
                 }
                 q
             }
             b'{' => match self.matching_brace(p) {
-                Some(close) => close + 1,
+                Some(close) => {
+                    self.exported_specifiers(p + 1, close);
+                    close + 1
+                }
                 None => return self.after_export(after),
             },
-            _ => return self.after_export(after),
+            _ => {
+                self.declared_exports(p);
+                return self.after_export(after);
+            }
         };
         let f = self.skip_trivia(from_at);
         if self.word_at(f, b"from") {
@@ -578,6 +719,7 @@ impl Scanner<'_> {
             if matches!(self.peek(s), b'"' | b'\'') {
                 let end = self.string_end(s);
                 self.record(s, end, ImportKind::ReExport);
+                self.bind(s, Vec::new());
                 self.pos = end;
                 self.last = Last::Value;
                 return;
@@ -589,6 +731,151 @@ impl Scanner<'_> {
             self.last = Last::Operator;
         } else {
             self.after_export(after);
+        }
+    }
+
+    /// Records the exported name spelled at `start..end` (an identifier or a string).
+    fn export_name(&mut self, start: usize, end: usize) {
+        let (mut a, mut b) = (start, end);
+        if matches!(self.peek(a), b'"' | b'\'') {
+            if b < a + 2 {
+                return;
+            }
+            a += 1;
+            b -= 1;
+        }
+        if b > a
+            && let Ok(n) = std::str::from_utf8(&self.src[a..b])
+        {
+            self.out.exports.push(n.to_owned());
+        }
+    }
+
+    /// `export { a, b as c, d as default }` between the braces: the exported names.
+    fn exported_specifiers(&mut self, from: usize, close: usize) {
+        let mut q = from;
+        while q < close {
+            let start = self.skip_trivia(q);
+            let mut end = start;
+            while end < close && self.peek(end) != b',' {
+                end = match self.peek(end) {
+                    b'"' | b'\'' => self.string_end(end),
+                    _ => end + 1,
+                };
+            }
+            q = end + 1;
+            // The last name of the specifier is the exported one (`a`, `b as c`).
+            let mut name = None;
+            let mut r = start;
+            while r < end {
+                r = self.skip_trivia(r);
+                if r >= end {
+                    break;
+                }
+                let e = match self.peek(r) {
+                    b'"' | b'\'' => self.string_end(r),
+                    c if is_ident_start(c) => self.ident_end(r),
+                    _ => r + 1,
+                };
+                if &self.src[r..e] != b"as" {
+                    name = Some((r, e));
+                }
+                r = e;
+            }
+            if let Some((a, b)) = name {
+                let first = self.skip_trivia(start);
+                let typed = self.word_at(first, b"type")
+                    && first != a
+                    && !self.word_at(self.skip_trivia(first + 4), b"as");
+                if !typed {
+                    self.export_name(a, b);
+                }
+            }
+        }
+    }
+
+    /// `export default ...`, `export function f`, `export class C`, `export const a = 1, b`
+    /// at `p`: the names declared.
+    fn declared_exports(&mut self, p: usize) {
+        if self.word_at(p, b"default") {
+            self.out.exports.push("default".to_owned());
+            return;
+        }
+        let mut q = p;
+        if self.word_at(q, b"async") {
+            q = self.skip_trivia(q + 5);
+        }
+        for kw in [&b"function"[..], b"class"] {
+            if self.word_at(q, kw) {
+                let mut n = self.skip_trivia(q + kw.len());
+                if self.peek(n) == b'*' {
+                    n = self.skip_trivia(n + 1);
+                }
+                let e = self.ident_end(n);
+                self.export_name(n, e);
+                return;
+            }
+        }
+        for kw in [&b"const"[..], b"let", b"var"] {
+            if self.word_at(q, kw) {
+                return self.declarators(q + kw.len());
+            }
+        }
+    }
+
+    /// The names bound by `a = 1, b, c = f(x, y)` from `p` (simple identifiers only: a
+    /// destructuring pattern is skipped). Stops at `;` or a line break outside brackets
+    /// (unless the line ends with `,` or `=`).
+    fn declarators(&mut self, mut p: usize) {
+        let mut expect_name = true;
+        let mut depth = 0usize;
+        let mut prev = b' ';
+        while p < self.src.len() {
+            let before = p;
+            p = self.skip_trivia(p);
+            let newline = self.src[before..p]
+                .iter()
+                .any(|&c| c == b'\n' || c == b'\r');
+            if depth == 0 && newline && !expect_name && !matches!(prev, b',' | b'=') {
+                return;
+            }
+            let c = self.peek(p);
+            if expect_name && depth == 0 {
+                expect_name = false;
+                if is_ident_start(c) {
+                    let e = self.ident_end(p);
+                    self.export_name(p, e);
+                    prev = b'a';
+                    p = e;
+                    continue;
+                }
+            }
+            match c {
+                0 => return,
+                b';' if depth == 0 => return,
+                b',' if depth == 0 => expect_name = true,
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => {
+                    if depth == 0 {
+                        return;
+                    }
+                    depth -= 1;
+                }
+                b'"' | b'\'' => {
+                    p = self.string_end(p);
+                    prev = b'"';
+                    continue;
+                }
+                b'`' => {
+                    p += 1;
+                    while p < self.src.len() && self.src[p] != b'`' {
+                        p += if self.src[p] == b'\\' { 2 } else { 1 };
+                    }
+                }
+                _ => {}
+            }
+            prev = c;
+            p += 1;
         }
     }
 
@@ -900,11 +1187,11 @@ const o = { import: 1 };
         assert!(hot.accepted.is_empty());
         assert!(scan("import.meta.hot.accept()").hot.self_accepting);
         assert!(scan("import.meta.hot?.accept()").hot.self_accepting);
-        assert!(
-            scan("import.meta.hot.acceptExports(['a'])")
-                .hot
-                .self_accepting
-        );
+        // `acceptExports` is self-accepting only when it covers every export (the server
+        // decides, with the module's export list).
+        let partial = scan("import.meta.hot.acceptExports(['a'])").hot;
+        assert!(!partial.self_accepting);
+        assert_eq!(partial.accepted_exports, Some(vec!["a".to_owned()]));
         let only_dispose = scan("import.meta.hot.dispose(() => {})").hot;
         assert!(only_dispose.uses_hot && !only_dispose.self_accepting);
     }
@@ -1015,5 +1302,71 @@ const mode = import.meta.env.MODE;
             "['./p/*.js', '!./p/x.js'], { eager: true, query: { a: ')' } }"
         );
         assert!(scan_hot("const x = 1").node_env.is_empty());
+    }
+
+    #[test]
+    fn exports_bindings_and_accepted_exports() {
+        let code = r#"import def, { a, b as c, "x-y" as xy } from './t'
+import * as ns from "./ns"
+import './side'
+export { a as b2 } from './re'
+export * from './star'
+export * as all from './all'
+const aliased = 1
+export { aliased as c, def as default }
+export const p = f(1, 2), q = [3, 4],
+  r = { s: 5 }
+export let t
+export async function g() {}
+export function* h() {}
+export class K {}
+const later = import('./lazy')
+if (import.meta.hot) {
+  import.meta.hot.acceptExports(['p', 'default'])
+  import.meta.hot.acceptExports('q', (m) => m)
+}
+"#;
+        let m = scan(code);
+        assert_eq!(
+            m.exports,
+            [
+                "b2", "all", "c", "default", "p", "q", "r", "t", "g", "h", "K"
+            ]
+        );
+        let by_spec: Vec<(&str, Vec<&str>)> = m
+            .imports
+            .iter()
+            .map(|r| {
+                let b = m.bindings.iter().find(|(at, _)| *at == r.start).unwrap();
+                (
+                    r.specifier.as_str(),
+                    b.1.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            by_spec,
+            vec![
+                ("./t", vec!["a", "b", "default", "x-y"]),
+                ("./ns", vec!["*"]),
+                ("./side", vec![]),
+                ("./re", vec![]),
+                ("./star", vec![]),
+                ("./all", vec![]),
+                ("./lazy", vec!["*"]),
+            ]
+        );
+        assert_eq!(
+            m.hot.accepted_exports.as_deref(),
+            Some(&["default".to_owned(), "p".to_owned(), "q".to_owned()][..])
+        );
+        assert!(!m.hot.self_accepting);
+        let empty = scan_hot("import.meta.hot.acceptExports([])");
+        assert_eq!(empty.accepted_exports.as_deref(), Some(&[][..]));
+        assert!(
+            scan_hot("import.meta.hot.accept()")
+                .accepted_exports
+                .is_none()
+        );
     }
 }
