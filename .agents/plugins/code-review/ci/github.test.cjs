@@ -290,6 +290,64 @@ test('a fix run that resolves every finding approves at the commit it pushed', a
   assert.deepEqual(submitted.map((r) => [r.event, r.commit_id]), [['APPROVE', 'c0ffee5678']]);
 });
 
+// A fix run whose branch moved on: the push step merged the new commits in (FIX_MERGE_PATH).
+async function fixAfterMerge(github, results, merge) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-test-'));
+  fs.writeFileSync(`${dir}/fixes.json`, JSON.stringify({ summary: 's', commit_message: 'm', results }));
+  fs.writeFileSync(`${dir}/diffs.json`, '{}');
+  if (merge) fs.writeFileSync(`${dir}/merge.json`, JSON.stringify(merge));
+  try {
+    await withEnv({
+      PR_NUMBER: '3', ACTOR: 'riley', FIX_COMMIT: 'c0ffee5678', FIX_HEAD: 'beef000001', FIXES_PATH: `${dir}/fixes.json`,
+      FIX_DIFFS_PATH: `${dir}/diffs.json`, FIX_MERGE_PATH: `${dir}/merge.json`,
+    }, () => review.applyFixes({ github, context: { repo, payload: {} }, core }));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+const fixedAll = (...ids) => ids.map((id) => ({ id, status: 'fixed', explanation: `Fixed ${id}.`, files: ['a.rs'] }));
+
+test('after merging a moved branch, threads are resolved and the verdict is given at the merge', async () => {
+  const { github, state, submitted, comments } = fakeGitHub({ a: { resolved: false } }, { summaryMeta: reviewed, reviews: changesRequested });
+  await fixAfterMerge(github, fixedAll('a'), { branch: 'feat', head: 'beef000001', incoming: 'dad0000001', count: 1, stale: [] });
+  assert.equal(state.a.isResolved, true);
+  assert.deepEqual(submitted.map((r) => [r.event, r.commit_id]), [['APPROVE', 'beef000001']]);
+  assert.match(comments[0].body, /Codex fixed 1 finding in \[`c0ffee5`\].*; `feat` had moved on meanwhile, so its 1 new commit was merged into the fixes \(\[`beef000`\]/);
+});
+
+test('a fixed thread whose lines the merged commits changed gets a reply and stays open', async () => {
+  const { github, state, replies, submitted, comments } = fakeGitHub({ a: { resolved: false }, b: { resolved: false } }, { summaryMeta: reviewed, reviews: changesRequested });
+  await fixAfterMerge(github, fixedAll('a', 'b'), { branch: 'feat', head: 'beef000001', incoming: 'dad0000001', count: 2, stale: ['b'] });
+  assert.equal(state.a.isResolved, true);
+  assert.equal(state.b.isResolved, false);
+  const onB = replies.filter((r) => r.thread === 'b');
+  assert.equal(onB.length, 1);
+  assert.match(onB[0].body, /Fixed in \[`c0ffee5`\].*but `feat` changed these lines while Codex worked .*so this stays open/);
+  assert.match(comments[0].body, /its 2 new commits were merged.*; 1 fixed but left open because the branch changed its lines/);
+  assert.deepEqual(submitted, []);
+});
+
+test('an unreadable merge record leaves every fixed thread open', async () => {
+  const { github, state } = fakeGitHub({ a: { resolved: false } }, { summaryMeta: reviewed, reviews: changesRequested });
+  await fixAfterMerge(github, fixedAll('a'), null);
+  assert.equal(state.a.isResolved, false);
+});
+
+test('a conflict with the moved branch is reported and nothing is resolved', async () => {
+  const { github, state, comments } = fakeGitHub({ a: { resolved: false } }, { summaryMeta: reviewed });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-test-'));
+  fs.writeFileSync(`${dir}/fixes.json`, JSON.stringify({ summary: 's', commit_message: 'm', results: fixedAll('a') }));
+  const failing = { ...core, setFailed() {} };
+  try {
+    await withEnv({ PR_NUMBER: '3', ACTOR: 'riley', FIXES_PATH: `${dir}/fixes.json`, FIX_ERROR: '`feat` moved on while Codex worked (1 new commit, up to `dad0000`), and merging it into the fixes conflicts in `a.rs`; tick the box again to fix the new head.' },
+      () => review.applyFixes({ github, context: { repo, payload: {} }, core: failing }));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.equal(state.a.isResolved, false);
+  assert.match(comments[0].body, /could not be pushed: `feat` moved on .*conflicts in `a\.rs`.* Nothing was resolved\./);
+});
+
 test('a dismissed verdict, a closed PR or a PR without a completed review is left alone', async () => {
   for (const opts of [
     { summaryMeta: reviewed, reviews: [{ state: 'DISMISSED', commit_id: 'abcdef1234' }] },

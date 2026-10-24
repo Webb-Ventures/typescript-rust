@@ -592,13 +592,19 @@ function bulkIntent({ action, comment, changes }, threads) {
 // Results of a Codex fix run (box/job.mjs push): replies on every open finding, with the commit
 // and diff when it was fixed (then resolves it) or the reason when it was not (left open).
 //   FIXES_PATH   Codex's result ({ summary, commit_message, results: [{ id, status, explanation, files }] })
-//   FIX_COMMIT   the pushed commit, if any; FIX_DIFFS_PATH: { [finding id]: diff text }
+//   FIX_COMMIT   the fix commit, if pushed; FIX_DIFFS_PATH: { [finding id]: diff text }
+//   FIX_HEAD     the branch's head after the push, when that is not FIX_COMMIT (a merge of the
+//                branch's new commits into it); the verdict is given there
+//   FIX_MERGE_PATH  when the branch moved on and was merged in first: { branch, head, incoming,
+//                count, stale: [finding id] }; stale findings' lines changed in the merged
+//                commits, so their threads get a reply but stay open
 //   FIX_ERROR    why nothing could be pushed; ACTOR: who asked
 async function applyFixes({ github, context, core }) {
   const { owner, repo } = context.repo;
   const number = Number(process.env.PR_NUMBER);
   const actor = process.env.ACTOR;
   const commit = process.env.FIX_COMMIT || null;
+  const head = process.env.FIX_HEAD || commit;
   const took = elapsed();
   const summary = await findSummary(github, owner, repo, number);
   const meta = { ...readMeta(summary), busy: false, status: undefined, warning: undefined };
@@ -606,7 +612,7 @@ async function applyFixes({ github, context, core }) {
   const save = async ({ verdict = false } = {}) => {
     const now = await listThreads(github, owner, repo, number);
     // After a fix: approve once Codex (and anyone before it) resolved every finding, at the commit it pushed.
-    if (verdict) meta.held = await syncVerdict({ github, owner, repo, number, meta, threads: now, core, sha: commit, summaryUrl: summary?.html_url });
+    if (verdict) meta.held = await syncVerdict({ github, owner, repo, number, meta, threads: now, core, sha: head, summaryUrl: summary?.html_url });
     await upsertSummary(github, owner, repo, number, summary, renderSummary(meta, now));
   };
 
@@ -630,16 +636,41 @@ async function applyFixes({ github, context, core }) {
   try {
     diffs = JSON.parse(fs.readFileSync(process.env.FIX_DIFFS_PATH, 'utf8'));
   } catch {}
-  const commitUrl = commit && `https://github.com/${owner}/${repo}/commit/${commit}`;
+  let merge = null;
+  if (commit && process.env.FIX_MERGE_PATH) {
+    try {
+      merge = JSON.parse(fs.readFileSync(process.env.FIX_MERGE_PATH, 'utf8'));
+    } catch (error) {
+      core.warning(`Could not read the merge record: ${error.message}`);
+    }
+  }
+  const commitUrl = (sha) => `https://github.com/${owner}/${repo}/commit/${sha}`;
+  const link = (sha) => `[\`${sha.slice(0, 7)}\`](${commitUrl(sha)})`;
+  // A merge record that cannot be read leaves every fixed thread open: which lines moved is unknown.
+  const stale = new Set(merge ? merge.stale ?? [] : []);
+  const unsure = Boolean(commit && process.env.FIX_MERGE_PATH && !merge);
   const byId = new Map(result.results.map((r) => [r.id, r]));
   const updates = [];
   let declined = 0;
+  let kept = 0;
   for (const thread of threads.filter((t) => !t.resolved)) {
     const r = byId.get(thread.finding.id);
     if (r?.status === 'fixed' && commit) {
       const diff = diffs[thread.finding.id];
-      const lines = [`Fixed in [\`${commit.slice(0, 7)}\`](${commitUrl}) by Codex for @${actor}.`, '', r.explanation];
+      const moved = unsure || stale.has(thread.finding.id);
+      const lines = [moved
+        ? `Fixed in ${link(commit)} by Codex for @${actor}, but \`${merge?.branch ?? 'the branch'}\` changed these lines while Codex worked${merge ? ` (its new commits were merged in ${link(merge.head)})` : ''}, so this stays open: check that the fix still holds at the new head, then resolve it.`
+        : `Fixed in ${link(commit)} by Codex for @${actor}.`, '', r.explanation];
       if (diff) lines.push('', '<details><summary>Change</summary>', '', `${fence(diff)}diff`, diff, fence(diff), '', '</details>');
+      if (moved) {
+        kept += 1;
+        try {
+          await github.rest.pulls.createReplyForReviewComment({ owner, repo, pull_number: number, comment_id: thread.commentId, body: lines.join('\n') });
+        } catch (error) {
+          core.warning(`Could not reply on ${thread.url}: ${error.message}`);
+        }
+        continue;
+      }
       updates.push({ thread, resolve: true, reply: lines.join('\n') });
       continue;
     }
@@ -657,8 +688,10 @@ async function applyFixes({ github, context, core }) {
   const left = await settleThreads(github, owner, repo, number, updates, core);
   const fixed = updates.length - left.length;
   meta.bulk = [
-    commit ? `Codex fixed ${fixed} finding${fixed === 1 ? '' : 's'} in [\`${commit.slice(0, 7)}\`](${commitUrl}) for @${actor}` : `Codex changed nothing for @${actor}`,
+    commit ? `Codex fixed ${fixed} finding${fixed === 1 ? '' : 's'} in ${link(commit)} for @${actor}` : `Codex changed nothing for @${actor}`,
     took && ` in ${took}`,
+    merge && `; \`${merge.branch}\` had moved on meanwhile, so its ${plural(merge.count, 'new commit')} ${merge.count === 1 ? 'was' : 'were'} merged into the fixes (${link(merge.head)}) and pushed`,
+    kept && `; ${kept} fixed but left open because the branch changed ${kept === 1 ? 'its lines' : 'their lines'} while Codex worked`,
     declined ? `; ${declined} not fixed and left open (the reason is on ${declined === 1 ? 'its thread' : 'each thread'}).` : '.',
   ].filter(Boolean).join('');
   meta.warning = unsettledNote(left);

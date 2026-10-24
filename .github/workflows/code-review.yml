@@ -17,7 +17,10 @@ name: Code review
 #     number
 #   - fix: a trusted user ticking the summary's "Fix and resolve all findings" checkbox, or
 #     commenting /fix-all: Codex fixes the open findings, pushes a commit to the PR branch,
-#     replies on each thread with the change and resolves it. In a stack, the commit is then
+#     replies on each thread with the change and resolves it. If the branch moved on meanwhile,
+#     the box merges its new head into the fix and pushes the merge (never a rebase or a forced
+#     push); a conflict pushes nothing, and threads whose lines the new commits changed stay
+#     open (.agents/plugins/code-review/ci/catchup.cjs). In a stack, the commit is then
 #     merged into each PR above it in turn (a merge commit pushed to each branch); a
 #     conflict stops there, with a comment on that PR
 #   - resolve: /resolve-all (without fixing) or /unresolve-all from a trusted user, or
