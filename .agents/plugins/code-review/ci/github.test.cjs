@@ -297,6 +297,28 @@ test('a fix run that resolves every finding approves at the commit it pushed', a
   assert.deepEqual(submitted.map((r) => [r.event, r.commit_id]), [['APPROVE', 'c0ffee5678']]);
 });
 
+test('a fix reply lists the checks Codex ran, and a finding judged wrong stays open with its own reply', async () => {
+  const { github, state, replies, comments } = fakeGitHub({ a: { resolved: false }, b: { resolved: false } }, { summaryMeta: reviewed, reviews: changesRequested });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-test-'));
+  fs.writeFileSync(`${dir}/fixes.json`, JSON.stringify({ summary: 's', commit_message: 'm', results: [
+    { id: 'a', status: 'fixed', explanation: 'Fixed.', files: ['a.rs'], checks: ['tsc 7.0.2 on the input: TS2403 at 1:20', 'cargo test -p ts_r_checker: exit 0'] },
+    { id: 'b', status: 'wrong', explanation: 'tsc 7.0.2 reports TS1514 here too.', files: [], checks: ['bench/node_modules/.bin/tsc --noEmit\n/tmp/o/a.ts: TS1514'] },
+  ] }));
+  fs.writeFileSync(`${dir}/diffs.json`, '{}');
+  try {
+    await withEnv({ PR_NUMBER: '3', ACTOR: 'riley', FIX_COMMIT: 'c0ffee5678', FIXES_PATH: `${dir}/fixes.json`, FIX_DIFFS_PATH: `${dir}/diffs.json` },
+      () => review.applyFixes({ github, context: { repo, payload: {} }, core }));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  assert.equal(state.a.isResolved, true);
+  assert.equal(state.b.isResolved, false);
+  const on = (id) => replies.filter((r) => r.thread === id).map((r) => r.body).join('\n');
+  assert.match(on('a'), /Fixed\.\n\nChecked:\n- tsc 7\.0\.2 on the input: TS2403 at 1:20\n- cargo test -p ts_r_checker: exit 0/);
+  assert.match(on('b'), /^Codex \(asked by @riley\) judged this finding wrong and changed nothing, so it stays open for a person to confirm and resolve: tsc 7\.0\.2 reports TS1514 here too\.\n\nChecked:\n- bench\/node_modules\/\.bin\/tsc --noEmit \/tmp\/o\/a\.ts: TS1514$/);
+  assert.match(comments[0].body, /1 not fixed and left open \(1 of them judged wrong\)/);
+});
+
 // A fix run whose branch moved on: the push step merged the new commits in (FIX_MERGE_PATH).
 async function fixAfterMerge(github, results, merge) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-test-'));
