@@ -589,9 +589,17 @@ function bulkIntent({ action, comment, changes }, threads) {
   return null;
 }
 
+// The commands a fix result says were run for its finding, as a list under the reply.
+const checksList = (r) => {
+  const checks = (Array.isArray(r?.checks) ? r.checks : []).filter((c) => typeof c === 'string' && c.trim()).slice(0, 12);
+  return checks.length ? ['', 'Checked:', ...checks.map((c) => `- ${c.trim().replace(/\s*\n\s*/g, ' ').slice(0, 400)}`)] : [];
+};
+
 // Results of a Codex fix run (box/job.mjs push): replies on every open finding, with the commit
 // and diff when it was fixed (then resolves it) or the reason when it was not (left open).
-//   FIXES_PATH   Codex's result ({ summary, commit_message, results: [{ id, status, explanation, files }] })
+//   FIXES_PATH   Codex's result ({ summary, commit_message, results: [{ id, status, explanation, files, checks }] });
+//                status is fixed, not_fixed or wrong (Codex judged the finding mistaken; left open
+//                for a person to agree), checks what it ran for the finding (older runs have none)
 //   FIX_COMMIT   the fix commit, if pushed; FIX_DIFFS_PATH: { [finding id]: diff text }
 //   FIX_HEAD     the branch's head after the push, when that is not FIX_COMMIT (a merge of the
 //                branch's new commits into it); the verdict is given there
@@ -652,6 +660,7 @@ async function applyFixes({ github, context, core }) {
   const byId = new Map(result.results.map((r) => [r.id, r]));
   const updates = [];
   let declined = 0;
+  let disputed = 0;
   let kept = 0;
   for (const thread of threads.filter((t) => !t.resolved)) {
     const r = byId.get(thread.finding.id);
@@ -660,7 +669,7 @@ async function applyFixes({ github, context, core }) {
       const moved = unsure || stale.has(thread.finding.id);
       const lines = [moved
         ? `Fixed in ${link(commit)} by Codex for @${actor}, but \`${merge?.branch ?? 'the branch'}\` changed these lines while Codex worked${merge ? ` (its new commits were merged in ${link(merge.head)})` : ''}, so this stays open: check that the fix still holds at the new head, then resolve it.`
-        : `Fixed in ${link(commit)} by Codex for @${actor}.`, '', r.explanation];
+        : `Fixed in ${link(commit)} by Codex for @${actor}.`, '', r.explanation, ...checksList(r)];
       if (diff) lines.push('', '<details><summary>Change</summary>', '', `${fence(diff)}diff`, diff, fence(diff), '', '</details>');
       if (moved) {
         kept += 1;
@@ -675,11 +684,15 @@ async function applyFixes({ github, context, core }) {
       continue;
     }
     declined += 1;
+    if (r?.status === 'wrong') disputed += 1;
     const why = !r ? 'Codex did not report on this finding.' : r.status === 'fixed' ? `Codex changed nothing that could be pushed for it. ${r.explanation}` : r.explanation;
+    const opening = r?.status === 'wrong'
+      ? `Codex (asked by @${actor}) judged this finding wrong and changed nothing, so it stays open for a person to confirm and resolve: ${why}`
+      : `Not fixed by Codex (asked by @${actor}), so this stays open: ${why}`;
     try {
       await github.rest.pulls.createReplyForReviewComment({
         owner, repo, pull_number: number, comment_id: thread.commentId,
-        body: `Not fixed by Codex (asked by @${actor}), so this stays open: ${why}`,
+        body: [opening, ...checksList(r)].join('\n'),
       });
     } catch (error) {
       core.warning(`Could not reply on ${thread.url}: ${error.message}`);
@@ -692,7 +705,7 @@ async function applyFixes({ github, context, core }) {
     took && ` in ${took}`,
     merge && `; \`${merge.branch}\` had moved on meanwhile, so its ${plural(merge.count, 'new commit')} ${merge.count === 1 ? 'was' : 'were'} merged into the fixes (${link(merge.head)}) and pushed`,
     kept && `; ${kept} fixed but left open because the branch changed ${kept === 1 ? 'its lines' : 'their lines'} while Codex worked`,
-    declined ? `; ${declined} not fixed and left open (the reason is on ${declined === 1 ? 'its thread' : 'each thread'}).` : '.',
+    declined ? `; ${declined} not fixed and left open${disputed ? ` (${disputed} of them judged wrong)` : ''} (the reason is on ${declined === 1 ? 'its thread' : 'each thread'}).` : '.',
   ].filter(Boolean).join('');
   meta.warning = unsettledNote(left);
   await save({ verdict: true });
