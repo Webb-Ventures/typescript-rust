@@ -958,20 +958,12 @@ impl Linker<'_> {
 }
 
 /// Top-level keys of a JSON module whose value is an object (`None` for other modules).
-fn json_keys(module: &crate::graph::Module) -> Option<Vec<String>> {
+fn json_keys(module: &crate::graph::Module) -> Option<&[String]> {
     if module.loader != Loader::Json {
         return None;
     }
     if module.default_only {
-        return Some(Vec::new());
+        return Some(&[]);
     }
-    // The JSON loader's source is `module.exports = (\n<json>\n);`.
-    let js = &module.source.js;
-    let body = js
-        .strip_prefix("module.exports = (")?
-        .trim_end()
-        .strip_suffix(");")?;
-    let parsed = ts_r_config::jsonc::parse(body, &module.path);
-    let members = parsed.root?.as_object()?.to_vec();
-    Some(members.into_iter().map(|m| m.key).collect())
+    module.source.json_keys.as_deref()
 }

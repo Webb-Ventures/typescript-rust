@@ -239,13 +239,24 @@ impl BuildContext {
         let wd = &self.opts.working_dir;
         let mut out = Vec::new();
         let mut names: Vec<Option<String>> = Vec::new();
+        let mut seen = FxHashSet::default();
         let mut errs = Vec::new();
         for e in &self.opts.entry_points {
             let abs = path::resolve(wd, &e.path);
             let fs = self.prep.resolver.fs();
             if e.path.contains('*') && !fs.file_exists(&abs) {
                 // A glob entry: every matching file, in sorted order.
-                let found = glob_entries(&**fs, &abs);
+                let found = match glob_entries(&**fs, &abs) {
+                    Ok(found) => found,
+                    Err(text) => {
+                        errs.push(Message::new(
+                            Severity::Error,
+                            None,
+                            format!("Entry point glob {:?} {text}", e.path),
+                        ));
+                        continue;
+                    }
+                };
                 if found.is_empty() {
                     errs.push(Message::new(
                         Severity::Error,
@@ -255,7 +266,7 @@ impl BuildContext {
                 }
                 for f in found {
                     let f = fs.realpath(&f);
-                    if !out.iter().zip(&names).any(|(p, n)| *p == f && n.is_none()) {
+                    if seen.insert((f.clone(), None)) {
                         out.push(f);
                         names.push(None);
                     }
@@ -279,11 +290,7 @@ impl BuildContext {
                     }
                 }
             };
-            if out
-                .iter()
-                .zip(&names)
-                .any(|(p, n)| *p == resolved && *n == e.name)
-            {
+            if !seen.insert((resolved.clone(), e.name.clone())) {
                 continue;
             }
             out.push(resolved);
@@ -1093,14 +1100,14 @@ impl Timer {
 /// Files matching an absolute entry-point glob (`*` within a name, `**/` any directories),
 /// sorted. The walk starts at the directory before the first wildcard and is bounded in
 /// depth and size.
-fn glob_entries(fs: &dyn FileSystem, pattern: &str) -> Vec<String> {
+fn glob_entries(fs: &dyn FileSystem, pattern: &str) -> Result<Vec<String>, String> {
     const MAX_DEPTH: usize = 64;
     const MAX_FILES: usize = 100_000;
     let Some(star) = pattern.find('*') else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(slash) = pattern[..star].rfind('/') else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let base = if slash == 0 { "/" } else { &pattern[..slash] };
     let rest = &pattern[slash + 1..];
@@ -1111,7 +1118,9 @@ fn glob_entries(fs: &dyn FileSystem, pattern: &str) -> Vec<String> {
         for entry in fs.read_dir(&dir) {
             seen += 1;
             if seen > MAX_FILES {
-                break;
+                return Err(format!(
+                    "exceeds the traversal limit of {MAX_FILES} entries"
+                ));
             }
             let child_rel = if rel.is_empty() {
                 entry.name.clone()
@@ -1125,7 +1134,10 @@ fn glob_entries(fs: &dyn FileSystem, pattern: &str) -> Vec<String> {
                         found.push(child);
                     }
                 }
-                ts_r_config::EntryKind::Directory if depth < MAX_DEPTH => {
+                ts_r_config::EntryKind::Directory if glob_directory(rest, &child_rel) => {
+                    if depth >= MAX_DEPTH {
+                        return Err(format!("exceeds the traversal depth limit of {MAX_DEPTH}"));
+                    }
                     stack.push((child, child_rel, depth + 1));
                 }
                 ts_r_config::EntryKind::Directory => {}
@@ -1133,5 +1145,22 @@ fn glob_entries(fs: &dyn FileSystem, pattern: &str) -> Vec<String> {
         }
     }
     found.sort();
-    found
+    Ok(found)
+}
+
+/// Whether any continuation of a directory can match the pattern. A directory prefix
+/// must end at a pattern slash or within a `**` (which can consume slashes).
+fn glob_directory(pattern: &str, dir: &str) -> bool {
+    let prefix = format!("{dir}/");
+    let bytes = pattern.as_bytes();
+    bytes.iter().enumerate().any(|(i, &b)| {
+        let end = if b == b'/' {
+            i + 1
+        } else if b == b'*' && bytes.get(i + 1) == Some(&b'*') {
+            i + 2
+        } else {
+            return false;
+        };
+        crate::resolve::glob(&pattern[..end], &prefix)
+    })
 }

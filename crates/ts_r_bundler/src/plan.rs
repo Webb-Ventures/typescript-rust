@@ -1095,12 +1095,9 @@ impl Planner<'_> {
             let v = this.import_var(m, t);
             let to_esm = this.helper_names[Helper::ToEsm as usize].clone();
             let mut args = vec![Expr::call(&this.wrapper[t as usize], vec![])];
-            let json = {
-                let tm = &this.g.modules[t as usize];
-                tm.loader == Loader::Json && !tm.default_only
-            };
-            if json {
-                args.push(Expr::Num(2));
+            let tm = &this.g.modules[t as usize];
+            if tm.loader == Loader::Json {
+                args.push(Expr::Num(if tm.default_only { 3 } else { 2 }));
             } else if node_mode {
                 args.push(Expr::Num(1));
             }

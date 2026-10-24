@@ -28,7 +28,8 @@ an empty `files` list unless references are listed; TS18003 unless the config ha
 (nearest `tsconfig.json` upwards, `-p` file-or-directory). `FileSystem` (with `RealFs`,
 `MemoryFs`) is the fs abstraction the resolver reuses (`RealFs::read_file` decodes through
 `fs::decode_text`: a UTF-16 byte order mark, either endianness, means UTF-16 as in tsc;
-otherwise UTF-8 with U+FFFD for invalid bytes; `stamp(path)`: length and
+otherwise UTF-8 with U+FFFD for invalid bytes; `read_bytes` preserves original bytes in
+`RealFs` and defaults to UTF-8 contents for text-backed implementations; `stamp(path)`: length and
 modification time without a read, `RealFs` only; the default `None` makes callers read and
 compare, so a wrapper that changes contents must not forward it; `may_be_symlink(path)`:
 `false` only when the path is known not to be a symlink, so globbing derives a directory's

@@ -13,6 +13,7 @@
 //!   plus `default` = `module.exports` unless the module says `__esModule` (and the importer
 //!   isn't in Node's ESM mode, where `default` is always `module.exports`). `nodeMode` 2
 //!   is a JSON module: `default` is always the value and, as in an ES namespace, a getter.
+//!   Mode 3 is attributed JSON, exposing only that default getter.
 //! - `__tsrToCjs(ns)` views an ES namespace as CommonJS exports (`__esModule: true`); cached
 //!   so `require()` returns the same object every time. A namespace with a
 //!   `"module.exports"` export returns that value instead (Node's `require(esm)` rule).
@@ -145,7 +146,7 @@ impl Helpers {
         if self.used[Helper::ToEsm.index()] {
             let _ = write!(
                 s,
-                "var {to_esm} = (mod, nodeMode) => {{\n  const ns = {{}};\n  if (nodeMode || !mod || !mod.__esModule) Object.defineProperty(ns, \"default\", nodeMode > 1 ? {{ get: () => mod, enumerable: true }} : {{ value: mod, enumerable: true }});\n  return {copy}(ns, mod);\n}};\n"
+                "var {to_esm} = (mod, nodeMode) => {{\n  const ns = {{}};\n  if (nodeMode || !mod || !mod.__esModule) Object.defineProperty(ns, \"default\", nodeMode > 1 ? {{ get: () => mod, enumerable: true }} : {{ value: mod, enumerable: true }});\n  return nodeMode === 3 ? ns : {copy}(ns, mod);\n}};\n"
             );
         }
         if self.used[Helper::ToCjs.index()] {

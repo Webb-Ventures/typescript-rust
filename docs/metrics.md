@@ -84,7 +84,7 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Area | Result |
 |---|---|
-| Type checker vs tsc's conformance suite (exact diagnostics) | 96.6% of 12,750 compared test variants |
+| Type checker vs tsc's conformance suite (exact diagnostics) | 96.7% of 12,750 compared test variants |
 | private-app projects with exactly tsc's diagnostics | 25 of 25 |
 | private-app diagnostics: extra / missing vs tsc | 0 / 0 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
