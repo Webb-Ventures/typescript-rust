@@ -77,7 +77,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Release profile (fat LTO) vs thin LTO | 7% smaller, 2–4% faster |
 | PGO on top | 3–5% faster, 26% larger (opt-in; measured before training moved to the public repos) |
 | npm package, packed | `ts-r-lint` 1.2 MB · `ts-r-check` 2.3 MB · `ts-r-lsp` 3.7 MB · all tools 11.7 MB |
-| Minified output vs esbuild, top 1,000 packages | 3.1% larger in total over 909 packages; median ratio 1.048 (ecosystem/STATUS.md) |
+| Minified output vs esbuild, top 1,000 packages | 2.9% smaller in total over 914 packages; median ratio 0.993 (ecosystem/STATUS.md) |
 | `parse<T>` runtime | 510 B gzipped (budget 0.5 KB) |
 
 ## Correctness
@@ -101,11 +101,11 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Stage | Pass |
 |---|---|
-| Parse | 99.9% (988 / 989) |
+| Parse | 97.0% (959 / 989; the 30 failures are grammar errors ts-r's parser reports in JavaScript that Node and tsc accept, most often TS1313) |
 | TS transform | 100% (48 / 48) |
 | Bundle and run, vs esbuild | 100% (915 / 915) |
-| Type check, vs tsc 7 | 86.6% (614 / 709) |
-| Package's own test suite through ts-r | 0 / 4 (all four fail only on ts-r-check extra errors; all pass with those ignored) |
+| Type check, vs tsc 7 | 92.0% (652 / 709) |
+| Package's own test suite through ts-r | 2 / 4 (chalk and commander fail only on an extra TS2661 from ts-r-check, and pass with it ignored) |
 
 ## Sources
 

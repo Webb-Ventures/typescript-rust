@@ -138,8 +138,8 @@ Correctness:
 
 - esbuild's end-to-end bundler tests, run against ts-r-build: 742 of 779 compared cases
   pass (95.3%).
-- Ecosystem bundle stage: 844 packages pass and 71 fail (92.2%). Minified output is 3.1%
-  larger than esbuild's in total, with a median per-package ratio of 1.048.
+- Ecosystem bundle stage: all 915 compared packages pass (100%). Minified output is 2.9%
+  smaller than esbuild's in total over 914 packages, with a median per-package ratio of 0.993.
 
 Method and commits: [build](/benchmarks/#build),
 [ecosystem](/benchmarks/#ecosystem) and
