@@ -174,6 +174,17 @@ pub fn apply_dev_options(
         Value::String(s) => config.public_dir = Some(config.root.join(s)),
         _ => {}
     }
+    for p in dev["assetsInclude"].as_array().into_iter().flatten() {
+        let added = match (p["glob"].as_str(), p["regex"].as_str()) {
+            (Some(g), _) => config.assets_include.add_glob(g, &config.root),
+            (None, Some(r)) => js_regex(r, p["flags"].as_str().unwrap_or(""))
+                .map(|re| config.assets_include.add_regex(re)),
+            _ => Ok(()),
+        };
+        if let Err(e) = added {
+            warnings.push(format!("`assetsInclude`: {e}"));
+        }
+    }
     let s = &dev["server"];
     if let Some(h) = s["host"].as_str() {
         config.host = h.to_owned();
@@ -1026,6 +1037,28 @@ mod tests {
         apply_dev_options(&dev, &mut config, &rewrite);
         assert_eq!(config.env_dir, Some(root.join("env")));
         assert_eq!(config.public_dir, Some(outside));
+    }
+
+    #[test]
+    fn assets_include_resolves_against_this_root() {
+        let root = std::env::temp_dir().join("checkout-c");
+        let mut config = ts_r_hmr::DevConfig::new(&root);
+        let dev = json!({ "assetsInclude": [
+            { "glob": "**/*.unknown" },
+            { "glob": "nested/*.custom" },
+            { "regex": "\\.GLTF$", "flags": "i" },
+            { "regex": "(" },
+        ] });
+        let rewrite = |_: usize| -> ts_r_hmr::proxy::Rewrite { unreachable!() };
+        let warnings = apply_dev_options(&dev, &mut config, &rewrite);
+        let f = &config.assets_include;
+        assert!(f.matches(&root.join("a/b.unknown")));
+        assert!(f.matches(&root.join("nested/b.custom")));
+        assert!(!f.matches(&root.join("other/b.custom")));
+        assert!(f.matches(&root.join("m.gltf")));
+        assert!(!f.matches(&root.join("m.js")));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("`assetsInclude`"), "{warnings:?}");
     }
 
     #[test]

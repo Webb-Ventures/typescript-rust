@@ -903,6 +903,11 @@ Files, by layer:
   the driver reports them only for checked files (`should_check`) and they do not stop
   semantic checking. A constructor's or setter's annotation is not checked as a return type
   (no TS2355).
+  Regex errors that depend on the target (TS1501 flag, TS1503 named groups) are grammar-only
+  in the parser; `check.rs` keeps them only when the file's target is below the one named in
+  the message (`regex_needs_target`). Octal and `\8`/`\9` escapes in strings (TS1487/TS1488)
+  are in `SourceFile::lenient`: they are tsc syntax errors (the driver reports them with the
+  syntax errors and marks the file broken), so the grammar merge skips them.
   Grammar errors the parser does
   not report (TS1042/1044/1070/1090/1184/2369 modifiers, TS1163, TS1308 for `await` in a
   function that is not async, at the keyword) are reported here; TS5076,
@@ -2919,13 +2924,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-24, 1d94474, parity/checker merged with main at 2cd82e9 (#29's binder
-  changes): export= default views, widening implicit-any errors, class base checks and
-  import-name messages, object literal union reads; 12750 compared variants, 25 s on 4
-  threads): 12335 exact (96.7%; all diagnostics and chains), 12355 (96.9%) exact on first
-  lines; 207 variants with a diagnostic tsc does not report, 17 of them tests where tsc
-  reports nothing.
-  Earlier: 12331, 209 and 17 (e06c936, parity/checker before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-24, 48eb582, parity/grammar-diagnostics merged with main at 1c10cde (#31's
+  checker round and #29's binder changes): the lexer's regex pattern and flag errors and octal
+  escape errors; 12750 compared variants, 21 s on 4 threads): 12345 exact (96.8%; all
+  diagnostics and chains), 12365 (97.0%) exact on first lines; 203 variants with a diagnostic
+  tsc does not report, 17 of them tests where tsc reports nothing.
+  Earlier: 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

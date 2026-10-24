@@ -28,6 +28,7 @@ are cached by content hash. Change `cache_id` when output for the same input can
 | `graph.rs` | `ModuleGraph` (u32 ids, importers/importees, accepted deps, `propagate`) |
 | `scan.rs` | JS import / `import.meta.hot` scanner (not a parser; never fails) |
 | `render.rs` | import rewriting, HTML client injection, CSS-as-JS, content types, code frames |
+| `html_proxy.rs` | inline `<script type="module">` in HTML → `/page.html?html-proxy&index=N.js` modules |
 | `watch` | re-export of [`ts_r_watch`](../ts_r_watch/AGENTS.md): notify watcher, `Debouncer`, macOS kqueue fast path, dropping FSEvents' replayed startup events (moved out in design record 0012, E4) |
 | `timing.rs` | per-step latency records, `/@ts-r/stats` |
 | `cache.rs` | `TransformCache`: memory + `ts_r_cache` namespace `dev-transform` |
@@ -58,7 +59,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `last_hmr_timestamp = T`, and every importer's rewritten import of it carries `?t=T`, so the
   browser fetches fresh instances along the whole chain. Cycles terminate and set
   `isWithinCircularImport` (client reloads if the re-import throws). `invalidate()` re-propagates
-  from the module skipping its own acceptance.
+  from the module skipping its own acceptance. Each update item names the module whose
+  change started the chain (`firstInvalidatedBy`); the client sends it back with
+  `vite:invalidate`, and an invalidation whose propagation reaches that module again is a
+  full reload, so accept handlers that keep invalidating can't loop.
 - **Graph is built lazily from what the browser requests** (that is the unbundled-ESM graph).
   Nodes are never removed; ids stay valid. Edges are replaced wholesale on each prepare;
   importees that lose their last importer are sent in a `prune` message.
@@ -90,7 +94,18 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `timestamp`, `explicitImportRequired`, `isWithinCircularImport`; `full-reload`, `prune`,
   `error`, `custom`). We add only `tsrId` on `update` (clients ignore unknown fields). The
   overlay element is `<vite-error-overlay>`; CSS `<style>` tags carry `data-vite-dev-id`.
-  Client → server: `custom` events (`vite:invalidate`, `ts-r:applied`, user events).
+  Client → server: `custom` events (`vite:invalidate`, `ts-r:applied`, user events). A
+  client connecting or disconnecting is passed to the plugin host as Vite's
+  `vite:client:connect`/`vite:client:disconnect` events (only when a plugin listens).
+- **Inline module scripts are modules.** The served HTML (after `%VAR%` and
+  `transformIndexHtml`) has each non-empty inline `<script type="module">` replaced by a
+  `src` to `{page}?html-proxy&index=N.js`; that URL's graph file is the pseudo path
+  `{page file}?html-proxy&index=N.js` (same directory, so relative imports resolve), its
+  source the N-th inline script of the same transformed HTML, rendered like any module.
+- **`assetsInclude` files are assets.** A file with an unknown extension and no query goes
+  to plugin `load`/`transform` as a plugin module, unless `DevConfig::assets_include` (a
+  `glob::PathFilter` of root-resolved globs and regexes, filled from Vite's `assetsInclude`)
+  matches it: then it is served as an asset URL like a `.png`.
 - **Non-JS imports carry `?import`** (CSS, JSON, assets) so the server can tell a module
   request from a `<link>`/`<img>` request; `explicitImportRequired` tells the client to keep it
   when re-importing. CSS without `?import` (and not `Sec-Fetch-Dest: script`) is served as CSS
@@ -326,8 +341,8 @@ wrapper ~0.6, browser ~2.4).
 - Dep scan: only `<script type="module" src>` in `index.html` (no inline module scripts, no
   multi-page `build.rollupOptions.input`); imports behind non-literal `import(expr)` are found
   only on request (re-batch + reload).
-- Non-literal dynamic `import(expr)` isn't rewritten (bare specifiers in it fail); inline
-  `<script type="module">` in HTML isn't rewritten; in app (source) CSS
+- Non-literal dynamic `import(expr)` isn't rewritten (bare specifiers in it fail); an HTML
+  change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app (source) CSS
   `@import` and CSS modules (`.module.css`) aren't handled and `url()` is made absolute only
   (dependency CSS is bundled, see above). Dependency CSS isn't watched (only linked packages).
 - `new URL(`./${name}.png`, import.meta.url)` (a template with expressions) isn't turned into

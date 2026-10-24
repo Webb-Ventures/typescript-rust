@@ -67,6 +67,9 @@ pub enum Mode {
     Version,
     /// Internal: compile one file to stdout (`esm`/`cjs` line, then the code).
     Compile(String),
+    /// Internal: resolve the specifier (the positional argument) imported from this parent
+    /// through tsconfig `paths` and `baseUrl`, printing the file or nothing.
+    Resolve(String),
     /// Internal: the strategy "hook" compiler process.
     Serve,
 }
@@ -133,7 +136,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "-h" | "--help" => cli.mode = Mode::Help,
             "-V" | "--version" => cli.mode = Mode::Version,
             "--serve" => cli.mode = Mode::Serve,
-            "--tsconfig" | "--strategy" | "--node" | "--compile" => {
+            "--tsconfig" | "--strategy" | "--node" | "--compile" | "--resolve" => {
                 let v = match inline {
                     Some(v) => v,
                     None => value(&mut i, flag)?,
@@ -142,6 +145,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
                     "--tsconfig" => cli.tsconfig = Some(v),
                     "--node" => cli.node = v,
                     "--compile" => cli.mode = Mode::Compile(v),
+                    "--resolve" => cli.mode = Mode::Resolve(v),
                     _ => {
                         cli.strategy = match v.as_str() {
                             "prebuild" => Strategy::Prebuild,
@@ -193,6 +197,7 @@ pub fn main_with(args: &[String]) -> i32 {
             0
         }
         Mode::Compile(file) => compile_to_stdout(&cli, file),
+        Mode::Resolve(parent) => resolve_to_stdout(&cli, parent),
         Mode::Serve => {
             let engine = engine_from_env(&cli);
             match serve::serve(&engine) {
@@ -207,12 +212,30 @@ pub fn main_with(args: &[String]) -> i32 {
 /// The project for the internal modes: the run's entry and tsconfig come from the parent.
 fn engine_from_env(cli: &Cli) -> Engine {
     let entry = std::env::var("TS_R_RUN_ENTRY").unwrap_or_else(|_| absolute(&cli.entry));
-    let tsconfig = std::env::var("TS_R_RUN_TSCONFIG")
+    let project = Project::load(&entry, tsconfig_from_env(cli).as_deref());
+    Engine::new(project, cli.cache, cli.source_maps)
+}
+
+fn tsconfig_from_env(cli: &Cli) -> Option<String> {
+    std::env::var("TS_R_RUN_TSCONFIG")
         .ok()
         .filter(|s| !s.is_empty())
-        .or_else(|| cli.tsconfig.clone());
-    let project = Project::load(&entry, tsconfig.as_deref());
-    Engine::new(project, cli.cache, cli.source_maps)
+        .or_else(|| cli.tsconfig.clone())
+}
+
+/// For the preload: a bare specifier Node couldn't resolve, imported from a file the graph
+/// walk didn't compile (plain JavaScript), still goes through tsconfig `paths`, as under tsx.
+fn resolve_to_stdout(cli: &Cli, parent: &str) -> i32 {
+    let parent = absolute(parent);
+    let entry = std::env::var("TS_R_RUN_ENTRY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| parent.clone());
+    let project = Project::load(&entry, tsconfig_from_env(cli).as_deref());
+    if let Some(file) = project.resolve(&cli.entry, &parent, false) {
+        println!("{file}");
+    }
+    0
 }
 
 fn compile_to_stdout(cli: &Cli, file: &str) -> i32 {

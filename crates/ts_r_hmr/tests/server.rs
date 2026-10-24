@@ -442,6 +442,19 @@ fn hot_updates_over_websocket() {
     ws.send_text(r#"{"type":"custom","event":"vite:invalidate","data":{"path":"/src/counter.js","message":"test"}}"#)
         .unwrap();
     assert_eq!(next_of(&mut ws, "full-reload")["type"], "full-reload");
+    //    main.js accepts accepted.js: its update names the module that started the chain.
+    ws.send_text(
+        r#"{"type":"custom","event":"vite:invalidate","data":{"path":"/src/accepted.js"}}"#,
+    )
+    .unwrap();
+    let m = next_of(&mut ws, "update");
+    assert_eq!(m["updates"][0]["path"], "/src/main.js", "{m}");
+    assert_eq!(m["updates"][0]["firstInvalidatedBy"], "/src/accepted.js");
+    //    An invalidation from inside that update that would re-run the module that started
+    //    it is a loop: reload instead.
+    ws.send_text(r#"{"type":"custom","event":"vite:invalidate","data":{"path":"/src/accepted.js","firstInvalidatedBy":"/src/main.js"}}"#)
+        .unwrap();
+    assert_eq!(next_of(&mut ws, "full-reload")["type"], "full-reload");
 
     // 9. HTML change → full reload with its path.
     f.app.write(
@@ -763,5 +776,56 @@ fn virtual_module_imports_keep_queries_and_reach_files_outside_the_root() {
     let (status, _, lib) = http_get(server.addr(), &urls[1], &[]);
     assert_eq!(status, 200, "{lib}");
     assert!(lib.contains("export const l = 1"), "{lib}");
+    server.shutdown();
+}
+
+/// An inline `<script type="module">` is served as its own module from the page's
+/// `?html-proxy&index=N.js` URL: imports resolved from the page's directory, `import.meta`
+/// replaced, and a nested page's scripts numbered on their own.
+#[test]
+fn inline_module_scripts_are_served_through_html_proxy_urls() {
+    let app = TempDir::new("srv-proxy");
+    let cache = TempDir::new("srv-proxy-cache");
+    app.write(
+        "index.html",
+        "<!doctype html><body><script type=\"module\">import { a } from './src/a.js';\ndocument.body.dataset.mode = import.meta.env.MODE + a;</script></body>\n",
+    );
+    app.write(
+        "nested/page.html",
+        "<script type=\"module\" src=\"./x.js\"></script>\n<script type=\"module\">import './x.js'</script>\n",
+    );
+    app.write("src/a.js", "export const a = 1;\n");
+    app.write("nested/x.js", "export {};\n");
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    let (_, _, html) = http_get(addr, "/", &[]);
+    assert!(
+        html.contains(
+            "<script type=\"module\" src=\"/index.html?html-proxy&index=0.js\"></script>"
+        ),
+        "{html}"
+    );
+    let (status, headers, js) = http_get(addr, "/index.html?html-proxy&index=0.js", &[]);
+    assert_eq!(status, 200, "{js}");
+    assert!(
+        header(&headers, "content-type").is_some_and(|c| c.contains("javascript")),
+        "{headers:?}"
+    );
+    assert!(js.contains("from '/src/a.js'"), "{js}");
+    assert!(js.contains("\"MODE\": \"development\""), "{js}");
+    let (_, _, html) = http_get(addr, "/nested/page.html", &[]);
+    assert!(
+        html.contains("src=\"/nested/page.html?html-proxy&index=0.js\""),
+        "{html}"
+    );
+    let (_, _, js) = http_get(addr, "/nested/page.html?html-proxy&index=0.js", &[]);
+    assert!(js.contains("import '/nested/x.js'"), "{js}");
+    assert_eq!(
+        http_get(addr, "/index.html?html-proxy&index=5.js", &[]).0,
+        404
+    );
     server.shutdown();
 }

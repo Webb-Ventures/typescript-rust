@@ -1,0 +1,13 @@
+{
+  "name": "ts-r-run-oracle-harness",
+  "private": true,
+  "description": "Test-harness libraries tsx's test suite imports (the oracle's own manten/tsx-utils shims replace the rest). Installed into bench/run-oracle/node_modules by `npm ci`; nothing here runs inside ts-r-run.",
+  "type": "module",
+  "devDependencies": {
+    "execa": "8.0.1",
+    "expect": "30.5.2",
+    "fs-fixture": "2.16.0",
+    "outdent": "0.8.0",
+    "strip-ansi": "7.2.0"
+  }
+}

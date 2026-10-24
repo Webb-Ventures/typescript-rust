@@ -59,6 +59,28 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
     })
 }
 
+/// `text` with the first whole-word `from` of its first line replaced by `to`.
+fn rename_word(text: &str, from: &str, to: &str) -> String {
+    let line = text.find('\n').unwrap_or(text.len());
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while !from.is_empty() && from != to {
+        let Some(at) = text[i..line].find(from).map(|a| a + i) else {
+            break;
+        };
+        let end = at + from.len();
+        if (at == 0 || !word(bytes[at - 1])) && (end >= bytes.len() || !word(bytes[end])) {
+            return format!("{}{to}{}", &text[..at], &text[end..]);
+        }
+        i = end;
+        if i >= line {
+            break;
+        }
+    }
+    text.to_string()
+}
+
 /// tsserver-style display string of a symbol (`const x: number`, `(property) A.b: string`,
 /// `function f(a: string): void`). `at` is the name being described, for narrowed types.
 pub fn describe(ck: &mut Ck<'_, '_>, s: SymId, at: Option<Loc>) -> String {
@@ -71,11 +93,22 @@ fn describe_depth(ck: &mut Ck<'_, '_>, s: SymId, at: Option<Loc>, depth: u32) ->
     let name = c.sym_name(s).to_string();
     if flags.intersects(SymbolFlags::ALIAS) {
         return match c.resolve_alias(s) {
+            // tsc 7 describes the target under the alias's own name: `(alias) interface I`,
+            // `(alias) module m` (`import m = require()`), `(alias) namespace ns` (`* as ns`).
             Some(t) if t != s && depth < 4 => {
+                if c.sym_flags(t).intersects(SymbolFlags::MODULE_FILE) {
+                    let equals = c.first_decl(s).is_some_and(|d| {
+                        let parents = c.file(d.file).parents();
+                        [Some(d.node), parents.parent(d.node)]
+                            .into_iter()
+                            .flatten()
+                            .any(|n| matches!(c.ast(d.file).node(n), Node::ImportEquals { .. }))
+                    });
+                    let kw = if equals { "module" } else { "namespace" };
+                    return format!("(alias) {kw} {name}");
+                }
                 let inner = describe_depth(ck, t, None, depth + 1);
-                // tsserver drops the `function` keyword of aliased functions.
-                let inner = inner.strip_prefix("function ").unwrap_or(&inner);
-                format!("(alias) {inner}\nimport {name}")
+                format!("(alias) {}", rename_word(&inner, c.sym_name(t), &name))
             }
             _ => format!("import {name}"),
         };
@@ -453,5 +486,13 @@ mod tests {
             "Adds.\n\n*@param* `a` — first\n\n*@param* `b` — second\n\n*@returns* — sum"
         );
         assert_eq!(jsdoc_markdown("/** One line. */"), "One line.");
+    }
+
+    #[test]
+    fn rename_word_replaces_whole_words_on_the_first_line() {
+        assert_eq!(rename_word("interface x", "x", "test"), "interface test");
+        assert_eq!(rename_word("const xs: x", "x", "y"), "const xs: y");
+        assert_eq!(rename_word("class A\nA", "A", "B"), "class B\nA");
+        assert_eq!(rename_word("type T = U", "V", "W"), "type T = U");
     }
 }
