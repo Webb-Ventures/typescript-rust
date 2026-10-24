@@ -175,3 +175,11 @@ fn multiline_comments_keep_return_and_throw_operands_parenthesized() {
         }
     }
 }
+
+/// Static fields and blocks of a class-decorated derived class read `super` through
+/// `Reflect.get(_classSuper, k, _classThis)` (calls through `.call`, tags through `.bind`);
+/// an anonymous heritage is `(0, e)`, and static blocks alone don't name the class.
+#[test]
+fn es_decorated_statics() {
+    check("es_decorated_statics");
+}

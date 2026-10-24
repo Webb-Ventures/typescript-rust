@@ -26,10 +26,13 @@
 //! are folded into the next computed key (`[(_x_decorators = [dec], _a = __propKey(k))]`), or
 //! into the decoration block when no computed key follows (`this` there becomes `_outerThis`).
 //!
+//! In static fields and blocks of a class-decorated derived class, `super` reads, calls and
+//! tags go through `Reflect.get(_classSuper, k, _classThis)`.
+//!
 //! Not done (tsc does): static private members of class-decorated classes are not moved to
-//! `WeakMap`-style storage, `super` in static members of class-decorated classes is not
-//! rewritten to `_classSuper`, and anonymous classes get no `__setFunctionName` from the
-//! binding they are assigned to (named evaluation).
+//! `WeakMap`-style storage, writes to `super` properties in their static members are not
+//! lowered to `Reflect.set` (with temporaries), and anonymous classes get no
+//! `__setFunctionName` from the binding they are assigned to (named evaluation).
 
 use rustc_hash::FxHashSet;
 use ts_r_ast::{
@@ -260,13 +263,20 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
     if instance_methods_decorated || instance_fields_decorated {
         tx.need(Helper::RunInitializers);
     }
-    // Static blocks and static private members make tsc name a decorated class before they
-    // run (observed: static fields alone don't).
+    // A decorated class with a static private member or a static `accessor` gets its private
+    // statics lowered by the class-fields pass, which names the (now anonymous) class first
+    // with `static { __setFunctionName(this, "C"); }`. Static blocks, fields and methods alone
+    // don't (tsc 7.0.2: estransforms/esdecorator.go marks the class when it
+    // `hasStaticPrivateClassElements`; classfields.go `isAnonymousClassNeedingAssignedName`).
     let static_code = tx.items(p.members).iter().any(|&m| match tx.n(m) {
-        Node::PropertyDef { modifiers, key, .. } | Node::MethodDef { modifiers, key, .. } => {
+        Node::PropertyDef { modifiers, key, .. } => {
+            modifiers.contains(Modifiers::STATIC)
+                && (tx.kind(key) == NodeKind::PrivateName
+                    || modifiers.contains(Modifiers::ACCESSOR))
+        }
+        Node::MethodDef { modifiers, key, .. } => {
             modifiers.contains(Modifiers::STATIC) && tx.kind(key) == NodeKind::PrivateName
         }
-        Node::StaticBlock { .. } => true,
         _ => false,
     });
     tx.need(Helper::EsDecorate);
@@ -371,6 +381,7 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
     let static_left = chain(tx, &st, &static_slots, static_extra, at);
 
     if let Some(ct) = class_this {
+        let sup = class_super.map(|_| tx.ast.intern("_classSuper"));
         for &m in &members[key_blocks..] {
             match tx.n(m) {
                 Node::PropertyDef {
@@ -379,10 +390,16 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
                     ..
                 } if modifiers.contains(Modifiers::STATIC) => {
                     replace_this(tx, v, ct);
+                    if let Some(sup) = sup {
+                        replace_super_reads(tx, v, ct, sup);
+                    }
                 }
                 Node::StaticBlock { body } => {
                     for s in tx.items(body) {
                         replace_this(tx, s, ct);
+                        if let Some(sup) = sup {
+                            replace_super_reads(tx, s, ct, sup);
+                        }
                     }
                 }
                 _ => {}
@@ -549,6 +566,15 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
         body.push(let_named(tx, "_classThis", None, at));
     }
     if let Some(e) = class_super {
+        // An anonymous class, function or arrow would take its name from `_classSuper`:
+        // tsc writes `(0, e)` instead (esdecorator.go, transformClassLike step 2).
+        let e = if is_anonymous_fn(tx, e) {
+            let zero = tx.number(0.0, at);
+            let seq = tx.seq(&[zero, e], at);
+            tx.paren(seq, at)
+        } else {
+            e
+        };
         body.push(let_named(tx, "_classSuper", Some(e), at));
     }
     for e in [static_extra, instance_extra].into_iter().flatten() {
@@ -1632,6 +1658,173 @@ fn contains_this(tx: &Tx, root: NodeId) -> bool {
         }
     }
     false
+}
+
+/// True if `e`, under parentheses and type assertions, is a class or function expression
+/// without a name or an arrow function.
+fn is_anonymous_fn(tx: &Tx, mut e: NodeId) -> bool {
+    loop {
+        match tx.n(e) {
+            Node::Paren { expr }
+            | Node::As { expr, .. }
+            | Node::Satisfies { expr, .. }
+            | Node::TypeAssertion { expr, .. }
+            | Node::NonNull { expr } => e = expr,
+            Node::ClassExpr { name, .. } | Node::FunctionExpr { name, .. } => {
+                return name.is_none();
+            }
+            Node::Arrow { .. } => return true,
+            _ => return false,
+        }
+    }
+}
+
+/// True if `e` is `super.x` or `super[k]`.
+fn is_super_prop(tx: &Tx, e: NodeId) -> bool {
+    matches!(tx.n(e), Node::Member { obj, optional: false, .. } | Node::Index { obj, optional: false, .. }
+        if tx.kind(obj) == NodeKind::Super)
+}
+
+/// In the static fields and blocks of a class-decorated derived class, the decorator may
+/// replace the class, so tsc reads `super` through the saved heritage and the final class
+/// (observed, tsc 7.0.2): `super.x` is `Reflect.get(_classSuper, "x", _classThis)`,
+/// `super.m(a)` is `Reflect.get(..).call(_classThis, a)` and `` super.m`t` `` is
+/// `` Reflect.get(..).bind(_classThis)`t` ``. Writes to `super` properties (which tsc lowers
+/// through `Reflect.set` and temporaries) are left as written. Nested functions and classes
+/// have their own `super` and are skipped; arrows are not.
+fn replace_super_reads(tx: &mut Tx, root: NodeId, this: Atom, sup: Atom) {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        let at = tx.at(n);
+        match tx.n(n) {
+            Node::Call {
+                callee,
+                optional: false,
+                type_args,
+                args,
+            } if is_super_prop(tx, callee) => {
+                stack.extend(tx.items(args));
+                let get = super_get(tx, callee, this, sup, &mut stack);
+                let f = tx.member(get, "call", at);
+                let mut list = vec![tx.ident_atom(this, at)];
+                list.extend(tx.items(args));
+                let args = tx.new_list(&list);
+                tx.set(
+                    n,
+                    Node::Call {
+                        callee: f,
+                        optional: false,
+                        type_args,
+                        args,
+                    },
+                );
+            }
+            Node::TaggedTemplate {
+                tag,
+                type_args,
+                quasi,
+            } if is_super_prop(tx, tag) => {
+                stack.push(quasi);
+                let get = super_get(tx, tag, this, sup, &mut stack);
+                let bind = tx.member(get, "bind", at);
+                let r = tx.ident_atom(this, at);
+                let bound = tx.call(bind, &[r], at);
+                tx.set(
+                    n,
+                    Node::TaggedTemplate {
+                        tag: bound,
+                        type_args,
+                        quasi,
+                    },
+                );
+            }
+            Node::Member { .. } | Node::Index { .. } if is_super_prop(tx, n) => {
+                let get = super_get(tx, n, this, sup, &mut stack);
+                replace(tx.ast, n, get);
+            }
+            // Write targets keep `super`; only their computed keys and values are reads.
+            Node::Assign { left, right, .. } => {
+                stack.push(right);
+                push_target(tx, left, &mut stack);
+            }
+            Node::Update { arg, .. } => push_target(tx, arg, &mut stack),
+            Node::ForIn { left, right, body }
+            | Node::ForOf {
+                left, right, body, ..
+            } => {
+                stack.push(body);
+                stack.push(right);
+                push_target(tx, left, &mut stack);
+            }
+            Node::FunctionExpr { .. }
+            | Node::FunctionDecl { .. }
+            | Node::ClassDecl { .. }
+            | Node::ClassExpr { .. }
+            | Node::MethodDef { .. } => {}
+            _ => tx.ast.for_each_child(n, |c| stack.push(c)),
+        }
+    }
+}
+
+/// `Reflect.get(sup, key, this)` for `super.x` / `super[k]`; a computed key is pushed to be
+/// visited.
+fn super_get(tx: &mut Tx, prop: NodeId, this: Atom, sup: Atom, stack: &mut Vec<NodeId>) -> NodeId {
+    let at = tx.at(prop);
+    let key = match tx.n(prop) {
+        Node::Index { index, .. } => {
+            stack.push(index);
+            index
+        }
+        Node::Member { prop, .. } => {
+            let text = tx
+                .atom_of(prop)
+                .map(|a| tx.ast.atom(a).to_owned())
+                .unwrap_or_default();
+            tx.string(&text, at)
+        }
+        _ => tx.string("", at),
+    };
+    let f = tx.dotted("Reflect.get", at);
+    let h = tx.ident_atom(sup, at);
+    let r = tx.ident_atom(this, at);
+    tx.call(f, &[h, key, r], at)
+}
+
+/// Visits the reads inside a write target: the keys of `super` properties, the objects of
+/// other members and the defaults and computed keys of patterns, not `super.x` itself.
+fn push_target(tx: &Tx, target: NodeId, stack: &mut Vec<NodeId>) {
+    match tx.n(target) {
+        Node::Member { obj, .. } if tx.kind(obj) == NodeKind::Super => {}
+        Node::Index { obj, index, .. } if tx.kind(obj) == NodeKind::Super => stack.push(index),
+        Node::ObjectLit { .. } | Node::ArrayLit { .. } | Node::Paren { .. } => {
+            tx.ast.for_each_child(target, |c| {
+                if is_super_prop(tx, c) {
+                    push_target(tx, c, stack);
+                } else {
+                    // Nested patterns, defaults (`a = d`) and `key: target` properties.
+                    push_target_or_read(tx, c, stack);
+                }
+            });
+        }
+        _ => stack.push(target),
+    }
+}
+
+fn push_target_or_read(tx: &Tx, n: NodeId, stack: &mut Vec<NodeId>) {
+    match tx.n(n) {
+        Node::Property { key, value, .. } => {
+            if tx.kind(key) == NodeKind::ComputedKey {
+                stack.push(key);
+            }
+            push_target(tx, value, stack);
+        }
+        Node::Spread { arg } => push_target(tx, arg, stack),
+        Node::Assign { left, right, .. } => {
+            stack.push(right);
+            push_target(tx, left, stack);
+        }
+        _ => push_target(tx, n, stack),
+    }
 }
 
 /// Replaces `this` (outside nested functions and classes) with `name`.

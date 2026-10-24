@@ -246,8 +246,9 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   object rest (tsc flattens them too) are not handled. Private methods using `super`, and
   private classes evaluated in a loop with an outer `await` or `yield`, are refused (TSR2003).
 - TC39 decorators: static private members of class-decorated classes keep native `#x` (tsc
-  moves them to `__classPrivateFieldGet` storage), `super` in their static members is not
-  rewritten to `Reflect.get(_classSuper, ...)`, and named evaluation only covers
+  moves them to `__classPrivateFieldGet` storage), writes to `super` properties in their
+  static members stay as written (tsc uses `Reflect.set` and temporaries; reads, calls and
+  tags already go through `Reflect.get(_classSuper, k, _classThis)`), and named evaluation only covers
   `x = class {}` / `let x = class {}` (not object literal keys, defaults or destructuring).
 - `module: preserve` adds an `export {}` marker where tsc 7 adds none (tsc never adds it
   under `preserve`; the bundler relies on the marker, so only `.cts`/`.cjs` files and files
