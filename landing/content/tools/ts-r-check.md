@@ -46,7 +46,7 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 - Some inference: contextual types that flow through a reverse mapped type print wider than
   tsc's (`number | T["a"]` where tsc prints `number`).
 - Some relation and narrowing results differ from tsc's, mostly in TS2322, TS2339 and TS2345:
-  434 of tsc's 12,750 conformance test variants (3.4%) don't match exactly.
+  419 of tsc's 12,750 conformance test variants (3.3%) don't match exactly.
 
 The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.md).
 
