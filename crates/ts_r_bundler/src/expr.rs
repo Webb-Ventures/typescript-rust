@@ -150,7 +150,10 @@ impl Expr {
                     if i > 0 {
                         out.push_str(if compact { "," } else { ", " });
                     }
-                    if ts_r_codegen::literals::is_identifier_name(k) {
+                    if k == "__proto__" {
+                        // A plain `__proto__` key would set the prototype.
+                        out.push_str("[\"__proto__\"]");
+                    } else if ts_r_codegen::literals::is_identifier_name(k) {
                         out.push_str(k);
                     } else {
                         quote(k, out);

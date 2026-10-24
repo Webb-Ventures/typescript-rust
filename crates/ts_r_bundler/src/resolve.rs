@@ -65,14 +65,59 @@ pub struct Package {
     pub exports: Option<Value>,
     pub imports: Option<Value>,
     pub side_effects: SideEffects,
+    /// The first place the file is not strict JSON (a comment or a trailing comma): esbuild
+    /// fails the build on it, as Node does, while tsc tolerates both. File is absolute.
+    pub syntax_error: Option<crate::Message>,
+}
+
+/// The first comment or trailing comma in `text`, outside strings: what strict JSON rejects
+/// but the JSONC parser accepts.
+fn strict_json_error(text: &str) -> Option<(u32, &'static str)> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    while i < b.len() {
+        let c = b[i];
+        if in_string {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_string = false,
+                _ => {}
+            }
+        } else {
+            match c {
+                b'"' => in_string = true,
+                b'/' if matches!(b.get(i + 1), Some(b'/' | b'*')) => {
+                    return Some((i as u32, "JSON does not support comments"));
+                }
+                b',' => {
+                    let next = b[i + 1..].iter().find(|c| !c.is_ascii_whitespace());
+                    if matches!(next, Some(b'}' | b']')) {
+                        return Some((i as u32, "JSON does not support trailing commas"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 impl Package {
-    fn parse(dir: &str, text: &str) -> Option<Package> {
+    fn parse(dir: &str, file: &str, text: &str) -> Option<Package> {
         let root = jsonc::parse(text, "package.json").root?;
         root.as_object()?;
         let mut p = Package {
             dir: dir.to_owned(),
+            syntax_error: strict_json_error(text).map(|(pos, msg)| {
+                crate::LineIndex::new(text).message(
+                    crate::Severity::Error,
+                    file,
+                    pos,
+                    msg.to_owned(),
+                )
+            }),
             name: root.get("name").and_then(Value::as_str).map(str::to_owned),
             is_module: root.get("type").and_then(Value::as_str) == Some("module"),
             ..Package::default()
@@ -167,7 +212,7 @@ fn side_effects_glob(pattern: &str, rel: &str) -> bool {
 /// Minimal glob: `*` (no `/`), `**` (anything), `?`. Matched over (pattern, string)
 /// positions, one row of the table per pattern position, so a pattern of many `*`s cannot
 /// backtrack exponentially: O(pattern x string) time, O(string) memory.
-fn glob(p: &str, s: &str) -> bool {
+pub(crate) fn glob(p: &str, s: &str) -> bool {
     let (p, s) = (p.as_bytes(), s.as_bytes());
     let n = s.len();
     // rows[i % 4][j]: whether `p[i..]` matches `s[j..]`. Row i reads rows i+1..=i+3.
@@ -317,6 +362,10 @@ pub struct Resolver {
     platform: Platform,
     conditions: Vec<String>,
     main_fields: Vec<String>,
+    /// The main fields are the defaults, so esbuild's dual-package-hazard rule applies:
+    /// `require()` of a package with `main` and `module` gets `main`. An explicit
+    /// `--main-fields` list is followed as given.
+    dual_package_rule: bool,
     extensions: Vec<String>,
     /// `extensions` for files inside `node_modules`: JavaScript before TypeScript.
     node_modules_extensions: Vec<String>,
@@ -370,6 +419,7 @@ impl Resolver {
             platform: opts.platform,
             conditions: opts.effective_conditions(),
             main_fields: opts.effective_main_fields(),
+            dual_package_rule: opts.main_fields.is_none(),
             extensions: opts.resolve_extensions.clone(),
             node_modules_extensions: javascript_first(&opts.resolve_extensions),
             external: opts.external.clone(),
@@ -854,6 +904,7 @@ impl Resolver {
                     // `require()` of a package with both fields gets `main` (esbuild's
                     // dual-package-hazard rule).
                     if field == "module"
+                        && self.dual_package_rule
                         && kind == ResolveKind::Require
                         && (pkg.mains.contains_key("main") || self.load_index(pkg_dir).is_some())
                     {
@@ -864,6 +915,7 @@ impl Resolver {
                     {
                         let r = self.finish(f);
                         if field == "module"
+                            && self.dual_package_rule
                             && let Resolution::File(module_file) = &r
                         {
                             let main = pkg
@@ -920,7 +972,8 @@ impl Resolver {
             } else if folder {
                 self.load_file(&f)
             } else {
-                None
+                // A `.js` target may be compiled from a `.ts` file next to it.
+                self.ts_rewrite(&f)
             }
         };
         if let Some(f) =
@@ -977,10 +1030,14 @@ impl Resolver {
                 return Some(cand);
             }
         }
-        // TypeScript-style imports: `./x.js` may mean `./x.ts`.
+        self.ts_rewrite(p)
+    }
+
+    /// TypeScript-style imports: `./x.js` may mean `./x.ts`.
+    fn ts_rewrite(&self, p: &str) -> Option<String> {
         for (from, tos) in [
             (".js", &[".ts", ".tsx"][..]),
-            (".jsx", &[".tsx"][..]),
+            (".jsx", &[".ts", ".tsx"][..]),
             (".mjs", &[".mts"][..]),
             (".cjs", &[".cts"][..]),
         ] {
@@ -1035,13 +1092,26 @@ impl Resolver {
         let p = self
             .fs
             .read_file(&file)
-            .and_then(|t| Package::parse(dir, &t))
+            .and_then(|t| Package::parse(dir, &file, &t))
             .map(Arc::new);
         self.packages
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .insert(dir.to_owned(), p.clone());
         p
+    }
+
+    /// The strict-JSON errors of every `package.json` read so far, by file. Their `file` is
+    /// absolute.
+    pub fn package_json_errors(&self) -> Vec<crate::Message> {
+        let packages = self.packages.read().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<crate::Message> = packages
+            .values()
+            .flatten()
+            .filter_map(|p| p.syntax_error.clone())
+            .collect();
+        out.sort_by(|a, b| a.file.cmp(&b.file));
+        out
     }
 
     /// The nearest `package.json` at or above `dir`.
@@ -1073,6 +1143,55 @@ mod tests {
             ..BuildOptions::default()
         };
         Resolver::new(Arc::new(fs), &opts)
+    }
+
+    #[test]
+    fn exports_targets_may_name_compiled_typescript() {
+        let mut fs = MemoryFs::new();
+        fs.add_file(
+            "/p/node_modules/x/package.json",
+            r#"{"exports":{"./a":"./a.js","./b":"./b.jsx","./*":"./lib/*"}}"#,
+        )
+        .add_file("/p/node_modules/x/a.ts", "")
+        .add_file("/p/node_modules/x/b.tsx", "")
+        .add_file("/p/node_modules/x/lib/c.ts", "")
+        .add_file("/p/o.ts", "")
+        .add_file("/p/o.tsx", "");
+        let r = resolver(fs, Platform::Node);
+        // `.jsx` tries `.ts` before `.tsx`, like `.js`.
+        assert_eq!(
+            r.resolve("./o.jsx", "/p", ResolveKind::Import),
+            Resolution::File("/p/o.ts".into())
+        );
+        for (spec, file) in [("x/a", "a.ts"), ("x/b", "b.tsx"), ("x/c.js", "lib/c.ts")] {
+            assert_eq!(
+                r.resolve(spec, "/p", ResolveKind::Import),
+                Resolution::File(format!("/p/node_modules/x/{file}"))
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_main_fields_skip_the_dual_package_rule() {
+        let mut fs = MemoryFs::new();
+        fs.add_file(
+            "/p/node_modules/d/package.json",
+            r#"{"main":"./main.js","module":"./module.js"}"#,
+        )
+        .add_file("/p/node_modules/d/main.js", "")
+        .add_file("/p/node_modules/d/module.js", "");
+        let main = Resolution::File("/p/node_modules/d/main.js".into());
+        let module = Resolution::File("/p/node_modules/d/module.js".into());
+        let r = resolver(fs.clone(), Platform::Browser);
+        assert_eq!(r.resolve("d", "/p", ResolveKind::Require), main);
+        let opts = BuildOptions {
+            platform: Platform::Browser,
+            main_fields: Some(vec!["module".into(), "main".into()]),
+            ..BuildOptions::default()
+        };
+        let r = Resolver::new(Arc::new(fs), &opts);
+        assert_eq!(r.resolve("d", "/p", ResolveKind::Require), module);
+        assert_eq!(r.resolve("d", "/p", ResolveKind::Import), module);
     }
 
     /// Ecosystem (readable-stream, whatwg-url, tr46): `require('process/')` and

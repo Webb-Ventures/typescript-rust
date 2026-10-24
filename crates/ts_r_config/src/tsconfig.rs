@@ -758,9 +758,11 @@ fn substitute_config_dir(opts: &mut CompilerOptions, dir: &str) {
         let Some(v) = opts.get(id).cloned() else {
             continue;
         };
+        // As tsc: the template stands for `./` relative to the config directory, so
+        // `${configDir}..` is the parent directory (not `<dir>..`).
         let sub = |s: &str| -> Option<String> {
             s.strip_prefix(CONFIG_DIR_TEMPLATE)
-                .map(|rest| path::normalize(&format!("{dir}{rest}")))
+                .map(|rest| path::normalize(&path::combine(dir, &format!("./{rest}"))))
         };
         let new = match (decl.ty, v) {
             (OptionType::Path, OptionValue::String(s)) => sub(&s).map(OptionValue::String),

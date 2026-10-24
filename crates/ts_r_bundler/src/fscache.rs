@@ -190,6 +190,13 @@ impl FileSystem for CachedFs {
         self.read_file_now(path)
     }
 
+    fn read_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        if self.kind(path) == Some(None) {
+            return None;
+        }
+        self.inner.read_bytes(path)
+    }
+
     fn file_exists(&self, path: &str) -> bool {
         match self.kind(path) {
             Some(k) => k == Some(EntryKind::File),

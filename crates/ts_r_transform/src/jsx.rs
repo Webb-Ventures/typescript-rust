@@ -300,6 +300,11 @@ fn entity(tx: &mut Tx, path: &str, at: u32) -> NodeId {
 }
 
 fn root_ref(tx: &mut Tx, name: &str, at: u32) -> NodeId {
+    // A factory of `this` or `this.h` starts with the keyword, not a name, so a bundler sees
+    // it as the module's `this` (esbuild turns it into `exports` or `void 0`).
+    if name == "this" {
+        return tx.this(at);
+    }
     // `React` exported by another block of the enclosing namespace: `y.React` (observed).
     if let Some(scope) = tx.jsx.scope
         && let Some(atom) = tx.ast.atoms.find(name)
