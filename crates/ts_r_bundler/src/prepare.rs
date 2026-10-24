@@ -133,6 +133,16 @@ pub fn load(
                 hash,
             ))
         }
+        Loader::Bytes => {
+            let bytes = read_bytes()?;
+            let hash = hash_of(&bytes);
+            let mut b = String::new();
+            ts_r_codegen::sourcemap::base64_encode(&bytes, &mut b);
+            Ok(js_value(
+                format!("Uint8Array.fromBase64({})", js_string(&b)),
+                hash,
+            ))
+        }
         Loader::File => {
             let bytes = read_bytes()?;
             let hash = hash_of(&bytes);

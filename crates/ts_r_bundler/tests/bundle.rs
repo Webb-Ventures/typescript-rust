@@ -1676,3 +1676,63 @@ fn a_bigint_in_a_json_file_is_an_error() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors[0].contains("Unexpected \"123n\" in JSON"), "{errors:?}");
 }
+
+#[test]
+fn an_import_with_a_type_attribute_is_its_own_module_instance() {
+    // esbuild: `with { type }` picks the loader (json, text, bytes) whatever the extension,
+    // and makes a separate instance; `assert { ... }` is ignored.
+    let fs = project(&[
+        (
+            "entry.js",
+            "import x from './data.json';\n\
+             import y from './data.json' assert { type: 'json' };\n\
+             import z from './data.json' with { type: 'json' };\n\
+             import t from './foo.js' with { type: 'text' };\n\
+             import b from './foo.js' with { type: 'bytes' };\n\
+             import j from './foo.js' with { type: 'json' };\n\
+             console.log(x === y, x !== z, t, b, j);\n",
+        ),
+        ("data.json", "{ \"works\": true }"),
+        ("foo.js", "{ \"json\": 1 }"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+        .expect("options")
+        .build();
+    assert!(r.errors().next().is_none(), "{:?}", r.messages);
+    let out: String = r.outputs.iter().map(|o| o.text()).collect();
+    assert!(out.contains("// data.json with { type: 'json' }"), "{out}");
+    assert!(out.contains("Uint8Array.fromBase64("), "{out}");
+    assert!(out.contains("\"{ \\\"json\\\": 1 }\""), "{out}");
+    assert!(out.matches("require_data").count() >= 2, "{out}");
+}
+
+#[test]
+fn a_json_import_with_a_type_attribute_has_only_a_default_export() {
+    let errors = |entry: &str| {
+        let fs = project(&[("entry.js", entry), ("data.json", "{ \"foo\": 123 }")]);
+        let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs))
+            .expect("options")
+            .build();
+        r.errors().map(|m| m.text.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        errors(
+            "import x, { foo as x2 } from './data.json';\n\
+             import y, { foo as y2 } from './data.json' with { type: 'json' };\n\
+             console.log(x, x2, y, y2);\n"
+        ),
+        ["No matching export in \"data.json with { type: 'json' }\" for import \"foo\""]
+    );
+    // Attributes a bundle cannot honour fail the scan.
+    assert_eq!(
+        errors(
+            "import w from './data.json' with { kind: 'json' };\n\
+             import v from './data.json' with { type: 'css' };\n\
+             console.log(w, v);\n"
+        ),
+        [
+            "Importing with the \"kind\" attribute is not supported",
+            "Importing with a type attribute of \"css\" is not supported",
+        ]
+    );
+}

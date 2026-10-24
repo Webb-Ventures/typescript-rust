@@ -446,17 +446,19 @@ impl Linker<'_> {
     fn report_missing(&mut self, m: ModuleId, record: u32, name: &str, target: ModuleId) {
         let module = &self.g.modules[m as usize];
         let tmod = &self.g.modules[target as usize];
-        // TypeScript files may import types that were not elided (isolated modules), and
-        // modules without exports yield `undefined` (esbuild warns).
-        let ts = matches!(module.loader, Loader::Ts | Loader::Tsx)
-            || matches!(tmod.loader, Loader::Ts | Loader::Tsx);
-        if ts {
+        // A TypeScript file may export types, which an import in isolation cannot tell from
+        // values, and a TypeScript re-export may forward one: both are dropped silently, like
+        // esbuild. A value import in a TypeScript file from a JavaScript one must exist (the
+        // transform has already removed imports used only as types). Modules without exports
+        // yield `undefined` (esbuild warns).
+        let r = &module.meta.records[record as usize];
+        let ts = |l: Loader| matches!(l, Loader::Ts | Loader::Tsx);
+        if ts(tmod.loader) || (ts(module.loader) && r.kind == RecordKind::ReExport) {
             return;
         }
         if !self.reported.insert((m, record, name.to_owned())) {
             return;
         }
-        let r = &module.meta.records[record as usize];
         let no_exports = tmod.loader != Loader::Json
             && tmod.meta.exports.is_empty()
             && tmod.meta.star_exports.is_empty();
@@ -695,8 +697,12 @@ impl Linker<'_> {
         for n in names {
             let mut seen = FxHashSet::default();
             self.ambiguous = false;
-            if let Some(b) = self.resolve_export(m, &n, &mut seen) {
-                out.push((n, b));
+            match self.resolve_export(m, &n, &mut seen) {
+                // A TypeScript re-export of a missing name forwarded a type: not a property.
+                Some(Binding::Undefined)
+                    if matches!(self.g.modules[m as usize].loader, Loader::Ts | Loader::Tsx) => {}
+                Some(b) => out.push((n, b)),
+                None => {}
             }
         }
         out
@@ -909,6 +915,9 @@ impl Linker<'_> {
 fn json_keys(module: &crate::graph::Module) -> Option<Vec<String>> {
     if module.loader != Loader::Json {
         return None;
+    }
+    if module.default_only {
+        return Some(Vec::new());
     }
     // The JSON loader's source is `module.exports = (\n<json>\n);`.
     let js = &module.source.js;
