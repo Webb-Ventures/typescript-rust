@@ -62,6 +62,16 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 - **Top-level `this`** (`prepare.rs`): `undefined` in a file that exports something or uses
   `import.meta`; when bundling, the `exports` object (a CommonJS file) otherwise, even in
   a file with `import` statements, as esbuild does.
+- **Top-level `let`, `const` and `class` become `var`** (`print.rs` `class_to_var`) in every
+  bundled module, as esbuild prints them: `var C = class {}`, or `var C = class _C {}` with
+  the class's references to itself renamed `_C` (the same short name when mangling).
+  Decorated classes and nested declarations stay as written; transform mode never does it.
+- **Every CommonJS entry runs unwrapped** in `cjs` format without splitting when nothing
+  else imports it (`plan.rs` `unwrapped_entries`), and `import * as ns` of a CommonJS file
+  names its import `ns`, as esbuild does.
+- **`define` keys** (`prepare.rs` `apply_defines`) match `a.b`, `a?.b` and `a["b"]` alike,
+  and may start at `import.meta`; a write keeps its target unless the value is a name
+  (`d = 0` with `d=ident` becomes `ident = 0`), as in esbuild.
 - **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
   esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
 - **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:

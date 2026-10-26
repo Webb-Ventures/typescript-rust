@@ -487,7 +487,7 @@ fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
         .filter(|r| r.symbol.is_none())
         .map(|r| r.node.raw())
         .collect();
-    if global_refs.is_empty() {
+    if global_refs.is_empty() && !defines.roots.contains("import") {
         return false;
     }
     let mut writes: FxHashSet<u32> = FxHashSet::default();
@@ -516,20 +516,21 @@ fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
         let Some(id) = NodeId::from_raw(raw) else {
             continue;
         };
-        if writes.contains(&raw) {
-            continue;
-        }
+        // `a.b`, `a?.b` and `a["b"]` all match the key `a.b`, and `import.meta` is a root.
         let mut path: Vec<&str> = Vec::new();
         let mut cur = id;
         let ok = loop {
             match *ast.node(cur) {
-                Node::Member {
-                    obj,
-                    optional: false,
-                    prop,
-                } => match *ast.node(prop) {
+                Node::Member { obj, prop, .. } => match *ast.node(prop) {
                     Node::Ident { name } => {
                         path.push(ast.atom(name));
+                        cur = obj;
+                    }
+                    _ => break false,
+                },
+                Node::Index { obj, index, .. } => match *ast.node(index) {
+                    Node::StringLit { value } => {
+                        path.push(ast.atom(value));
                         cur = obj;
                     }
                     _ => break false,
@@ -537,6 +538,13 @@ fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
                 Node::Ident { name } => {
                     path.push(ast.atom(name));
                     break global_refs.contains(&cur.raw());
+                }
+                Node::MetaProperty {
+                    kind: MetaPropKind::ImportMeta,
+                } => {
+                    path.push("meta");
+                    path.push("import");
+                    break true;
                 }
                 _ => break false,
             }
@@ -548,6 +556,10 @@ fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
         let Some(v) = defines.lookup(&path).cloned() else {
             continue;
         };
+        // A write keeps its target unless the value is a name (`d = 0` becomes `ident = 0`).
+        if writes.contains(&raw) && !matches!(&v, DefineValue::Path(p) if p[0] != "undefined") {
+            continue;
+        }
         let at = ast.span(id).start;
         let new = build_define_value(ast, &v, at);
         build::replace(ast, id, new);

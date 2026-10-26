@@ -2281,3 +2281,26 @@ fn top_level_let_const_and_class_become_var() {
         assert_eq!(run_node("class-var", &r, "entry.js"), "Foo true 6\n");
     }
 }
+
+#[test]
+fn defines_match_import_meta_optional_chains_string_keys_and_name_writes() {
+    let fs = project(&[(
+        "src/entry.js",
+        "console.log(import.meta.foo, import.meta.foo.baz, a?.b, a['b'], c = 0, e.f = 0, g = 0);\n",
+    )]);
+    let mut o = opts(&["src/entry.js"]);
+    o.define = vec![
+        ("import.meta.foo".into(), "2".into()),
+        ("a.b".into(), "1".into()),
+        ("c".into(), "ident".into()),
+        ("e.f".into(), "ident".into()),
+        ("g".into(), "null".into()),
+    ];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(
+        code.contains("console.log(2, 2 .baz, 1, 1, ident = 0, ident = 0, g = 0)")
+            || code.contains("console.log(2, 2..baz, 1, 1, ident = 0, ident = 0, g = 0)"),
+        "{code}"
+    );
+}
