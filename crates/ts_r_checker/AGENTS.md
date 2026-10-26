@@ -742,6 +742,10 @@ Files, by layer:
   not `any[]`: `...[a, b]` is `[any, any]` and needs two arguments, `...[a, b = 1]` one or
   two, `...[a, ...b]` at least one (`param_type`; tsc: `getTypeForVariableLikeDeclaration`
   in tsc/internal/checker/checker.go; `calls_members.rs::rest_parameter_pattern_counts_its_elements`).
+- A binding pattern's implied type (`type_from_binding_pattern`) is computed once per
+  pattern outside speculation (`Ck::pattern_types`): it does not depend on context, and an
+  object literal initializer asks for it once per property (`bounded.rs::wide_object_pattern_with_defaults`).
+  Under speculation it is recomputed, since a default may read a tentative parameter type.
 - In a class whose `extends` expression is the `null` literal, `super` (static or instance,
   not a `super()` callee) is `null`, so `super.x` is TS2531; the first `super(...)` call in
   its constructor is TS17005 (`check_super`, `check_derived_constructor_super`; tsc:

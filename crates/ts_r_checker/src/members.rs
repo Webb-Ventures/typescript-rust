@@ -2263,9 +2263,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         if self.depth > 100 {
             return TypeId::IMPLICIT_ANY;
         }
+        // The implied type is independent of context, so outside speculation (where a
+        // default could read a parameter's tentative type) it is computed once per pattern:
+        // the contextual type of each property of an object literal initializer asks for it.
+        let cacheable =
+            self.speculative == 0 && self.context_overrides.is_empty() && self.flow_loop == 0;
+        if cacheable && let Some(&t) = self.pattern_types.get(&l) {
+            return t;
+        }
         self.depth += 1;
         let r = self.type_from_binding_pattern_inner(l);
         self.depth -= 1;
+        if cacheable {
+            self.pattern_types.insert(l, r);
+        }
         r
     }
 
@@ -2274,6 +2285,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         match *ast.node(l.node) {
             Node::ObjectPattern { props } => {
                 let mut members: Vec<((ts_r_types::StrId, SymId), String)> = Vec::new();
+                let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
                 let mut index = Vec::new();
                 for &p in ast.list(props) {
                     match *ast.node(p) {
@@ -2293,7 +2305,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 ty = self.add_optionality(ty);
                                 flags |= SymbolFlags::OPTIONAL;
                             }
-                            if members.iter().any(|m| m.1 == name) {
+                            if !seen.insert(name.clone()) {
                                 continue;
                             }
                             let nid = self.store().intern_str(&name);
