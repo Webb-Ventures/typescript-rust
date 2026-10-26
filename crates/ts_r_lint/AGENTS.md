@@ -629,6 +629,15 @@ member reads don't count). What we learned, in our words:
   `for` heads, `delete`). The fix renames to `size` and writes `x` as a member object
   (`member_object_text`; extra parentheses inside an unparenthesized `new` callee when the
   chain ends in a call; a `;` from `needs_semicolon`), unless the array has more comments.
+- **prefer-array-index-of**: `findIndex`/`findLastIndex` with one callback that is a
+  plain (non-async, non-generator) arrow/function of one identifier parameter returning
+  `p === v` or `v === p` (concise body or a lone `return`). Skipped for receivers
+  `should_skip_known_non_array_receiver` rejects, when the parameter has any other
+  reference, or a function expression uses `this`/`arguments` outside nested functions or
+  its own name. Fix: rename and replace the callback with `v` (wrapped when `v` was
+  parenthesized and the callback wasn't); a suggestion when `v` has side effects; nothing
+  with a comment in the callback. `simple_array_search` is shared (prefer-includes's
+  `some` form uses the same shape).
 - Shared parenthesization helpers in `unicorn_util_h5.rs`: `expression_start_needs_parens`
   (a `{`/`class`/`function`/`async function`/`let [` start moved to a statement, arrow
   body, `export default` or `for` init), `member_object_needs_parens` /
@@ -640,7 +649,7 @@ member reads don't count). What we learned, in our words:
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).
