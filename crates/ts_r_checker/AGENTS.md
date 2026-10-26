@@ -1084,7 +1084,9 @@ Files, by layer:
   encloses B, then A (`dotted_namespace_outer_exports`). Class statics and enum members
   merged into a namespace are not in scope in its body, even when the binder resolved the
   name through the shared exports table (`member_out_of_scope`;
-  `merged_members_not_in_scope`).
+  `merged_members_not_in_scope`): the lookup then goes on outwards, so
+  `typeof Decimal` in `namespace Decimal` beside `class Decimal { static Decimal }` is
+  the class (decimal.js, bignumber.js).
 - **CommonJS names in JavaScript.** A JavaScript file with no ECMAScript module syntax and a
   CommonJS indicator anywhere (`SourceFile::is_commonjs_module`: a one-argument
   `require(x)`, an assignment to `module.exports[.x]` or `exports.x`/`exports["x"]`,

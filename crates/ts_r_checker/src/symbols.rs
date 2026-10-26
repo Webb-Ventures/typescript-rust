@@ -1336,7 +1336,12 @@ impl<'a> Checker<'a> {
                 }
                 // Exported declarations of a module file or namespace are in scope too
                 // (`export const x = 1` then `let y: x` is TS2749, not TS2304).
-                if let Some(id) = self.lookup_in_scope_exports(l.file, sc, n, meaning) {
+                // A class static shared through a merged namespace's exports is not in
+                // scope; the walk goes on to the outer scopes (decimal.js: `typeof Decimal`
+                // in `namespace Decimal` with a `static Decimal` member).
+                if let Some(id) = self.lookup_in_scope_exports(l.file, sc, n, meaning)
+                    && !self.member_out_of_scope(l, self.sym_flags(id), meaning)
+                {
                     return Some(id);
                 }
             }
