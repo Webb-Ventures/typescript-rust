@@ -251,10 +251,11 @@ pub fn is_ts_only_in_js_error(code: u32) -> bool {
     (8000..9000).contains(&code)
 }
 
-/// A legacy octal or `\8`/`\9` escape (TS1487 / TS1488) inside a template literal type:
-/// typescript-eslint's parser doesn't fail on it.
+/// A malformed escape inside a template literal type (a missing hex digit, an unterminated
+/// or out-of-range `\u{…}`, a legacy octal or `\8`/`\9`; TS1125, TS1198, TS1199, TS1487,
+/// TS1488): typescript-eslint's parser doesn't fail on it.
 fn is_template_type_escape(ast: &Ast, d: &ts_r_diagnostics::Diagnostic) -> bool {
-    matches!(d.code, 1487 | 1488)
+    matches!(d.code, 1125 | 1198 | 1199 | 1487 | 1488)
         && (1..=ast.node_count() as u32)
             .filter_map(NodeId::from_raw)
             .any(|id| {

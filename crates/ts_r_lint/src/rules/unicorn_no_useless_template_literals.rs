@@ -68,7 +68,7 @@ fn quote_string(text: &str) -> String {
 
 /// A string literal's inner raw text made safe for a template: unescaped `` ` `` and `${`
 /// get a backslash.
-fn escape_for_template(raw: &str) -> String {
+pub(super) fn escape_for_template(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut chars = raw.chars().peekable();
     while let Some(c) = chars.next() {

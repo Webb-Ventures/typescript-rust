@@ -480,6 +480,7 @@ mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_keyboard_event_key;
+mod unicorn_prefer_literal_ascii;
 mod unicorn_prefer_location_assign;
 mod unicorn_prefer_math_abs;
 mod unicorn_prefer_math_constants;
@@ -538,7 +539,7 @@ mod unicorn_require_css_escape;
 mod unicorn_require_module_attributes;
 mod unicorn_require_module_specifiers;
 mod unicorn_require_number_to_fixed_digits_argument;
-mod unicorn_require_proxy_trap_boolean_return;
+mod unicorn_single_line_block_comment_style;
 mod unicorn_splice;
 mod unicorn_static;
 mod unicorn_switch_case_braces;
@@ -1118,6 +1119,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_template_literals::RULE,
     &unicorn_prefer_escaped_irregular_whitespace::RULE,
     &unicorn_prefer_unicode_code_point_escapes::RULE,
+    &unicorn_prefer_literal_ascii::RULE,
+    &unicorn_single_line_block_comment_style::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

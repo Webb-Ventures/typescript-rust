@@ -428,6 +428,7 @@ unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 247/247
 unicorn/prefer-iterator-to-array 61/61
 unicorn/prefer-keyboard-event-key 116/116
+unicorn/prefer-literal-ascii 110/110
 unicorn/prefer-location-assign 54/54
 unicorn/prefer-math-abs 122/122
 unicorn/prefer-math-constants 66/66
@@ -482,6 +483,7 @@ unicorn/require-css-escape 54/54
 unicorn/require-module-attributes 35/35
 unicorn/require-module-specifiers 67/68
 unicorn/require-number-to-fixed-digits-argument 15/15
+unicorn/single-line-block-comment-style 173/173
 unicorn/switch-case-braces 56/56
 unicorn/switch-case-break-position 30/30
 unicorn/template-indent 79/79
