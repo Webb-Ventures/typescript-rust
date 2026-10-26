@@ -647,3 +647,24 @@ fn round_trips_repo_fixtures() {
     }
     assert!(checked >= 40, "only {checked} fixtures checked");
 }
+
+#[test]
+fn adjacent_jsx_elements_print_as_tsc_does() {
+    // `<a/><b/>` (TS2657) parses as a sequence led by a zero-width marker that prints
+    // nothing; as an attribute value the sequence is bare (tsc 7: tsxErrorRecovery2,
+    // jsxAttributeValueBinaryExpression).
+    let src = "var x = <a></a><b></b>;\n<X a=<b/><c/> />;\nlet y = (, a);\n";
+    let r = ts_r_parser::parse(src, SourceKind::Tsx);
+    let out = print_as(
+        &r.ast,
+        src,
+        &opts(Layout::Tsc),
+        &PrintHints::default(),
+        Syntax::JavaScript,
+    )
+    .code;
+    assert_eq!(
+        out,
+        "var x = (<a></a>, <b></b>);\n<X a=<b />, <c />/>;\nlet y = (, a);\n"
+    );
+}

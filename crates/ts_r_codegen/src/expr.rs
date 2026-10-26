@@ -342,7 +342,12 @@ impl Printer<'_> {
                 self.no_in = saved;
             }
             Node::Seq { exprs } => {
-                let es = self.ast.list(exprs).to_vec();
+                let mut es = self.ast.list(exprs).to_vec();
+                // Adjacent JSX elements (`<a/><b/>`, TS2657) parse as a sequence led by a
+                // zero-width `Missing` standing for tsc's synthesized comma: it prints nothing.
+                if es.len() > 1 && self.is_jsx_sibling_marker(es[0], es[1]) {
+                    es.remove(0);
+                }
                 // A sequence the transform breaks after every comma is indented from its
                 // first element on (`(_a = class {\n    },\n    _a)`).
                 let hinted = self.tsc && self.hint_multi_line(id);
@@ -1779,6 +1784,18 @@ impl Printer<'_> {
         }
     }
 
+    /// Whether `first` is the zero-width `Missing` the parser puts before adjacent JSX
+    /// elements it groups into a sequence (`<a/><b/>`).
+    pub(crate) fn is_jsx_sibling_marker(&self, first: NodeId, second: NodeId) -> bool {
+        let at = self.ast.span(first);
+        matches!(self.node(first), Node::Missing {})
+            && at.is_empty()
+            && (matches!(
+                self.node(second),
+                Node::JsxElement { .. } | Node::JsxFragment { .. }
+            ) || self.ast.span(second).start == at.start)
+    }
+
     fn jsx_attr(&mut self, id: NodeId) {
         self.map_node(id);
         match self.node(id) {
@@ -1798,6 +1815,8 @@ impl Printer<'_> {
                             }
                         },
                         Node::JsxExprContainer { .. } => self.jsx_child(v),
+                        // `a=<b/><c/>` (TS2657): tsc prints the sequence bare, `a=<b />, <c />`.
+                        Node::Seq { .. } => self.expr(v, Prec::Lowest),
                         _ => self.jsx(v),
                     }
                 }
