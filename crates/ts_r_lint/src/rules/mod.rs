@@ -653,6 +653,7 @@ mod unicorn_prefer_string_starts_ends_with;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_switch;
+mod unicorn_prefer_temporal;
 mod unicorn_prefer_temporal_conversion;
 mod unicorn_prefer_ternary;
 mod unicorn_prefer_then_catch;
@@ -738,6 +739,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_iterator_concat::RULE,
     &unicorn_prefer_json_import::RULE,
     &unicorn_prefer_short_arrow_method::RULE,
+    &unicorn_prefer_temporal::RULE,
     &unicorn_require_post_message_target_origin::RULE,
     &unicorn_try_complexity::RULE,
     &unicorn_no_unreadable_new_expression::RULE,
