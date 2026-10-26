@@ -1,7 +1,7 @@
 //! Constant evaluation and dead-branch removal.
 //!
 //! [`fold`] removes branches whose test is a compile-time constant: `if`, `?:`, `&&`, `||`,
-//! `??` and `while (false)`. `var` declarations (and, in sloppy code, block functions that
+//! `??`, `while (false)` and the unreachable cases of `switch (constant)`. `var` declarations (and, in sloppy code, block functions that
 //! Annex B binds as `var`) inside a removed branch are kept as `var x;` so hoisting is
 //! unchanged. A selected operand that is called, tagged, deleted or `typeof`'d is wrapped as
 //! `(0, x)` where it would otherwise mean something else (`(1 && o.m)()` must not pass `o`
@@ -11,7 +11,7 @@
 //!
 //! [`eval`] is the shared constant evaluator; [`crate::compress`] builds on it.
 
-use ts_r_ast::{Ast, BinaryOp, Node, NodeId, UnaryOp, VarKind};
+use ts_r_ast::{Ast, BinaryOp, Node, NodeId, NodeList, UnaryOp, VarKind};
 
 use crate::build;
 use crate::purity::Purity;
@@ -399,6 +399,7 @@ impl Folder<'_> {
                 build::replace(ast, id, new);
                 self.changed = true;
             }
+            Node::Switch { disc, cases } => self.fold_switch(ast, disc, cases),
             Node::Conditional { test, cons, alt } => {
                 if let Some(t) = self.known(ast, test) {
                     let keep = self.as_value(ast, if t { cons } else { alt }, use_);
@@ -431,6 +432,94 @@ impl Folder<'_> {
                 self.changed = true;
             }
             _ => {}
+        }
+    }
+
+    /// `switch (constant)`: empties the bodies of cases that can neither be jumped to nor be
+    /// fallen into (their `var`s stay declared), so a `require()` there is never resolved,
+    /// as esbuild does. Case tests are kept: they may still be evaluated. A case is a jump
+    /// target when it is a non-constant test before the first matching case, the first
+    /// matching case itself, or `default` when no case matches for sure. A switch whose dead
+    /// bodies hold a lexical declaration (other cases could see it) is left alone.
+    fn fold_switch(&mut self, ast: &mut Ast, disc: NodeId, cases: NodeList) {
+        if !self.pure(ast, disc) {
+            return;
+        }
+        let Some(value) = eval(ast, disc, Some(self.scopes)) else {
+            return;
+        };
+        let cases = ast.list(cases).to_vec();
+        // Per case: `None` for `default`, else whether it matches (`None`: unknown).
+        let mut tests = Vec::with_capacity(cases.len());
+        for &c in &cases {
+            let Node::SwitchCase { test, .. } = *ast.node(c) else {
+                return;
+            };
+            tests.push(test.map(|t| {
+                self.pure(ast, t)
+                    .then(|| eval(ast, t, Some(self.scopes)))
+                    .flatten()
+                    .map(|v| v.strict_eq(&value))
+            }));
+        }
+        let first_match = tests.iter().position(|t| *t == Some(Some(true)));
+        let mut dead = Vec::new();
+        let mut falls_in = false;
+        for (i, &c) in cases.iter().enumerate() {
+            let target = match tests[i] {
+                None => first_match.is_none(),
+                Some(t) => match first_match {
+                    Some(m) => i == m || (i < m && t.is_none()),
+                    None => t != Some(false),
+                },
+            };
+            let Node::SwitchCase { body, .. } = *ast.node(c) else {
+                return;
+            };
+            let body = ast.list(body);
+            if target || falls_in {
+                falls_in = !body.last().is_some_and(|&s| {
+                    matches!(
+                        ast.node(s),
+                        Node::Break { .. }
+                            | Node::Continue { .. }
+                            | Node::Return { .. }
+                            | Node::Throw { .. }
+                    )
+                });
+                continue;
+            }
+            if body.is_empty() {
+                continue;
+            }
+            let lexical = body.iter().any(|&s| match *ast.node(s) {
+                Node::VarDecl { kind, .. } => kind != VarKind::Var,
+                Node::FunctionDecl { .. } | Node::ClassDecl { .. } => true,
+                _ => false,
+            });
+            if lexical {
+                return;
+            }
+            dead.push(c);
+        }
+        for c in dead {
+            let Node::SwitchCase { test, body } = *ast.node(c) else {
+                continue;
+            };
+            let mut hoisted = Vec::new();
+            for s in ast.list(body).to_vec() {
+                self.hoisted_names(ast, s, &mut hoisted);
+            }
+            let at = ast.span(c).start;
+            let stmts = if hoisted.is_empty() {
+                Vec::new()
+            } else {
+                let decls: Vec<_> = hoisted.into_iter().map(|n| (n, None)).collect();
+                vec![build::var_decl_many(ast, VarKind::Var, &decls, at)]
+            };
+            let body = ast.add_list(&stmts);
+            *ast.node_mut(c) = Node::SwitchCase { test, body };
+            self.changed = true;
         }
     }
 
@@ -590,6 +679,34 @@ mod tests {
         assert_eq!(run("try {} catch (e) { var v = e; }"), "var v;");
         assert_eq!(run("try {} catch { a() }"), ";");
         assert_eq!(run("try { f() } catch { a() }"), "try{f()}catch{a()}");
+    }
+
+    #[test]
+    fn empties_unreachable_switch_cases() {
+        assert_eq!(
+            run("switch (1) { case 0: a(); break; case 1: b(); break; case 2: c(); var v; }"),
+            "switch(1){case 0:case 1:b();break;case 2:var v}"
+        );
+        // Fall-through keeps the next case; a non-constant case before the match is a target.
+        assert_eq!(
+            run("switch ('b') { case 'a': a(); case 'b': b(); case 'c': c(); break; case 'd': d() }"),
+            "switch('b'){case'a':case'b':b();case'c':c();break;case'd':}"
+        );
+        assert_eq!(
+            run("switch (1) { case x: a(); break; case 1: b(); break; case x: c(); default: d() }"),
+            "switch(1){case x:a();break;case 1:b();break;case x:default:}"
+        );
+        // `default` is the target when nothing matches.
+        assert_eq!(
+            run("switch (0) { case 1: a(); break; default: b() }"),
+            "switch(0){case 1:default:b()}"
+        );
+        assert_eq!(run("switch (x) { case 0: a() }"), "switch(x){case 0:a()}");
+        // A lexical declaration in a dead case is visible to the others.
+        assert_eq!(
+            run("switch (1) { case 0: let q; case 1: q = 1 }"),
+            "switch(1){case 0:let q;case 1:q=1}"
+        );
     }
 
     #[test]

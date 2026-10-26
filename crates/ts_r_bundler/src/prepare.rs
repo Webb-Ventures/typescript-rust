@@ -1159,6 +1159,7 @@ fn has_constant_test(ast: &Ast) -> bool {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::Coalesce,
             ..
         } => literal(left),
+        Node::Switch { disc, .. } => literal(disc) || matches!(*ast.node(disc), Node::StringLit { .. }),
         // `try {} catch { ... }`: the handler is dead code.
         Node::Try {
             block,

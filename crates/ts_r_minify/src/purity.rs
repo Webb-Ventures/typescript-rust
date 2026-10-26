@@ -19,7 +19,7 @@
 use ts_r_ast::{Ast, BinaryOp, Modifiers, Node, NodeId, UnaryOp, VarKind};
 
 use crate::fold::Const;
-use crate::scope::Scopes;
+use crate::scope::{Scopes, SymbolKind};
 
 /// Context for [`expr_is_pure`] and friends.
 #[derive(Clone, Copy)]
@@ -178,7 +178,8 @@ impl Purity<'_> {
                 ..
             } => self.class(decorators, heritage, members, d),
             Node::Call { callee, args, .. } => {
-                let annotated = self.annotations && has_pure_comment(ast, self.src, id);
+                let annotated = self.annotations
+                    && (has_pure_comment(ast, self.src, id) || self.no_side_effects_callee(callee));
                 (annotated || self.known_pure_call(callee, args))
                     && ast.list(args).iter().all(|&a| self.arg(a, d))
             }
@@ -300,6 +301,69 @@ impl Purity<'_> {
 
     fn is_global(&self, id: NodeId) -> bool {
         self.scopes.is_none_or(|s| s.symbol_of(id).is_none())
+    }
+
+    /// A call of a local function annotated `/* @__NO_SIDE_EFFECTS__ */` (a function
+    /// declaration, or a never-reassigned `const` whose initializer is a function or arrow,
+    /// with the comment before the statement or before the initializer), which esbuild
+    /// treats like a `/* @__PURE__ */` call.
+    pub fn no_side_effects_callee(&self, callee: NodeId) -> bool {
+        let (ast, src) = (self.ast, self.src);
+        let Some(scopes) = self.scopes else {
+            return false;
+        };
+        if ast.comments.is_empty() || !src.contains("__NO_SIDE_EFFECTS__") {
+            return false;
+        }
+        let Node::Ident { .. } = *ast.node(callee) else {
+            return false;
+        };
+        let Some(sym) = scopes.symbol_of(callee) else {
+            return false;
+        };
+        let sym = scopes.symbol(sym);
+        if sym.writes > 0 || sym.decls != 1 || !matches!(sym.kind, SymbolKind::Function | SymbolKind::Const) {
+            return false;
+        }
+        let Some(decl) = sym.decl else {
+            return false;
+        };
+        let span = ast.span(decl);
+        let comment_text = |c: &ts_r_ast::Comment| {
+            src.get(c.span.start as usize..c.span.end as usize).unwrap_or("")
+        };
+        // Before the statement: `/* @__NO_SIDE_EFFECTS__ */ export default async function* f`.
+        let idx = ast.comments.partition_point(|c| c.span.end <= span.start);
+        if let Some(c) = idx.checked_sub(1).map(|i| &ast.comments[i])
+            && is_no_side_effects(comment_text(c))
+        {
+            let between = src.get(c.span.end as usize..span.start as usize).unwrap_or("x");
+            let keywords_only = between
+                .split(|ch: char| ch.is_ascii_whitespace() || ch == '*')
+                .all(|w| matches!(w, "" | "export" | "default" | "async" | "function" | "const"));
+            let fn_init = || {
+                let rest = src.get(span.end as usize..).unwrap_or("").trim_start();
+                rest.strip_prefix('=').is_some_and(|r| {
+                    let r = r.trim_start();
+                    r.starts_with("function") || r.starts_with("async") || r.starts_with('(')
+                })
+            };
+            if keywords_only && (sym.kind == SymbolKind::Function || fn_init()) {
+                return true;
+            }
+        }
+        // Before the initializer: `const f = /* @__NO_SIDE_EFFECTS__ */ function () {}`.
+        if sym.kind == SymbolKind::Const
+            && let Some(c) = ast.comments.get(idx)
+            && is_no_side_effects(comment_text(c))
+            && src
+                .get(span.end as usize..c.span.start as usize)
+                .is_some_and(|b| b.trim() == "=")
+        {
+            let after = src.get(c.span.end as usize..).unwrap_or("").trim_start();
+            return after.starts_with("function") || after.starts_with("async") || after.starts_with('(');
+        }
+        false
     }
 
     fn known_pure_call(&self, callee: NodeId, args: ts_r_ast::NodeList) -> bool {
@@ -495,6 +559,17 @@ pub fn has_pure_comment(ast: &Ast, src: &str, id: NodeId) -> bool {
         }
     }
     false
+}
+
+/// `/* @__NO_SIDE_EFFECTS__ */` or `/* #__NO_SIDE_EFFECTS__ */` (also as a line comment).
+fn is_no_side_effects(text: &str) -> bool {
+    let inner = text
+        .strip_prefix("/*")
+        .and_then(|t| t.strip_suffix("*/"))
+        .or_else(|| text.strip_prefix("//"))
+        .unwrap_or("")
+        .trim();
+    inner == "@__NO_SIDE_EFFECTS__" || inner == "#__NO_SIDE_EFFECTS__"
 }
 
 /// `/* @__PURE__ */` or `/* #__PURE__ */` (also as a line comment).

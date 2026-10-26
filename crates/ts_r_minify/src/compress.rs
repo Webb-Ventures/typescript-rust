@@ -109,6 +109,77 @@ impl Compressor<'_> {
         false
     }
 
+    /// The parts of an unused expression that must still run, when that is less than all of
+    /// it (`None`: keep it as is). A `/* @__PURE__ */` (or `@__NO_SIDE_EFFECTS__`) call or
+    /// `new` whose arguments have side effects keeps only those arguments, a spread one as
+    /// `[...x]` (iterating can run code), as esbuild does.
+    fn unused_effects(&self, ast: &mut Ast, e: NodeId) -> Option<Vec<NodeId>> {
+        if self.pure(ast, e) {
+            return Some(Vec::new());
+        }
+        let mut out = Vec::new();
+        self.effects_into(ast, e, &mut out, 0).then_some(out)
+    }
+
+    /// Pushes what must run of unused `e` to `out`; false when nothing is simplified.
+    fn effects_into(&self, ast: &mut Ast, e: NodeId, out: &mut Vec<NodeId>, d: u32) -> bool {
+        if self.pure(ast, e) {
+            return true;
+        }
+        if d > 64 {
+            out.push(e);
+            return false;
+        }
+        match *ast.node(e) {
+            Node::Seq { exprs } => {
+                let mut changed = false;
+                for it in ast.list(exprs).to_vec() {
+                    changed |= self.effects_into(ast, it, out, d + 1);
+                }
+                changed
+            }
+            Node::Call { callee, args, .. } | Node::New { callee, args, .. } => {
+                let p = Purity {
+                    ast,
+                    src: self.src,
+                    scopes: Some(self.scopes),
+                    annotations: true,
+                };
+                let annotated = crate::purity::has_pure_comment(ast, self.src, e)
+                    || (matches!(ast.node(e), Node::Call { .. }) && p.no_side_effects_callee(callee));
+                // `f?.(x)` / `a?.b(x)`: the arguments run only when the chain doesn't stop.
+                let mut chain = e;
+                let optional = loop {
+                    match *ast.node(chain) {
+                        Node::Call { optional: true, .. }
+                        | Node::Member { optional: true, .. }
+                        | Node::Index { optional: true, .. } => break true,
+                        Node::Call { callee: c, .. } => chain = c,
+                        Node::Member { obj, .. } | Node::Index { obj, .. } => chain = obj,
+                        _ => break false,
+                    }
+                };
+                if !annotated || optional {
+                    out.push(e);
+                    return false;
+                }
+                for a in ast.list(args).to_vec() {
+                    if let Node::Spread { .. } = *ast.node(a) {
+                        let at = ast.span(a).start;
+                        out.push(build::array(ast, &[a], at));
+                    } else {
+                        self.effects_into(ast, a, out, d + 1);
+                    }
+                }
+                true
+            }
+            _ => {
+                out.push(e);
+                false
+            }
+        }
+    }
+
     fn pure(&self, ast: &Ast, id: NodeId) -> bool {
         Purity {
             ast,
@@ -972,8 +1043,21 @@ impl Compressor<'_> {
                     ),
                     None => continue,
                 },
+                Node::ExprStmt { expr } => match self.unused_effects(ast, expr) {
+                    Some(kept) if kept.is_empty() => continue,
+                    Some(kept) => {
+                        let at = ast.span(expr).start;
+                        let e = match kept[..] {
+                            [one] => one,
+                            _ => build::seq(ast, &kept, at),
+                        };
+                        ast.add(Node::ExprStmt { expr: e }, ast.span(s))
+                    }
+                    None => s,
+                },
                 _ => s,
             };
+            let node = *ast.node(s);
             match node {
                 Node::Empty {} => continue,
                 Node::ExprStmt { expr } if self.pure(ast, expr) => continue,
@@ -1403,12 +1487,17 @@ mod tests {
     use ts_r_codegen::{CodegenOptions, Layout};
 
     fn run(src: &str) -> String {
+        run_with(src, true)
+    }
+
+    fn run_with(src: &str, comments: bool) -> String {
         let mut ast = ts_r_parser::parse(src, SourceKind::Js).ast;
         let scopes = Scopes::analyze(&ast, true);
         crate::fold::fold(&mut ast, src, &scopes);
         compress(&mut ast, src, &scopes, &CompressOptions::default());
         let o = CodegenOptions {
             layout: Layout::Compact,
+            comments,
             ..CodegenOptions::default()
         };
         ts_r_codegen::print(&ast, src, &o).code
@@ -1425,6 +1514,36 @@ mod tests {
             "function f(){return g(),1;var q;function k(){}}"
         );
         assert_eq!(run("if (a) { if (b) c(); } else d();"), "a?b&&c():d();");
+    }
+
+    #[test]
+    fn unused_pure_calls_keep_only_argument_effects() {
+        assert_eq!(
+            run_with("/* @__PURE__ */ foo(...args); /* @__PURE__ */ new foo(...args);", false),
+            "[...args],[...args];"
+        );
+        assert_eq!(run_with("/* @__PURE__ */ foo(1, g(), x);", false), "g(),x;");
+        assert_eq!(run_with("/* @__PURE__ */ foo(1);", false), "");
+        // Annotations of removed calls never move onto the code that stays.
+        assert_eq!(
+            run("/* @__PURE__ */ foo(1); bar(); /* @__PURE__ */ foo(g()); bar();"),
+            "bar(),g(),bar();/* @__PURE__ *//* @__PURE__ */"
+        );
+        assert_eq!(run_with("/* @__PURE__ */ a?.b(g());", false), "a?.b(g());");
+        assert_eq!(
+            run_with("/* @__NO_SIDE_EFFECTS__ */ function f(y) { s(y) } f('x'); f(k); x(f(1));", false),
+            "function f(y){s(y)}k,x(f(1));"
+        );
+        assert_eq!(
+            run_with("const f = /* @__NO_SIDE_EFFECTS__ */ function* (y) { s(y) }; f(1); f(k);", false),
+            "const f=function*(y){s(y)};k;"
+        );
+        // Only function initializers, and only bindings that are never reassigned.
+        assert_eq!(run_with("/* @__NO_SIDE_EFFECTS__ */ const f = 1; f(1);", false), "const f=1;f(1);");
+        assert_eq!(
+            run_with("/* @__NO_SIDE_EFFECTS__ */ function f() {} f = g; f(1);", false),
+            "function f(){}f=g,f(1);"
+        );
     }
 
     #[test]
