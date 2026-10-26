@@ -283,3 +283,5 @@ unicorn/no-this-assignment
 unicorn/no-unreadable-iife
 unicorn/no-zero-fractions
 unicorn/empty-brace-spaces
+unicorn/numeric-separators-style
+unicorn/no-xor-as-exponentiation
