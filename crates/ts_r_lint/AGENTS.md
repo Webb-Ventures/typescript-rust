@@ -1919,6 +1919,21 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   is a comment inside. The quote is `"` only when the innermost selector is a `"` string.
   Receivers that can't be nodes stop all three.
 
+- `no-invalid-argument-count` (`unicorn_no_invalid_argument_count.rs`, data in
+  `unicorn_argument_counts.rs`): calls and `new` on known globals, by the callee's dotted path
+  of plain names (through parentheses, TS wrappers and optional links) with leading
+  `globalThis`/`global`/`self`/`window` dropped, only when the root is the global binding.
+  Counts are exact, `{min, max}` or a set of allowed counts; with a spread only the other
+  arguments count, against the maximum, and the message says "at least N". Options add
+  patterns (`*` matches one segment) matched on the raw path without scope; one naming a
+  default replaces it and stays global-only. Defaults come first, then options in order, and
+  the first broken one reports on the callee. Failing that, a spread-free call to a function
+  written in place or a never-reassigned single declaration (`listener_function` in
+  `unicorn_prefer_observer_apis`, now `pub(crate)`) with more arguments than parameters
+  (`this` aside, no rest) reports; too few never does. The table of about 870 API counts is
+  data (facts about the APIs): it was generated from the plugin's published table into a
+  sorted Rust array, not translated code.
+
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
 `utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
@@ -1946,4 +1961,4 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/is-array.js`, `prefer-dom-node-replace-children.js`,
 `utils/should-report-replace-children-receiver.js`, `utils/is-dom-node.js`,
 `utils/is-node-value-not-dom-node.js`, `better-dom-traversing.js`,
-`utils/is-left-hand-side.js`, `ast/is-member-expression.js`.
+`utils/is-left-hand-side.js`, `ast/is-member-expression.js`, `no-invalid-argument-count.js`.

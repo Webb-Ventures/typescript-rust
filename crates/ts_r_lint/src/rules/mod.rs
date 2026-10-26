@@ -305,6 +305,7 @@ mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_abort;
+mod unicorn_argument_counts;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_better_dom_traversing;
@@ -387,9 +388,6 @@ mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_argument_count;
-mod unicorn_no_invalid_boolean_attribute_value;
-mod unicorn_no_invalid_character_comparison;
-mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_remove_event_listener;
@@ -1030,7 +1028,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_incorrect_template_string_interpolation::RULE,
     &unicorn_no_impossible_length_comparison::RULE,
     &unicorn_no_instanceof_builtins::RULE,
-    &unicorn_no_invalid_character_comparison::RULE,
+    &unicorn_no_invalid_argument_count::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_integrity::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,

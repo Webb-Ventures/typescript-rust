@@ -287,7 +287,7 @@ fn contains_layout_read(cx: &Ctx<'_, '_>, root: NodeId) -> bool {
 }
 
 /// The function a listener argument is, or names.
-fn listener_function(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
+pub(crate) fn listener_function(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
     let ast = cx.ast();
     let node = skip_wrappers(ast, id);
     if is_function(ast, node) {
