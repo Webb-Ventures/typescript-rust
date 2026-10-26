@@ -87,6 +87,7 @@ mod no_duplicate_case;
 mod no_else_return;
 mod no_empty;
 mod no_empty_character_class;
+mod no_empty_function;
 mod no_empty_pattern;
 mod no_empty_static_block;
 mod no_eq_null;
@@ -182,20 +183,25 @@ mod ts_adjacent_overload_signatures;
 mod ts_array_type;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
+mod ts_ban_tslint_comment;
+mod ts_class_literal_property_style;
 mod ts_consistent_generic_constructors;
 mod ts_consistent_indexed_object_style;
 mod ts_consistent_type_assertions;
+mod ts_consistent_type_definitions;
 mod ts_consistent_type_imports;
 mod ts_dot_notation;
 mod ts_no_array_constructor;
 mod ts_no_array_delete;
 mod ts_no_base_to_string;
+mod ts_no_confusing_non_null_assertion;
 mod ts_no_confusing_void_expression;
 mod ts_no_deprecated;
 mod ts_no_dupe_class_members;
 mod ts_no_duplicate_enum_values;
 mod ts_no_duplicate_type_constituents;
 mod ts_no_dynamic_delete;
+mod ts_no_empty_function;
 mod ts_no_empty_object_type;
 mod ts_no_explicit_any;
 mod ts_no_extra_non_null_assertion;
@@ -345,6 +351,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_else_return::RULE,
     &no_empty::RULE,
     &no_empty_character_class::RULE,
+    &no_empty_function::RULE,
     &no_empty_pattern::RULE,
     &no_empty_static_block::RULE,
     &no_eq_null::RULE,
@@ -440,17 +447,22 @@ pub static ALL: &[&RuleDef] = &[
     &ts_consistent_generic_constructors::RULE,
     &ts_consistent_indexed_object_style::RULE,
     &ts_consistent_type_assertions::RULE,
+    &ts_ban_tslint_comment::RULE,
+    &ts_class_literal_property_style::RULE,
+    &ts_consistent_type_definitions::RULE,
     &ts_consistent_type_imports::RULE,
     &ts_dot_notation::RULE,
     &ts_no_array_constructor::RULE,
     &ts_no_base_to_string::RULE,
     &ts_no_array_delete::RULE,
+    &ts_no_confusing_non_null_assertion::RULE,
     &ts_no_confusing_void_expression::RULE,
     &ts_no_deprecated::RULE,
     &ts_no_dupe_class_members::RULE,
     &ts_no_duplicate_enum_values::RULE,
     &ts_no_duplicate_type_constituents::RULE,
     &ts_no_dynamic_delete::RULE,
+    &ts_no_empty_function::RULE,
     &ts_no_empty_object_type::RULE,
     &ts_no_explicit_any::RULE,
     &ts_no_extra_non_null_assertion::RULE,
