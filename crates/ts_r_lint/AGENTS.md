@@ -762,3 +762,8 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   `Object.defineProperty(x, "length", {value: 3})`, `Object.assign(x, {length: 3})`)
   makes it a size (report); an accessor descriptor makes it unknown. A destructuring
   default (`({length: x.length = 1} = y)`) is not a known value.
+- **DOM collections** (`prefer-at`, from `unicorn: rules/prefer-at.js`). `childNodes`,
+  `children` and the `getElementsBy*` / `querySelectorAll` calls (optional chains
+  included), and values typed `NodeList`/`NodeListOf`/`HTMLCollection`/`HTMLCollectionOf`
+  (nullish union members ignored), are not given `.at()`. Reports sit on the index without
+  its parentheses, as ESTree ranges exclude them.

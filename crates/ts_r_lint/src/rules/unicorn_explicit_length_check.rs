@@ -24,8 +24,8 @@ use super::unicorn_static::{
     Static, static_value, static_value_control_flow, static_value_no_side_effects,
 };
 use super::unicorn_text::{
-    has_comment_in, is_parenthesized, is_same_reference, needs_parens_at_expression_start,
-    needs_semicolon,
+    has_comment_in, is_parenthesized, is_same_reference, is_written,
+    needs_parens_at_expression_start, needs_semicolon,
 };
 use super::unicorn_util::{space_around_keyword, with_edits};
 use ts_r_ast::Ast;
@@ -783,42 +783,6 @@ fn is_known_numeric_mutation(cx: &Ctx<'_, '_>, reference: NodeId, name: &str) ->
             if !items.is_empty() && items.iter().all(is_safe_non_negative_integer));
     }
     is_known_non_negative_integer(cx, assignment_value(cx, member))
-}
-
-/// The member is written (`=`, `++`, `delete`, destructuring target, `for` head).
-fn is_written(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
-    let ast = cx.ast();
-    let mut cur = node;
-    let parent = loop {
-        let Some(p) = cx.parent(cur) else {
-            return false;
-        };
-        if matches!(ast.node(p), Node::Paren { .. }) || is_ts_wrapper(ast, p) {
-            cur = p;
-        } else {
-            break p;
-        }
-    };
-    match *ast.node(parent) {
-        Node::Assign { left, .. } | Node::AssignPattern { left, .. } => left == cur,
-        Node::Update { .. } => true,
-        Node::Unary {
-            op: UnaryOp::Delete,
-            ..
-        } => true,
-        Node::ForIn { left, .. } | Node::ForOf { left, .. } => left == cur,
-        Node::ArrayPattern { .. } | Node::Rest { .. } => true,
-        Node::ArrayLit { .. } | Node::Spread { .. } | Node::ShorthandProp { .. } => {
-            is_assignment_target(ast, cx.file.parents, parent)
-        }
-        Node::Property { value, .. } => {
-            value == cur
-                && cx
-                    .parent(parent)
-                    .is_some_and(|o| is_assignment_target(ast, cx.file.parents, o))
-        }
-        _ => false,
-    }
 }
 
 fn is_property_mutation(cx: &Ctx<'_, '_>, reference: NodeId, name: &str) -> bool {

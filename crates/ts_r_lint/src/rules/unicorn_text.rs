@@ -567,3 +567,48 @@ fn same_reference(ast: &Ast, a: NodeId, b: NodeId, depth: u32) -> bool {
         _ => false,
     }
 }
+
+/// `isLeftHandSide`: the expression (through parentheses and TS wrappers) is written: `=`,
+/// `++`, `delete`, a destructuring target or a `for` head.
+pub(crate) fn is_written(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut cur = node;
+    let parent = loop {
+        let Some(p) = cx.parent(cur) else {
+            return false;
+        };
+        if matches!(
+            ast.node(p),
+            Node::Paren { .. }
+                | Node::As { .. }
+                | Node::Satisfies { .. }
+                | Node::NonNull { .. }
+                | Node::TypeAssertion { .. }
+                | Node::Instantiation { .. }
+        ) {
+            cur = p;
+        } else {
+            break p;
+        }
+    };
+    match *ast.node(parent) {
+        Node::Assign { left, .. } | Node::AssignPattern { left, .. } => left == cur,
+        Node::Update { .. } => true,
+        Node::Unary {
+            op: UnaryOp::Delete,
+            ..
+        } => true,
+        Node::ForIn { left, .. } | Node::ForOf { left, .. } => left == cur,
+        Node::ArrayPattern { .. } | Node::Rest { .. } => true,
+        Node::ArrayLit { .. } | Node::Spread { .. } | Node::ShorthandProp { .. } => {
+            is_assignment_target(ast, cx.file.parents, parent)
+        }
+        Node::Property { value, .. } => {
+            value == cur
+                && cx
+                    .parent(parent)
+                    .is_some_and(|o| is_assignment_target(ast, cx.file.parents, o))
+        }
+        _ => false,
+    }
+}
