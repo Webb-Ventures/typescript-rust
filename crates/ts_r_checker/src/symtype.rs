@@ -1434,7 +1434,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// `for (const x of xs)` / `for (const k in o)`: the variable's type.
-    fn for_variable_type(&mut self, declarator: Loc) -> Option<TypeId> {
+    pub(crate) fn for_variable_type(&mut self, declarator: Loc) -> Option<TypeId> {
         let decl = self.c.parent(declarator)?;
         let stmt = self.c.parent(decl)?;
         let ast = self.ast(stmt.file);

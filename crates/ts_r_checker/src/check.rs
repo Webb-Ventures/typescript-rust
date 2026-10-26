@@ -1767,6 +1767,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if parent == TypeId::UNRESOLVED || self.store().is_error(parent) {
             return;
         }
+        if !self.c.opts.strict_null_checks
+            && let Some(t) = self.nullish_pattern_initializer(obj_pat)
+        {
+            parent = t;
+        }
         if root.optional_param && self.c.opts.strict_null_checks {
             parent = self.filter_type(parent, |ck, m| {
                 !ck.store().flags(m).contains(TypeFlags::UNDEFINED)
@@ -1856,6 +1861,30 @@ impl<'c, 'a> Ck<'c, 'a> {
             dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
             &[&name, &ts],
         );
+    }
+
+    /// Without strict null checks, the `null` or `undefined` type of the initializer of
+    /// an unannotated declaration whose name is object pattern `pat`. The declared type
+    /// widens to `any`, but the pattern still reads properties off `null` or `undefined`
+    /// (`const { b } = null` is TS2339 on 'null'; tsc: checker/checker.go,
+    /// getBindingElementTypeFromParentType).
+    fn nullish_pattern_initializer(&mut self, pat: Loc) -> Option<TypeId> {
+        let p = self.c.parent(pat)?;
+        let Node::VarDeclarator {
+            name,
+            type_ann: None,
+            init: Some(init),
+            ..
+        } = *self.node(p)
+        else {
+            return None;
+        };
+        if name != pat.node || self.for_variable_type(p).is_some() {
+            return None;
+        }
+        let t = self.quietly(|ck| ck.check_expr(Loc::new(p.file, init)));
+        let f = self.store().flags(t);
+        (!f.intersects(TypeFlags::UNION) && f.intersects(TypeFlags::NULLABLE)).then_some(t)
     }
 
     /// Where the value an object pattern destructures comes from.
@@ -9596,7 +9625,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         };
         match *self.node(f) {
-            Node::FunctionDecl { body, .. } | Node::FunctionExpr { body, .. } => body.is_some(),
+            // A zero-width block is the one the parser made up after a missing `{`
+            // (`{ foo(x = 1), }`): no implementation.
+            Node::FunctionDecl { body, .. } | Node::FunctionExpr { body, .. } => {
+                body.is_some_and(|b| {
+                    let ast = self.ast(f.file);
+                    let sp = ast.span(b);
+                    sp.start != sp.end || !matches!(ast.node(b), Node::Block { .. })
+                })
+            }
             Node::FunctionType { .. }
             | Node::ConstructorType { .. }
             | Node::CallSignature { .. }

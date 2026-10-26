@@ -2,7 +2,9 @@
 //! decorators. Expected output taken from tsc 7.0.2 on the same input.
 //! Skipped when the lib files are not available (`cargo xtask upstream sync --minimal`).
 
-use ts_r_checker::{CheckRun, LibStore, check_program, load_program};
+use ts_r_checker::{
+    CheckRun, LibStore, check_program, check_program_through_syntax_errors, load_program,
+};
 use ts_r_config::{MemoryFs, load_tsconfig};
 
 ts_r_testing::cap_memory!();
@@ -997,4 +999,38 @@ a.ts(12,15): error TS2844: Type of instance member variable 'b' cannot reference
 b.ts(1,10): error TS2814: Function with bodies can only merge with classes that are ambient.
 b.ts(2,7): error TS2813: Class declaration cannot implement overload list for 'f'."#
     );
+}
+
+/// A method whose body the parser made up after a missing `{` has no implementation, so
+/// its parameter initializers are TS2371 (callSignaturesWithParameterInitializers2; tsc
+/// prints them only without syntax errors, so this checks the semantic list directly).
+#[test]
+fn initializers_in_made_up_bodies() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file(
+        "/p/a.ts",
+        "var b = {\n    foo(x = 1),\n    bar(y = 1) { },\n};\n",
+    );
+    fs.add_file(
+        "/p/tsconfig.json",
+        r#"{"compilerOptions": {"strict": false, "target": "es2015"}, "files": ["a.ts"]}"#,
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let result = check_program_through_syntax_errors(&program, CheckRun { threads: 1 });
+    let semantic: Vec<String> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == 2371)
+        .map(|d| {
+            let f = &program.files[d.file.0 as usize];
+            let lc = f.lines().line_col_utf16(&f.text, d.span.start);
+            format!("{}:{} TS{}", lc.line + 1, lc.col + 1, d.code)
+        })
+        .collect();
+    assert_eq!(semantic, ["2:9 TS2371"]);
 }

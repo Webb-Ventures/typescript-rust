@@ -369,7 +369,9 @@ Files, by layer:
   `static_refs.rs`); both are checked in `resolve_type_name`. In `symbols.rs`
   `resolve_ident`, exports of a namespace merged with an enum are out of scope inside the
   enum's body (`namespace_export_in_enum`). TS2371 (initializers in signatures without
-  a body, binding-element defaults too) is in the modifier walk in `check.rs`.
+  a body, binding-element defaults too) is in the modifier walk in `check.rs`; the
+  zero-width block the parser makes up after a missing `{` (`{ foo(x = 1), }`) counts as
+  no body (`param_owner_has_body`).
 - Qualified type names (`resolve_type_name`): an export found on the left namespace that
   has no type meaning gives TS2749 (`'A.B' ... Did you mean 'typeof A.B'?`) when it is a
   value and TS2694 on the right name otherwise (an uninstantiated namespace used as a
@@ -698,6 +700,11 @@ Files, by layer:
   when that is `any`/`unknown`; any other annotation is TS1196 and the variable is an error
   type. A destructured catch variable is checked like a variable's pattern (TS2339 per
   missing key, `{}` for `unknown` without strict null checks; TS2488 for array patterns).
+  Without strict null checks an unannotated declaration initialized with `null` or
+  `undefined` widens to `any`, yet its object pattern still reads off the initializer's
+  type: `const { b } = null` (or `using`) is TS2339 on 'null'
+  (`nullish_pattern_initializer`; tsc: checker/checker.go,
+  getBindingElementTypeFromParentType).
   A `let`/`const`/`using` directly in the catch block named like the catch variable is
   TS2492 at its first such binding, for every name of a destructured catch variable and
   of a destructured declaration too (`catch ([a, b]) { const [c, b] = ... }`;
