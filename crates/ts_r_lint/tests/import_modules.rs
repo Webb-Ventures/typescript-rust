@@ -286,3 +286,44 @@ fn restricted_paths_with_globs_and_bad_exceptions() {
         ]
     );
 }
+
+#[test]
+fn polyfill_targets_come_from_browserslist_or_engines() {
+    let code = "import \"core-js/features/array/includes\";\nrequire(\"object-assign\");\n";
+    let rule = "unicorn/no-unnecessary-polyfills";
+    let both = ["Use built-in instead.", "Use built-in instead."];
+    let h = host(&[("/p/package.json", r#"{"engines": {"node": ">=20"}}"#.into())]);
+    assert_eq!(
+        messages(&h, rule, serde_json::json!([]), "a.js", code),
+        both
+    );
+    // A Browserslist config wins over `engines`; its `production` section first.
+    let h = host(&[
+        ("/p/package.json", r#"{"engines": {"node": ">=20"}}"#.into()),
+        (
+            "/p/sub/.browserslistrc",
+            "# old\nnode 0.10\n[production]\nnode 20, chrome 120\n".into(),
+        ),
+    ]);
+    assert_eq!(
+        messages(&h, rule, serde_json::json!([]), "sub/a.js", code),
+        both
+    );
+    let h = host(&[
+        (
+            "/p/package.json",
+            r#"{"browserslist": ["node 0.10"]}"#.into(),
+        ),
+        ("/p/x/package.json", r#"{"name": "x"}"#.into()),
+    ]);
+    assert!(messages(&h, rule, serde_json::json!([]), "x/a.js", code).is_empty());
+    // Two configs in one directory: no targets.
+    let h = host(&[
+        ("/p/package.json", r#"{"browserslist": "node 20"}"#.into()),
+        ("/p/.browserslistrc", "node 20\n".into()),
+    ]);
+    assert!(messages(&h, rule, serde_json::json!([]), "a.js", code).is_empty());
+    // Nothing found: no targets.
+    let h = host(&[]);
+    assert!(messages(&h, rule, serde_json::json!([]), "a.js", code).is_empty());
+}

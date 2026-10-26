@@ -2709,8 +2709,11 @@ The three `recommended` unicorn rules that were missing, each at 100% of its ora
 
   Candidates are picked by token prefix, in the plugin's order, and the first match with the
   fewest feature segments wins. The Browserslist subset is described in the rule's doc
-  comment. The linter reads no Browserslist config or package.json `engines`, so the rule
-  reports nothing without `targets`.
+  comment. Without `targets` the rule finds them as the plugin does, through
+  `LintEnv.modules`: the nearest Browserslist config (`browserslist` / `.browserslistrc`
+  file or a `browserslist` key in package.json, `production` section else defaults; two in
+  one directory give none), else the nearest package.json's `engines`. Features are cached
+  per discovered target set (`tests/import_modules.rs` covers the lookup).
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
 `rules/{no-multiple-promise-resolver-calls,require-proxy-trap-boolean-return,

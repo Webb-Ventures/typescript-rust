@@ -20,9 +20,10 @@
 //! and browser versions, ranges and comparisons (`node >16`, `chrome 100`, `safari 15 - 16`)
 //! joined with `,`, `or`, `and` and `not`; other queries (usage, `defaults`, `last 2
 //! versions`), `esmodules` and `node: "current"` give no targets. Without the option the
-//! plugin reads a Browserslist config or `engines` in package.json; the linter does not
-//! read either, so the rule then reports nothing. An invalid query or version also turns
-//! the rule off, as in the plugin.
+//! nearest Browserslist config (`browserslist`, `.browserslistrc`, or `browserslist` in
+//! package.json; its `production` section, else its defaults) gives the targets, else the
+//! nearest package.json's `engines`, read through the run's file system. An invalid query
+//! or version turns the rule off, as in the plugin.
 //!
 //! The data (core-js-compat features and entries, Node.js releases, browser versions) is
 //! vendored from the pinned packages in `unicorn_no_unnecessary_polyfills_data.txt`.
@@ -30,6 +31,7 @@
 use super::prelude::*;
 use super::ts_no_require_imports::plain_string;
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 pub static RULE: RuleDef = RuleDef {
@@ -1024,11 +1026,96 @@ fn availability(d: &Data, targets: &[(u16, Ver)]) -> Vec<(bool, bool)> {
         .collect()
 }
 
+/// Per core-js feature: (in core-js-compat's unavailable list, available).
+type Features = Vec<(bool, bool)>;
+
 #[derive(Debug)]
 struct NoUnnecessaryPolyfills {
-    /// Per core-js feature: (in core-js-compat's unavailable list, available); `None` when
-    /// there are no targets.
-    features: Option<Vec<(bool, bool)>>,
+    /// From the `targets` option: `Some(None)` when they turn the rule off. `None` when
+    /// there is no option (targets come from the file's Browserslist config or `engines`).
+    features: Option<Option<Features>>,
+    /// Features per discovered targets (their JSON), for files without the option.
+    discovered: std::sync::Mutex<FxHashMap<String, Arc<Option<Features>>>>,
+}
+
+/// browserslist's config file format: `#` comments, queries split on lines and commas,
+/// `[env names]` sections; queries before any section are the `defaults`.
+fn parse_browserslist_file(text: &str) -> Option<serde_json::Map<String, Value>> {
+    let mut result = serde_json::Map::new();
+    result.insert("defaults".into(), Value::Array(Vec::new()));
+    let mut sections = vec!["defaults".to_owned()];
+    for raw in text.lines() {
+        let line = raw.find('#').map_or(raw, |i| &raw[..i]);
+        for q in line.split(',').map(str::trim).filter(|q| !q.is_empty()) {
+            if q.len() > 2 && q.starts_with('[') && q.ends_with(']') {
+                sections = q[1..q.len() - 1].split(' ').map(str::to_owned).collect();
+                for sec in &sections {
+                    if result.contains_key(sec) {
+                        return None;
+                    }
+                    result.insert(sec.clone(), Value::Array(Vec::new()));
+                }
+            } else {
+                for sec in &sections {
+                    if let Some(Value::Array(a)) = result.get_mut(sec) {
+                        a.push(Value::String(q.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    Some(result)
+}
+
+/// The targets the plugin finds without the option: the nearest Browserslist config
+/// (`browserslist` or `.browserslistrc` file, or a `browserslist` key in `package.json`;
+/// its `production` environment, else its defaults), else the nearest `package.json`'s
+/// `engines`. Two configs in one directory are an error: no targets.
+fn discovered_targets(m: &crate::modules::ModCtx) -> Option<Value> {
+    use ts_r_config::path;
+    let fs = m.fs();
+    let mut dir = m.dir().to_owned();
+    for _ in 0..256 {
+        let mut found: Vec<Value> = Vec::new();
+        for name in ["browserslist", ".browserslistrc"] {
+            let f = path::combine(&dir, name);
+            if fs.file_exists(&f) {
+                let text = fs.read_file(&f).unwrap_or_default();
+                found.push(Value::Object(parse_browserslist_file(&text)?));
+            }
+        }
+        if fs.file_exists(&path::combine(&dir, "package.json"))
+            && let Some(pkg) = m.host().package_json(&dir)
+            && let Some(list) = pkg.get("browserslist")
+        {
+            found.push(match list {
+                Value::Array(_) | Value::String(_) => {
+                    serde_json::json!({ "defaults": list.clone() })
+                }
+                other => other.clone(),
+            });
+        }
+        match found.len() {
+            0 => {}
+            1 => {
+                let config = found.pop()?;
+                let picked = match config.get("production") {
+                    Some(v) if !v.is_null() => v.clone(),
+                    _ => config.get("defaults").cloned().unwrap_or(Value::Null),
+                };
+                return Some(picked);
+            }
+            _ => return None,
+        }
+        let up = path::directory_of(&dir).to_owned();
+        if up == dir || up.is_empty() {
+            break;
+        }
+        dir = up;
+    }
+    let pkg_dir = m.host().package_dir(m.dir())?;
+    let engines = m.host().package_json(&pkg_dir)?.get("engines")?.clone();
+    Some(engines)
 }
 
 impl FromOptions for NoUnnecessaryPolyfills {
@@ -1046,15 +1133,41 @@ impl FromOptions for NoUnnecessaryPolyfills {
             }
         }
         let Some(targets) = targets.filter(|t| truthy(t)) else {
-            return Ok(Self { features: None });
+            return Ok(Self {
+                features: None,
+                discovered: Default::default(),
+            });
         };
         let d = data();
         let features = core_js_targets(d, targets).map(|t| availability(d, &t));
-        Ok(Self { features })
+        Ok(Self {
+            features: Some(features),
+            discovered: Default::default(),
+        })
     }
 }
 
 const POLYFILL: &str = "Use built-in instead.";
+
+impl NoUnnecessaryPolyfills {
+    fn discover(&self, cx: &Ctx<'_, '_>) -> Arc<Option<Features>> {
+        let Some(targets) = discovered_targets(cx.file.modules()).filter(truthy) else {
+            return Arc::new(None);
+        };
+        let key = targets.to_string();
+        if let Ok(cache) = self.discovered.lock()
+            && let Some(f) = cache.get(&key)
+        {
+            return f.clone();
+        }
+        let d = data();
+        let f = Arc::new(core_js_targets(d, &targets).map(|t| availability(d, &t)));
+        if let Ok(mut cache) = self.discovered.lock() {
+            cache.insert(key, f.clone());
+        }
+        f
+    }
+}
 
 impl Rule for NoUnnecessaryPolyfills {
     fn kinds(&self) -> &'static [NodeKind] {
@@ -1062,9 +1175,6 @@ impl Rule for NoUnnecessaryPolyfills {
     }
 
     fn enter(&self, node: NodeId, cx: &mut Ctx<'_, '_>) {
-        let Some(features) = &self.features else {
-            return;
-        };
         let ast = cx.ast();
         let source = match *ast.node(node) {
             Node::ImportDecl { source, .. } => source,
@@ -1093,6 +1203,18 @@ impl Rule for NoUnnecessaryPolyfills {
             return;
         }
         let d = data();
+        let held;
+        let features = match &self.features {
+            Some(Some(f)) => f,
+            Some(None) => return,
+            None => {
+                held = self.discover(cx);
+                match held.as_ref() {
+                    Some(f) => f,
+                    None => return,
+                }
+            }
+        };
         let all_available = |list: &[u32]| list.iter().all(|&f| features[f as usize].1);
         let key = value.replacen("core-js-pure", "core-js", 1);
         let key = key.strip_suffix(".js").unwrap_or(&key);
