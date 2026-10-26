@@ -361,6 +361,10 @@ pub(crate) struct Shared {
     /// The files each page's `<style>` blocks and `style` attributes read or reference: a
     /// change to one reloads the page.
     pub html_deps: Mutex<HashMap<PathBuf, Vec<PathBuf>>>,
+    /// Each page as last served, after `%ENV%` and `transformIndexHtml`: its inline module
+    /// scripts are read from here, so a hook that is not pure (a random id per call) gives
+    /// the page and its scripts the same text.
+    pub html_pages: Mutex<HashMap<PathBuf, String>>,
 }
 
 impl Shared {
@@ -642,6 +646,7 @@ impl DevServer {
             watched_outside: Mutex::default(),
             changed_at: Mutex::default(),
             html_deps: Mutex::default(),
+            html_pages: Mutex::default(),
         });
         let watcher = if config.watch {
             let s = Arc::clone(&shared);
@@ -1199,7 +1204,9 @@ fn route(shared: &Shared, req: &Request) -> Response {
         }
         return serve_file(shared, req, &file, path);
     }
-    if file.is_dir() {
+    // A folder's page only with the slash: `/dir` looks for `dir.html`, then the root page
+    // (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`).
+    if path.ends_with('/') && file.is_dir() {
         let index = file.join("index.html");
         if index.is_file() {
             return serve_html(shared, req, &index);
@@ -1387,7 +1394,17 @@ fn transformed_html(shared: &Shared, url: &str, file: &Path) -> io::Result<Resul
 
 fn serve_html(shared: &Shared, req: &Request, file: &Path) -> Response {
     let html = transformed_html(shared, &req.path, file).map(|r| {
-        r.map(|html| crate::html_proxy::with_proxies(&html, &url_for_file(&shared.root, file)))
+        r.map(|html| {
+            let out = crate::html_proxy::with_proxies(&html, &url_for_file(&shared.root, file));
+            // Vite: packages/vite/src/node/server/middlewares/indexHtml.ts keeps each inline
+            // script as the page was served, so the proxy module matches this page.
+            shared
+                .html_pages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(file.to_path_buf(), html);
+            out
+        })
     });
     match html {
         Ok(Err(message)) => Response::text(
@@ -2779,8 +2796,17 @@ fn compose_maps(chain: &[Option<String>], input: &TransformInput<'_>) -> Option<
 pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<Vec<u8>, String> {
     if let Some((page, n)) = crate::html_proxy::split_module_file(file) {
         let page_url = url_for_file(&shared.root, &page);
-        let html = transformed_html(shared, &page_url, &page)
-            .map_err(|e| format!("{}: {e}", page.display()))??;
+        let served = shared
+            .html_pages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&page)
+            .cloned();
+        let html = match served {
+            Some(html) => html,
+            None => transformed_html(shared, &page_url, &page)
+                .map_err(|e| format!("{}: {e}", page.display()))??,
+        };
         return crate::html_proxy::script(&html, n)
             .map(|s| s.as_bytes().to_vec())
             .ok_or_else(|| format!("{page_url} has no inline module script {n}"));

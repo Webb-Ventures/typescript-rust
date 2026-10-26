@@ -143,6 +143,12 @@ fn handle_change(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(path.clone(), timestamp);
+    // A changed page's inline scripts come from its next serve.
+    shared
+        .html_pages
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(path);
     // `.env*`: new values everywhere, so the page reloads (Vite restarts its server).
     if let Some(dir) = &shared.env_options.dir
         && crate::env::is_env_file(dir, path)

@@ -257,8 +257,21 @@ fn denied_files_case_html_fallback_and_asset_queries() {
     let (status, _, body) = http_get(f.server.addr(), "/missing", &[("Accept", "*/*")]);
     assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
     // A public file matches only in its own case (the disk may not care).
-    let (status, _, body) = f.get("/ROBOTS.TXT");
+    let (status, _, body) = http_get(f.server.addr(), "/ROBOTS.TXT", &[("Accept", "text/plain")]);
     assert_eq!(status, 404, "{body}");
+    // A folder's page needs the slash; without it `<path>.html`, else the root page.
+    f.app.write("dir/index.html", "<p>dir page</p>");
+    f.app.write("both.html", "<p>both file</p>");
+    f.app.write("both/index.html", "<p>both folder</p>");
+    for (url, want) in [
+        ("/dir/", "dir page"),
+        ("/dir", "id=\"app\""),
+        ("/both", "both file"),
+        ("/both/", "both folder"),
+    ] {
+        let (status, _, body) = http_get(f.server.addr(), url, &html);
+        assert!(status == 200 && body.contains(want), "{url}: {body}");
+    }
     let (_, _, js) = f.get("/src/logo.svg?import&no-inline&x=1");
     assert!(js.contains("\"/src/logo.svg?no-inline&x=1\""), "{js}");
     // `//x` is not a file of the root or the public directory: the fallback page.

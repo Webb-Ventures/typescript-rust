@@ -142,7 +142,12 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `transformIndexHtml`) has each non-empty inline `<script type="module">` replaced by a
   `src` to `{page}?html-proxy&index=N.js`; that URL's graph file is the pseudo path
   `{page file}?html-proxy&index=N.js` (same directory, so relative imports resolve), its
-  source the N-th inline script of the same transformed HTML, rendered like any module.
+  source the N-th inline script of the page as last served (`Shared::html_pages`, dropped
+  when the page file changes), rendered like any module. The hook is not run again for the
+  script: a `transformIndexHtml` that is not pure (a new id per call) would give the script
+  other text than its page. Each serve stores the page again, so a reload gets the new
+  script (`vite: packages/vite/src/node/server/middlewares/indexHtml.ts` caches each inline
+  script when it serves the page and invalidates its proxy module).
 - **`assetsInclude` files are assets.** A file with an unknown extension and no query goes
   to plugin `load`/`transform` as a plugin module, unless `DevConfig::assets_include` (a
   `glob::PathFilter` of root-resolved globs and regexes, filled from Vite's `assetsInclude`)
@@ -242,6 +247,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
   files, `define` and mode; the `import.meta.env` prelude is added at render (not cached with
   the transform). A change to a `.env*` file in the env dir reloads it and sends `full-reload`
   when the result differs. The client runtime and `/@vite/env` carry the `define` globals.
+- **`%NAME%` in HTML** takes `import.meta.env.NAME` from the env, or from a `define` of
+  `import.meta.env.NAME`: a define that is a JSON string gives its text, any other gives the
+  expression as written (`vite: packages/vite/src/node/plugins/html.ts`, `htmlEnvHook`).
 - **Glob imports are expanded after the transform cache** (in `prepare_script`), so a new or
   deleted file matching a module's patterns (`Shared::glob_watches`) re-prepares that module
   and propagates like an edit. Aliases in patterns go through the plugin `resolveId` (pre).
@@ -277,8 +285,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `.git` (403), like Vite's default `server.fs.deny`.
 - **HTML fallback** (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`): a
   GET that matched nothing and accepts `text/html` or `*/*` (not `/favicon.ico`) gets the page
-  `<path>.html` when it exists, else the root `index.html`. Pages are sent as `text/html` (no
-  charset, as Vite does).
+  `<path>.html` when it exists, else the root `index.html`. A directory's `index.html` is
+  served only for a path ending in `/`: `/dir` tries `dir.html`, then the root page. Pages
+  are sent as `text/html` (no charset, as Vite does).
 - **App CSS** (`server/app_css.rs`, `vite: packages/vite/src/node/plugins/css.ts`,
   `urlResolver`/`rewriteCssUrls`/`rewriteCssImageSet`): linked and JS-imported stylesheets in
   the root, and a page's `<style>` blocks and `style` attributes, have `@import`s inlined

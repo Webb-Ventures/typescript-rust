@@ -414,3 +414,73 @@ fn plugin_loads_are_kept_until_the_module_is_invalidated() {
     assert!(http_get(addr, url, &[]).2.contains("d + 3;"));
     server.shutdown();
 }
+
+/// `transformIndexHtml` puts a new id in the page on every call.
+#[derive(Debug, Default)]
+struct RandomIdHost {
+    calls: Mutex<u32>,
+}
+
+impl PluginHost for RandomIdHost {
+    fn cache_id(&self) -> &str {
+        "random-id-host/1"
+    }
+
+    fn hooks(&self) -> PluginHooks {
+        PluginHooks {
+            index_html: true,
+            ..PluginHooks::default()
+        }
+    }
+
+    fn resolve_ids(
+        &self,
+        _stage: Stage,
+        _importer: &str,
+        specifiers: &[String],
+    ) -> Result<Vec<Option<PluginResolution>>, String> {
+        Ok(vec![None; specifiers.len()])
+    }
+
+    fn load(&self, _id: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn transform(&self, _: Stage, _: &str, _: &str) -> Result<Option<Transformed>, String> {
+        Ok(None)
+    }
+
+    fn transform_index_html(&self, _url: &str, _file: &Path, html: &str) -> Result<String, String> {
+        let mut n = self.calls.lock().unwrap();
+        *n += 1;
+        Ok(html.replace("{{ id }}", &format!("id{}", *n)))
+    }
+}
+
+/// A page's inline module script is the one in the page as served: a `transformIndexHtml`
+/// that is not pure gives each reload a new script, the same as its page's.
+#[test]
+fn inline_scripts_match_the_page_as_served() {
+    let app = TempDir::new("plug-inline");
+    let cache = TempDir::new("plug-inline-cache");
+    app.write(
+        "index.html",
+        "<div id=\"{{ id }}\"></div>\n<script type=\"module\">\nconsole.log('{{ id }}')\n</script>\n",
+    );
+    let host = Arc::new(RandomIdHost::default());
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    let script = "/index.html?html-proxy&index=0.js";
+    for n in 1..=3 {
+        let page = http_get(addr, "/", &[("Accept", "text/html")]).2;
+        assert!(page.contains(&format!("id=\"id{n}\"")), "{page}");
+        assert!(page.contains(script), "{page}");
+        let js = http_get(addr, script, &[]).2;
+        assert!(js.contains(&format!("'id{n}'")), "{n}: {js}");
+    }
+    server.shutdown();
+}
