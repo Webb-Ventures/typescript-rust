@@ -228,7 +228,7 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-26, v1/emit2): 1,693 match, 35 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  Last run (2026-10-26, v1/emit2): 1,697 match, 31 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
   syntax errors are skipped); `--filter esDecorators`: 134 match, 6 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
@@ -279,6 +279,20 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   (codegen prints `1_000` as `1000`); the separators are not otherwise lowered.
 - `(x as T)` loses its parentheses when the comments in them are inline (`(/* c */ x as T)`
   → `/* c */ x`); a line comment after the `(` keeps them.
+- A namespace or enum exported by an `export { }` list assigns every alias in its IIFE
+  argument, on each of its declarations and whoever declared the name first:
+  `(N || (exports.B = exports.N = N = {}))`, not `exports.N = N;` after it
+  (`cjs::list_aliases`; const enums keep the statement after).
+- A namespace's IIFE parameter is `N_1` (the next unused `N_k`) when the body declares a
+  value named `N` in any nested scope: a `const`, `var`, function, class, parameter, catch
+  variable, inner namespace or enum, an `import N =` alias or a `declare const`; types,
+  enum members and names merged from another declaration don't count
+  (`namespace::param_name`). Otherwise `(function (N) { const N = 0; })` is a SyntaxError.
+- An `import` or `export` in a single-statement position (`if (x) export type {};`, a syntax
+  error) does not make the file a module: only top-level statements count (`scope.rs`
+  `sub_stmt`).
+- TC39 decorators on a class that `extends null`: the synthesized constructor has no
+  `super(...arguments)`.
 
 ## Dependencies
 
@@ -287,9 +301,12 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 
 ## Gaps (largest baseline mismatch groups first)
 
-- `using`: `export =` after a top-level `using` (CommonJS `module.exports`), a `var` in a
-  nested block exported by an `export { }` list (CommonJS `exports.y = y;` after it), and the
+- `using`: `export =` after a top-level `using` (CommonJS `module.exports`) and the
   helper order when `__setFunctionName` is requested between the two `using` helpers.
+- CommonJS: a top-level `var` in a nested block, loop or `try` exported by an `export { }`
+  list gets no `exports.y = y;` after it (tsc adds one after each, hoists `for (var h = x;;)`
+  out of the loop and wraps a `for (var n in o)` body to add it; `topLevelVarHoistingCommonJS`,
+  `usingDeclarationsTopLevelOfModule.3`).
 - Below ES2022: a private member as a `for...of` / `for...in` destructuring target and
   `#x in o` outside any class are refused (TSR2003); nor is `super` in
   the static code of a class without `extends` lowered (tsc moves it out unchanged, a

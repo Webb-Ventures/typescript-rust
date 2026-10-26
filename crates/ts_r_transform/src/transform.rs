@@ -43,6 +43,9 @@ pub(crate) struct Tx<'a> {
     /// Names generated so far.
     pub taken: FxHashSet<String>,
     pub ns_stack: Vec<NsFrame>,
+    /// Value bindings by name (built on the first namespace body; see
+    /// `namespace::param_name`).
+    pub value_bindings_by_name: Option<FxHashMap<Atom, Vec<BindingId>>>,
     /// Evaluated enums of this file, by binding.
     pub enums: FxHashMap<BindingId, EnumInfo>,
     /// Whether a member receiver chain starts at an import binding.
@@ -148,6 +151,7 @@ pub(crate) fn run(
         marker: None,
         taken: FxHashSet::default(),
         ns_stack: Vec::new(),
+        value_bindings_by_name: None,
         enums: FxHashMap::default(),
         enum_import_roots: FxHashMap::default(),
         enum_declared: FxHashSet::default(),

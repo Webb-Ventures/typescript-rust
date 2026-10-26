@@ -241,6 +241,12 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
                     tx.map_range(prop, name_span);
                 }
                 rhs = tx.assign(em, rhs, at);
+            } else if top_level && tx.opts.is_cjs() && !is_const {
+                for alias in crate::cjs::list_aliases(tx, name_atom) {
+                    let e = tx.ident("exports", at);
+                    let em = tx.member_or_index(e, &alias, at);
+                    rhs = tx.assign(em, rhs, at);
+                }
             }
             let pa = tx.paren(rhs, at);
             crate::namespace::map_names(tx, &[l, n2], name_span);

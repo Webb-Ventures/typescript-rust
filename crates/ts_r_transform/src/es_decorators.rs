@@ -286,6 +286,24 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
     let derived = tx.items(p.heritage).iter().any(
         |&h| matches!(tx.n(h), Node::HeritageClause { kind, .. } if kind == HeritageKind::Extends),
     );
+    // `extends null` has no constructor to call: a synthesized constructor gets no
+    // `super(...arguments)` (observed, tsc 7.0.2 `esDecoratorExtendsNull`).
+    let extends_null = tx.items(p.heritage).iter().any(|&h| match tx.n(h) {
+        Node::HeritageClause {
+            kind: HeritageKind::Extends,
+            types,
+        } => tx.items(types).first().is_some_and(|&t| {
+            let mut e = match tx.n(t) {
+                Node::ExprWithTypeArgs { expr, .. } => expr,
+                _ => t,
+            };
+            while let Node::Paren { expr } = tx.n(e) {
+                e = expr;
+            }
+            tx.kind(e) == NodeKind::NullLit
+        }),
+        _ => false,
+    });
     let class_name = p.name.map(|n| tx.name(n).to_owned());
     let mut st = Lower {
         decorated: Vec::new(),
@@ -421,7 +439,7 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
             Some(c) => append_to_ctor(tx, c, s, !define),
             None => {
                 let mut body = Vec::with_capacity(2);
-                if derived {
+                if derived && !extends_null {
                     let sup = tx.mk(Node::Super {}, at);
                     let args = tx.ident("arguments", at);
                     let spread = tx.spread(args, at);
