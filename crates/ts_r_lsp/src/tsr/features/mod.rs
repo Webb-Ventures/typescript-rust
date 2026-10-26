@@ -17,6 +17,7 @@ mod outline;
 mod position;
 mod quick_info;
 mod signature;
+mod signature_site;
 mod strings;
 mod type_args;
 

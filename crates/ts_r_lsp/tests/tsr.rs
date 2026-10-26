@@ -1652,6 +1652,77 @@ fn completion_package_exports_and_imports() {
     c.shutdown();
 }
 
+/// Signature help: the overload a call resolves to is active, generic candidates show
+/// instantiated, rest tuples expand into parameters, type argument lists and contextually
+/// typed parameter lists get help, and private constructors get none from outside.
+#[test]
+fn signature_help_candidates_and_sites() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(
+        "declare function f(a: number): number;\n\
+         declare function f(b: string): number;\n\
+         f(¦\"x\");\n\
+         declare function g<T>(a: T): T;\n\
+         g(¦\n\
+         ;declare function w(...args: [string, string] | [number, string, string]): void;\n\
+         w(1, \"\", ¦);\n\
+         declare function h<T, U>(): void;\n\
+         h<number, ¦;\n\
+         declare function takesCb(cb: (n: number, s: string) => void): void;\n\
+         takesCb((n, ¦));\n\
+         class P { private constructor() {} }\n\
+         new P(¦);\n\
+         declare function opt(c?: number): void;\n\
+         opt(¦);\n",
+    );
+    let env = Env::new("sighelp", &[("tsconfig.json", TSCONFIG), ("src/a.ts", &a)]);
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let u = env.uri("src/a.ts");
+    let ask = |c: &mut ScriptedClient, (l, ch): (u32, u32)| {
+        result(c, "textDocument/signatureHelp", at(&u, l, ch))
+    };
+    let labels = |s: &Value| -> Vec<String> {
+        s["signatures"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|x| x["label"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let s = ask(&mut c, m[0]);
+    assert_eq!(s["activeSignature"], 1, "{s}");
+    let s = ask(&mut c, m[1]);
+    assert_eq!(labels(&s), ["g(a: unknown): unknown"], "{s}");
+    let s = ask(&mut c, m[2]);
+    assert_eq!(
+        labels(&s),
+        [
+            "w(args_0: string, args_1: string): void",
+            "w(args_0: number, args_1: string, args_2: string): void"
+        ],
+        "{s}"
+    );
+    assert_eq!(
+        (s["activeSignature"].clone(), s["activeParameter"].clone()),
+        (json!(1), json!(2))
+    );
+    let s = ask(&mut c, m[3]);
+    assert_eq!(labels(&s), ["h<T, U>(): void"], "{s}");
+    assert_eq!(s["activeParameter"], 1);
+    let s = ask(&mut c, m[4]);
+    assert_eq!(labels(&s), ["cb(n: number, s: string): void"], "{s}");
+    assert_eq!(s["activeParameter"], 1);
+    assert_eq!(ask(&mut c, m[5]), Value::Null);
+    let s = ask(&mut c, m[6]);
+    assert_eq!(labels(&s), ["opt(c?: number): void"], "{s}");
+    c.shutdown();
+}
+
 /// Source with `¦` markers: the text without them and each marker's (line, character).
 fn marked(src: &str) -> (String, Vec<(u32, u32)>) {
     let mut text = String::new();
