@@ -13,7 +13,19 @@ pub fn node_at(ast: &Ast, offset: u32) -> Option<NodeId> {
     if offset < sp.start || offset > sp.end {
         return None;
     }
-    let mut cur = root;
+    // A JSDoc tag's type (`@type {T}`, `@param {T} x`) sits in a comment, outside the
+    // spans of the tree it belongs to: an offset inside one descends from that type.
+    let tag_type = ast.jsdoc_tags.iter().find_map(|t| {
+        let ty = t.ty?;
+        let s = ast.span(ty);
+        (s.start <= offset && offset <= s.end && s.start < s.end).then_some(ty)
+    });
+    Some(descend(ast, tag_type.unwrap_or(root), offset))
+}
+
+/// The innermost node below `from` whose span holds `offset` (or ends at it).
+fn descend(ast: &Ast, from: NodeId, offset: u32) -> NodeId {
+    let mut cur = from;
     // Child ids are smaller than their parent's, so this descends at most node_count times.
     for _ in 0..ast.node_count() {
         let mut inside = None;
@@ -36,7 +48,7 @@ pub fn node_at(ast: &Ast, offset: u32) -> Option<NodeId> {
             _ => break,
         }
     }
-    Some(cur)
+    cur
 }
 
 /// The identifier (or private name) at `offset`.

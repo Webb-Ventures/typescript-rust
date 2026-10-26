@@ -846,6 +846,52 @@ fn hover_shows_types_and_docs() {
     c.shutdown();
 }
 
+/// Type alias hovers print the aliased type (`Exclude<..>` shows the union it makes); a
+/// JSDoc `@typedef`/`@callback` is spelled out, also where a tag's type names it.
+#[test]
+fn hover_on_type_aliases_and_jsdoc_typedefs() {
+    if !libs_present() {
+        return;
+    }
+    let ts = "type A = \"a\" | \"b\";\ntype B = Exclude<A, \"a\">;\ntype O = { x: number };\n";
+    let js = "/**\n * Bar doc\n * @typedef {Object} Bar\n * @property {string} baz\n */\n\
+              /** @callback Cb\n * @param {string} x\n */\n\
+              /** @type {Bar} */\nexport const bar = { baz: \"\" };\n";
+    let env = Env::new(
+        "hover-aliases",
+        &[
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions": {"allowJs": true, "checkJs": true, "strict": true, "module": "nodenext", "target": "es2022", "noEmit": true}, "include": ["src"]}"#,
+            ),
+            ("src/a.ts", ts),
+            ("src/b.js", js),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.js");
+    let ua = env.uri("src/a.ts");
+    let ub = env.uri("src/b.js");
+    let h = hover_text(&mut c, &ua, 1, 5);
+    assert!(h.contains("type B = \"b\""), "{h}");
+    let h = hover_text(&mut c, &ua, 2, 5);
+    assert!(h.contains("type O = {\n    x: number;\n}"), "{h}");
+    let want = "type Bar = {\n    baz: string;\n}";
+    let h = hover_text(&mut c, &ub, 2, 22);
+    assert!(h.contains(want), "{h}");
+    assert!(h.contains("```\nBar doc"), "{h:?}");
+    assert!(!h.contains("property"), "{h:?}");
+    // The name in `@type {Bar}` (a tag type in a comment, outside the statement's span).
+    let h = hover_text(&mut c, &ub, 8, 12);
+    assert!(h.contains(want), "{h}");
+    assert!(h.contains("```\nBar doc"), "{h:?}");
+    assert!(!h.contains("property"), "{h:?}");
+    let h = hover_text(&mut c, &ub, 5, 15);
+    assert!(h.contains("type Cb = (x: string) => any"), "{h}");
+    c.shutdown();
+}
+
 const NAV_KEYWORDS: &str = "class Base { m() {} }
 class D extends Base {
   override m() { super.m(); }

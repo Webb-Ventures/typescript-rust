@@ -54,8 +54,19 @@ fn own_raw(ck: &Ck<'_, '_>, d: Loc) -> Option<String> {
             _ => break,
         }
     }
+    // A JSDoc `@typedef`/`@callback` alias is built from the comment it sits in.
+    let span = ast.span(node.node);
+    if matches!(c.node(node), Node::TypeAlias { .. })
+        && let Some(comment) = ast
+            .comments_between(0, u32::MAX)
+            .iter()
+            .find(|cm| cm.span.start < span.start && span.end <= cm.span.end)
+    {
+        let raw = comment.span.text(text);
+        return raw.starts_with("/**").then(|| raw.to_string());
+    }
     // The last `/** */` of the comments right before the node (other comments may follow).
-    let mut pos = ast.span(node.node).start;
+    let mut pos = span.start;
     for comment in ast.comments_between(0, pos).iter().rev() {
         let between = text.get(comment.span.end as usize..pos as usize)?;
         if !between.trim().is_empty() {
@@ -392,6 +403,17 @@ fn render(ck: &mut Ck<'_, '_>, found: Found, decl: Loc) -> String {
             // A `@typedef` comment documents the type, unless `decl` is that type.
             if doc.declares_type() && !matches!(ck.c.node(decl), Node::TypeAlias { .. }) {
                 return String::new();
+            }
+            // The type's `@property`, `@param` and `@returns` tags make it; tsc does not list
+            // them.
+            let mut doc = doc;
+            if doc.declares_type() {
+                doc.tags.retain(|t| {
+                    !matches!(
+                        t.name.as_str(),
+                        "property" | "prop" | "param" | "arg" | "argument" | "returns" | "return"
+                    )
+                });
             }
             jsdoc::render(&doc, &mut |name| link_target(ck, at, name))
         }

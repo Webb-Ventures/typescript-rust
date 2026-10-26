@@ -384,7 +384,18 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   `accessor` fields), `(method)`, `function`, `constructor`, `class`/`(local class)`/
   `abstract class`, `interface`, `enum`/`const enum`, `(enum member) E.m = 0`,
   `namespace`/`module`, `(type parameter) T in C<T>`/`in f<T>(x: T): void`/
-  `in type A<T>`, `type A<T> = <body as written>`.
+  `in type A<T>`, `type A<T> = <body>`.
+- A type alias's body is its declared type as printed (`type B = Exclude<A, "a">` shows
+  the union it makes, `type R = ReturnType<..>` the object). Until the checker's
+  `PrintMode::quick_info_alias` (tsc's `InTypeAlias`: the outermost type prints without
+  its own alias) is on the stack, a body the printer names by the alias itself is spelled
+  out from its members for JSDoc `@typedef`/`@callback` aliases and TypeScript object types
+  of plain properties (`readonly`, `?` without the `undefined` it adds), and is otherwise
+  the text as written, as is a conditional type. A JSDoc alias's documentation is the
+  comment it sits in, without the `@property`/`@param`/`@returns` tags that build it.
+- Names inside JSDoc tag types (`@type {Bar}`, `@param {Bar} x`, `@extends {a.B}`) are
+  found by `locate::node_at`: a tag's type lies in a comment, outside its host's span, so
+  an offset inside one descends from that type (hover, definition, references, rename).
 - Functions show every overload (`function f(x: number): void` per line; from five on, the
   first three then `// +N more overloads`); on a declaration's own name, that
   declaration's signature; at a call of an overloaded or generic function, the signature
