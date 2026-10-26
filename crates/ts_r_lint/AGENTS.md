@@ -762,8 +762,8 @@ no-negated-condition 134/134, no-object-as-default-parameter 62/62, no-process-e
 no-static-only-class 91/91, no-thenable 178/178, no-useless-fallback-in-spread 61/61,
 no-useless-length-check 165/165, no-useless-promise-resolve-reject 121/121,
 no-useless-spread 283/283, no-useless-switch-case 34/34, no-useless-undefined 271/271,
-prefer-export-from 158/158, prefer-module 152/152, prefer-switch 68/68,
-prefer-top-level-await 228/228, switch-case-braces 56/56.
+prefer-export-from 158/158, prefer-module 152/152, prefer-switch 68/68, prefer-ternary
+142/142, prefer-top-level-await 228/228, switch-case-braces 56/56. Not done: no-for-loop.
 
 Shared helpers of this round live in `unicorn_util_h4.rs` (method calls, identifier
 validity, free names, renames, ESTree identifier spans, same-line trailing comments,
@@ -817,6 +817,10 @@ heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path
   current discriminant candidates; the candidates kept are the ones before that `if`.
   Member references compare their computed keys after folding literals (`a["b" + ""]` is
   `a.b`), which `is_same_reference` alone doesn't do.
+- **prefer-ternary.** The plugin's "minimal ternary" fix (branches that differ in one
+  inner value become `foo(test ? a : b)`) is not implemented: no oracle case expects it, so
+  only whole `return`/assignment merges are fixed. `let x = a; if (t) x = b;` is a
+  suggestion only, and is skipped when `x` is read in `t` or `b`.
 - **prefer-top-level-await.** Without type information `isKnownNonPromise` is always
   false, so every unawaited promise-like top-level call is reported.
 - **prefer-export-from.** A new `export ... from` goes at the end of the source text (the
@@ -826,8 +830,8 @@ heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path
 - **no-thenable.** Under espree a shorthand `export {then}` is one identifier node playing
   both roles, so it is reported twice; typescript-eslint makes two nodes and reports once.
 
-Read to understand (not ported), all from eslint-plugin-unicorn 79.0.0 `rules/`: the 24
-rule files of the list above, plus `utils/get-available-variable-name.js`,
+Read to understand (not ported), all from eslint-plugin-unicorn 79.0.0 `rules/`: the rule
+files of the rules above, plus `utils/get-available-variable-name.js`,
 `fix/rename-variable.js`, `fix/replace-reference-identifier.js`,
 `utils/get-switch-case-head-location.js`, `utils/get-indent-string.js`,
 `utils/get-linebreak.js`, `utils/comments.js`,
@@ -856,6 +860,8 @@ rule files of the list above, plus `utils/get-available-variable-name.js`,
 `ast/is-reference-identifier.js`, `utils/function-body.js`,
 `utils/is-node-value-not-function.js`, `utils/array-or-object-prototype-property.js`,
 `utils/has-optional-chain-element.js`, `utils/get-const-variable-initializer.js`,
-`utils/get-indent-unit.js`, `utils/get-line-indent.js`; and from
+`utils/get-indent-unit.js`, `utils/get-line-indent.js`, `utils/get-sibling-node.js`,
+`utils/should-add-parentheses-to-conditional-expression-child.js`,
+`utils/is-same-tokens.js`, `shared/minimal-ternary.js`; and from
 `@eslint-community/eslint-utils`, `hasSideEffect`, `getFunctionHeadLocation` and
 `getFunctionNameWithKind`.

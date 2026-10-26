@@ -353,6 +353,7 @@ mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_switch;
+mod unicorn_prefer_ternary;
 mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_switch_case_braces;
@@ -741,6 +742,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_switch::RULE,
+    &unicorn_prefer_ternary::RULE,
     &unicorn_prefer_top_level_await::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_switch_case_braces::RULE,
