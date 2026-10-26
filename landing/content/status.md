@@ -19,7 +19,7 @@ number disappears from its source, so the table can't silently go stale).
 
 | Tool | Works today | Main gaps |
 | --- | --- | --- |
-| [`ts-r-run`](tools/ts-r-run.md) | Runs TypeScript on Node 22.15+; passes 98 of 100 compared tests of tsx's own suite and 36 of 36 of Node's type-stripping tests | Only the entry's tsconfig is used; Windows untested |
+| [`ts-r-run`](tools/ts-r-run.md) | Runs TypeScript on Node 22.15+; passes 100 of 100 compared tests of tsx's own suite and 36 of 36 of Node's type-stripping tests | Only the entry's tsconfig is used; Windows untested |
 | [`ts-r-dev`](tools/ts-r-dev.md) | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling | No CSS preprocessors; some `vite.config` options and plugin APIs; HTTP/1.1 only |
 | [`ts-r-build`](tools/ts-r-build.md) | esbuild's CLI flags, ESM/CJS/IIFE, splitting, minify, source maps, `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | [`ts-r-check`](tools/ts-r-check.md) | tsc's codes and messages; 97.0% of conformance tests exact; 3 of 6 public bench projects match exactly | No "Did you mean" suggestions on regular expression errors (TS1369); some inference and narrowing; emits like tsc unless `--noEmit` |

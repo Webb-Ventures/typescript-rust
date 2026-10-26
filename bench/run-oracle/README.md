@@ -46,14 +46,14 @@ not literal.
 
 ## Results
 
-23aedd7 (2026-10-24, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
+30863e8 (2026-10-26, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
 
-- tsx: **98 of 100 compared cases pass (98.0%)**; 35 skipped.
+- tsx: **100 of 100 compared cases pass (100%)**; 35 skipped.
 - node: **36 of 36 compared cases pass (100%)**; 53 skipped.
 
 | tsx spec | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| smoke | 11 | 2 | 0 |
+| smoke | 13 | 0 | 0 |
 | tsconfig | 19 | 0 | 0 |
 | cli | 13 | 0 | 10 |
 | commonjs-mode-contracts | 8 | 0 | 0 |
@@ -73,16 +73,11 @@ not literal.
 In the node source, 29 skips are `--eval`, `--print` or stdin cases and 24 are cases where Node
 and tsx disagree. In 20 of those 24 `ts-r-run` matches tsx and in 4 it matches Node.
 
-Remaining tsx failures by cause:
-
-- **`require()` of ES modules** (`ts_r_run` and `ts_r_transform`, 2, smoke "package type:
-  undefined" from `.js` and from `.ts`): tsx compiles every module a `require()` reaches to
-  CommonJS with esbuild's interop, and the smoke test's snapshot has that shape: namespace keys
-  in sorted order with `default` first (`{"cjsContext":true,"default":1,"named":2}`, ours keeps
-  source order), `.mjs` files that see a CommonJS context, an ES package without
-  `__esModule`, and no `ERR_REQUIRE_ESM_RACE_CONDITION` when `cjs/index.cjs` requires
-  `ts/index.ts` after an `import()` of it. `ts-r-run` keeps Node's own `require(esm)` and
-  tsc's interop helpers.
+No tsx case fails. The 35 skips were reviewed again: they test tsx's API, its REPL, `tsx
+watch`, its `--eval`/`--print`, `--version` and `--help` text, an interactive pty, or tsx's own
+source, and one ("require(esm) support controls extensionless .mjs resolution") fails with tsx
+itself here. The 53 node skips are `--eval`/`--print`/stdin input or cases where Node and tsx
+disagree. None of them can be compared with the same command.
 
 | Run | tsx compared | tsx pass | tsx skip | tsx rate | node compared | node pass | node skip |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -91,3 +86,4 @@ Remaining tsx failures by cause:
 | signal relay with a listener hidden from `listenerCount`, `--enable-source-maps` for `--test` | 86 | 79 | 49 | 91.9% | 36 | 36 | 53 |
 | format detection (only top-level `await` forces ESM), `import.meta` and a hidden `__esModule` marker in CommonJS output, `?query` instances, `import()` default unwrap, syntax errors behind `import()` deferred to load time, `TransformError` for `require` of top-level `await`, JSON named exports, no type stripping of preload output in `node_modules` | 86 | 84 | 49 | 97.7% | 36 | 36 | 53 |
 | the loader-flag cases (`--import tsx`, `--require tsx/cjs`) and `tsx --test` brought in; `ts-r-run --test` without a file, `require('..')` to a package's TypeScript index | 100 | 98 | 35 | 98.0% | 36 | 36 | 53 |
+| `require()` of ES modules compiled to CommonJS (sorted exports, `default` first in `__importStar`), one instance for a file both required and imported, native `import()` in CommonJS output, `?query` after a plain import in CommonJS, `require` through an `imports` map | 100 | 100 | 35 | 100% | 36 | 36 | 53 |
