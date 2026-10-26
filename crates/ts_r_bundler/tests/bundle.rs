@@ -2304,3 +2304,95 @@ fn defines_match_import_meta_optional_chains_string_keys_and_name_writes() {
         "{code}"
     );
 }
+
+#[test]
+fn drop_labels_remove_labeled_statements_before_resolving() {
+    let fs = project(&[(
+        "src/entry.js",
+        "keep: console.log('keep');\nDROP: require('./missing');\nexport const f = () => {\n  if (globalThis.x) DROP: require('./missing2');\n  DROP: { console.log('drop'); }\n  other: console.log('other');\n};\n",
+    )]);
+    let mut o = opts(&["src/entry.js"]);
+    o.drop_labels = vec!["DROP".into()];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(!code.contains("missing"), "{code}");
+    assert!(
+        !code.contains("'drop'") && !code.contains("\"drop\""),
+        "{code}"
+    );
+    assert!(code.contains("keep:"), "{code}");
+    assert!(code.contains("other:"), "{code}");
+}
+
+#[test]
+fn alias_rewrites_package_paths_longest_key_first_from_the_working_dir() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import 'pkg';\nimport 'pkg/foo';\nimport 'pkg/foo/bar';\nimport './nested';\nimport 'prefix-foo';\nimport 'abs/';\n",
+        ),
+        ("src/nested/index.js", "import 'inner';\n"),
+        (
+            "src/nested/node_modules/alias-inner/index.js",
+            "console.log('wrong');\n",
+        ),
+        (
+            "node_modules/alias-inner/index.js",
+            "console.log('inner');\n",
+        ),
+        ("node_modules/alias-pkg/index.js", "console.log('pkg');\n"),
+        ("node_modules/alias-foo/index.js", "console.log('foo');\n"),
+        ("node_modules/alias-foo/bar.js", "console.log('foo/bar');\n"),
+        (
+            "node_modules/prefix-foo/index.js",
+            "console.log('prefix-foo');\n",
+        ),
+        ("lib/file.js", "console.log('abs');\n"),
+    ]);
+    let mut o = opts(&["src/entry.js"]);
+    o.alias = vec![
+        ("pkg".into(), "alias-pkg".into()),
+        ("pkg/foo".into(), "alias-foo".into()),
+        ("inner".into(), "alias-inner".into()),
+        ("prefix".into(), "nope".into()),
+        ("abs".into(), "/proj/lib/file.js".into()),
+    ];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    for want in [
+        "'pkg'",
+        "'foo'",
+        "'foo/bar'",
+        "'inner'",
+        "'prefix-foo'",
+        "'abs'",
+    ] {
+        let dq = want.replace('\'', "\"");
+        assert!(
+            code.contains(want) || code.contains(&dq),
+            "{want} in {code}"
+        );
+    }
+    assert!(!code.contains("wrong"), "{code}");
+}
+
+#[test]
+fn alias_runs_before_external_patterns() {
+    let fs = project(&[
+        ("src/entry.js", "import 'pkg/x';\nimport 'other';\n"),
+        (
+            "node_modules/other-real/index.js",
+            "console.log('other');\n",
+        ),
+    ]);
+    let mut o = opts(&["src/entry.js"]);
+    o.alias = vec![
+        ("pkg".into(), "alias/pkg".into()),
+        ("other".into(), "other-real".into()),
+    ];
+    o.external = vec!["alias/*".into(), "other".into()];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("alias/pkg/x"), "{code}");
+    assert!(code.contains("console.log('other')"), "{code}");
+}

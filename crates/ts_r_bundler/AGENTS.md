@@ -74,6 +74,12 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   (`d = 0` with `d=ident` becomes `ident = 0`), as in esbuild.
 - **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
   esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
+- **`alias` runs before everything else in resolution** (`resolve.rs` `alias`): only package
+  paths are aliased; the longest matching key wins (`key` exactly or `key/rest`, which keeps
+  `/rest`); the substitution resolves from the working directory, and `external` patterns
+  see the substituted path, as esbuild's CLI does.
+- **`drop_labels`** turns labeled statements whose label is in the set into empty statements
+  right after parsing (`prepare.rs` `drop_labels`), so their imports are never resolved.
 - **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:
   `.jsx`, `.js`, then `.tsx`, `.ts`, then the rest), as esbuild does; elsewhere the
   configured `resolveExtensions` order applies.
@@ -85,7 +91,8 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   memory and in `ts_r_cache` (namespace `build`). Anything a fragment depends on must be in
   `ModulePlan` (it derives `Hash`).
 - Module preparation depends only on the file, its loader, the tsconfig-derived transform
-  options, the defines, annotation handling and the effective output format (`prep_key`).
+  options, the defines, dropped labels, annotation handling and the effective output format
+  (`prep_key`).
   Resolution and the tsconfig-derived transform options are never cached across a
   structural change.
 - A CommonJS entry of a single-entry CommonJS build runs unwrapped (Node's own `module`,

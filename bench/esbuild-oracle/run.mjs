@@ -382,6 +382,11 @@ function flagsFor(c) {
       }
       // The input root is only known per tool run: buildAndRun fills it in.
       case 'TSConfigPath': flags.push(`--tsconfig=\0IN${v}`); break;
+      case 'DropLabels': flags.push(`--drop-labels=${asList(v).join(',')}`); break;
+      // Absolute replacements are paths in the test's file system.
+      case 'PackageAliases':
+        for (const it of v.items) flags.push(`--alias:${it.key}=${it.value.startsWith?.('/') ? `\0IN${it.value}` : it.value}`);
+        break;
       default: why.push(k);
     }
   }
