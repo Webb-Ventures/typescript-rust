@@ -3432,6 +3432,82 @@ impl<'c, 'a> Ck<'c, 'a> {
         None
     }
 
+    /// The index signatures a property name `t.name` reads when no `string` signature
+    /// covers it: those keyed by a template literal or string mapping the name's literal
+    /// fits (`[k: Lowercase<string>]` for `t.a`; tsc's `getApplicableIndexInfoForName`).
+    pub fn name_pattern_index_info(&mut self, t: TypeId, name: &str) -> Option<IndexInfo> {
+        if name.starts_with("__@") || name.starts_with('#') || !self.has_pattern_index(t, 0) {
+            return None;
+        }
+        let lit = self.store().string_literal(name, false);
+        let at = self.apparent_type(t);
+        if self.store().flags(at).contains(TypeFlags::UNION) {
+            // A union has the index signatures whose key every member declares as such
+            // (`T | { [k: string]: number }` has none for `Lowercase<string>`).
+            let members = self.store().members_of_union(at).to_vec();
+            let first = self.resolved_members(*members.first()?);
+            let keys: Vec<TypeId> = first.index.iter().map(|i| i.key).collect();
+            let mut types = Vec::new();
+            let mut readonly = false;
+            for k in keys {
+                let f = self.store().flags(k);
+                if !f.intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
+                    || !self.is_assignable(lit, k)
+                {
+                    continue;
+                }
+                let mut vals = Vec::new();
+                for &m in &members {
+                    let mm = self.apparent_type(m);
+                    if !self.store().flags(mm).contains(TypeFlags::OBJECT) {
+                        return None;
+                    }
+                    let r = self.resolved_members(mm);
+                    let i = r.index.iter().find(|i| i.key == k)?;
+                    vals.push(i.value);
+                    readonly |= i.readonly;
+                }
+                types.push(self.union(&vals));
+            }
+            if types.is_empty() {
+                return None;
+            }
+            let value = self.intersection(&types);
+            return Some(IndexInfo {
+                key: lit,
+                value,
+                readonly,
+                decl: None,
+            });
+        }
+        self.pattern_key_index_info(t, lit)
+    }
+
+    /// Whether `t` (or a member of its union or intersection) has an index signature keyed
+    /// by a template literal or string mapping type.
+    fn has_pattern_index(&mut self, t: TypeId, depth: u32) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        let t = self.apparent_type(t);
+        let f = self.store().flags(t);
+        if f.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION) {
+            let members = self.store().members_of_union(t).to_vec();
+            return members
+                .into_iter()
+                .any(|m| self.has_pattern_index(m, depth + 1));
+        }
+        if !f.contains(TypeFlags::OBJECT) {
+            return false;
+        }
+        let m = self.resolved_members(t);
+        let s = self.store();
+        m.index.iter().any(|i| {
+            s.flags(i.key)
+                .intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
+        })
+    }
+
     /// The index signatures of `t` a pattern key (`` `foo-${string}` ``) is assignable to,
     /// their value types intersected (every member of a union, some member of an
     /// intersection); `string` signatures included.

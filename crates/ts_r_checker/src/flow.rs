@@ -41,6 +41,8 @@ pub enum RefRoot {
     Super,
     /// `import.meta` (its properties narrow like `this.x`).
     ImportMeta,
+    /// `new.target`, likewise.
+    NewTarget,
 }
 
 /// What a const binding (or a binding of a parameter pattern) stands for: `prop` of the
@@ -163,10 +165,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 root: RefRoot::Super,
                 path: Vec::new(),
             }),
-            Node::MetaProperty {
-                kind: ts_r_ast::MetaPropKind::ImportMeta,
-            } => Some(RefKey {
-                root: RefRoot::ImportMeta,
+            Node::MetaProperty { kind } => Some(RefKey {
+                root: match kind {
+                    ts_r_ast::MetaPropKind::ImportMeta => RefRoot::ImportMeta,
+                    ts_r_ast::MetaPropKind::NewTarget => RefRoot::NewTarget,
+                },
                 path: Vec::new(),
             }),
             Node::Paren { expr } | Node::NonNull { expr } => {
@@ -276,6 +279,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::MetaProperty {
                     kind: ts_r_ast::MetaPropKind::ImportMeta,
                 } => return Some("import.meta".into()),
+                Node::MetaProperty {
+                    kind: ts_r_ast::MetaPropKind::NewTarget,
+                } => return Some("new.target".into()),
                 Node::Paren { expr } | Node::NonNull { expr } => n = expr,
                 Node::Member { obj, .. }
                 | Node::JsxMemberExpr { obj, .. }
@@ -1570,7 +1576,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // Patterns and for-heads: does any identifier inside bind/assign our root?
                 if matches!(
                     w.key.root,
-                    RefRoot::This | RefRoot::Super | RefRoot::ImportMeta
+                    RefRoot::This | RefRoot::Super | RefRoot::ImportMeta | RefRoot::NewTarget
                 ) {
                     return AssignEffect::None;
                 }
@@ -2126,10 +2132,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         return true;
                     }
                 }
-                Node::MetaProperty {
-                    kind: ts_r_ast::MetaPropKind::ImportMeta,
-                } => {
-                    if name == "import.meta" {
+                Node::MetaProperty { kind } => {
+                    let written = match kind {
+                        ts_r_ast::MetaPropKind::ImportMeta => "import.meta",
+                        ts_r_ast::MetaPropKind::NewTarget => "new.target",
+                    };
+                    if name == written {
                         return true;
                     }
                 }
@@ -2582,7 +2590,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     _ => self.is_const_declaration(rd),
                 }
             }
-            RefRoot::This | RefRoot::ImportMeta => true,
+            RefRoot::This | RefRoot::ImportMeta | RefRoot::NewTarget => true,
             RefRoot::Super => false,
         };
         if !keeps {

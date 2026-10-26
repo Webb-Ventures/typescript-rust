@@ -3184,6 +3184,27 @@ Type-aware lint round 3 (`m4/type-aware-3`):
   properties keep the read type for writes (`accessor_signatures`). Conformance
   7881 -> 7887 exact.
 
+Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7.0.2 probes:
+
+- A property name with no `string` index signature to read reads those keyed by a template
+  literal or string mapping its literal fits (`t.a` for `[k: Lowercase<string>]`), by `.`
+  and by a literal element access; several such signatures intersect their values. A union
+  only has the signatures whose key every member declares exactly, so
+  `(T | { [k: string]: number }).a` is TS2339 (tsc: getApplicableIndexInfoForName,
+  getUnionIndexInfos). `Ck::name_pattern_index_info` is public for lint rules
+  (`pattern_index_property_access`).
+- `new.target` is the type of the class of the constructor it is in, else of the function
+  declaration or expression (`() => void` printed), arrows looking through; elsewhere it is
+  TS17013 and the error type. Its properties narrow like `this.x` (`RefRoot::NewTarget`;
+  tsc: checkNewTargetMetaProperty) (`new_target_types`).
+- An array literal that is a destructuring assignment target is a tuple (`[[x]] = v` is
+  `[[any]]`), as tsc's checkArrayLiteral does for `inDestructuringPattern`.
+- `contextual_type` of a call argument, once the call is resolved, is the resolved
+  signature's parameter: `[].map(() => e)` gives `e` the context `{ a: false; }` that `U`
+  was inferred as, not `U` (tsc's getContextualTypeForArgumentAtIndex reads the resolved
+  signature). The context an argument was first checked with only applies while the call
+  infers (`tests/editor_queries.rs`).
+
 ## Levels (`layers.rs`, design record 0005)
 
 `Checker::layered(&program, Some(&layer))` builds a checker whose own level holds the

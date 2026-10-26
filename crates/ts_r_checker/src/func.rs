@@ -1011,9 +1011,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.resolved_calls.get(&call).copied().flatten()
             }
         }?;
-        if let Some(t) = self.first_context_of(arg, sig) {
-            return Some(t);
-        }
+        // After the call is resolved, an argument's context is the resolved signature's
+        // parameter, inferences applied (`[].map(() => x)` returns into `{ a: false }`, not
+        // `U`), as tsc's `getContextualType` answers; the context the argument was first
+        // checked with only matters while the call infers.
         self.param_type_at(sig, idx)
     }
 
