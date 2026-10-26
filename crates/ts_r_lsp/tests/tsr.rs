@@ -846,6 +846,58 @@ fn hover_shows_types_and_docs() {
     c.shutdown();
 }
 
+const NAV_KEYWORDS: &str = "class Base { m() {} }
+class D extends Base {
+  override m() { super.m(); }
+}
+const make = () => new D();
+let xs: D[] = [];
+interface I {}
+";
+
+#[test]
+fn keyword_definitions_and_type_definitions() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navkw",
+        &[("tsconfig.json", TSCONFIG), ("src/k.ts", NAV_KEYWORDS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/k.ts");
+    let u = env.uri("src/k.ts");
+    assert!(diags_for(&mut c, &u, |d| d.is_empty()).is_some());
+    let start = |v: &Value, i: usize| v[i]["range"]["start"].clone();
+    // `override` goes to the base class's member, `super` to the base class.
+    let d = result(&mut c, "textDocument/definition", at(&u, 2, 4));
+    assert_eq!(start(&d, 0), json!({"line": 0, "character": 13}), "{d}");
+    let d = result(&mut c, "textDocument/definition", at(&u, 2, 18));
+    assert_eq!(start(&d, 0), json!({"line": 0, "character": 6}), "{d}");
+    // A function's own type stands for its return type.
+    let d = result(&mut c, "textDocument/typeDefinition", at(&u, 4, 7));
+    assert_eq!(d.as_array().map(Vec::len), Some(1), "{d}");
+    assert_eq!(start(&d, 0), json!({"line": 1, "character": 6}), "{d}");
+    // `D[]` leads to `D` as well as to `Array`.
+    let d = result(&mut c, "textDocument/typeDefinition", at(&u, 5, 5));
+    let here: Vec<&Value> = d
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|l| l["uri"] == u.as_str())
+        .collect();
+    assert_eq!(here.len(), 1, "{d}");
+    assert_eq!(
+        here[0]["range"]["start"],
+        json!({"line": 1, "character": 6})
+    );
+    assert!(d.as_array().unwrap().len() > 1, "{d}");
+    // A type-only symbol goes to itself.
+    let d = result(&mut c, "textDocument/typeDefinition", at(&u, 6, 10));
+    assert_eq!(start(&d, 0), json!({"line": 6, "character": 10}), "{d}");
+    c.shutdown();
+}
+
 #[test]
 fn definition_type_definition_references_rename() {
     if !libs_present() {

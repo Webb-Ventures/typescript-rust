@@ -7,6 +7,7 @@ mod class_items;
 mod complete;
 mod hover;
 mod jsx_items;
+mod keywords;
 pub mod locate;
 mod multiline;
 mod nav;
@@ -104,7 +105,18 @@ pub fn handle<'c, 'p>(
             )
         }
         "textDocument/documentHighlight" => {
-            let refs = nav::references(cx, ck, at(method)?, nav::Scope::File);
+            let offset = at(method)?;
+            let d = keywords::Doc::new(cx.checker, cx.file);
+            if let Some(mut spans) = keywords::keyword_highlights(&d, offset) {
+                spans.sort_unstable();
+                spans.dedup();
+                let out = spans
+                    .iter()
+                    .map(|&(s, e)| json!({"range": lines.range(text, s, e), "kind": 2}))
+                    .collect();
+                return Ok(Value::Array(out));
+            }
+            let refs = nav::references(cx, ck, offset, nav::Scope::File);
             let out: Vec<Value> = refs
                 .iter()
                 .map(|r| {

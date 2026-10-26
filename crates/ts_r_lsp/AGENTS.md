@@ -380,6 +380,44 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   declaration describes the declaration; a string or number literal that names a member
   (`o["a"]`, `{ 1: x }`) describes that member.
 
+## Keywords and navigation (`tsr/features/keywords.rs`, `nav.rs`)
+
+Syntax-only rules for the keywords tsc 7 answers without a symbol. Learned from the fourslash
+tests and from reading `src/services/documentHighlights.ts`, `src/services/findAllReferences.ts`
+and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms on our AST.
+
+- **Highlights on a keyword** (`keyword_highlights`, tried before symbol highlights): an
+  `if`/`else` chain (an `else if` on one line is one span), a function's `return`s and the
+  `throw`s it owns (a `throw` in a `try` with a `catch` belongs to the `try`), `try`/`finally`
+  (not `catch`), a `switch` with its `case`/`default` and its own `break`s, a loop with its own
+  `break`/`continue` (labels followed), `constructor`, a `get`/`set` pair, `async`/`await`,
+  `yield`, and every occurrence of a modifier among the declarations around (none for
+  `default`, `in`, `out`). Loops use an explicit stack; walks stop at `MAX_DEPTH`.
+- **References without a symbol** (`special_references`): `this` (every `this` of the same
+  container; in a static member, every static member's `this` of that class), `super` (same
+  class, same static-ness), labels (the label is the declaration), primitive type keywords
+  (`string` across the project's own files). References of a class name also list the `this`
+  of its static members; rename skips those unless the cursor is on `this`.
+- **Go to definition on a keyword** (`keyword_definition`): `return`/`await`/`yield` go to the
+  innermost function or method (its name, a method's key, the variable an anonymous function
+  initializes, else the whole function); `case`/`default` to their `switch` keyword;
+  `export default <expr>`'s `default` to the whole statement; `break l`/`continue l` to the
+  label (nothing on the label itself); `this` to the function's `this` parameter, else the
+  class name in a class member, else nothing; `super` to the base class, plus for
+  `super(...)` the whole constructor it calls; `override` to the base member (instance: base
+  types; static: the base constructor type), else its own name; any other modifier and the
+  `function`/`class`/`interface`/`enum`/`type`/`namespace`/`const`/`let`/`var` keyword to the
+  definition of the declared name. A variable statement's modifier goes nowhere.
+- **Type definition** follows tsc's symbol-of-type rule: the declarations of each union
+  member's symbol (not the alias: `Pick<T, K>` goes to its mapped type), the first type
+  argument of a well-known global generic first (`Array`, `Promise`, `Map`, `Pick`, ... the
+  list in `known_type_argument`), a function's own inferred type (or the function that
+  initializes the variable) replaced by its single signature's return type, and a type-only
+  symbol whose type has no declaration going to itself. Keywords before a name stand for
+  the name.
+- `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
+  (`a|()`), as tsserver's touching-name lookup does.
+
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
 Design record [0007](../../docs/design/0007-sound-mode.md), "Reporting". All of it lives in

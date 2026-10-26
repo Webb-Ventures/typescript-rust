@@ -40,9 +40,14 @@ pub fn node_at(ast: &Ast, offset: u32) -> Option<NodeId> {
 }
 
 /// The identifier (or private name) at `offset`.
+/// The name at `offset`, or the one ending there (`a|()` is on `a`, as in tsserver).
 pub fn ident_at(ast: &Ast, offset: u32) -> Option<NodeId> {
     let n = node_at(ast, offset)?;
-    is_name(ast, n).then_some(n)
+    if is_name(ast, n) {
+        return Some(n);
+    }
+    let p = node_at(ast, offset.checked_sub(1)?)?;
+    (is_name(ast, p) && ast.span(p).end == offset).then_some(p)
 }
 
 pub fn is_name(ast: &Ast, n: NodeId) -> bool {
