@@ -49,8 +49,15 @@ const REJECTED_GRAMMAR: &[u32] = &[
 const ACCEPTED_SYNTAX: &[u32] = &[18030];
 
 /// The error diagnostics of `parsed` that a build fails on, in source order.
+/// With the parser's [`ParseResult::build_only`] errors (`await x` in a function that is not
+/// async), which only a build tool reports.
 pub fn build_errors(parsed: &ParseResult) -> Vec<&Diagnostic> {
-    parse_build_errors(&parsed.diagnostics, &parsed.grammar, &parsed.ast)
+    let mut out = parse_build_errors(&parsed.diagnostics, &parsed.grammar, &parsed.ast);
+    if !parsed.build_only.is_empty() {
+        out.extend(parsed.build_only.iter());
+        out.sort_by_key(|d| d.span.start);
+    }
+    out
 }
 
 /// [`build_errors`] over the parts of a [`ParseResult`]: `diagnostics` and `grammar` as in
@@ -275,8 +282,26 @@ mod tests {
             ("f((undefined && foo ?? {}));", SourceKind::Ts),
             ("a ?? b || c;", SourceKind::Js),
             ("a || b ?? c;", SourceKind::Js),
+            // TS1308 (tsc's checker): `await` in a function that is not async.
+            ("function f() { await Promise.resolve(1); }", SourceKind::Ts),
+            ("function f() { await x; }", SourceKind::Js),
+            (
+                "async function f() { return () => { await x; }; }",
+                SourceKind::Ts,
+            ),
         ] {
             assert!(fails(src, kind), "{src}");
+        }
+    }
+
+    #[test]
+    fn await_in_async_code_builds() {
+        for src in [
+            "async function f() { await x; }",
+            "const f = async () => { await x; };",
+            "function f() { await(x); }",
+        ] {
+            assert!(!fails(src, SourceKind::Ts), "{src}");
         }
     }
 

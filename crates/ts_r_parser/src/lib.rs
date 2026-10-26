@@ -50,6 +50,10 @@ pub struct ParseResult {
     /// syntax errors. (In a template they are an error everywhere: syntax only.) Sorted by
     /// starting position.
     pub lenient: Vec<Diagnostic>,
+    /// Errors only a build tool reports (esbuild fails on them before running), in no
+    /// other list: tsc's checker reports them itself, so the checker never sees these.
+    /// `await x` in a function that is not async (TS1308). Sorted by starting position.
+    pub build_only: Vec<Diagnostic>,
 }
 
 impl ParseResult {
@@ -177,6 +181,7 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
             diagnostics: vec![Diagnostic::new(messages::FILE_TOO_LARGE, Span::EMPTY, &[])],
             grammar: Vec::new(),
             lenient: Vec::new(),
+            build_only: Vec::new(),
         };
     }
     let js_ts = !kind.is_typescript() && opts.ts_in_js != TsInJs::Reject;
@@ -333,6 +338,7 @@ struct ParserCheckpoint {
     pattern_literals: u32,
     regex_errs: u32,
     kept_grammar: u32,
+    build_only: u32,
 }
 
 /// Maximum nesting depth of recursive constructs before giving up on the file.
@@ -410,6 +416,8 @@ pub(crate) struct Parser<'a> {
     /// Checker grammar errors tsc reports even in a file with syntax errors, and which do
     /// not stop the check: in both `diagnostics` and `grammar`, never deduplicated.
     kept_grammar: Vec<Diagnostic>,
+    /// [`ParseResult::build_only`].
+    build_only: Vec<Diagnostic>,
     /// Start of the object literal being parsed (`u32::MAX` outside one).
     object_literal_start: u32,
     /// Start of the operand of the innermost prefix operator (`~<a/>`): a JSX element there
@@ -509,6 +517,7 @@ impl<'a> Parser<'a> {
             pattern_literals: Vec::new(),
             regex_errs: Vec::new(),
             kept_grammar: Vec::new(),
+            build_only: Vec::new(),
             object_literal_start: u32::MAX,
             unary_operand_start: u32::MAX,
             jsdoc_import: false,
@@ -639,11 +648,14 @@ impl<'a> Parser<'a> {
         diags.append(&mut self.lx.diagnostics);
         diags.sort_by_key(|d| d.span.start);
         self.ast.comments = std::mem::take(&mut self.lx.comments);
+        let mut build_only = std::mem::take(&mut self.build_only);
+        build_only.sort_by_key(|d| d.span.start);
         ParseResult {
             ast: self.ast,
             diagnostics: diags,
             grammar,
             lenient,
+            build_only,
         }
     }
 
@@ -785,6 +797,7 @@ impl<'a> Parser<'a> {
             pattern_literals: self.pattern_literals.len() as u32,
             regex_errs: self.regex_errs.len() as u32,
             kept_grammar: self.kept_grammar.len() as u32,
+            build_only: self.build_only.len() as u32,
         }
     }
 
@@ -809,6 +822,7 @@ impl<'a> Parser<'a> {
         self.pattern_literals.truncate(cp.pattern_literals as usize);
         self.regex_errs.truncate(cp.regex_errs as usize);
         self.kept_grammar.truncate(cp.kept_grammar as usize);
+        self.build_only.truncate(cp.build_only as usize);
     }
 
     /// Runs `f` and always restores the parser state afterwards.

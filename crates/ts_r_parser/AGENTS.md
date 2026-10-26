@@ -200,6 +200,10 @@ Files:
     ESLint's parser and esbuild accept them in sloppy code. Every tsc-facing consumer (the
     checker driver, `ts-r-check --noCheck`, the incremental history) takes a file's syntax
     errors from `tsc_syntax_errors(diagnostics, grammar, lenient)`, never `without_grammar`. In an untagged template they are plain syntax errors (`template_element`).
+  - `ParseResult::build_only` holds errors only build tools report, in no other list:
+    `await x` in a function that is not async parses as an await expression (as tsc does)
+    and gets TS1308 there, which tsc's checker reports itself and esbuild fails on.
+    Checkpointed like the other side lists.
   - An escaped keyword consumed by `bump` as a keyword is TS1260; one read as a name goes
     through `intern_token`, which marks it (`name_tok`).
 - **Context lives in `Ctx` bits** (`AWAIT`, `YIELD`, `DISALLOW_IN`, `AMBIENT`,

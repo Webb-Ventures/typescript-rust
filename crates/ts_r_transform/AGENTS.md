@@ -38,7 +38,8 @@ emitter must not write that file (TSR2002).
 `build_errors(&parsed)` picks the parse errors a build tool fails on, as esbuild does
 (`build_errors.rs`): syntax errors and the grammar errors that are ECMAScript early errors
 or syntax errors in JavaScript (`a && b ?? c`, TS5076), not tsc-only grammar rules
-(`declare function f() {}`, `if (x) ;`, `a?.#x`).
+(`declare function f() {}`, `if (x) ;`, `a?.#x`), plus the parser's `build_only` errors
+(TS1308, `await` in a function that is not async).
 `TranspileOutput::build_errors` holds those plus the transform's errors; the dev server
 fails on them, while `diagnostics` keeps everything tsc reports. `sloppy_only_syntax` lists
 `with` statements and `delete name` with whether the file itself makes them strict code;

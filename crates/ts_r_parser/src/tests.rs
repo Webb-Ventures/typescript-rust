@@ -3037,6 +3037,23 @@ fn mapped_type_members_are_ts7061() {
 /// `without_grammar` drops, in position order. (A deferred grammar error is kept only
 /// without lexer or syntax errors, so it never meets a lenient one.)
 #[test]
+fn await_outside_async_is_build_only() {
+    let r = parse("function f() { await Promise.resolve(1); }", SourceKind::Ts);
+    assert!(r.diagnostics.is_empty() && r.grammar.is_empty());
+    let got: Vec<_> = r.build_only.iter().map(|d| (d.code, d.span)).collect();
+    assert_eq!(got, [(1308, ts_r_ast::Span::new(15, 20))]);
+    // Rolled back with a speculative parse: one error, not one per attempt.
+    let r = parse(
+        "function f() { let g = (a = await x) => a; }",
+        SourceKind::Ts,
+    );
+    assert_eq!(r.build_only.len(), 1);
+    for src in ["async function f() { await x; }", "await x; export {};"] {
+        assert!(parse(src, SourceKind::Ts).build_only.is_empty(), "{src}");
+    }
+}
+
+#[test]
 fn tsc_syntax_errors_keep_lenient() {
     let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
     let check = |src: &str, syntax: &[u32], tsc: &[u32]| {
