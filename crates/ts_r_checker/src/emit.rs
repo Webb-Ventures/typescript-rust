@@ -43,7 +43,40 @@ impl Checker<'_> {
             }
             return Some(false);
         }
+        if !self.has_meaning(target, meaning::VALUE) && self.default_export_has_value(alias) {
+            return Some(true);
+        }
         Some(self.has_meaning(target, meaning::VALUE))
+    }
+
+    /// Whether the alias chain from `alias` passes an `export default X` whose `X` is both a
+    /// local type and an exported value of its file (`interface F {}` with `export const
+    /// F`): the binder resolved `X` to the local type alone, but the default export stands
+    /// for both (importElisionExportNonExportAndDefault; tsc merges the two in the
+    /// module's locals).
+    fn default_export_has_value(&self, alias: ts_r_types::SymId) -> bool {
+        let Some(r) = self.parts(alias).next() else {
+            return false;
+        };
+        for step in self.link.alias_chain(r) {
+            for d in self.decls(self.sym_ref(step)) {
+                let ast = self.ast(d.file);
+                let Node::ExportDefaultExpr { expr } = *ast.node(d.node) else {
+                    continue;
+                };
+                let Node::Ident { name } = *ast.node(expr) else {
+                    continue;
+                };
+                let bound = &self.file(d.file).bound;
+                let module = self.sym(d.file, bound.file_symbol);
+                if let Some(v) = self.export_of(module, ast.atom(name))
+                    && self.has_meaning(v, meaning::VALUE)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// The value of `access` (`E.A`, `E["A"]`, `ns.E.A`) when `E` is a const enum (of any

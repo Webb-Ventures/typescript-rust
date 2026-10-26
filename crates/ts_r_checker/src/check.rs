@@ -4947,15 +4947,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             _ => fn_parts(ast, owner.node).and_then(|p| p.return_type),
         };
         if !allowed || return_type != Some(l.node) {
-            // The parser defers its TS1228 to a clean parse; tsc's checker reports it in any
-            // file, so a file with syntax errors gets it from here.
-            if self.has_syntax_errors(file) {
-                self.error(
-                    l,
-                    dg::A_TYPE_PREDICATE_IS_ONLY_ALLOWED_IN_RETURN_TYPE_POSITION_FOR_FUNCTIONS_AND_METHO_1228,
-                    &[],
-                );
-            }
+            // TS1228 is the parser's (kept as a grammar error in any file).
             return;
         }
         // `this is T` / `asserts this`: nothing to look up.

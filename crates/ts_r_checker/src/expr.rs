@@ -516,8 +516,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 arg,
                 options,
                 phase,
-                ..
+                type_args,
             } => {
+                // `import<T>` is TS1326 (from the parser), and its type arguments are still
+                // resolved (importWithTypeArguments: TS2304 for `T`).
+                if let Some(ta) = type_args {
+                    self.type_args_from_node(Some(at(ta)), false);
+                }
                 // `import()` under verbatimModuleSyntax and `module: commonjs` is a grammar
                 // error, before the others (tsc: grammarchecks.go
                 // checkGrammarImportCallExpression).
