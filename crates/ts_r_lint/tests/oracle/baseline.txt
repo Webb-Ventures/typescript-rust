@@ -475,6 +475,7 @@ unicorn/prefer-native-coercion-functions 110/110
 unicorn/prefer-negative-index 167/167
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-coercion 60/60
+unicorn/prefer-number-is-safe-integer 88/88
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-object-destructuring-defaults 44/44
 unicorn/prefer-object-from-entries 172/172
@@ -514,6 +515,8 @@ unicorn/prefer-top-level-await 228/228
 unicorn/prefer-type-error 112/112
 unicorn/prefer-type-literal-last 37/37
 unicorn/prefer-unary-minus 71/71
+unicorn/prefer-url-can-parse 94/94
+unicorn/prefer-url-search-parameters 87/87
 unicorn/relative-url-style 422/422
 unicorn/require-array-join-separator 80/80
 unicorn/require-array-sort-compare 64/64

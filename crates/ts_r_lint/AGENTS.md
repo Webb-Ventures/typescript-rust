@@ -1752,6 +1752,18 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   `unicorn_abort.rs` holds the shared controller shape (declarator, abort callback,
   `.signal` reads that aren't aliased, written or asked for `reason`/`throwIfAborted`) and
   the suggestion (rename to `signal`/`abortSignal` when free, remove the statements).
+- **prefer-url-search-parameters**: `query.split("&").map(p => p.split("="))` alone or as
+  the argument of `Object.fromEntries`/`new Map`/`new URLSearchParams` (reported with its
+  wrapper, unless the wrapper has type arguments). Only suggested; nothing when
+  `URLSearchParams` is a local runtime binding other than the `url` module's.
+- **prefer-number-is-safe-integer**: `Number.isInteger` (renamed, suggested) and
+  `x % 1 === 0`, `Math.floor|trunc(x) === x`, lodash/underscore `isInteger`/`isSafeInteger`
+  (suggested as `Number.isSafeInteger(x)` when `Number` isn't local).
+- **prefer-url-can-parse**: a `try { new URL(a, b); return/assign bool } catch { opposite }`
+  becomes `URL.canParse(a, b)` (fixed). Arguments that could throw while converted
+  (side effects with implicit conversions, objects, classes, templates with
+  substitutions, tagged templates, the global `Symbol`) are skipped; `declare` and
+  type-only bindings of `URL`/`Symbol` count as the global.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1764,4 +1776,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `fix/remove-statement.js`, `no-unsafe-sqlite-interpolation.js`, `no-late-event-control.js`,
 `shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
 `prefer-abort-signal-timeout.js`, `shared/abort-controller.js`,
-`utils/is-global-identifier.js`, `utils/function-body.js`.
+`utils/is-global-identifier.js`, `utils/function-body.js`, `prefer-url-search-parameters.js`,
+`ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`.

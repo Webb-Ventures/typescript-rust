@@ -534,6 +534,7 @@ mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_negative_index;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
+mod unicorn_prefer_number_is_safe_integer;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_object_define_properties;
 mod unicorn_prefer_object_destructuring_defaults;
@@ -578,6 +579,8 @@ mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
 mod unicorn_prefer_unary_minus;
+mod unicorn_prefer_url_can_parse;
+mod unicorn_prefer_url_search_parameters;
 mod unicorn_relative_url_style;
 mod unicorn_require_array_join_separator;
 mod unicorn_require_array_sort_compare;
@@ -1135,6 +1138,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_math_constants::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
+    &unicorn_prefer_number_is_safe_integer::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_object_iterable_methods::RULE,
@@ -1166,6 +1170,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,
+    &unicorn_prefer_url_can_parse::RULE,
+    &unicorn_prefer_url_search_parameters::RULE,
     &unicorn_relative_url_style::RULE,
     &unicorn_require_array_sort_compare::RULE,
     &unicorn_require_css_escape::RULE,
