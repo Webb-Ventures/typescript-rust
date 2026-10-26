@@ -560,7 +560,12 @@ Files, by layer:
   TS2302, from `check_type_reference`).
 - Local exports and augmentations: `export_locals.rs` (`export { x }` of a non-local or
   unknown name: TS2661/TS2304, also in a script's `declare global`, where only the block's
-  own declarations are local; imports and exports in `declare global` or a resolved module
+  own declarations are local. A name whose first declaration is not a top-level statement
+  of a script or lib file is local too, so `declare module "m" { export { Buffer } }` may
+  export a global that a `global { }` block inside another `declare module "m"` declares
+  (@types/node; tsc: `checkExportSpecifier` in tsc/internal/checker/checker.go only
+  rejects `undefined`, `globalThis` and names whose declaration container is a global
+  source file); imports and exports in `declare global` or a resolved module
   augmentation: TS2667/TS2666; `global { }` without `declare`: TS2670). Unlinked relative
   specifiers in augmentations are TS2307 in `check_module_requests`.
 - Reference directives: `references.rs` (`/// <reference path>` naming no program file:
