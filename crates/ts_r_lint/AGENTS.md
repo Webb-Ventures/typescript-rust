@@ -1979,6 +1979,22 @@ obvious from the plugin's docs:
   the read, or in another function; a call in the declaration's function in between, found
   through identifiers that are a callee, a tag or a callee's object chain). Object literal
   methods aren't a boundary for the `'a' in object` guard (ESTree makes them properties).
+- **no-unnecessary-default-arguments** (187/187): calls of a local function (one
+  declaration, never reassigned: a non-global `function` declaration or a `const` bound to a
+  function or arrow, without type parameters or an `arguments` use) whose trailing primitive
+  arguments, or object-literal properties, equal the parameter's literal default (`Object.is`
+  semantics). Nothing is reported in a file with `with`, direct `eval` or sloppy-mode block
+  function declarations. The removal is a fix in plain JS, and a suggestion in TypeScript or
+  where JSDoc types or `@ts-check` could make the default matter.
+- **no-unused-properties** (106/106): for every non-global, singly declared variable with a
+  read (not exported), and every parameter named by a plain identifier with a type-literal
+  annotation, follows each use into the object literal (or the type literal annotating it)
+  property by property. A use passes on to a property through a member with the same key,
+  an assignment or call of a member, an unpredictable computed member, or a destructuring
+  that could bind the key (same key, computed key, rest); other uses read everything.
+  Unreached properties are reported, and reached ones are checked one level deeper.
+  Objects with methods, accessors or `function` values, computed keys and `__proto__` are
+  skipped. Number and string keys are different keys.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
@@ -2001,7 +2017,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`,
 `no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`,
 `prefer-simplified-conditions.js`, `no-declarations-before-early-exit.js`, `prefer-else-if.js`,
-`custom-error-definition.js`, `consistent-destructuring.js`;
+`custom-error-definition.js`, `consistent-destructuring.js`,
+`no-unnecessary-default-arguments.js`, `no-unused-properties.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,

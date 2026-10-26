@@ -446,7 +446,8 @@ mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_flat_map;
 mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
-mod unicorn_no_unnecessary_fetch_options;
+mod unicorn_no_unnecessary_boolean_comparison;
+mod unicorn_no_unnecessary_default_arguments;
 mod unicorn_no_unnecessary_global_this;
 mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_parameters;
@@ -464,9 +465,7 @@ mod unicorn_no_unsafe_promise_all_settled_values;
 mod unicorn_no_unsafe_property_key;
 mod unicorn_no_unsafe_sqlite_interpolation;
 mod unicorn_no_unsafe_string_replacement;
-mod unicorn_no_unused_builtin_method_return;
-mod unicorn_no_unused_iterator_helper;
-mod unicorn_no_url_in_search_params;
+mod unicorn_no_unused_properties;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
 mod unicorn_no_useless_collection_argument;
@@ -1106,7 +1105,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_array_flat_map::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
-    &unicorn_no_unnecessary_fetch_options::RULE,
+    &unicorn_no_unnecessary_boolean_comparison::RULE,
+    &unicorn_no_unnecessary_default_arguments::RULE,
     &unicorn_no_unnecessary_global_this::RULE,
     &unicorn_no_unnecessary_nested_ternary::RULE,
     &unicorn_no_unnecessary_slice_end::RULE,
@@ -1118,7 +1118,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unsafe_buffer_conversion::RULE,
     &unicorn_no_unsafe_sqlite_interpolation::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
-    &unicorn_no_url_in_search_params::RULE,
+    &unicorn_no_unused_properties::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_coercion::RULE,
     &unicorn_no_useless_compound_assignment::RULE,
