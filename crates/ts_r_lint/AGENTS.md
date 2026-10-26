@@ -1876,6 +1876,20 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   (none with getter-aware side effects or reading a later declaration, no comments); the
   rest remove their line, inline span with one comma, or tokens (lexed with `ts_r_lexer`).
 
+- `prefer-abort-signal-any` (`unicorn_prefer_abort_signal_any.rs`): a `const` `AbortController`
+  followed by either one non-`await` `for (const <signal-like> of <source>)` whose only
+  statement is `<same name>.addEventListener('abort', <aborts the controller>)`, or two or more
+  such listeners in a row on signal-like names (`signal`, `*Signal`) or side-effect-free
+  `AbortSignal.any/timeout(...)`. Options are absent, a boolean or `{capture, once, passive}`
+  booleans; the callback may pass `<source>.reason`. Loop sources are names, array literals,
+  `Array.of`/`Array(...)`, or `Array.from(<known array>)`; a known element list needs two or
+  more direct sources. A spread, the controller's own `.signal`, `AbortSignal.abort()`, or a
+  `const` array written before the loop stops it; annotated names must be `AbortSignal` arrays
+  (tuples, `Array<T>`, `ReadonlyArray<T>`, local aliases). Readonly sources (`as const`,
+  `readonly T[]`, `ReadonlyArray`) are copied (`[...x]`) in the shared `AbortController`
+  suggestion. `unicorn_abort::abort_reference_from` and `is_same_binding` are the shared
+  pieces.
+
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
 `utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
@@ -1899,4 +1913,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `require-text-decoder-streaming.js`, `utils/single-statement.js`, `fix/append-argument.js`,
 `prefer-https.js`, `prefer-temporal-conversion.js`,
 `no-unnecessary-fetch-options.js`, `fix/remove-argument.js`, `fix/remove-object-property.js`,
-`utils/get-static-value.js`.
+`utils/get-static-value.js`, `prefer-abort-signal-any.js`,
+`utils/is-array.js`.

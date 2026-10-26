@@ -107,6 +107,35 @@ pub(crate) fn abort_controller_declarator(
 /// non-async, non-generator function without parameters whose concise body, or only
 /// statement, is the call.
 pub(crate) fn abort_reference(cx: &Ctx<'_, '_>, callback: NodeId, name: &str) -> Option<NodeId> {
+    abort_reference_from(cx, callback, name, None)
+}
+
+/// Two names for the same binding (or the same undeclared global).
+pub(crate) fn is_same_binding(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId) -> bool {
+    let ast = cx.ast();
+    if !matches!(ast.node(a), Node::Ident { .. }) || !matches!(ast.node(b), Node::Ident { .. }) {
+        return false;
+    }
+    let sem = cx.semantic();
+    let sym = |id| {
+        sem.symbol_of_decl(id)
+            .or_else(|| sem.reference_at(id).and_then(|r| sem.reference(r).symbol()))
+    };
+    match (sym(a), sym(b)) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => ident_name(ast, a) == ident_name(ast, b),
+        _ => false,
+    }
+}
+
+/// As [`abort_reference`]; with a `source` signal, `controller.abort(source.reason)` counts
+/// too.
+pub(crate) fn abort_reference_from(
+    cx: &Ctx<'_, '_>,
+    callback: NodeId,
+    name: &str,
+    source: Option<NodeId>,
+) -> Option<NodeId> {
     let ast = cx.ast();
     let (flags, params, body) = match *ast.node(callback) {
         Node::Arrow {
@@ -153,10 +182,30 @@ pub(crate) fn abort_reference(cx: &Ctx<'_, '_>, callback: NodeId, name: &str) ->
     else {
         return None;
     };
+    let args = ast.list(args);
+    let reason_of_source = |arg: NodeId| {
+        let Some(source) = source else {
+            return false;
+        };
+        let Node::Member {
+            obj: reason_obj,
+            optional: false,
+            prop: reason,
+        } = *ast.node(skip_parens(ast, arg))
+        else {
+            return false;
+        };
+        ident_name(ast, reason) == Some("reason")
+            && is_same_binding(
+                cx,
+                super::unicorn_util::skip_wrappers(ast, reason_obj),
+                super::unicorn_util::skip_wrappers(ast, source),
+            )
+    };
     (ident_name(ast, prop) == Some("abort")
         && matches!(ast.node(obj), Node::Ident { .. })
         && ident_name(ast, obj) == Some(name)
-        && ast.list(args).is_empty())
+        && (args.is_empty() || matches!(args, &[a] if reason_of_source(a))))
     .then_some(obj)
 }
 
