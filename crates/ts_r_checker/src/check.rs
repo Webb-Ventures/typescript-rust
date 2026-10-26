@@ -4293,11 +4293,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.check_static_function_name_conflicts(l, members);
         // Only the first type of the first `extends` clause is the base; the others
         // (`extends A, B`, `extends A extends B`, both grammar errors) are never checked.
+        // An element the parser recovered as missing is skipped: tsc's list holds no such
+        // element (`class C extends await<string>` in a module checks `string`: TS2863).
         let base_node = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
             Node::HeritageClause {
                 kind: HeritageKind::Extends,
                 types,
-            } => ast.list(types).first().copied(),
+            } => ast.list(types).iter().copied().find(|&t| {
+                !matches!(*ast.node(t), Node::ExprWithTypeArgs { expr, .. }
+                    if matches!(ast.node(expr), Node::Missing { .. }))
+            }),
             _ => None,
         });
         if let Some(t) = base_node
