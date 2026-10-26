@@ -219,8 +219,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 - The latency benchmark uses generated JS; the real-app benchmark (results in `ts_r_hmr`'s
   AGENTS.md) edits one file. Vite's own playground specs run against both servers in
   [`bench/dev-oracle`](../../bench/dev-oracle/README.md); its README lists the failing tests
-  by cause (importmap, wasm, HMR edge cases, dynamic imports with variables, CSS modules,
-  import attributes).
+  by cause (today one: glob and dynamic-import-vars output isn't visible to post plugins).
 - No CSS preprocessors: the excalidraw harness maps `.scss` to an empty stylesheet for both
   servers, so the page renders unstyled.
 - Fast Refresh: components created inside other expressions (object literals, conditionals,
