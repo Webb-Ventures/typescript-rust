@@ -28,7 +28,7 @@ use super::prelude::*;
 use super::unicorn_html::{html_attr_decode, is_html_space, srcset_candidates};
 use super::unicorn_static::{Static, static_value_no_side_effects};
 use super::unicorn_url::dot_slash_is_noop;
-use super::unicorn_util_h2::decode_jsx_entities;
+use super::unicorn_util::decode_jsx_entities;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

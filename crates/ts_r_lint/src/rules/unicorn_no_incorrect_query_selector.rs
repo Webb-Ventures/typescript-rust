@@ -21,7 +21,7 @@ use super::unicorn_ast::{is_left_hand_side, method_call};
 use super::unicorn_explicit_length_check::{boolean_ancestor, is_control_flow_test};
 use super::unicorn_no_array_reduce::const_initializer;
 use super::unicorn_text::{paren_span, would_remove_comments};
-use super::unicorn_util_h5::is_value_not_dom_node;
+use super::unicorn_util::is_value_not_dom_node;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

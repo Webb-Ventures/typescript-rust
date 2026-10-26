@@ -1,7 +1,7 @@
 //! HTML attribute text for the unicorn rules that read JSX attributes the way a browser
 //! reads HTML: character-reference decoding in attribute values and `srcset` candidates.
 
-use super::unicorn_util_h2::decode_jsx_entities;
+use super::unicorn_util::decode_jsx_entities;
 
 /// Windows-1252 code points the HTML parser substitutes for numeric references 0x80-0x9F.
 const C1_REMAP: [u32; 32] = [

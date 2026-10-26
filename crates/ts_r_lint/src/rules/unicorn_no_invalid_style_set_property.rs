@@ -25,8 +25,8 @@ use super::prelude::*;
 use super::unicorn_css_properties::is_css_property;
 use super::unicorn_static::{Static, static_value_control_flow};
 use super::unicorn_types::{Checker, Guess};
+use super::unicorn_util::escape_string;
 use super::unicorn_util::skip_wrappers;
-use super::unicorn_util_h5::escape_string;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

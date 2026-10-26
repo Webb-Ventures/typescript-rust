@@ -30,12 +30,13 @@
 
 use super::prelude::*;
 use super::unicorn_ast::method_call;
+use super::unicorn_ast::remove_statements;
 use super::unicorn_iter::{next_statement, only_expression, referenced_by_nested_function};
 use super::unicorn_no_useless_boolean_cast::concise_arrow_body_text;
 use super::unicorn_static::has_side_effect;
-use super::unicorn_text::{has_comment_in, is_same_reference, paren_text};
+use super::unicorn_text::{has_comment_in, paren_text};
 use super::unicorn_types::is_known_non_indexed_collection;
-use super::unicorn_util_h5::remove_statement;
+use super::unicorn_util::is_same_reference;
 use crate::semantic::RefFlags;
 use ts_r_ast::Ast;
 

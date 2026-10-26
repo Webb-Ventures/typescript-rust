@@ -18,10 +18,12 @@
 
 use super::prelude::*;
 use super::unicorn_static::{has_side_effect, static_value_no_side_effects};
-use super::unicorn_text::{has_comment_in, is_same_reference};
+use super::unicorn_text::has_comment_in;
+use super::unicorn_text::needs_semicolon;
 use super::unicorn_types::{is_array, should_skip_known_non_array_receiver};
 use super::unicorn_util::has_optional_chain;
-use super::unicorn_util_h5::{needs_semicolon, node_matches_path};
+use super::unicorn_util::is_same_reference;
+use super::unicorn_util::node_matches_path;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

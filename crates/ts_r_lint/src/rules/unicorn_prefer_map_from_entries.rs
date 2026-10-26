@@ -24,8 +24,8 @@ use super::unicorn_text::{
     call_argument_text, has_comment_in, has_possible_side_effect, needs_semicolon, paren_text,
     static_string_value,
 };
+use super::unicorn_util::escape_string;
 use super::unicorn_util::has_optional_chain;
-use super::unicorn_util_h5::escape_string;
 use ts_r_ast::{Ast, ParentMap};
 
 pub static RULE: RuleDef = RuleDef {

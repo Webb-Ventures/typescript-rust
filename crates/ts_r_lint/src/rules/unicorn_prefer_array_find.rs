@@ -19,15 +19,15 @@
 //! suggestion ("Use `.find(…)`.").
 
 use super::prelude::*;
+use super::unicorn_ast::is_left_hand_side;
 use super::unicorn_ast::method_call;
 use super::unicorn_no_useless_undefined::is_reference_context;
 use super::unicorn_text::has_comment_in;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::paren_span as parenthesized_span;
 use super::unicorn_types::is_known_non_indexed_collection;
-use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h4::{available_name, rename_symbol_fix, scope_within, singular};
-use super::unicorn_util_h5::{
-    is_left_hand_side, is_parenthesized, is_side_effect_free_function, remove_method_call,
-};
+use super::unicorn_util::{available_name, rename_symbol_fix, scope_within, singular};
+use super::unicorn_util::{is_side_effect_free_function, remove_method_call};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

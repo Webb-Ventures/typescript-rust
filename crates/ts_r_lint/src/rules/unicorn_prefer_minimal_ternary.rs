@@ -32,7 +32,7 @@
 use super::prelude::*;
 use super::unicorn_static::has_side_effect;
 use super::unicorn_text::{is_parenthesized, needs_semicolon, paren_text, static_string_value};
-use super::unicorn_util_h1::static_property_name;
+use super::unicorn_util::static_property_name;
 use ts_r_ast::{Ast, BinaryOp, NodeKind as K, UnaryOp};
 
 pub static RULE: RuleDef = RuleDef {

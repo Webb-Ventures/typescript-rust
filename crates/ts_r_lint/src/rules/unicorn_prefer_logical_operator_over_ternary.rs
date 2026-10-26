@@ -23,8 +23,8 @@ use super::unicorn_text::{
     paren_span, would_remove_comments,
 };
 use super::unicorn_types::{binding_annotation, is_boolean};
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h1::is_same_reference;
 use crate::semantic::{ScopeId, ScopeKind};
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};

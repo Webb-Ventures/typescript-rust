@@ -8,11 +8,11 @@
 //! on its line by more code or a comment, or a comment sits between the branches.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
 use super::unicorn_conditions::{
     always_exits, branch_statements, is_block_scoped_declaration, unwrapped_branch_text,
 };
 use super::unicorn_text::needs_semicolon;
-use super::unicorn_util_h4::linebreak;
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};
 

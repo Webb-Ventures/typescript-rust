@@ -11,7 +11,7 @@
 
 use super::prelude::*;
 use super::unicorn_static::{Static, static_value_control_flow};
-use super::unicorn_util_h2::decode_jsx_entities;
+use super::unicorn_util::decode_jsx_entities;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

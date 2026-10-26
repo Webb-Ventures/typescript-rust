@@ -34,7 +34,7 @@ use super::unicorn_no_array_reduce::const_initializer;
 use super::unicorn_static::{Static, static_value_control_flow};
 use super::unicorn_text::has_comment_in;
 use super::unicorn_types::{Checker, TargetNodeFn};
-use super::unicorn_util_h1::static_property_name;
+use super::unicorn_util::static_property_name;
 use crate::ast_util::number_to_string;
 use ts_r_ast::Ast;
 

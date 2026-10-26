@@ -19,8 +19,8 @@
 
 use super::prelude::*;
 use super::unicorn_ast::method_call;
+use super::unicorn_util::is_value_not_dom_node;
 use super::unicorn_util::skip_wrappers;
-use super::unicorn_util_h5::is_value_not_dom_node;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

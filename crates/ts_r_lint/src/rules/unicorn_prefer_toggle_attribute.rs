@@ -25,8 +25,8 @@ use super::unicorn_text::{
     expression_text, is_parenthesized, is_same_reference, member_object_text, needs_semicolon,
     paren_text, would_remove_comments,
 };
+use super::unicorn_util::is_value_not_dom_node;
 use super::unicorn_util::{has_optional_chain, space_around_keyword};
-use super::unicorn_util_h5::is_value_not_dom_node;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

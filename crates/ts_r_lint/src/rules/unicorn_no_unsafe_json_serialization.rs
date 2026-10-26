@@ -15,10 +15,10 @@ use super::prelude::*;
 use super::unicorn_no_array_reduce::const_initializer;
 use super::unicorn_static::{Static, is_global_ident, static_value, static_value_no_side_effects};
 use super::unicorn_text::call_argument_text;
+use super::unicorn_text::paren_span as parenthesized_span;
 use super::unicorn_types::{
     Checker, Guess, JType, is_bigint, is_map, is_regexp, is_set, is_weak_map, is_weak_set,
 };
-use super::unicorn_util::parenthesized_span;
 use crate::ast_util::number_to_string;
 use ts_r_ast::{Ast, KeywordTypeKind, UnaryOp};
 

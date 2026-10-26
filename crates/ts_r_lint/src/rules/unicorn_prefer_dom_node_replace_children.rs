@@ -27,12 +27,12 @@ use super::unicorn_static::{
     Static, has_side_effect, has_side_effect_with_getters, mutable_member_access,
     static_string_literal, static_value_no_side_effects,
 };
+use super::unicorn_text::{member_object_needs_parens, needs_semicolon, would_remove_comments};
 use super::unicorn_types::Checker;
 use super::unicorn_util::skip_wrappers;
-use super::unicorn_util_h1::static_property_name;
-use super::unicorn_util_h5::{
-    is_same_reference, is_value_not_dom_node, member_object_needs_parens, method_call_of,
-    needs_semicolon, remove_statement, would_remove_comments,
+use super::unicorn_util::static_property_name;
+use super::unicorn_util::{
+    is_same_reference, is_value_not_dom_node, method_call_of, remove_statement,
 };
 
 pub static RULE: RuleDef = RuleDef {

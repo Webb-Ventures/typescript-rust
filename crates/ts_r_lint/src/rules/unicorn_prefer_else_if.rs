@@ -16,8 +16,8 @@ use super::unicorn_no_redundant_comparison::contains_optional_chain;
 use super::unicorn_no_top_level_side_effects::{assignment_targets, is_global_reference};
 use super::unicorn_text::static_string_value;
 use super::unicorn_types::is_boolean;
-use super::unicorn_util_h1::{is_same_reference, logical_operands};
-use super::unicorn_util_h4::has_side_effect;
+use super::unicorn_util::has_side_effect_with as has_side_effect;
+use super::unicorn_util::{is_same_reference, logical_operands};
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};
 

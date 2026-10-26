@@ -19,8 +19,8 @@ use super::unicorn_ast::method_call;
 use super::unicorn_splice::static_number;
 use super::unicorn_static::has_side_effect;
 use super::unicorn_text::{
-    has_comment_in, is_same_reference, member_object_text, paren_span, paren_text,
-    static_string_value, would_remove_comments,
+    has_comment_in, member_object_text, paren_span, paren_text, static_string_value,
+    would_remove_comments,
 };
 use super::unicorn_types::should_skip_known_non_array_receiver;
 use super::unicorn_util::space_around_keyword;

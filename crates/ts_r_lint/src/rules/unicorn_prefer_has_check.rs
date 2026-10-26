@@ -32,7 +32,7 @@ use super::unicorn_no_mismatched_map_key::binding;
 use super::unicorn_static::{Static, is_global_ident, static_value_no_side_effects};
 use super::unicorn_text::{member_object_text, needs_semicolon, paren_text, would_remove_comments};
 use super::unicorn_types::{binding_annotation, type_definition};
-use super::unicorn_util_h5::is_boolean_context;
+use super::unicorn_util::is_boolean_context;
 use crate::semantic::{DeclKind, SymbolId};
 use ts_r_ast::{Ast, BinaryOp, KeywordTypeKind, NodeList, TypeOperatorKind, UnaryOp};
 

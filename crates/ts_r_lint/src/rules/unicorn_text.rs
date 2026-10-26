@@ -106,6 +106,30 @@ pub(crate) fn needs_parens_at_expression_start(
     }
     let mut node = replaced;
     for _ in 0..10_000 {
+        // The replaced node is a whole statement: the text starts it.
+        if matches!(
+            ast.node(node),
+            Node::ExprStmt { .. }
+                | Node::Block { .. }
+                | Node::Empty {}
+                | Node::If { .. }
+                | Node::For { .. }
+                | Node::ForIn { .. }
+                | Node::ForOf { .. }
+                | Node::While { .. }
+                | Node::DoWhile { .. }
+                | Node::Return { .. }
+                | Node::Break { .. }
+                | Node::Continue { .. }
+                | Node::Throw { .. }
+                | Node::Labeled { .. }
+                | Node::Switch { .. }
+                | Node::Try { .. }
+                | Node::Debugger {}
+                | Node::With { .. }
+        ) {
+            return !regexp;
+        }
         let Some(parent) = cx.parent(node) else {
             return false;
         };

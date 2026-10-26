@@ -28,12 +28,13 @@
 use super::prelude::*;
 use super::unicorn_iter::unwrap_expression;
 use super::unicorn_static::{Static, static_value, static_value_no_side_effects};
-use super::unicorn_text::{has_comment_in, is_same_reference};
+use super::unicorn_text::has_comment_in;
 use super::unicorn_types::{
     BOOLEAN, Checker, DocAnnotation, Guess, binding_annotation, has_jsdoc_type_reference,
     has_native_type_assertion, is_indexed_collection, is_known_non_indexed_collection, is_regexp,
     is_string, jsdoc_callable_return, jsdoc_return_type, jsdoc_type_annotation, type_definition,
 };
+use super::unicorn_util::is_same_reference;
 use crate::env::SourceType;
 use crate::semantic::{RefFlags, Resolution, SymbolId};
 use ts_r_ast::Ast;

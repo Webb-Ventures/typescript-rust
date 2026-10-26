@@ -342,7 +342,8 @@ impl Rule for PreferDirectIteration {
             return;
         }
         let span = cx.span(id);
-        let fix = (!has_comment_in(cx, span)).then(|| remove_method_call(cx, id, Fix::default()));
+        let fix =
+            (!has_comment_in(cx, span)).then(|| remove_method_call_into(cx, id, Fix::default()));
         let r = cx
             .report(
                 cx.span(call.prop),

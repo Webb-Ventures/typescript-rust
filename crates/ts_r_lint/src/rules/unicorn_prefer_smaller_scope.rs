@@ -20,8 +20,8 @@ use super::unicorn_conditions::{
     comment_after, comment_before, has_multiline_token, reindent_text,
 };
 use super::unicorn_text::{is_parenthesized, paren_span, paren_text};
-use super::unicorn_util_h1::is_direct_eval_call;
-use super::unicorn_util_h2::{indent_unit, line_indent};
+use super::unicorn_util::is_direct_eval_call;
+use super::unicorn_util::{indent_unit, line_indent};
 use crate::semantic::{RefFlags, ScopeId, SymbolId};
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};

@@ -18,8 +18,8 @@
 use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_static::{Static, static_value_no_side_effects};
-use super::unicorn_text::is_same_reference;
 use super::unicorn_types::is_known_non_map;
+use super::unicorn_util::is_same_reference;
 use crate::semantic::{Resolution, SymbolId};
 use ts_r_ast::Ast;
 

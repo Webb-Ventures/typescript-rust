@@ -16,11 +16,11 @@
 //! object, `undefined`).
 
 use super::prelude::*;
+use super::unicorn_ast::is_left_hand_side;
 use super::unicorn_static::static_string_literal;
 use super::unicorn_text::has_comment_in;
-use super::unicorn_util_h5::{
-    escape_string, is_left_hand_side, is_value_not_dom_node, member_object_text, method_call_of,
-};
+use super::unicorn_text::member_object_text;
+use super::unicorn_util::{escape_string, is_value_not_dom_node, method_call_of};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

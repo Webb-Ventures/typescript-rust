@@ -19,11 +19,12 @@
 //! it a suggestion.
 
 use super::prelude::*;
+use super::unicorn_ast::is_left_hand_side;
 use super::unicorn_ast::method_call;
 use super::unicorn_no_array_reduce::const_initializer as const_init;
 use super::unicorn_static::{Static, static_string_literal, static_value_no_side_effects};
-use super::unicorn_util_h4::estree_ident_span;
-use super::unicorn_util_h5::{is_left_hand_side, would_remove_comments};
+use super::unicorn_text::would_remove_comments;
+use super::unicorn_util::estree_ident_span;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

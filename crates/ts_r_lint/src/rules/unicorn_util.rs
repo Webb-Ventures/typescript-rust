@@ -2232,9 +2232,25 @@ fn reference_property_name(cx: &Ctx<'_, '_>, id: NodeId) -> Option<String> {
             Node::Ident { name } => Some(ast.atom(name).to_owned()),
             _ => None,
         },
-        Node::Index { index, .. } => static_value_string(ast, cx.src(), index)
-            .map(|c| c.into_owned())
-            .or_else(|| literal_concat(cx, index, 0)),
+        Node::Index { index, .. } => {
+            // A sequence's value is its last expression (`a[(f(), "b")]` is `a.b`).
+            let mut index = skip_parens(ast, index);
+            for _ in 0..10_000 {
+                match *ast.node(index) {
+                    Node::Seq { exprs } => match ast.list(exprs).last() {
+                        Some(&last) => index = skip_parens(ast, last),
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
+            static_value_string(ast, cx.src(), index)
+                .map(|c| c.into_owned())
+                .or_else(|| literal_concat(cx, index, 0))
+                .or_else(|| {
+                    super::unicorn_static::static_value(cx, index).and_then(|v| v.to_js_string())
+                })
+        }
         _ => None,
     }
 }

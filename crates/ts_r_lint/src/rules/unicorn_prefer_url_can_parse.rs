@@ -14,7 +14,7 @@
 
 use super::prelude::*;
 use super::unicorn_text::{call_argument_text, has_comment_in};
-use super::unicorn_util_h4::has_side_effect;
+use super::unicorn_util::has_side_effect_with as has_side_effect;
 use crate::semantic::{DeclKind, SymbolId};
 use ts_r_ast::Ast;
 

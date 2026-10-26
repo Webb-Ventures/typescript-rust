@@ -19,7 +19,7 @@ use super::unicorn_text::{
     expression_text, is_same_reference, needs_semicolon, paren_span, paren_text,
 };
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h1::static_string;
+use super::unicorn_util::static_string;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -281,10 +281,7 @@ impl PreferClasslistToggle {
         ) else {
             return;
         };
-        if !matches!(m1.as_str(), "add" | "remove")
-            || !matches!(m2.as_str(), "add" | "remove")
-            || m1 == m2
-        {
+        if !matches!(m1, "add" | "remove") || !matches!(m2, "add" | "remove") || m1 == m2 {
             return;
         }
         let Some(member) = parent_np(cx, cond_expr) else {

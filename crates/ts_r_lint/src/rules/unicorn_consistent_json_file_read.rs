@@ -17,7 +17,7 @@ use super::prelude::*;
 use super::unicorn_ast::{method_call, remove_argument};
 use super::unicorn_static::{Static, static_value_no_side_effects};
 use super::unicorn_text::{has_comment_in, paren_span};
-use super::unicorn_util_h1::static_property_name;
+use super::unicorn_util::static_property_name;
 use serde_json::Value;
 
 pub static RULE: RuleDef = RuleDef {

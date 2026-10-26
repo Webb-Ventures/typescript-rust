@@ -19,9 +19,9 @@
 use super::prelude::*;
 use super::unicorn_iter::unwrap_expression;
 use super::unicorn_no_mismatched_map_key::same_binding;
-use super::unicorn_text::is_same_reference;
 use super::unicorn_types::{is_array, is_map, is_set};
-use super::unicorn_util_h1::static_property_name;
+use super::unicorn_util::is_same_reference;
+use super::unicorn_util::static_property_name;
 use rustc_hash::FxHashSet;
 use ts_r_ast::{Ast, VarKind};
 

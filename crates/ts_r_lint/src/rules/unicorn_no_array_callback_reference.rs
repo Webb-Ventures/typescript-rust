@@ -26,13 +26,12 @@
 use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_no_array_reduce::const_initializer as const_init;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::{paren_span as parenthesized_span, paren_text as parenthesized_text};
 use super::unicorn_types::{Checker, INDEXED_COLLECTION};
-use super::unicorn_util::{parenthesized_span, skip_wrappers};
-use super::unicorn_util_h4::singular;
-use super::unicorn_util_h5::{
-    is_parenthesized, is_value_not_function, node_matches_path, parenthesized_text,
-    starts_like_declaration,
-};
+use super::unicorn_util::singular;
+use super::unicorn_util::skip_wrappers;
+use super::unicorn_util::{is_value_not_function, node_matches_path, starts_like_declaration};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

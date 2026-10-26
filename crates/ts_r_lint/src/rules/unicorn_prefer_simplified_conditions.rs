@@ -27,9 +27,9 @@ use super::unicorn_text::{
     static_string_value,
 };
 use super::unicorn_types::is_boolean;
+use super::unicorn_util::is_boolean_context;
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h1::{is_same_reference, logical_operands};
-use super::unicorn_util_h5::is_boolean_context;
+use super::unicorn_util::{is_same_reference, logical_operands};
 use crate::semantic::DeclKind;
 use ts_r_ast::Ast;
 

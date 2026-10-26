@@ -29,8 +29,8 @@ use super::prelude::*;
 use super::unicorn_ast::linebreak;
 use super::unicorn_static::{static_string_literal, static_value, static_value_control_flow};
 use super::unicorn_text::has_comment_in;
+use super::unicorn_util::line_indent;
 use super::unicorn_util::skip_wrappers;
-use super::unicorn_util_h2::line_indent;
 use crate::semantic::Decl;
 
 pub static RULE: RuleDef = RuleDef {

@@ -20,7 +20,7 @@
 use super::prelude::*;
 use super::unicorn_ast::remove_statements;
 use super::unicorn_no_array_reduce::const_initializer;
-use super::unicorn_util_h1::static_string;
+use super::unicorn_util::static_string;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
