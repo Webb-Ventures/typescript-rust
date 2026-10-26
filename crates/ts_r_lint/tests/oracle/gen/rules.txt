@@ -312,3 +312,4 @@ unicorn/prefer-array-flat-map
 unicorn/prefer-array-flat
 unicorn/require-array-join-separator
 unicorn/no-unreadable-array-destructuring
+unicorn/prefer-dom-node-remove
