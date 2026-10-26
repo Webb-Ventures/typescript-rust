@@ -542,6 +542,13 @@ impl Printer<'_> {
                         self.expr_trailing(p + dot.len() as u32);
                     }
                 }
+                // tsc keeps a line break after the `.` too, indented once (`this.\n
+                // foo()`); a missing name (`x.` then `}`) ends the line.
+                let after = self.break_after_dot(obj, prop, dot);
+                if after {
+                    self.indent();
+                    self.newline();
+                }
                 match self.node(prop) {
                     Node::PrivateName { .. } => {
                         self.map_start(prop);
@@ -549,6 +556,9 @@ impl Printer<'_> {
                         self.map_end(prop);
                     }
                     _ => self.ident_name(prop),
+                }
+                if after {
+                    self.dedent();
                 }
                 if before {
                     self.dedent();
@@ -908,6 +918,26 @@ impl Printer<'_> {
             return;
         }
         self.expr(id, Prec::Call);
+    }
+
+    /// [`Layout::Tsc`]: whether the source breaks the line between the `.` of member `obj.prop`
+    /// and its name (for a missing name, the next token).
+    fn break_after_dot(&self, obj: NodeId, prop: NodeId, dot: &str) -> bool {
+        if !self.tsc || self.is_synthetic(obj) {
+            return false;
+        }
+        let missing = matches!(self.node(prop), Node::Missing {});
+        if self.is_synthetic(prop) && !missing {
+            return false;
+        }
+        let from = self.span(obj).end;
+        let to = if missing {
+            self.next_token_start(self.span(prop).start)
+        } else {
+            self.span(prop).start
+        };
+        self.token_between(from, to.max(from), dot)
+            .is_some_and(|p| self.has_newline_between(p + dot.len() as u32, to))
     }
 
     fn push_space(&mut self) {

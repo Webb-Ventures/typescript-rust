@@ -1178,6 +1178,7 @@ fn emit_js(ctx: &Ctx, i: usize) -> FileOut {
         single_quoted: &r.single_quoted,
         map_ranges: &r.map_ranges,
         moved_comments: &r.moved_comments,
+        trail_from: &r.trail_from,
         no_detached_comments: r.no_detached_comments,
         strip_numeric_separators: opts.strip_numeric_separators,
     };

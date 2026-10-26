@@ -3053,6 +3053,14 @@ fn tsc_syntax_errors_keep_lenient() {
     );
     check("let t = `\\01`; const a;", &[1487], &[1487]);
     check("const a;", &[], &[]);
+    // A private name in an optional chain (TS18030): ESTree parsers accept `this?.#x()`.
+    // `&&` mixed with `??` stays a syntax error everywhere (tsc and ESTree parsers).
+    check("let x = (undefined && foo ?? {});", &[5076], &[5076]);
+    let private = "class C { #x() {} f() { this?.#x(); this?.a.#x; } }";
+    check(private, &[], &[18030, 18030]);
+    let js = parse(private, SourceKind::Js);
+    assert!(js.syntax_errors().is_empty(), "{:?}", js.diagnostics);
+    assert_eq!(codes(&js.diagnostics), [18030, 18030]);
 }
 
 /// Unicode escapes in JSX tag and attribute names: decoded (so `<\u0061></a>` closes) and

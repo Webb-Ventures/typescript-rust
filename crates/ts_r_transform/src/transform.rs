@@ -128,6 +128,9 @@ pub(crate) struct Tx<'a> {
     /// Statements standing for source nodes moved elsewhere
     /// ([`crate::TransformResult::moved_comments`]).
     pub moved_comments: Vec<(NodeId, Span)>,
+    /// Where synthesized statements' trailing comments start
+    /// ([`crate::TransformResult::trail_from`]).
+    pub trail_from: Vec<(NodeId, u32)>,
 }
 
 impl Build for Tx<'_> {
@@ -206,6 +209,7 @@ pub(crate) fn run(
         no_detached_comments: false,
         map_ranges: Vec::new(),
         moved_comments: Vec::new(),
+        trail_from: Vec::new(),
     };
     let using = crate::downlevel::using_needing_lowering(&*tx.ast, opts.target);
     crate::enums::prepass(&mut tx);
@@ -266,6 +270,12 @@ pub(crate) fn run(
         },
         moved_comments: {
             let mut r = tx.moved_comments;
+            r.sort_by_key(|&(n, _)| n);
+            r.dedup_by_key(|&mut (n, _)| n);
+            r
+        },
+        trail_from: {
+            let mut r = tx.trail_from;
             r.sort_by_key(|&(n, _)| n);
             r.dedup_by_key(|&mut (n, _)| n);
             r

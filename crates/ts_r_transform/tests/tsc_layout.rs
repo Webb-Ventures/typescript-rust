@@ -259,3 +259,12 @@ fn triple_slash_erased_interface() {
 fn decorator_metadata_rules() {
     check("decorator_metadata_rules");
 }
+
+/// Comments of code a transform moves or rewrites: an enum member's (before its `,`; after it
+/// they go), lowered static fields and blocks and private fields (they move with the code),
+/// the first line of a multi-line comment (trailing spaces trimmed), a statement block's
+/// comment after `{` and before `}`, and line breaks after a `.`.
+#[test]
+fn moved_comments() {
+    check("moved_comments");
+}

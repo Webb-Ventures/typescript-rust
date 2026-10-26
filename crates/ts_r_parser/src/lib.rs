@@ -43,8 +43,9 @@ pub struct ParseResult {
     /// them for older targets. So are, in a JavaScript file, the TypeScript-only rules of
     /// [`is_checked_js_grammar`] (`if (x);`), which only a checked JavaScript file reports.
     pub grammar: Vec<Diagnostic>,
-    /// Syntax errors to tsc that ESLint's parser and esbuild accept in sloppy code: octal
-    /// and `\8` escapes in strings (TS1487, TS1488; `"\033"`). They are also in `grammar`,
+    /// Syntax errors to tsc that ESLint's parser and esbuild accept: octal and `\8` escapes
+    /// in strings in sloppy code (TS1487, TS1488; `"\033"`), and a private name in an
+    /// optional chain (TS18030; `this?.#x()`). They are also in `grammar`,
     /// so `syntax_errors` and the build tools leave them out; the checker reports them as
     /// syntax errors. (In a template they are an error everywhere: syntax only.) Sorted by
     /// starting position.
@@ -617,6 +618,14 @@ impl<'a> Parser<'a> {
             })
             .cloned()
             .collect();
+        // `a?.#x` (TS18030) is a syntax error to tsc, but ESTree parsers (typescript-eslint,
+        // espree) and esbuild accept it.
+        lenient.extend(
+            diags
+                .iter()
+                .filter(|d| d.code == messages::OPTIONAL_CHAIN_PRIVATE_NAME.code)
+                .cloned(),
+        );
         lenient.sort_by_key(|d| d.span.start);
         if !lenient.is_empty() {
             grammar.extend(lenient.iter().cloned());

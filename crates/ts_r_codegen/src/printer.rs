@@ -163,6 +163,17 @@ impl<'a> Printer<'a> {
             .is_ok_and(|i| ranges[i].1.start == crate::NO_MAP && ranges[i].1.end == crate::NO_MAP)
     }
 
+    /// [`PrintHints::trail_from`]: where statement `id`'s trailing comments start.
+    pub(crate) fn trail_from(&self, id: NodeId) -> Option<u32> {
+        if !self.tsc {
+            return None;
+        }
+        let t = self.hints.trail_from;
+        t.binary_search_by_key(&id, |&(n, _)| n)
+            .ok()
+            .map(|i| t[i].1)
+    }
+
     /// [`PrintHints::moved_comments`]: the source range statement `id` stands for.
     pub(crate) fn moved_of(&self, id: NodeId) -> Option<Span> {
         if !self.tsc {
@@ -1253,7 +1264,7 @@ impl<'a> Printer<'a> {
     /// A multi-line block comment in [`Layout::Tsc`], moved as tsc moves it (observed): every
     /// line after the first is shifted by the distance the comment's start moved (its
     /// leading whitespace measured with tab stops of 4, never below column 0, rewritten as
-    /// spaces) and loses its trailing whitespace; empty lines stay empty.
+    /// spaces); every line loses its trailing whitespace; empty lines stay empty.
     fn reindented_comment(&mut self, c: &Comment, text: &str) {
         let line_start = self.src[..c.span.start as usize]
             .rfind('\n')
@@ -1288,7 +1299,8 @@ impl<'a> Printer<'a> {
     fn shifted_comment_lines(&mut self, text: &str, shift: i64) {
         let mut lines = text.split('\n');
         if let Some(first) = lines.next() {
-            self.push(first.trim_end_matches('\r'));
+            // The first line loses its trailing whitespace too (`/** c \n */`, observed).
+            self.push(first.trim_end_matches('\r').trim_end_matches([' ', '\t']));
         }
         for line in lines {
             let line = line.trim_end_matches('\r');

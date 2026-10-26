@@ -84,6 +84,13 @@ impl Printer<'_> {
         self.stmt_end = saved;
         if !self.is_synthetic(id) {
             self.trailing_comments(span.end);
+        } else if let Some(at) = self.trail_from(id) {
+            self.trailing_comments(at);
+            // A comment after the element's `,` on its line goes (observed).
+            let after = self.next_token_start(at);
+            if self.src.as_bytes().get(after as usize) == Some(&b',') {
+                self.drop_same_line_comments(after + 1);
+            }
         } else if let Some(end) = trail {
             self.trailing_comments(end);
         }
@@ -194,13 +201,19 @@ impl Printer<'_> {
                 // the comments on the `{` line (`function* g() { // c`).
                 if is_body && !self.is_synthetic(id) {
                     self.drop_same_line_comments(span.start + 1);
+                } else if !self.is_synthetic(id) {
+                    // A statement block keeps them there (`if (x) { // c\n}`).
+                    self.trailing_comments(span.start + 1);
                 }
                 if !self.is_synthetic(id) && self.has_comments_in(span) {
                     self.indent();
                     self.leading_comments(span.end.saturating_sub(1));
                     self.dedent();
                 }
-                self.newline();
+                // A block comment the `}` follows on its line keeps it there (`/* c */ }`).
+                if !self.after_inline_comment() {
+                    self.newline();
+                }
                 self.map_token("}", close);
                 if !self.is_synthetic(id) {
                     self.skip_comments_to(span.end);
@@ -235,7 +248,9 @@ impl Printer<'_> {
             self.leading_comments(span.end.saturating_sub(1));
         }
         self.dedent();
-        self.newline();
+        if !(self.tsc && self.after_inline_comment()) {
+            self.newline();
+        }
         self.map_token("}", close);
         if !self.is_synthetic(id) {
             self.skip_comments_to(span.end);
