@@ -375,6 +375,7 @@ mod unicorn_no_incomplete_accessor_override;
 mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
+mod unicorn_no_invalid_argument_count;
 mod unicorn_no_invalid_boolean_attribute_value;
 mod unicorn_no_invalid_character_comparison;
 mod unicorn_no_invalid_dom_token;
@@ -596,6 +597,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_invalid_argument_count::RULE,
     &unicorn_no_invalid_boolean_attribute_value::RULE,
     &unicorn_no_invalid_response_options::RULE,
     &unicorn_no_invalid_dom_token::RULE,
