@@ -223,7 +223,8 @@ mod tests {
     fn oxlint_rules_map() {
         let reg = Registry::global();
         let v = serde_json::json!({
-            "rules": { "no-debugger": "error", "eslint/no-debugger": "warn", "react/jsx-key": "error" },
+            "rules": { "no-debugger": "error", "eslint/no-debugger": "warn", "react/jsx-key": "error",
+                       "unicorn/escape-case": "error", "jsdoc/check-access": "error" },
             "ignorePatterns": ["dist/"]
         });
         let objs = objects_from_oxlint(&v, reg).unwrap();
@@ -236,5 +237,9 @@ mod tests {
         assert_eq!(r.mapped, Ok("no-debugger"));
         let p = rules.iter().find(|r| r.written == "react/jsx-key").unwrap();
         assert_eq!(p.mapped, Err(UnsupportedReason::Plugin));
+        for name in ["unicorn/escape-case", "jsdoc/check-access"] {
+            let r = rules.iter().find(|r| r.written == name).unwrap();
+            assert_eq!(r.mapped, Ok(name));
+        }
     }
 }

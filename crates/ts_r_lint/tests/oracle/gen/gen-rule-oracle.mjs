@@ -10,6 +10,7 @@
 //        --eslint-tests <eslint>/tests/lib/rules --tseslint-tests <ts-eslint>/packages/eslint-plugin/tests/rules
 //        [--fixtures <copy of ts-eslint/packages/eslint-plugin/tests/fixtures>]
 //        [--jsdoc-tests <eslint-plugin-jsdoc>/test/rules/assertions]
+//        [--unicorn-tests <eslint-plugin-unicorn>/test]
 //        --out <crates/ts_r_lint/tests/oracle/rules> [rule ...]
 // Pinned: eslint 10.12.0, typescript-eslint 8.71.1, typescript 6.0.3 (private-app's).
 //
@@ -21,7 +22,11 @@
 // `typed: { root, project }` and its `filename`, relative to the fixtures directory.
 // Rule names: `no-debugger` (ESLint core tests), `@typescript-eslint/no-explicit-any`, or
 // `jsdoc/require-returns` (eslint-plugin-jsdoc 63.3.3, from the tools dir: its assertion
-// files export `{ valid, invalid }` and its runner adds `ecmaVersion: 'latest'`).
+// files export `{ valid, invalid }` and its runner adds `ecmaVersion: 'latest'`), or
+// `unicorn/no-null` (eslint-plugin-unicorn 79.0.0, from the tools dir with `outdent`: its
+// `test/utils/test.js` tester is replaced by a recorder; cases run with its default
+// globals, builtin + node + browser, which are written once per file as `globals` and left
+// out of each case's own; Vue, HTML, Svelte and non-JavaScript language cases are skipped).
 
 import { registerHooks, createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -43,6 +48,8 @@ const tsTests = opt('--tseslint-tests');
 const outDir = path.resolve(opt('--out'));
 const fixturesOpt = opt('--fixtures');
 const jsdocTests = opt('--jsdoc-tests');
+const unicornTestsOpt = opt('--unicorn-tests');
+const unicornTests = unicornTestsOpt ? fs.realpathSync(path.resolve(unicornTestsOpt)) : undefined;
 const fixturesDir = fixturesOpt ? fs.realpathSync(path.resolve(fixturesOpt)) : undefined;
 const rules = args.flatMap((a) =>
   a.startsWith('@') && !a.startsWith('@typescript-eslint/')
@@ -55,6 +62,13 @@ const { Linter } = toolsRequire('eslint');
 const tsParser = toolsRequire('@typescript-eslint/parser');
 const tsPlugin = toolsRequire('@typescript-eslint/eslint-plugin');
 const jsdocPlugin = jsdocTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-jsdoc')).href)).default : undefined;
+const unicornPlugin = unicornTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-unicorn')).href)).default : undefined;
+const unicornGlobals = unicornTests
+  ? (() => {
+      const g = toolsRequire('globals');
+      return { ...g.builtin, ...g.node, ...g.browser };
+    })()
+  : undefined;
 
 // ---- stubs -------------------------------------------------------------------------------
 const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tsr-lint-stubs-'));
@@ -81,6 +95,41 @@ const RULE = stub(
   `module.exports = { meta: {}, create() { return {}; } };
    // Names some tests import from the rule module for expected data (never read here).
    module.exports.phrases = new Proxy({}, { get: () => '' });`,
+);
+// eslint-plugin-unicorn's tester (`test/utils/test.js`) and parser table: the recorder
+// lives in `globalThis.__unicornTester` below.
+const UNICORN_TEST = stub(
+  'unicorn-test',
+  `const same = (o) => o;
+   const other = (name) => ({ name, __parser: 'other', mergeParserOptions: same });
+   exports.parsers = { typescript: { name: 'typescript', __parser: 'ts', mergeParserOptions: same }, vue: other('vue'), html: other('html'), svelte: other('svelte') };
+   exports.avoidTestTitleConflict = same;
+   exports.normalizeTestCase = (t) => (typeof t === 'string' ? { code: t } : t);
+   exports.languages = new Proxy({}, { get: (_t, k) => ({ __language: String(k) }) });
+   exports.getTester = (importMeta, ruleId) => globalThis.__unicornTester(importMeta, ruleId);`,
+);
+const UNICORN_PARSERS = stub(
+  'unicorn-parsers',
+  `exports.typescriptEslintParser = { __parser: 'ts' };
+   exports.vueEslintParser = { __parser: 'other' };
+   exports.htmlEslintParser = { __parser: 'other' };
+   exports.svelteEslintParser = { __parser: 'other' };`,
+);
+const ESLINT_NAMED = stub(
+  'eslint-named',
+  `const real = require(${JSON.stringify(toolsRequire.resolve('eslint'))});
+   module.exports = real; exports.Linter = real.Linter; exports.RuleTester = real.RuleTester; exports.SourceCode = real.SourceCode; exports.ESLint = real.ESLint;`,
+);
+const ESPREE_NAMED = stub(
+  'espree-named',
+  `const real = require(${JSON.stringify(toolsRequire.resolve('espree'))});
+   module.exports = real; exports.parse = real.parse; exports.tokenize = real.tokenize; exports.latestEcmaVersion = real.latestEcmaVersion; exports.version = real.version;`,
+);
+const NODE_TEST = stub(
+  'node-test',
+  `const noop = () => {};
+   const t = Object.assign(noop, { describe: noop, it: noop, test: noop, only: noop, skip: noop, todo: noop, snapshot: { setDefaultSnapshotSerializers: noop, setResolveSnapshotPath: noop } });
+   module.exports = t; exports.describe = noop; exports.it = noop; exports.test = noop; exports.snapshot = t.snapshot;`,
 );
 // Test-suite helpers that only validate option schemas.
 const OPTIONS_VALID = stub('options-valid', `exports.areOptionsValid = () => true;`);
@@ -146,6 +195,20 @@ registerHooks({
     if (s === 'vitest') return r(VITEST);
     if (/(^|\/)areOptionsValid(\.ts)?$/.test(s)) return r(OPTIONS_VALID);
     if (s === '@typescript-eslint/utils') return r(TS_UTILS);
+    const parent = context.parentURL ?? '';
+    if (unicornTests && parent.startsWith(pathToFileURL(unicornTests).href)) {
+      if (/(^|\/)utils\/test\.js$/.test(s)) return r(UNICORN_TEST);
+      if (/scripts\/parsers\.js$/.test(s)) return r(UNICORN_PARSERS);
+      if (s === 'node:test') return r(NODE_TEST);
+      if (s === 'eslint') return r(ESLINT_NAMED);
+      if (s === 'espree') return r(ESPREE_NAMED);
+      if (s === '../index.js') return { url: pathToFileURL(toolsRequire.resolve('eslint-plugin-unicorn')).href, shortCircuit: true };
+      if (!s.startsWith('.') && !s.startsWith('node:')) {
+        try {
+          return { url: pathToFileURL(toolsRequire.resolve(s)).href, shortCircuit: true };
+        } catch {}
+      }
+    }
     if (s === 'globals' || s === 'eslint-scope' || s === 'espree' || s.startsWith('@typescript-eslint/') || s === 'eslint' || s.startsWith('eslint/')) {
       try {
         return { url: pathToFileURL(toolsRequire.resolve(s)).href, shortCircuit: true };
@@ -172,6 +235,26 @@ globalThis.it = globalThis.test = each((fn) => {
   } catch {}
 });
 
+globalThis.__unicornTester = (importMeta, ruleId) => {
+  const id = ruleId ?? path.basename(new URL(importMeta.url).pathname, '.js');
+  const record = (tests, parser) => {
+    const lo = { ...(tests.testerOptions?.languageOptions || {}) };
+    if (parser) lo.parser = parser;
+    globalThis.__recorded.push({
+      name: 'unicorn/' + id,
+      config: { languageOptions: { ...lo, globals: { ...unicornGlobals, ...(lo.globals || {}) } } },
+      tests,
+      defined: [],
+    });
+  };
+  const test = (tests) => record(tests);
+  test.snapshot = (tests) => record(tests);
+  test.only = test;
+  test.typescript = (tests) => record(tests, { __parser: 'ts' });
+  for (const p of ['vue', 'html', 'svelte']) test[p] = (tests) => record(tests, { __parser: 'other' });
+  return { ruleId: id, rule: unicornPlugin?.rules?.[id] ?? {}, test };
+};
+
 // ---- helpers -----------------------------------------------------------------------------
 const parserKind = (p) => (p == null ? undefined : p.__parser || 'other');
 
@@ -190,6 +273,7 @@ function normalizeCase(c, valid) {
     expectedErrors: valid ? 0 : Array.isArray(c.errors) ? c.errors.length : c.errors,
     expectedOutput: c.output,
     skip: !!c.skip || !!c.dependencyConstraints,
+    language: typeof c.language === 'string' ? c.language : c.language ? 'other' : undefined,
   };
 }
 
@@ -232,6 +316,7 @@ const requiresTypes = (ruleId) =>
 
 function observe(ruleId, isTs, testerConfig, c) {
   if (c.parser === 'fixture' || c.parser === 'other' || c.skip || typeof c.code !== 'string') return { skipped: 'unsupported case' };
+  if (c.language && c.language !== 'js/js') return { skipped: 'other language' };
   // Lone surrogates cannot be represented in UTF-8 source files.
   if (!c.code.isWellFormed()) return { skipped: 'lone surrogate' };
   const lo = mergeLo(testerConfig.languageOptions, c.languageOptions);
@@ -274,7 +359,11 @@ function observe(ruleId, isTs, testerConfig, c) {
   const config = [
     {
       files: ['**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}'],
-      plugins: { '@typescript-eslint': tsPlugin, ...(jsdocPlugin ? { jsdoc: jsdocPlugin } : {}) },
+      plugins: {
+        '@typescript-eslint': tsPlugin,
+        ...(jsdocPlugin ? { jsdoc: jsdocPlugin } : {}),
+        ...(unicornPlugin ? { unicorn: unicornPlugin } : {}),
+      },
       languageOptions,
       settings: c.settings || {},
       rules: { [ruleId]: ['error', ...c.options] },
@@ -299,7 +388,7 @@ function observe(ruleId, isTs, testerConfig, c) {
       ecmaVersion: lo.ecmaVersion,
       // typescript-eslint testers often set the source type through `parserOptions`.
       sourceType: lo.sourceType ?? lo.parserOptions?.sourceType,
-      globals: lo.globals,
+      globals: ruleId.startsWith('unicorn/') ? ownGlobals(lo.globals) : lo.globals,
       ecmaFeatures: lo.parserOptions?.ecmaFeatures,
       parserOptions: pickParserOptions(lo.parserOptions),
     },
@@ -318,7 +407,18 @@ function observe(ruleId, isTs, testerConfig, c) {
   };
 }
 
+// A unicorn case's globals beyond the tester's defaults (written once per file).
+function ownGlobals(g) {
+  if (!g) return undefined;
+  const own = Object.fromEntries(Object.entries(g).filter(([k, v]) => unicornGlobals[k] !== v));
+  return Object.keys(own).length ? own : undefined;
+}
+
 function testFileFor(rule) {
+  if (rule.startsWith('unicorn/')) {
+    const f = unicornTests ? path.join(unicornTests, rule.slice('unicorn/'.length) + '.js') : '';
+    return { files: fs.existsSync(f) ? [f] : [], isTs: false, source: 'eslint-plugin-unicorn' };
+  }
   if (rule.startsWith('jsdoc/')) {
     const camel = rule.slice('jsdoc/'.length).replace(/-([a-z])/g, (_m, c) => c.toUpperCase());
     const f = jsdocTests ? path.join(jsdocTests, camel + '.js') : '';
@@ -381,7 +481,8 @@ for (const rule of rules) {
     }
   }
   const out = { rule, source: source ?? (isTs ? 'typescript-eslint' : 'eslint'), skipped, cases };
-  const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-') + '.json';
+  if (rule.startsWith('unicorn/')) out.globals = unicornGlobals;
+  const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-').replace('unicorn/', 'unicorn-') + '.json';
   fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, null, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
   console.error(`${rule}: ${cases.length} cases, skipped ${JSON.stringify(skipped)}`);
 }

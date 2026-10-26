@@ -1202,3 +1202,37 @@ pub fn keyword_and_space(src: &str, start: u32, keyword: &str) -> Span {
     }
     Span::new(start, end as u32)
 }
+
+/// The span ESLint gives a `TemplateElement`: its raw text plus the delimiters around it
+/// (the opening `` ` `` or `}`, and the closing `` ` `` or `${`).
+pub fn template_element_span(src: &str, raw: Span) -> Span {
+    let s = src.as_bytes();
+    let end = match s.get(raw.end as usize) {
+        Some(b'`') => raw.end + 1,
+        Some(b'$') => raw.end + 2,
+        _ => raw.end,
+    };
+    Span::new(raw.start.saturating_sub(1), end.min(s.len() as u32))
+}
+
+/// The span of the string literal itself for a `StringLit` or a `Directive` (whose span also
+/// covers its `;` and anything up to it).
+pub fn string_literal_span(ast: &Ast, src: &str, id: NodeId) -> Span {
+    let span = ast.span(id);
+    if !matches!(ast.node(id), Node::Directive { .. }) {
+        return span;
+    }
+    let b = span.text(src).as_bytes();
+    let Some(&quote) = b.first() else {
+        return span;
+    };
+    let mut i = 1;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            c if c == quote => return Span::new(span.start, span.start + i as u32 + 1),
+            _ => i += 1,
+        }
+    }
+    span
+}

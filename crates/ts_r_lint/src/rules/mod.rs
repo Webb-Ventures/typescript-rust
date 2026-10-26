@@ -260,6 +260,12 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_escape_case;
+mod unicorn_no_console_spaces;
+mod unicorn_number_literal_case;
+mod unicorn_prefer_node_protocol;
+mod unicorn_prefer_optional_catch_binding;
+mod unicorn_text_encoding_identifier_case;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -545,6 +551,13 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
+    // eslint-plugin-unicorn
+    &unicorn_escape_case::RULE,
+    &unicorn_no_console_spaces::RULE,
+    &unicorn_number_literal_case::RULE,
+    &unicorn_prefer_node_protocol::RULE,
+    &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_text_encoding_identifier_case::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

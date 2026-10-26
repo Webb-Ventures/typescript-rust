@@ -11,6 +11,9 @@
 //! copy of typescript-eslint's test fixtures, mounted in memory at `/fixtures`) through our
 //! checker, like `ts-r-lint` does for a real project. They are skipped when the TypeScript
 //! lib files are missing (`cargo xtask upstream sync --minimal`).
+//!
+//! A rule file's top-level `globals` (eslint-plugin-unicorn's tester defaults) are added to
+//! every case's own.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -370,8 +373,28 @@ fn run_file(reg: &'static Registry, f: &Path, filter: Option<&str>, verbose: usi
     let mut tally = Tally::default();
     let mut log = String::new();
     let mut shown = 0;
+    // File-level `globals` (a tester's defaults, eslint-plugin-unicorn's) apply to every
+    // case under its own.
+    let file_globals = data["globals"].as_object();
     for case in data["cases"].as_array().into_iter().flatten() {
         tally.total += 1;
+        let merged;
+        let case = match file_globals {
+            Some(g) => {
+                let mut c = case.clone();
+                let mut all = g.clone();
+                if let Some(own) = case["languageOptions"]["globals"].as_object() {
+                    all.extend(own.clone());
+                }
+                if !c["languageOptions"].is_object() {
+                    c["languageOptions"] = json!({});
+                }
+                c["languageOptions"]["globals"] = Value::Object(all);
+                merged = c;
+                &merged
+            }
+            None => case,
+        };
         let res = std::panic::catch_unwind(|| run_case(reg, &rule, case))
             .unwrap_or_else(|_| Err("panicked".to_owned()));
         match res {

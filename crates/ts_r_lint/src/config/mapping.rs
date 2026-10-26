@@ -150,6 +150,8 @@ pub fn map_oxlint_name(reg: &Registry, name: &str) -> Result<&'static str, Unsup
     match plugin {
         Some("eslint") => map_eslint_name(reg, rule),
         Some("typescript") => map_eslint_name(reg, &format!("@typescript-eslint/{rule}")),
+        // Plugins whose rules ts-r-lint names as ESLint does.
+        Some("jsdoc" | "unicorn") => map_eslint_name(reg, name),
         Some(_) => Err(UnsupportedReason::Plugin),
         None => {
             if let Ok(n) = map_eslint_name(reg, rule) {
