@@ -1525,6 +1525,12 @@ fn side_effectful_const_reference(
         .any(|c| side_effectful_const_reference(cx, c, visited))
 }
 
+/// `hasSideEffectfulConstInitializer`: `id` is (or reads) a `const` whose initializer has
+/// side effects.
+pub(crate) fn has_side_effectful_const_initializer(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    side_effectful_const_init(cx, id, &mut Vec::new())
+}
+
 fn side_effectful_const_init(cx: &Ctx<'_, '_>, id: NodeId, visited: &mut Vec<SymbolId>) -> bool {
     let Some((sym, init)) = const_definition(cx, id) else {
         return !matches!(cx.node(id), Node::Ident { .. })

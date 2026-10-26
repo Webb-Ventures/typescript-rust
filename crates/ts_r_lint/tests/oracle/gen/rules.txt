@@ -403,3 +403,4 @@ unicorn/no-array-splice
 unicorn/no-unnecessary-splice
 unicorn/prefer-math-abs
 unicorn/no-collection-bracket-access
+unicorn/prefer-string-pad-start-end

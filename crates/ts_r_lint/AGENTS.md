@@ -991,3 +991,9 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   `Object.prototype` names, and `Symbol.iterator`/`Symbol.toStringTag` (static values give
   `Builtin("Symbol.x")`). Conditional, logical and sequence keys with a call, write or
   member read (eslint-utils' `considerGetters`) skip the rule altogether.
+- **Manual padding** (`prefer-string-pad-start-end`, from `unicorn:
+  rules/prefer-string-pad-start-end.js`). A name stands for its `const` initializer
+  (parentheses dropped, as ESTree does) or its function/class declaration when it has one
+  definition and no later write. The plugin's 750-line `isBoolean` is cut down to
+  literals, `!`, comparisons and global `Boolean`/`isFinite`/`isNaN` calls, which is all
+  the oracle needs; JSDoc and TS annotations go through `is_known_non_string`.

@@ -376,6 +376,7 @@ mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
 mod unicorn_prefer_split_limit;
 mod unicorn_prefer_spread;
+mod unicorn_prefer_string_pad_start_end;
 mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
@@ -799,6 +800,13 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_single_array_predicate::RULE,
     &unicorn_prefer_split_limit::RULE,
     &unicorn_prefer_string_repeat::RULE,
+    &unicorn_prefer_structured_clone::RULE,
+    &unicorn_prefer_regexp_test::RULE,
+    &unicorn_prefer_spread::RULE,
+    &unicorn_prefer_string_pad_start_end::RULE,
+    &unicorn_prefer_string_replace_all::RULE,
+    &unicorn_prefer_string_slice::RULE,
+    &unicorn_prefer_string_starts_ends_with::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_switch::RULE,

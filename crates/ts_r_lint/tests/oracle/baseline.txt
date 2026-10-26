@@ -367,6 +367,7 @@ unicorn/prefer-simple-sort-comparator 66/66
 unicorn/prefer-single-array-predicate 32/32
 unicorn/prefer-split-limit 77/77
 unicorn/prefer-spread 625/626
+unicorn/prefer-string-pad-start-end 130/130
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-structured-clone 47/47
