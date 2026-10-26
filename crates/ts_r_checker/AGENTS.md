@@ -3070,6 +3070,10 @@ Files, by layer:
       `T | undefined` under strictNullChecks. "Some paths" means not in a statement
       directly in the body before any `return`, and the rule does not apply when a base
       class declares the property. Fixture: `js_this_property_unset_in_constructor`.
+      The first `return` of each constructor body is found by one walk, cached in
+      `Ck::ctor_first_return`. A body over the walk's budget counts as having no
+      `return`, so its properties fall back to `T`, never `T | undefined`
+      (`tests/bounded.rs`, and `ts_r_emit`'s `javascript_many_this_properties_are_linear`).
     - Type nodes name a JS ES module's exports through its file symbol, so `.d.ts` emit
       writes `import("./Test.js").default` (`ts_r_check/tests/cli.rs`).
 - Front-end crates are read-only; parser problems go to

@@ -1100,39 +1100,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             let at_top = stmt.is_some_and(|st| {
                 matches!(ast.node(st), Node::ExprStmt { .. }) && parents.parent(st) == Some(body)
             });
-            if at_top {
-                let start = ast.span(assign).start;
-                let body_start = ast.span(body).start;
-                let mut early_return = false;
-                let mut stack = vec![body];
-                let mut seen = 0u32;
-                while let Some(n) = stack.pop() {
-                    seen += 1;
-                    if seen > 20_000 {
-                        early_return = true;
-                        break;
-                    }
-                    let sp = ast.span(n);
-                    if sp.start >= start || sp.end < body_start {
-                        continue;
-                    }
-                    match ast.node(n) {
-                        Node::Return { .. } => {
-                            early_return = true;
-                            break;
-                        }
-                        Node::FunctionExpr { .. }
-                        | Node::FunctionDecl { .. }
-                        | Node::Arrow { .. }
-                        | Node::ClassDecl { .. }
-                        | Node::ClassExpr { .. } => continue,
-                        _ => {}
-                    }
-                    ast.for_each_child(n, |c| stack.push(c));
-                }
-                if !early_return {
-                    return false;
-                }
+            // Before the constructor's first `return` (found once per constructor).
+            if at_top && ast.span(assign).start < self.first_return_in_body(Loc::new(d.file, body))
+            {
+                return false;
             }
         }
         in_ctor
@@ -1142,6 +1113,46 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .flags(t)
                     .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED | TypeFlags::VOID)
             })
+    }
+
+    /// The start of the first `return` in function body `body`, outside nested functions
+    /// and classes; `u32::MAX` when there is none. Cached per body. A body too large to
+    /// walk within the budget counts as having none (every top-level assignment is then
+    /// definitely assigned: the plain declared type, never a spurious `| undefined`).
+    fn first_return_in_body(&mut self, body: Loc) -> u32 {
+        if let Some(&r) = self.ctor_first_return.get(&body) {
+            return r;
+        }
+        let ast = self.ast(body.file);
+        let mut first = u32::MAX;
+        let mut stack = vec![body.node];
+        let mut seen = 0u32;
+        while let Some(n) = stack.pop() {
+            seen += 1;
+            if seen > 2_000_000 {
+                first = u32::MAX;
+                break;
+            }
+            let start = ast.span(n).start;
+            if start >= first {
+                continue;
+            }
+            match ast.node(n) {
+                Node::Return { .. } => {
+                    first = start;
+                    continue;
+                }
+                Node::FunctionExpr { .. }
+                | Node::FunctionDecl { .. }
+                | Node::Arrow { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. } => continue,
+                _ => {}
+            }
+            ast.for_each_child(n, |c| stack.push(c));
+        }
+        self.ctor_first_return.insert(body, first);
+        first
     }
 
     /// Every declaration of `s` is a `this.x` assignment target in a class method or
