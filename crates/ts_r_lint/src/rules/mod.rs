@@ -444,7 +444,7 @@ mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_manually_wrapped_comments;
 mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
-mod unicorn_no_missing_local_resource;
+mod unicorn_no_multiple_promise_resolver_calls;
 mod unicorn_no_named_default;
 mod unicorn_no_negated_array_predicate;
 mod unicorn_no_negated_comparison;
@@ -1169,6 +1169,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_named_default::RULE,
     &unicorn_no_negated_comparison::RULE,
     &unicorn_no_negated_array_predicate::RULE,
+    &unicorn_no_multiple_promise_resolver_calls::RULE,
     &unicorn_no_negated_condition::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
