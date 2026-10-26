@@ -3964,8 +3964,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A subtype of an object literal type has no other properties (except
         // `undefined` ones): `User` is not a subtype of `{ name: string }`, so the common
         // supertype of the two is `User`.
+        // A widened literal (a variable's declared type) is no object literal here: `[a, b]`
+        // of `var a = { n: "" }, b = { n: "", d: 1 }` is `{ n: string }[]` (tsc drops the
+        // literal flag when widening: getWidenedTypeOfObjectLiteral).
         if matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
             && self.object_flags(t).contains(ObjectFlags::OBJECT_LITERAL)
+            && !self.object_flags(t).contains(ObjectFlags::WIDENED_LITERAL)
         {
             for (n, sp) in self.properties_of(s) {
                 if excluded.contains(&n) || self.property_of_type_id(t, n).is_some() {
@@ -3992,7 +3996,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         let require_optional = matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
-            && !self.object_flags(s).contains(ObjectFlags::OBJECT_LITERAL)
+            && (!self.object_flags(s).contains(ObjectFlags::OBJECT_LITERAL)
+                || self.object_flags(s).contains(ObjectFlags::WIDENED_LITERAL))
             && !self.c.is_tuple_type(s);
         if rel != RelationKind::Identity {
             // Missing properties.

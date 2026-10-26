@@ -1958,7 +1958,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         ) {
             flags |= SigFlags::ABSTRACT;
         }
-        let (params, this_type, mut min_args, has_rest) = self.params_of(l.file, parts.params);
+        let (mut params, this_type, mut min_args, has_rest) = self.params_of(l.file, parts.params);
         // An immediately invoked function: unannotated parameters past the call's written
         // arguments (a spread counts as one) are optional (`((a, b) => {})(1)`).
         if let Some(call) = self.iife_call(l)
@@ -1988,6 +1988,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 i += 1;
             }
             min_args = min_args.min(last_required as u32);
+            // They print as optional too (`function foo(x: number, y?: undefined)`; tsc:
+            // isOptionalParameter).
+            let fixed = params.len() - usize::from(has_rest);
+            for p in params.iter_mut().take(fixed).skip(min_args as usize) {
+                p.optional = true;
+            }
         }
         // A JavaScript function without parameter types takes any number of arguments.
         if self.is_untyped_js_signature(l) {

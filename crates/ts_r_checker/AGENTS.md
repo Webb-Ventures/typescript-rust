@@ -3024,6 +3024,15 @@ Files, by layer:
   - Bodies the parser made up (zero width) get no TS2355, TS2366, TS7030 or TS2378. A
     return type written `!T` or `T!` reports them over the `!` too. Only a class's first
     `implements` clause is checked (tsc: ast/utilities.go GetHeritageClause).
+  - A widened object literal (`ObjectFlags::WIDENED_LITERAL`, a variable's declared type)
+    is no object literal for the subtype relations. A subtype of it may have other
+    properties, and as a source it must have the target's optional properties. So
+    `[a1, b1]` reduces to `a1`'s type (tsc drops the literal flag in
+    getWidenedTypeOfObjectLiteral). The unannotated parameters of an IIFE past its
+    arguments are optional in the signature (`y?: undefined`). Fixture:
+    `tests/parity/widened_literal_subtypes_and_iife_params`.
+  - `import<T>` resolves its type arguments. `export default X` of a local type `X` and an
+    exported value `X` is a value for `alias_is_value` (`tests/alias_is_value.rs`).
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 

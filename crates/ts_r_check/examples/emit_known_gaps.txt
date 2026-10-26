@@ -2,7 +2,6 @@
 # (record 0012, E1 gate). test<TAB>output<TAB>cause. Regenerate with a full
 # `emit_oracle --emitter program --write-gaps` run; the list may only shrink.
 compiler/bigintArbirtraryIdentifier.ts	badImport2.js	differs: import/export
-compiler/importElisionExportNonExportAndDefault.ts	main.js	differs: import/export
 compiler/pathMappingBasedModuleResolution1_node.ts	f1.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file3.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file1.js	missing: not emitted
@@ -20,6 +19,5 @@ conformance/jsdoc/jsdocTypeTag.ts	a.js	missing: TS5055: would overwrite an input
 conformance/parser/ecmascript6/Iterators/parserForOfStatement22.ts	parserForOfStatement22.js	differs: other
 conformance/salsa/plainJSGrammarErrors.ts	plainJSGrammarErrors.js	missing: TSR2002: resolver answered Unknown
 tsc7/compiler/anonymousClassDecoratorEs2022.ts	anonymousClassDecoratorEs2022.js	differs: arrow functions
-tsc7/compiler/constEnumOnlyModuleImportAliasEmit.ts	sensmap.js	differs: const enum inlining
 tsc7/compiler/jsxNestedIndentation.js	jsxNestedIndentation.js	missing: TS5055: would overwrite an input
 tsc7/compiler/panicForInEmptyDeclarationList.ts	panicForInEmptyDeclarationList.js	differs: other
