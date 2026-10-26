@@ -697,6 +697,11 @@ fn run(test: &Test, libs: &LibStore) -> BTreeSet<Diag> {
             continue;
         }
         match program.files.get(d.file.0 as usize) {
+            // tsc's CLI reports a lib file's half of a clash with a project declaration
+            // (TS2300 'Promise' in four lib files), but the baselines keep only some of them
+            // and without a position (`lib.es5.d.ts(--,--)`, which `parse_line` skips): they
+            // are not compared.
+            Some(f) if f.is_lib => {}
             Some(f) => {
                 let lc = f.lines().line_col_utf16(&f.text, d.span.start);
                 // tsc's harness keeps test file names relative, and a source file's module

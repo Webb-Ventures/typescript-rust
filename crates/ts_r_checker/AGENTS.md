@@ -616,7 +616,11 @@ Files, by layer:
   semantic errors: `tsc: tsc/internal/compiler/program.go`; they also hide the program's
   link (merge) errors on their line, such as a duplicate `declare global` member, and such a
   hit counts as the directive's use, so no TS2578: `driver::link_diagnostic_reported`,
-  `check::suppressed_by_directive`),
+  `check::suppressed_by_directive`; a lib file's half of a clash with a project
+  declaration, TS2300 `Duplicate identifier 'bold'` in `lib.es2015.core.d.ts`, is reported
+  as tsc 7's CLI does unless `skipLibCheck` or `skipDefaultLibCheck`:
+  `driver::lib_link_diagnostics_reported`; the conformance example does not compare them,
+  since the baselines keep only some, as `lib.es5.d.ts(--,--)`),
   `driver.rs` (threads, ordering).
 - A property missing on a global lib type that a later lib adds is TS2550 naming that lib
   (`lib_hint.rs`: `[].at` without es2022). The table holds the container/member pairs

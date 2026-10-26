@@ -338,11 +338,22 @@ pub fn check<F: FileSystem>(
     }
     let program = load_program(fs, roots, options, libs, threads);
     phases.lap("load");
-    let sources = |program: &ProgramFiles| {
+    // Text for every non-lib file, and for the lib files diagnostics point into (tsc prints
+    // a lib file's diagnostics with its path).
+    let sources = |program: &ProgramFiles, diags: &[ts_r_diagnostics::Diagnostic]| {
+        let mut shown: Vec<bool> = program.files.iter().map(|f| !f.is_lib).collect();
+        for d in diags {
+            for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
+                if let Some(s) = shown.get_mut(f.0 as usize) {
+                    *s = true;
+                }
+            }
+        }
         program
             .files
             .iter()
-            .map(|f| (!f.is_lib).then(|| (f.path.clone(), f.text.clone())))
+            .zip(shown)
+            .map(|(f, shown)| shown.then(|| (f.path.clone(), f.text.clone())))
             .collect()
     };
     let files = program
@@ -361,7 +372,7 @@ pub fn check<F: FileSystem>(
         let result = ts_r_checker::check_program(&program, CheckRun { threads });
         phases.lap("check");
         return Outcome {
-            sources: sources(&program),
+            sources: sources(&program, &result.diagnostics),
             diagnostics: result.diagnostics,
             mode: Mode::Cold,
             stats: CheckStats::default(),
@@ -401,7 +412,7 @@ pub fn check<F: FileSystem>(
     crate::libinfo::remember(cache, &program, &m.libs);
     phases.lap("save");
     Outcome {
-        sources: sources(&program),
+        sources: sources(&program, &diagnostics),
         diagnostics,
         mode,
         stats,

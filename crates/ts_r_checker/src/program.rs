@@ -343,6 +343,20 @@ pub(crate) fn reference_attribute(text: &str, key: &str) -> Option<String> {
     None
 }
 
+/// `dir` with symbolic links and `..` resolved, without Windows' verbatim `\\?\` prefix;
+/// `dir` itself when that fails.
+fn real_dir(dir: PathBuf) -> PathBuf {
+    match std::fs::canonicalize(&dir) {
+        Ok(real) => match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+            // `\\?\UNC\server\share` stays as it is.
+            Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+            Some(_) => dir,
+            None => real,
+        },
+        Err(_) => dir,
+    }
+}
+
 /// Where lib files come from. Parsed lib files are cached and shared between programs
 /// (they are immutable once bound).
 #[derive(Debug)]
@@ -360,7 +374,9 @@ impl LibStore {
     }
 
     /// Finds the lib directory: `$TS_R_LIB_DIR`, `<exe dir>/lib`, `<exe dir>/../lib`, then the
-    /// synced upstream copy in this repository's `target/upstream`.
+    /// synced upstream copy in this repository's `target/upstream`. The directory is taken
+    /// by its real path, as tsc shows its lib files (a lib file's half of a duplicate
+    /// declaration, under a symlinked `node_modules`).
     pub fn locate() -> Option<LibStore> {
         let mut candidates: Vec<PathBuf> = Vec::new();
         if let Some(d) = std::env::var_os("TS_R_LIB_DIR") {
@@ -379,7 +395,7 @@ impl LibStore {
         candidates
             .into_iter()
             .find(|d| d.join("lib.es5.d.ts").is_file())
-            .map(LibStore::new)
+            .map(|d| LibStore::new(real_dir(d)))
     }
 
     pub fn dir(&self) -> &Path {
