@@ -200,6 +200,14 @@ import reference.
 
 ## Measurements
 
+Latest (2026-10-26, v1/emit3, `cargo run --release -p ts_r_check --example emit_oracle --
+--emitter program`): ES2022+ JS outputs 2,159: bytes 2,067 (95.7%), shape 2,109 (97.7%; the
+50 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18 bytes-exact outputs
+with a map baseline; all 17,352 outputs: 15,761 bytes-exact (90.8%), JS 13,599 / 14,476
+(93.9%), `.d.ts` 1,960 / 2,640. Declarations (E2): 1,190 of 1,315 baselines without
+JavaScript inputs have every `.d.ts` bytes-exact (90.5%); 1,190 / 1,634 over all baselines.
+The paragraphs below are the milestone measurements.
+
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946
 (90.1%, gate >= 90% met), shape 2,012 (93.2%; the 147 others are listed in
 `../ts_r_check/examples/emit_known_gaps.txt` with their cause), map segments equal on 0 of 17
