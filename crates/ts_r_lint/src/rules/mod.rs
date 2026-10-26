@@ -334,7 +334,7 @@ mod unicorn_expiring_todo_comments;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
 mod unicorn_filename_case;
-mod unicorn_html;
+mod unicorn_id_match;
 mod unicorn_import_style;
 mod unicorn_isolated_functions;
 mod unicorn_iter;
@@ -1288,6 +1288,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_function_style::RULE,
     &unicorn_no_keyword_prefix::RULE,
     &unicorn_consistent_arrow_return_style::RULE,
+    &unicorn_id_match::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
