@@ -9896,6 +9896,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(expr.file);
         let n = skip_parens(ast, expr.node);
         let el = Loc::new(expr.file, n);
+        // An assignment or a comma expression elaborates its right operand (tsc:
+        // elaborateError in relater.go).
+        match *ast.node(n) {
+            Node::Assign {
+                op: ts_r_ast::AssignOp::Assign,
+                right,
+                ..
+            } => return self.elaborate_error(Loc::new(expr.file, right), source, target),
+            Node::Seq { exprs } => {
+                return match ast.list(exprs).last() {
+                    Some(&last) => self.elaborate_error(Loc::new(expr.file, last), source, target),
+                    None => false,
+                };
+            }
+            _ => {}
+        }
         let tf = self.store().flags(target);
         if tf.intersects(TypeFlags::PRIMITIVE) && !tf.contains(TypeFlags::UNION) {
             return false;
