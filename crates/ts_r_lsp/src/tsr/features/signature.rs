@@ -374,7 +374,7 @@ fn longest_candidate(ck: &Ck<'_, '_>, sigs: &[SigId], count: usize) -> usize {
 
 /// A generic candidate of a call that does not resolve, instantiated as tsc shows it (see
 /// the module docs).
-fn instantiate_for_failure(
+pub(super) fn instantiate_for_failure(
     ck: &mut Ck<'_, '_>,
     file: FileId,
     sig: SigId,

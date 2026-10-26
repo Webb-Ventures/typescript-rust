@@ -825,9 +825,45 @@ pub(super) fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Lo
     };
     if (sigs.len() > 1 || generic)
         && let Some(call) = call_of(ck, at)
-        && let Some(r) = ck.resolved_signature(call)
     {
-        return vec![r];
+        let resolved = ck.resolved_signature(call);
+        let still_generic = resolved.is_some_and(|r| {
+            let st = ck.store();
+            !st.list_items(st.sig(r).type_params).is_empty()
+        });
+        if let Some(r) = resolved
+            && !still_generic
+        {
+            return vec![r];
+        }
+        // A generic call that does not resolve (no signature, or the candidate left
+        // uninstantiated) shows that candidate instantiated as signature help does
+        // (written type arguments, else inferred; `any` in JavaScript).
+        let cand = resolved.unwrap_or(sigs[0]);
+        if generic || still_generic {
+            let (type_args, args) = match *ck.c.node(call) {
+                Node::Call {
+                    type_args, args, ..
+                }
+                | Node::New {
+                    type_args, args, ..
+                } => (type_args, args),
+                _ => return sigs,
+            };
+            let args: Vec<(usize, ts_r_ast::NodeId)> =
+                ck.c.ast(call.file)
+                    .list(args)
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .collect();
+            let sig =
+                super::signature::instantiate_for_failure(ck, call.file, cand, type_args, &args);
+            return vec![sig];
+        }
+        if let Some(r) = resolved {
+            return vec![r];
+        }
     }
     sigs
 }

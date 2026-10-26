@@ -847,13 +847,15 @@ fn hover_shows_types_and_docs() {
 }
 
 /// Type alias hovers print the aliased type (`Exclude<..>` shows the union it makes); a
-/// JSDoc `@typedef`/`@callback` is spelled out, also where a tag's type names it.
+/// JSDoc `@typedef`/`@callback` is spelled out, also where a tag's type names it; a generic
+/// call that does not resolve shows its instantiated candidate.
 #[test]
 fn hover_on_type_aliases_and_jsdoc_typedefs() {
     if !libs_present() {
         return;
     }
-    let ts = "type A = \"a\" | \"b\";\ntype B = Exclude<A, \"a\">;\ntype O = { x: number };\n";
+    let ts = "type A = \"a\" | \"b\";\ntype B = Exclude<A, \"a\">;\ntype O = { x: number };\n\
+              class D<T> { constructor(val: T) {} }\nnew D<string>();\n";
     let js = "/**\n * Bar doc\n * @typedef {Object} Bar\n * @property {string} baz\n */\n\
               /** @callback Cb\n * @param {string} x\n */\n\
               /** @type {Bar} */\nexport const bar = { baz: \"\" };\n";
@@ -877,6 +879,12 @@ fn hover_on_type_aliases_and_jsdoc_typedefs() {
     assert!(h.contains("type B = \"b\""), "{h}");
     let h = hover_text(&mut c, &ua, 2, 5);
     assert!(h.contains("type O = {\n    x: number;\n}"), "{h}");
+    // A call that does not resolve shows its candidate with the written type arguments.
+    let h = hover_text(&mut c, &ua, 4, 4);
+    assert!(
+        h.contains("constructor D<string>(val: string): D<string>"),
+        "{h}"
+    );
     let want = "type Bar = {\n    baz: string;\n}";
     let h = hover_text(&mut c, &ub, 2, 22);
     assert!(h.contains(want), "{h}");

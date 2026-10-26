@@ -399,7 +399,9 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
 - Functions show every overload (`function f(x: number): void` per line; from five on, the
   first three then `// +N more overloads`); on a declaration's own name, that
   declaration's signature; at a call of an overloaded or generic function, the signature
-  the call resolved to (`f<string>(x: string)`). A callee variable shows the
+  the call resolved to (`f<string>(x: string)`); one that does not resolve shows the
+  candidate instantiated as signature help does (written type arguments, else inferred,
+  `any` in JavaScript: `constructor B<unknown>(): B<unknown>`). A callee variable shows the
   resolved signature as its type. `new C(..)`/`C(..)` of a class with one construct
   signature shows `constructor C<args>(..): C<args>`.
 - Member names are `Owner<params or args>.name`, `Owner["lit"]` or `Owner[1]`. A member
