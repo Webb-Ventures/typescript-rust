@@ -394,6 +394,7 @@ mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
+mod unicorn_no_loop_iterable_mutation;
 mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
@@ -503,6 +504,7 @@ mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_group_by;
+mod unicorn_prefer_has_check;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
@@ -1007,6 +1009,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_well_known_symbol_methods::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
+    &unicorn_no_loop_iterable_mutation::RULE,
     &unicorn_no_magic_array_flat_depth::RULE,
     &unicorn_no_mismatched_map_key::RULE,
     &unicorn_no_misrefactored_assignment::RULE,
@@ -1097,6 +1100,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_group_by::RULE,
+    &unicorn_prefer_has_check::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,

@@ -94,7 +94,7 @@ fn map_has_call(ast: &Ast, id: NodeId) -> Option<NodeId> {
 }
 
 /// The variable `ident` names: its reference, its declaration, or a lookup by name.
-fn binding(cx: &Ctx<'_, '_>, ident: NodeId) -> Option<SymbolId> {
+pub(crate) fn binding(cx: &Ctx<'_, '_>, ident: NodeId) -> Option<SymbolId> {
     let sem = cx.semantic();
     if let Some(r) = sem.reference_at(ident) {
         return match sem.reference(r).resolution {
@@ -108,7 +108,7 @@ fn binding(cx: &Ctx<'_, '_>, ident: NodeId) -> Option<SymbolId> {
     sem.lookup(sem.enclosing_scope(ident), ident_name(cx.ast(), ident)?)
 }
 
-fn same_binding(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId) -> bool {
+pub(crate) fn same_binding(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId) -> bool {
     match (binding(cx, a), binding(cx, b)) {
         (None, None) => ident_name(cx.ast(), a) == ident_name(cx.ast(), b),
         (x, y) => x == y,

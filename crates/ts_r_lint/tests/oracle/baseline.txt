@@ -348,6 +348,7 @@ unicorn/no-invalid-well-known-symbol-methods 57/57
 unicorn/no-late-current-target-access 49/49
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
+unicorn/no-loop-iterable-mutation 197/197
 unicorn/no-magic-array-flat-depth 27/27
 unicorn/no-mismatched-map-key 103/103
 unicorn/no-misrefactored-assignment 79/79
@@ -447,6 +448,7 @@ unicorn/prefer-get-or-insert-computed 62/62
 unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
 unicorn/prefer-group-by 181/181
+unicorn/prefer-has-check 211/211
 unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 247/247
 unicorn/prefer-iterable-in-constructor 76/76
