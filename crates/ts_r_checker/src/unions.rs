@@ -1483,6 +1483,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(o) = s.object_of(t)
             && o.flags.contains(ObjectFlags::OBJECT_LITERAL)
         {
+            // An already widened literal is not normalized again with its siblings.
+            let siblings = siblings.filter(|_| self.is_normalizable_literal(t));
             return self.widen_object_literal_in(t, siblings);
         }
         if s.object_of(t).is_some() && self.c.is_array_type(t) {

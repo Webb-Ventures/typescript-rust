@@ -7345,7 +7345,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     let mut c = Vec::new();
                     for &sib in sibs {
-                        if !self.is_object_literal_type(sib) {
+                        if !self.is_normalizable_literal(sib) {
                             continue;
                         }
                         let sp = self
@@ -7384,7 +7384,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             let own_count = out.len();
             let mut seen = own;
             for &sib in sibs {
-                if sib == t || !self.is_object_literal_type(sib) {
+                if sib == t || !self.is_normalizable_literal(sib) {
                     continue;
                 }
                 let Some(sm) = self.store().object_of(sib).and_then(|o| o.members()) else {
@@ -7486,6 +7486,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// An object literal expression's type (fresh or widened).
+    /// An object literal type that widening with its union siblings still normalizes: not
+    /// one already widened (a variable's type: `[a, b]` of two declared literals keeps
+    /// them as they are; tsc drops the object literal flags when it widens).
+    pub(crate) fn is_normalizable_literal(&self, t: TypeId) -> bool {
+        self.store().object_of(t).is_some_and(|o| {
+            o.flags.contains(ObjectFlags::OBJECT_LITERAL)
+                && !o.flags.contains(ObjectFlags::WIDENED_LITERAL)
+        })
+    }
+
     fn is_object_literal_type(&self, t: TypeId) -> bool {
         self.store()
             .object_of(t)
