@@ -230,7 +230,8 @@ pub fn compile(
         // Option errors keep program diagnostics out, these too (observed with a missing
         // reference: `tsbuildWatch/sample/watches-config-files-that-are-not-present`).
         if !options_failed {
-            diags = rooted_program_diagnostics(&program, parsed, located);
+            let g = !global.is_empty();
+            diags = rooted_program_diagnostics(&program, parsed, diags, located, g);
         }
         config_diags.extend(global);
     }
@@ -341,13 +342,25 @@ pub fn check(program: &ProgramFiles, threads: usize, no_check: bool) -> (Vec<Dia
     (d, semantic)
 }
 
-/// The program diagnostics tsc keeps when `rootDir` errors (TS6059) replace the checker's:
-/// those, then TS6307 (a `composite` file not listed), by file.
+/// The program diagnostics after the `rootDir` check (TS6059). A file outside `rootDir`
+/// that only an import brings in is reported at that import, next to the checker's
+/// diagnostics (`checked`), by file and position. When a root file is outside (`global`,
+/// an option-level error) the checker's are dropped: the located TS6059s, then TS6307 (a
+/// `composite` file not listed), by file (tsc 7.0.2, observed).
 pub fn rooted_program_diagnostics(
     program: &ProgramFiles,
     parsed: &ParsedConfig,
+    checked: Vec<Diagnostic>,
     located: Vec<Diagnostic>,
+    global: bool,
 ) -> Vec<Diagnostic> {
+    if !global {
+        // At one position the TS6059 comes first (before a TS6307 on the same import).
+        let mut diags = located;
+        diags.extend(checked);
+        sort_by_file(program, &mut diags);
+        return diags;
+    }
     let mut diags = located;
     let composite = references::composite_diagnostics(program, parsed);
     if !composite.is_empty() {

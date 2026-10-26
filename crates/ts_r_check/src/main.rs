@@ -19,8 +19,10 @@
 //! without parsing, a run after an edit re-checks only the affected files. `--no-history`
 //! checks everything and leaves the cache alone. History is skipped when sound mode may apply
 //! (it needs the loaded program and history does not save its results) and when the program
-//! is emitted or has a `rootDir` (emit and the TS6059 check need the loaded program). `TS_R_CHECK_STATS=1`
-//! prints what the history did to stderr.
+//! is emitted (emit needs the loaded program). With a `rootDir`, history is used when every
+//! file it reports that could be emitted lies under it (no TS6059 is possible); otherwise the
+//! program is loaded for the TS6059 check. `TS_R_CHECK_STATS=1` prints what the history did
+//! to stderr.
 
 mod build;
 mod explain;
@@ -430,6 +432,27 @@ fn load_sound_config(
         cfg.exclude.clear();
     }
     (cfg, errors, configured)
+}
+
+/// Whether some file in `files` (non-lib files with their external-library flag) could be
+/// emitted and lies outside `root`: the files TS6059 reports on. External libraries and
+/// declaration files are never emitted; anything else outside `root` counts, so the check
+/// errs towards loading the program.
+fn outside_root_dir(root: &str, files: &[(String, bool)], case_sensitive: bool) -> bool {
+    files.iter().any(|(path, external)| {
+        !external
+            && !is_declaration_name(path)
+            && !ts_r_config::path::contains(root, path, case_sensitive)
+    })
+}
+
+/// `x.d.ts`, `x.d.mts`, `x.d.cts` and arbitrary-extension declarations (`x.d.css.ts`).
+fn is_declaration_name(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".d.ts")
+        || lower.ends_with(".d.mts")
+        || lower.ends_with(".d.cts")
+        || (lower.ends_with(".ts") && lower.rsplit('/').next().is_some_and(|n| n.contains(".d.")))
 }
 
 /// Per file id: `(path, text)` for non-lib files.
@@ -857,7 +880,7 @@ fn main() -> ExitCode {
         };
         (program, diagnostics, semantic, early, package_jsons)
     };
-    let needs_program = emitting || parsed.options.root_dir().is_some() || incremental || project_refs || no_check
+    let needs_program = emitting || incremental || project_refs || no_check
             // Option errors: the program's syntax errors win over them (see below).
             || options_failed
             || report.needs_program();
@@ -914,7 +937,13 @@ fn main() -> ExitCode {
         }
         // History runs may skip reading unchanged files: their saved flag answers.
         let pragmas = sound_cfg.is_some() && outcome.pragma;
-        if pragmas {
+        // TS6059 needs the program (it points at the importing node): load it only when a
+        // file history reports could be outside `rootDir`.
+        let outside_root = parsed
+            .options
+            .root_dir()
+            .is_some_and(|root| outside_root_dir(root, &outcome.files, fs.case_sensitive()));
+        if pragmas || outside_root {
             let (program, diags, _, _, _) = full_check(true, false);
             let sources = sources_of(&program);
             (Some(program), sources, diags)
@@ -971,8 +1000,10 @@ fn main() -> ExitCode {
         let cfg = emit_config(&parsed, &fs, &host, args.threads);
         let (located, global) = ts_r_emit::root_dir_diagnostics(program, &cfg);
         if !located.is_empty() || !global.is_empty() {
-            // Option-level errors: tsc then reports no syntactic or semantic diagnostics.
-            diags = build::rooted_program_diagnostics(program, &parsed, located);
+            // A root file outside `rootDir` is an option-level error: tsc then reports no
+            // syntactic or semantic diagnostics. One only an import brings in keeps them.
+            let g = !global.is_empty();
+            diags = build::rooted_program_diagnostics(program, &parsed, diags, located, g);
             config_diags.extend(global);
         }
         if emitting {
