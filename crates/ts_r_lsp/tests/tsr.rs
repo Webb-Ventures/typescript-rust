@@ -2609,3 +2609,62 @@ fn hover_documentation_follows_tsc() {
     assert!(d.contains("*@example*\n```tsx\ndraw(o, 1)\n```"), "{d}");
     c.shutdown();
 }
+
+const QI_A: &str = "import m = require(\"./b\");
+import { y } from \"./¦b\";
+interface I { /** The x. */ x: number }
+const i: I = { ¦x: 0 };
+[1].forEach(cla¦ss {});
+const f = (a: number) =¦> a;
+class C<T> {}
+C.proto¦type;
+m.¦N;
+";
+
+const QI_B: &str = "export const y = 1;
+export namespace N { export const z = 1; }
+";
+
+#[test]
+fn hover_names_like_tsc() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(QI_A);
+    let env = Env::new(
+        "hovernames",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", &a),
+            ("src/b.ts", QI_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let ua = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let mut h = |(l, ch): (u32, u32)| hover_text(&mut c, &ua, l, ch);
+    assert!(h(m[0]).contains("module \"./b\""), "{}", h(m[0]));
+    let x = h(m[1]);
+    assert!(
+        x.contains("(property) I.x: number") && x.contains("The x."),
+        "{x}"
+    );
+    assert!(
+        h(m[2]).contains("(local class) (Anonymous class)"),
+        "{}",
+        h(m[2])
+    );
+    assert!(
+        h(m[3]).contains("function f(a: number): number"),
+        "{}",
+        h(m[3])
+    );
+    assert!(
+        h(m[4]).contains("(property) C<T>.prototype: C<any>"),
+        "{}",
+        h(m[4])
+    );
+    assert!(h(m[5]).contains("namespace m.N"), "{}", h(m[5]));
+    c.shutdown();
+}
