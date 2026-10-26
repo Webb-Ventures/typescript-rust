@@ -767,3 +767,9 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   included), and values typed `NodeList`/`NodeListOf`/`HTMLCollection`/`HTMLCollectionOf`
   (nullish union members ignored), are not given `.at()`. Reports sit on the index without
   its parentheses, as ESTree ranges exclude them.
+- **Regex patterns as strings** (`prefer-string-replace-all`, from
+  `unicorn: rules/prefer-string-replace-all.js`) use the crate's own `regex.rs` tree. A
+  fixed-string pattern keeps each character as written (`\n`, `\x41`, `\u{..}` stay; an
+  identity escape loses its backslash; `\cX` becomes `\r`/`\n`/`\t`/`\u{X}`; `\0`-`\7`
+  octal and null become `\u{X}`; `\8` is `8`; a lone Annex-B backslash, as in `\c_`,
+  becomes `\\`).
