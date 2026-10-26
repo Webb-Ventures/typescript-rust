@@ -331,14 +331,13 @@ unicorn/prefer-location-assign 54/54
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
-unicorn/prefer-promise-static-methods 51/51
-unicorn/prefer-queue-microtask 55/55
-unicorn/prefer-response-static-json 39/39
+unicorn/prefer-promise-with-resolvers 37/37
 unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-single-array-predicate 32/32
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112
+unicorn/prefer-type-literal-last 37/37
 unicorn/require-module-attributes 35/35
 unicorn/switch-case-break-position 30/30
 unicorn/text-encoding-identifier-case 101/101

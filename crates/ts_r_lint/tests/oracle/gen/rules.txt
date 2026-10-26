@@ -330,3 +330,5 @@ unicorn/prefer-single-array-predicate
 unicorn/no-global-object-property-assignment
 unicorn/require-module-attributes
 unicorn/consistent-empty-array-spread
+unicorn/prefer-promise-with-resolvers
+unicorn/prefer-type-literal-last
