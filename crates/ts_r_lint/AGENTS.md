@@ -1718,6 +1718,10 @@ Fifteen rules, each at 100% of its oracle cases: `no-abusive-eslint-disable`,
 `consistent-compound-words`, `prefer-single-replace`, `name-replacements` and
 `consistent-boolean-name`.
 
+A second batch adds six more, also at 100% of their oracle cases: `isolated-functions`,
+`no-unsafe-property-key`, `no-unnecessary-parameters`, `no-unused-builtin-method-return`,
+`no-nonstandard-builtin-properties` and `no-unsafe-json-serialization`.
+
 - **Column-0 problems** (`directives.rs`). ESLint puts a problem reported at column 0 (a
   whole-file report) before the problems on its line. `ProblemPos.before_line` carries that,
   and the sort key is `(pos, !before_line)`.
@@ -1768,12 +1772,73 @@ Fifteen rules, each at 100% of its oracle cases: `no-abusive-eslint-disable`,
     record keys follow the numeric-literal token rules: `.5` is a key, `1.5n` is not.
   - A conditional or logical expression has a kind (string, array, ...) only when both
     branches agree.
+- **`isolated-functions`.** Built on the ESTree view (`crate::estree`, `crate::esquery`
+  selectors). The reasons a function is isolated are tried in order: a comment tag before the
+  function (or its declarator, declaration, export, property or method), a call to one of the
+  `functions`, the first argument of `browser.execute`/`page.evaluate`, the `func` of
+  `{browser,chrome}.scripting.executeScript`, then the selectors by specificity.
+  - Outside references are the scope chain's "through" references. Type, `typeof`-type and
+    implicit references don't count.
+  - Allowed globals: `overrideGlobals` first, then comment globals (`off` forbids), then
+    `env.globals`. `Object.prototype` names are not globals here, because the plugin reads
+    the `globals` package, not ESLint's ES3 list.
+  - `this`/`super` are walked until a non-arrow function. Classes are entered only through
+    `superClass` and computed keys.
+- **`no-unsafe-property-key`.** Keys are classified as unsafe, safe or unknown by our own
+  rules first. Unknown keys fall back to an `unicorn_types::Checker` over the array target
+  names. Annotations resolve through `type_definition` from the declaring scope, and
+  well-known `Symbol.*` keys are safe.
+- **`no-unnecessary-parameters`.** Its local-call tracker covers symbols with one
+  declaration, plus `#private` methods through the nearest class. It stops at the global
+  scope, writes, exports, decorators and non-call references.
+  - The rule skips a whole file with `with`, direct `eval` or a sloppy-mode block function,
+    and skips functions that use their own `arguments` or have type parameters.
+    `ARGUMENTS` symbols are not in `scope.symbols`, so it scans `sem.symbols()`.
+  - Fixes remove the parameter and the argument (`remove_object_property` works
+    token-wise), add a local default with `unicorn_util_h2::{indent_unit, line_indent}`, and
+    replace references, adding parentheses and ASI guards where needed.
+  - It only suggests in TypeScript, or when the file has JSDoc types or `@ts-check`.
+- **`no-unused-builtin-method-return`.** A call counts as discarded when
+  `is_value_not_usable` holds, or when it is a `for` init/update, looking through `await`
+  and TS wrappers (`void` is a deliberate use).
+  - The receiver resolves through an unwritten single declarator or a plain parameter. A
+    member, a destructured, defaulted or optional parameter, or a write before the call
+    makes it uncertain, and uncertain receivers are skipped.
+  - Set and Temporal methods need a known receiver: `unicorn_types::SET`, or one local
+    `Checker` per Temporal method over dotted `Temporal.X` names plus `new Temporal.X()` /
+    `Temporal.X.from()`. Array methods only need the receiver not to be obviously
+    something else.
+  - Lazy iterator helpers are left to `no-unused-iterator-helper`. The check for them is a
+    small local copy of the iterator-expression test, which should fold into h2's
+    `unicorn_iter`.
+- **`no-nonstandard-builtin-properties`.** The data is a `Shape` per kind of object (its
+  own props, its own methods, and a base: `OBJECT`, `FUNCTION` or `CONSTRUCTOR`), with a
+  `(instance, prototype, static)` triple per global.
+  - Property names are literal keys only. Like `getPropertyName` without a scope, they
+    don't follow constants.
+  - Indexes count as standard: array indexes on arrays and strings, and canonical numeric
+    strings on typed arrays.
+  - The call kind looks up through parentheses and TS wrappers. A class's `extends`
+    clause counts as construction.
+- **`no-unsafe-json-serialization`.** Map, Set, WeakMap, WeakSet, BigInt and RegExp come
+  from the shared checkers. Symbols and functions have local `Checker`s: `Symbol.for(...)`,
+  the `symbol` keyword, well-known `Symbol.*` builtins as a static type, and function or
+  class syntax or a never-reassigned function or class name.
+  - The search keeps a per-path visited set. A `const` initializer reports its first
+    problem at the use, without suggestions.
+  - The report node is the argument without parentheses (ESTree has none). TS wrappers are
+    kept.
 - **Gaps.**
   - `expiring-todo-comments` does not check package, engine or peer-dependency
     conditions, and recognizes only some CI vendors when detecting a PR.
   - CSS, JSON and HTML languages are not linted.
   - `consistent-boolean-name` has no checker type information and no `wrappers`
     option, and does not mask `{@link}` or code spans inside JSDoc.
+  - `isolated-functions` does not treat JSX element names as references.
+    `no-unnecessary-parameters` skips every generic function, which only approximates the
+    plugin's type-aware check. `no-unused-builtin-method-return`, `no-unsafe-property-key`
+    and `no-unsafe-json-serialization` see no checker types: only syntax, annotations and
+    JSDoc.
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
 `rules/no-abusive-eslint-disable.js`, `rules/filename-case.js`, `rules/import-style.js`,
@@ -1793,4 +1858,14 @@ Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
 `rules/utils/type-helpers.js` (parts), `rules/utils/get-type-boolean-state.js`,
 `rules/utils/function-body.js`, `rules/utils/is-string.js`, `rules/utils/is-array.js`,
 `rules/utils/is-react-hook-name.js`, `rules/utils/get-boolean-wrapper-variable-state.js`
-(header).
+(header), `rules/isolated-functions.js`, `docs/rules/isolated-functions.md`,
+`rules/no-unsafe-property-key.js`, `rules/utils/builtins.js`, `rules/shared/builtin-errors.js`,
+`rules/shared/typed-array.js`, `rules/no-unnecessary-parameters.js`,
+`docs/rules/no-unnecessary-parameters.md`, `rules/utils/track-local-function-calls.js`,
+`rules/utils/get-primitive-literal-value.js`, `rules/fix/remove-object-property.js`,
+`rules/fix/replace-reference-identifier.js`, `rules/fix/remove-argument.js`,
+`rules/utils/get-indent-unit.js`, `rules/utils/has-javascript-type-annotations.js`,
+`rules/no-unused-builtin-method-return.js`, `rules/shared/iterator-helpers.js`,
+`rules/no-nonstandard-builtin-properties.js`, `rules/utils/unwrap-typescript-expression.js`,
+`rules/utils/member-expression.js`, `rules/no-unsafe-json-serialization.js`,
+`rules/utils/get-const-variable-initializer.js`.
