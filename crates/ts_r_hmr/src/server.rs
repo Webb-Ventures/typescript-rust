@@ -1590,18 +1590,35 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         "json" if as_script => match fs::read_to_string(file) {
             Ok(text) => {
                 ensure_asset(shared, file, &url);
-                match crate::assets::json_module(&text) {
+                let module = match transform_plugins(shared) {
+                    Some(host) => {
+                        json_through_plugins(shared, host, &crate::paths::id(file), &text)
+                    }
+                    None => crate::assets::json_module(&text).map_err(|e| {
+                        TransformError::at(
+                            format!("invalid JSON: {e}"),
+                            e.line() as u32,
+                            e.column() as u32,
+                        )
+                    }),
+                };
+                match module {
                     Ok(module) => js_response(req, module),
-                    Err(e) => error_response(
-                        shared,
-                        ModuleError {
-                            message: format!("invalid JSON: {e}"),
-                            file: file.to_path_buf(),
-                            url,
-                            loc: Some((e.line() as u32, e.column() as u32)),
-                            frame: render::code_frame(&text, e.line() as u32, e.column() as u32),
-                        },
-                    ),
+                    Err(e) => {
+                        let loc = e.line.zip(e.column);
+                        error_response(
+                            shared,
+                            ModuleError {
+                                message: e.message,
+                                file: file.to_path_buf(),
+                                url,
+                                loc,
+                                frame: loc.map_or_else(String::new, |(l, c)| {
+                                    render::code_frame(&text, l, c)
+                                }),
+                            },
+                        )
+                    }
                 }
             }
             Err(_) => Response::text(404, "Not found"),
@@ -2714,6 +2731,15 @@ pub(crate) fn run_transform(
     let Some(host) = host else {
         return transform.transform(input);
     };
+    // A plugin module with a JSON id (`\0/data.json`): Vite's JSON plugin is its built-in step.
+    if is_json_id(plugin_id) {
+        let code = json_through_plugins(shared, host, plugin_id, input.source)?;
+        return Ok(TransformOutput {
+            imports: scan::scan(&code).imports,
+            code,
+            map: None,
+        });
+    }
     let hooks = shared.plugin_hooks;
     let pre = if hooks.transform_pre {
         host.transform(Stage::Pre, plugin_id, input.source)
@@ -2750,6 +2776,48 @@ pub(crate) fn run_transform(
     }
     out.map = compose_maps(&chain, input);
     Ok(out)
+}
+
+/// Whether Vite's JSON plugin takes the module `id`: a `.json` path, not asked for `?raw`,
+/// `?url` or as a worker (`vite: packages/vite/src/node/plugins/json.ts`).
+fn is_json_id(id: &str) -> bool {
+    let (path, query) = id.split_once('?').unwrap_or((id, ""));
+    path.ends_with(".json")
+        && !["raw", "url", "worker", "sharedworker"]
+            .iter()
+            .any(|k| crate::http::query_param(query, k).is_some())
+}
+
+/// JSON text as an ES module, with the plugins' `transform` hooks around the conversion:
+/// pre hooks see the JSON (module type `json`), post hooks the JS.
+fn json_through_plugins(
+    shared: &Shared,
+    host: &dyn PluginHost,
+    id: &str,
+    text: &str,
+) -> Result<String, TransformError> {
+    let hooks = shared.plugin_hooks;
+    let pre = if hooks.transform_pre {
+        host.transform(Stage::Pre, id, text)
+            .map_err(TransformError::new)?
+    } else {
+        None
+    };
+    let json = pre.as_ref().map_or(text, |t| t.code.as_str());
+    let module = crate::assets::json_module(json).map_err(|e| {
+        TransformError::at(
+            format!("invalid JSON: {e}"),
+            e.line() as u32,
+            e.column() as u32,
+        )
+    })?;
+    if !hooks.transform_post {
+        return Ok(module);
+    }
+    Ok(host
+        .transform(Stage::Post, id, &module)
+        .map_err(TransformError::new)?
+        .map_or(module, |t| t.code))
 }
 
 /// One map for a chain of transforms (see [`run_transform`]); sources that name the
@@ -3285,6 +3353,17 @@ pub(crate) fn next_timestamp(shared: &Shared) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_ids_are_the_json_plugins() {
+        assert!(is_json_id("/p/a.json"));
+        assert!(is_json_id("\0/bar.json"));
+        assert!(is_json_id("/p/a.json?lang=x"));
+        assert!(!is_json_id("/p/a.json?raw"));
+        assert!(!is_json_id("/p/a.json?url"));
+        assert!(!is_json_id("/p/a.jsonc"));
+        assert!(!is_json_id("\0virtual:x"));
+    }
 
     #[test]
     fn assets_include_files_are_assets_not_plugin_modules() {

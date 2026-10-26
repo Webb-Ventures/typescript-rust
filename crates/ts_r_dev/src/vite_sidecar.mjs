@@ -150,12 +150,29 @@ function stringFilter(f, make) {
   return (s) => !exclude.some((m) => m(s)) && (include.length === 0 || include.some((m) => m(s)))
 }
 
-// Hook filters (`{ filter: { id, code }, handler }`).
+// Hook filters (`{ filter: { id, code, moduleType }, handler }`). A `moduleType` filter is a
+// list (or `{ include }`) of the types a hook takes; only `transform` has a module type.
 function compileFilter(filter) {
   if (!filter) return () => true
   const id = stringFilter(filter.id, idMatcher)
   const code = stringFilter(filter.code, codeMatcher)
-  return (moduleId, src) => (!id || id(moduleId)) && (!code || src == null || code(src))
+  const mt = filter.moduleType
+  const types = mt == null ? null : Array.isArray(mt) ? mt : (mt.include ?? [])
+  return (moduleId, src, moduleType) =>
+    (!types || moduleType == null || types.includes(moduleType)) &&
+    (!id || id(moduleId)) &&
+    (!code || src == null || code(src))
+}
+
+// The module type Vite guesses from an id (vite: packages/vite/src/node/server/
+// transformRequest.ts): the first `.ext` up to the end that names a known type.
+const moduleTypes = { js: 'js', mjs: 'js', cjs: 'js', jsx: 'jsx', ts: 'ts', mts: 'ts', cts: 'ts', tsx: 'tsx', json: 'json', txt: 'text', css: 'css' }
+function guessModuleType(id) {
+  for (let i = id.indexOf('.'); i >= 0; i = id.indexOf('.', i + 1)) {
+    const t = moduleTypes[id.slice(i + 1)]
+    if (t) return t
+  }
+  return undefined
 }
 
 // ---- config ----
@@ -337,18 +354,23 @@ function mapText(map) {
   }
 }
 
+// Module types: before ts-r-dev's built-in step the type guessed from the id (`json` for
+// JSON, `ts` for TypeScript), after it `js`, as Vite's own JSON and TS plugins return. A hook
+// may change it (`{ code, moduleType }`).
 async function opTransform({ stage, moduleId, code }) {
   let changed = false
   const maps = []
+  const options = { ssr: false, moduleType: (stage === 'pre' ? guessModuleType(moduleId) : null) ?? 'js' }
   for (const h of sorted(active, 'transform')) {
-    if (stageOf(h) !== stage || !h.test(moduleId, code)) continue
+    if (stageOf(h) !== stage || !h.test(moduleId, code, options.moduleType)) continue
     let r
     try {
-      r = await h.fn.call(context(h.plugin), code, moduleId, { ssr: false })
+      r = await h.fn.call(context(h.plugin), code, moduleId, options)
     } catch (e) {
       throw new Error(hookError(h.plugin, e))
     }
     if (r == null) continue
+    if (typeof r === 'object' && typeof r.moduleType === 'string') options.moduleType = r.moduleType
     const next = typeof r === 'string' ? r : r.code
     if (typeof next === 'string' && next !== code) {
       code = next
@@ -833,6 +855,17 @@ async function start() {
     }
   }
   for (const after of post) await after()
+  // `options` (vite: packages/vite/src/node/server/pluginContainer.ts, run once before the
+  // build starts): a hook may return new input options, and may change other hooks, such
+  // as their filters, which are read again on every call.
+  let inputOptions = config.build?.rolldownOptions ?? config.build?.rollupOptions ?? {}
+  for (const h of sorted(active, 'options')) {
+    try {
+      inputOptions = (await h.fn.call(context(h.plugin), inputOptions)) || inputOptions
+    } catch (e) {
+      throw new Error(hookError(h.plugin, e))
+    }
+  }
   // buildStart is a parallel hook: handlers start together, except a `sequential: true`
   // one, which waits for those before it and finishes before the next start.
   let batch = []

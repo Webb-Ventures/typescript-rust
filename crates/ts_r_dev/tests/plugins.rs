@@ -361,6 +361,62 @@ fn vite_plugins_run_in_a_node_sidecar() {
     assert!(!process_alive(pid), "sidecar {pid} outlived ts-r-dev");
 }
 
+/// `transform` hooks get Vite's module type (`json` before the JSON step, `js` after, `ts`
+/// for TypeScript), JSON files and JSON-id plugin modules go through them, and a filter an
+/// `options` hook sets is the one used.
+#[test]
+fn transform_hooks_see_module_types_and_options_hook_filters() {
+    if !node_available() {
+        eprintln!("skipping: node not found (set TS_R_NODE)");
+        return;
+    }
+    let app = TempDir::new("plugins-module-type");
+    let cache = TempDir::new("plugins-module-type-cache");
+    app.write("index.html", "<!doctype html><body>hi</body>\n");
+    app.write(
+        "vite.config.mjs",
+        r#"const types = ['pre', 'post'].map((enforce) => ({
+  name: `type-${enforce}`,
+  enforce,
+  transform(code, id, opts) {
+    if (id.endsWith('.json') || id.endsWith('/a.ts')) return code.replace(`TYPE_${enforce.toUpperCase()}`, opts.moduleType)
+  },
+}))
+const lazy = {
+  name: 'lazy',
+  options() { lazy.transform.filter = { id: '**/a.ts' } },
+  transform: { filter: { id: { exclude: ['**/*.ts'] } }, handler: (code) => code.replace('LAZY', 'ok') },
+}
+const typed = { name: 'typed', transform: { filter: { moduleType: ['json'] }, handler() { throw new Error('json is js after the JSON step') } } }
+export default {
+  plugins: [types, lazy, typed, {
+    name: 'virtual-json',
+    resolveId(id) { if (id === 'virtual:/v.json') return '\0/v.json' },
+    load(id) { if (id === '\0/v.json') return JSON.stringify({ pre: 'TYPE_PRE', post: 'TYPE_POST' }) },
+  }],
+}
+"#,
+    );
+    app.write(
+        "src/a.ts",
+        "import d from './d.json'\nimport v from 'virtual:/v.json'\nexport const x: string = 'TYPE_PRE TYPE_POST LAZY'\nexport const both = [d, v]\n",
+    );
+    app.write("src/d.json", r#"{"pre":"TYPE_PRE","post":"TYPE_POST"}"#);
+    let dev = DevProcess::start(app.path(), cache.path(), &[]);
+    let addr = dev.addr.parse().unwrap();
+    let (status, _, a) = http_get(addr, "/src/a.ts", &[]);
+    assert_eq!(status, 200, "{a}");
+    assert!(a.contains("'ts js ok'"), "{a}");
+    let (status, _, d) = http_get(addr, "/src/d.json?import", &[]);
+    assert_eq!(status, 200, "{d}");
+    assert!(d.contains(r#"export const pre = "json";"#), "{d}");
+    assert!(d.contains(r#"export const post = "js";"#), "{d}");
+    let (status, _, v) = http_get(addr, "/@id/__x00__/v.json", &[]);
+    assert_eq!(status, 200, "{v}");
+    assert!(v.contains(r#"export const pre = "json";"#), "{v}");
+    assert!(v.contains(r#"export const post = "js";"#), "{v}");
+}
+
 #[test]
 fn react_only_configs_skip_the_sidecar_once_the_manifest_is_cached() {
     if !node_available() {

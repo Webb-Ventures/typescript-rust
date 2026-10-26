@@ -54,7 +54,7 @@ is React's, pre-bundled with the other deps (`optimize_include`); our parts are 
 With a `vite.config.{js,mjs,ts,mts,cjs,cts}` in the root (and no `--no-plugins`), a Node
 sidecar (`node`, or `TS_R_NODE`) imports it, flattens and orders `plugins` (`apply`,
 `enforce`, hook `order`, hook `filter`s), runs `config` → `configResolved` →
-`configureServer` → `buildStart`, and implements `ts_r_hmr::PluginHost` over JSON lines
+`configureServer` → `options` → `buildStart`, and implements `ts_r_hmr::PluginHost` over JSON lines
 (stdin/stdout; plugin stdout is moved to stderr). Stdin is read while the startup hooks run,
 so a `this.resolve` there gets its answer (null before the dev server attaches); other
 requests wait for startup. Hooks: `resolveId` (with `this.resolve`
@@ -64,6 +64,15 @@ connect-style middlewares, `server.ws.send`/`on`. `this.meta` carries the instal
 and Rolldown's versions (plugins pick APIs by it). The sidecar script is written by us
 from the documented plugin API (no Vite code).
 
+- **Hook filters are read on every call**, so a filter an `options` hook (or any earlier
+  hook) assigns is the one used (`vite: packages/vite/src/node/server/pluginContainer.ts`
+  runs `options` once before the build starts).
+- **Module types** (`vite: packages/vite/src/node/server/transformRequest.ts`,
+  `getModuleTypeFromId`): a pre-stage `transform` gets the type guessed from the id (the
+  first `.ext` up to the end that is known: `js`, `jsx`, `ts`, `tsx`, `json`, `text`,
+  `css`; else `js`), a post-stage one `js` (our built-in step made JS, as Vite's JSON and
+  TS plugins return), and a hook returning `moduleType` changes it for the hooks after it.
+  A `filter.moduleType` list (or `{ include }`) skips a hook for other types.
 - **`/plugin-react` is replaced, not run:** plugins named `vite:react*`
   / `@vitejs/plugin-react*` only run their `config` hooks; JSX options from the resolved config
   (`oxc.jsx.importSource`/`runtime`, `esbuild.jsx*`) configure `TsTransform`, and Fast Refresh

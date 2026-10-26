@@ -148,6 +148,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
   other text than its page. Each serve stores the page again, so a reload gets the new
   script (`vite: packages/vite/src/node/server/middlewares/indexHtml.ts` caches each inline
   script when it serves the page and invalidates its proxy module).
+- **JSON goes through plugin `transform` hooks** (`vite: packages/vite/src/node/plugins/json.ts`):
+  a `.json` import (not `?raw`/`?url`/worker) and a plugin module whose id ends in `.json`
+  (`\0/data.json`) get the pre hooks on the JSON text, then become a module (named exports),
+  then get the post hooks on the JS.
 - **`assetsInclude` files are assets.** A file with an unknown extension and no query goes
   to plugin `load`/`transform` as a plugin module, unless `DevConfig::assets_include` (a
   `glob::PathFilter` of root-resolved globs and regexes, filled from Vite's `assetsInclude`)
