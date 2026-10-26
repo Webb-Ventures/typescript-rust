@@ -423,6 +423,7 @@ mod unicorn_no_unnecessary_await;
 mod unicorn_no_unnecessary_boolean_comparison;
 mod unicorn_no_unnecessary_global_this;
 mod unicorn_no_unnecessary_nested_ternary;
+mod unicorn_no_unnecessary_parameters;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
@@ -1150,6 +1151,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_boolean_name::RULE,
     &unicorn_isolated_functions::RULE,
     &unicorn_no_unsafe_property_key::RULE,
+    &unicorn_no_unnecessary_parameters::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
