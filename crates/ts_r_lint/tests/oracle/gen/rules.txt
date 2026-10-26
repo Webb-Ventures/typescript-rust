@@ -328,3 +328,5 @@ unicorn/consistent-assert
 unicorn/no-top-level-assignment-in-function
 unicorn/prefer-single-array-predicate
 unicorn/no-global-object-property-assignment
+unicorn/require-module-attributes
+unicorn/consistent-empty-array-spread

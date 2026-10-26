@@ -24,7 +24,7 @@ pub(crate) fn unwrap_ts(ast: &Ast, mut id: NodeId) -> NodeId {
 }
 
 /// A string literal's value or a substitution-free template's cooked text.
-fn static_string(ast: &Ast, id: NodeId) -> Option<String> {
+pub(crate) fn static_string(ast: &Ast, id: NodeId) -> Option<String> {
     match *ast.node(id) {
         Node::StringLit { value } => Some(ast.atom(value).to_owned()),
         Node::TemplateLit { parts } => match ast.list(parts) {
@@ -152,4 +152,53 @@ pub(crate) fn is_outermost_logical(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let ast = cx.ast();
     let parent = parent_skip_parens(ast, cx.file.parents, id);
     !parent.is_some_and(|p| matches!(*ast.node(p), Node::Binary { op: o, .. } if o == op))
+}
+
+/// The runs of non-space text in `span` outside comments: removing each one removes the
+/// tokens there while keeping the spaces and comments between them (as a fix removing
+/// tokens one by one does).
+pub(crate) fn token_runs(ast: &Ast, src: &str, span: Span) -> Vec<Span> {
+    let comments = ast.comments_in(span);
+    let mut out = Vec::new();
+    let mut run: Option<u32> = None;
+    let mut ci = 0;
+    let mut pos = span.start as usize;
+    let end = (span.end as usize).min(src.len());
+    while pos < end {
+        if let Some(c) = comments.get(ci)
+            && c.span.start as usize <= pos
+        {
+            if let Some(s) = run.take() {
+                out.push(Span::new(s, pos as u32));
+            }
+            pos = (c.span.end as usize).max(pos + 1);
+            ci += 1;
+            continue;
+        }
+        let Some(ch) = src[pos..].chars().next() else {
+            break;
+        };
+        if super::unicorn_ast::is_js_space(ch) {
+            if let Some(s) = run.take() {
+                out.push(Span::new(s, pos as u32));
+            }
+        } else if run.is_none() {
+            run = Some(pos as u32);
+        }
+        pos += ch.len_utf8();
+    }
+    if let Some(s) = run {
+        out.push(Span::new(s, end as u32));
+    }
+    out
+}
+
+/// A fix deleting each of `spans`.
+pub(crate) fn delete_all(spans: impl IntoIterator<Item = Span>) -> Option<Fix> {
+    let mut it = spans.into_iter();
+    let mut fix = Fix::delete(it.next()?);
+    for s in it {
+        fix = fix.and(s, "");
+    }
+    Some(fix)
 }

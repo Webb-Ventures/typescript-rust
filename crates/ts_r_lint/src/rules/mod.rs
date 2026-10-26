@@ -282,7 +282,7 @@ mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_date_clone;
-mod unicorn_consistent_existence_index_check;
+mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
@@ -352,8 +352,7 @@ mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
-mod unicorn_require_array_sort_compare;
-mod unicorn_require_css_escape;
+mod unicorn_require_module_attributes;
 mod unicorn_static;
 mod unicorn_switch_case_break_position;
 mod unicorn_text_encoding_identifier_case;
@@ -667,7 +666,7 @@ pub static ALL: &[&RuleDef] = &[
     // eslint-plugin-unicorn
     &unicorn_consistent_assert::RULE,
     &unicorn_consistent_date_clone::RULE,
-    &unicorn_consistent_existence_index_check::RULE,
+    &unicorn_consistent_empty_array_spread::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
     &unicorn_empty_brace_spaces::RULE,
@@ -736,6 +735,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
+    &unicorn_require_module_attributes::RULE,
     &unicorn_switch_case_break_position::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
