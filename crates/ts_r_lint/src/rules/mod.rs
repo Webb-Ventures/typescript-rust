@@ -552,6 +552,7 @@ mod unicorn_prefer_short_arrow_method;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_condition_first;
 mod unicorn_prefer_simple_sort_comparator;
+mod unicorn_prefer_simplified_conditions;
 mod unicorn_prefer_single_array_predicate;
 mod unicorn_prefer_smaller_scope;
 mod unicorn_prefer_split_limit;
@@ -1137,6 +1138,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_simple_condition_first::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
+    &unicorn_prefer_simplified_conditions::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
     &unicorn_prefer_smaller_scope::RULE,
     &unicorn_prefer_string_match_all::RULE,

@@ -1892,6 +1892,18 @@ A second batch adds six more, also at 100% of their oracle cases: `isolated-func
   `isBoolean` gives up on a `const` alias chain 256 deep (upstream overflows its stack
   and returns false), treats a binding annotated with a type parameter as not boolean,
   and counts calls of a binding annotated with a function type returning `boolean`.
+- **prefer-simplified-conditions** (386/386): `!(a && b)` is De Morgan-rewritten when
+  the negated operands weigh less than the original (each `!`, `!=` and `!==` weighs one;
+  a double negation of a boolean, or in a control-flow test, drops; an equality flips;
+  `negatedConditions: "expand"` always rewrites); not inside another negation. Absorption
+  (`a || (a && b)` is `a`) needs a plain replacement (name, literal, `this`, static
+  string); dropping the other side needs it to be a literal or a parameter/function/`var`
+  name (or a negation of one) and a boolean context or two booleans; no fix in a
+  reference context. Factoring a common first term (`a && b || a && c`) needs simple,
+  chain-free operands (names, literals, calls, plain members, `!`, `===`/`!==`) and a
+  boolean context or boolean operands; operands with side effects other than
+  `Array.isArray`-like static checks make it a suggestion. A return/throw argument with a
+  line break after `!` gets parentheses. Comments inside withhold the fix.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
@@ -1911,7 +1923,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `prefer-includes-over-repeated-comparisons.js`, `no-useless-logical-operand.js`,
 `prefer-continue.js`, `prefer-early-return.js`, `no-unnecessary-boolean-comparison.js`,
 `prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`,
-`no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`;
+`no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`,
+`prefer-simplified-conditions.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,

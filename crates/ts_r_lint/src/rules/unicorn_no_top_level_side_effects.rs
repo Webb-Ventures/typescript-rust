@@ -151,7 +151,7 @@ fn unwrap(ast: &Ast, mut id: NodeId) -> NodeId {
 }
 
 /// `sourceCode.isGlobalReference`: a reference to a configured, built-in or comment global.
-fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     if !matches!(cx.node(id), Node::Ident { .. }) {
         return false;
     }
