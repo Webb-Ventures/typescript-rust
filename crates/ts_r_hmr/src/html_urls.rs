@@ -307,7 +307,10 @@ fn srcset(value: &str, map: &mut dyn FnMut(&str) -> Option<String>) -> String {
             Some(k) => (&c[..k], c[k..].trim()),
             None => (c, ""),
         };
-        let u = map(u).unwrap_or_else(|| u.to_owned());
+        // A space would end the URL: a base with one (`/foo bar/`) is written encoded.
+        let u = map(u)
+            .map(|m| m.replace(' ', "%20"))
+            .unwrap_or_else(|| u.to_owned());
         out.push(if descriptor.is_empty() {
             u
         } else {
@@ -341,6 +344,14 @@ mod tests {
             run(html, false),
             "<!-- <script src=\"/c.js\"> --><link rel=icon href=/app/f.ico><script type=\"module\" src='/app/src/m.js'></script><a href=\"/about\">x</a><img src=\"//cdn/x.png\" alt=\"a > b\"><img src=\"/app/i.png\">"
         );
+    }
+
+    #[test]
+    fn srcset_urls_encode_spaces() {
+        let out = srcset("./a.png 1x, ./b.png 2x", &mut |u| {
+            Some(format!("/foo bar/{}", u.trim_start_matches("./")))
+        });
+        assert_eq!(out, "/foo%20bar/a.png 1x, /foo%20bar/b.png 2x");
     }
 
     #[test]

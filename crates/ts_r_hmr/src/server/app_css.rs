@@ -177,9 +177,7 @@ impl CssHost for AppCss<'_> {
         let inline = has("inline")
             || (fragment.is_empty()
                 && !has("no-inline")
-                && fs::metadata(&file).is_ok_and(|m| {
-                    crate::assets::inline_under(&ext, m.len(), self.shared.assets_inline_limit)
-                }));
+                && fs::metadata(&file).is_ok_and(|m| self.shared.inlines(&file, &ext, m.len())));
         if inline && let Ok(bytes) = fs::read(&file) {
             return Some(crate::assets::data_url(
                 &ext,

@@ -71,6 +71,10 @@ pub struct HotInfo {
     pub node_env: Vec<(u32, u32)>,
     /// `new URL("<literal>", import.meta.url)`: the literal's contents (between the quotes).
     pub asset_urls: Vec<ImportRecord>,
+    /// Parallel to `asset_urls`: for a URL passed straight to `new Worker(...)` or
+    /// `new SharedWorker(...)`, the worker type its options give (`"module"` for
+    /// `{ type: 'module' }`, `"classic"` otherwise, `"ignore"` with `/* @vite-ignore */`).
+    pub asset_url_workers: Vec<Option<&'static str>>,
     /// `import.meta.glob(...)` calls.
     pub globs: Vec<GlobCall>,
     /// `import(expr)` whose argument is neither a string nor a template literal: the
@@ -150,6 +154,7 @@ pub fn scan(code: &str) -> ModuleScan {
         last: Last::Start,
         braces: Vec::new(),
         out: ModuleScan::default(),
+        inner_new: None,
     };
     s.run();
     s.out
@@ -193,6 +198,8 @@ struct Scanner<'a> {
     last: Last,
     braces: Vec<Brace>,
     out: ModuleScan,
+    /// The `new` of a `new URL(...)` already scanned as `new Worker(new URL(...))`'s argument.
+    inner_new: Option<usize>,
 }
 
 const REGEX_KEYWORDS: &[&[u8]] = &[
@@ -321,7 +328,7 @@ impl Scanner<'_> {
                 {
                     self.process_env(start, b);
                 }
-            } else if word == b"new" {
+            } else if word == b"new" && self.inner_new != Some(start) {
                 self.new_url(end);
             }
             if word == b"export" {
@@ -533,8 +540,30 @@ impl Scanner<'_> {
     }
 
     /// After `new`: `URL("<literal>", import.meta.url)` with a string or a template literal
-    /// without substitutions.
+    /// without substitutions, or `Worker(new URL(...), options)` / `SharedWorker(...)`
+    /// (`vite: packages/vite/src/node/plugins/workerImportMetaUrl.ts`).
     fn new_url(&mut self, after: usize) {
+        let p = self.skip_trivia(after);
+        for ctor in [&b"Worker"[..], b"SharedWorker"] {
+            if self.word_at(p, ctor) {
+                let q = self.skip_trivia(p + ctor.len());
+                if self.peek(q) != b'(' {
+                    return;
+                }
+                let n = self.skip_trivia(q + 1);
+                if self.word_at(n, b"new") {
+                    self.inner_new = Some(n);
+                    self.url_call(n + 3, true);
+                }
+                return;
+            }
+        }
+        self.url_call(after, false);
+    }
+
+    /// `URL("<literal>", import.meta.url)` after a `new` ending at `after`; `worker`: the
+    /// call is the first argument of a worker constructor, whose options give its type.
+    fn url_call(&mut self, after: usize, worker: bool) {
         let p = self.skip_trivia(after);
         if !self.word_at(p, b"URL") {
             return;
@@ -584,6 +613,17 @@ impl Scanner<'_> {
         if !matches!(self.peek(m), b')' | b',') {
             return;
         }
+        let worker_type = if worker {
+            if self.peek(m) == b',' {
+                m = self.skip_trivia(m + 1);
+            }
+            if self.peek(m) != b')' {
+                return;
+            }
+            Some(self.worker_type(m + 1))
+        } else {
+            None
+        };
         if let Ok(text) = std::str::from_utf8(&self.src[lit + 1..end - 1]) {
             self.out.hot.asset_urls.push(ImportRecord {
                 specifier: text.to_owned(),
@@ -591,7 +631,96 @@ impl Scanner<'_> {
                 end: (end - 1) as u32,
                 kind: ImportKind::Dynamic,
             });
+            self.out.hot.asset_url_workers.push(worker_type);
         }
+    }
+
+    /// The worker type given by the constructor arguments after the URL (from `after`, just
+    /// past the `new URL(...)` call): no options (or only a trailing comma) is `classic`;
+    /// an object literal whose `type` is the string `'module'` is `module`; any other
+    /// options are `classic`; a `/* @vite-ignore */` among them is `ignore`.
+    fn worker_type(&self, after: usize) -> &'static str {
+        let c = self.skip_trivia(after);
+        if self.peek(c) != b',' {
+            return "classic";
+        }
+        let Some(end) = self.argument_end(c + 1) else {
+            return "classic";
+        };
+        if memfind(&self.src[c + 1..end], b"@vite-ignore").is_some() {
+            return "ignore";
+        }
+        let open = self.skip_trivia(c + 1);
+        if self.peek(open) != b'{' {
+            return "classic";
+        }
+        // The object's own keys (depth 1): the last `type` key with a string value wins.
+        let mut found = "classic";
+        let mut depth = 0usize;
+        let mut p = open;
+        while p < end {
+            let q = self.skip_trivia(p);
+            if q >= end {
+                break;
+            }
+            let key_end = match self.peek(q) {
+                b'{' | b'(' | b'[' => {
+                    depth += 1;
+                    p = q + 1;
+                    continue;
+                }
+                b'}' | b')' | b']' => {
+                    depth = depth.saturating_sub(1);
+                    p = q + 1;
+                    continue;
+                }
+                b'"' | b'\'' => {
+                    let e = self.string_end(q);
+                    let is_type = &self.src[q + 1..e.saturating_sub(1).max(q + 1)] == b"type";
+                    p = e;
+                    if !(depth == 1 && is_type) {
+                        continue;
+                    }
+                    e
+                }
+                b'`' => {
+                    p = self.template_end(q).unwrap_or(end);
+                    continue;
+                }
+                _ if depth == 1
+                    && self.word_at(q, b"type")
+                    && (q == 0 || !is_ident_char(self.src[q - 1])) =>
+                {
+                    p = q + 4;
+                    q + 4
+                }
+                _ => {
+                    p = q + 1;
+                    continue;
+                }
+            };
+            let colon = self.skip_trivia(key_end);
+            if self.peek(colon) != b':' {
+                continue;
+            }
+            let v = self.skip_trivia(colon + 1);
+            found = match self.peek(v) {
+                b'"' | b'\'' => {
+                    let e = self.string_end(v);
+                    p = e;
+                    if &self.src[v + 1..e.saturating_sub(1).max(v + 1)] == b"module" {
+                        "module"
+                    } else {
+                        "classic"
+                    }
+                }
+                _ => {
+                    p = v;
+                    "classic"
+                }
+            };
+        }
+        found
     }
 
     /// `import.meta.glob` whose name ends at `name_end`: records the call up to its closing
@@ -1537,6 +1666,54 @@ const mode = import.meta.env.MODE;
             "['./p/*.js', '!./p/x.js'], { eager: true, query: { a: ')' } }"
         );
         assert!(scan_hot("const x = 1").node_env.is_empty());
+    }
+
+    #[test]
+    fn worker_urls_and_their_types() {
+        let code = "\
+new Worker(new URL('./a.js', import.meta.url))
+new Worker(new URL('./b.js', import.meta.url), { type: 'module' })
+new SharedWorker(new URL('./c.js', import.meta.url), {
+  name: 'x', // comment
+  type: 'classic',
+})
+new Worker(new URL('./d.js', import.meta.url), /* @vite-ignore */ opts)
+new Worker(new URL('./e.js', import.meta.url) /* , */,
+  // trailing comma
+)
+new Worker(new URL('./f.js', import.meta.url), { xtype: 'module', nested: { type: 'module' } })
+const u = new URL('./g.png', import.meta.url)
+new Worker(new URL(`./h.js`, import.meta.url), { 'type': \"module\" })
+";
+        let hot = scan_hot(code);
+        let got: Vec<(&str, Option<&str>)> = hot
+            .asset_urls
+            .iter()
+            .zip(&hot.asset_url_workers)
+            .map(|(r, w)| (r.specifier.as_str(), *w))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("./a.js", Some("classic")),
+                ("./b.js", Some("module")),
+                ("./c.js", Some("classic")),
+                ("./d.js", Some("ignore")),
+                ("./e.js", Some("classic")),
+                ("./f.js", Some("classic")),
+                ("./g.png", None),
+                ("./h.js", Some("module")),
+            ]
+        );
+        // Unterminated worker calls never panic.
+        for code in [
+            "new Worker(",
+            "new Worker(new URL('./a', import.meta.url), {",
+            "new Worker(new",
+        ] {
+            let hot = scan_hot(code);
+            assert_eq!(hot.asset_urls.len(), hot.asset_url_workers.len());
+        }
     }
 
     #[test]

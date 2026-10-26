@@ -119,6 +119,7 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
   const send = (m, p) => browser.send(m, p, sessionId)
   const handlers = { console: new Set(), pageerror: new Set(), load: new Set(), framenavigated: new Set(), response: new Set() }
   let mainFrameId = null
+  let docResponse = null
   let currentUrl = 'about:blank'
   const listener = (msg) => {
     if (msg.sessionId !== sessionId) return
@@ -161,6 +162,8 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
         break
       case 'Network.responseReceived': {
         const r = { url: () => p.response.url, status: () => p.response.status, headers: () => lower(p.response.headers) }
+        // The main frame's document: what `page.goto` resolves to.
+        if (p.type === 'Document' && (p.frameId === mainFrameId || mainFrameId === null)) docResponse = r
         for (const h of [...handlers.response]) h(r)
         break
       }
@@ -214,6 +217,14 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
     isVisible: () => callOn(objectId, 'function(){ const r = this.getBoundingClientRect(); return !!(r.width || r.height) && getComputedStyle(this).visibility !== "hidden" }'),
     click: () => callOn(objectId, 'function(){ this.scrollIntoView(); this.click() }'),
     elementHandle: async () => handle(objectId),
+    getProperty: async (n) => {
+      const v = await callOn(objectId, 'function(n){ return this[n] }', n)
+      return { jsonValue: async () => v }
+    },
+    boundingBox: () => callOn(objectId, 'function(){ const r = this.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }'),
+    // Like Playwright's, it looks inside the element's shadow root when it has one.
+    $$eval: (sel, fn, arg) =>
+      callOn(objectId, `function(a){ const root = this.shadowRoot || this; return (${fnSource(fn)})([...root.querySelectorAll(${JSON.stringify(sel)})], a) }`, arg),
   })
   const locator = (selector) => ({
     textContent: async () => (await waitFor(selector)).textContent(),
@@ -223,6 +234,7 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
     click: async () => (await waitFor(selector, { state: 'visible' })).click(),
     evaluate: async (fn, arg) => (await waitFor(selector)).evaluate(fn, arg),
     elementHandle: () => waitFor(selector),
+    boundingBox: async () => (await waitFor(selector)).boundingBox(),
     isVisible: async () => {
       const h = await query(selector).catch(() => null)
       return h ? h.isVisible() : false
@@ -249,13 +261,14 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
   const page = {
     async goto(url) {
       const loaded = nextLoad(15000)
+      docResponse = null
       const r = await send('Page.navigate', { url })
       if (r.errorText) {
         loaded.catch(() => {})
         throw new Error(`page.goto: ${r.errorText} at ${url}`)
       }
       await loaded
-      return null
+      return docResponse
     },
     async reload() {
       const loaded = nextLoad(15000)
@@ -336,7 +349,16 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
         }
       },
     },
-    get keyboard() { throw new Unsupported('page.keyboard') },
+    keyboard: {
+      // Named keys only (what the specs press).
+      async press(key) {
+        const codes = { Escape: 27, Enter: 13, Tab: 9 }
+        if (!(key in codes)) throw new Unsupported(`page.keyboard.press('${key}')`)
+        const k = { key, code: key, windowsVirtualKeyCode: codes[key] }
+        await send('Input.dispatchKeyEvent', { type: 'keyDown', ...k })
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', ...k })
+      },
+    },
     get mouse() { throw new Unsupported('page.mouse') },
     route: () => { throw new Unsupported('page.route') },
     frame: () => { throw new Unsupported('page.frame') },

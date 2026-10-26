@@ -6,7 +6,7 @@
 // on stdin, one per line on stdout. Plugin output to stdout is moved to stderr so it can't
 // corrupt the protocol.
 //
-// Requests:  {id, op: "resolve"|"load"|"transform"|"html"|"hot"|"middleware"|"proxyRewrite"|"proxyBypass", ...}
+// Requests:  {id, op: "resolve"|"load"|"transform"|"html"|"hot"|"middleware"|"proxyRewrite"|"proxyBypass"|"inlineLimit", ...}
 //            {op: "event", event, data}            (no reply)
 //            {rid, result}                         (reply to a resolve callback)
 // Replies:   {ready: manifest} | {fatal: message}  (first line)
@@ -469,6 +469,19 @@ function proxyOptions(p) {
   return out
 }
 
+// `build.assetsInlineLimit(file, content)`: a boolean decides, anything else (or a throw)
+// leaves the default limit (`vite: packages/vite/src/node/plugins/asset.ts`, shouldInline).
+function opInlineLimit({ file }) {
+  const limit = config?.build?.assetsInlineLimit
+  if (typeof limit !== 'function') return null
+  try {
+    const r = limit(file, fs.readFileSync(file))
+    return typeof r === 'boolean' ? r : null
+  } catch {
+    return null
+  }
+}
+
 function opProxyRewrite({ index, url }) {
   const rule = proxyRules[index]
   if (!rule || typeof rule.rewrite !== 'function') return null
@@ -564,8 +577,13 @@ function devOptions() {
     envDir: config.envDir === false ? false : typeof config.envDir === 'string' ? rootRelative(config.envDir) : null,
     publicDir: config.publicDir === false ? false : typeof config.publicDir === 'string' ? rootRelative(config.publicDir) : null,
     assetsInclude: assetsIncludePatterns(config.assetsInclude),
-    assetsInlineLimit: typeof config.build?.assetsInlineLimit === 'number' ? config.build.assetsInlineLimit : null,
+    // A function runs per asset in the sidecar (`inlineLimit`).
+    assetsInlineLimit:
+      typeof config.build?.assetsInlineLimit === 'number' ? config.build.assetsInlineLimit
+      : typeof config.build?.assetsInlineLimit === 'function' ? 'function' : null,
     hmrPartialAccept: config.experimental?.hmrPartialAccept === true,
+    optimizeExclude: [...new Set((config.optimizeDeps?.exclude ?? []).filter((s) => typeof s === 'string'))],
+    cspNonce: typeof config.html?.cspNonce === 'string' ? config.html.cspNonce : null,
     cssTransformer: config.css?.transformer === 'lightningcss' ? 'lightningcss' : 'postcss',
     server: {
       host,
@@ -1011,6 +1029,7 @@ const ops = {
   hot: opHot,
   middleware: opMiddleware,
   proxyRewrite: opProxyRewrite,
+  inlineLimit: opInlineLimit,
   proxyBypass: opProxyBypass,
 }
 

@@ -15,6 +15,10 @@ import { Unsupported, launchChrome, newPage } from './cdp.mjs'
 import { __root, expect } from './shim/vitest.mjs'
 import * as utils from './shim/utils.mjs'
 
+// vitest sets NODE_ENV to 'test' when it isn't set; the servers inherit it (specs compare
+// pages against `process.env.NODE_ENV`).
+process.env.NODE_ENV ??= 'test'
+
 const here = import.meta.dirname
 const repo = path.resolve(here, '../..')
 const limit = path.join(repo, 'scripts/limit.sh')
@@ -40,10 +44,14 @@ function withTimeout(p, ms, what) {
 
 function startServer(testDir, rootDir) {
   const port = Number(args.port)
+  // A variant spec (`__tests__/<variant>/x.spec.ts`) runs with `vite.config-<variant>.js`.
+  const variant = path.basename(path.dirname(args.spec))
+  const variantConfig = path.join(rootDir, `vite.config-${variant}.js`)
+  const config = variant !== '__tests__' && fs.existsSync(variantConfig) ? variantConfig : null
   const cmd =
     args.server === 'vite'
-      ? [process.execPath, path.join(here, 'vite-serve.mjs'), rootDir, String(port)]
-      : [args.tsr, rootDir, '--port', String(port), '--strict-port', '--cache-dir', args['cache-dir']]
+      ? [process.execPath, path.join(here, 'vite-serve.mjs'), rootDir, String(port), ...(config ? [config] : [])]
+      : [args.tsr, rootDir, '--port', String(port), '--strict-port', '--cache-dir', args['cache-dir'], ...(config ? ['--config', config] : [])]
   const child = spawn(limit, ['--mem-mb', '1024', '--time-s', '1200', '--', ...cmd], {
     cwd: testDir,
     env: { ...process.env, TS_R_CACHE_DIR: args['cache-dir'], VITE_INLINE: 'inline-serve', NO_COLOR: '1' },

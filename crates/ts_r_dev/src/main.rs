@@ -32,6 +32,7 @@ Options:
   --no-watch         Don't watch files
   --force            Pre-bundle dependencies again, ignoring the cached batch
   --no-react-refresh Turn off React Fast Refresh (on when a React Refresh runtime is installed)
+  -c, --config <file> Use this Vite config file instead of the root's vite.config.*
   --no-plugins       Don't load vite.config plugins (run in a Node sidecar when present)
   --quiet            Don't log updates
   -h, --help         Show this help
@@ -55,6 +56,8 @@ struct Args {
     force: bool,
     react_refresh: bool,
     plugins: bool,
+    /// `--config`: the Vite config file (relative to the working directory).
+    config: Option<PathBuf>,
 }
 
 fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Args>, String> {
@@ -73,6 +76,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Args>, String>
         force: false,
         react_refresh: true,
         plugins: true,
+        config: None,
     };
     let mut it = args.into_iter().peekable();
     let mut root_set = false;
@@ -142,6 +146,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Option<Args>, String>
             "--force" => a.force = true,
             "--no-react-refresh" => a.react_refresh = false,
             "--no-plugins" => a.plugins = false,
+            "--config" | "-c" => a.config = Some(PathBuf::from(value("--config")?)),
             "--quiet" => a.quiet = true,
             s if s.starts_with('-') => return Err(format!("unknown option: {s}")),
             s => {
@@ -224,7 +229,15 @@ fn main() -> ExitCode {
     // vite.config plugins, run by a Node sidecar (skipped when the only plugins are ones
     // with built-in replacements, like @vitejs/plugin-react). Node starts first; the
     // Rust-side setup below runs while it loads the config.
-    let starting = match vite_plugins::find_config(&args.root).filter(|_| args.plugins) {
+    let config_file = match &args.config {
+        Some(file) if !file.is_file() => {
+            eprintln!("ts-r-dev: config file not found: {}", file.display());
+            return ExitCode::from(1);
+        }
+        Some(file) => Some(file.clone()),
+        None => vite_plugins::find_config(&args.root),
+    };
+    let starting = match config_file.filter(|_| args.plugins) {
         None => None,
         Some(file) => {
             let cache = match &args.cache {
@@ -331,6 +344,12 @@ fn main() -> ExitCode {
         };
         let dev_warnings =
             vite_plugins::apply_dev_options(&p.manifest.dev, &mut config, &rewrite, &bypass);
+        if p.manifest.dev["assetsInlineLimit"] == "function" {
+            let weak = Arc::downgrade(&p);
+            config.assets_inline_fn = Some(Arc::new(move |file: &Path| {
+                weak.upgrade()?.should_inline(file)
+            }));
+        }
         open_config = match &p.manifest.dev["server"]["open"] {
             serde_json::Value::String(s) => Some(s.clone()),
             serde_json::Value::Bool(true) => Some(String::new()),
@@ -466,5 +485,10 @@ mod tests {
         assert!(p(&["--port", "x"]).is_err());
         assert!(p(&["--bogus"]).is_err());
         assert!(p(&["a", "b"]).is_err());
+        let a = p(&["app", "-c", "vite.config-es.js"]).unwrap().unwrap();
+        assert_eq!(a.config, Some(PathBuf::from("vite.config-es.js")));
+        let a = p(&["--config=x.mjs"]).unwrap().unwrap();
+        assert_eq!(a.config, Some(PathBuf::from("x.mjs")));
+        assert!(p(&["--config"]).is_err());
     }
 }

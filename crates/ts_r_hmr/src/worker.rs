@@ -43,6 +43,30 @@ pub fn file_url(url: &str, query: &str) -> String {
     out
 }
 
+/// `url` with `worker_file&type=<ty>` first in its query, the URL's own parameters after
+/// it (and its `#hash` kept last), as a `new Worker(new URL(...))` argument is rewritten.
+pub fn inject_worker_query(url: &str, ty: &str) -> String {
+    let (no_hash, hash) = match url.find('#') {
+        Some(i) => url.split_at(i),
+        None => (url, ""),
+    };
+    let (path, query) = match no_hash.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (no_hash, ""),
+    };
+    let mut out = format!("{path}?worker_file&type={ty}");
+    if !query.is_empty() {
+        out.push('&');
+        out.push_str(query);
+    }
+    out.push_str(hash);
+    out
+}
+
+/// A classic worker can't `import` the client's `injectQuery`: its own copy, appended to the
+/// worker's code (`import(expr)` gets `?import` added at run time, as in modules).
+pub const CLASSIC_INJECT_QUERY: &str = "\nfunction __vite__injectQuery(url, query) {\n  if (url[0] !== '.' && url[0] !== '/') return url;\n  const at = url.search(/[?#]/);\n  const path = at < 0 ? url : url.slice(0, at);\n  const { search, hash } = new URL(url, 'http://localhost');\n  return path + '?' + query + (search ? '&' + search.slice(1) : '') + hash;\n}\n";
+
 /// The wrapper module: the URL (`&url`) or a function constructing the worker.
 pub fn wrapper_module(constructor: &str, file_url: &str, query: &str) -> String {
     let url = serde_json::to_string(file_url).unwrap_or_else(|_| "\"\"".to_owned());
@@ -95,6 +119,18 @@ mod tests {
         assert_eq!(
             wrapper_module("Worker", "/w.js?worker_file&type=module", "worker&url"),
             "export default \"/w.js?worker_file&type=module\"\n"
+        );
+    }
+
+    #[test]
+    fn worker_query_goes_first() {
+        assert_eq!(
+            inject_worker_query("/es/w.js", "classic"),
+            "/es/w.js?worker_file&type=classic"
+        );
+        assert_eq!(
+            inject_worker_query("/w.ts?raw=1#x", "module"),
+            "/w.ts?worker_file&type=module&raw=1#x"
         );
     }
 

@@ -48,7 +48,7 @@ fn inline_scripts(html: &str) -> Vec<(usize, Range<usize>)> {
 }
 
 /// Index of the `>` closing the tag that starts at `start`, honouring quoted values.
-fn tag_end(lower: &str, start: usize) -> Option<usize> {
+pub(crate) fn tag_end(lower: &str, start: usize) -> Option<usize> {
     let mut quote = None;
     for (i, c) in lower[start..].char_indices() {
         match (quote, c) {
@@ -68,7 +68,7 @@ fn is_module(tag: &str) -> bool {
         .any(|t| tag.contains(t))
 }
 
-fn has_attr(tag: &str, name: &str) -> bool {
+pub(crate) fn has_attr(tag: &str, name: &str) -> bool {
     tag.match_indices(name).any(|(i, _)| {
         i > 0
             && tag.as_bytes()[i - 1].is_ascii_whitespace()

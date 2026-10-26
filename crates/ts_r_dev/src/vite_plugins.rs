@@ -128,6 +128,7 @@ impl Manifest {
                     .iter()
                     .any(|r| r["rewrite"] == true || r["bypass"] == true)
             })
+            || self.dev["assetsInlineLimit"] == "function"
     }
 }
 
@@ -191,9 +192,14 @@ pub fn apply_dev_options(
         Value::String(s) => config.public_dir = Some(config.root.join(s)),
         _ => {}
     }
+    if let Some(n) = dev["cspNonce"].as_str() {
+        config.csp_nonce = Some(n.to_owned());
+    }
     if let Some(n) = dev["assetsInlineLimit"].as_u64() {
         config.assets_inline_limit = n;
     }
+    config.optimize_exclude = strings(&dev["optimizeExclude"]);
+    config.optimize_exclude = strings(&dev["optimizeExclude"]);
     if let Some(on) = dev["hmrPartialAccept"].as_bool() {
         config.hmr_partial_accept = on;
     }
@@ -560,6 +566,17 @@ impl VitePlugins {
             cache_id,
             started,
         }))
+    }
+
+    /// Runs the `build.assetsInlineLimit` function on `file` in the sidecar: `Some` when
+    /// it returned a boolean.
+    pub fn should_inline(&self, file: &Path) -> Option<bool> {
+        self.call(
+            "inlineLimit",
+            json!({ "file": file.to_string_lossy().replace('\\', "/") }),
+        )
+        .ok()?
+        .as_bool()
     }
 
     /// Runs `server.proxy[index].rewrite(url)` in the sidecar.

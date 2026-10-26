@@ -44,7 +44,6 @@ const SKIP = {
   'ssr-resolve': 'SSR (no browser page)',
   'ssr-alias': 'SSR (no browser page)',
   'ssr-webworker': 'SSR (no browser page)',
-  'worker': 'web workers: specs need variant configs and worker bundling',
   'legacy': 'build only (@vitejs/plugin-legacy)',
   'environment-react-ssr': 'SSR (no browser page)',
   'optimize-missing-deps': 'custom server',
@@ -102,12 +101,19 @@ function playgrounds() {
   for (const name of fs.readdirSync(playground).sort()) {
     const tests = path.join(playground, name, '__tests__')
     if (!exists(tests)) continue
+    const hasServe = (d) => exists(path.join(d, 'serve.ts')) || exists(path.join(d, 'serve.js'))
     const specs = fs.readdirSync(tests).filter((f) => f.endsWith('.spec.ts')).sort()
-    const variants = fs.readdirSync(tests, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    // Variant specs (`__tests__/<variant>/*.spec.ts`) run with `vite.config-<variant>.js`, as
+    // vitestSetup's loadConfig does; a variant with its own serve.ts starts a custom server.
+    const variants = fs.readdirSync(tests, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
+    for (const v of variants) {
+      if (hasServe(path.join(tests, v))) continue
+      for (const f of fs.readdirSync(path.join(tests, v)).filter((f) => f.endsWith('.spec.ts')).sort()) specs.push(`${v}/${f}`)
+    }
     let skip = SKIP[name] ?? null
-    if (!skip && (exists(path.join(tests, 'serve.ts')) || exists(path.join(tests, 'serve.js')))) skip = 'custom server (__tests__/serve.ts)'
+    if (!skip && hasServe(tests)) skip = 'custom server (__tests__/serve.ts)'
     if (!skip && name.startsWith('ssr')) skip = 'SSR (no browser page)'
-    if (!skip && specs.length === 0) skip = `only variant specs (${variants.join(', ')}): they need Vite config variants`
+    if (!skip && specs.length === 0) skip = `only variant specs with a custom server (${variants.join(', ')})`
     if (!skip) {
       const missing = missingDeps(path.join(playground, name))
       if (missing.length) skip = `npm packages not in bench/node_modules: ${missing.join(', ')}`
@@ -204,11 +210,13 @@ function compare(vite, tsr) {
 async function runPlayground(pg, slot) {
   const runs = {}
   for (const server of servers) {
-    const dir = prepare(server, pg.name)
+    let dir = prepare(server, pg.name)
     runs[server] = {}
     for (const [i, spec] of pg.specs.entries()) {
+      // A variant spec gets a fresh copy: the specs before it may have edited files.
+      if (spec.includes('/') && i > 0) dir = prepare(server, pg.name)
       const port = 15300 + slot * 20 + i * 2 + (server === 'vite' ? 0 : 1)
-      const out = path.join(outDir, 'runs', `${pg.name}.${spec}.${server}.json`)
+      const out = path.join(outDir, 'runs', `${pg.name}.${spec.replaceAll('/', '__')}.${server}.json`)
       fs.mkdirSync(path.dirname(out), { recursive: true })
       fs.rmSync(out, { force: true })
       const start = Date.now()

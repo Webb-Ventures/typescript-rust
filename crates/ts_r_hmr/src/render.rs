@@ -110,6 +110,77 @@ pub fn inject_client_at(html: &str, client: &str, extra: &str) -> String {
     }
 }
 
+/// `value` for a double-quoted HTML attribute.
+pub fn attr_escape(value: &str) -> String {
+    value.replace('&', "&amp;").replace('"', "&quot;")
+}
+
+/// The page with `nonce="<nonce>"` on every `<script>`, `<style>` and
+/// `<link rel="stylesheet|modulepreload|preload">` that has no `nonce` yet (Vite's
+/// `html.cspNonce`, as observed on its csp playground). Script and style contents and
+/// comments are skipped.
+pub fn with_nonce(html: &str, nonce: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let attr = format!(" nonce=\"{}\"", attr_escape(nonce));
+    let mut out = String::with_capacity(html.len() + 64);
+    let mut copied = 0;
+    let mut from = 0;
+    while let Some(i) = lower[from..].find('<') {
+        let start = from + i;
+        if lower[start..].starts_with("<!--") {
+            from = lower[start..]
+                .find("-->")
+                .map_or(lower.len(), |j| start + j + 3);
+            continue;
+        }
+        let name_end = lower[start + 1..]
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+            .map_or(lower.len(), |j| start + 1 + j);
+        let name = &lower[start + 1..name_end];
+        let Some(end) = crate::html_proxy::tag_end(&lower, start) else {
+            break;
+        };
+        let tag = &lower[start..end];
+        let wants = match name {
+            "script" | "style" => true,
+            "link" => link_rel(tag).is_some_and(|r| {
+                r.split_ascii_whitespace()
+                    .any(|r| matches!(r, "stylesheet" | "modulepreload" | "preload"))
+            }),
+            _ => false,
+        };
+        if wants && !crate::html_proxy::has_attr(tag, "nonce") {
+            out.push_str(&html[copied..name_end]);
+            out.push_str(&attr);
+            copied = name_end;
+        }
+        from = end + 1;
+        if matches!(name, "script" | "style") {
+            let close = format!("</{name}");
+            from = lower[from..].find(&close).map_or(lower.len(), |j| from + j);
+        }
+    }
+    out.push_str(&html[copied..]);
+    out
+}
+
+/// The `rel` value of a (lowercased) `<link ...>` tag.
+fn link_rel(tag: &str) -> Option<&str> {
+    let (i, _) = tag
+        .match_indices("rel")
+        .find(|&(i, _)| i > 0 && tag.as_bytes()[i - 1].is_ascii_whitespace())?;
+    let rest = tag[i + 3..].trim_start().strip_prefix('=')?.trim_start();
+    match rest.as_bytes().first()? {
+        q @ (b'"' | b'\'') => {
+            let rest = &rest[1..];
+            rest.find(*q as char).map(|j| &rest[..j])
+        }
+        _ => rest
+            .split(|c: char| c.is_ascii_whitespace() || c == '>')
+            .next(),
+    }
+}
+
 /// Byte index just after the `>` of the first `<name ...>` tag (not `<header>`).
 fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
     let mut from = 0;
@@ -441,6 +512,15 @@ pub fn code_frame(src: &str, line: u32, column: u32) -> String {
 mod tests {
     use super::*;
     use crate::scan::scan;
+
+    #[test]
+    fn csp_nonce_goes_on_scripts_styles_and_stylesheets_once() {
+        let html = "<link rel=\"stylesheet\" href=\"a.css\"><link rel=icon href=i.png>\n<style>p{}</style><!-- <script> -->\n<script>let s = '<style>'</script><script nonce=\"x\">1</script><link rel='modulepreload' href=m.js>";
+        assert_eq!(
+            with_nonce(html, "N\""),
+            "<link nonce=\"N&quot;\" rel=\"stylesheet\" href=\"a.css\"><link rel=icon href=i.png>\n<style nonce=\"N&quot;\">p{}</style><!-- <script> -->\n<script nonce=\"N&quot;\">let s = '<style>'</script><script nonce=\"x\">1</script><link nonce=\"N&quot;\" rel='modulepreload' href=m.js>"
+        );
+    }
 
     #[test]
     fn import_attribute_spans() {

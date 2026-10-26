@@ -379,8 +379,13 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `fileToDevUrl`): `import x from './a.svg?no-inline&foo=bar'` exports
   `<base>/a.svg?no-inline&foo=bar`: the path `encodeURI`d, the query kept without `import`,
   `url` and `t`. The same rule applies when a plugin module of a known asset falls back to
-  the default load. `assetsInlineLimit` (number form; ts-r-dev reads it from the Vite config)
-  sets the SVG inline limit.
+  the default load. `assetsInlineLimit` (ts-r-dev reads it from the Vite config) sets the SVG
+  inline limit; its function form is `DevConfig::assets_inline_fn` (`true`/`false` decide,
+  `None` falls back to the limit), used for script imports and CSS `url()`s alike.
+- **`html.cspNonce`** (`DevConfig::csp_nonce`, `render::with_nonce`; observed on Vite's csp
+  playground): a page gets `<meta property="csp-nonce" nonce="N" />` after the client script,
+  and every `<script>`, `<style>` and `<link rel="stylesheet|modulepreload|preload">` without
+  a `nonce` gets `nonce="N"`. Script and style contents and comments are skipped.
 - **Plugins are optional and cheap when absent.** Every hook call is skipped unless
   `PluginHost::hooks()` says some plugin has it (`Shared::plugin_hooks`, read once). With
   hooks, a module costs one batched `resolveId` call per stage, one `transform` call per stage
@@ -421,6 +426,17 @@ are cached by content hash. Change `cache_id` when output for the same input can
   URL with `worker_file&type=module` first in the query and the import's other parameters
   after it (`&url` exports the URL; `&inline` means nothing in dev). A `worker_file` request
   serves the script with `/@vite/env` run first (`importScripts` for `type=classic`).
+  `new Worker(new URL('./w.js', import.meta.url))` (and `SharedWorker`) is found by the
+  scanner (`HotInfo::asset_url_workers`): the URL is never inlined and gets
+  `?worker_file&type=classic`, or `type=module` when the options are an object literal with
+  `type: 'module'`; `/* @vite-ignore */` leaves it alone. A classic worker gets no hot or env
+  import prelude, and when it has non-literal dynamic imports an inline
+  `__vite__injectQuery` function is appended (it can't import the client).
+- **`optimizeDeps.exclude`** (`DevConfig::optimize_exclude`): a named package (or a subpath of
+  it) is never pre-bundled: it resolves to its files and is served module by module.
+- **`DevServer::url()`** encodes the base (`encodeURI`), so a base with spaces or non-ASCII
+  characters gives a working URL. An asset's `?import` module exports its URL with
+  `?t=<last hot update>` after a hot update, as Vite's does.
 - **Dynamic imports** (`vite: packages/vite/src/node/plugins/importAnalysis.ts`,
   `dynamicImportVars.ts`): a non-literal `import(expr)` argument, and a template whose text
   names neither a script nor CSS (`` `./${x}.json` ``), is wrapped as
