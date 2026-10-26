@@ -349,19 +349,14 @@ mod unicorn_numeric_separators_style;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_math_trunc;
+mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_optional_catch_binding;
-mod unicorn_prefer_regexp_test;
-mod unicorn_prefer_spread;
-mod unicorn_prefer_string_replace_all;
-mod unicorn_prefer_string_slice;
-mod unicorn_prefer_string_starts_ends_with;
-mod unicorn_prefer_string_trim_start_end;
-mod unicorn_prefer_structured_clone;
-mod unicorn_prefer_then_catch;
+mod unicorn_prefer_prototype_methods;
+mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_type_error;
 mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_text_encoding_identifier_case;
@@ -745,18 +740,14 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_code_point::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_math_trunc::RULE,
+    &unicorn_prefer_native_coercion_functions::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
-    &unicorn_prefer_regexp_test::RULE,
-    &unicorn_prefer_spread::RULE,
-    &unicorn_prefer_string_replace_all::RULE,
-    &unicorn_prefer_string_slice::RULE,
-    &unicorn_prefer_string_starts_ends_with::RULE,
-    &unicorn_prefer_string_trim_start_end::RULE,
-    &unicorn_prefer_then_catch::RULE,
+    &unicorn_prefer_prototype_methods::RULE,
+    &unicorn_prefer_reflect_apply::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_require_number_to_fixed_digits_argument::RULE,
     &unicorn_text_encoding_identifier_case::RULE,

@@ -137,3 +137,253 @@ pub(crate) fn has_side_effect(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     }
     walk(cx.ast(), id, 0)
 }
+
+/// An optional link (`?.`) in the chain `id` ends, not cut off by parentheses (TS
+/// wrappers without parentheses are looked through): `a?.b` yes, `(a?.b)` no.
+pub(crate) fn has_unparenthesized_optional_chain(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
+    let mut id = id;
+    for _ in 0..100_000 {
+        match *ast.node(id) {
+            Node::As { expr, .. }
+            | Node::Satisfies { expr, .. }
+            | Node::NonNull { expr }
+            | Node::TypeAssertion { expr, .. } => id = expr,
+            Node::Member { obj, optional, .. } | Node::Index { obj, optional, .. } => {
+                if optional {
+                    return true;
+                }
+                id = obj;
+            }
+            Node::Call {
+                callee, optional, ..
+            } => {
+                if optional {
+                    return true;
+                }
+                id = callee;
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// unicorn's `getStaticStringValue`: a string literal or a template without expressions.
+pub(crate) fn static_string(ast: &ts_r_ast::Ast, id: NodeId) -> Option<&str> {
+    match *ast.node(skip_parens(ast, id)) {
+        Node::StringLit { value } => Some(ast.atom(value)),
+        Node::TemplateLit { parts } => match ast.list(parts) {
+            [only] => match *ast.node(*only) {
+                Node::TemplateElement { cooked, .. } => Some(ast.atom(cooked)),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The name of member `id` (through parentheses): `a.b`, or `a["b"]` / ``a[`b`]`` with a
+/// static string key.
+pub(crate) fn static_member_name(ast: &ts_r_ast::Ast, id: NodeId) -> Option<&str> {
+    match *ast.node(skip_parens(ast, id)) {
+        Node::Member { prop, .. } => ident_name(ast, prop),
+        Node::Index { index, .. } => static_string(ast, index),
+        _ => None,
+    }
+}
+
+/// The object of member `id` (through parentheses).
+pub(crate) fn member_object(ast: &ts_r_ast::Ast, id: NodeId) -> Option<NodeId> {
+    match *ast.node(skip_parens(ast, id)) {
+        Node::Member { obj, .. } | Node::Index { obj, .. } => Some(obj),
+        _ => None,
+    }
+}
+
+/// `@eslint-community/eslint-utils`' `getFunctionHeadLocation` as a span: an arrow's `=>`;
+/// otherwise from the start of the function (or of the property, method or field that
+/// holds it, as its value or computed key) to the `(` of its parameters.
+pub(crate) fn utils_function_head_span(cx: &Ctx<'_, '_>, f: NodeId) -> Span {
+    let ast = cx.ast();
+    let src = cx.src();
+    let head = function_head_span(ast, src, cx.file.parents, f);
+    if !matches!(cx.node(f), Node::Arrow { .. })
+        && let Some(p) = cx.parent(f)
+        && matches!(cx.node(p), Node::ComputedKey { .. })
+        && let Some(holder) = cx.parent(p)
+        && matches!(
+            cx.node(holder),
+            Node::Property { .. } | Node::MethodDef { .. } | Node::PropertyDef { .. }
+        )
+    {
+        return Span::new(cx.span(holder).start, head.end);
+    }
+    head
+}
+
+/// `@eslint-community/eslint-utils`' `getFunctionNameWithKind` (which differs from
+/// ESLint's: class fields holding functions are methods, `export default` functions are
+/// named `'default'`, an object property's function is a method).
+pub(crate) fn utils_function_name_with_kind(cx: &Ctx<'_, '_>, f: NodeId) -> String {
+    let ast = cx.ast();
+    let (is_async, is_gen, own_name, is_arrow) = match *cx.node(f) {
+        Node::FunctionDecl { flags, name, .. } | Node::FunctionExpr { flags, name, .. } => (
+            flags.contains(FnFlags::ASYNC),
+            flags.contains(FnFlags::GENERATOR),
+            name.and_then(|n| ident_name(ast, n)),
+            false,
+        ),
+        Node::Arrow { flags, .. } => (flags.contains(FnFlags::ASYNC), false, None, true),
+        _ => return String::new(),
+    };
+    let direct = parent_skip_parens(ast, cx.file.parents, f);
+    // (holder, key, is class member, method kind)
+    let holder = direct.and_then(|p| match *cx.node(p) {
+        Node::Property { key, value, .. } if value == f => Some((p, key, false, None)),
+        Node::MethodDef { key, kind, .. } => {
+            let in_object = cx
+                .parent(p)
+                .is_some_and(|o| matches!(cx.node(o), Node::ObjectLit { .. }));
+            Some((p, key, !in_object, Some(kind)))
+        }
+        Node::PropertyDef {
+            key,
+            value: Some(v),
+            ..
+        } if skip_parens(ast, v) == f => Some((p, key, true, None)),
+        _ => None,
+    });
+    let mut tokens: Vec<String> = Vec::new();
+    if let Some((p, key, true, _)) = holder {
+        if cx.node(p).modifiers().contains(Modifiers::STATIC) {
+            tokens.push("static".into());
+        }
+        if matches!(cx.node(key), Node::PrivateName { .. }) {
+            tokens.push("private".into());
+        }
+    }
+    if is_async {
+        tokens.push("async".into());
+    }
+    if is_gen {
+        tokens.push("generator".into());
+    }
+    match holder {
+        Some((_, _, _, Some(MethodKind::Constructor))) => return "constructor".into(),
+        Some((_, _, _, Some(MethodKind::Get))) => tokens.push("getter".into()),
+        Some((_, _, _, Some(MethodKind::Set))) => tokens.push("setter".into()),
+        Some(_) => tokens.push("method".into()),
+        None => {
+            if is_arrow {
+                tokens.push("arrow".into());
+            }
+            tokens.push("function".into());
+        }
+    }
+    if let Some((_, key, _, _)) = holder {
+        if let Node::PrivateName { name } = *cx.node(key) {
+            tokens.push(format!("#{}", ast.atom(name)));
+        } else if let Some(name) = utils_property_name(cx, key) {
+            tokens.push(format!("'{name}'"));
+        } else {
+            let text = match *cx.node(key) {
+                Node::ComputedKey { expr } => cx.text(expr),
+                _ => cx.text(key),
+            };
+            if !text.contains('\n') {
+                tokens.push(format!("[{text}]"));
+            }
+        }
+    } else if let Some(name) = own_name {
+        tokens.push(format!("'{name}'"));
+    } else if matches!(cx.node(f), Node::FunctionDecl { modifiers, .. } if modifiers.contains(Modifiers::DEFAULT))
+    {
+        tokens.push("'default'".into());
+    } else if let Some(p) = direct {
+        match *cx.node(p) {
+            Node::VarDeclarator { name, .. } if ident_name(ast, name).is_some() => {
+                tokens.push(format!("'{}'", ident_name(ast, name).unwrap_or_default()));
+            }
+            Node::Assign {
+                left,
+                op: AssignOp::Assign,
+                ..
+            }
+            | Node::AssignPattern { left, .. }
+                if ident_name(ast, left).is_some() =>
+            {
+                tokens.push(format!("'{}'", ident_name(ast, left).unwrap_or_default()));
+            }
+            Node::Param {
+                pattern,
+                init: Some(_),
+                ..
+            } if ident_name(ast, pattern).is_some() => {
+                tokens.push(format!(
+                    "'{}'",
+                    ident_name(ast, pattern).unwrap_or_default()
+                ));
+            }
+            Node::BindingProperty {
+                key,
+                value: None,
+                init: Some(_),
+            } => {
+                if let Some(n) = ident_name(ast, key) {
+                    tokens.push(format!("'{n}'"));
+                }
+            }
+            Node::ShorthandProp {
+                name,
+                init: Some(_),
+                ..
+            } => {
+                if let Some(n) = ident_name(ast, name) {
+                    tokens.push(format!("'{n}'"));
+                }
+            }
+            Node::ExportDefaultExpr { .. } => tokens.push("'default'".into()),
+            _ => {}
+        }
+    }
+    tokens.join(" ")
+}
+
+/// eslint-utils' `getPropertyName` of a key without a scope: an identifier, a string or
+/// number literal, or a computed key with a static value (literals, templates, `+`).
+pub(crate) fn utils_property_name(cx: &Ctx<'_, '_>, key: NodeId) -> Option<String> {
+    let ast = cx.ast();
+    match *cx.node(key) {
+        Node::Ident { name } => Some(ast.atom(name).to_owned()),
+        Node::StringLit { value } => Some(ast.atom(value).to_owned()),
+        Node::NumberLit { value } => Some(number_to_string(value.get())),
+        Node::ComputedKey { expr } => static_value_string(ast, cx.src(), expr)
+            .map(|c| c.into_owned())
+            .or_else(|| literal_concat(cx, expr, 0)),
+        _ => None,
+    }
+}
+
+fn literal_concat(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> Option<String> {
+    if depth > 16 {
+        return None;
+    }
+    let ast = cx.ast();
+    match *ast.node(skip_parens(ast, id)) {
+        Node::Binary {
+            left,
+            op: BinaryOp::Add,
+            right,
+        } => {
+            let l = static_value_string(ast, cx.src(), left)
+                .map(|c| c.into_owned())
+                .or_else(|| literal_concat(cx, left, depth + 1))?;
+            let r = static_value_string(ast, cx.src(), right)
+                .map(|c| c.into_owned())
+                .or_else(|| literal_concat(cx, right, depth + 1))?;
+            Some(l + &r)
+        }
+        _ => None,
+    }
+}

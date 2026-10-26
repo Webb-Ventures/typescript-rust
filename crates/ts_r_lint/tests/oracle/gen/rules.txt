@@ -299,3 +299,6 @@ unicorn/prefer-type-error
 unicorn/require-number-to-fixed-digits-argument
 unicorn/prefer-math-trunc
 unicorn/prefer-code-point
+unicorn/prefer-reflect-apply
+unicorn/prefer-prototype-methods
+unicorn/prefer-native-coercion-functions

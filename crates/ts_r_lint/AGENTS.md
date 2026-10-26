@@ -579,7 +579,30 @@ member reads don't count). What we learned, in our words:
   the parent is arithmetic/bitwise, unary `+ - ~`, or an arithmetic compound assignment's
   right side); `String.fromCharCode` always gets `fromCodePoint`.
 
+- **prefer-reflect-apply**: `fn.apply(null | this, [..] | arguments)` and
+  `Function.prototype.apply.call(fn, ...)` (non-optional calls of non-optional members;
+  static string keys count) become `Reflect.apply(fn, recv, list)`. Literal, array/object
+  literal and `super` receivers are skipped, as is a receiver chain with an optional link
+  outside parentheses (`a?.b.apply`). The fix is dropped when a comment lies outside the
+  target, receiver and list.
+- **prefer-prototype-methods**: the first argument of `Reflect.apply` or the object of
+  `.apply/.bind/.call`: `[].x`/`{}.x` (key evaluated with `const`s and well-known symbols,
+  `Symbol(Symbol.iterator)`), or a global read of an `Object.prototype` method (configured
+  global, or a member of the global object via `unicorn_util::is_global_object`, with a
+  key static without variables, since the reference tracker evaluates in the global
+  scope). No fix with a comment inside the replaced node.
+- **prefer-native-coercion-functions**: `v => String(v)` (also `Number`, `BigInt`,
+  `Boolean`, `Symbol`, written as the callee, TS wrappers dropped) and identity callbacks
+  of `.some()`-like methods (`Boolean`). Names and heads follow eslint-utils, not ESLint
+  (`utils_function_name_with_kind`: class fields holding functions are methods, an object
+  property's function is a method, `export default` is `'default'`;
+  `utils_function_head_span`: a computed key's function starts at its property). Fixes:
+  `foo: Name` for object methods, ` = Name;` for class methods (suggestion), a `;` when a
+  token on a later line, outside the parent, could continue the identifier.
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
-`prefer-code-point.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text}.js`; `@eslint-community/eslint-utils` (`hasSideEffect`).
+`prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
+`prefer-native-coercion-functions.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body}.js`;
+`@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
+`getFunctionHeadLocation`, `ReferenceTracker`).
