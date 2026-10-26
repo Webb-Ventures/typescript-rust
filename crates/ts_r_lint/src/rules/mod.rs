@@ -300,6 +300,7 @@ mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
+mod unicorn_no_double_comparison;
 mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_exports_in_scripts;
 mod unicorn_no_global_object_property_assignment;
@@ -325,6 +326,7 @@ mod unicorn_no_unnecessary_await;
 mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_compound_assignment;
 mod unicorn_no_useless_continue;
@@ -694,6 +696,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
+    &unicorn_no_double_comparison::RULE,
+    &unicorn_no_duplicate_logical_operands::RULE,
+    &unicorn_no_duplicate_set_values::RULE,
     &unicorn_no_duplicate_if_branches::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
@@ -719,6 +724,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_nested_ternary::RULE,
     &unicorn_no_unnecessary_slice_end::RULE,
     &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_unsafe_string_replacement::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_compound_assignment::RULE,
     &unicorn_no_useless_continue::RULE,

@@ -341,3 +341,5 @@ unicorn/prefer-promise-try
 unicorn/no-invalid-fetch-options
 unicorn/no-misrefactored-assignment
 unicorn/no-useless-compound-assignment
+unicorn/no-unsafe-string-replacement
+unicorn/no-double-comparison

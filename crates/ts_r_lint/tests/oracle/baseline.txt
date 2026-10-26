@@ -288,6 +288,7 @@ unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
+unicorn/no-double-comparison 83/83
 unicorn/no-duplicate-if-branches 30/30
 unicorn/no-exports-in-scripts 22/22
 unicorn/no-global-object-property-assignment 34/34
@@ -313,6 +314,7 @@ unicorn/no-unnecessary-await 63/66
 unicorn/no-unnecessary-nested-ternary 39/39
 unicorn/no-unnecessary-slice-end 39/39
 unicorn/no-unreadable-iife 14/14
+unicorn/no-unsafe-string-replacement 78/78
 unicorn/no-useless-boolean-cast 61/61
 unicorn/no-useless-compound-assignment 79/79
 unicorn/no-useless-continue 43/43
