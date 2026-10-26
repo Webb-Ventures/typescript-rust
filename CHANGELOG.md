@@ -7,6 +7,31 @@ pull requests merged since the previous release (also on the
 
 <!-- releases -->
 
+## [v0.1.0-alpha.4](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.4) - 2026-10-24
+
+### From the core team
+
+- Site: correct stale and false claims (audit at 087afc9) in #28
+- Site: type-check landing/ with ts-r's own drop-in tsc (@ts-r.dev/typescript) in #30
+- Binder and emit parity: TS2649/TS2671, ESNext using, decorator statics super in #29
+- License: MIT only (drop the Apache-2.0 option) in #35
+- ts-r-build: esbuild oracle 666 -> 742 of 779 (95.3%) in #33
+- @ts-r.dev/typescript: fix the in-place install, alpha ranges, registry readmes and Next.js's tsc flags in #34
+- Checker: 12331 of 12750 conformance variants exact (96.7%), 17 false-positive tests in #31
+- Code review bot: merge a moved branch into its fixes instead of giving up in #38
+- Lexer: regex pattern and flag errors, octal escape errors (TS1487-TS1537) in #32
+- Parity oracles for ts-r-dev, ts-r-run, ts-r-lsp and the launcher, plus the first fixes in #37
+- Parser round 2: mapped type members, JSX escapes, import() commas, plain JS grammar errors (builds on #32, 12,350 exact) in #39
+- Benches: cancel on push and close, several slots on disjoint cores, faster runs in #43
+- Checker round 2: 12360 of 12750 conformance variants exact (96.9%), 10 false-positive tests (builds on #31) in #40
+- Review bot: measured accuracy, oracle-first parity rule, checked bot fixes in #44
+- ts-r-build: esbuild oracle 742/779 -> 832/872 (95.4%), builds on #33 in #41
+- Claims audit: re-measure ecosystem, React parity, round trip, incremental; drop private-app claims in #42
+- ts-r-run parity round 2: tsx 98 of 100 (98.0%), node 36 of 36 in #45
+- Site: ts-r-run passes 98 of 100 of tsx's tests (was 75 of 86) in #46
+- ts-r-dev parity round 3: Vite oracle 202 -> 274 of 322 (85.1%) in #47
+- Site and README: benchmark audit before v0.1.0-alpha.4 in #48
+
 ## [v0.1.0-alpha.3](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.3) - 2026-10-22
 
 ### From the core team
