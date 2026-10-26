@@ -106,7 +106,11 @@ impl DepBundle {
     /// resolves to `/node_modules/react/index.js`, and no absolute path is in the output.
     /// Dependency CSS is read with `@import`s inlined and `url()`s rewritten to the URLs the
     /// server serves those files at (`ts_r_hmr::css`).
+    ///
+    /// A Windows verbatim root (`\\?\C:\x`, as `fs::canonicalize` returns) is used in its
+    /// plain form, so it shares a prefix with the resolver's file paths.
     pub fn serve_root(mut self, root: &std::path::Path) -> DepBundle {
+        let root = ts_r_hmr::paths::strip_verbatim(root.to_path_buf());
         let root = path::normalize_slashes(&root.to_string_lossy());
         self.out_dir = format!("{}/@ts-r/deps", root.trim_end_matches('/'));
         self.root = Some(std::path::PathBuf::from(root));
