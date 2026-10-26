@@ -152,6 +152,11 @@ are cached by content hash. Change `cache_id` when output for the same input can
   a `.json` import (not `?raw`/`?url`/worker) and a plugin module whose id ends in `.json`
   (`\0/data.json`) get the pre hooks on the JSON text, then become a module (named exports),
   then get the post hooks on the JS.
+- **Static import attributes are removed** (`vite: packages/vite/src/node/plugins/importAnalysis.ts`):
+  `import d from './d.json' with { type: 'json' }` (and `assert { ... }`, and `export ... from`)
+  is served without the clause, since the server decides what a module is and serves JSON as
+  JS. Left in, the browser rejects the JS MIME type. A dynamic `import(x, { with })` keeps its
+  options (`render::import_attributes_span`).
 - **`assetsInclude` files are assets.** A file with an unknown extension and no query goes
   to plugin `load`/`transform` as a plugin module, unless `DevConfig::assets_include` (a
   `glob::PathFilter` of root-resolved globs and regexes, filled from Vite's `assetsInclude`)

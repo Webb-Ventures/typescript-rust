@@ -194,6 +194,74 @@ pub fn js_string(s: &str) -> String {
         .replace("</", "<\\/")
 }
 
+/// The import attributes clause after a static import's specifier: `with { ... }` (or the
+/// older `assert { ... }`) starting after the closing quote at `quote`. Returns the span
+/// from just after the quote to just after the `}`, which the server removes: the browser
+/// would otherwise demand a JSON MIME type for a `.json` module served as JS (Vite strips
+/// static import attributes too, `vite: packages/vite/src/node/plugins/importAnalysis.ts`).
+pub fn import_attributes_span(code: &str, quote: u32) -> Option<(u32, u32)> {
+    let b = code.as_bytes();
+    let start = quote as usize + 1;
+    let mut i = skip_trivia(b, start);
+    let kw = if b[i.min(b.len())..].starts_with(b"with") {
+        4
+    } else if b[i.min(b.len())..].starts_with(b"assert") {
+        6
+    } else {
+        return None;
+    };
+    i = skip_trivia(b, i + kw);
+    if b.get(i) != Some(&b'{') {
+        return None;
+    }
+    // To the matching `}`: attribute values are string literals, keys identifiers or strings.
+    let mut depth = 0u32;
+    while i < b.len() {
+        match b[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((start as u32, i as u32 + 1));
+                }
+            }
+            q @ (b'"' | b'\'') => {
+                i += 1;
+                while i < b.len() && b[i] != q && b[i] != b'\n' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b';' => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Past spaces and comments from `i` (newlines included).
+fn skip_trivia(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() {
+        match b[i] {
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i = b[i + 2..]
+                    .windows(2)
+                    .position(|w| w == b"*/")
+                    .map_or(b.len(), |p| i + 2 + p + 2);
+            }
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                i = b[i..]
+                    .iter()
+                    .position(|&c| c == b'\n')
+                    .map_or(b.len(), |p| i + p);
+            }
+            _ => break,
+        }
+    }
+    i
+}
+
 /// Content type by file extension.
 pub fn content_type(ext: &str) -> &'static str {
     match ext {
@@ -277,6 +345,26 @@ pub fn code_frame(src: &str, line: u32, column: u32) -> String {
 mod tests {
     use super::*;
     use crate::scan::scan;
+
+    #[test]
+    fn import_attribute_spans() {
+        fn span(code: &str) -> Option<&str> {
+            let r = &scan(code).imports[0];
+            import_attributes_span(code, r.end).map(|(s, e)| &code[s as usize..e as usize])
+        }
+        assert_eq!(
+            span("import d from './d.json' with { type: 'json' };"),
+            Some(" with { type: 'json' }")
+        );
+        assert_eq!(
+            span("export * from \"./d.json\" /* c */ assert {\n  type: \"json\"\n}\nx()"),
+            Some(" /* c */ assert {\n  type: \"json\"\n}")
+        );
+        assert_eq!(span("import d from './d.json';\nwith ({}) {}"), None);
+        assert_eq!(span("import d from './d.json'\nwithout()"), None);
+        assert_eq!(span("import d from './d.json' with { type: 'json'"), None);
+        assert_eq!(span("import d from './d.json' with"), None);
+    }
 
     #[test]
     fn rewrites_bare_and_relative_imports() {

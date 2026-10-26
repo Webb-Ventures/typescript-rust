@@ -3127,6 +3127,16 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: 
             end: rec.end,
             text: url_of(t, true),
         });
+        // Static import attributes go: the server decides what a module is.
+        if rec.kind != crate::scan::ImportKind::Dynamic
+            && let Some((start, end)) = render::import_attributes_span(&p.output.code, rec.end)
+        {
+            edits.push(render::Edit {
+                start,
+                end,
+                text: String::new(),
+            });
+        }
     }
     for (rec, t) in p.hot.accepted.iter().zip(&p.accept_targets) {
         let text = match t {

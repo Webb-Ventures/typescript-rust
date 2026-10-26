@@ -362,6 +362,29 @@ fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
 }
 
 #[test]
+fn static_import_attributes_are_removed_dynamic_ones_kept() {
+    let f = start();
+    f.app.write(
+        "src/attrs.js",
+        "import d from './data.json' with { type: 'json' };\nexport * from './data.json' assert { type: \"json\" };\nconst l = import('./data.json', { with: { type: 'json' } });\nconsole.log(d, l);\n",
+    );
+    let (status, _, body) = f.get("/src/attrs.js");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains("import d from '/src/data.json?import';"),
+        "{body}"
+    );
+    assert!(
+        body.contains("export * from '/src/data.json?import';"),
+        "{body}"
+    );
+    assert!(
+        body.contains("{ with: { type: 'json' } })"),
+        "dynamic import attributes stay: {body}"
+    );
+}
+
+#[test]
 fn a_pruned_module_imported_again_is_fetched_fresh() {
     let f = start();
     f.app.write("src/child.js", "export const v = 1;\n");
