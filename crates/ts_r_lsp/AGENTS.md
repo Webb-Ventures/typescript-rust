@@ -947,7 +947,9 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle lists the rest by cause: bench/lsp-oracle/README.md): hover
+- Features (the fourslash oracle, 1864 of 2517 tests at aed0aea, lists the rest by cause:
+  bench/lsp-oracle/README.md): hover has no JavaScript `@typedef`/`@callback`/`@property`
+  hovers and no keyword or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
