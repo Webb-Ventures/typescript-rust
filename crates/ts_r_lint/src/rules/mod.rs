@@ -203,6 +203,7 @@ mod ts_no_floating_promises;
 mod ts_no_for_in_array;
 mod ts_no_generated_empty_object_type;
 mod ts_no_implied_eval;
+mod ts_no_inferrable_types;
 mod ts_no_invalid_void_type;
 mod ts_no_meaningless_void_operator;
 mod ts_no_misused_new;
@@ -455,6 +456,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_for_in_array::RULE,
     &ts_no_generated_empty_object_type::RULE,
     &ts_no_implied_eval::RULE,
+    &ts_no_inferrable_types::RULE,
     &ts_no_invalid_void_type::RULE,
     &ts_no_meaningless_void_operator::RULE,
     &ts_no_misused_new::RULE,
