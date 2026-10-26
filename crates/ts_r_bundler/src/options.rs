@@ -61,6 +61,8 @@ pub enum Loader {
     Text,
     /// Copied to the output directory; the module exports its URL.
     File,
+    /// Copied to the output directory; imports of it stay imports of the copy (`copy`).
+    Copy,
     /// A stylesheet, bundled into a `.css` output next to the JS (`crate::css`).
     Css,
     /// A CSS module: classes, IDs and keyframe names are local (`local-css`).
@@ -87,6 +89,7 @@ impl Loader {
             "json" => Loader::Json,
             "text" => Loader::Text,
             "file" => Loader::File,
+            "copy" => Loader::Copy,
             "css" => Loader::Css,
             "local-css" => Loader::LocalCss,
             "global-css" => Loader::GlobalCss,
@@ -115,6 +118,7 @@ impl Loader {
             Loader::Json => "json",
             Loader::Text => "text",
             Loader::File => "file",
+            Loader::Copy => "copy",
             Loader::Css => "css",
             Loader::LocalCss => "local-css",
             Loader::GlobalCss => "global-css",

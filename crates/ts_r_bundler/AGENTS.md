@@ -168,6 +168,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   entries' common directory, `..` written `_.._`. The replacement can shift source map
   columns after it on the same line. `--public-path` also prefixes cross-chunk imports
   (`plan::chunk_import`).
+- **`copy` files** (`graph::copy_imports_external`): an `import`, `require()` or
+  `import()` of one is an external import of a placeholder path (`copy_path`), replaced in
+  each chunk by the copy's URL from that chunk (`chunk::copy_url`); the copy is named with
+  `--asset-names`, or is the entry's own output when the file is also an entry point.
+  Import attributes on such an import are kept, never checked.
 - **A module only `import()` reaches is named like a chunk** (`bundle::dynamic_file_name`):
   `--chunk-names` (default `[name]-[hash]`, `[name]` the file's stem, `[dir]` dropped), not
   `--entry-names`, as esbuild 0.28.2 does (`import('./sub/c')` gives `out/c-HASH.js`).

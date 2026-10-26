@@ -347,8 +347,56 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             .unwrap_or_else(|e| e.into_inner())
             .insert(p.clone(), n.loaded);
     }
+    copy_imports_external(&mut g);
     g.entries = entries.iter().filter_map(|e| ids.get(e).copied()).collect();
     g
+}
+
+/// The external path standing for the copy of `module` until chunks know its URL: the
+/// asset's placeholder and the file name, so generated names read `import_a` for `a.png`.
+pub fn copy_path(asset: &crate::prepare::Asset, module: &str) -> String {
+    let file = path::file_name(split_query(module).0);
+    format!("{}/{file}", asset.placeholder)
+}
+
+/// Whether an external path is a [`copy_path`].
+pub fn is_copy_path(p: &str) -> bool {
+    p.starts_with("__TSR_ASSET_")
+}
+
+/// JavaScript imports of a `copy`-loader file stay imports, of the copy: their target is
+/// an external path that chunk assembly replaces with the copy's URL (the placeholder of
+/// its [`crate::prepare::Asset`]). The copied module itself is never part of a chunk.
+fn copy_imports_external(g: &mut Graph) {
+    let copies: Vec<Option<String>> = g
+        .modules
+        .iter()
+        .map(|m| {
+            (m.loader == crate::options::Loader::Copy)
+                .then(|| m.source.asset.as_ref().map(|a| copy_path(a, &m.path)))
+                .flatten()
+        })
+        .collect();
+    if copies.iter().all(Option::is_none) {
+        return;
+    }
+    for m in &mut g.modules {
+        if m.loader.is_css() {
+            continue;
+        }
+        for (t, r) in m.targets.iter_mut().zip(&m.meta.records) {
+            if let Target::Module(id) = *t
+                && let Some(ph) = &copies[id as usize]
+            {
+                *t = Target::External(match r.kind {
+                    RecordKind::Import | RecordKind::ReExport => {
+                        external_key(ph, r.phase, &r.attrs)
+                    }
+                    _ => ph.clone(),
+                });
+            }
+        }
+    }
 }
 
 /// A stylesheet's references as module records (after the JavaScript stub's, which has
@@ -460,9 +508,11 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             }
         }
         targets.push(match res {
+            // Attributes of an import of a `copy` file stay on the import of the copy.
             Resolution::File(f)
                 if ctx.prep.opts.bundle
-                    && matches!(r.kind, RecordKind::Import | RecordKind::ReExport) =>
+                    && matches!(r.kind, RecordKind::Import | RecordKind::ReExport)
+                    && ctx.prep.opts.loader_for(&f) != Loader::Copy =>
             {
                 match attribute_type(&r.attrs) {
                     Ok(Some(t)) => RawTarget::Path(format!("{f}{WITH_TYPE_SEP}{t}")),

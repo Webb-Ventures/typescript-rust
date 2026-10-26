@@ -2464,3 +2464,36 @@ fn css_imports_keep_the_last_copy_and_the_layer_order() {
         "@import\"http://x/y.css\";@layer first;@layer last{body{color:green}}@layer first{body{color:red}}\n"
     );
 }
+
+#[test]
+fn copy_loader_imports_stay_imports_of_the_copy() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import a from './a.png' with { type: 'x' };\nconst b = require('./b.png');\nimport('./c.png');\nconsole.log(a, b);\n",
+        ),
+        ("a.png", "a"),
+        ("b.png", "b"),
+        ("c.png", "c"),
+        ("entry.css", "body { background: url(./a.png) }\n"),
+    ]);
+    let mut o = opts(&["entry.js", "entry.css", "c.png"]);
+    o.loaders.insert(".png".into(), ts_r_bundler::Loader::Copy);
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(js.contains("import_a") || js.contains("a_default"), "{js}");
+    let a = r
+        .outputs
+        .iter()
+        .find(|o| o.path.starts_with("/proj/out/a-") && o.path.ends_with(".png"))
+        .expect("a.png copied");
+    let a_name = a.path.trim_start_matches("/proj/out/");
+    assert!(js.contains(&format!("from \"./{a_name}\" with")), "{js}");
+    assert!(js.contains("require(\"./b-"), "{js}");
+    // `c.png` is also an entry point: the import names the entry's copy.
+    assert!(js.contains("import(\"./c.png\")"), "{js}");
+    assert_eq!(file(&r, "/proj/out/c.png"), "c");
+    assert!(!js.contains("__TSR_ASSET_"), "{js}");
+    let css = file(&r, "/proj/out/entry.css");
+    assert!(css.contains(&format!("url(\"./{a_name}\")")), "{css}");
+}

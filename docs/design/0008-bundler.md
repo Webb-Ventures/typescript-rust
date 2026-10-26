@@ -32,8 +32,9 @@ syntax that an ES5 target forbids is an error, as in esbuild (`features.rs`, `lo
    built-ins external on `--platform=node`, `--external` patterns with `*`, and
    `--packages=external`. Results are cached per `(spec, dir, kind)` until a structural change.
 2. **Prepare** (`prepare.rs`). Load with the loader for the extension (`js jsx ts tsx json
-   text file css local-css global-css empty base64 dataurl binary`; other non-JS loaders
-   become small CommonJS modules, stylesheets are parsed by `css/` into a `Sheet`),
+   text file copy css local-css global-css empty base64 dataurl binary`; other non-JS
+   loaders become small CommonJS modules, stylesheets are parsed by `css/` into a `Sheet`,
+   and imports of a `copy` file stay imports, of its copy),
    parse, run `ts_r_transform` with module format `Preserve` (types, enums, decorators, JSX),
    apply `--define` (plus esbuild's automatic `process.env.NODE_ENV` for browser bundles), fold
    constants (`ts_r_minify::fold`, so dead `NODE_ENV` branches never reach the import scan),

@@ -217,7 +217,7 @@ pub fn load(
                 hash,
             ))
         }
-        Loader::File => {
+        Loader::File | Loader::Copy => {
             let bytes = read_bytes()?;
             let hash = hash_of(&bytes);
             let name = path.rsplit('/').next().unwrap_or(path);

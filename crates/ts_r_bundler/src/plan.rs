@@ -908,7 +908,9 @@ impl Planner<'_> {
             .rsplit('/')
             .next()
             .unwrap_or(path);
-        let base = if path.starts_with('@') || !path.starts_with('.') {
+        let base = if !crate::graph::is_copy_path(path)
+            && (path.starts_with('@') || !path.starts_with('.'))
+        {
             path
         } else {
             last
@@ -1151,6 +1153,14 @@ impl Planner<'_> {
                             None
                         }
                     }
+                }
+                // A `copy` file: the call names the copy (`graph::copy_imports_external`).
+                (RecordKind::Require, Target::External(x)) if crate::graph::is_copy_path(x) => {
+                    *require_shim = true;
+                    Some(Expr::call("require", vec![Expr::Str(x.clone())]))
+                }
+                (RecordKind::Dynamic, Target::External(x)) if crate::graph::is_copy_path(x) => {
+                    Some(Expr::Import(x.clone()))
                 }
                 (RecordKind::Require, Target::External(_)) => {
                     *require_shim = true;

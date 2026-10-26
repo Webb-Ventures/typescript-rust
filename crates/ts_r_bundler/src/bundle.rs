@@ -550,7 +550,9 @@ impl BuildContext {
         // Assets from the file loader, with paths relative to outdir.
         let mut assets: Vec<(&Asset, String)> = Vec::new();
         for (i, m) in graph.modules.iter().enumerate() {
-            if lk.included[i]
+            // A `copy` file imported from JavaScript is copied though no chunk has it.
+            let copied = m.loader == Loader::Copy && !graph.entries.contains(&(i as ModuleId));
+            if (lk.included[i] || copied)
                 && let Some(a) = &m.source.asset
             {
                 assets.push((a, asset_path(&a.rel_path, &m.path, &outbase)));
@@ -582,6 +584,28 @@ impl BuildContext {
             let css_entry = pl.chunks[ci]
                 .entry
                 .is_some_and(|e| graph.modules[e as usize].loader.is_css());
+            // A `copy` entry point is its file, copied under the entry's name.
+            if let Some(e) = pl.chunks[ci].entry
+                && pl.chunks[ci].user_entry.is_some()
+                && graph.modules[e as usize].loader == Loader::Copy
+            {
+                let m = &graph.modules[e as usize];
+                if let Some(a) = &m.source.asset {
+                    let stem = file
+                        .strip_suffix(opts.out_extension_js.as_str())
+                        .unwrap_or(&file);
+                    let name = path::file_name(crate::graph::split_query(&m.path).0);
+                    let ext = name
+                        .rsplit_once('.')
+                        .map(|(_, e)| format!(".{e}"))
+                        .unwrap_or_default();
+                    outputs.push(OutputFile {
+                        path: format!("{stem}{ext}"),
+                        contents: a.bytes.to_vec(),
+                    });
+                }
+                continue;
+            }
             if css_entry {
                 let css = co.css.take().unwrap_or_default();
                 outputs.push(OutputFile {
@@ -812,6 +836,34 @@ impl BuildContext {
                 let out = OutputFile {
                     path: full,
                     contents: css.as_bytes().to_vec(),
+                };
+                return Ok((vec![out], Vec::new(), meta));
+            }
+            if loader == Loader::Copy
+                && let Some(a) = &source.asset
+            {
+                // A `copy` entry is copied under its entry name (observed in esbuild).
+                let file = match outfile {
+                    Some(f) => f.to_owned(),
+                    None => {
+                        let js = self.entry_file_name(&e, &outbase, names[i].as_deref());
+                        let stem = js
+                            .strip_suffix(opts.out_extension_js.as_str())
+                            .unwrap_or(&js);
+                        let name = path::file_name(&e);
+                        let ext = name
+                            .rsplit_once('.')
+                            .map(|(_, x)| format!(".{x}"))
+                            .unwrap_or_default();
+                        format!("{stem}{ext}")
+                    }
+                };
+                let full = format!("{outdir}/{file}");
+                let n = a.bytes.len();
+                let meta = (pretty, n, full.clone(), n);
+                let out = OutputFile {
+                    path: full,
+                    contents: a.bytes.to_vec(),
                 };
                 return Ok((vec![out], Vec::new(), meta));
             }

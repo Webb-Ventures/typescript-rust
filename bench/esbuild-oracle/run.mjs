@@ -302,7 +302,7 @@ function flagsFor(c) {
       case 'ExtensionToLoader':
         for (const it of v.items) {
           const l = it.value.ident?.replace('config.Loader', '').toLowerCase();
-          const map = { js: 'js', jsx: 'jsx', ts: 'ts', tsx: 'tsx', json: 'json', text: 'text', file: 'file', css: 'css', empty: 'empty', base64: 'base64', dataurl: 'dataurl', binary: 'binary', copy: null, default: null, localcss: 'local-css', globalcss: 'global-css', none: null };
+          const map = { js: 'js', jsx: 'jsx', ts: 'ts', tsx: 'tsx', json: 'json', text: 'text', file: 'file', css: 'css', empty: 'empty', base64: 'base64', dataurl: 'dataurl', binary: 'binary', copy: 'copy', default: null, localcss: 'local-css', globalcss: 'global-css', none: null };
           if (!map[l]) { why.push(`Loader=${l}`); continue; }
           flags.push(`--loader:${it.key}=${map[l]}`);
         }

@@ -430,8 +430,72 @@ pub fn assemble(
             result.map = Some(json);
         }
     }
-    result.code = out.code;
+    result.code = copy_urls(out.code, graph, plan, opts, &file, outbase);
     result
+}
+
+/// The URL of a `copy` file's copy from chunk `file`: its entry output when it is an entry
+/// point too (observed in esbuild), else its asset.
+pub(crate) fn copy_url(
+    graph: &Graph,
+    plan: &Plan,
+    opts: &BuildOptions,
+    m: &crate::graph::Module,
+    a: &crate::prepare::Asset,
+    file: &str,
+    outbase: &str,
+) -> String {
+    let entry = plan.chunks.iter().find(|c| {
+        c.user_entry.is_some()
+            && c.entry
+                .is_some_and(|e| std::ptr::eq(&graph.modules[e as usize], m))
+    });
+    let rel = match entry {
+        Some(c) => {
+            let stem = c
+                .file
+                .strip_suffix(opts.out_extension_js.as_str())
+                .unwrap_or(&c.file);
+            let name = ts_r_config::path::file_name(crate::graph::split_query(&m.path).0);
+            let ext = name
+                .rsplit_once('.')
+                .map(|(_, x)| format!(".{x}"))
+                .unwrap_or_default();
+            format!("{stem}{ext}")
+        }
+        None => crate::bundle::asset_path(&a.rel_path, &m.path, outbase),
+    };
+    crate::bundle::asset_url(&plan.outdir, file, &rel, &opts.public_path) + &a.query
+}
+
+/// Imports of `copy`-loader files (externals named by their asset placeholder, see
+/// `graph::copy_imports_external`) as the copies' URLs from this chunk.
+fn copy_urls(
+    mut code: String,
+    graph: &Graph,
+    plan: &Plan,
+    opts: &BuildOptions,
+    file: &str,
+    outbase: &str,
+) -> String {
+    if !code.contains("__TSR_ASSET_") {
+        return code;
+    }
+    for m in &graph.modules {
+        if m.loader != crate::options::Loader::Copy {
+            continue;
+        }
+        let Some(a) = &m.source.asset else { continue };
+        let ph = format!("\"{}\"", crate::graph::copy_path(a, &m.path));
+        if !code.contains(&ph) {
+            continue;
+        }
+        let url = copy_url(graph, plan, opts, m, a, file, outbase);
+        let mut quoted = String::new();
+        ts_r_codegen::literals::quote_string(&url, '"', &mut quoted);
+        code = code.replace(&ph, &quoted);
+    }
+    code
 }
 
 /// `var X` or `(globalThis.a ??= {}).b` for a dotted `--global-name`.
@@ -488,6 +552,17 @@ impl crate::css::order::Host for CssHost<'_> {
                     return u.to_string();
                 }
                 if let Some(a) = &tm.source.asset {
+                    if tm.loader == crate::options::Loader::Copy {
+                        return copy_url(
+                            self.graph,
+                            self.plan,
+                            self.opts,
+                            tm,
+                            a,
+                            self.file,
+                            self.outbase,
+                        );
+                    }
                     let rel = crate::bundle::asset_path(&a.rel_path, &tm.path, self.outbase);
                     return crate::bundle::asset_url(
                         &self.plan.outdir,
