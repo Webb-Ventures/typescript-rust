@@ -711,7 +711,10 @@ impl<'a> Parser<'a> {
                 // changes once `as T` is erased (`a + b * c`), so the expression stops before
                 // an operator that binds tighter than the one under the `as` (tsc 7,
                 // microsoft/TypeScript#63527; `',' expected` follows in a declaration).
-                if let Node::Binary { op: under, .. } = *self.ast.node(last) {
+                // TypeScript 5.x (typescript-estree) takes it: `ParseOptions::assertion_continues`.
+                if !self.assertion_continues
+                    && let Node::Binary { op: under, .. } = *self.ast.node(last)
+                {
                     if self.at(T::Gt) {
                         self.lx.rescan_greater();
                     }

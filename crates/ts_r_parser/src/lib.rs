@@ -149,6 +149,11 @@ pub struct ParseOptions {
     /// always the operator (`await\n x` included), as espree's `sourceType: "module"` and
     /// typescript-estree do. Off by default: tsc decides from the file's own syntax.
     pub module: bool,
+    /// After `a ## b as T` (or `satisfies T`), keep taking operators that bind tighter than
+    /// `##` (`a < 0 as any ** 2` is `((a < 0) as any) ** 2`), as TypeScript 5.x and
+    /// typescript-estree do. Off by default: tsc 7 stops there, because erasing the
+    /// assertion would change the meaning (microsoft/TypeScript#63527, `';' expected`).
+    pub assertion_continues: bool,
 }
 
 /// Parses `src` with the grammar for `kind`.
@@ -182,6 +187,7 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
             p.js_ts = true;
         }
         p.module_await = module_await;
+        p.assertion_continues = opts.assertion_continues;
         if module_await {
             // As tsc reparses a module's statements that hold an `await` name: `await` is
             // an operator at the top level (`@await class C {}` is TS1109).
@@ -364,6 +370,8 @@ pub(crate) struct Parser<'a> {
     /// Parsing a JSDoc type expression (`jsdoc.rs`): `*`, `?T`, `T?`, `!T`, `T!` and
     /// `Array.<T>` are types.
     jsdoc: bool,
+    /// [`ParseOptions::assertion_continues`].
+    assertion_continues: bool,
     /// End of the previous token: the end of the node being finished.
     prev_end: u32,
     depth: u32,
@@ -477,6 +485,7 @@ impl<'a> Parser<'a> {
             jsx: kind.is_jsx(),
             js_ts: false,
             jsdoc: false,
+            assertion_continues: false,
             prev_end: 0,
             depth: 0,
             speculating: 0,

@@ -43,6 +43,15 @@ let r = ts_r_parser::parse_with(src, SourceKind::Js, opts);
 "module"` and typescript-estree; request from lint). The default (`false`) is tsc's: the
 file's own syntax decides.
 
+`ParseOptions { assertion_continues: true, .. }` keeps taking tighter operators after
+`a ## b as T` / `satisfies T` (`a < 0 as any ** 2` is `((a < 0) as any) ** 2`), as
+TypeScript 5.x and typescript-estree do (request from lint: unicorn/prefer-includes). The
+default (`false`) is tsc 7.0.2's: the expression stops before an operator binding tighter than
+`##`, because erasing the assertion would change its meaning (microsoft/TypeScript#63527,
+disallowUnerasableAssertion; `';' expected` / `',' expected` follows). Verified with tsc 7.0.2
+on both `array.indexOf(value) < 0 as any ** 2;` and `array.lastIndexOf(value) < 0 satisfies
+boolean as any ** 2;`: both TS1005.
+
 Files:
 - `stmt.rs`: statements, declarations, import/export.
 - `expr.rs`: expressions, arrows, literals, templates, binding patterns.

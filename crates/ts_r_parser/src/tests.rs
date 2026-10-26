@@ -3292,3 +3292,45 @@ fn bare_super_is_a_member_access() {
         assert_eq!(n, members, "{src}\n{}", r.ast.dump());
     }
 }
+
+/// `a ## b as T $$ c` with `$$` tighter than `##`: tsc 7.0.2 stops before `$$` (TS1005,
+/// microsoft/TypeScript#63527); `ParseOptions::assertion_continues` parses it as TypeScript
+/// 5.x and typescript-estree do, `((a ## b) as T) $$ c`.
+#[test]
+fn assertion_continues_takes_tighter_operators() {
+    for src in [
+        "array.indexOf(value) < 0 as any ** 2;",
+        "array.lastIndexOf(value) < 0 satisfies boolean as any ** 2;",
+    ] {
+        let tsc = parse(src, SourceKind::Ts);
+        assert!(
+            tsc.diagnostics.iter().any(|d| d.code == 1005),
+            "{src}: {:?}",
+            tsc.diagnostics
+        );
+        let opts = crate::ParseOptions {
+            assertion_continues: true,
+            ..Default::default()
+        };
+        let r = crate::parse_with(src, SourceKind::Ts, opts);
+        assert!(r.diagnostics.is_empty(), "{src}: {:?}", r.diagnostics);
+        // One statement whose expression is `**` over the assertion.
+        let ast = &r.ast;
+        let ts_r_ast::Node::Program { stmts } = *ast.node(ast.root) else {
+            panic!()
+        };
+        let stmts = ast.list(stmts);
+        assert_eq!(stmts.len(), 1, "{}", ast.dump());
+        let ts_r_ast::Node::ExprStmt { expr } = *ast.node(stmts[0]) else {
+            panic!("{}", ast.dump())
+        };
+        let ts_r_ast::Node::Binary { left, op, .. } = *ast.node(expr) else {
+            panic!("{}", ast.dump())
+        };
+        assert_eq!(op, ts_r_ast::BinaryOp::Exp);
+        assert_eq!(ast.kind(left), NodeKind::As, "{}", ast.dump());
+    }
+    // Without a binary operator under the assertion both agree.
+    let ok = parse("x satisfies boolean as any ** 2;", SourceKind::Ts);
+    assert!(ok.diagnostics.is_empty(), "{:?}", ok.diagnostics);
+}
