@@ -30,8 +30,8 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-v1/resolve at 45ab2ad (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**854 of 881 compared cases pass (96.9%)**; 189 of the 1070 cases are skipped. Of the 27 failures, 13 are
+v1 build3 at 8a3356f (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**858 of 885 compared cases pass (96.9%)**; 185 of the 1070 cases are skipped. Of the 27 failures, 13 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
 artifacts; the other 6 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
@@ -40,13 +40,15 @@ spread arguments in DCE; top-level await in lazily initialized modules; CommonJS
 in order between inlined modules; top-level `this` is `exports` in a file without exports;
 top-level `let` / `const` / `class` become `var`; every CommonJS entry runs unwrapped; and
 `define` matches `import.meta`, optional chains and string keys. The runner now maps the
-tests' `Defines` lists to `--define`, so 9 more cases are compared (8 pass).
+tests' `Defines` lists to `--define`, so 9 more cases are compared (8 pass). At 8a3356f
+`--alias` and `--drop-labels` are implemented and the runner maps `PackageAliases` and
+`DropLabels`, so 4 more cases are compared (all pass).
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
 | bundler_css_test.go | 1 | 5 | 56 |
-| bundler_dce_test.go | 113 | 0 | 8 |
-| bundler_default_test.go | 243 | 1 | 59 |
+| bundler_dce_test.go | 115 | 0 | 6 |
+| bundler_default_test.go | 245 | 1 | 57 |
 | bundler_glob_test.go | 1 | 0 | 9 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
@@ -111,14 +113,13 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
 - **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
   the enum, so `c = d` with `d=b` refers to the member `b`; ts-r substitutes after.
 
-### Skipped (189)
+### Skipped (185)
 
 CSS bundling entries (44), `MangleProps` / `MangleQuoted` / `ReserveProps` (35), `Loader=copy`
 (19), `Loader=localcss` / `globalcss` (19), `InjectPaths` (17), nondeterministic (11), Go-only
 TypeScript options (10), `External.PostResolve` (8), `KeepNames` (8), `UnsupportedCSSFeatures`
 (7), cases sharing a Go variable (6), `OriginalTargetEnv` (5), no output path (4), `Defines`
-with call flags (`--pure`, 2), and 1-2 each for `DropLabels`, `PackageAliases`, Windows paths,
-stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
+with call flags (`--pure`, 2), and 1-2 each for Windows paths, stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -135,3 +136,4 @@ stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and
 | v1 build parity at e5b1e2c: DCE of dead `switch` cases and `@__NO_SIDE_EFFECTS__`, async lazy modules, CommonJS imports in order, top-level `this`, `let`/`const`/`class` to `var`, unwrapped CommonJS entries, `define` on `import.meta` / optional chains; runner maps `Defines` | 1070 | 881 | 851 | 30 | 189 | 96.6% |
 | v1 emit parity at 9293c3c: async `super` below ES2017 (optional `super` calls, `super` in nested class keys) | 1070 | 881 | 852 | 29 | 189 | 96.7% |
 | v1 resolve parity at 45ab2ad: tsconfig `extends` of a package through Yarn PnP's `.pnp.data.json` | 1070 | 881 | 854 | 27 | 189 | 96.9% |
+| v1 build3 at 8a3356f: `--alias`, `--drop-labels`; runner maps `PackageAliases` and `DropLabels` | 1070 | 885 | 858 | 27 | 185 | 96.9% |
