@@ -304,3 +304,4 @@ unicorn/prefer-string-slice
 unicorn/prefer-math-min-max
 unicorn/explicit-length-check
 unicorn/prefer-at
+unicorn/prefer-string-starts-ends-with

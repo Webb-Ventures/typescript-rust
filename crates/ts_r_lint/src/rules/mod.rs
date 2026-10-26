@@ -348,6 +348,7 @@ mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_string_slice;
+mod unicorn_prefer_string_starts_ends_with;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
@@ -737,6 +738,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_string_slice::RULE,
+    &unicorn_prefer_string_starts_ends_with::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,

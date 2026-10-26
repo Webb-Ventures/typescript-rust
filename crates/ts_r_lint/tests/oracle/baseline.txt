@@ -337,6 +337,7 @@ unicorn/prefer-number-coercion 60/60
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
 unicorn/prefer-string-slice 142/142
+unicorn/prefer-string-starts-ends-with 249/249
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112
 unicorn/prefer-type-literal-last 37/37
