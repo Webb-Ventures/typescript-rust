@@ -23,7 +23,8 @@
 //! no constructor functions) or with a computed key (`this[k]`), nested targets
 //! (`C.m.x = v`), `this.constructor = v`.
 
-use ts_r_ast::{Ast, JsDocTagKind, Modifiers, Node, NodeId, ParentMap, Span};
+use rustc_hash::{FxHashMap, FxHashSet};
+use ts_r_ast::{Ast, Atom, JsDocTagKind, Modifiers, Node, NodeId, ParentMap, Span};
 use ts_r_binder::{SymbolFlags, meaning};
 use ts_r_checker::{Checker, Loc};
 use ts_r_diagnostics::FileId;
@@ -50,6 +51,8 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
         return Some((Span::EMPTY, "a JSDoc @typedef"));
     }
     let parents = f.parents();
+    // Per class, the member names it declares (`(is static, name)`), built on first use.
+    let mut members: FxHashMap<NodeId, FxHashSet<(bool, &str)>> = FxHashMap::default();
     for raw in 1..=ast.node_count() as u32 {
         let Some(n) = NodeId::from_raw(raw) else {
             continue;
@@ -58,16 +61,15 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
             Node::ImportDecl { .. } if ast.is_jsdoc(n) => Some("a JSDoc @import"),
             Node::TypeAlias { .. } if ast.is_jsdoc(n) => Some("a JSDoc @typedef or @callback"),
             Node::Assign { left, right, .. } => {
-                assignment_target(c, file, ast, parents, left, right)
+                assignment_target(c, file, ast, parents, &mut members, left, right)
             }
             Node::Ident { name } if !ast.is_jsdoc(n) => {
                 let text = ast.atom(name);
                 // `module.exports` / `exports` read as the module object (no local of
                 // that name): a CommonJS pattern tsc declares.
                 ((text == "exports" || text == "module")
-                    && c.resolve_ident(Loc { file, node: n }, meaning::VALUE)
-                        .is_none()
-                    && !is_member_name(ast, parents, n))
+                    && !is_property_name(ast, parents, n)
+                    && is_module_object(c, file, n))
                 .then_some("a CommonJS module")
             }
             _ => None,
@@ -79,11 +81,58 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     None
 }
 
-/// `n` is the property name of a member access (`a.exports`), not a reference.
-fn is_member_name(ast: &Ast, parents: &ParentMap, n: NodeId) -> bool {
-    parents
-        .parent(n)
-        .is_some_and(|p| matches!(*ast.node(p), Node::Member { prop, .. } if prop == n))
+/// Identifier `n` is a name rather than a reference: a member access's property
+/// (`a.exports`), a property, method or member key (`{ module: 1 }`, `module() {}`), a
+/// renamed binding's key (`{ module: m }`), a label, a specifier's foreign name, an enum
+/// member, an import attribute key, a JSX attribute or a qualified name's right side.
+/// Shorthand properties and computed keys (`{ module }`, `[exports.k]`) are references.
+fn is_property_name(ast: &Ast, parents: &ParentMap, n: NodeId) -> bool {
+    let Some(p) = parents.parent(n) else {
+        return false;
+    };
+    match *ast.node(p) {
+        Node::Member { prop, .. } => prop == n,
+        Node::Property { key, .. }
+        | Node::PropertyDef { key, .. }
+        | Node::MethodDef { key, .. }
+        | Node::PropertySignature { key, .. }
+        | Node::MethodSignature { key, .. }
+        | Node::ImportAttribute { key, .. } => key == n,
+        Node::BindingProperty {
+            key,
+            value: Some(_),
+            ..
+        } => key == n,
+        Node::Labeled { label, .. } => label == n,
+        Node::Break { label } | Node::Continue { label } => label == Some(n),
+        Node::ImportSpecifier { imported, .. } => imported == Some(n),
+        Node::ExportSpecifier { exported, .. } => exported == Some(n),
+        Node::EnumMember { name, .. } | Node::JsxAttr { name, .. } => name == n,
+        Node::JsxNamespacedName { .. } => true,
+        Node::QualifiedName { right, .. } => right == n,
+        _ => false,
+    }
+}
+
+/// Identifier `n` (`module` or `exports`) is the CommonJS module object: it resolves to
+/// nothing, or only to a global variable or function declared ambiently in another file
+/// (`declare var module: NodeModule`, as @types/node declares it). A declaration in this
+/// file, or an import, is an ordinary local. The checker's rule for `require` and the
+/// module object (`is_commonjs_global`), restated with its public API.
+fn is_module_object(c: &Checker, file: FileId, n: NodeId) -> bool {
+    let Some(s) = c.resolve_ident(Loc { file, node: n }, meaning::VALUE) else {
+        return true;
+    };
+    let f = c.sym_flags(s);
+    if !f.intersects(SymbolFlags::FUNCTION | SymbolFlags::VARIABLE)
+        || f.intersects(SymbolFlags::ALIAS)
+    {
+        return false;
+    }
+    let Some(&d) = c.decls(s).first() else {
+        return false;
+    };
+    d.file != file && ts_r_checker::Ck::new(c, file).is_ambient_node(d)
 }
 
 /// The name a property access or a literal element access assigns (`o.x`, `o["x"]`), with
@@ -104,11 +153,12 @@ fn assigned_name(ast: &Ast, target: NodeId) -> Option<(NodeId, &str)> {
 /// (observed: tsc 7 declares a class's members from `this.x = v` in its constructor and
 /// methods, and a class's statics from `C.x = v`; a function's `this.x = v` and nested
 /// targets such as `C.m.x = v` declare nothing).
-fn assignment_target(
+fn assignment_target<'a>(
     c: &Checker,
     file: FileId,
-    ast: &Ast,
+    ast: &'a Ast,
     parents: &ParentMap,
+    members: &mut FxHashMap<NodeId, FxHashSet<(bool, &'a str)>>,
     target: NodeId,
     value: NodeId,
 ) -> Option<&'static str> {
@@ -120,7 +170,10 @@ fn assignment_target(
     match *ast.node(obj) {
         Node::This {} => {
             let (class, is_static) = this_class(ast, parents, obj)?;
-            if name == "constructor" || class_declares(ast, class, name, is_static) {
+            let declared = members
+                .entry(class)
+                .or_insert_with(|| member_names(ast, class));
+            if name == "constructor" || declared.contains(&(is_static, name)) {
                 return None;
             }
             // `this["x"] = v` is not written.
@@ -216,34 +269,41 @@ fn this_class(ast: &Ast, parents: &ParentMap, n: NodeId) -> Option<(NodeId, bool
     None
 }
 
-/// Class `class` declares a member named `name` (a property, method or accessor) on the
-/// side `is_static` says.
-fn class_declares(ast: &Ast, class: NodeId, name: &str, is_static: bool) -> bool {
-    let (Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. }) = *ast.node(class)
-    else {
-        return false;
+/// The members class `class` declares (properties, methods, accessors): `(is static, key)`.
+fn member_keys(ast: &Ast, class: NodeId) -> impl Iterator<Item = (bool, NodeId)> + '_ {
+    let members = match *ast.node(class) {
+        Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => ast.list(members),
+        _ => &[],
     };
-    ast.list(members).iter().any(|&m| {
-        let (key, modifiers) = match *ast.node(m) {
-            Node::PropertyDef { key, modifiers, .. } | Node::MethodDef { key, modifiers, .. } => {
-                (key, modifiers)
-            }
-            _ => return false,
-        };
-        modifiers.contains(Modifiers::STATIC) == is_static && ast.name_of(key) == Some(name)
+    members.iter().filter_map(|&m| match *ast.node(m) {
+        Node::PropertyDef { key, modifiers, .. } | Node::MethodDef { key, modifiers, .. } => {
+            Some((modifiers.contains(Modifiers::STATIC), key))
+        }
+        _ => None,
     })
 }
 
+/// The names class `class` declares as members, per side: `(is static, name)`.
+fn member_names(ast: &Ast, class: NodeId) -> FxHashSet<(bool, &str)> {
+    member_keys(ast, class)
+        .filter_map(|(is_static, key)| Some((is_static, ast.name_of(key)?)))
+        .collect()
+}
+
 /// One `this.x = v` a JavaScript class declares a property with: `(is static, name, the
-/// assignment's statement, its target)`.
-type ThisProperty = (bool, String, NodeId, NodeId);
+/// assignment's statement, its target, where the comments before that statement start)`.
+type ThisProperty = (bool, Atom, NodeId, NodeId, u32);
 
 /// The `this.x = v` assignments (`x` an identifier) in the constructor, methods, accessors
 /// and static blocks of `members` (arrow functions included, nested functions and classes
 /// not), first assignment of each name per side, in source order: the binder's this
-/// properties of a JavaScript class.
+/// properties of a JavaScript class. One pass: names seen are kept in a set, and the start
+/// of each statement's leading comments (the end of the statement before it in its block,
+/// else the block's start) is noted while its block is visited.
 fn this_assignments(ast: &Ast, parents: &ParentMap, members: &[NodeId]) -> Vec<ThisProperty> {
     let mut out: Vec<ThisProperty> = Vec::new();
+    let mut seen: FxHashSet<(bool, Atom)> = FxHashSet::default();
+    let mut comments_from: FxHashMap<NodeId, u32> = FxHashMap::default();
     let mut stack: Vec<NodeId> = Vec::new();
     for &m in members {
         let (is_static, body) = match *ast.node(m) {
@@ -266,6 +326,13 @@ fn this_assignments(ast: &Ast, parents: &ParentMap, members: &[NodeId]) -> Vec<T
                 | Node::FunctionExpr { .. }
                 | Node::ClassDecl { .. }
                 | Node::ClassExpr { .. } => continue,
+                Node::Block { stmts } => {
+                    let mut prev = ast.span(n).start;
+                    for &st in ast.list(stmts) {
+                        comments_from.insert(st, prev);
+                        prev = ast.span(st).end;
+                    }
+                }
                 Node::Assign {
                     op: ts_r_ast::AssignOp::Assign,
                     left,
@@ -274,15 +341,18 @@ fn this_assignments(ast: &Ast, parents: &ParentMap, members: &[NodeId]) -> Vec<T
                     if let Node::Member { obj, prop, .. } = *ast.node(left)
                         && matches!(ast.node(obj), Node::This {})
                         && let Node::Ident { name } = *ast.node(prop)
+                        && seen.insert((is_static, name))
                     {
-                        let name = ast.atom(name).to_owned();
-                        if !out.iter().any(|o| o.0 == is_static && o.1 == name) {
-                            let stmt = parents
-                                .parent(n)
-                                .filter(|&p| matches!(ast.node(p), Node::ExprStmt { .. }))
-                                .unwrap_or(n);
-                            out.push((is_static, name, stmt, left));
-                        }
+                        let parent = parents.parent(n);
+                        let stmt = parent
+                            .filter(|&p| matches!(ast.node(p), Node::ExprStmt { .. }))
+                            .unwrap_or(n);
+                        let from = comments_from.get(&stmt).copied().unwrap_or_else(|| {
+                            parents
+                                .parent(stmt)
+                                .map_or(ast.span(stmt).start, |p| ast.span(p).start)
+                        });
+                        out.push((is_static, name, stmt, left, from));
                     }
                 }
                 _ => {}
@@ -293,6 +363,17 @@ fn this_assignments(ast: &Ast, parents: &ParentMap, members: &[NodeId]) -> Vec<T
         }
     }
     out
+}
+
+/// The identifier and string names class `class` declares as members, per side, as atoms.
+fn member_atoms(ast: &Ast, class: NodeId) -> FxHashSet<(bool, Atom)> {
+    member_keys(ast, class)
+        .filter_map(|(is_static, key)| match *ast.node(key) {
+            Node::Ident { name } => Some((is_static, name)),
+            Node::StringLit { value } => Some((is_static, value)),
+            _ => None,
+        })
+        .collect()
 }
 
 impl super::Emitter<'_, '_> {
@@ -310,8 +391,10 @@ impl super::Emitter<'_, '_> {
         };
         let instance = self.ck.declared_type_of_symbol(sym);
         let constructor = self.ck.type_of_symbol(sym);
-        for (is_static, name, stmt, target) in props {
-            if name == "constructor" || class_declares(&self.ast, class, &name, is_static) {
+        let declared = member_atoms(&self.ast, class);
+        for (is_static, atom, stmt, target, comments_from) in props {
+            let name = self.ast.atom(atom).to_owned();
+            if name == "constructor" || declared.contains(&(is_static, atom)) {
                 continue;
             }
             let owner = if is_static { constructor } else { instance };
@@ -319,9 +402,8 @@ impl super::Emitter<'_, '_> {
                 continue;
             };
             // The statement's own JSDoc, on a line of its own.
-            let prev = self.previous_statement_end(stmt);
             self.last_written_end = None;
-            self.leading_comments(stmt, prev);
+            self.leading_comments(stmt, comments_from);
             if is_static {
                 self.w("static ");
             }
@@ -343,22 +425,5 @@ impl super::Emitter<'_, '_> {
             self.w(";");
             self.nl();
         }
-    }
-
-    /// Where the comments before statement `s` start: the end of the statement before it
-    /// in its block, else the block's start.
-    fn previous_statement_end(&self, s: NodeId) -> u32 {
-        let Some(block) = self.parents.parent(s) else {
-            return self.ast.span(s).start;
-        };
-        if let Node::Block { stmts } = *self.ast.node(block) {
-            let list = self.ast.list(stmts);
-            if let Some(i) = list.iter().position(|&x| x == s)
-                && i > 0
-            {
-                return self.ast.span(list[i - 1]).end;
-            }
-        }
-        self.ast.span(block).start
     }
 }
