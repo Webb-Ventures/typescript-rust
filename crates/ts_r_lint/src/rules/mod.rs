@@ -347,6 +347,7 @@ mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_canvas_to_image;
 mod unicorn_no_chained_comparison;
 mod unicorn_no_collection_bracket_access;
+mod unicorn_no_computed_property_existence_check;
 mod unicorn_no_conflicting_constraints;
 mod unicorn_no_confusing_array_with;
 mod unicorn_no_console_spaces;
@@ -366,6 +367,7 @@ mod unicorn_no_incomplete_accessor_override;
 mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
+mod unicorn_no_invalid_character_comparison;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_property_descriptor;
 mod unicorn_no_invalid_remove_event_listener;
@@ -416,6 +418,7 @@ mod unicorn_no_useless_collection_argument;
 mod unicorn_no_useless_compound_assignment;
 mod unicorn_no_useless_concat;
 mod unicorn_no_useless_continue;
+mod unicorn_no_useless_delete_check;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_fallback_in_spread;
 mod unicorn_no_useless_length_check;
@@ -441,6 +444,7 @@ mod unicorn_prefer_array_last_methods;
 mod unicorn_prefer_array_slice;
 mod unicorn_prefer_array_some;
 mod unicorn_prefer_at;
+mod unicorn_prefer_await;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_boolean_return;
@@ -902,6 +906,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
     &unicorn_no_chained_comparison::RULE,
+    &unicorn_no_computed_property_existence_check::RULE,
     &unicorn_no_confusing_array_with::RULE,
     &unicorn_no_array_method_this_argument::RULE,
     &unicorn_no_conflicting_constraints::RULE,
@@ -922,6 +927,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_incorrect_template_string_interpolation::RULE,
     &unicorn_no_impossible_length_comparison::RULE,
     &unicorn_no_instanceof_builtins::RULE,
+    &unicorn_no_invalid_character_comparison::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_late_current_target_access::RULE,
@@ -969,6 +975,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_collection_argument::RULE,
     &unicorn_no_useless_concat::RULE,
     &unicorn_no_useless_continue::RULE,
+    &unicorn_no_useless_delete_check::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_override::RULE,
     &unicorn_no_useless_re_export::RULE,
@@ -988,6 +995,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_array_from_range::RULE,
     &unicorn_prefer_array_slice::RULE,
     &unicorn_prefer_array_last_methods::RULE,
+    &unicorn_prefer_await::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_block_statement_over_iife::RULE,
     &unicorn_prefer_at::RULE,

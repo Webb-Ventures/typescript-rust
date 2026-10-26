@@ -109,3 +109,97 @@ pub(crate) fn global_value_available(cx: &Ctx<'_, '_>, at: NodeId, name: &str) -
         None => true,
     }
 }
+
+/// `id` without parentheses and TS expression wrappers.
+pub(crate) fn unwrap_ts_and_parens(ast: &Ast, mut id: NodeId) -> NodeId {
+    for _ in 0..100_000 {
+        match *ast.node(id) {
+            Node::Paren { expr }
+            | Node::As { expr, .. }
+            | Node::Satisfies { expr, .. }
+            | Node::NonNull { expr }
+            | Node::TypeAssertion { expr, .. }
+            | Node::Instantiation { expr, .. } => id = expr,
+            _ => return id,
+        }
+    }
+    id
+}
+
+/// An optional link in the chain `id` ends (TS wrappers and parentheses looked through).
+pub(crate) fn has_optional_chain_element(ast: &Ast, mut id: NodeId) -> bool {
+    for _ in 0..100_000 {
+        id = unwrap_ts_and_parens(ast, id);
+        match *ast.node(id) {
+            Node::Member { obj, optional, .. } | Node::Index { obj, optional, .. } => {
+                if optional {
+                    return true;
+                }
+                id = obj;
+            }
+            Node::Call {
+                callee, optional, ..
+            } => {
+                if optional {
+                    return true;
+                }
+                id = callee;
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
+/// `reindentText`: every line after the first that starts with `from` gets `to` in its
+/// place; blank lines become empty; other lines and the line breaks are kept.
+pub(crate) fn reindent_text(text: &str, from: &str, to: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut first = true;
+    for _ in 0..text.len() + 1 {
+        let brk = rest.char_indices().find(|&(_, c)| is_line_break(c));
+        let (line, next) = match brk {
+            Some((i, c)) => {
+                let len = if rest[i..].starts_with("\r\n") {
+                    2
+                } else {
+                    c.len_utf8()
+                };
+                (&rest[..i], Some((&rest[i..i + len], &rest[i + len..])))
+            }
+            None => (rest, None),
+        };
+        if first {
+            out.push_str(line);
+            first = false;
+        } else if line.trim().is_empty() {
+        } else if let Some(stripped) = line.strip_prefix(from) {
+            out.push_str(to);
+            out.push_str(stripped);
+        } else {
+            out.push_str(line);
+        }
+        let Some((brk, after)) = next else {
+            break;
+        };
+        out.push_str(brk);
+        rest = after;
+    }
+    out
+}
+
+/// The text before `pos` on its line, when it is only whitespace (`pos` starts its line).
+pub(crate) fn indent_if_line_start(src: &str, pos: usize) -> Option<&str> {
+    let start = src[..pos]
+        .char_indices()
+        .rev()
+        .find(|&(_, c)| is_line_break(c))
+        .map_or(0, |(i, c)| i + c.len_utf8());
+    let before = &src[start..pos];
+    before.trim().is_empty().then_some(before)
+}

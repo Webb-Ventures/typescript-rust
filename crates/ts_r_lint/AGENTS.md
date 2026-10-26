@@ -1751,20 +1751,46 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   (`isBoolean`, typed or inferred) is skipped. The `a < b && b < c` suggestion needs both
   operators of the same kind, a plain middle without side effects, and a spot where the
   `&&` can't be captured by an operator around it.
+- **no-invalid-character-comparison**: one character of a provable string (`charAt`/`at`
+  with at most one argument, `s[k]` with a numeric literal or canonical index string)
+  compared for equality with a static string longer than one UTF-16 unit.
+- **no-computed-property-existence-check**: `object[key]` in a truthiness position (looked
+  at from its outermost TS wrapper) and `key in object` with a non-static key; boolean-typed
+  accesses and `Map`/`Set`/`WeakMap`/`WeakSet`/string receivers are skipped. The
+  `Object.hasOwn()` suggestion needs a plain access (no wrapper, no optional link, no
+  `super`) and, for `in`, names or `this` on both sides.
+- **no-useless-delete-check**: `if (k in o) delete o[k]` on a known object (static object
+  value, object-like `const` initializer, or an `object`/function/constructor type
+  annotation) is a suggestion; `if (m.has(k)) m.delete(k)` on a `const` from a global
+  collection constructor is a fix. Keys match as the same reference that can't need a
+  repeated coercion, or as equal static keys; test operands must be free of side effects
+  with getters counted.
+- **prefer-await**: every `.then/.catch/.finally` call (static computed names included) not
+  discarded with `void`; there is no type information, so no receiver is known not to be a
+  promise. The async-IIFE suggestion follows the plugin's indentation rules (first body
+  line, else one level deeper than the nearest line-starting ancestor, else the file's
+  indent unit). 109/110: `promise.then(await => await)` in a `.ts` file is a parse error in
+  ts_r_parser (`await` as an arrow parameter outside a module), not a rule gap.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
-  identifier searches, joining fixes, and `global_value_available` (type-only bindings
-  don't shadow a global value).
+  identifier searches, joining fixes, `global_value_available` (type-only bindings
+  don't shadow a global value), optional-chain and TS-wrapper unwrapping,
+  `reindent_text` (`reindentText`) and `indent_if_line_start`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
 `prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`,
-`no-negated-comparison.js`, `no-chained-comparison.js`;
+`no-negated-comparison.js`, `no-chained-comparison.js`, `no-invalid-character-comparison.js`,
+`no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
 `comments.js`, `comparison.js`, `is-logical-expression.js`,
-`get-unparenthesized-keyword-argument-parent.js`; `rules/fix/remove-statement.js`,
+`get-unparenthesized-keyword-argument-parent.js`, `boolean.js`, `unwrap-typescript-expression.js`,
+`has-optional-chain-element.js`, `get-const-variable-initializer.js`, `single-statement.js`,
+`is-same-reference.js`, `is-promise-type.js`, `is-call-expression-value-discarded-with-void.js`,
+`contains-suspension-point.js`, `get-references.js`, `get-indent-string.js`, `get-indent-unit.js`,
+`get-line-indent.js`, `reindent-text.js`; `rules/fix/remove-statement.js`,
 `add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
 `rules/shared/nullish-check.js`. ESLint docs for `operator-assignment` and
 `logical-assignment-operators`.

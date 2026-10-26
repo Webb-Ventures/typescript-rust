@@ -308,6 +308,7 @@ unicorn/no-break-in-nested-loop 24/24
 unicorn/no-canvas-to-image 41/41
 unicorn/no-chained-comparison 126/126
 unicorn/no-collection-bracket-access 129/129
+unicorn/no-computed-property-existence-check 137/137
 unicorn/no-conflicting-constraints 61/61
 unicorn/no-confusing-array-with 49/49
 unicorn/no-console-spaces 86/86
@@ -326,6 +327,7 @@ unicorn/no-impossible-length-comparison 77/77
 unicorn/no-incorrect-template-string-interpolation 59/59
 unicorn/no-ineffective-csp-directives 40/40
 unicorn/no-instanceof-builtins 175/175
+unicorn/no-invalid-character-comparison 115/115
 unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-invalid-well-known-symbol-methods 57/57
@@ -373,6 +375,7 @@ unicorn/no-useless-collection-argument 67/67
 unicorn/no-useless-compound-assignment 79/79
 unicorn/no-useless-concat 69/69
 unicorn/no-useless-continue 43/43
+unicorn/no-useless-delete-check 125/125
 unicorn/no-useless-error-capture-stack-trace 53/53
 unicorn/no-useless-fallback-in-spread 61/61
 unicorn/no-useless-length-check 165/165
@@ -398,6 +401,7 @@ unicorn/prefer-array-last-methods 43/43
 unicorn/prefer-array-slice 61/61
 unicorn/prefer-array-some 377/377
 unicorn/prefer-at 482/482
+unicorn/prefer-await 109/110
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-boolean-return 71/71
