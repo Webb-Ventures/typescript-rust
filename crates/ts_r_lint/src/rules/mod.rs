@@ -294,15 +294,7 @@ mod unicorn_error_message;
 mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
 mod unicorn_new_for_builtins;
-mod unicorn_no_array_concat_in_loop;
-mod unicorn_no_array_reverse;
-mod unicorn_no_array_sort;
-mod unicorn_no_asterisk_prefix_in_documentation_comments;
-mod unicorn_no_async_promise_finally;
-mod unicorn_no_await_in_promise_methods;
-mod unicorn_no_break_in_nested_loop;
-mod unicorn_no_canvas_to_image;
-mod unicorn_no_confusing_array_with;
+mod unicorn_no_array_method_this_argument;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
@@ -692,15 +684,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_escape_case::RULE,
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
-    &unicorn_no_array_concat_in_loop::RULE,
-    &unicorn_no_array_reverse::RULE,
-    &unicorn_no_array_sort::RULE,
-    &unicorn_no_asterisk_prefix_in_documentation_comments::RULE,
-    &unicorn_no_async_promise_finally::RULE,
-    &unicorn_no_await_in_promise_methods::RULE,
-    &unicorn_no_break_in_nested_loop::RULE,
-    &unicorn_no_canvas_to_image::RULE,
-    &unicorn_no_confusing_array_with::RULE,
+    &unicorn_no_array_method_this_argument::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,

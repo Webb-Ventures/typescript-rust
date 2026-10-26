@@ -283,15 +283,7 @@ unicorn/error-message 106/106
 unicorn/escape-case 198/198
 unicorn/explicit-length-check 224/224
 unicorn/new-for-builtins 366/366
-unicorn/no-array-concat-in-loop 33/33
-unicorn/no-array-reverse 28/28
-unicorn/no-array-sort 76/76
-unicorn/no-asterisk-prefix-in-documentation-comments 56/56
-unicorn/no-async-promise-finally 39/39
-unicorn/no-await-in-promise-methods 110/111
-unicorn/no-break-in-nested-loop 24/24
-unicorn/no-canvas-to-image 41/41
-unicorn/no-confusing-array-with 49/49
+unicorn/no-array-method-this-argument 137/137
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
