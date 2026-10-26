@@ -54,8 +54,10 @@ pub fn assign(g: &Graph, l: &Link, minify: bool) -> CssNames {
             .iter()
             .map(|local| {
                 if minify {
-                    let n =
-                        ts_r_minify::rename::next_free_name(&mut cursor, &|c| taken.contains(c));
+                    let n = ts_r_minify::rename::next_free_name(&mut cursor, &|c| {
+                        // `$` is not a CSS name character.
+                        taken.contains(c) || c.contains('$')
+                    });
                     taken.insert(n.clone());
                     return n;
                 }

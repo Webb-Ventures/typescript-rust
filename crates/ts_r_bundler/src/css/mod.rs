@@ -7,6 +7,7 @@
 //! decoded: reference targets, local names, `@import` conditions. Behaviour follows
 //! esbuild's documented and observed output (its `bundler_css_test.go` cases as data).
 
+pub mod color;
 pub mod lexer;
 pub mod link;
 pub mod order;
@@ -183,6 +184,7 @@ pub fn parse(src: Arc<str>, mode: NameMode) -> Sheet {
         local_ids: FxHashMap::default(),
         mode,
         depth: 0,
+        compose_target: None,
         too_deep: false,
     };
     for w in warnings {
@@ -205,6 +207,9 @@ struct Parser {
     sheet: Sheet,
     local_ids: FxHashMap<String, u32>,
     mode: NameMode,
+    /// The class a `composes` in the current rule applies to (a nested rule whose selector
+    /// is empty or `&` composes for its parent).
+    compose_target: Option<u32>,
     depth: usize,
     too_deep: bool,
 }
@@ -421,7 +426,20 @@ impl Parser {
                     match block {
                         Some(Cv::Block { items: body, .. }) => {
                             seen_rule = true;
-                            let prelude = self.selector(trim(&items).to_vec());
+                            // The mode a selector ends in holds for its body too
+                            // (`.a :global { animation: x }` names a global animation).
+                            let (prelude, mode) = self.selector(trim(&items).to_vec());
+                            let target = match trim(&prelude) {
+                                [Cv::Local { name, prefix: b'.' }] => Some(*name),
+                                [] => self.compose_target,
+                                [Cv::Tok(t)] if t.t == T::Delim && self.text(t) == "&" => {
+                                    self.compose_target
+                                }
+                                _ => None,
+                            };
+                            let saved = (self.mode, self.compose_target);
+                            self.mode = mode;
+                            self.compose_target = target;
                             self.depth += 1;
                             let body = if self.depth > MAX_DEPTH {
                                 Vec::new()
@@ -429,8 +447,15 @@ impl Parser {
                                 self.rules(body, false)
                             };
                             self.depth -= 1;
-                            let body = self.rule_composes(&prelude, body);
-                            out.push(Node::Rule { prelude, body });
+                            let body = self.rule_composes(body);
+                            (self.mode, self.compose_target) = saved;
+                            // A nested rule with nothing left of its selector (`:global`)
+                            // is its parent's (observed in esbuild).
+                            if !top && trim(&prelude).is_empty() {
+                                out.extend(body);
+                            } else {
+                                out.push(Node::Rule { prelude, body });
+                            }
                         }
                         _ if top => {
                             if let Some(Cv::Tok(t)) = items.first() {
@@ -511,11 +536,11 @@ impl Parser {
     /// A selector with local names resolved: `.x` and `#x` become [`Cv::Local`] in local
     /// mode, `:local(...)` / `:global(...)` and bare `:local` / `:global` switch the mode
     /// and are removed.
-    fn selector(&mut self, prelude: Vec<Cv>) -> Vec<Cv> {
+    fn selector(&mut self, prelude: Vec<Cv>) -> (Vec<Cv>, NameMode) {
         let mut out = Vec::with_capacity(prelude.len());
         let mut mode = self.mode;
         self.selector_into(prelude, &mut mode, &mut out);
-        out
+        (out, mode)
     }
 
     fn selector_into(&mut self, items: Vec<Cv>, mode: &mut NameMode, out: &mut Vec<Cv>) {
@@ -850,17 +875,14 @@ impl Parser {
         Some(Node::Import(idx))
     }
 
-    /// Moves `composes` declarations of a rule out of its body (local mode).
-    fn rule_composes(&mut self, prelude: &[Cv], body: Vec<Node>) -> Vec<Node> {
+    /// Moves `composes` declarations of a rule out of its body, for the class
+    /// `compose_target` names (only a single class selector may compose).
+    fn rule_composes(&mut self, body: Vec<Node>) -> Vec<Node> {
         let has = body.iter().any(|n| matches!(n, Node::Decl { name, .. } if self.text(name).eq_ignore_ascii_case("composes")));
         if !has {
             return body;
         }
-        // Only a single class selector may compose.
-        let class = match trim(prelude) {
-            [Cv::Local { name, prefix: b'.' }] => Some(*name),
-            _ => None,
-        };
+        let class = self.compose_target;
         let mut out = Vec::with_capacity(body.len());
         for n in body {
             match n {
@@ -914,9 +936,14 @@ impl Parser {
                 _ => {}
             }
         }
-        if from == ComposeFrom::Local && self.mode == NameMode::Local {
-            for n in &names {
-                self.local(n);
+        if from == ComposeFrom::Local {
+            if self.mode == NameMode::Local {
+                for n in &names {
+                    self.local(n);
+                }
+            } else {
+                // `:global { composes: a }` composes global names.
+                from = ComposeFrom::Global;
             }
         }
         self.sheet.composes.push(Compose {
@@ -1085,6 +1112,24 @@ mod tests {
         let s = p(".a, .b { composes: c; }", NameMode::Local);
         assert!(s.composes.is_empty());
         assert!(!s.messages.is_empty());
+    }
+
+    #[test]
+    fn selector_mode_holds_for_the_body_and_nested_composes() {
+        // `.b :global` makes `y` a global animation; `:global { ... }` nested in `.a` (global `x`) is
+        // `.a`'s own body, and its `composes` names global classes, recorded before `.a`'s.
+        let s = p(
+            ".a { composes: c; :global { composes: G; animation: x } } .b :global { animation: y } .c {}",
+            NameMode::Local,
+        );
+        assert_eq!(s.locals, ["a", "c", "b"]);
+        assert_eq!(s.composes.len(), 2);
+        assert!(matches!(s.composes[0].from, ComposeFrom::Global));
+        assert_eq!(s.composes[0].names, ["G"]);
+        let Node::Rule { body, .. } = &s.rules[0] else {
+            panic!()
+        };
+        assert!(matches!(&body[..], [Node::Decl { .. }]));
     }
 
     #[test]

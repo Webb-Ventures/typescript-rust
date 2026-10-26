@@ -37,6 +37,7 @@ and a dependency's dynamic `import()` of a stylesheet stays external as the serv
 original file, through `BuildOptions::dynamic_import_url`, as Vite does);
 `css/` is the stylesheet side: `lexer.rs` (CSS Syntax tokens, escapes, quoting), `mod.rs`
 (rules, `@import`/`url()`/`composes` records, local names for `local-css`), `print.rs`,
+`color.rs` (shortest colors for `--minify-syntax`; the CSS named-color table),
 `order.rs` (`@import` expansion, duplicates, layers, one stylesheet per chunk) and
 `link.rs` (final local names, `composes` class lists, reference errors);
 `data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
@@ -179,8 +180,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   fewer conditions, leaving an `@layer` statement only where layer order needs it (the
   rules are in `css/order.rs`). External `@import`s go first; only the first file's leading
   `@layer` statements go above them. A leading `@charset` becomes `@charset "UTF-8";` at
-  the top, a later one stays. `--minify-syntax` drops a rule or declaration an identical
-  later one repeats. Parsing never fails: malformed CSS gives warnings, nesting deeper than
+  the top, a later one stays. `composes ... from "file"` orders that file like an
+  `@import`. The `:global` / `:local` mode a selector ends in holds for its body, and a
+  nested rule left with no selector (`:global { ... }`) is its parent's body.
+  `--minify-syntax` shortens colors in color properties and drops a rule or declaration an
+  identical later one repeats. Parsing never fails: malformed CSS gives warnings, nesting deeper than
   128 levels an error. Minified identifiers use our own name sequence, not esbuild's
   frequency order.
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that

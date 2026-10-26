@@ -116,18 +116,35 @@ impl Walk<'_> {
         if !leading.is_empty() && sheet.rules.iter().any(|n| matches!(n, Node::Import(_))) {
             self.items.push(Item::Layers(leading, chain.clone(), true));
         }
-        for imp in &sheet.imports {
-            let c = &imp.conditions;
-            let cond = Cond {
-                layer: c.layer.as_ref().map(|l| p.values_text(l)),
-                supports: c.supports.as_ref().map(|s| p.values_text(s)),
-                media: p.values_text(&c.media),
-            };
+        // `@import`s and the files `composes ... from` names (as unconditional imports,
+        // observed in esbuild), in source order.
+        let mut imports = sheet.imports.iter().peekable();
+        for (r, rec) in sheet.records.iter().enumerate() {
+            let r = r as u32;
             let mut next = chain.clone();
-            if !(cond.layer.is_none() && cond.supports.is_none() && cond.media.is_empty()) {
-                next.push(cond);
+            match rec.kind {
+                super::RecKind::Import => {
+                    let Some(imp) = imports.next_if(|i| i.record == r) else {
+                        continue;
+                    };
+                    let c = &imp.conditions;
+                    let cond = Cond {
+                        layer: c.layer.as_ref().map(|l| p.values_text(l)),
+                        supports: c.supports.as_ref().map(|s| p.values_text(s)),
+                        media: p.values_text(&c.media),
+                    };
+                    if !(cond.layer.is_none() && cond.supports.is_none() && cond.media.is_empty()) {
+                        next.push(cond);
+                    }
+                }
+                super::RecKind::Composes => {
+                    if !matches!(host.target(m, r), Target::Module(_)) {
+                        continue;
+                    }
+                }
+                super::RecKind::Url => continue,
             }
-            match host.target(m, imp.record) {
+            match host.target(m, r) {
                 Target::Module(t) => {
                     if host.sheet(t).is_some() {
                         self.visit(t, next);
@@ -615,7 +632,7 @@ mod tests {
                 "@import 'p.css'; a { x: 1; x: 2; x: 1 } p { color: blue } @media s { & a { y: z } } @media s { a { y: z } }",
                 true
             ),
-            "@charset \"UTF-8\";a{x:2;x:1}p{color:blue}@media s{a{y:z}}\n"
+            "@charset \"UTF-8\";a{x:2;x:1}p{color:#00f}@media s{a{y:z}}\n"
         );
     }
 
