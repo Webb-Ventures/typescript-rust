@@ -153,7 +153,7 @@ fn has_multiline_token(cx: &Ctx<'_, '_>, root: NodeId) -> bool {
 
 /// Moves every later line of `text` from `from` indentation to `to`; blank lines become
 /// empty. Line breaks are kept.
-fn reindent(text: &str, from: &str, to: &str) -> String {
+pub(super) fn reindent(text: &str, from: &str, to: &str) -> String {
     let mut out = String::with_capacity(text.len() + 16);
     let mut first = true;
     let mut rest = text;

@@ -563,6 +563,7 @@ mod unicorn_prefer_continue;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_default_parameters;
 mod unicorn_prefer_direct_iteration;
+mod unicorn_prefer_dispose;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
@@ -739,6 +740,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_manually_wrapped_comments::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_no_unsafe_dom_html::RULE,
+    &unicorn_prefer_dispose::RULE,
     &unicorn_prefer_import_meta_properties::RULE,
     &unicorn_prefer_iterator_concat::RULE,
     &unicorn_prefer_json_import::RULE,
