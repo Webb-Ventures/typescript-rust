@@ -283,6 +283,7 @@ mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
+mod unicorn_explicit_timer_delay;
 mod unicorn_length_or_infinity;
 mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
@@ -324,6 +325,7 @@ mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener_options;
+mod unicorn_prefer_array_slice;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
@@ -342,6 +344,7 @@ mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
+mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
 mod unicorn_static;
 mod unicorn_text;
@@ -656,6 +659,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,
+    &unicorn_explicit_timer_delay::RULE,
     &unicorn_max_nested_calls::RULE,
     &unicorn_new_for_builtins::RULE,
     &unicorn_no_array_concat_in_loop::RULE,
@@ -696,6 +700,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
+    &unicorn_prefer_array_slice::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,
@@ -714,6 +719,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
+    &unicorn_require_array_sort_compare::RULE,
     &unicorn_require_css_escape::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,

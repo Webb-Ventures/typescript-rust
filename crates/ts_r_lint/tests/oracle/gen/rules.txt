@@ -313,3 +313,6 @@ unicorn/prefer-identifier-import-export-specifiers
 unicorn/consistent-existence-index-check
 unicorn/no-unnecessary-nested-ternary
 unicorn/require-css-escape
+unicorn/explicit-timer-delay
+unicorn/require-array-sort-compare
+unicorn/prefer-array-slice

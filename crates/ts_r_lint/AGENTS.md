@@ -656,7 +656,9 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `utils/should-add-parentheses-to-comparison.js`, `utils/get-precedence.js`,
 `no-unnecessary-nested-ternary.js`, `utils/should-add-parentheses-to-logical-expression-child.js`,
 `utils/should-add-parentheses-to-conditional-expression-child.js`, `require-css-escape.js`,
-`utils/is-node-value-not-dom-node.js`.
+`utils/is-node-value-not-dom-node.js`, `explicit-timer-delay.js`,
+`require-array-sort-compare.js`, `fix/append-argument.js`, `fix/replace-argument.js`,
+`prefer-array-slice.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:
