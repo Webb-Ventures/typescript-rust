@@ -291,12 +291,12 @@ unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
 unicorn/no-empty-file 58/58
 unicorn/no-exports-in-scripts 22/22
-unicorn/no-for-each 431/431
-unicorn/no-for-loop 276/276
+unicorn/no-global-object-property-assignment 34/34
+unicorn/no-incorrect-template-string-interpolation 59/59
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
-unicorn/no-late-current-target-access 49/49
+unicorn/no-invalid-well-known-symbol-methods 57/57
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
 unicorn/no-negated-condition 134/134

@@ -300,12 +300,12 @@ mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
 mod unicorn_no_empty_file;
 mod unicorn_no_exports_in_scripts;
-mod unicorn_no_for_each;
-mod unicorn_no_for_loop;
+mod unicorn_no_global_object_property_assignment;
+mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
-mod unicorn_no_late_current_target_access;
+mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_negated_condition;
@@ -690,12 +690,12 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_empty_file::RULE,
     &unicorn_no_exports_in_scripts::RULE,
-    &unicorn_no_for_each::RULE,
-    &unicorn_no_for_loop::RULE,
+    &unicorn_no_global_object_property_assignment::RULE,
+    &unicorn_no_incorrect_template_string_interpolation::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
-    &unicorn_no_late_current_target_access::RULE,
+    &unicorn_no_invalid_well_known_symbol_methods::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_negated_condition::RULE,

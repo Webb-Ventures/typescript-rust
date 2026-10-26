@@ -42,7 +42,7 @@ pub(crate) fn static_string(ast: &Ast, id: NodeId) -> Option<String> {
 }
 
 /// The static name of a member access: `a.b`, `a["b"]`, `a[0]`, `a[`b`]`.
-fn static_property_name(cx: &Ctx<'_, '_>, id: NodeId) -> Option<String> {
+pub(crate) fn static_property_name(cx: &Ctx<'_, '_>, id: NodeId) -> Option<String> {
     match *cx.node(id) {
         Node::Member { prop, .. } => match *cx.node(prop) {
             Node::Ident { name } => Some(cx.ast().atom(name).to_owned()),
