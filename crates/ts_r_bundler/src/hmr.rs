@@ -282,7 +282,7 @@ impl DepBundle {
         let mut per_request = Vec::with_capacity(deps.len());
         let mut real_files = Vec::new();
         for dep in deps {
-            let file = path::normalize_slashes(&dep.file.to_string_lossy());
+            let file = plain_file(dep.file);
             let file = self.fs.realpath(&file);
             if let Some(&i) = entry_of_file.get(&file) {
                 per_request.push(i);
@@ -479,7 +479,7 @@ impl DepBundler for DepBundle {
         dep: &DepRequest<'_>,
         source: &str,
     ) -> Result<TransformOutput, TransformError> {
-        let file = path::normalize_slashes(&dep.file.to_string_lossy());
+        let file = plain_file(dep.file);
         let file = self.fs.realpath(&file);
         let dir = path::directory_of(&file).to_owned();
         let esm = self.is_esm(&file, source);
@@ -618,9 +618,30 @@ impl FileSystem for Overlay {
     }
 }
 
+/// A request's file with `/` separators and without a Windows verbatim prefix, so it shares a
+/// prefix with the serve root ([`DepBundle::serve_root`]) and the resolver's paths.
+fn plain_file(file: &std::path::Path) -> String {
+    let file = ts_r_hmr::paths::strip_verbatim(file.to_path_buf());
+    path::normalize_slashes(&file.to_string_lossy())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Windows CI: a request for `\\?\D:\x\pkg\index.js` (what `fs::canonicalize`
+    /// returns) imported `/@ts-r/up/9/D:/%5C/x/...` instead of `/x/...` under a plain root.
+    #[test]
+    fn verbatim_request_files_lose_their_prefix() {
+        assert_eq!(
+            plain_file(std::path::Path::new(r"\\?\D:\x\pkg\index.js")),
+            "D:/x/pkg/index.js"
+        );
+        assert_eq!(
+            plain_file(std::path::Path::new("/x/index.js")),
+            "/x/index.js"
+        );
+    }
 
     #[test]
     fn facade_exports() {

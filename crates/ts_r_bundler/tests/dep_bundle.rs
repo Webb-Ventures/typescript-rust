@@ -420,7 +420,7 @@ fn esm_package_with_only_a_dynamic_css_import() {
         "node_modules/@vitejs/test-pkg/pkg.css",
         ".pkg { color: red }\n",
     );
-    let project = std::fs::canonicalize(&project).expect("canonical project");
+    let project = ts_r_hmr::paths::canonicalize(&project).expect("canonical project");
     let entry = project.join("node_modules/@vitejs/test-pkg/index.js");
     let request = DepRequest {
         specifier: "@vitejs/test-pkg",

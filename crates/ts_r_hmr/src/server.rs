@@ -3034,7 +3034,6 @@ pub(crate) fn cached_transform(
         TransformCache::key(&cache_id, Mode::Dev, input.id, &content)
     };
     let key = key_for(&watch_deps);
-    let mut ran_watch: Option<Vec<PathBuf>> = None;
     let output = shared.cache.get_or_insert_rekeyed(key, || {
         let mut added = Vec::new();
         let out = run_transform(
@@ -3068,12 +3067,13 @@ pub(crate) fn cached_transform(
             }
         }
         let rekey = key_for(&deps);
-        ran_watch = Some(added);
+        // Recorded before the output is published: a caller that waited for this run (the
+        // deps scan and a request at once) reads the files below as soon as it wakes, and
+        // must see this run's list, or its module never learns about them (a Windows CI
+        // flake: editing the file never re-ran the hooks).
+        set_plugin_watch(shared, file, |w| w.transform = added);
         Ok((out, Some(rekey)))
     })?;
-    if let Some(added) = ran_watch {
-        set_plugin_watch(shared, file, |w| w.transform = added);
-    }
     // What the hooks watch now: this call's run, or the run another caller (the deps scan
     // and a request) did while this one waited for it.
     let now = shared
