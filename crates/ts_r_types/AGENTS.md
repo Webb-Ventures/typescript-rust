@@ -53,8 +53,12 @@ every table), `tests.rs`.
   follow a linked forward, so a linked forward reads as its target everywhere; an unlinked
   one reads as `UNRESOLVED`. This is the only way a type graph can be cyclic
   (`type J = string | J[]` is `string | Array<F>` with `F -> J`): walkers over type
-  arguments must stop on traits or keep a visited set. `forward_alias(t)` tells a raw
-  forward id from its target (printers print the alias name there); `unforward(t)` gives a
+  arguments must stop on traits or keep a visited set. `forward_node((file, node))`
+  interns one per type node (`Key::ForwardNode`, at the node's file level) for an element
+  whose union names the alias (`type V = (string | V)[]`); it carries no alias.
+  `forward_alias(t)` gives an alias forward's symbol (printers print the alias name there;
+  a node forward prints as its target), `is_forward(t)` tells any raw forward id from its
+  target, and `unforward(t)` gives a
   linked forward's target id (identity comparisons need it: `F -> object` is not
   `TypeId::OBJECT`).
 - No relation, printing or member resolution logic here: that needs declarations and lives in

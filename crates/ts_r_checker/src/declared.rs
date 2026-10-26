@@ -261,20 +261,21 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             self.store().link_forward(f, t);
         }
-        if !self.pending_forwards.is_empty() && !self.in_alias_resolution() {
-            self.resolve_pending_forwards();
-        }
-        if !ok {
-            // A cycle: don't publish, a later top-level request may resolve differently.
-            return t;
-        }
-        match self.c.sym_links(s) {
-            Some(l) => {
+        // A cycle: don't publish, a later top-level request may resolve differently.
+        let t = match self.c.sym_links(s) {
+            Some(l) if ok => {
                 let _ = l.declared.set(t);
                 *l.declared.get().unwrap_or(&t)
             }
-            None => t,
+            _ => t,
+        };
+        // After publishing: a type node handed out as a forward reference names this alias.
+        if (!self.pending_forwards.is_empty() || !self.pending_node_forwards.is_empty())
+            && !self.in_alias_resolution()
+        {
+            self.resolve_pending_forwards();
         }
+        t
     }
 
     fn class_or_interface_type(&mut self, s: SymId) -> TypeId {
@@ -644,20 +645,31 @@ impl<'c, 'a> Ck<'c, 'a> {
         })
     }
 
-    /// Resolves the aliases handed out as forward references and links them.
+    /// Resolves the aliases and type nodes handed out as forward references and links them.
     fn resolve_pending_forwards(&mut self) {
         let mut guard = 0;
-        while let Some(s) = self.pending_forwards.pop() {
+        loop {
             guard += 1;
             if guard > 10_000 {
                 self.pending_forwards.clear();
+                self.pending_node_forwards.clear();
                 break;
             }
-            let t = self.declared_type_of_symbol(s);
-            if let Some(f) = self.store().find_forward(s)
-                && t != TypeId::UNRESOLVED
-            {
-                self.store().link_forward(f, t);
+            if let Some(s) = self.pending_forwards.pop() {
+                let t = self.declared_type_of_symbol(s);
+                if let Some(f) = self.store().find_forward(s)
+                    && t != TypeId::UNRESOLVED
+                {
+                    self.store().link_forward(f, t);
+                }
+            } else if let Some(l) = self.pending_node_forwards.pop() {
+                let t = self.type_from_node(l);
+                let f = self.store().forward_node((l.file.0, l.node.raw()));
+                if t != TypeId::UNRESOLVED {
+                    self.store().link_forward(f, t);
+                }
+            } else {
+                break;
             }
         }
     }
@@ -1475,12 +1487,61 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ..
             }
         ) {
+            // A union or intersection naming an alias that is being resolved (`type V =
+            // (string | V)[]`) reads as a forward reference to the node's type, linked once
+            // the alias is known (tsc defers the whole array reference).
+            let at = Loc::new(l.file, n);
+            if self.in_alias_resolution()
+                && !self.type_nodes.contains_key(&at)
+                && self.names_resolving_alias(at, 0)
+                && self.referenced_outer_type_params(at).is_empty()
+            {
+                let f = self.store().forward_node((at.file.0, at.node.raw()));
+                if self.store().unforward(f) == f && !self.pending_node_forwards.contains(&at) {
+                    self.pending_node_forwards.push(at);
+                }
+                return f;
+            }
             return self.type_from_node(l);
         }
         self.deferred_alias_ref = true;
         let t = self.type_from_node(Loc::new(l.file, n));
         self.deferred_alias_ref = false;
         t
+    }
+
+    /// Whether the union or intersection `l` has a member (through parentheses and nested
+    /// unions and intersections) that is a plain reference to a non-generic type alias
+    /// whose declared type is being resolved. Syntax only, nothing is resolved but names.
+    fn names_resolving_alias(&mut self, l: Loc, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        let ast = self.ast(l.file);
+        let n = crate::nodes::skip_type_parens(ast, l.node);
+        match *ast.node(n) {
+            Node::UnionType { types } | Node::IntersectionType { types } => {
+                let members = ast.list(types).to_vec();
+                members
+                    .into_iter()
+                    .any(|m| self.names_resolving_alias(Loc::new(l.file, m), depth + 1))
+            }
+            Node::TypeRef {
+                name,
+                type_args: None,
+            } if depth > 0 => {
+                let Some(sym) = self
+                    .resolve_entity(Loc::new(l.file, name), meaning::TYPE)
+                    .and_then(|s| self.c.resolve_alias(s))
+                else {
+                    return false;
+                };
+                self.c.sym_flags(sym).intersects(SymbolFlags::TYPE_ALIAS)
+                    && self.local_type_params(sym).is_empty()
+                    && self.is_resolving(Resolving::DeclaredType(sym))
+            }
+            _ => false,
+        }
     }
 
     pub fn type_from_node_aliased(&mut self, l: Loc, alias: AliasId) -> TypeId {

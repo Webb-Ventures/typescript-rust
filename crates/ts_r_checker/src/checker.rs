@@ -673,6 +673,10 @@ pub struct Ck<'c, 'a> {
     /// Aliases handed out as forward references before their resolution started; resolved
     /// (and linked) once no type alias is being resolved.
     pub(crate) pending_forwards: Vec<SymId>,
+    /// Type nodes handed out as forward references (a deferred position whose union names
+    /// an alias being resolved, `type V = (string | V)[]`): resolved and linked like
+    /// `pending_forwards`.
+    pub(crate) pending_node_forwards: Vec<Loc>,
     pub(crate) assigned_syms: FxHashSet<SymId>,
     /// Assigned symbols with at least one non-compound assignment (`x = ...`, not `x++`).
     pub(crate) definitely_assigned_syms: FxHashSet<SymId>,
@@ -882,6 +886,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             ret_ctx_mappers: Vec::new(),
             deferred_alias_ref: false,
             pending_forwards: Vec::new(),
+            pending_node_forwards: Vec::new(),
             assigned_syms: FxHashSet::default(),
             definitely_assigned_syms: FxHashSet::default(),
             last_assignment: FxHashMap::default(),

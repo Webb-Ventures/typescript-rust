@@ -1391,9 +1391,14 @@ Files, by layer:
   non-generic type alias that is being resolved, or not yet resolved while another alias
   is, is a store forward reference (`deferred_alias_ref`, `pending_forwards` in
   `declared.rs`); the alias's resolution links it (without this, react18's `ReactNode =
-  ... | Iterable<ReactNode>` read as `Iterable<any>` and accepted anything). Generic
-  aliases and class type arguments are not deferred. Relations unforward both sides
-  first (`[Traversable]` with `type Traversable = object`; `generic_constraint_args`).
+  ... | Iterable<ReactNode>` read as `Iterable<any>` and accepted anything). A union or
+  intersection there with such a member (through parentheses and nested unions:
+  `type V = (string | V)[]`, `Array<string | V>`, `type Box2 = Box<Box2 | number>`),
+  that uses no outer type parameter, is a forward to the node's type
+  (`pending_node_forwards`), built and linked once the alias is published (before that
+  the union would need the alias and make it circular, silently `any`). Generic
+  aliases (`type R<T> = Array<T | R<T>>`) and class type arguments are not deferred.
+  Relations unforward both sides first (`[Traversable]` with `type Traversable = object`; `generic_constraint_args`).
   A union of an aliased union and members it already contains is that aliased union
   (`C | undefined` with `type C = undefined | ...` prints `C`; `union_origin_items`).
 - **Conditional and indexed sources.** A deferred conditional source relates to a target

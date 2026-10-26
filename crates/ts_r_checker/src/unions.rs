@@ -387,9 +387,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         // Forward references to type aliases read differently once linked: not cached.
         if types.len() >= CACHED_UNION_MIN
             && reduction != Reduction::Subtype
-            && !types
-                .iter()
-                .any(|&t| self.store().forward_alias(t).is_some())
+            && !types.iter().any(|&t| self.store().is_forward(t))
         {
             if let Some(t) = self.union_cache.get(types, reduction, alias) {
                 return t;
