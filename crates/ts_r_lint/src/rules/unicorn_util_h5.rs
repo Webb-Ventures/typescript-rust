@@ -1215,3 +1215,64 @@ pub(crate) fn remove_statement(cx: &Ctx<'_, '_>, stmt: NodeId) -> Fix {
     }
     Fix::delete(Span::new(start as u32, end as u32))
 }
+
+/// unicorn's `escapeString`: `s` quoted with `quote` (`'` unless `"`), escaping the quote,
+/// backslashes, control characters, DEL and the line/paragraph separators.
+pub(crate) fn escape_string(s: &str, quote: Option<char>) -> String {
+    let q = if quote == Some('"') { '"' } else { '\'' };
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push(q);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            c if c == q => {
+                out.push('\\');
+                out.push(q);
+            }
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\u{b}' => out.push_str("\\v"),
+            '\0' => out.push_str("\\u{0}"),
+            c if (c as u32) <= 0x1f || matches!(c as u32, 0x7f | 0x2028 | 0x2029) => {
+                out.push_str(&format!("\\u{{{:x}}}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push(q);
+    out
+}
+
+/// An ECMAScript IdentifierName (reserved words included).
+pub(crate) fn is_identifier_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .is_some_and(|c| c == '$' || c == '_' || c.is_alphabetic())
+        && chars.all(|c| {
+            c == '$' || c == '_' || c == '\u{200c}' || c == '\u{200d}' || c.is_alphanumeric()
+        })
+}
+
+/// unicorn's `getIndentString`: the whitespace just before `pos` on its line.
+pub(crate) fn indent_before<'a>(cx: &Ctx<'_, 'a>, pos: u32) -> &'a str {
+    let src = cx.src();
+    let lines = cx.file.lines;
+    let start = lines
+        .line_span(lines.line_of(pos))
+        .map_or(pos, |l| l.start)
+        .min(pos);
+    let before = &src[start as usize..pos as usize];
+    &before[before.trim_end().len()..]
+}
+
+/// unicorn's `getLinebreak`: the file's first line break, `\n` when it has none.
+pub(crate) fn linebreak(cx: &Ctx<'_, '_>) -> &'static str {
+    match cx.src().find('\n') {
+        Some(i) if i > 0 && cx.src().as_bytes()[i - 1] == b'\r' => "\r\n",
+        _ => "\n",
+    }
+}

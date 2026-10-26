@@ -322,3 +322,4 @@ unicorn/prefer-logical-operator-over-ternary
 unicorn/prefer-string-raw
 unicorn/prefer-default-parameters
 unicorn/prefer-object-from-entries
+unicorn/dom-node-dataset

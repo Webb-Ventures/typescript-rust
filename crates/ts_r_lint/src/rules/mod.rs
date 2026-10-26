@@ -280,15 +280,7 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
-mod unicorn_array_mutate;
-mod unicorn_ast;
-mod unicorn_consistent_assert;
-mod unicorn_consistent_class_member_order;
-mod unicorn_consistent_date_clone;
-mod unicorn_consistent_empty_array_spread;
-mod unicorn_consistent_optional_chaining;
-mod unicorn_consistent_template_literal_escape;
-mod unicorn_consistent_tuple_labels;
+mod unicorn_dom_node_dataset;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
@@ -672,13 +664,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
     // eslint-plugin-unicorn
-    &unicorn_consistent_assert::RULE,
-    &unicorn_consistent_class_member_order::RULE,
-    &unicorn_consistent_date_clone::RULE,
-    &unicorn_consistent_empty_array_spread::RULE,
-    &unicorn_consistent_optional_chaining::RULE,
-    &unicorn_consistent_template_literal_escape::RULE,
-    &unicorn_consistent_tuple_labels::RULE,
+    &unicorn_dom_node_dataset::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,

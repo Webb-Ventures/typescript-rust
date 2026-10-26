@@ -745,6 +745,18 @@ member reads don't count). What we learned, in our words:
   `Object.fromEntries(pairs)` with the loop removed (`remove_statement`, unicorn's
   `removeStatement`: a `;` when ASI needs one, else the statement's own lines); one-argument
   `_.fromPairs` / `lodash.fromPairs` / configured `functions` calls are renamed.
+- `unicorn/dom-node-dataset` (338/338): default mode reports `set/remove/hasAttribute`
+  (no `?.` on the member) and `getAttribute` (not awaited) with a static `data-*` name on a
+  receiver not known to be a non-DOM value or the global `document`, skipping names that
+  map to inherited `Object.prototype` members; the `.dataset` rewrite is a fix, a suggestion
+  for `getAttribute`. `preferAttributes` reverses it. A `x?.dataset` that ends the chain is
+  an ESTree `ChainExpression`, not a member, so `'k' in el?.dataset`, `Object.hasOwn(el?.dataset, …)`
+  and `const … = el?.dataset` are not reported, while `el?.dataset.k` is. A default
+  `[el.dataset.k = 1] = a` is a pattern, not a write. Computed keys are evaluated without a
+  scope (`dataset[k]` is never known, `dataset['a' + 'b']` is). The `const data = el.dataset`
+  suggestion inlines every `data.k` read and needs the element name to resolve to the same
+  never-reassigned binding at each use. Added `escape_string` (quote-js-string's escapes),
+  `is_identifier_name`, `indent_before` and `linebreak` to `unicorn_util_h5.rs`.
 - `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
   not count tagged templates; `has_possible_side_effect` adds tagged templates and
   spreads anywhere, like unicorn).
@@ -759,7 +771,7 @@ member reads don't count). What we learned, in our words:
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `prefer-modern-dom-apis.js`, `prefer-query-selector.js`, `prefer-dom-node-text-content.js`, `prefer-keyboard-event-key.js`, `no-array-method-this-argument.js`, `fix/remove-argument.js`, `prefer-string-raw.js`, `prefer-default-parameters.js`, `prefer-object-from-entries.js`, `shared/for-of-collection-loop.js`, `fix/remove-statement.js`, `utils/get-sibling-node.js`, `utils/needs-semicolon.js`, `utils/is-string-literal-required.js`, `shared/is-jest-inline-snapshot.js`, `utils/get-unparenthesized-keyword-argument-parent.js`, `fix/add-parentheses-to-return-or-throw-expression.js`, `shared/event-keys.js`, `utils/is-dom-node.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `prefer-modern-dom-apis.js`, `prefer-query-selector.js`, `prefer-dom-node-text-content.js`, `prefer-keyboard-event-key.js`, `no-array-method-this-argument.js`, `fix/remove-argument.js`, `prefer-string-raw.js`, `prefer-default-parameters.js`, `prefer-object-from-entries.js`, `shared/for-of-collection-loop.js`, `fix/remove-statement.js`, `utils/get-sibling-node.js`, `dom-node-dataset.js`, `utils/escape-string.js` (and `quote-js-string`), `utils/get-indent-string.js`, `utils/member-expression.js`, `utils/needs-semicolon.js`, `utils/is-string-literal-required.js`, `shared/is-jest-inline-snapshot.js`, `utils/get-unparenthesized-keyword-argument-parent.js`, `fix/add-parentheses-to-return-or-throw-expression.js`, `shared/event-keys.js`, `utils/is-dom-node.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
 get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement,is-node-matches,comments,get-const-variable-initializer,array-or-object-prototype-property,get-parent-pattern,single-statement,should-report-replace-children-receiver}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).
