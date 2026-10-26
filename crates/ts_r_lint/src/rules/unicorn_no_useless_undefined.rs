@@ -391,7 +391,7 @@ fn test_validity(cx: &Ctx<'_, '_>, test: NodeId, access: &Access) -> Option<bool
 }
 
 /// The value position calls, tags or deletes it, so it can't become a plain reference.
-fn is_reference_context(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_reference_context(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let ast = cx.ast();
     let mut cur = id;
     loop {

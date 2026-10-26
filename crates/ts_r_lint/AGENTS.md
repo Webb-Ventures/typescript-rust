@@ -758,12 +758,13 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
 
 Current: catch-error-name 120/120, consistent-function-scoping 170/170, no-array-reduce
 482/482, no-await-expression-member 71/72, no-empty-file 58/58, no-for-each 431/431,
-no-negated-condition 134/134, no-object-as-default-parameter 62/62, no-process-exit 58/58,
-no-static-only-class 91/91, no-thenable 178/178, no-useless-fallback-in-spread 61/61,
-no-useless-length-check 165/165, no-useless-promise-resolve-reject 121/121,
-no-useless-spread 283/283, no-useless-switch-case 34/34, no-useless-undefined 271/271,
-prefer-export-from 158/158, prefer-module 152/152, prefer-switch 68/68, prefer-ternary
-142/142, prefer-top-level-await 228/228, switch-case-braces 56/56. Not done: no-for-loop.
+no-for-loop 276/276, no-negated-condition 134/134, no-object-as-default-parameter 62/62,
+no-process-exit 58/58, no-static-only-class 91/91, no-thenable 178/178,
+no-useless-fallback-in-spread 61/61, no-useless-length-check 165/165,
+no-useless-promise-resolve-reject 121/121, no-useless-spread 283/283,
+no-useless-switch-case 34/34, no-useless-undefined 271/271, prefer-export-from 158/158,
+prefer-module 152/152, prefer-switch 68/68, prefer-ternary 142/142, prefer-top-level-await
+228/228, switch-case-braces 56/56.
 
 Shared helpers of this round live in `unicorn_util_h4.rs` (method calls, identifier
 validity, free names, renames, ESTree identifier spans, same-line trailing comments,
@@ -817,6 +818,13 @@ heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path
   current discriminant candidates; the candidates kept are the ones before that `if`.
   Member references compare their computed keys after folding literals (`a["b" + ""]` is
   `a.b`), which `is_same_reference` alone doesn't do.
+- **no-for-loop.** The plugin singularizes the array name with the `pluralize` package;
+  `singular` in `unicorn_util_h4.rs` is our own small set of English rules (irregulars,
+  `-ies`, `-xes`/`-ches`/`-shes`/`-sses`, else drop `s`), enough for the oracle names.
+  An optional `arr?.[i]` sits in an ESTree chain expression, so `delete (arr?.[i])` is a
+  read (reported, unfixed as a reference context). The type-aware `.entries()` check
+  (with parser services) is not implemented, only the annotation and syntax checks.
+  `remove_statement` (shared) drops a statement with its own line, as `removeStatement`.
 - **prefer-ternary.** The plugin's "minimal ternary" fix (branches that differ in one
   inner value become `foo(test ? a : b)`) is not implemented: no oracle case expects it, so
   only whole `return`/assignment merges are fixed. `let x = a; if (t) x = b;` is a
@@ -862,6 +870,7 @@ files of the rules above, plus `utils/get-available-variable-name.js`,
 `utils/has-optional-chain-element.js`, `utils/get-const-variable-initializer.js`,
 `utils/get-indent-unit.js`, `utils/get-line-indent.js`, `utils/get-sibling-node.js`,
 `utils/should-add-parentheses-to-conditional-expression-child.js`,
-`utils/is-same-tokens.js`, `shared/minimal-ternary.js`; and from
+`utils/is-same-tokens.js`, `shared/minimal-ternary.js`, `utils/singular.js`,
+`fix/remove-statement.js`, `utils/get-scopes.js`, `utils/is-reference-context.js`; and from
 `@eslint-community/eslint-utils`, `hasSideEffect`, `getFunctionHeadLocation` and
 `getFunctionNameWithKind`.

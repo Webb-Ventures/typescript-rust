@@ -520,3 +520,162 @@ pub(crate) fn is_typescript_path(path: &str) -> bool {
         .iter()
         .any(|e| lower.ends_with(e))
 }
+
+/// `removeStatement`: the edit removing `stmt`. On a line of its own, the whole line goes
+/// (with the line break before it, or after it on the first line); when the token before
+/// could join what follows, the statement becomes `;` instead.
+pub(crate) fn remove_statement(cx: &Ctx<'_, '_>, stmt: NodeId) -> (Span, String) {
+    let span = cx.span(stmt);
+    if super::unicorn_text::needs_semicolon(cx, span.start, "(") {
+        return (span, ";".into());
+    }
+    let bytes = cx.src().as_bytes();
+    let (mut start, mut end) = (span.start as usize, span.end as usize);
+    let mut before = start;
+    while before > 0 && matches!(bytes[before - 1], b' ' | b'\t') {
+        before -= 1;
+    }
+    let mut after = end;
+    while after < bytes.len() && matches!(bytes[after], b' ' | b'\t') {
+        after += 1;
+    }
+    let line_start = before == 0 || matches!(bytes[before - 1], b'\n' | b'\r');
+    let line_end = after == bytes.len() || matches!(bytes[after], b'\n' | b'\r');
+    if line_start && line_end {
+        end = after;
+        start = before;
+        if start == 0 {
+            end += if bytes[end..].starts_with(b"\r\n") {
+                2
+            } else {
+                usize::from(end < bytes.len())
+            };
+        } else {
+            start -= if start >= 2 && &bytes[start - 2..start] == b"\r\n" {
+                2
+            } else {
+                1
+            };
+        }
+    }
+    (Span::new(start as u32, end as u32), String::new())
+}
+
+/// The singular of an English plural name (`items` → `item`, `cities` → `city`,
+/// `boxes` → `box`), or `None` when the name doesn't look plural. Only the end of the name
+/// changes, so `visibleItems` becomes `visibleItem`.
+pub(crate) fn singular(name: &str) -> Option<String> {
+    const IRREGULAR: &[(&str, &str)] = &[
+        ("children", "child"),
+        ("people", "person"),
+        ("men", "man"),
+        ("women", "woman"),
+        ("mice", "mouse"),
+        ("geese", "goose"),
+        ("feet", "foot"),
+        ("teeth", "tooth"),
+        ("indices", "index"),
+        ("matrices", "matrix"),
+        ("vertices", "vertex"),
+        ("leaves", "leaf"),
+        ("knives", "knife"),
+        ("lives", "life"),
+        ("wolves", "wolf"),
+        ("halves", "half"),
+    ];
+    const UNCHANGED: &[&str] = &[
+        "news",
+        "series",
+        "species",
+        "data",
+        "sheep",
+        "fish",
+        "deer",
+        "information",
+        "status",
+        "alias",
+        "bus",
+        "gas",
+        "lens",
+        "canvas",
+        "atlas",
+        "this",
+        "is",
+        "was",
+        "has",
+        "us",
+    ];
+    let lower = name.to_ascii_lowercase();
+    let keep_case = |stem_len: usize, tail: &str| {
+        let mut out = name[..stem_len].to_owned();
+        let upper =
+            name[stem_len..].chars().all(|c| c.is_ascii_uppercase()) && name.len() > stem_len + 1;
+        out.push_str(&if upper {
+            tail.to_ascii_uppercase()
+        } else {
+            tail.to_owned()
+        });
+        out
+    };
+    for &(plural, single) in IRREGULAR {
+        if lower.ends_with(plural) {
+            let stem = name.len() - plural.len();
+            // A whole word, or a camelCase segment: `childNodes` is not `childNode`s.
+            let boundary = stem == 0 || name.as_bytes()[stem].is_ascii_uppercase();
+            if boundary {
+                let first = &name[stem..=stem];
+                let mut tail = single.to_owned();
+                if first.chars().all(|c| c.is_ascii_uppercase()) {
+                    tail[..1].make_ascii_uppercase();
+                }
+                return Some(keep_case(stem, &tail));
+            }
+        }
+    }
+    if UNCHANGED.iter().any(|u| lower.ends_with(u)) || !name.is_ascii() {
+        return None;
+    }
+    let n = lower.len();
+    let ends = |s: &str| lower.ends_with(s);
+    let result = if ends("ss") || ends("us") || ends("is") || !ends("s") || n < 2 {
+        return None;
+    } else if n > 3
+        && ends("ies")
+        && !matches!(lower.as_bytes()[n - 4], b'a' | b'e' | b'i' | b'o' | b'u')
+    {
+        keep_case(n - 3, "y")
+    } else if ["sses", "xes", "ches", "shes", "zzes"]
+        .iter()
+        .any(|e| ends(e))
+        || (ends("uses") && n > 4)
+    {
+        keep_case(n - 2, "")
+    } else {
+        keep_case(n - 1, "")
+    };
+    (result != name).then_some(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::singular;
+
+    #[test]
+    fn singular_names() {
+        let s = |w: &str| singular(w);
+        assert_eq!(s("items").as_deref(), Some("item"));
+        assert_eq!(s("cities").as_deref(), Some("city"));
+        assert_eq!(s("cases").as_deref(), Some("case"));
+        assert_eq!(s("boxes").as_deref(), Some("box"));
+        assert_eq!(s("xs").as_deref(), Some("x"));
+        assert_eq!(s("visibleItems").as_deref(), Some("visibleItem"));
+        assert_eq!(s("childNodes").as_deref(), Some("childNode"));
+        assert_eq!(s("children").as_deref(), Some("child"));
+        assert_eq!(s("allChildren").as_deref(), Some("allChild"));
+        assert_eq!(s("arr"), None);
+        assert_eq!(s("class"), None);
+        assert_eq!(s("status"), None);
+        assert_eq!(s("s"), None);
+        assert_eq!(s("é"), None);
+    }
+}

@@ -352,3 +352,4 @@ unicorn/no-useless-spread
 unicorn/no-for-each
 unicorn/no-array-reduce
 unicorn/prefer-ternary
+unicorn/no-for-loop

@@ -328,7 +328,7 @@ fn has_read_inside(cx: &Ctx<'_, '_>, sym: SymbolId, span: Span) -> bool {
 }
 
 /// The `const` declarator initializer an identifier refers to (single plain declaration).
-fn const_initializer(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
+pub(crate) fn const_initializer(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
     let ast = cx.ast();
     if !matches!(ast.node(id), Node::Ident { .. }) {
         return None;
