@@ -366,6 +366,7 @@ mod unicorn_prefer_prototype_methods;
 mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_set_size;
 mod unicorn_prefer_type_error;
+mod unicorn_require_array_join_separator;
 mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
@@ -765,6 +766,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_reflect_apply::RULE,
     &unicorn_prefer_set_size::RULE,
     &unicorn_prefer_type_error::RULE,
+    &unicorn_require_array_join_separator::RULE,
     &unicorn_require_number_to_fixed_digits_argument::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,

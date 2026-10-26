@@ -310,3 +310,4 @@ unicorn/prefer-array-index-of
 unicorn/prefer-array-some
 unicorn/prefer-array-flat-map
 unicorn/prefer-array-flat
+unicorn/require-array-join-separator

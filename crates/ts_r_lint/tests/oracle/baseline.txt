@@ -355,6 +355,7 @@ unicorn/prefer-prototype-methods 79/79
 unicorn/prefer-reflect-apply 79/79
 unicorn/prefer-set-size 67/67
 unicorn/prefer-type-error 112/112
+unicorn/require-array-join-separator 80/80
 unicorn/require-number-to-fixed-digits-argument 15/15
 unicorn/text-encoding-identifier-case 101/101
 unicorn/throw-new-error 86/86
