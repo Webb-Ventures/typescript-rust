@@ -388,6 +388,7 @@ mod unicorn_no_this_outside_of_class;
 mod unicorn_no_top_level_assignment_in_function;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
+mod unicorn_no_uncalled_method;
 mod unicorn_no_undeclared_class_members;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
@@ -553,6 +554,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_uncalled_method::RULE,
     &unicorn_prefer_single_object_destructuring::RULE,
     &unicorn_no_incomplete_accessor_override::RULE,
     &unicorn_no_unreadable_object_destructuring::RULE,
