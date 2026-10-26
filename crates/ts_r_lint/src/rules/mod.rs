@@ -405,6 +405,7 @@ mod unicorn_no_undeclared_class_members;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
+mod unicorn_no_unnecessary_boolean_comparison;
 mod unicorn_no_unnecessary_global_this;
 mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_slice_end;
@@ -971,6 +972,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
+    &unicorn_no_unnecessary_boolean_comparison::RULE,
     &unicorn_no_unnecessary_global_this::RULE,
     &unicorn_no_unnecessary_nested_ternary::RULE,
     &unicorn_no_unnecessary_slice_end::RULE,

@@ -1827,6 +1827,15 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   with a TypeScript program (loose `==` needs both sides typed string or number, a union
   receiver is skipped) but the rule oracle lints them without type information, so they
   can't match.
+- **no-unnecessary-boolean-comparison** (432/432): `x === true`/`x !== false` become `x`,
+  `x === false`/`x !== true` become `!x` (`getNegatedExpressionText`), when `x` is a known
+  boolean: `isBoolean`, a `satisfies`/`as`/`<T>` of a boolean type (or `satisfies`/`as`
+  `any`/`unknown` of a boolean), or a call of a stable local function (a declaration, a
+  named function expression, or a `const` arrow/function never reassigned, without a
+  type annotation) whose one return, expression body or return type is boolean. A JSDoc
+  type or return annotation turns the function check off; an optional chain is never a
+  known boolean, and a `yield` inside makes the value unknown. No fix when a comment sits
+  outside the operand (`is_boolean_expression` in `unicorn_conditions.rs`).
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
@@ -1834,7 +1843,7 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   `reindent_text` (`reindentText`), `indent_if_line_start`, `outermost_ts_wrapper`,
   `logical_child_text` (`getLogicalExpressionChildText`), `comment_next_to`/`comment_before`/
   `comment_after`, `has_multiline_token`, `is_block_scoped_declaration`, the early-exit
-  pieces and `short_body_problem`.
+  pieces, `short_body_problem` and `is_boolean_expression`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
@@ -1844,7 +1853,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`,
 `no-subtraction-comparison.js`, `prefer-simple-condition-first.js`,
 `prefer-includes-over-repeated-comparisons.js`, `no-useless-logical-operand.js`,
-`prefer-continue.js`, `prefer-early-return.js`;
+`prefer-continue.js`, `prefer-early-return.js`, `no-unnecessary-boolean-comparison.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
@@ -1856,7 +1865,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `get-line-indent.js`, `reindent-text.js`, `get-assignment-targets.js`, `member-expression.js`,
 `is-branch-exit.js`, `track-branch-exits.js`, `is-array.js`, `is-global-identifier.js`,
 `type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`,
-`is-boolean.js`, `is-reference-context.js`, `get-unwrapped-branch-text.js`, `block-scope.js`;
+`is-boolean.js`, `is-reference-context.js`, `get-unwrapped-branch-text.js`, `block-scope.js`, `function-body.js`;
 `rules/ast/is-in-directive-prologue.js`; `rules/fix/replace-node-with-expression.js`; `rules/fix/remove-statement.js`,
 `add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
 `rules/shared/nullish-check.js`, `builtin-errors.js`, `early-exit.js`,

@@ -793,3 +793,157 @@ fn short_body_fix(
     let at = cx.span(owner).start;
     Some(Fix::replace(range, text).and(Span::new(at, at), String::new()))
 }
+
+/// A `boolean` keyword or a `true`/`false` literal type.
+fn is_boolean_type(ast: &Ast, ty: NodeId) -> bool {
+    matches!(
+        ast.node(ty),
+        Node::KeywordType {
+            kind: KeywordTypeKind::Boolean
+        } | Node::BoolLit { .. }
+    )
+}
+
+/// `isBoolean` with a few more of the plugin's syntax cases than
+/// [`super::unicorn_types::is_boolean`]: an optional chain may give `undefined`;
+/// `as`/`<T>`/`satisfies` with a boolean type; `satisfies` (or `as any`/`as unknown`) of a
+/// boolean; and calls of a stable local function (a declaration in module code or a
+/// `const` function value without other writes) whose only result is boolean.
+pub(crate) fn is_boolean_expression(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    boolean_expression(cx, id, 0)
+}
+
+fn boolean_expression(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    let ast = cx.ast();
+    let id = skip_parens(ast, id);
+    if depth > 50 {
+        return false;
+    }
+    match *ast.node(id) {
+        Node::Member { .. } | Node::Index { .. } | Node::Call { .. }
+            if has_optional_chain_element(ast, id) =>
+        {
+            false
+        }
+        Node::Satisfies { ty, expr } => {
+            is_boolean_type(ast, ty)
+                || boolean_expression(cx, expr, depth + 1)
+                || super::unicorn_types::is_boolean(cx, id)
+        }
+        Node::As { ty, expr } | Node::TypeAssertion { ty, expr } => {
+            is_boolean_type(ast, ty)
+                || (matches!(
+                    ast.node(ty),
+                    Node::KeywordType {
+                        kind: KeywordTypeKind::Any | KeywordTypeKind::Unknown
+                    }
+                ) && boolean_expression(cx, expr, depth + 1))
+                || super::unicorn_types::is_boolean(cx, id)
+        }
+        Node::Call { callee, .. } => {
+            super::unicorn_types::is_boolean(cx, id)
+                || boolean_function_reference(cx, skip_parens(ast, callee), depth + 1)
+        }
+        _ => super::unicorn_types::is_boolean(cx, id),
+    }
+}
+
+fn boolean_function_reference(cx: &Ctx<'_, '_>, callee: NodeId, depth: u32) -> bool {
+    let ast = cx.ast();
+    let sem = cx.semantic();
+    if !matches!(ast.node(callee), Node::Ident { .. }) {
+        return false;
+    }
+    let Some(sym) = sem.symbol_of_ident(callee) else {
+        return false;
+    };
+    let symbol = sem.symbol(sym);
+    let [decl] = symbol.decls[..] else {
+        return false;
+    };
+    // A JSDoc type decides on its own (the base `isBoolean` reads it).
+    if super::unicorn_types::jsdoc_type_annotation(cx, decl.name).is_some() {
+        return false;
+    }
+    let writes = |allowed: Option<NodeId>| {
+        symbol.refs.iter().any(|&r| {
+            let r = sem.reference(r);
+            r.is_write() && Some(r.node) != allowed
+        })
+    };
+    let function = match decl.kind {
+        DeclKind::Function | DeclKind::FunctionExprName => {
+            let stable = decl.kind == DeclKind::FunctionExprName
+                || cx.env().source_type == crate::env::SourceType::Module;
+            if !stable || writes(None) {
+                return false;
+            }
+            decl.node
+        }
+        _ => {
+            let Node::VarDeclarator {
+                name,
+                init: Some(mut init),
+                type_ann: None,
+                ..
+            } = *ast.node(decl.node)
+            else {
+                return false;
+            };
+            if name != decl.name || writes(Some(name)) {
+                return false;
+            }
+            for _ in 0..1000 {
+                match *ast.node(init) {
+                    Node::Satisfies { expr, .. }
+                    | Node::NonNull { expr }
+                    | Node::Paren { expr } => {
+                        init = expr;
+                    }
+                    _ => break,
+                }
+            }
+            init
+        }
+    };
+    let (flags, return_type, body) = match *ast.node(function) {
+        Node::FunctionDecl {
+            flags,
+            return_type,
+            body: Some(body),
+            ..
+        }
+        | Node::FunctionExpr {
+            flags,
+            return_type,
+            body: Some(body),
+            ..
+        } => (flags, return_type, body),
+        Node::Arrow {
+            flags,
+            return_type,
+            body,
+            ..
+        } => (flags, return_type, body),
+        _ => return false,
+    };
+    if flags.intersects(FnFlags::ASYNC | FnFlags::GENERATOR)
+        || super::unicorn_types::jsdoc_return_type(cx, function).is_some()
+    {
+        return false;
+    }
+    if let Some(t) = return_type {
+        return is_boolean_type(ast, t);
+    }
+    let result = match *ast.node(body) {
+        Node::Block { stmts } => match ast.list(stmts) {
+            [only] => match *ast.node(*only) {
+                Node::Return { arg: Some(arg) } => arg,
+                _ => return false,
+            },
+            _ => return false,
+        },
+        _ => body,
+    };
+    boolean_expression(cx, result, depth + 1)
+}
