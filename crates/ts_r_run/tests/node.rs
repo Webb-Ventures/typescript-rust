@@ -589,7 +589,7 @@ fn a_query_import_after_a_plain_one_is_a_module_of_its_own_in_commonjs() {
         ),
         (
             "j.js",
-            "console.log(import.meta.url.split('/').pop(), typeof __filename !== 'undefined' ? __filename.split('/').pop() : undefined);\nexport const j = 1;\n",
+            "console.log(import.meta.url.split('/').pop(), typeof __filename !== 'undefined' ? __filename.split(/[\\\\/]/).pop() : undefined);\nexport const j = 1;\n",
         ),
         ("t.mjs", "export const v = await Promise.resolve(5);\n"),
     ];
