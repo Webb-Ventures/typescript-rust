@@ -31,7 +31,7 @@ use crate::shape::{Hash, PathKey};
 /// Cache namespace of persisted histories.
 pub const NAMESPACE: &str = "check";
 /// Bump when the manifest layout or anything hashed into it changes.
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 const MAGIC: &[u8; 4] = b"TSRH";
 
 /// Where a module request led (paths relative to the config directory).
@@ -785,6 +785,7 @@ mod tests {
                 Ref::Ambient("*.svg".to_owned()),
                 Ref::Global("JSX".to_owned()),
             ],
+            locals: [3; 32],
         };
         Manifest {
             program_key: [9; 32],

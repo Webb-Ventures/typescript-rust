@@ -77,7 +77,8 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   entry (whose deps include sibling exports it names, `ts_r_decls::Dep::Sibling`), the
   module's augmentations, and when `t` does not declare `n` every `export *` target's
   answer; an import that resolves nowhere also depends on `t`'s export names (the error
-  suggests names). Dependency files (`node_modules`), JSON and `export =` modules count as
+  suggests names) and on its top-level local names (`FileShape::locals`: TS2459/TS2460 when
+  `t` declares the name locally, TS2305 when not). Dependency files (`node_modules`), JSON and `export =` modules count as
   a whole (`Node::All`); a dependency file's entry also depends on the global names it reads
   (a package can name a project's global type), and an inferred export on the values it is
   inferred from (`ts_r_decls` deps: `export const y = x` depends on `x`).

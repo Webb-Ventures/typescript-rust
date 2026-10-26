@@ -71,6 +71,7 @@ impl Writer {
             self.str(st);
         }
         self.refs(&s.uses);
+        self.hash(&s.locals);
     }
 
     fn refs(&mut self, rs: &[Ref]) {
@@ -241,11 +242,13 @@ impl<'a> Reader<'a> {
         let n = self.count()?;
         let stars = (0..n).map(|_| self.str()).collect::<Option<Vec<_>>>()?;
         let uses = self.refs()?;
+        let locals = self.hash()?;
         Some(FileShape {
             api,
             provides,
             stars,
             uses,
+            locals,
         })
     }
 

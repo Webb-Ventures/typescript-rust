@@ -68,6 +68,10 @@ pub struct FileShape {
     pub stars: Vec<String>,
     /// Everything checking the file reads from others (sorted, deduplicated).
     pub uses: Vec<Ref>,
+    /// Hash of the module's top-level local names (zero for scripts and dependency files):
+    /// an import of a name the module does not export reports TS2459/TS2460 when the
+    /// module declares it locally, TS2305 when not.
+    pub locals: Hash,
 }
 
 impl FileShape {
@@ -95,6 +99,7 @@ impl FileShape {
                 .collect(),
             stars: self.stars.iter().map(|s| f(s)).collect(),
             uses: self.uses.iter().map(r).collect(),
+            locals: self.locals,
         }
     }
 }
@@ -177,6 +182,7 @@ pub fn shape_of(program: &ProgramFiles, f: &SourceFile) -> FileShape {
         provides,
         stars,
         uses,
+        locals: module_locals_hash(f),
     };
     // Declaration dependencies identify imports by specifier only. When requests of the
     // same specifier resolve apart, conservatively include every alternate target.
@@ -272,6 +278,7 @@ fn external_shape(
         provides,
         stars: Vec::new(),
         uses: Vec::new(),
+        locals: [0; 32],
     };
     add_uses(program, f, resolve, &mut shape);
     // Its declarations can name globals a project file declares (`value: CustomGlobal`):
@@ -296,6 +303,27 @@ fn external_shape(
 /// A non-relative module specifier (one that can name an ambient module).
 fn is_bare(spec: &str) -> bool {
     !spec.starts_with('.') && !spec.starts_with('/')
+}
+
+/// Hash of the sorted names in a module's top-level scope (zero for a script, whose
+/// top-level names are globals and tracked as such).
+fn module_locals_hash(f: &SourceFile) -> Hash {
+    let b = &f.bound;
+    let Some(top) = b.scopes.first().filter(|_| b.is_module) else {
+        return [0; 32];
+    };
+    let mut names: Vec<&str> = b
+        .table(top.locals)
+        .iter()
+        .map(|&(n, _)| b.name_text(&f.ast, n))
+        .collect();
+    names.sort_unstable();
+    let mut h = blake3::Hasher::new();
+    h.update(&(names.len() as u64).to_le_bytes());
+    for n in names {
+        str_into(&mut h, n);
+    }
+    *h.finalize().as_bytes()
 }
 
 /// Adds what checking `f` reads from other files to `shape.uses` (sorted, deduplicated).
@@ -513,7 +541,7 @@ impl ProgramShapes {
             .collect();
         // Same provided surface: nothing another file uses changed.
         let same_surface = |a: &FileShape, b: &FileShape| {
-            a.api == b.api && a.provides == b.provides && a.stars == b.stars
+            a.api == b.api && a.provides == b.provides && a.stars == b.stars && a.locals == b.locals
         };
         if fresh.iter().all(|(p, s)| match (self.shapes.get(p), s) {
             (Some(a), Some(b)) => same_surface(a, b),
@@ -1011,6 +1039,8 @@ impl<'a> DeepHashes<'a> {
                         // No exports: a script or an empty module ("is not a module").
                         h.update(&s.api);
                     }
+                    // A missing export the module declares locally is TS2459/TS2460.
+                    h.update(&s.locals);
                     for st in &s.stars {
                         self.path_into(&mut h, st);
                         succ.push(self.names_node(st));
