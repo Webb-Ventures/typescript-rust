@@ -125,6 +125,9 @@ enum Context {
     Reference,
     /// A name being declared that may start with a keyword (a constructor parameter).
     Keywords(&'static [&'static str]),
+    /// A name in `import { | } from "m"` / `export { | } from "m"`: the module's exports
+    /// not named yet (and `type` unless it was just written).
+    ImportClause { decl: NodeId, after_type: bool },
     /// Nothing.
     None,
 }
@@ -194,6 +197,9 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
             Some(super::jsx_items::JsxSpot::Tag) => jsx_tag = true,
             None => {}
         }
+    }
+    if let Some((decl, after_type)) = import_clause_at(c, file, ws) {
+        return (Context::ImportClause { decl, after_type }, prefix);
     }
     // `obj.|` / `obj.pre|`
     let b = text.as_bytes();
@@ -506,6 +512,58 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         Context::Keywords(words) => {
             for k in words {
                 items.push(json!({"label": k, "kind": 14, "sortText": SORT_KEYWORD}));
+            }
+        }
+        Context::ImportClause { decl, after_type } => {
+            let Some(names) = import_clause_names(c, cx.file, decl, ws_of(c, cx.file, offset))
+            else {
+                return Value::Null;
+            };
+            if names.is_empty() {
+                return Value::Null;
+            }
+            let text = c.file(cx.file).text.as_str();
+            let is_import = matches!(c.node(Loc::new(cx.file, decl)), Node::ImportDecl { .. });
+            // `import { "a b" as a_b }`: a quoted export needs a local name, unless the
+            // specifier already has one (`import { | as x }`).
+            let rest = text.get(offset as usize..).unwrap_or("").trim_start();
+            let has_as = rest.starts_with("as")
+                && !rest[2..].starts_with(|ch: char| ch.is_alphanumeric() || ch == '_');
+            for (name, s) in names {
+                // A re-exported name (`export { x as "y" }`) is an alias: tsc's kind for it.
+                let kind = if c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
+                    6
+                } else {
+                    item_kind(c, s)
+                };
+                let mut item = json!({
+                    "label": name,
+                    "kind": kind,
+                    "sortText": SORT_MEMBER,
+                });
+                if !is_identifier_name(&name) {
+                    let quoted = ts_r_checker::print::quote_string(&name);
+                    let insert = if is_import && !has_as {
+                        let local: String = name
+                            .chars()
+                            .map(|ch| {
+                                if ch.is_alphanumeric() || ch == '$' {
+                                    ch
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect();
+                        format!("{quoted} as {local}")
+                    } else {
+                        quoted
+                    };
+                    item["insertText"] = json!(insert);
+                }
+                items.push(item);
+            }
+            if !after_type {
+                items.push(json!({"label": "type", "kind": 14, "sortText": SORT_KEYWORD}));
             }
         }
         Context::String { lit } => {
@@ -884,6 +942,104 @@ fn possibly_type_argument(ck: &mut Ck<'_, '_>, file: FileId, pos: u32, depth: u3
 
 /// Whether `s` has a meaning in `want`; an alias by what it resolves to (an alias that
 /// resolves to nothing keeps every meaning).
+/// `import { | } from "m"` / `export { | } from "m"` (the token before the name is the
+/// clause's `{`, a `,`, or `type`): the declaration, and whether that token is `type`
+/// (`tsc: tsc/internal/ls/completions.go`, the import/export clause completions).
+fn import_clause_at(c: &Checker<'_>, file: FileId, ws: u32) -> Option<(NodeId, bool)> {
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let (tok, t) = super::position::token_before(ast, text, ws)?;
+    if !matches!(t, "{" | "," | "type") {
+        return None;
+    }
+    let parents = c.file(file).parents();
+    let mut cur = node_at(ast, tok);
+    for _ in 0..8 {
+        let n = cur?;
+        match *ast.node(n) {
+            Node::ImportDecl { source, .. }
+            | Node::ExportNamed {
+                source: Some(source),
+                ..
+            } => {
+                // Between the clause's `{` and the module specifier.
+                let start = ast.span(n).start as usize;
+                let open = text.get(start..tok as usize + 1)?.find('{')? + start;
+                let closed = text
+                    .get(open..tok as usize)
+                    .is_some_and(|between| between.contains('}'));
+                if closed || tok >= ast.span(source).start {
+                    return None;
+                }
+                return Some((n, t == "type"));
+            }
+            Node::ExportNamed { source: None, .. } => return None,
+            _ => cur = parents.parent(n),
+        }
+    }
+    None
+}
+
+/// The exports of the module an import or export clause names, minus `default` and the
+/// names its other specifiers already take. `None` when the module does not resolve.
+fn import_clause_names(
+    c: &Checker<'_>,
+    file: FileId,
+    decl: NodeId,
+    ws: u32,
+) -> Option<Vec<(String, SymId)>> {
+    let ast = c.ast(file);
+    let (source, specifiers) = match *ast.node(decl) {
+        Node::ImportDecl {
+            source, specifiers, ..
+        } => (source, specifiers),
+        Node::ExportNamed {
+            source: Some(source),
+            specifiers,
+            ..
+        } => (source, specifiers),
+        _ => return None,
+    };
+    let bound = &c.file(file).bound;
+    let ri = bound
+        .module_requests
+        .iter()
+        .position(|r| r.node == source)?;
+    let target = c.link.module_target(file, ri as u32);
+    let module = c.module_target_symbol(target)?;
+    let mut taken: HashSet<String> = HashSet::new();
+    for &sp in ast.list(specifiers) {
+        let span = ast.span(sp);
+        if span.start <= ws && ws <= span.end {
+            continue;
+        }
+        let name = match *ast.node(sp) {
+            Node::ImportSpecifier {
+                imported, local, ..
+            } => imported.unwrap_or(local),
+            Node::ExportSpecifier { local, .. } => local,
+            _ => continue,
+        };
+        let n = match *ast.node(name) {
+            Node::StringLit { .. } => {
+                let raw = ast.span(name).text(&c.file(file).text);
+                raw[1..raw.len().saturating_sub(1).max(1)].to_string()
+            }
+            _ => match super::locate::name_text(ast, name) {
+                Some(t) => t.to_string(),
+                None => continue,
+            },
+        };
+        taken.insert(n);
+    }
+    Some(
+        c.exports_of(module)
+            .into_iter()
+            .filter(|(n, _)| n != "default" && !taken.contains(n))
+            .collect(),
+    )
+}
+
 /// Whether `s` may be named in a type: a type, or a namespace with such a member somewhere
 /// below it (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter; a
 /// namespace of values only is not offered where a type goes).
@@ -975,8 +1131,19 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
     };
     if let Some(s) = named {
         let f = c.sym_flags(s);
-        if qualified || f.intersects(SymbolFlags::MODULE_FILE) {
+        if qualified {
             return c.exports_of(s);
+        }
+        // `ns.|` of a module in an expression: its values and namespaces, not its types.
+        if f.intersects(SymbolFlags::MODULE_FILE) {
+            return c
+                .exports_of(s)
+                .into_iter()
+                .filter(|(_, x)| match c.resolve_alias(*x) {
+                    Some(t) => c.has_meaning(t, meaning::VALUE | meaning::NAMESPACE),
+                    None => true,
+                })
+                .collect();
         }
         if f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
             && !f.intersects(

@@ -1535,6 +1535,58 @@ fn completion_of_namespaces_in_type_positions() {
     c.shutdown();
 }
 
+/// `import { | } from "m"` lists the module's exports not named yet (quoted ones with a
+/// local name), then `type`; `ns.|` of a module in an expression leaves out its types.
+#[test]
+fn completion_in_import_and_export_clauses() {
+    if !libs_present() {
+        return;
+    }
+    let m = "export const a = 1;\nexport function b() {}\nexport type T = 1;\n\
+             const c = 2;\nexport { c as \"c d\" };\nexport default 3;\n";
+    let u = "import { a,  } from \"./m.js\";\nexport {  } from \"./m.js\";\n\
+             import * as ns from \"./m.js\";\nns.;\n";
+    let env = Env::new(
+        "complete-import-clause",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/m.ts", m),
+            ("src/u.ts", u),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/u.ts");
+    let uu = env.uri("src/u.ts");
+    let items = |r: &Value| -> Vec<(String, String)> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| {
+                        let l = i["label"].as_str().unwrap_or("").to_string();
+                        let t = i["insertText"].as_str().unwrap_or(&l).to_string();
+                        (l, t)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = items(&result(&mut c, "textDocument/completion", at(&uu, 0, 12)));
+    let labels: Vec<&str> = l.iter().map(|(x, _)| x.as_str()).collect();
+    assert_eq!(labels, ["T", "b", "c d", "type"], "{l:?}");
+    assert!(
+        l.contains(&("c d".into(), "\"c d\" as c_d".into())),
+        "{l:?}"
+    );
+    let l = items(&result(&mut c, "textDocument/completion", at(&uu, 1, 9)));
+    assert!(l.contains(&("c d".into(), "\"c d\"".into())), "{l:?}");
+    assert!(l.iter().any(|(x, _)| x == "a"), "{l:?}");
+    let l = items(&result(&mut c, "textDocument/completion", at(&uu, 3, 3)));
+    assert!(l.iter().any(|(x, _)| x == "b"), "{l:?}");
+    assert!(!l.iter().any(|(x, _)| x == "T"), "{l:?}");
+    c.shutdown();
+}
+
 /// Class bodies: the inherited members not written yet (and member keywords) where a member
 /// name goes, `this` members among the names in a method, and private or protected members
 /// only where they may be read.

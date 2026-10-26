@@ -342,6 +342,13 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   is offered there (and among `a.b.|` members in a type, not after `typeof` or in
   `import x = a.b`) only when a type is somewhere below it, through aliases and nested
   namespaces (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter).
+- Import and export clauses (`import { | } from "m"`, `export { | } from "m"`, the token
+  before the name being the clause's `{`, a `,` or `type`): the module's exports minus
+  `default` and the names other specifiers already take (the one being edited does not
+  count), then `type` unless just written; nothing when all are taken or the module does
+  not resolve. A quoted export inserts `"a b" as a_b` in an import without `as`; a
+  re-exported name has kind variable. `ns.|` of a module in an expression lists its values
+  and namespaces only.
 - Possible type arguments (`tsc: tsc/internal/ls/utilities.go`, the backward scan for a
   `<` that might open type arguments): reading tokens back from the offset over balanced
   `<>`, `()`, `[]`, `{}` and the tokens a type may hold, to an identifier right before an
