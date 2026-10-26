@@ -735,15 +735,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some((orig, _)) = data.origin {
             return self.has_type_param_default(orig);
         }
-        for d in self.c.decls(data.sym) {
-            if let Node::TypeParam {
-                default: Some(_), ..
-            } = *self.node(d)
-            {
-                return true;
-            }
-        }
-        false
+        // A merged interface or class declaration may declare the default (either order).
+        let sym = data.sym;
+        let mut decls = self.c.decls(sym);
+        decls.extend(self.merged_type_param_decls(sym));
+        decls.into_iter().any(|d| {
+            matches!(
+                *self.node(d),
+                Node::TypeParam {
+                    default: Some(_),
+                    ..
+                }
+            )
+        })
     }
 
     /// Default of a type parameter, if declared.
@@ -764,16 +768,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         let sym = data.sym;
         let mut res = None;
         if !data.is_this {
-            let def = self
-                .c
-                .decls(sym)
-                .into_iter()
-                .find_map(|d| match *self.node(d) {
-                    Node::TypeParam {
-                        default: Some(def), ..
-                    } => Some(Loc::new(d.file, def)),
-                    _ => None,
-                });
+            // As with constraints, a merged interface or class declaration may declare it.
+            let mut decls = self.c.decls(sym);
+            decls.extend(self.merged_type_param_decls(sym));
+            let def = decls.into_iter().find_map(|d| match *self.node(d) {
+                Node::TypeParam {
+                    default: Some(def), ..
+                } => Some(Loc::new(d.file, def)),
+                _ => None,
+            });
             // A default naming a type alias that is being resolved (`T = ParsedNode` with
             // `type ParsedNode = A | Seq` and `interface Seq<T = ParsedNode>`) holds a
             // forward reference to it, linked once the alias is known: tsc defers
