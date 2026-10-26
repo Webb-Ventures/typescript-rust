@@ -1484,10 +1484,24 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Resolves `A`, `A.B.C` (`QualifiedName` or property access) to a symbol, without
     /// resolving the final alias.
+    /// A UMD global (`export as namespace Foo`) read as a type: its module's `export =`,
+    /// when that has a type meaning (`export = Thing` for a class `Thing`).
+    pub(crate) fn umd_export_equals_type(&self, l: Loc) -> Option<SymId> {
+        let s = self.c.resolve_ident(l, meaning::NAMESPACE)?;
+        if !self.c.sym_flags(s).intersects(SymbolFlags::MODULE_FILE) {
+            return None;
+        }
+        let t = self.c.resolve_alias(self.c.export_of(s, "export=")?)?;
+        self.c.has_meaning(t, meaning::TYPE).then_some(t)
+    }
+
     pub fn resolve_entity(&mut self, l: Loc, m: u8) -> Option<SymId> {
         let ast = self.ast(l.file);
         match *ast.node(l.node) {
-            Node::Ident { .. } => self.c.resolve_ident(l, m),
+            Node::Ident { .. } => self
+                .c
+                .resolve_ident(l, m)
+                .or_else(|| (m & meaning::TYPE != 0).then(|| self.umd_export_equals_type(l))?),
             Node::QualifiedName { left, right }
             | Node::Member {
                 obj: left,

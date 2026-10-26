@@ -6436,6 +6436,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.error(l, dg::CANNOT_USE_NAMESPACE_0_AS_A_TYPE_2709, &[text]);
                     return None;
                 }
+                // A UMD global (`export as namespace Foo`) names its module's `export =`,
+                // which may be a type (`export = Thing` for a class `Thing`).
+                if let Some(t) = self.umd_export_equals_type(l) {
+                    return Some(t);
+                }
                 // (`exports` and `module` are values in a CommonJS module.)
                 let commonjs_value = matches!(text, "exports" | "module")
                     && self.c.file(l.file).is_js()
