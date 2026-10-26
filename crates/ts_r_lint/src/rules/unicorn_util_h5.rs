@@ -279,6 +279,7 @@ pub(crate) fn is_boolean_context(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     }
     false
 }
+
 /// An optional link (`?.`) in the chain `id` ends, not cut off by parentheses (TS
 /// wrappers without parentheses are looked through): `a?.b` yes, `(a?.b)` no.
 pub(crate) fn has_unparenthesized_optional_chain(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
@@ -1096,4 +1097,58 @@ pub(crate) fn is_value_not_function(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
         }
         _ => ident_name(ast, id) == Some("undefined"),
     }
+}
+
+/// unicorn's `isNodeMatches` for `Name` / `a.b.c` paths: identifiers (and `this`/`super`)
+/// joined by non-optional, non-computed members, through parentheses.
+pub(crate) fn node_matches_path(ast: &ts_r_ast::Ast, id: NodeId, path: &str) -> bool {
+    let names: Vec<&str> = path.split('.').collect();
+    let mut node = skip_parens(ast, id);
+    for &name in names[1..].iter().rev() {
+        match *ast.node(node) {
+            Node::Member {
+                obj,
+                prop,
+                optional: false,
+            } if ident_name(ast, prop) == Some(name) => node = skip_parens(ast, obj),
+            _ => return false,
+        }
+    }
+    match (names[0], ast.node(node)) {
+        ("this", Node::This {}) | ("super", Node::Super {}) => true,
+        (n, _) => ident_name(ast, node) == Some(n),
+    }
+}
+
+/// unicorn's `removeMethodCall`: deletes `.name(...)` from `obj.name(...)`, keeping the
+/// object's parentheses.
+pub(crate) fn remove_method_call(cx: &Ctx<'_, '_>, call: NodeId) -> Option<Fix> {
+    let ast = cx.ast();
+    let Node::Call { callee, .. } = *cx.node(call) else {
+        return None;
+    };
+    let member = skip_parens(ast, callee);
+    let (Node::Member { obj, .. } | Node::Index { obj, .. }) = *ast.node(member) else {
+        return None;
+    };
+    let obj_end = parenthesized_span(cx, skip_parens(ast, obj)).end;
+    let member_end = parenthesized_span(cx, member).end;
+    Some(
+        Fix::delete(Span::new(obj_end, cx.span(member).end))
+            .and(Span::new(member_end, cx.span(call).end), ""),
+    )
+}
+
+/// The call's explicit type arguments (`foo<T>()`).
+pub(crate) fn has_type_arguments(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    matches!(
+        *cx.node(id),
+        Node::Call {
+            type_args: Some(_),
+            ..
+        } | Node::New {
+            type_args: Some(_),
+            ..
+        }
+    )
 }

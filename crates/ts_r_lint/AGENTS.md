@@ -651,6 +651,14 @@ member reads don't count). What we learned, in our words:
   argument): fixed for side-effect-free callbacks, else suggested. The 4 failures are
   `x < 0 as any ** 2`: ESLint's TypeScript 5 parser accepts it, tsc 7 (and our parser)
   report TS1005.
+- **prefer-array-flat-map**: `x.map(f).flat()` / `.flat(1)` (raw `1`), not on
+  `React.Children`/`Children` or known non-arrays, reported from `map` to the call's end;
+  fixed (remove `.flat()`, rename) when `f` is an arrow returning an array literal or a
+  side-effect-free inline function, suggested otherwise, nothing with comments outside the
+  `map` call or type arguments. `x.filter(p => t).flatMap(p => [a, b])` (plain untyped
+  expression arrows on the same name, 2+ elements, no optional link in `x`) suggests
+  `x.flatMap(p => t ? [a, b] : [])`, wrapping a test that is an arrow, assignment, class,
+  `?:`, function, object, sequence, TS wrapper or `yield`.
 - `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
   not count tagged templates; `has_possible_side_effect` adds tagged templates and
   spreads anywhere, like unicorn).
@@ -665,7 +673,7 @@ member reads don't count). What we learned, in our words:
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement,is-node-matches,comments}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).
