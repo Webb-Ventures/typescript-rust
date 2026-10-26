@@ -334,11 +334,7 @@ mod unicorn_prefer_module;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
-mod unicorn_prefer_prototype_methods;
-mod unicorn_prefer_query_selector;
-mod unicorn_prefer_reflect_apply;
-mod unicorn_prefer_set_size;
-mod unicorn_prefer_string_raw;
+mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_switch_case_braces;
 mod unicorn_text_encoding_identifier_case;
@@ -707,22 +703,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
-    &unicorn_prefer_promise_static_methods::RULE,
-    &unicorn_prefer_promise_try::RULE,
-    &unicorn_prefer_queue_microtask::RULE,
-    &unicorn_prefer_response_static_json::RULE,
-    &unicorn_prefer_promise_with_resolvers::RULE,
-    &unicorn_prefer_short_escape_sequences::RULE,
-    &unicorn_prefer_single_array_predicate::RULE,
-    &unicorn_prefer_string_repeat::RULE,
-    &unicorn_prefer_structured_clone::RULE,
-    &unicorn_prefer_regexp_test::RULE,
-    &unicorn_prefer_spread::RULE,
-    &unicorn_prefer_string_replace_all::RULE,
-    &unicorn_prefer_string_slice::RULE,
-    &unicorn_prefer_string_starts_ends_with::RULE,
-    &unicorn_prefer_string_trim_start_end::RULE,
-    &unicorn_prefer_then_catch::RULE,
+    &unicorn_prefer_top_level_await::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_switch_case_braces::RULE,
     &unicorn_text_encoding_identifier_case::RULE,

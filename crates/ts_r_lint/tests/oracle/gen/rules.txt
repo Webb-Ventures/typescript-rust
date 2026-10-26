@@ -310,3 +310,4 @@ unicorn/no-thenable
 unicorn/no-static-only-class
 unicorn/no-useless-promise-resolve-reject
 unicorn/no-useless-length-check
+unicorn/prefer-top-level-await
