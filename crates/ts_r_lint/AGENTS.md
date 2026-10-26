@@ -972,3 +972,11 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   JavaScript's `\s` set (`unicorn_ast::is_js_space`), not Rust's `char::is_whitespace`.
   zod's `z.string()` is recognised by its import: a runtime `{z}` (or `{"z" as x}`) or
   namespace import from `"zod"` exactly.
+- **Splice replacements** (`no-unnecessary-splice` and `no-array-splice`, from `unicorn:
+  rules/no-unnecessary-splice.js`, `rules/no-array-splice.js` and
+  `shared/splice-replacements.js`). `unicorn_splice` decides which calls are no-ops,
+  emptying, `shift`/`unshift`/`pop`/`push`; numbers there are only signed literals
+  (`getStaticNumberValue`), not constants. `no-array-splice` skips those calls and wants a
+  `let`/`var` local with a fresh-array initializer whose other references are member
+  accesses, spreads or `for-of` sources only. Without type information its
+  tuple/type-parameter check never fires, so only the annotation test remains.

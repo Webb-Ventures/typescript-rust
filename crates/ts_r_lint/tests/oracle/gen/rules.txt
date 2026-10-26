@@ -399,3 +399,5 @@ unicorn/prefer-split-limit
 unicorn/no-impossible-length-comparison
 unicorn/no-unnecessary-global-this
 unicorn/no-unnecessary-string-trim
+unicorn/no-array-splice
+unicorn/no-unnecessary-splice

@@ -295,6 +295,7 @@ mod unicorn_no_array_concat_in_loop;
 mod unicorn_no_array_from_fill;
 mod unicorn_no_array_reverse;
 mod unicorn_no_array_sort;
+mod unicorn_no_array_splice;
 mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
@@ -329,6 +330,7 @@ mod unicorn_no_unnecessary_await;
 mod unicorn_no_unnecessary_global_this;
 mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_slice_end;
+mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_boolean_cast;
@@ -384,7 +386,7 @@ mod unicorn_prefer_type_literal_last;
 mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
 mod unicorn_require_module_attributes;
-mod unicorn_require_module_specifiers;
+mod unicorn_splice;
 mod unicorn_static;
 mod unicorn_switch_case_break_position;
 mod unicorn_text;
@@ -714,6 +716,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_concat_in_loop::RULE,
     &unicorn_no_array_reverse::RULE,
     &unicorn_no_array_sort::RULE,
+    &unicorn_no_array_splice::RULE,
     &unicorn_no_async_promise_finally::RULE,
     &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
@@ -749,6 +752,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_global_this::RULE,
     &unicorn_no_unnecessary_nested_ternary::RULE,
     &unicorn_no_unnecessary_slice_end::RULE,
+    &unicorn_no_unnecessary_splice::RULE,
     &unicorn_no_unnecessary_string_trim::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_boolean_cast::RULE,

@@ -286,6 +286,7 @@ unicorn/no-array-concat-in-loop 33/33
 unicorn/no-array-from-fill 30/30
 unicorn/no-array-reverse 28/28
 unicorn/no-array-sort 76/76
+unicorn/no-array-splice 95/95
 unicorn/no-async-promise-finally 39/39
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
@@ -320,6 +321,7 @@ unicorn/no-unnecessary-await 63/66
 unicorn/no-unnecessary-global-this 77/77
 unicorn/no-unnecessary-nested-ternary 39/39
 unicorn/no-unnecessary-slice-end 39/39
+unicorn/no-unnecessary-splice 97/97
 unicorn/no-unnecessary-string-trim 95/95
 unicorn/no-unreadable-iife 14/14
 unicorn/no-useless-boolean-cast 61/61
