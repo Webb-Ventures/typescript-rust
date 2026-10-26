@@ -1708,177 +1708,80 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-invalid-well-kn
   predicate (`x is T`, not `asserts`) is a boolean annotation. "TypeScript" for the
   `Boolean()` exemption is the file extension or the TS parser.
 
-## eslint-plugin-unicorn rules (round 6, h4)
+## eslint-plugin-unicorn rules (round 6, h2)
 
-Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its oracle, all
-`NO_PRESET`. What we learned, in our words (each file's header has the details):
+`no-array-callback-reference`, `prefer-array-find`, `prefer-set-has`,
+`no-array-fill-with-reference-type`, `prefer-single-call`, `no-immediate-mutation`,
+`no-array-sort-for-min-max`, `no-negated-array-predicate`, `prefer-iterator-to-array-at-end`,
+`prefer-iterable-in-constructor`, `no-duplicate-loops`, `prefer-map-from-entries`,
+`prefer-array-from-map`, `no-mismatched-map-key`, `prefer-array-iterable-methods`,
+`prefer-iterator-zip`, `no-unreadable-for-of-expression`, `no-unused-iterator-helper`,
+`prefer-direct-iteration`, `no-confusing-array-splice`, `no-useless-iterator-to-array`,
+`prefer-array-from-async`, `prefer-iterator-helpers`, `no-async-iterator-callback`,
+`prefer-object-iterable-methods`, `no-unnecessary-array-flat-map`, `prefer-group-by`,
+`no-boolean-sort-comparator`, `no-return-array-push`, `no-loop-iterable-mutation`,
+`prefer-has-check`, `no-useless-set-construction`, `prefer-minimal-ternary`,
+`no-invalid-temporal-arithmetic`, `no-invalid-intl-options` (each at 100% of its oracle).
+Each rule file's `//!` comment states the rule as implemented; the points that are not
+obvious from the plugin's docs:
 
-A second batch adds six more, also at 100% of their oracle cases: `isolated-functions`,
-`no-unsafe-property-key`, `no-unnecessary-parameters`, `no-unused-builtin-method-return`,
-`no-nonstandard-builtin-properties` and `no-unsafe-json-serialization`.
-Four opt-in rules (`NO_PRESET`) follow, also at 100%: `consistent-function-style`,
-`no-keyword-prefix`, `consistent-arrow-return-style` and `id-match`.
+- `rules/unicorn_iter.rs` holds what the iterator rules share: the `ITERATOR` checker (an
+  `Iterator.from/concat/zip/zipKeyed` call on the global, an argument-less
+  `entries/keys/values()` or `matchAll()`, a lazy helper on an iterator, a sync generator
+  call, or a plain `const` of one), `is_known_non_iterator` (literals, functions, classes,
+  `new LocalClass()`, `const`s of those or of `toArray/slice/concat/split`), and the
+  "fill a collection in a `for…of`" pieces (single loop binding, `[a, b]` pair patterns,
+  `references_symbol`, `referenced_by_nested_function`, `contains_suspension_point`,
+  `global_name_available`, `next_statement`).
+- The oracle is untyped, so the plugin's type-checker branches are not implemented in
+  `prefer-array-from-async`, `no-async-iterator-callback`, `no-boolean-sort-comparator`,
+  `no-unnecessary-array-flat-map`, `prefer-has-check` and `prefer-minimal-ternary` (which
+  also reports through const enums, as the untyped plugin does).
+- `no-loop-iterable-mutation` runs over every `for…of` in the file, inner loops first, and
+  reports each call once; "the delete of the current entry may have run" uses a structural
+  `always_exits` instead of code-path analysis. `no-mismatched-map-key` walks the file in
+  preorder itself. `prefer-iterator-zip` works on exit from the `for`.
+- `prefer-minimal-ternary` compares branches token by token (comments and whitespace
+  dropped, literal text kept verbatim, a trailing comma of a directly compared object
+  ignored). In TypeScript (extension or parser) objects whose shared values are not literals
+  get a suggestion instead of a fix.
+- `no-invalid-temporal-arithmetic`: Temporal receivers are `unicorn_types` checkers on
+  `Temporal.<Type>` (one target-node function per type); durations come from
+  `new Temporal.Duration(..)`, `Temporal.Duration.from(x)`, plain object literals (later keys
+  win), `const` bindings that are not object literals (those may be mutated), and the ISO
+  subset `±PnYnMnWnDTnHnMn(.f)S` (parsed by hand: no components, or a `T` without time
+  components, is not a duration; the fraction splits into ms/µs/ns). A field is known only
+  as a safe integer. Well-known symbols (`Symbol.iterator`) are primitives: they become
+  `NaN` increments and fail string conversion.
+- `no-invalid-intl-options`: the `Intl` constructors are followed with
+  `unicorn_util::global_path`; options must be an object literal of plain, distinct,
+  statically named properties. Problems are kept per option name, first one wins, reported at
+  the key (the expression inside `[...]` for a computed key) or the object. Fraction and
+  significant digit options are validated only when that rounding is in use, recomputed after
+  each group; the rename suggestion needs exactly one known name one edit away
+  (case-insensitive, adjacent transposition counting as one edit).
 
-- **Column-0 problems** (`directives.rs`). ESLint puts a problem reported at column 0 (a
-  whole-file report) before the problems on its line. `ProblemPos.before_line` carries that,
-  and the sort key is `(pos, !before_line)`.
-- **Template literal types** (`engine.rs`, `is_template_type_escape`). An invalid escape
-  inside a template literal type (TS1125, 1198, 1199, 1487, 1488) is not a fatal parse error
-  for lint, because ESLint's parser accepts it.
-- **Working directory** (`LintEnv.cwd`, `ResolveOptions.cwd`). `filename-case` needs
-  ESLint's `cwd` for its directory checks.
-- **Shared naming helpers** (`unicorn_names.rs`, not a rule). `RegexOpt` holds a regex
-  option (`source`, `flags`). It also has the plugin's word splitting and
-  camel/pascal/kebab/snake casing, which `filename-case`, `consistent-compound-words`,
-  `name-replacements` and `consistent-boolean-name` use. `name-replacements` reuses
-  compound-words' import and rename checks (`import_check`, `can_rename`).
-- **Escapes and text.** `no-useless-template-literals` folds static interpolations, and
-  rebuilds either a string literal or a template depending on what the result needs.
-  `prefer-escaped-irregular-whitespace` writes `\u{X}`, keeps an LS/PS that is already
-  escaped, fixes regexes only with `u`/`v`, and skips JSX attribute strings.
-  `prefer-unicode-code-point-escapes` scans bytes and joins surrogate pairs. In a regex
-  without `u`, it only suggests, and checks the result with `crate::regex::parse`.
-  `prefer-literal-ascii` has no fix in a directive, when a following digit would extend a
-  legacy escape, or in a template literal type with a backslash.
-- **Comments.** `single-line-block-comment-style` leaves tooling directives alone
-  (matched by hand) and ESLint inline-config comments.
-- **Typed without the typed oracle.** `no-non-function-verb-prefix` is not `.typed()`,
-  because the untyped oracle cannot run typed rules. It checks
-  `cx.types().is_available()` and reports nothing without types. Class fields read
-  `type_at(PropertyDef)`.
-- **Renames.** `consistent-compound-words` matches the longest words first and checks
-  that a match ends on a word boundary. It walks (scope, symbol) in order, and a tracker of
-  names already used stops two renames from colliding. It only suggests.
-  `name-replacements` takes its table from the plugin defaults (generated once by a
-  script outside the repo). `locale_cmp` approximates `localeCompare` for ordering. The
-  filename report has its own location. A JSDoc `@param` attached to a parameter blocks
-  that parameter's fix.
-- **`prefer-single-replace`.** Reads the `crate::regex` tree: one alternative holding one
-  character, or a non-negated class of one character.
-- **`consistent-boolean-name`.** Every binding is boolean, non-boolean or unknown, and
-  unknown never reports.
-  - Type annotations are evaluated with an environment of generic arguments.
-  - An interface with call signatures and `Promise<T>` returns count. `as`/`satisfies`
-    use the target type first.
-  - A compound write makes a binding non-boolean, and an optional chain makes it unknown.
-  - React `useRef` and Vue `ref`/`computed` suppress the non-boolean report.
-  - Members dedupe per owner and name. Merged interfaces share an owner (found by
-    namespace path), and overload signatures decide over the implementation.
-  - JSDoc `@type`/`@param`/`@returns` are tokenized and parsed by our own small parser
-    (unions, intersections, `?`/`!`/`=`, function types, generics, records). Numeric
-    record keys follow the numeric-literal token rules: `.5` is a key, `1.5n` is not.
-  - A conditional or logical expression has a kind (string, array, ...) only when both
-    branches agree.
-- **`isolated-functions`.** Built on the ESTree view (`crate::estree`, `crate::esquery`
-  selectors). The reasons a function is isolated are tried in order: a comment tag before the
-  function (or its declarator, declaration, export, property or method), a call to one of the
-  `functions`, the first argument of `browser.execute`/`page.evaluate`, the `func` of
-  `{browser,chrome}.scripting.executeScript`, then the selectors by specificity.
-  - Outside references are the scope chain's "through" references. Type, `typeof`-type and
-    implicit references don't count.
-  - Allowed globals: `overrideGlobals` first, then comment globals (`off` forbids), then
-    `env.globals`. `Object.prototype` names are not globals here, because the plugin reads
-    the `globals` package, not ESLint's ES3 list.
-  - `this`/`super` are walked until a non-arrow function. Classes are entered only through
-    `superClass` and computed keys.
-- **`no-unsafe-property-key`.** Keys are classified as unsafe, safe or unknown by our own
-  rules first. Unknown keys fall back to an `unicorn_types::Checker` over the array target
-  names. Annotations resolve through `type_definition` from the declaring scope, and
-  well-known `Symbol.*` keys are safe.
-- **`no-unnecessary-parameters`.** Its local-call tracker covers symbols with one
-  declaration, plus `#private` methods through the nearest class. It stops at the global
-  scope, writes, exports, decorators and non-call references.
-  - The rule skips a whole file with `with`, direct `eval` or a sloppy-mode block function,
-    and skips functions that use their own `arguments` or have type parameters.
-    `ARGUMENTS` symbols are not in `scope.symbols`, so it scans `sem.symbols()`.
-  - Fixes remove the parameter and the argument (`remove_object_property` works
-    token-wise), add a local default with `unicorn_util_h2::{indent_unit, line_indent}`, and
-    replace references, adding parentheses and ASI guards where needed.
-  - It only suggests in TypeScript, or when the file has JSDoc types or `@ts-check`.
-- **`no-unused-builtin-method-return`.** A call counts as discarded when
-  `is_value_not_usable` holds, or when it is a `for` init/update, looking through `await`
-  and TS wrappers (`void` is a deliberate use).
-  - The receiver resolves through an unwritten single declarator or a plain parameter. A
-    member, a destructured, defaulted or optional parameter, or a write before the call
-    makes it uncertain, and uncertain receivers are skipped.
-  - Set and Temporal methods need a known receiver: `unicorn_types::SET`, or one local
-    `Checker` per Temporal method over dotted `Temporal.X` names plus `new Temporal.X()` /
-    `Temporal.X.from()`. Array methods only need the receiver not to be obviously
-    something else.
-  - Lazy iterator helpers are left to `no-unused-iterator-helper`. The check for them is a
-    small local copy of the iterator-expression test, which should fold into h2's
-    `unicorn_iter`.
-- **`no-nonstandard-builtin-properties`.** The data is a `Shape` per kind of object (its
-  own props, its own methods, and a base: `OBJECT`, `FUNCTION` or `CONSTRUCTOR`), with a
-  `(instance, prototype, static)` triple per global.
-  - Property names are literal keys only. Like `getPropertyName` without a scope, they
-    don't follow constants.
-  - Indexes count as standard: array indexes on arrays and strings, and canonical numeric
-    strings on typed arrays.
-  - The call kind looks up through parentheses and TS wrappers. A class's `extends`
-    clause counts as construction.
-- **`no-unsafe-json-serialization`.** Map, Set, WeakMap, WeakSet, BigInt and RegExp come
-  from the shared checkers. Symbols and functions have local `Checker`s: `Symbol.for(...)`,
-  the `symbol` keyword, well-known `Symbol.*` builtins as a static type, and function or
-  class syntax or a never-reassigned function or class name.
-  - The search keeps a per-path visited set. A `const` initializer reports its first
-    problem at the use, without suggestions.
-  - The report node is the argument without parentheses (ESTree has none). TS wrappers are
-    kept.
-- **`consistent-function-style`.** The role comes from the function's slot, looking
-  through parentheses. FunctionDecl spans drop `export`/`default` to match ESTree.
-  Accessor, class-member, default-value and IIFE slots have no role.
-- **`no-keyword-prefix` and `id-match`.** Both run over the ESTree view (`run_file`,
-  `EsTree::build`), because the rules decide by ESTree parent types. Reports are deduped by
-  range (shorthand properties are two nodes). `id-match` follows ESLint's core `id-match`
-  (`eslint/lib/rules/id-match.js`, read as a reference) and tests with `RegexOpt` and the
-  `u` flag. Configured and comment globals are skipped as references.
-- **`consistent-arrow-return-style`.** Reuses `concise_arrow_body_text` (from
-  `no-useless-boolean-cast`), `unicorn_ast::linebreak` and h2's
-  `indent_unit`/`line_indent`. The token after the block is checked as text, and a
-  template continuation is found by climbing to a `TemplateLit` parent.
-- **Gaps.**
-  - `expiring-todo-comments` does not check package, engine or peer-dependency
-    conditions, and recognizes only some CI vendors when detecting a PR.
-  - CSS, JSON and HTML languages are not linted.
-  - `consistent-boolean-name` has no checker type information and no `wrappers`
-    option, and does not mask `{@link}` or code spans inside JSDoc.
-  - `isolated-functions` does not treat JSX element names as references.
-    `no-unnecessary-parameters` skips every generic function, which only approximates the
-    plugin's type-aware check. `no-unused-builtin-method-return`, `no-unsafe-property-key`
-    and `no-unsafe-json-serialization` see no checker types: only syntax, annotations and
-    JSDoc.
+Shared changes: `unicorn_text::static_member_name` (added; it reads a sequence index by its
+last expression), and `binding`/`same_binding` in `unicorn_no_mismatched_map_key.rs` and
+`can_observe_array_argument` in `unicorn_prefer_iterator_to_array_at_end.rs` are
+`pub(crate)`.
 
-Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
-`rules/no-abusive-eslint-disable.js`, `rules/filename-case.js`, `rules/import-style.js`,
-`rules/template-indent.js`, `rules/shared/is-jest-inline-snapshot.js`,
-`rules/expiring-todo-comments.js`, `rules/shared/package-json.js`,
-`rules/prefer-bigint-literals.js`, `rules/no-useless-template-literals.js`,
-`rules/utils/escape-template-element-raw.js`,
-`rules/utils/has-template-incompatible-escape.js`,
-`rules/prefer-escaped-irregular-whitespace.js`,
-`rules/prefer-unicode-code-point-escapes.js`, `rules/prefer-literal-ascii.js`,
-`rules/single-line-block-comment-style.js`, `rules/no-non-function-verb-prefix.js`,
-`rules/consistent-compound-words.js`, `rules/shared/identifier-checks.js`,
-`rules/prefer-single-replace.js`, `rules/name-replacements.js`,
-`rules/shared/name-replacements.js`, `rules/consistent-boolean-name.js`,
-`rules/utils/is-boolean.js`, `rules/utils/jsdoc.js`, `rules/utils/jsdoc-type.js`,
-`rules/utils/parse-jsdoc-type.js`, `rules/utils/get-jsdoc-boolean-state.js`,
-`rules/utils/type-helpers.js` (parts), `rules/utils/get-type-boolean-state.js`,
-`rules/utils/function-body.js`, `rules/utils/is-string.js`, `rules/utils/is-array.js`,
-`rules/utils/is-react-hook-name.js`, `rules/utils/get-boolean-wrapper-variable-state.js`
-(header), `rules/isolated-functions.js`, `docs/rules/isolated-functions.md`,
-`rules/no-unsafe-property-key.js`, `rules/utils/builtins.js`, `rules/shared/builtin-errors.js`,
-`rules/shared/typed-array.js`, `rules/no-unnecessary-parameters.js`,
-`docs/rules/no-unnecessary-parameters.md`, `rules/utils/track-local-function-calls.js`,
-`rules/utils/get-primitive-literal-value.js`, `rules/fix/remove-object-property.js`,
-`rules/fix/replace-reference-identifier.js`, `rules/fix/remove-argument.js`,
-`rules/utils/get-indent-unit.js`, `rules/utils/has-javascript-type-annotations.js`,
-`rules/no-unused-builtin-method-return.js`, `rules/shared/iterator-helpers.js`,
-`rules/no-nonstandard-builtin-properties.js`, `rules/utils/unwrap-typescript-expression.js`,
-`rules/utils/member-expression.js`, `rules/no-unsafe-json-serialization.js`,
-`rules/utils/get-const-variable-initializer.js`, `rules/consistent-function-style.js`,
-`rules/utils/has-unsafe-arrow-conversion-reference.js`, `rules/no-keyword-prefix.js`,
-`rules/consistent-arrow-return-style.js`, `rules/utils/function-body.js`,
-`rules/utils/reindent-text.js`, `rules/utils/get-concise-arrow-body-text.js`,
-`rules/utils/comments.js`, `rules/id-match.js`; ESLint 9: `lib/rules/id-match.js`.
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0: `rules/{no-array-callback-reference,
+prefer-array-find, prefer-set-has, no-array-fill-with-reference-type, prefer-single-call,
+no-immediate-mutation, no-array-sort-for-min-max, no-negated-array-predicate,
+prefer-iterator-to-array-at-end, prefer-iterable-in-constructor, no-duplicate-loops,
+prefer-map-from-entries, prefer-array-from-map, no-mismatched-map-key,
+prefer-array-iterable-methods, prefer-iterator-zip, no-unreadable-for-of-expression,
+no-unused-iterator-helper, prefer-direct-iteration, no-confusing-array-splice,
+no-useless-iterator-to-array, prefer-array-from-async, prefer-iterator-helpers,
+no-async-iterator-callback, prefer-object-iterable-methods, no-unnecessary-array-flat-map,
+prefer-group-by, no-boolean-sort-comparator, no-return-array-push, no-loop-iterable-mutation,
+prefer-has-check, no-useless-set-construction, prefer-minimal-ternary,
+no-invalid-temporal-arithmetic, no-invalid-intl-options}.js`;
+`rules/shared/{iterator-helpers, for-of-collection-loop, typed-array, minimal-ternary}.js`;
+`rules/utils/{track-branch-exits, comparison, is-same-binding, type-helpers,
+builtin-collection-type, comments, is-const-enum-reference, type-arguments, is-same-tokens,
+should-add-parentheses-to-conditional-expression-child,
+should-add-parentheses-to-await-expression-argument, get-const-variable-initializer,
+is-string, global-reference-tracker}.js`; `rules/ast/{is-method-call, is-member-expression,
+call-or-new-expression, matches-name-constraint}.js`.
