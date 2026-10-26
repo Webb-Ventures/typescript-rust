@@ -337,6 +337,7 @@ mod unicorn_prefer_location_assign;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_promise_static_methods;
 mod unicorn_prefer_queue_microtask;
 mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_short_escape_sequences;
@@ -712,6 +713,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_promise_static_methods::RULE,
     &unicorn_prefer_queue_microtask::RULE,
     &unicorn_prefer_response_static_json::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,

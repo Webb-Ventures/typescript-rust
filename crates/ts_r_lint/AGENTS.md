@@ -627,6 +627,9 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
   **no-optional-chaining-on-undeclared-variable** (scopes walked outwards; type-only
   declarations and imports don't declare a runtime name), **prefer-response-static-json**:
   see each file's header.
+- **prefer-promise-static-methods** withholds its fix when the executor has typed
+  parameters, a return type or type parameters, when `new Promise<T>` would hand its type
+  arguments to `reject`, or when a comment would be lost.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -658,7 +661,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `utils/should-add-parentheses-to-conditional-expression-child.js`, `require-css-escape.js`,
 `utils/is-node-value-not-dom-node.js`, `explicit-timer-delay.js`,
 `require-array-sort-compare.js`, `fix/append-argument.js`, `fix/replace-argument.js`,
-`prefer-array-slice.js`.
+`prefer-array-slice.js`, `prefer-promise-static-methods.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:

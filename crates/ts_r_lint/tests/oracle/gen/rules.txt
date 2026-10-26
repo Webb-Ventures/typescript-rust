@@ -316,3 +316,4 @@ unicorn/require-css-escape
 unicorn/explicit-timer-delay
 unicorn/require-array-sort-compare
 unicorn/prefer-array-slice
+unicorn/prefer-promise-static-methods
