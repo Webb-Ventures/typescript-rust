@@ -37,7 +37,15 @@
 // eslintrc-style cases become flat config, the generator runs from the plugin root, and each
 // case's `filename` is kept relative to `tests/files`; Babel and Flow parser cases are
 // skipped, as are cases that need the webpack or TypeScript resolver (not installed: ESLint
-// reports "Resolve error") or name an absolute path in the plugin's checkout).
+// reports "Resolve error"); absolute paths into the plugin's checkout are written as
+// `/import`, where the harness mounts it; a tester's `settings` apply to its cases; the
+// rules get ESLint 9's `context.parserOptions` and `getTokenOrComment{Before,After}`, which
+// ESLint 10 dropped; group-exports and no-relative-parent-imports, tested only with Babel,
+// replay with espree). Don't create a `node_modules` in the plugin checkout, except for
+// import/no-unused-modules: it lists files with ESLint 9's FileEnumerator (gone in ESLint
+// 10), so generate it alone with an ESLint 9 tools dir (eslint@9 plus the checkout's
+// eslintrc needs: eslint-plugin-eslint-plugin, eslint-plugin-json, babel-eslint, semver)
+// symlinked as the checkout's `node_modules`, and remove the link after.
 
 import { registerHooks, createRequire, isBuiltin } from 'node:module';
 import fs from 'node:fs';
@@ -79,7 +87,30 @@ const tsParser = toolsRequire('@typescript-eslint/parser');
 const tsPlugin = toolsRequire('@typescript-eslint/eslint-plugin');
 const jsdocPlugin = jsdocTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-jsdoc')).href)).default : undefined;
 const unicornPlugin = unicornTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-unicorn')).href)).default : undefined;
-const importPlugin = importTests ? toolsRequire('eslint-plugin-import') : undefined;
+// eslint-plugin-import 2.32.0 targets ESLint 9: some rules read `context.parserOptions` and
+// `sourceCode.getTokenOrComment{Before,After}`, which ESLint 10 removed. Each rule's context
+// gets the ESLint 9 values back (flat config's `languageOptions.parserOptions`, and token
+// lookups that include comments), so those rules behave as they do on ESLint 9.
+const eslint9Context = (context) => {
+  // Contexts are frozen: the extra properties go on an object that inherits from them.
+  const sc = context.sourceCode;
+  const sourceCode = Object.create(sc, {
+    getTokenOrCommentBefore: { value: (n, skip) => sc.getTokenBefore(n, { includeComments: true, skip }) },
+    getTokenOrCommentAfter: { value: (n, skip) => sc.getTokenAfter(n, { includeComments: true, skip }) },
+  });
+  return Object.create(context, {
+    parserOptions: { value: context.languageOptions?.parserOptions ?? {} },
+    sourceCode: { value: sourceCode },
+    getSourceCode: { value: () => sourceCode },
+  });
+};
+const importPluginRaw = importTests ? toolsRequire('eslint-plugin-import') : undefined;
+const importPlugin = importPluginRaw && {
+  ...importPluginRaw,
+  rules: Object.fromEntries(
+    Object.entries(importPluginRaw.rules).map(([n, r]) => [n, { ...r, create: (context) => r.create(eslint9Context(context)) }]),
+  ),
+};
 const unicornGlobals = unicornTests
   ? (() => {
       const g = toolsRequire('globals');
@@ -228,6 +259,24 @@ const IMPORT_TESTER = stub(
    exports.withoutAutofixOutput = (t) => t;`,
 );
 const EMPTY = stub('empty', `exports.version = '0.0.0';`);
+const CHAI = stub('chai', `exports.expect = () => new Proxy({}, { get: function g() { return new Proxy(() => {}, { get: g }); } });`);
+const NO_PROCESS = stub(
+  'no-process',
+  `const no = () => { throw new Error('child processes are disabled in the oracle generator'); };
+   exports.exec = no; exports.execSync = no; exports.execFile = no; exports.execFileSync = no;
+   exports.spawn = no; exports.spawnSync = no; exports.fork = no;`,
+);
+const importRuleStubs = new Map();
+const importRuleStub = (name) => {
+  if (!importRuleStubs.has(name)) {
+    importRuleStubs.set(
+      name,
+      stub('import-rule-' + name.replace(/[^\w-]/g, '_'), `module.exports = { meta: globalThis.__importRuleMeta(${JSON.stringify(name)}), create() { return {}; } };`),
+    );
+  }
+  return importRuleStubs.get(name);
+};
+globalThis.__importRuleMeta = (name) => importPluginRaw?.rules?.[name]?.meta ?? {};
 
 registerHooks({
   load(url, context, next) {
@@ -244,6 +293,9 @@ registerHooks({
   },
   resolve(specifier, context, next) {
     const s = specifier;
+    // eslint-plugin-import's own lazy requires (no-unused-modules loads ESLint's
+    // FileEnumerator while linting) resolve normally.
+    if (/\/node_modules\/(eslint-plugin-import|eslint-module-utils)\//.test(context.parentURL ?? '')) return next(specifier, context);
     const r = (url) => ({ url, shortCircuit: true, format: 'commonjs' });
     if (/lib\/rule-tester\/rule-tester$/.test(s) || s === '@typescript-eslint/rule-tester') return r(RULE_TESTER);
     if (s.startsWith('.') && /(^|\/)(lib|src)\/rules\//.test(s)) return r(RULE);
@@ -261,9 +313,19 @@ registerHooks({
     if (importTests && parent.startsWith(pathToFileURL(importTests).href)) {
       if (s === '../utils') return r(IMPORT_UTILS);
       if (s === '../rule-tester') return r(IMPORT_TESTER);
-      if (/^rules\//.test(s)) return r(RULE);
+      // A rule module's stub carries the rule's `meta` (its message templates, which some
+      // tests format their expected messages with), never its implementation.
+      if (/^rules\//.test(s)) return r(importRuleStub(s.slice('rules/'.length)));
+      // The fixture tree's own `package.json` files are data the tests read.
+      if (/(^|\/)package\.json$/.test(s) && s.startsWith('.')) {
+        const f = path.resolve(path.dirname(new URL(parent).pathname), s);
+        if (importFiles && f.startsWith(importFiles + path.sep) && fs.existsSync(f)) return { url: pathToFileURL(f).href, shortCircuit: true };
+      }
       if (/(^|\/)package\.json$/.test(s) && !s.startsWith('eslint/')) return r(EMPTY);
-      if (['chai', 'babel-preset-flow', 'babel-eslint'].includes(s)) return r(EMPTY);
+      if (s === 'chai') return r(CHAI);
+      // Test bodies (`it`) are run for their RuleTester calls; never let one spawn a process.
+      if (s === 'child_process' || s === 'node:child_process') return r(NO_PROCESS);
+      if (['babel-preset-flow', 'babel-eslint'].includes(s)) return r(EMPTY);
       if (s.startsWith('.') && !path.extname(s)) {
         const f = path.resolve(path.dirname(new URL(parent).pathname), s + '.js');
         if (fs.existsSync(f)) return { url: pathToFileURL(f).href, shortCircuit: true };
@@ -284,10 +346,16 @@ registerHooks({
       if (s === 'eslint') return r(ESLINT_NAMED);
       if (s === 'espree') return r(ESPREE_NAMED);
       if (s === '../index.js') return { url: pathToFileURL(toolsRequire.resolve('eslint-plugin-unicorn')).href, shortCircuit: true };
+      // A test that imports its rule module (for its messages) gets the stub.
+      if (/^\.\.\/rules\//.test(s)) return r(RULE);
       if (!s.startsWith('.') && !s.startsWith('node:')) {
         try {
           return { url: pathToFileURL(toolsRequire.resolve(s)).href, shortCircuit: true };
-        } catch {}
+        } catch {
+          // Language plugins for cases of other languages (CSS, JSON, Markdown, ...), which
+          // are skipped.
+          if (/^(@eslint\/(css|json|markdown)|@html-eslint\/|eslint-plugin-(toml|yml|yaml)|eslint-soml)/.test(s)) return r(EMPTY);
+        }
       }
     }
     if (s === 'globals' || s === 'eslint-scope' || s === 'espree' || s.startsWith('@typescript-eslint/') || s === 'eslint' || s.startsWith('eslint/')) {
@@ -307,9 +375,18 @@ const each = (run) => {
   f.only = f;
   return f;
 };
-globalThis.describe = each((fn) => fn());
+// mocha's `this` in suites and hooks, and its hooks: `before*` run at once (fixture files a
+// suite creates must exist when its cases are replayed), `after*` never (so they stay).
+const mochaThis = { timeout() {}, slow() {}, retries() {}, skip() {} };
+globalThis.describe = each((fn) => fn.call(mochaThis));
 // mocha's alias (eslint-plugin-import's tests).
 globalThis.context = globalThis.describe;
+globalThis.before = globalThis.beforeEach = (fn) => {
+  try {
+    fn.call(mochaThis);
+  } catch {}
+};
+globalThis.after = globalThis.afterEach = () => {};
 // A test body that runs its own Linter (array-type's multi-pass fix checks) has nothing to
 // record; let it fail without losing the file's RuleTester cases.
 globalThis.it = globalThis.test = each((fn) => {
@@ -323,6 +400,8 @@ globalThis.__unicornTester = (importMeta, ruleId) => {
   const record = (tests, parser) => {
     const lo = { ...(tests.testerOptions?.languageOptions || {}) };
     if (parser) lo.parser = parser;
+    // A tester for another language (`testerOptions.language`: CSS, JSON, YAML, ...).
+    if (tests.testerOptions && 'language' in tests.testerOptions) lo.parser = { __parser: 'other' };
     globalThis.__recorded.push({
       name: 'unicorn/' + id,
       config: { languageOptions: { ...lo, globals: { ...unicornGlobals, ...(lo.globals || {}) } } },
@@ -341,10 +420,16 @@ globalThis.__unicornTester = (importMeta, ruleId) => {
 // eslint-plugin-import's eslintrc-style cases as flat ones (as its own FlatCompatRuleTester
 // does): `parser` (a marker or module path), `parserOptions.ecmaVersion/sourceType` move to
 // `languageOptions`.
+// group-exports and no-relative-parent-imports test only with Babel; their cases are
+// replayed with espree (the default parser), and those that need Babel syntax (Flow) fail
+// to parse and are skipped.
+const BABEL_AS_ESPREE = new Set(['group-exports', 'no-relative-parent-imports']);
+let babelAsEspree = false;
 const importParser = (p) => {
   if (p == null) return undefined;
   if (typeof p !== 'string') return p;
   if (p === 'tsr:espree' || /espree/.test(p)) return undefined;
+  if (babelAsEspree && (p === 'tsr:babel' || /babel-eslint|@babel\/eslint-parser/.test(p))) return undefined;
   if (p === 'tsr:ts' || /typescript-eslint|ts-parser/.test(p)) return { __parser: 'ts' };
   return { __parser: 'other' };
 };
@@ -361,10 +446,16 @@ const importFlat = (t) => {
   return { ...rest, languageOptions: lo };
 };
 globalThis.__importTester = (name, config, tests) => {
+  babelAsEspree = BABEL_AS_ESPREE.has(name);
+  // A tester's own `settings` (config/typescript.js) apply to each of its cases.
+  const withSettings = (t) => {
+    const f = importFlat(t);
+    return config?.settings ? { ...f, settings: { ...config.settings, ...(f.settings || {}) } } : f;
+  };
   globalThis.__recorded.push({
     name: 'import/' + name,
     config: { languageOptions: importFlat(config).languageOptions },
-    tests: { valid: (tests.valid || []).map(importFlat), invalid: (tests.invalid || []).map(importFlat) },
+    tests: { valid: (tests.valid || []).map(withSettings), invalid: (tests.invalid || []).map(withSettings) },
     defined: [],
   });
 };
@@ -448,10 +539,6 @@ function observe(ruleId, isTs, testerConfig, c) {
   }
   const merged = parserKind(lo.parser);
   if (merged === 'fixture' || merged === 'other') return { skipped: 'unsupported case' };
-  // Settings or code naming an absolute path in eslint-plugin-import's checkout.
-  if (importFiles && JSON.stringify({ ...c, filename: undefined }).includes(path.dirname(importFiles))) {
-    return { skipped: 'machine-specific path' };
-  }
   const useTs = isTs || merged === 'ts';
   const jsx = !!lo.parserOptions?.ecmaFeatures?.jsx;
   // eslint-plugin-import's cases name files in its fixture tree (`tests/files`), which its
@@ -577,6 +664,31 @@ function testFileFor(rule) {
 fs.mkdirSync(outDir, { recursive: true });
 // A RegExp in rule options (`ignore: [/^skip/]`) is written as `{ "regex": source,
 // "flags": flags }`; plain JSON would turn it into `{}`.
+// eslint-plugin-import's cases name files of its checkout by absolute path (in code,
+// options, settings and messages). The harness mounts the checkout's `tests` at `/import`,
+// so the checkout root is written as `/import`; columns after a rewritten path in the
+// code move left by the length difference.
+const MOUNT = '/import';
+function unmachine(rec, root) {
+  const lines = rec.code.split(/\r\n|[\r\n\u2028\u2029]/);
+  const shift = (line, col) => {
+    if (line == null || col == null) return col;
+    const before = (lines[line - 1] ?? '').slice(0, col - 1);
+    return col - (before.split(root).length - 1) * (root.length - MOUNT.length);
+  };
+  for (const m of rec.messages ?? []) {
+    m.column = shift(m.line, m.column);
+    m.endColumn = shift(m.endLine, m.endColumn);
+  }
+  const map = (v) => {
+    if (typeof v === 'string') return v.split(root).join(MOUNT);
+    if (Array.isArray(v)) return v.map(map);
+    if (v && typeof v === 'object' && !(v instanceof RegExp)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [map(k), map(x)]));
+    return v;
+  };
+  return map(rec);
+}
+
 function regexToJson(key, value) {
   return value instanceof RegExp ? { regex: value.source, flags: value.flags } : value;
 }
@@ -617,13 +729,21 @@ for (const rule of rules) {
             skipped[k] = (skipped[k] || 0) + 1;
             continue;
           }
-          cases.push({
+          const entry = {
             code: c.code,
             options: c.options.length ? c.options : undefined,
             settings: c.settings,
             valid: c.valid || undefined,
             ...obs,
-          });
+          };
+          // Lone surrogates (in options or messages too) have no UTF-8 form.
+          const wellFormed = (v) =>
+            typeof v === 'string' ? v.isWellFormed() : v && typeof v === 'object' ? Object.values(v).every(wellFormed) : true;
+          if (!wellFormed(entry)) {
+            skipped['lone surrogate'] = (skipped['lone surrogate'] || 0) + 1;
+            continue;
+          }
+          cases.push(importRoot ? unmachine(entry, importRoot) : entry);
         }
       }
     }
