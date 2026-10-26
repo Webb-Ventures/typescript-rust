@@ -358,6 +358,7 @@ mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_duplicate_logical_operands;
 mod unicorn_no_duplicate_set_values;
 mod unicorn_no_empty_file;
+mod unicorn_no_error_property_assignment;
 mod unicorn_no_exports_in_scripts;
 mod unicorn_no_for_each;
 mod unicorn_no_for_loop;
@@ -429,6 +430,7 @@ mod unicorn_no_useless_recursion;
 mod unicorn_no_useless_spread;
 mod unicorn_no_useless_switch_case;
 mod unicorn_no_useless_undefined;
+mod unicorn_no_using_resource_escape;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
@@ -918,6 +920,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_duplicate_logical_operands::RULE,
     &unicorn_no_duplicate_set_values::RULE,
     &unicorn_no_duplicate_if_branches::RULE,
+    &unicorn_no_error_property_assignment::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
     &unicorn_no_ineffective_csp_directives::RULE,
@@ -986,6 +989,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_spread::RULE,
     &unicorn_no_useless_switch_case::RULE,
     &unicorn_no_useless_undefined::RULE,
+    &unicorn_no_using_resource_escape::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,

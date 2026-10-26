@@ -1771,6 +1771,19 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   line, else one level deeper than the nearest line-starting ancestor, else the file's
   indent unit). 109/110: `promise.then(await => await)` in a `.ts` file is a parse error in
   ts_r_parser (`await` as an arrow parameter outside a module), not a rule gap.
+- **no-error-property-assignment**: assignments to `message`, `name`, `cause`, `stack` (and
+  `Object.assign(err, {..})` with the global `Object`) on a `const`/`let` freshly bound to
+  `new <builtin Error>(..)` in the same statement list, before anything else could have
+  seen the error. A walker keeps one frame per Program, block, static block and `case`
+  body; bare blocks are transparent, functions are boundaries, and a reassignment,
+  destructuring, loop or update of the name clears it. Computed keys count only when
+  static without reading any binding.
+- **no-using-resource-escape**: a `using`/`await using` resource that leaves its scope by
+  being returned, exported (`export default`, `export =`, local `export {}` specifiers,
+  exported `const` initializers) or captured by a returned or exported function. Type
+  references, `typeof` queries and type-only member keys aren't uses; a name bound only
+  as a type alias, interface or type parameter isn't a value. Files without a `using`
+  declaration are skipped before the walk.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
@@ -1781,7 +1794,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
 `prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`,
 `no-negated-comparison.js`, `no-chained-comparison.js`, `no-invalid-character-comparison.js`,
-`no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`;
+`no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`, `no-error-property-assignment.js`,
+`no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
@@ -1790,7 +1804,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `has-optional-chain-element.js`, `get-const-variable-initializer.js`, `single-statement.js`,
 `is-same-reference.js`, `is-promise-type.js`, `is-call-expression-value-discarded-with-void.js`,
 `contains-suspension-point.js`, `get-references.js`, `get-indent-string.js`, `get-indent-unit.js`,
-`get-line-indent.js`, `reindent-text.js`; `rules/fix/remove-statement.js`,
+`get-line-indent.js`, `reindent-text.js`, `get-assignment-targets.js`, `member-expression.js`,
+`is-branch-exit.js`, `track-branch-exits.js`; `rules/fix/remove-statement.js`,
 `add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
-`rules/shared/nullish-check.js`. ESLint docs for `operator-assignment` and
+`rules/shared/nullish-check.js`, `builtin-errors.js`. ESLint docs for `operator-assignment` and
 `logical-assignment-operators`.
