@@ -2079,6 +2079,24 @@ obvious from the plugin's docs:
   reports on `toString` unless `x` is a known non-buffer, a known string, or a `toBase64()`
   result. It shares the `Buffer` policy (`is_buffer_expression`, `is_non_buffer_node`, the
   name lists) with `unicorn_prefer_uint8array_hex`.
+- `prefer-regexp-escape` (`unicorn_prefer_regexp_escape.rs`): `s.replace(/[…]/g, '\\$&')`
+  (a plain method call, the regex global and not sticky, a non-negated class of at least 8
+  distinct regex syntax characters `\\^$.*+?()[]{}|/-`, with an unescaped `-` only at the class
+  edges and an unescaped `]` only first) unless `s` is a known non-string, fixed to
+  `RegExp.escape(s)` (no fix for `super` or when a comment would go). One-argument calls of an
+  escape helper suggest `RegExp.escape(x)`: the default export of `escape-string-regexp`,
+  `lodash.escaperegexp` or `lodash/escapeRegExp` (default import, `{default as x}`, or `const x =
+  require('…')`), lodash's `escapeRegExp` (named import or `const {escapeRegExp} =
+  require('lodash')`), and `_.escapeRegExp(x)` where `_` is a default/namespace import or
+  `require` of `lodash`/`lodash-es`, or an undeclared `_`/`lodash`. Not for a spread, a known
+  non-string argument without a possibly mutated member read, or a static non-string value.
+- `prefer-error-is-error` (`unicorn_prefer_error_is_error.rs`): `x instanceof Error` and
+  `Object.prototype.toString.call(x)` / `({}).toString.call(x)` compared with `==`, `!=`, `===`
+  or `!==` to the static string `'[object Error]'` (either side; plain members, one argument)
+  are fixed to `[!]Error.isError(x)` (the argument text as one call argument, keyword spacing
+  kept; no fix when a comment would go). Not when any scope around declares `Error` (or, for
+  the tag check, `Object`) as a value: unlike a plain lookup, an inner type-only declaration
+  (`type`, `interface`, `import type`) does not hide an outer value of the same name.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -2109,4 +2127,6 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/is-node-value-not-dom-node.js`, `better-dom-traversing.js`,
 `utils/is-left-hand-side.js`, `ast/is-member-expression.js`, `no-invalid-argument-count.js`, `prefer-uint8array-hex.js`,
 `shared/buffer-reference.js`, `prefer-uint8array-base64.js`,
-`utils/global-reference-tracker.js`, `fix/remove-method-call.js`.
+`utils/global-reference-tracker.js`, `fix/remove-method-call.js`, `prefer-regexp-escape.js`,
+`shared/regexp-escape.js`, `prefer-error-is-error.js`,
+`utils/comments.js`, `utils/get-call-argument-text.js`, `utils/imports.js`.

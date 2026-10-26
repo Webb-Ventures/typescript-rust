@@ -526,9 +526,7 @@ mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
 mod unicorn_prefer_dom_node_replace_children;
 mod unicorn_prefer_dom_node_text_content;
-mod unicorn_prefer_early_return;
-mod unicorn_prefer_else_if;
-mod unicorn_prefer_escaped_irregular_whitespace;
+mod unicorn_prefer_error_is_error;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_export_from;
 mod unicorn_prefer_flat_math_min_max;
@@ -577,6 +575,7 @@ mod unicorn_prefer_prototype_methods;
 mod unicorn_prefer_query_selector;
 mod unicorn_prefer_queue_microtask;
 mod unicorn_prefer_reflect_apply;
+mod unicorn_prefer_regexp_escape;
 mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_scoped_selector;
@@ -1167,6 +1166,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_direct_iteration::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
     &unicorn_prefer_dom_node_replace_children::RULE,
+    &unicorn_prefer_error_is_error::RULE,
     &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_flat_math_min_max::RULE,
     &unicorn_prefer_export_from::RULE,
@@ -1199,6 +1199,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_promise_static_methods::RULE,
     &unicorn_prefer_promise_try::RULE,
     &unicorn_prefer_queue_microtask::RULE,
+    &unicorn_prefer_regexp_escape::RULE,
     &unicorn_prefer_response_static_json::RULE,
     &unicorn_prefer_scoped_selector::RULE,
     &unicorn_prefer_set_methods::RULE,
