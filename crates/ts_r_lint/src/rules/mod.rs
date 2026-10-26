@@ -318,6 +318,7 @@ mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_existence_index_check;
 mod unicorn_consistent_export_decorator_position;
 mod unicorn_consistent_function_scoping;
+mod unicorn_consistent_json_file_read;
 mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
@@ -415,7 +416,7 @@ mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_prevent_default_in_passive_listener;
 mod unicorn_no_process_exit;
-mod unicorn_no_return_array_push;
+mod unicorn_no_selector_as_dom_name;
 mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_single_promise_in_promise_methods;
 mod unicorn_no_static_only_class;
@@ -965,6 +966,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_date_clone::RULE,
     &unicorn_consistent_existence_index_check::RULE,
     &unicorn_consistent_empty_array_spread::RULE,
+    &unicorn_consistent_json_file_read::RULE,
     &unicorn_consistent_optional_chaining::RULE,
     &unicorn_catch_error_name::RULE,
     &unicorn_consistent_function_scoping::RULE,
@@ -1050,7 +1052,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_prevent_default_in_passive_listener::RULE,
     &unicorn_no_process_exit::RULE,
-    &unicorn_no_return_array_push::RULE,
+    &unicorn_no_selector_as_dom_name::RULE,
     &unicorn_no_static_only_class::RULE,
     &unicorn_no_subtraction_comparison::RULE,
     &unicorn_no_thenable::RULE,

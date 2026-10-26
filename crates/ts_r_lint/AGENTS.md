@@ -1824,6 +1824,20 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   and `getBoundingClientRect()`/`getClientRects()` on anything that could be an element,
   the global `innerWidth`/`innerHeight`, `visualViewport.width`/`height`, also through object
   patterns); writes and `delete` don't count.
+- **no-selector-as-dom-name**: a string or template whose text starts with `.`/`#` passed
+  as a class name to `classList.add`/`remove`/`contains`/`toggle`/`replace`, or as the name
+  to `getElementById`/`getElementsByClassName`; the fix drops the prefix for a simple name or
+  a `` `.${x}` `` template.
+- **consistent-json-file-read**: the argument of a plain `JSON.parse(x)`, through `await`s
+  and single-use variables (one plain declarator; the initialising write and the read are its
+  two references), that is a `readFile`/`readFileSync` call (non-optional member, or a name
+  imported from an `fs` module) with one or two non-spread arguments. String mode: no
+  encoding (fix adds `'utf8'`, after a trailing comma if there is one) or a static
+  `undefined`/`null`/`{encoding: undefined | null}` second argument (replaced by `'utf8'`
+  unless it holds a comment). Buffer mode: a static `"utf8"`/`"utf-8"` (any case) or
+  `{encoding: <that>}` second argument, removed. An options name whose `encoding` gets a
+  `get`/`set` descriptor through `Object.defineProperty(ies)`, also through `const` aliases,
+  is never static.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1843,4 +1857,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`,
 `no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`,
 `no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`,
-`no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`.
+`no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`,
+`no-selector-as-dom-name.js`, `consistent-json-file-read.js`.
