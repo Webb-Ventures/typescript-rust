@@ -1775,6 +1775,13 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
 - **no-prevent-default-in-passive-listener**: `event.preventDefault()` directly in an inline
   listener registered with `{passive: true}` (last `passive` key; plain properties only),
   before any suspension (shares the suspension helpers above); suggests `passive: false`.
+- **prefer-path2d**: one `run_file` walk (explicit stack, no recursion) groups canvas path
+  calls per function and innermost loop by receiver (`beginPath()` closes a group); the
+  receiver is a context by its local annotation (aliases, interfaces' `extends`, type
+  parameter constraints, unions/intersections), a `getContext("2d")` initializer or the
+  names `context`/`ctx`. Functions passed to the global `requestAnimationFrame`/
+  `setInterval`, called in loops, or called (transitively) from those are repeated; two
+  builders and a consumer in a repeated draw are reported. No fix.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1790,4 +1797,4 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/is-global-identifier.js`, `utils/function-body.js`, `prefer-url-search-parameters.js`,
 `ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`,
 `require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
-`no-prevent-default-in-passive-listener.js`.
+`no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`.

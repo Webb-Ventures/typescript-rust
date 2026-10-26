@@ -542,7 +542,7 @@ mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_object_iterable_methods;
 mod unicorn_prefer_optional_catch_binding;
-mod unicorn_prefer_private_class_fields;
+mod unicorn_prefer_path2d;
 mod unicorn_prefer_promise_static_methods;
 mod unicorn_prefer_promise_try;
 mod unicorn_prefer_promise_with_resolvers;
@@ -1146,6 +1146,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_object_iterable_methods::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_path2d::RULE,
     &unicorn_prefer_promise_static_methods::RULE,
     &unicorn_prefer_promise_try::RULE,
     &unicorn_prefer_queue_microtask::RULE,
