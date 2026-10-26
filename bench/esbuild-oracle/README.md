@@ -23,41 +23,43 @@ node bench/esbuild-oracle/fails.mjs [REGEX]   # list failures from target/esbuil
 ```
 
 Cases are skipped when they need options the CLI cannot express or that ts-r-build does not
-implement (`MangleProps`, inject, plugins, CSS bundling, custom JSX factories through Go
-structs, ...). `results.json` lists every skip reason; cases that print `Math.random()`
+implement (Go plugins, browser targets, custom JSX factories through Go structs, ...). `results.json` lists every skip reason; cases that print `Math.random()`
 results are skipped as nondeterministic. `UnsupportedJSFeatures` maps to `--target=esN` when
 the set equals a year target and to `--supported:<feature>=false` flags otherwise.
 
 ## Results
 
-v1 build5 at af89821 (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**938 of 964 compared cases pass (97.3%)**; 106 of the 1070 cases are skipped. Of the 26 failures, 13 are
+v1 build6 at c0449fb (2026-10-27, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**1,002 of 1,028 compared cases pass (97.5%)**; 42 of the 1070 cases are skipped. Of the 26 failures, 14 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
-artifacts; the other 5 are gaps. The esbuild test files come from
+artifacts; the other 4 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-Since 955b2a9 (931 of 957): ts-r-build has `--keep-names` (functions and classes whose
-binding the minifier or the bundler renamed get their `name` back through a `__name`
-helper), and the runner maps `KeepNames`: 7 of its 8 cases are compared and pass, and the
-eighth prints `Math.random()` results (nondeterministic, skipped).
+Since af89821 (938 of 964): ts-r-build has `--mangle-props`, `--mangle-quoted`,
+`--reserve-props`, `--inject`, path externals matched after resolution, CSS nesting
+lowering (`--supported:nesting=false`), `calc()` folding and short numbers under
+`--minify-syntax`, and more CSS module names (`@container`, counter styles, string keyframe
+names); `define` applies inside enum initializers and to JSX factories. The runner maps
+`MangleProps`, `MangleQuoted`, `ReserveProps`, `InjectPaths`, `External.PostResolve`,
+`OriginalTargetEnv` and `UnsupportedCSSFeatures` (nesting), so 64 more cases are compared.
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| bundler_css_test.go | 48 | 4 | 10 |
-| bundler_dce_test.go | 116 | 0 | 5 |
-| bundler_default_test.go | 253 | 1 | 49 |
+| bundler_css_test.go | 55 | 4 | 3 |
+| bundler_dce_test.go | 117 | 0 | 4 |
+| bundler_default_test.go | 293 | 1 | 9 |
 | bundler_glob_test.go | 1 | 0 | 9 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
 | bundler_importstar_ts_test.go | 23 | 0 | 0 |
-| bundler_loader_test.go | 78 | 0 | 7 |
+| bundler_loader_test.go | 80 | 0 | 5 |
 | bundler_lower_test.go | 73 | 11 | 0 |
 | bundler_packagejson_test.go | 93 | 2 | 1 |
 | bundler_splitting_test.go | 22 | 1 | 0 |
-| bundler_ts_test.go | 69 | 4 | 15 |
-| bundler_tsconfig_test.go | 68 | 3 | 9 |
+| bundler_ts_test.go | 76 | 3 | 9 |
+| bundler_tsconfig_test.go | 75 | 4 | 1 |
 | bundler_yarnpnp_test.go | 2 | 0 | 1 |
 
-### Intended differences (13): ts-r-build follows tsc 7
+### Intended differences (14): ts-r-build follows tsc 7
 
 ts-r-build lowers TypeScript and JavaScript with the same transform as `ts-r-check` emit, so
 where tsc 7 and esbuild disagree it gives tsc's result. These cases are not changed.
@@ -85,6 +87,9 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
   (`TSComputedClassFieldUseDefineFalse`); a package `tsconfig` field naming a missing file
   falls back to the package's `tsconfig.json`, as tsc resolves it
   (`TsconfigJsonNodeModulesTsconfigPathBad`).
+- **`importsNotUsedAsValues: "preserve"`** (`TsconfigPreserveUnusedImports`): tsc 7 no
+  longer has the option, so ts-r-build drops an import whose names are only used as types;
+  esbuild keeps it as `import "./foo"`.
 
 ### Oracle artifacts (8)
 
@@ -102,22 +107,21 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
 - `SplittingMinifyIdentifiersCrashIssue437`: the output differs only in which short name the
   minifier picks (`o` vs `f`), which shows in a thrown error.
 
-### Gaps (5)
+### Gaps (4)
 
 - **CSS** (4): with `--minify-identifiers`, esbuild names local CSS classes by how often
   they are used, ts-r-build in source order (`ImportLocalCSSFromJSMinifyIdentifiers`,
-  `...AvoidGlobalNames`, `...MultipleEntryPoints`); `CSSCaseInsensitivity` needs at-rule
-  names kept in their written case, `from` printed as `0%` and `calc()` folding.
-- **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
-  the enum, so `c = d` with `d=b` refers to the member `b`; ts-r substitutes after.
+  `...AvoidGlobalNames`, `...MultipleEntryPoints`); esbuild escapes non-ASCII characters in
+  CSS strings (`"\1f44d"`, its default ASCII charset) and ts-r-build keeps them
+  (`ImportCSSFromJSLocalAtCounterStyle`).
 
-### Skipped (106)
+### Skipped (42)
 
-`MangleProps` / `MangleQuoted` / `ReserveProps` (35), `InjectPaths` (17), nondeterministic
-(12), Go-only TypeScript options (10), `External.PostResolve` (8),
-`UnsupportedCSSFeatures` (7), cases sharing a Go variable (6), `OriginalTargetEnv` (5), no
-output path (4), `Defines` with call flags (`--pure`, 2), and 1-2 each for Windows paths,
-stdout, a non-string file, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
+Nondeterministic (12), Go-only TypeScript options (10), cases sharing a Go variable (6), no
+output path (4, one of them writes to stdout), Windows paths (2), and one each for a browser
+target with CSS features (`CSSNestingOldBrowser`), `UnsupportedCSSFeatures` other than
+nesting (`InlineStyle`), `Defines` with call flags (`--pure`), a non-string file, the two JSX
+options `Fragment` and `SideEffects`, absolute node paths and `Plugins` (a Go plugin).
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -137,3 +141,4 @@ stdout, a non-string file, JSX options and absolute node paths. `Plugins` (1) ne
 | v1 build3 at 8a3356f: `--alias`, `--drop-labels`; runner maps `PackageAliases` and `DropLabels` | 1070 | 885 | 858 | 27 | 185 | 96.9% |
 | v1 build4 at 955b2a9: CSS bundling and CSS modules, `copy` / `local-css` / `global-css` loaders; runner compares CSS and maps those loaders | 1070 | 957 | 931 | 26 | 113 | 97.3% |
 | v1 build5 at af89821: `--keep-names`; runner maps `KeepNames` | 1070 | 964 | 938 | 26 | 106 | 97.3% |
+| v1 build6 at c0449fb: `--mangle-props` / `--mangle-quoted` / `--reserve-props`, `--inject`, path externals, CSS nesting lowering, `calc()` folding, more CSS module names, `define` in enums and JSX factories; runner maps those options | 1070 | 1028 | 1002 | 26 | 42 | 97.5% |

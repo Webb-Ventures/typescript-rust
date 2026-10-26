@@ -88,9 +88,9 @@ Usage: ts-r-dev [root] [options]
     ],
     notYet: [
       'No plugins and no JavaScript config file or API',
-      'No CSS bundling; @import is not followed',
+      'CSS syntax lowering is limited to nesting',
       'No lowering below ES2015: const, classes and destructuring are errors at --target=es5',
-      'No --mangle-props, --drop or --pure',
+      'No --drop or --pure',
     ],
     usage: `Usage: ts-r-build [options] [entry points]
 

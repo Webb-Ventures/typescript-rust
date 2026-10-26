@@ -37,12 +37,14 @@ Full runs use `--jobs 1`: two playgrounds at once got Chrome killed at its
 
 ## Results
 
-b5d9371 (2026-10-26, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
-`--jobs 1`): **509 of 509 compared tests pass (100.0%)**; 100 tests are skipped. Three full
-runs in a row gave 509 of 509 twice and 510 of 510 once: `wasm > should work when inlined`
-passed against Vite in that run (it is a Vite-side flake, skipped when it fails there). One
-more run, started while Chrome from a stopped run was still exiting, lost three playgrounds on
-the Vite side to "Chrome did not start" and is not counted. Since
+c0449fb (2026-10-27, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
+`--jobs 1`): **512 of 512 compared tests pass (100.0%)**; 97 tests are skipped. Since
+b5d9371 (509 of 509, 100 skipped): the shim has `text=` selectors and
+`page.frame(name).content()`, so html's "invalid > should reload when fixed" and
+proxy-bypass's `async-proxy-bypass` are compared and pass, and `wasm > should work when
+inlined` passed against Vite in this run. At b5d9371, three full runs in a row gave 509 of
+509 twice and 510 of 510 once (the wasm test is a Vite-side flake, skipped when it fails
+there). Since
 2bd07f1 (322 of 322, 77 skipped): variant specs run (assets' encoded and relative bases, env's
 NODE_ENV variant, the worker playground's es, iife and relative-base variants and others),
 workers are no longer skipped, and the shim has `page.goto`'s response, `page.keyboard.press`,
@@ -51,7 +53,7 @@ What made them pass in ts-r-dev: `--config`, `new Worker(new URL(...))` URLs wit
 `worker_file&type=...`, classic workers, `build.assetsInlineLimit` as a function,
 `optimizeDeps.exclude`, an encoded base in the server URL, `srcset` URLs with spaces, `t=` on
 asset URLs after a hot update and `html.cspNonce` (`crates/ts_r_hmr/AGENTS.md`).
-Earlier runs: 322 of 322 at 2bd07f1; 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322
+Earlier runs: 509 of 509 at b5d9371; 322 of 322 at 2bd07f1; 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322
 at e07eafa; 202 of 322 at 58a940e; 101 of 254 at 8c14f29, with an older harness that loaded
 fewer specs.
 
@@ -77,7 +79,7 @@ fewer specs.
 | glob-import | 25 | 25 | 0 |
 | hmr | 58 | 58 | 1 |
 | hmr-root | 1 | 1 | 0 |
-| html | 46 | 46 | 17 |
+| html | 47 | 47 | 16 |
 | import-attribute | 2 | 2 | 0 |
 | lazy-compilation | 0 | 0 | 2 |
 | minify | 0 | 0 | 3 |
@@ -85,10 +87,10 @@ fewer specs.
 | nested-deps | 1 | 1 | 0 |
 | object-hooks | 1 | 1 | 0 |
 | preserve-symlinks | 2 | 2 | 0 |
-| proxy-bypass | 2 | 2 | 2 |
+| proxy-bypass | 3 | 3 | 1 |
 | transform-plugin | 4 | 4 | 0 |
 | tsconfig-json | 5 | 5 | 1 |
-| wasm | 10 | 10 | 1 |
+| wasm | 11 | 11 | 0 |
 | worker | 50 | 50 | 16 |
 
 No failures remain. The last one was glob-import's "import.meta.glob and dynamic import vars
@@ -106,7 +108,7 @@ three hmr-only runs after the watcher change (crates/ts_r_watch/AGENTS.md).
 Tests that fail against Vite in a run are skipped, so the compared count moves with Vite's own
 flakes: css-codesplit's first three tests (the page isn't styled yet when Vite is tested) and
 one wasm test. Others fail against Vite in every run: html's three `invalid` tests (Vite 8.3.4
-serves `invalid.html` with status 200 and no overlay) and proxy-bypass's
-`async-proxy-bypass`. The worker iife variant's "sourcemap is correct after env is injected"
-needs `page.frame`, which the shim doesn't have. ts-r-dev passes the css-codesplit ones (the CSS module one since 61c9d42, the
+serves `invalid.html` with status 200 and no overlay). The worker iife variant's "sourcemap is correct after env is injected"
+needed `page.frame`; with the shim's `page.frame` it fails against Vite in the c0449fb run (its
+`waitForEvent("response")` times out). ts-r-dev passes the css-codesplit ones (the CSS module one since 61c9d42, the
 style-order one since 7cba502).
