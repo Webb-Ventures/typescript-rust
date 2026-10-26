@@ -267,6 +267,51 @@ fn duplicate_outputs_are_not_written() {
     }
 }
 
+/// A file outside `rootDir` that is both imported and matched by `include` is reported at
+/// the import, with both reasons; one only matched by `include` is global (tsc 7.0.2: the
+/// config's absolute path in the include reason).
+#[test]
+fn root_dir_imported_and_included_is_located_with_both_reasons() {
+    let files = [
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions":{"noEmit":true,"rootDir":"src","types":[]},"include":["src","lib"]}"#,
+        ),
+        (
+            "src/a.ts",
+            "import { l } from \"../lib/l\";\nexport const a: string = l;\n",
+        ),
+        ("lib/l.ts", "export const l = \"x\";\n"),
+        ("lib/m.ts", "export const m = 1;\n"),
+    ];
+    let (fs, parsed) = project(&files);
+    let program = load_program(&fs, &parsed.file_names, &parsed.options, None, 1);
+    let cfg = EmitConfig {
+        options: &parsed.options,
+        config: Some(&parsed),
+        threads: 1,
+        case_sensitive: true,
+        specifiers: None,
+    };
+    let (located, global) = ts_r_emit::root_dir_diagnostics(&program, &cfg);
+    assert_eq!(located.len(), 1, "{located:?}");
+    let d = &located[0];
+    assert_eq!(program.files[d.file.0 as usize].path, "/p/src/a.ts");
+    assert_eq!(
+        d.message,
+        "File '/p/lib/l.ts' is not under 'rootDir' '/p/src'. 'rootDir' is expected to contain all source files.\n  The file is in the program because:\n    Imported via \"../lib/l\" from file '/p/src/a.ts'\n    Matched by include pattern 'lib' in '/p/tsconfig.json'"
+    );
+    assert_eq!(global.len(), 1, "{global:?}");
+    assert!(global[0].message.contains("'/p/lib/m.ts'"));
+    assert_eq!(
+        global[0].related,
+        vec![
+            "The file is in the program because:".to_owned(),
+            "  Matched by include pattern 'lib' in '/p/tsconfig.json'".to_owned()
+        ]
+    );
+}
+
 #[test]
 fn root_dir_importers_follow_program_order_under_no_emit() {
     let mut files = vec![
