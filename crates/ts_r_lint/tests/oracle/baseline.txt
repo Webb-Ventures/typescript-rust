@@ -146,6 +146,7 @@ jsdoc/require-yields-check 53/53
 jsdoc/require-yields-description 3/3
 jsdoc/require-yields-type 3/3
 jsdoc/tag-lines 60/60
+jsdoc/ts-no-empty-object-type 6/6
 max-depth 28/28
 max-nested-callbacks 32/32
 max-params 59/59
