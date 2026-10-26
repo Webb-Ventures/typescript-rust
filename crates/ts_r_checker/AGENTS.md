@@ -505,6 +505,19 @@ Files, by layer:
   (`check_setters_without_getters`), a set accessor whose computed name is no literal or
   unique symbol is an accessor of its own: TS7032 names it by the key's source text
   (`[k]`) and no getter types it (tsc: tsc/internal/checker/checker.go, getTypeOfAccessors).
+- TS2312 (`check_interface_base_kinds`) at each interface `extends` entry whose reduced
+  type is not a valid base (`is_valid_base_type`): valid are object types other than
+  generic mapped types (`Partial<T>`, `Omit<T, K>` over a type parameter, a mapped type
+  with a generic `as` clause), `object`, `any`, intersections of valid types, and type
+  parameters whose base constraint is valid (`extends T` with `T extends object`).
+  Unions, primitives and unconstrained type parameters are not. Unresolved and error
+  types are skipped. `base_types` keeps exactly the valid ones, so an invalid entry adds
+  no members and no TS2430, and a type parameter base contributes its constraint's
+  apparent members. `with_this_arg` returns an intersection unchanged (alias included)
+  when no member took the `this` argument, so `type T2 = T1 & { b: number }` prints as
+  `T2`. An intersection of class references is rebuilt without its alias and prints as
+  `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
+  getTypeWithThisArgument).
 - TS2310 (`check_circular_interface_bases`): every interface declaration with an
   `extends` clause whose symbol's bases lead back to it (`has_circular_bases`). Classes
   get TS2506 instead. A class `extends` naming an interface with no value

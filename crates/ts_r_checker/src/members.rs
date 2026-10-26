@@ -310,8 +310,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         // Inherited members.
         let bases = self.base_types(sym);
         for b in bases.iter() {
-            if self.store().flags(*b).contains(TypeFlags::INTERSECTION) {
-                // `interface I extends A & B`: the intersection's properties and signatures.
+            if self
+                .store()
+                .flags(*b)
+                .intersects(TypeFlags::INTERSECTION | TypeFlags::TYPE_PARAMETER)
+            {
+                // `interface I extends A & B` (or `extends T` with an object constraint):
+                // the apparent properties and signatures.
                 for (n, p) in self.properties_of(*b) {
                     if let std::collections::hash_map::Entry::Vacant(e) = index_of.entry(n) {
                         e.insert(props.len());
@@ -713,12 +718,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::Interface { extends, .. } => {
                     for &e in ast.list(extends) {
                         let t = self.type_from_node(Loc::new(d.file, e));
-                        let t = self.with_this_arg(t, this_type);
-                        if self.store().flags(t).contains(TypeFlags::OBJECT)
-                            || self.store().flags(t).contains(TypeFlags::INTERSECTION)
-                        {
-                            out.push(t);
+                        if self.store().is_error(t) || t == TypeId::UNRESOLVED {
+                            continue;
                         }
+                        // Invalid bases (unions, primitives, unconstrained type parameters,
+                        // generic mapped types) are dropped: TS2312 in `heritage.rs`.
+                        let reduced = self.reduced_type(t);
+                        if !self.is_valid_base_type(reduced, 0)
+                            || self.store().flags(reduced).intersects(TypeFlags::ANY)
+                        {
+                            continue;
+                        }
+                        out.push(self.with_this_arg(reduced, this_type));
                     }
                 }
                 _ => {}
@@ -848,6 +859,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .iter()
                         .map(|&p| self.with_this_arg(p, this_arg))
                         .collect();
+                    // Unchanged members keep the intersection and the alias naming it
+                    // (`type T2 = T1 & { b: number }` with object-literal members); a
+                    // member reference that took the `this` argument makes a new,
+                    // unaliased intersection (tsc: checker/checker.go,
+                    // getTypeWithThisArgument).
+                    if mapped == parts {
+                        return t;
+                    }
                     return self.intersection(&mapped);
                 }
                 t

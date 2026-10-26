@@ -158,6 +158,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.check_type_parameter_merge(Loc::new(file, i));
             self.check_interface_heritage(Loc::new(file, i));
             self.check_circular_interface_bases(Loc::new(file, i));
+            self.check_interface_base_kinds(Loc::new(file, i));
             self.check_index_constraints(Loc::new(file, i));
             self.check_late_bound_duplicates(Loc::new(file, i));
             self.check_computed_member_names(Loc::new(file, i));
