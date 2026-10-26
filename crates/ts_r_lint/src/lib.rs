@@ -7,9 +7,12 @@ pub mod diagnostic;
 pub mod directives;
 pub mod engine;
 pub mod env;
+pub mod esquery;
+pub mod estree;
 pub mod fix;
 pub mod globals;
 pub mod jsdoc;
+pub mod jsdoc_tree;
 pub mod lib_globals;
 #[rustfmt::skip]
 pub mod lib_globals_generated;

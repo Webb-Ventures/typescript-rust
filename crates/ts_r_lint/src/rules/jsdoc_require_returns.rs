@@ -240,9 +240,7 @@ impl RequireReturns {
         if exempt(self, f, doc, class.as_ref()) {
             return;
         }
-        let ctx_force = contexts
-            .find(f, doc.target)
-            .is_some_and(|e| e.force_require_return);
+        let ctx_force = contexts.find(doc).is_some_and(|e| e.force_require_return);
         let Some(tag) = doc.preferred(cx, f, "returns") else {
             return;
         };
@@ -345,5 +343,73 @@ impl Rule for RequireReturns {
         jsdoc::for_each_doc(cx, &settings, &contexts, |cx, f, doc| {
             self.check(cx, f, &contexts, doc);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{ConfigFile, ConfigKind, ResolveOptions, objects_from_eslint_json};
+    use crate::engine::lint_source;
+    use crate::registry::Registry;
+    use crate::types::{FileKey, NoTypeInfo};
+
+    /// The 1-based lines of the rule's reports with `options`.
+    fn lines(code: &str, options: serde_json::Value) -> Vec<usize> {
+        let cfg = serde_json::json!([{
+            "files": ["**/*.ts"],
+            "languageOptions": { "parser": "typescript-eslint/parser" },
+            "rules": { "jsdoc/require-returns": ["error", options] },
+        }]);
+        let objs = objects_from_eslint_json(&cfg, Registry::global()).unwrap();
+        let cfg = ConfigFile::new(ConfigKind::Eslint, None, "/p".into(), objs);
+        let fc = cfg.file_config("a.ts", &ResolveOptions::new()).unwrap();
+        let mut out: Vec<usize> = lint_source("/p/a.ts", code, &fc, &NoTypeInfo, FileKey(0))
+            .diagnostics
+            .iter()
+            .filter(|d| d.rule == Some("jsdoc/require-returns"))
+            .map(|d| code[..d.span.start as usize].matches('\n').count() + 1)
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn selector_contexts() {
+        let code = "/** Doc. */
+function top(): string { return ''; }
+function outer() {
+  /** Doc. */
+  function inner(): string { return ''; }
+}
+interface I {
+  /** Doc. */
+  g: () => string;
+}
+";
+        let opts = serde_json::json!({ "contexts": [
+            ":not(BlockStatement) > FunctionDeclaration",
+            "TSPropertySignature > TSTypeAnnotation > TSFunctionType",
+        ]});
+        // `inner` sits in a block; the function-typed property's doc is found through the
+        // property.
+        assert_eq!(lines(code, opts), vec![1, 8]);
+    }
+
+    #[test]
+    fn comment_contexts() {
+        let code = "/** Doc.\n * @private\n */
+function a(): string { return ''; }
+/** Doc. */
+function b(): string { return ''; }
+";
+        let opts = serde_json::json!({ "contexts": [{
+            "context": "FunctionDeclaration",
+            "comment": "JsdocBlock:not(*:has(JsdocTag[tag=private]))",
+        }]});
+        assert_eq!(lines(code, opts), vec![5]);
+        let any = serde_json::json!({ "contexts": [{
+            "comment": "JsdocBlock:has(JsdocTag[tag=private])",
+        }]});
+        assert_eq!(lines(code, any), vec![1]);
     }
 }

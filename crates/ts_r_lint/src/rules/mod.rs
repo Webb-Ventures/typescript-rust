@@ -52,6 +52,7 @@ mod no_octal;
 mod no_prototype_builtins;
 mod no_redeclare;
 mod no_regex_spaces;
+mod no_restricted_syntax;
 mod no_self_assign;
 mod no_setter_return;
 mod no_shadow_restricted_names;
@@ -206,6 +207,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_constant_condition::RULE,
     &no_control_regex::RULE,
     &no_debugger::RULE,
+    &no_restricted_syntax::RULE,
     &no_delete_var::RULE,
     &no_dupe_args::RULE,
     &no_dupe_class_members::RULE,

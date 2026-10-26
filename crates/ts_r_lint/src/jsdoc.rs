@@ -10,7 +10,12 @@ use serde_json::{Map, Value};
 use ts_r_ast::{Ast, CommentKind, KeywordTypeKind, Modifiers, Node, NodeId, ParentMap};
 use ts_r_span::{LineIndex, Span};
 
+use std::sync::Arc;
+
 use crate::ast_util::{ident_name, skip_parens};
+use crate::esquery::{self, Selector};
+use crate::estree::{EsTree, Origin};
+use crate::jsdoc_tree::JsdocTree;
 use crate::rule::Ctx;
 
 /// Recursion limit for the AST helpers below; deeper input is treated as "no".
@@ -790,6 +795,65 @@ impl<'a> Finder<'a> {
             | Node::ObjectLit { .. }
             | Node::Arrow { .. }
             | Node::FunctionExpr { .. } => self.reduce_expr(id),
+            Node::FunctionType { .. } => self.reduce_fn_type(id),
+            _ => id,
+        }
+    }
+
+    /// A function type written as an annotation documents what it annotates: a property,
+    /// a method or declared function's return type, a method's function, or the variable
+    /// declaration of an annotated variable or of an arrow / function declaration parameter.
+    /// (`@es-joy/jsdoccomment: src/jsdoccomment.js`, `getTSFunctionComment`.)
+    fn reduce_fn_type(&self, id: NodeId) -> NodeId {
+        let mut child = id;
+        let mut p = self.parent(id);
+        let mut guard = 0;
+        while let Some(q) = p
+            && matches!(self.ast.node(q), Node::ParenType { .. })
+            && guard < 1000
+        {
+            guard += 1;
+            child = q;
+            p = self.parent(q);
+        }
+        let Some(p) = p else { return id };
+        let is = |o: Option<NodeId>| o == Some(child);
+        let var_decl_of = |declarator: NodeId| {
+            self.parent(declarator)
+                .filter(|&d| matches!(self.ast.node(d), Node::VarDecl { .. }))
+        };
+        match *self.ast.node(p) {
+            Node::TypeAlias { ty, .. } if ty == child && self.is_exported_decl(p) => p,
+            Node::PropertyDef { type_ann, .. } | Node::PropertySignature { type_ann, .. }
+                if is(type_ann) =>
+            {
+                p
+            }
+            Node::MethodSignature { return_type, .. } if is(return_type) => p,
+            Node::FunctionDecl {
+                return_type,
+                body: None,
+                ..
+            } if is(return_type) => p,
+            Node::FunctionExpr { return_type, .. } if is(return_type) => self
+                .parent(p)
+                .filter(|&m| matches!(self.ast.node(m), Node::MethodDef { .. }))
+                .unwrap_or(id),
+            Node::VarDeclarator { type_ann, .. } if is(type_ann) => var_decl_of(p).unwrap_or(id),
+            Node::Param {
+                type_ann, pattern, ..
+            } if is(type_ann) && matches!(self.ast.node(pattern), Node::Ident { .. }) => {
+                let Some(f) = self.parent(p) else { return id };
+                match self.ast.node(f) {
+                    Node::FunctionDecl { .. } => f,
+                    Node::Arrow { .. } => self
+                        .parent(f)
+                        .filter(|&d| matches!(self.ast.node(d), Node::VarDeclarator { .. }))
+                        .and_then(var_decl_of)
+                        .unwrap_or(id),
+                    _ => id,
+                }
+            }
             _ => id,
         }
     }
@@ -1082,12 +1146,22 @@ pub fn is_jsdoc_text(text: &str) -> bool {
 // ---------------------------------------------------------------------------------------------
 // Contexts and iteration.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ContextEntry {
-    /// The ESTree type; `None` is `any`.
+    /// The ESTree type; `None` is `any`. For a selector context, its text.
     pub ty: Option<String>,
     pub is_object: bool,
     pub force_require_return: bool,
+    /// The parsed context when it is a selector rather than a plain node type.
+    pub selector: Option<Arc<Selector>>,
+    /// The `comment` selector an object entry matches the JSDoc block against.
+    pub comment: Option<Arc<Selector>>,
+}
+
+impl ContextEntry {
+    fn comment_raw(&self) -> Option<&str> {
+        self.comment.as_deref().map(|s| s.raw.as_str())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1107,9 +1181,16 @@ fn plain_type_name(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+fn parse_selector(raw: &str) -> Result<Arc<Selector>, String> {
+    let mut sel =
+        esquery::parse(raw).map_err(|e| format!("jsdoc: invalid selector `{raw}`: {e}"))?;
+    sel.raw = raw.to_owned();
+    Ok(Arc::new(sel))
+}
+
 impl Contexts {
-    /// From `options[0].contexts`, then `settings.jsdoc.contexts`, then the defaults. Only
-    /// node type names, `any` and `{context, forceRequireReturn}` objects are supported.
+    /// From `options[0].contexts`, then `settings.jsdoc.contexts`, then the defaults: node
+    /// types, esquery selectors, `any` and `{context, comment, forceRequireReturn}` objects.
     pub fn from_options(opts: &Map<String, Value>, settings: &Settings) -> Result<Self, String> {
         let from_options = opts.get("contexts").and_then(Value::as_array);
         let list: Vec<Value> = match from_options.or(settings.contexts.as_ref()) {
@@ -1118,53 +1199,103 @@ impl Contexts {
         };
         let mut entries = Vec::new();
         let mut all = false;
+        let mut plain_any = false;
         for v in &list {
-            let (ty, is_object, force) = match v {
-                Value::String(s) => (s.clone(), false, false),
+            let (ty, is_object, force, comment) = match v {
+                Value::String(s) => (s.clone(), false, false, None),
                 Value::Object(o) => {
-                    if o.contains_key("comment") {
-                        return Err("jsdoc: `comment` contexts are not supported".into());
-                    }
+                    let comment = match o.get("comment") {
+                        Some(Value::String(c)) => Some(parse_selector(c)?),
+                        None | Some(Value::Null) => None,
+                        Some(_) => return Err("jsdoc: `comment` must be a selector".into()),
+                    };
                     let ty = o
                         .get("context")
                         .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
                         .unwrap_or("any")
                         .to_owned();
                     let force = o
                         .get("forceRequireReturn")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
-                    (ty, true, force)
+                    (ty, true, force, comment)
                 }
                 _ => return Err("jsdoc: invalid `contexts` entry".into()),
             };
             if ty == "any" {
                 all = true;
+                plain_any |= !is_object;
                 entries.push(ContextEntry {
                     ty: None,
                     is_object,
                     force_require_return: force,
+                    selector: None,
+                    comment,
                 });
                 continue;
             }
-            if !plain_type_name(&ty) {
-                return Err(format!("jsdoc: selector contexts are not supported: {ty}"));
-            }
+            let selector = if plain_type_name(&ty) {
+                None
+            } else {
+                Some(parse_selector(&ty)?)
+            };
             entries.push(ContextEntry {
                 ty: Some(ty),
                 is_object,
                 force_require_return: force,
+                selector,
+                comment,
             });
+        }
+        // A plain `any` checks every block whatever the other entries say.
+        if plain_any {
+            for e in &mut entries {
+                e.comment = None;
+            }
         }
         Ok(Contexts { entries, all })
     }
 
-    /// `findContext`: the first entry matching the node.
-    pub fn find(&self, finder: &Finder<'_>, t: Option<Target>) -> Option<&ContextEntry> {
-        let ty = t.map(|t| finder.es_type(t));
-        self.entries.iter().find(|e| match &e.ty {
-            None => e.is_object,
-            Some(name) => ty.is_some_and(|ty| ty == name),
+    /// `findContext`: the entry the block was found through ([`Doc::context`]).
+    pub fn find(&self, doc: &Doc) -> Option<&ContextEntry> {
+        doc.context.and_then(|i| self.entries.get(i))
+    }
+
+    fn uses_selectors(&self) -> bool {
+        self.entries.iter().any(|e| e.selector.is_some())
+    }
+
+    /// The first entry matching the node (with no ancestry, like `esquery.matches` without
+    /// parents) whose `comment` is the one the block was found through.
+    fn found(
+        &self,
+        finder: &Finder<'_>,
+        tree: Option<&EsTree<'_>>,
+        t: Option<Target>,
+        comment: Option<&str>,
+    ) -> Option<usize> {
+        let es = |t: Target| {
+            let (id, export) = match t {
+                Target::Export(id) => (id, true),
+                _ => (t.id(), false),
+            };
+            tree.and_then(|tr| tr.of_ast(id, export))
+        };
+        let node_matches = |e: &ContextEntry| match (&e.ty, t) {
+            (None, _) | (_, None) => false,
+            (Some(name), Some(t)) => match (&e.selector, tree) {
+                (Some(sel), Some(tr)) => es(t).is_some_and(|n| sel.matches(tr, n, 0)),
+                (Some(_), None) => false,
+                (None, _) => finder.es_type(t) == name,
+            },
+        };
+        self.entries.iter().position(|e| {
+            if e.is_object {
+                (e.ty.is_none() || node_matches(e)) && e.comment_raw() == comment
+            } else {
+                node_matches(e)
+            }
         })
     }
 }
@@ -1175,10 +1306,44 @@ pub struct Item {
     /// `None` for blocks no node claimed (only when iterating over all blocks).
     pub target: Option<Target>,
     pub comment: usize,
+    /// The entry `findContext` gives for the block.
+    pub context: Option<usize>,
+}
+
+/// Whether the block's ESTree view matches a `comment` selector (`commentHandler`).
+fn comment_matches(finder: &Finder<'_>, comment: usize, sel: &Selector) -> bool {
+    let text = finder.ast.comments[comment].span.text(finder.src);
+    let tree = JsdocTree::build(&Block::parse(text));
+    sel.matches(&tree, 0, 0)
 }
 
 /// The (node, block) pairs a rule checks, in visiting order.
 pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
+    if !contexts.all
+        && (contexts.uses_selectors() || contexts.entries.iter().any(|e| e.comment.is_some()))
+    {
+        return collect_listeners(finder, contexts);
+    }
+    let tree = contexts
+        .uses_selectors()
+        .then(|| EsTree::build(finder.ast, finder.src));
+    let tree = tree.as_ref();
+    // With object `any` entries, a block is checked through the first entry without a
+    // `comment` or whose `comment` matches it; if none, it is skipped.
+    let filtered = contexts.all && contexts.entries.iter().any(|e| e.comment.is_some());
+    let via = |c: usize| -> Result<Option<&str>, ()> {
+        if !filtered {
+            return Ok(None);
+        }
+        for e in &contexts.entries {
+            match &e.comment {
+                None => return Ok(None),
+                Some(sel) if comment_matches(finder, c, sel) => return Ok(Some(&sel.raw)),
+                Some(_) => {}
+            }
+        }
+        Err(())
+    };
     let ast = finder.ast;
     let mut out = Vec::new();
     let mut claimed = vec![false; ast.comments.len()];
@@ -1197,9 +1362,11 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                         && !claimed[c]
                     {
                         claimed[c] = true;
+                        let Ok(comment) = via(c) else { continue };
                         out.push(Item {
                             target: Some(t),
                             comment: c,
+                            context: contexts.found(finder, tree, Some(t), comment),
                         });
                     }
                 } else {
@@ -1210,6 +1377,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                         out.push(Item {
                             target: Some(t),
                             comment: c,
+                            context: contexts.found(finder, tree, Some(t), None),
                         });
                     }
                 }
@@ -1228,9 +1396,68 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
         for (i, c) in ast.comments.iter().enumerate() {
             if !claimed[i] && c.kind == CommentKind::Block && is_jsdoc_text(c.span.text(finder.src))
             {
+                let Ok(comment) = via(i) else { continue };
                 out.push(Item {
                     target: None,
                     comment: i,
+                    context: contexts.found(finder, tree, None, comment),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Contexts as ESLint listeners (`getContextObject`): every ESTree node in traversal order,
+/// each distinct context matched in selector-specificity order, and every entry under that
+/// context run in option order (a block can be checked more than once).
+fn collect_listeners(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
+    let tree = EsTree::build(finder.ast, finder.src);
+    let mut owned: Vec<Selector> = Vec::new();
+    // (selector index, entries using it)
+    let mut keys: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut key_raw: Vec<String> = Vec::new();
+    for (i, e) in contexts.entries.iter().enumerate() {
+        let Some(raw) = e.ty.as_deref() else { continue };
+        if let Some(k) = key_raw.iter().position(|r| r == raw) {
+            keys[k].1.push(i);
+            continue;
+        }
+        let Ok(sel) = esquery::parse(raw.strip_suffix(":exit").unwrap_or(raw)) else {
+            continue;
+        };
+        owned.push(sel);
+        key_raw.push(raw.to_owned());
+        keys.push((owned.len() - 1, vec![i]));
+    }
+    keys.sort_by(|a, b| owned[a.0].compare(&owned[b.0]));
+    let prepared: Vec<_> = owned.iter().map(Selector::prepare).collect();
+    let mut out = Vec::new();
+    for n in 0..tree.len() as u32 {
+        for (sel, entries) in &keys {
+            if !prepared[*sel].matches_listener(&tree, n) {
+                continue;
+            }
+            let node = &tree.nodes[n as usize];
+            let t = match node.origin {
+                Origin::Real => Target::Node(node.ast),
+                Origin::Export => Target::Export(node.ast),
+                Origin::Synthetic => continue,
+            };
+            let Some(c) = finder.jsdoc_of_target(t) else {
+                continue;
+            };
+            for &i in entries {
+                let e = &contexts.entries[i];
+                if let Some(cs) = &e.comment
+                    && !comment_matches(finder, c, cs)
+                {
+                    continue;
+                }
+                out.push(Item {
+                    target: Some(t),
+                    comment: c,
+                    context: contexts.found(finder, Some(&tree), Some(t), e.comment_raw()),
                 });
             }
         }
@@ -1290,6 +1517,8 @@ pub struct Doc {
     pub target: Option<Target>,
     pub comment: Span,
     pub block: Block,
+    /// The `contexts` entry the block was found through (`findContext`).
+    pub context: Option<usize>,
     /// 0-based line of the comment start.
     pub line: u32,
     /// Whitespace the comment's line starts with, repeated to the comment's column.
@@ -1312,6 +1541,7 @@ impl Doc {
         Doc {
             target: item.target,
             comment: c.span,
+            context: item.context,
             block: Block::parse(text),
             line,
             indent: std::iter::repeat_n(ch, col).collect(),

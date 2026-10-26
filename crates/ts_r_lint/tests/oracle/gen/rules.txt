@@ -39,6 +39,7 @@ no-octal
 no-prototype-builtins
 no-redeclare
 no-regex-spaces
+no-restricted-syntax
 no-self-assign
 no-setter-return
 no-shadow-restricted-names

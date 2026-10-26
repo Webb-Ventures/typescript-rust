@@ -85,8 +85,8 @@ constructor-super 82/82
 for-direction 100/100
 getter-return 81/81
 jsdoc/escape-inline-tags 38/38
-jsdoc/require-param-description 17/19
-jsdoc/require-returns 156/158
+jsdoc/require-param-description 19/19
+jsdoc/require-returns 158/158
 no-array-constructor 142/142
 no-async-promise-executor 11/11
 no-case-declarations 19/19
@@ -126,6 +126,7 @@ no-octal 17/17
 no-prototype-builtins 47/47
 no-redeclare 71/71
 no-regex-spaces 73/73
+no-restricted-syntax 34/34
 no-self-assign 85/85
 no-setter-return 164/164
 no-shadow-restricted-names 44/44
