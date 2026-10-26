@@ -316,6 +316,7 @@ mod unicorn_consistent_boolean_name;
 mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_compound_words;
 mod unicorn_consistent_date_clone;
+mod unicorn_consistent_destructuring;
 mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_existence_index_check;
 mod unicorn_consistent_export_decorator_position;
@@ -324,8 +325,7 @@ mod unicorn_consistent_function_style;
 mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
-mod unicorn_css_properties;
-mod unicorn_default_export_style;
+mod unicorn_custom_error_definition;
 mod unicorn_dom_node_dataset;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
@@ -1000,6 +1000,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_assert::RULE,
     &unicorn_consistent_class_member_order::RULE,
     &unicorn_consistent_date_clone::RULE,
+    &unicorn_consistent_destructuring::RULE,
     &unicorn_consistent_existence_index_check::RULE,
     &unicorn_consistent_empty_array_spread::RULE,
     &unicorn_consistent_json_file_read::RULE,
@@ -1008,6 +1009,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_function_scoping::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
+    &unicorn_custom_error_definition::RULE,
     &unicorn_dom_node_dataset::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
