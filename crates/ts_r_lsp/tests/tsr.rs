@@ -3603,3 +3603,51 @@ fn rename_stops_at_name_keeping_specifiers() {
     );
     c.shutdown();
 }
+
+/// The labels of a completion answer (`None` when there is no list or it is empty).
+fn completion_at(c: &mut ScriptedClient, uri: &str, line: u32, ch: u32) -> Option<Vec<String>> {
+    let r = result(c, "textDocument/completion", at(uri, line, ch));
+    let items = r["items"].as_array().filter(|a| !a.is_empty())?;
+    Some(
+        items
+            .iter()
+            .map(|i| i["label"].as_str().unwrap().to_string())
+            .collect(),
+    )
+}
+
+const CP: &str = "outer: while (true) {\n  inner: for (;;) {\n    break ;\n  }\n}\nconst t = `a ${1} b`;\nconst r = /x/g;\nfunction f(a = 1) {}\ntype A<K = number, L = string> = K;\nfunction g<C extends Array<number>>() {}\n";
+
+#[test]
+fn completions_for_labels_literals_and_type_parameters() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new("cmpl8", &[("tsconfig.json", TSCONFIG), ("src/a.ts", CP)]);
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let u = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    // After `break`: the labels around, innermost first.
+    assert_eq!(
+        completion_at(&mut c, &u, 2, 10),
+        Some(vec!["inner".to_string(), "outer".to_string()])
+    );
+    // In a template's text (also at its ends) and at the end of a regular expression:
+    // no list. Inside the hole: a list.
+    for ch in [11, 12, 13, 18, 19] {
+        assert_eq!(completion_at(&mut c, &u, 5, ch), None, "at 5:{ch}");
+    }
+    assert!(completion_at(&mut c, &u, 5, 15).is_some());
+    assert_eq!(completion_at(&mut c, &u, 6, 14), None);
+    // `arguments` in a parameter's default.
+    let l = completion_at(&mut c, &u, 7, 15).unwrap_or_default();
+    assert!(l.iter().any(|x| x == "arguments"), "{l:?}");
+    // A type parameter's default names neither it nor later ones; a constraint's type
+    // argument may name the parameter itself.
+    let l = completion_at(&mut c, &u, 8, 11).unwrap_or_default();
+    assert!(!l.iter().any(|x| x == "K" || x == "L"), "{l:?}");
+    let l = completion_at(&mut c, &u, 9, 27).unwrap_or_default();
+    assert!(l.iter().any(|x| x == "C"), "{l:?}");
+    c.shutdown();
+}

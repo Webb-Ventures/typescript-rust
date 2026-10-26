@@ -382,15 +382,21 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   where it is the innermost node holding the position strictly (`f() {}|` is outside `f`);
   a body the parser closed at the end of the file holds the position after it.
 - Parameters: inside a parameter's type or default the parameter itself and the later ones
-  are not offered (`f(a, b = |, c)` offers `a`).
+  are not offered (`f(a, b = |, c)` offers `a`); `arguments` is offered in a default too.
+  A type parameter's default offers neither itself nor the later ones, and its own
+  constraint does not offer it, except inside a type argument (`C extends Array<|>`).
+- Labels: after `break`/`continue` on the same line, the labels of the enclosing labeled
+  statements (innermost first, up to the nearest function or class), or no list.
+- Literal text: inside a template's text (its ends included), at the end of a regular
+  expression and right after a bigint literal there is no list; a number is not text
+  (`10| + 1` gets one).
 - Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
   a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
   dot; after `?.` private names are not offered. A value whose type is a promise also
   lists the awaited type's members, each inserting `(await x).m` and replacing from the
   value's start (inside async functions and at the top of a module). `import("./m").|` in
   a type lists the module's exports (types, and namespaces holding them).
-- Template holes: a `${|}` of a template literal completes like any expression (only a
-  `TemplateElement`, the literal text, blocks completion); a word that starts with a digit
+- Template holes: a `${|}` of a template literal completes like any expression; a word that starts with a digit
   (`1.5|`) is a number, not a member access.
 - Generic calls (`generic_context.rs`): an object literal argument of a call to a generic
   signature (or one nested in such a literal through property values) also lists the
