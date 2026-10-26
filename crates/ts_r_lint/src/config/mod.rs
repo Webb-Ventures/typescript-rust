@@ -41,6 +41,8 @@ pub struct LanguagePartial {
     pub parser: Option<String>,
     pub jsx_pragma: Option<Option<String>>,
     pub global_return: Option<bool>,
+    /// `parserOptions.ecmaFeatures.impliedStrict`.
+    pub implied_strict: Option<bool>,
     pub jsx_fragment_name: Option<Option<String>>,
     pub emit_decorator_metadata: Option<bool>,
     pub experimental_decorators: Option<bool>,
@@ -390,6 +392,9 @@ impl ConfigFile {
             if let Some(g) = o.language.global_return {
                 lang.global_return = Some(g);
             }
+            if let Some(g) = o.language.implied_strict {
+                lang.implied_strict = Some(g);
+            }
             if let Some(p) = &o.language.jsx_fragment_name {
                 lang.jsx_fragment_name = Some(p.clone());
             }
@@ -452,6 +457,7 @@ impl ConfigFile {
                 None
             },
             global_return: lang.global_return.unwrap_or(false),
+            implied_strict: lang.implied_strict.unwrap_or(false),
             jsx_fragment_name: if typescript {
                 lang.jsx_fragment_name.clone().flatten()
             } else {
@@ -800,10 +806,13 @@ fn language_from_json(lo: &serde_json::Map<String, Value>) -> LanguagePartial {
         l.parser = Some(p.clone());
     }
     if let Some(Value::Object(po)) = lo.get("parserOptions") {
-        if let Some(Value::Object(ef)) = po.get("ecmaFeatures")
-            && let Some(Value::Bool(b)) = ef.get("globalReturn")
-        {
-            l.global_return = Some(*b);
+        if let Some(Value::Object(ef)) = po.get("ecmaFeatures") {
+            if let Some(Value::Bool(b)) = ef.get("globalReturn") {
+                l.global_return = Some(*b);
+            }
+            if let Some(Value::Bool(b)) = ef.get("impliedStrict") {
+                l.implied_strict = Some(*b);
+            }
         }
         match po.get("jsxPragma") {
             Some(Value::String(s)) => l.jsx_pragma = Some(Some(s.clone())),

@@ -8,8 +8,13 @@ use serde_json::Value;
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
 mod constructor_super;
+mod default_case;
+mod default_case_last;
+mod default_param_last;
+mod eqeqeq;
 mod for_direction;
 mod getter_return;
+mod guard_for_in;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_property_names;
@@ -46,8 +51,15 @@ mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
 mod jsdoc_tag_lines;
+mod max_depth;
+mod max_nested_callbacks;
+mod max_params;
+mod no_alert;
 mod no_array_constructor;
 mod no_async_promise_executor;
+mod no_await_in_loop;
+mod no_bitwise;
+mod no_caller;
 mod no_case_declarations;
 mod no_class_assign;
 mod no_compare_neg_zero;
@@ -56,9 +68,12 @@ mod no_console;
 mod no_const_assign;
 mod no_constant_binary_expression;
 mod no_constant_condition;
+mod no_constructor_return;
+mod no_continue;
 mod no_control_regex;
 mod no_debugger;
 mod no_delete_var;
+mod no_div_regex;
 mod no_dupe_args;
 mod no_dupe_class_members;
 mod no_dupe_else_if;
@@ -68,7 +83,11 @@ mod no_empty;
 mod no_empty_character_class;
 mod no_empty_pattern;
 mod no_empty_static_block;
+mod no_eq_null;
+mod no_eval;
 mod no_ex_assign;
+mod no_extend_native;
+mod no_extra_bind;
 mod no_extra_boolean_cast;
 mod no_fallthrough;
 mod no_func_assign;
@@ -76,24 +95,52 @@ mod no_global_assign;
 mod no_import_assign;
 mod no_invalid_regexp;
 mod no_irregular_whitespace;
+mod no_iterator;
+mod no_label_var;
+mod no_labels;
+mod no_lone_blocks;
+mod no_lonely_if;
 mod no_loss_of_precision;
 mod no_misleading_character_class;
+mod no_multi_assign;
+mod no_multi_str;
+mod no_negated_condition;
+mod no_nested_ternary;
+mod no_new;
+mod no_new_func;
 mod no_new_native_nonconstructor;
+mod no_new_object;
+mod no_new_symbol;
+mod no_new_wrappers;
 mod no_nonoctal_decimal_escape;
 mod no_obj_calls;
+mod no_object_constructor;
 mod no_octal;
+mod no_octal_escape;
+mod no_plusplus;
+mod no_proto;
 mod no_prototype_builtins;
 mod no_redeclare;
 mod no_regex_spaces;
+mod no_restricted_globals;
+mod no_restricted_properties;
 mod no_restricted_syntax;
+mod no_return_assign;
+mod no_script_url;
 mod no_self_assign;
+mod no_self_compare;
+mod no_sequences;
 mod no_setter_return;
 mod no_shadow_restricted_names;
 mod no_sparse_arrays;
+mod no_template_curly_in_string;
 mod no_this_before_super;
+mod no_throw_literal;
 mod no_unassigned_vars;
 mod no_undef;
+mod no_undef_init;
 mod no_unexpected_multiline;
+mod no_unneeded_ternary;
 mod no_unreachable;
 mod no_unsafe_finally;
 mod no_unsafe_negation;
@@ -104,16 +151,26 @@ mod no_unused_private_class_members;
 mod no_unused_vars;
 mod no_useless_assignment;
 mod no_useless_backreference;
+mod no_useless_call;
 mod no_useless_catch;
+mod no_useless_computed_key;
+mod no_useless_concat;
 mod no_useless_constructor;
 mod no_useless_escape;
+mod no_useless_rename;
 mod no_var;
+mod no_void;
 mod no_with;
 mod prefer_const;
+mod prefer_numeric_literals;
+mod prefer_object_has_own;
 mod prefer_rest_params;
 mod prefer_spread;
 mod preserve_caught_error;
+mod radix;
 mod require_yield;
+mod symbol_description;
+mod this_binding;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
 mod ts_consistent_type_imports;
@@ -198,14 +255,15 @@ mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod use_isnan;
 mod valid_typeof;
+mod yoda;
 
 /// Everything a rule module usually needs: `use super::prelude::*;`.
 #[allow(unused_imports)]
 pub(crate) mod prelude {
     pub(crate) use super::{
         ESLINT_REC, FromOptions, NO_PRESET, TS_ESLINT_REC, TS_REC, TS_REC_TC, TS_STRICT,
-        TS_STRICT_TC, TS_STYLISTIC_TC, bool_field, create, create_default, meta, obj_opt,
-        str_field, str_list,
+        TS_STRICT_TC, TS_STYLISTIC_TC, bool_field, create, create_default, max_option, meta,
+        obj_opt, str_field, str_list,
     };
     pub(crate) use crate::ast_util::*;
     pub(crate) use crate::diagnostic::Fix;
@@ -226,10 +284,22 @@ pub(crate) mod prelude {
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
     &constructor_super::RULE,
+    &default_case::RULE,
+    &default_case_last::RULE,
+    &default_param_last::RULE,
+    &eqeqeq::RULE,
     &for_direction::RULE,
     &getter_return::RULE,
+    &guard_for_in::RULE,
+    &max_depth::RULE,
+    &max_nested_callbacks::RULE,
+    &max_params::RULE,
+    &no_alert::RULE,
     &no_array_constructor::RULE,
     &no_async_promise_executor::RULE,
+    &no_await_in_loop::RULE,
+    &no_bitwise::RULE,
+    &no_caller::RULE,
     &no_case_declarations::RULE,
     &no_class_assign::RULE,
     &no_compare_neg_zero::RULE,
@@ -238,10 +308,13 @@ pub static ALL: &[&RuleDef] = &[
     &no_const_assign::RULE,
     &no_constant_binary_expression::RULE,
     &no_constant_condition::RULE,
+    &no_constructor_return::RULE,
+    &no_continue::RULE,
     &no_control_regex::RULE,
     &no_debugger::RULE,
     &no_restricted_syntax::RULE,
     &no_delete_var::RULE,
+    &no_div_regex::RULE,
     &no_dupe_args::RULE,
     &no_dupe_class_members::RULE,
     &no_dupe_else_if::RULE,
@@ -251,7 +324,11 @@ pub static ALL: &[&RuleDef] = &[
     &no_empty_character_class::RULE,
     &no_empty_pattern::RULE,
     &no_empty_static_block::RULE,
+    &no_eq_null::RULE,
+    &no_eval::RULE,
     &no_ex_assign::RULE,
+    &no_extend_native::RULE,
+    &no_extra_bind::RULE,
     &no_extra_boolean_cast::RULE,
     &no_fallthrough::RULE,
     &no_func_assign::RULE,
@@ -259,23 +336,51 @@ pub static ALL: &[&RuleDef] = &[
     &no_import_assign::RULE,
     &no_invalid_regexp::RULE,
     &no_irregular_whitespace::RULE,
+    &no_iterator::RULE,
+    &no_label_var::RULE,
+    &no_labels::RULE,
+    &no_lone_blocks::RULE,
+    &no_lonely_if::RULE,
     &no_loss_of_precision::RULE,
     &no_misleading_character_class::RULE,
+    &no_multi_assign::RULE,
+    &no_multi_str::RULE,
+    &no_negated_condition::RULE,
+    &no_nested_ternary::RULE,
+    &no_new::RULE,
+    &no_new_func::RULE,
     &no_new_native_nonconstructor::RULE,
+    &no_new_object::RULE,
+    &no_new_symbol::RULE,
+    &no_new_wrappers::RULE,
     &no_nonoctal_decimal_escape::RULE,
     &no_obj_calls::RULE,
+    &no_object_constructor::RULE,
     &no_octal::RULE,
+    &no_octal_escape::RULE,
+    &no_plusplus::RULE,
+    &no_proto::RULE,
     &no_prototype_builtins::RULE,
     &no_redeclare::RULE,
     &no_regex_spaces::RULE,
+    &no_restricted_globals::RULE,
+    &no_restricted_properties::RULE,
+    &no_return_assign::RULE,
+    &no_script_url::RULE,
     &no_self_assign::RULE,
+    &no_self_compare::RULE,
+    &no_sequences::RULE,
     &no_setter_return::RULE,
     &no_shadow_restricted_names::RULE,
     &no_sparse_arrays::RULE,
+    &no_template_curly_in_string::RULE,
     &no_this_before_super::RULE,
+    &no_throw_literal::RULE,
     &no_unassigned_vars::RULE,
     &no_undef::RULE,
+    &no_undef_init::RULE,
     &no_unexpected_multiline::RULE,
+    &no_unneeded_ternary::RULE,
     &no_unreachable::RULE,
     &no_unsafe_finally::RULE,
     &no_unsafe_negation::RULE,
@@ -286,15 +391,23 @@ pub static ALL: &[&RuleDef] = &[
     &no_unused_vars::RULE,
     &no_useless_assignment::RULE,
     &no_useless_backreference::RULE,
+    &no_useless_call::RULE,
     &no_useless_catch::RULE,
+    &no_useless_computed_key::RULE,
+    &no_useless_concat::RULE,
     &no_useless_constructor::RULE,
     &no_useless_escape::RULE,
+    &no_useless_rename::RULE,
     &no_var::RULE,
+    &no_void::RULE,
     &no_with::RULE,
     &prefer_const::RULE,
+    &prefer_numeric_literals::RULE,
+    &prefer_object_has_own::RULE,
     &prefer_rest_params::RULE,
     &prefer_spread::RULE,
     &preserve_caught_error::RULE,
+    &radix::RULE,
     &require_yield::RULE,
     &ts_await_thenable::RULE,
     &ts_ban_ts_comment::RULE,
@@ -378,8 +491,10 @@ pub static ALL: &[&RuleDef] = &[
     &ts_unbound_method::RULE,
     &ts_unified_signatures::RULE,
     &ts_use_unknown_in_catch_callback_variable::RULE,
+    &symbol_description::RULE,
     &use_isnan::RULE,
     &valid_typeof::RULE,
+    &yoda::RULE,
     &jsdoc_check_access::RULE,
     &jsdoc_check_alignment::RULE,
     &jsdoc_check_property_names::RULE,
@@ -510,6 +625,20 @@ pub(crate) fn obj_opt(opts: &[Value], i: usize) -> &serde_json::Map<String, Valu
 #[allow(dead_code)]
 pub(crate) fn bool_field(o: &serde_json::Map<String, Value>, k: &str, default: bool) -> bool {
     o.get(k).and_then(Value::as_bool).unwrap_or(default)
+}
+
+/// The limit of a `max-*` rule: a number, or `{ max }` / `{ maximum }` (`default` when
+/// neither is given).
+pub(crate) fn max_option(opts: &[Value], default: u64) -> u64 {
+    match opts.first() {
+        Some(Value::Number(n)) => n.as_u64().unwrap_or(default),
+        Some(Value::Object(o)) => o
+            .get("max")
+            .or_else(|| o.get("maximum"))
+            .and_then(Value::as_u64)
+            .unwrap_or(default),
+        _ => default,
+    }
 }
 
 /// A string field of an options object.

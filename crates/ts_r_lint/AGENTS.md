@@ -46,6 +46,7 @@ Files:
 - `project.rs`: file discovery (`.gitignore`, ignores, nearest config), parallel runner.
 - `output.rs`: stylish, json, sarif, github.
 - `ast_util.rs`: helpers shared by rules.
+- `rules/this_binding.rs`: where a `this` is bound and whether code is strict (core rules).
 - `jsdoc.rs`: shared machinery for the `jsdoc/*` rules (see "jsdoc rules" below).
 - `jsdoc_util.rs`: helpers the round-3 `jsdoc/*` rules share (the `contexts` option,
   preferred-tag lookup, "replaces docs" exemptions, generator/`yield`/`throw` questions).
@@ -171,6 +172,31 @@ Files:
   once (`eslint -c oracle.config.mjs -f json -o <out>/ALL.json .`, and `ts-r-lint
   --no-gitignore -c oracle.config.mjs -f json`); `compare.py` treats `ALL.json` as every
   package.
+
+## Core ESLint rules (round 3)
+
+Round 3 adds 57 core rules, each at 100% of its oracle (`no-return-assign` through
+`no-useless-rename` at the end of `tests/oracle/gen/rules.txt`).
+
+- **Shared pieces.** `rules/this_binding.rs` (no `RULE`) answers where a `this` is bound and
+  whether that binding is the default one (the global object in sloppy code, and never
+  under `impliedStrict` or in a module); `no-eval`, `no-alert`, `no-extra-bind` and
+  `no-lone-blocks` use it. `rules::max_option` reads a `max-*` limit given as a
+  number or as `{ max }` / `{ maximum }`. `LintEnv::implied_strict` carries
+  `parserOptions.ecmaFeatures.impliedStrict` (all code strict), next to `global_return`.
+- **yoda** decides "is this a range test" with JavaScript's `<=`: two strings compare by
+  UTF-16 code units, anything else through ToNumber, and a regex literal compares as its
+  source text.
+- **no-useless-rename** reports but does not fix when removing the key would drop a comment,
+  or when the target with a default is wrapped in parentheses.
+- Not done yet: `no-promise-executor-return`, `grouped-accessor-pairs`, `no-else-return`.
+
+Read to understand (not ported), ESLint `lib/rules/`: `no-eval.js`, `no-lonely-if.js`,
+`no-alert.js`, `eqeqeq.js`, `no-throw-literal.js`, `radix.js`, `no-extra-bind.js`,
+`no-lone-blocks.js`, `prefer-numeric-literals.js`, `no-extend-native.js`,
+`prefer-object-has-own.js`, `no-useless-computed-key.js`, `no-restricted-properties.js`,
+`no-restricted-globals.js`, `yoda.js`, `no-useless-rename.js`, and `utils/ast-utils.js`
+(the default-`this` test, when braces are needed, same-reference and static property names).
 
 ## jsdoc rules
 

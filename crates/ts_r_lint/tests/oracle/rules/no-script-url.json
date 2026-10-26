@@ -1,0 +1,10 @@
+{"rule":"no-script-url","source":"eslint","skipped":{},"cases":[{"code":"var a = 'Hello World!';","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var a = 10;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var url = 'xjavascript:'","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var url = `xjavascript:`","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"var url = `${foo}javascript:`","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"var a = foo`javaScript:`;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"var a = 'javascript:void(0);';","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-script-url","messageId":"unexpectedScriptURL","message":"Script URL is a form of eval.","line":1,"column":9,"endLine":1,"endColumn":30}],"output":null},
+{"code":"var a = 'javascript:';","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-script-url","messageId":"unexpectedScriptURL","message":"Script URL is a form of eval.","line":1,"column":9,"endLine":1,"endColumn":22}],"output":null},
+{"code":"var a = `javascript:`;","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-script-url","messageId":"unexpectedScriptURL","message":"Script URL is a form of eval.","line":1,"column":9,"endLine":1,"endColumn":22}],"output":null},
+{"code":"var a = `JavaScript:`;","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-script-url","messageId":"unexpectedScriptURL","message":"Script URL is a form of eval.","line":1,"column":9,"endLine":1,"endColumn":22}],"output":null}]}

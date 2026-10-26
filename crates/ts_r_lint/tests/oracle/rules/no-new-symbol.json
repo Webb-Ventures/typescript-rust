@@ -1,0 +1,7 @@
+{"rule":"no-new-symbol","source":"eslint","skipped":{},"cases":[{"code":"var foo = Symbol('foo');","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"function bar(Symbol) { var baz = new Symbol('baz');}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"function Symbol() {} new Symbol();","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"new foo(Symbol);","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"new foo(bar, Symbol);","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"var foo = new Symbol('foo');","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-new-symbol","messageId":"noNewSymbol","message":"`Symbol` cannot be called as a constructor.","line":1,"column":15,"endLine":1,"endColumn":21}],"output":null},
+{"code":"function bar() { return function Symbol() {}; } var baz = new Symbol('baz');","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-new-symbol","messageId":"noNewSymbol","message":"`Symbol` cannot be called as a constructor.","line":1,"column":63,"endLine":1,"endColumn":69}],"output":null}]}
