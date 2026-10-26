@@ -307,6 +307,7 @@ mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
+mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_process_exit;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
@@ -314,6 +315,7 @@ mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_useless_fallback_in_spread;
 mod unicorn_no_useless_switch_case;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
@@ -690,6 +692,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,
+    &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_process_exit::RULE,
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_this_outside_of_class::RULE,
@@ -697,6 +700,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_useless_fallback_in_spread::RULE,
     &unicorn_no_useless_switch_case::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,

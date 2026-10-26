@@ -300,3 +300,5 @@ unicorn/catch-error-name
 unicorn/switch-case-braces
 unicorn/no-process-exit
 unicorn/no-useless-switch-case
+unicorn/no-object-as-default-parameter
+unicorn/no-useless-fallback-in-spread
