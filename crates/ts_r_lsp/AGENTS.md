@@ -842,7 +842,7 @@ features stay on ts-r (hover p50 0.12 ms).
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
   have no symbol (the checker does not type JSX yet); references do not follow renaming
-  imports (`import { a as b }`: uses of `b`) or contextually typed object literal properties.
+  imports (`import { a as b }`: uses of `b`) or members inherited across classes.
   Completions: no bracket-notation members (`o["a-b"]`), no
   accessibility filtering after `.` (private members are listed), auto-imports only from
   the project's own (non-`node_modules`) modules and never `default` exports.
