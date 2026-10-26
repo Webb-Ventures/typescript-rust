@@ -363,6 +363,7 @@ mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
+mod unicorn_no_invalid_property_descriptor;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
@@ -554,6 +555,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_invalid_property_descriptor::RULE,
     &unicorn_no_uncalled_method::RULE,
     &unicorn_prefer_single_object_destructuring::RULE,
     &unicorn_no_incomplete_accessor_override::RULE,
