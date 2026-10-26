@@ -39,7 +39,16 @@ impl Cfg {
     /// The graph of a function's parameters and body (`FunctionDecl`, `FunctionExpr`,
     /// `Arrow`).
     pub fn function(ast: &Ast, f: NodeId) -> Cfg {
+        Cfg::function_with_exits(ast, f, &[])
+    }
+
+    /// [`Cfg::function`], where each call in `exits` (sorted) ends the program like
+    /// `process.exit()`: its arguments are evaluated, then control goes nowhere (not even
+    /// to a `catch` or `finally`). With exits, the static blocks of classes defined in the
+    /// function are part of its graph too.
+    pub fn function_with_exits(ast: &Ast, f: NodeId, exits: &[NodeId]) -> Cfg {
         let mut b = Builder::new(ast);
+        b.exits = exits;
         match *ast.node(f) {
             Node::FunctionDecl { params, body, .. } | Node::FunctionExpr { params, body, .. } => {
                 for &p in ast.list(params) {
@@ -161,6 +170,8 @@ struct Builder<'a> {
     /// Block count past which `finally` bodies are no longer built twice (each copy doubles
     /// the nested ones).
     block_budget: usize,
+    /// Calls that end the program (sorted).
+    exits: &'a [NodeId],
 }
 
 /// A literal test that is always truthy (`while (true)`).
@@ -239,6 +250,7 @@ impl<'a> Builder<'a> {
             labels: Vec::new(),
             case_ends: Vec::new(),
             block_budget: 4 * ast.nodes.len() + 4096,
+            exits: &[],
         };
         b.cur = b.new_block();
         b.exit = b.new_block();
@@ -440,6 +452,17 @@ impl<'a> Builder<'a> {
                 self.expr(expr);
             }
         }
+        // With exit calls, static blocks run with the class definition, in order (the
+        // exit-aware graph needs to see a `process.exit()` there).
+        if !self.exits.is_empty() {
+            for &m in ast.list(members) {
+                if let Node::StaticBlock { body } = *ast.node(m) {
+                    for &s in ast.list(body) {
+                        self.stmt(s);
+                    }
+                }
+            }
+        }
     }
 
     fn decorators(&mut self, decorators: ts_r_ast::NodeList) {
@@ -452,6 +475,17 @@ impl<'a> Builder<'a> {
 
     fn expr(&mut self, id: NodeId) {
         let ast = self.ast;
+        if !self.exits.is_empty()
+            && self.exits.binary_search(&id).is_ok()
+            && let Node::Call { args, .. } = *ast.node(id)
+        {
+            for &a in ast.list(args) {
+                self.expr(a);
+            }
+            self.event(id);
+            self.dead();
+            return;
+        }
         match *ast.node(id) {
             Node::Binary {
                 left,

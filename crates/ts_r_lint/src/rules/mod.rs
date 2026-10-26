@@ -507,6 +507,7 @@ mod unicorn_require_css_escape;
 mod unicorn_require_module_attributes;
 mod unicorn_require_module_specifiers;
 mod unicorn_require_number_to_fixed_digits_argument;
+mod unicorn_require_proxy_trap_boolean_return;
 mod unicorn_splice;
 mod unicorn_static;
 mod unicorn_switch_case_braces;
@@ -555,6 +556,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_require_proxy_trap_boolean_return::RULE,
     &unicorn_no_invalid_property_descriptor::RULE,
     &unicorn_no_uncalled_method::RULE,
     &unicorn_prefer_single_object_destructuring::RULE,
