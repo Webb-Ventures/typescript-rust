@@ -13,6 +13,7 @@ pub mod fix;
 pub mod globals;
 pub mod jsdoc;
 pub mod jsdoc_tree;
+pub mod jsdoc_util;
 pub mod lib_globals;
 #[rustfmt::skip]
 pub mod lib_globals_generated;

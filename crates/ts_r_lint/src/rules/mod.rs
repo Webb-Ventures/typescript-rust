@@ -10,9 +10,41 @@ use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 mod constructor_super;
 mod for_direction;
 mod getter_return;
+mod jsdoc_check_access;
+mod jsdoc_check_alignment;
+mod jsdoc_check_property_names;
+mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
+mod jsdoc_implements_on_classes;
+mod jsdoc_multiline_blocks;
+mod jsdoc_no_blank_block_descriptions;
+mod jsdoc_no_blank_blocks;
+mod jsdoc_no_defaults;
+mod jsdoc_no_multi_asterisks;
+mod jsdoc_no_types;
+mod jsdoc_reject_any_type;
+mod jsdoc_reject_function_type;
+mod jsdoc_require_hyphen_before_param_description;
+mod jsdoc_require_next_description;
+mod jsdoc_require_next_type;
 mod jsdoc_require_param_description;
+mod jsdoc_require_param_name;
+mod jsdoc_require_param_type;
+mod jsdoc_require_property_description;
+mod jsdoc_require_property_name;
+mod jsdoc_require_property_type;
 mod jsdoc_require_returns;
+mod jsdoc_require_returns_check;
+mod jsdoc_require_returns_description;
+mod jsdoc_require_returns_type;
+mod jsdoc_require_throws;
+mod jsdoc_require_throws_description;
+mod jsdoc_require_throws_type;
+mod jsdoc_require_yields;
+mod jsdoc_require_yields_check;
+mod jsdoc_require_yields_description;
+mod jsdoc_require_yields_type;
+mod jsdoc_tag_lines;
 mod no_array_constructor;
 mod no_async_promise_executor;
 mod no_case_declarations;
@@ -347,9 +379,41 @@ pub static ALL: &[&RuleDef] = &[
     &ts_use_unknown_in_catch_callback_variable::RULE,
     &use_isnan::RULE,
     &valid_typeof::RULE,
+    &jsdoc_check_access::RULE,
+    &jsdoc_check_alignment::RULE,
+    &jsdoc_check_property_names::RULE,
+    &jsdoc_empty_tags::RULE,
     &jsdoc_escape_inline_tags::RULE,
+    &jsdoc_implements_on_classes::RULE,
+    &jsdoc_multiline_blocks::RULE,
+    &jsdoc_no_blank_block_descriptions::RULE,
+    &jsdoc_no_blank_blocks::RULE,
+    &jsdoc_no_defaults::RULE,
+    &jsdoc_no_multi_asterisks::RULE,
+    &jsdoc_no_types::RULE,
+    &jsdoc_reject_any_type::RULE,
+    &jsdoc_reject_function_type::RULE,
+    &jsdoc_require_hyphen_before_param_description::RULE,
+    &jsdoc_require_next_description::RULE,
+    &jsdoc_require_next_type::RULE,
     &jsdoc_require_param_description::RULE,
+    &jsdoc_require_param_name::RULE,
+    &jsdoc_require_param_type::RULE,
+    &jsdoc_require_property_description::RULE,
+    &jsdoc_require_property_name::RULE,
+    &jsdoc_require_property_type::RULE,
     &jsdoc_require_returns::RULE,
+    &jsdoc_require_returns_check::RULE,
+    &jsdoc_require_returns_description::RULE,
+    &jsdoc_require_returns_type::RULE,
+    &jsdoc_require_throws::RULE,
+    &jsdoc_require_throws_description::RULE,
+    &jsdoc_require_throws_type::RULE,
+    &jsdoc_require_yields::RULE,
+    &jsdoc_require_yields_check::RULE,
+    &jsdoc_require_yields_description::RULE,
+    &jsdoc_require_yields_type::RULE,
+    &jsdoc_tag_lines::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

@@ -47,6 +47,8 @@ Files:
 - `output.rs`: stylish, json, sarif, github.
 - `ast_util.rs`: helpers shared by rules.
 - `jsdoc.rs`: shared machinery for the `jsdoc/*` rules (see "jsdoc rules" below).
+- `jsdoc_util.rs`: helpers the round-3 `jsdoc/*` rules share (the `contexts` option,
+  preferred-tag lookup, "replaces docs" exemptions, generator/`yield`/`throw` questions).
 - `esquery.rs`: esquery selectors (parser and matcher, generic over a `Tree`); `estree.rs`:
   the typescript-estree view of a file they match; `jsdoc_tree.rs`: the `JsdocBlock` view of
   one comment for jsdoc `comment` contexts (see "Selectors" below).
@@ -225,10 +227,51 @@ Files:
   `{@link @scope/pkg}`. Descriptions are scanned first, then each tag but `@example`, one
   report per remaining occurrence; the fixer escapes with `\@` or backticks.
 
+Round 3 adds 32 more rules (`src/rules/jsdoc_*.rs`; shared helpers in `src/jsdoc_util.rs`):
+`require-param-{name,type}`, `require-property-{name,type,description}`, `require-{returns,throws,yields}-{type,description}`,
+`require-next-{type,description}`, `require-throws`, `require-yields`, `require-yields-check`,
+`require-returns-check`, `check-access`, `check-alignment`, `check-property-names`,
+`empty-tags`, `implements-on-classes`, `multiline-blocks`, `no-blank-blocks`,
+`no-blank-block-descriptions`, `no-defaults`, `no-multi-asterisks`, `no-types`,
+`reject-any-type`, `reject-function-type`, `require-hyphen-before-param-description`,
+`tag-lines`. `check-param-names`, `require-property` and `require-asterisk-prefix` were
+written but left out: each misses one case on a report position (below). What we learned:
+
+- **Report positions.** A report given a comment-relative line lands at column 0 of that
+  line; one given only `column: 0` lands at the comment's own column. ESLint can report a
+  column past the end of an empty line (`1:2` on an empty first line, `5:9` on a blank line);
+  a byte span can't say that, so rules whose tests need it wait for an explicit report
+  location on `Diagnostic`.
+- **Fixes on one block accumulate.** A rule that reports several times on a block mutates the
+  same parsed block each time and every fix rewrites the whole comment, so the fixes overlap
+  and only the first in source order is applied per pass (tag-lines shows both mutations in a
+  later report's fix text). Removing a tag or inserting lines renumbers every line after it;
+  inserted lines belong to no tag; lines made by replacing the block description are
+  numbered 0 and the first line always has an empty start.
+- **Contexts.** Rules that declare no default contexts ignore the `contexts` option. Rules
+  that do (`require-yields`, the returns rules) check only blocks whose node matches one of
+  the listed contexts.
+- **Yield and return walks.** The yield search skips nested functions, class bodies, call
+  callees, `new` and `await` operands; with `next` only a yield used directly as an
+  initializer counts. A `MethodDefinition` itself never "has a yield value". The returns and
+  throws checks need *every* branch to end in the statement (`if` with both arms, `switch`
+  with a default, `try` with `finally`).
+- **Undefined-ish types.** A `@returns`/`@yields` type is "maybe undefined" when its
+  top-level union mentions `undefined` or `void`, or it names a `@typedef` whose type does;
+  those blocks don't need a matching return or yield. Type checks in reject-*-type and here
+  use a light scanner of the type text, not a full jsdoc type parser.
+
 Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc.js`
 (iterateAllJsdocs, findContext), `src/jsdocUtils.js` (getContextObject),
 `src/jsdocUtils.js`, `src/utils/hasReturnValue.js`, `src/rules/requireParamDescription.js`,
-`src/rules/requireReturns.js`, `src/rules/escapeInlineTags.js`; `@es-joy/jsdoccomment`
+`src/rules/requireReturns.js`, `src/rules/escapeInlineTags.js`, and for round 3
+`src/rules/{requireParamName,requireParamType,requireReturnsDescription,requireReturnsType,
+requirePropertyName,checkAccess,emptyTags,implementsOnClasses,noDefaults,noTypes,
+checkAlignment,noMultiAsterisks,noBlankBlocks,noBlankBlockDescriptions,
+requireHyphenBeforeParamDescription,multilineBlocks,requireThrows,requireYields,
+requireYieldsCheck,requireReturnsCheck,checkPropertyNames,tagLines}.js`,
+`src/buildRejectOrPreferRuleDefinition.js`, `src/buildForbidRuleDefinition.js`,
+`src/getDefaultTagStructureForMode.js`, `src/index-cjs.js`; `@es-joy/jsdoccomment`
 `src/jsdoccomment.js` (getReducedASTNode, getTSFunctionComment), `src/parseComment.js`,
 `src/commentParserToESTree.js`, `src/commentHandler.js`, `src/parseInlineTags.js`; `comment-parser` `src/parser/{index,
 source-parser,block-parser,spec-parser}.ts`, `src/parser/tokenizers/{tag,type,name,
