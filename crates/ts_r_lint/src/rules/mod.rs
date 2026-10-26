@@ -521,6 +521,7 @@ mod unicorn_prefer_math_abs;
 mod unicorn_prefer_math_constants;
 mod unicorn_prefer_math_min_max;
 mod unicorn_prefer_math_trunc;
+mod unicorn_prefer_minimal_ternary;
 mod unicorn_prefer_modern_dom_apis;
 mod unicorn_prefer_module;
 mod unicorn_prefer_native_coercion_functions;
@@ -1114,6 +1115,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_map_from_entries::RULE,
     &unicorn_prefer_math_abs::RULE,
     &unicorn_prefer_math_min_max::RULE,
+    &unicorn_prefer_minimal_ternary::RULE,
     &unicorn_prefer_module::RULE,
     &unicorn_prefer_math_constants::RULE,
     &unicorn_prefer_node_protocol::RULE,
