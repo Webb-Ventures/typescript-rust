@@ -560,7 +560,8 @@ typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visi
 
 `prefer-blob-reading-methods`, `consistent-date-clone`, `no-invalid-remove-event-listener`,
 `prefer-structured-clone`, `prefer-event-target`, `no-useless-error-capture-stack-trace`,
-`no-negation-in-equality-check` (each at 100% of its oracle), `no-await-in-promise-methods`
+`no-negation-in-equality-check`, `no-exports-in-scripts`, `consistent-tuple-labels`,
+`no-leading-empty-lines`, `prefer-add-event-listener-options` (each at 100% of its oracle), `no-await-in-promise-methods`
 (110 of 111) and `no-unnecessary-await` (63 of 66): their last cases need the parser's
 module goal, see below. Shared call shapes are
 in `rules/unicorn_ast.rs`: `method_call` (a call of `obj.name` with an identifier property,
@@ -594,6 +595,11 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
 - **prefer-event-target**: `EventEmitter` as superclass or `new` callee, unless declared by
   an import of (or a `const` destructuring / `.EventEmitter` of `require`/`await import`
   of) `@angular/core` or `eventemitter3`.
+- **no-exports-in-scripts** (a `#!` first line), **consistent-tuple-labels**,
+  **no-leading-empty-lines**, **prefer-add-event-listener-options**: see each file's header.
+- **A leading BOM** is stripped before linting, by the CLI (`project::lint_one`) and by the
+  oracle harness, which puts it back in front of fixed output; `gen-rule-oracle.mjs` applies
+  fix ranges to the BOM-less text the same way (ESLint's ranges index text without it).
 - **prefer-structured-clone**'s JSON suggestion deletes `JSON.stringify` with each
   parenthesis around it, the inner call's `(`, `)` and trailing comma; the clone-function
   form replaces the callee inside its parentheses.
@@ -604,5 +610,6 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `ast/call-or-new-expression.js`, `utils/is-node-matches.js`, `utils/comments.js`,
 `fix/remove-method-call.js`, `fix/remove-spaces-after.js`, `no-unnecessary-await.js`,
 `no-negation-in-equality-check.js`, `no-useless-error-capture-stack-trace.js`,
-`prefer-event-target.js`, `utils/needs-semicolon.js`,
+`prefer-event-target.js`, `no-exports-in-scripts.js`, `consistent-tuple-labels.js`,
+`no-leading-empty-lines.js`, `prefer-add-event-listener-options.js`, `utils/needs-semicolon.js`,
 `fix/add-parentheses-to-return-or-throw-expression.js`.

@@ -301,3 +301,7 @@ unicorn/prefer-event-target
 unicorn/no-useless-error-capture-stack-trace
 unicorn/no-unnecessary-await
 unicorn/no-negation-in-equality-check
+unicorn/no-exports-in-scripts
+unicorn/consistent-tuple-labels
+unicorn/no-leading-empty-lines
+unicorn/prefer-add-event-listener-options

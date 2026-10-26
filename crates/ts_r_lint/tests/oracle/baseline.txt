@@ -266,14 +266,17 @@ radix 91/91
 require-yield 15/15
 symbol-description 8/8
 unicorn/consistent-date-clone 26/26
+unicorn/consistent-tuple-labels 30/30
 unicorn/empty-brace-spaces 213/213
 unicorn/escape-case 198/198
 unicorn/new-for-builtins 366/366
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-console-spaces 86/86
 unicorn/no-document-cookie 21/21
+unicorn/no-exports-in-scripts 22/22
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-remove-event-listener 42/42
+unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
@@ -288,6 +291,7 @@ unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
+unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46

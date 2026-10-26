@@ -296,6 +296,8 @@ function pickParserOptions(po = {}) {
 }
 
 function applyFixes(code, fixes) {
+  // Fix ranges index ESLint's text, which has no leading BOM; the BOM is kept in front.
+  if (code.startsWith('\uFEFF')) return '\uFEFF' + applyFixes(code.slice(1), fixes);
   // One pass, like RuleTester: sort by range, skip overlapping fixes.
   const sorted = fixes.filter(Boolean).sort((x, y) => x.range[0] - y.range[0] || x.range[1] - y.range[1]);
   let out = '';
