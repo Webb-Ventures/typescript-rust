@@ -3117,30 +3117,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return true;
                 }
                 // `S` is assignable to `keyof T` when it is assignable to `keyof C`, `C` being
-                // T's constraint (a string index signature contributes `string` only).
-                let mut kc = if self.store().flags(c).contains(TypeFlags::ANY) {
+                // T's constraint (a string index signature contributes `string | number`;
+                // tsc: relater.go, structuredTypeRelatedToWorker).
+                let kc = if self.store().flags(c).contains(TypeFlags::ANY) {
                     self.keyof_constraint()
                 } else {
                     self.keyof_type(c)
                 };
-                if self
-                    .index_info_of(c, TypeId::STRING)
-                    .is_some_and(|i| i.key == TypeId::STRING)
-                    && self.store().flags(kc).contains(TypeFlags::UNION)
-                {
-                    let parts: Vec<TypeId> = self
-                        .store()
-                        .members_of_union(kc)
-                        .iter()
-                        .copied()
-                        .filter(|&m| m != TypeId::NUMBER)
-                        .collect();
-                    kc = self.union_with(
-                        &parts,
-                        crate::unions::Reduction::Literal,
-                        ts_r_types::AliasId::NONE,
-                    );
-                }
                 if kc == t || self.store().flags(kc).intersects(TypeFlags::INDEX) {
                     return false;
                 }
