@@ -35,7 +35,9 @@ Files:
 - `lib_globals.rs`: TypeScript lib globals for TypeScript-parsed files (which lib files, from
   `parserOptions.lib`, the tsconfig with `project`/`projectService`, or `esnext`), cached per
   lib set and per tsconfig (reloaded when the tsconfig or a config it extends changes; the
-  nearest-tsconfig lookup is not cached, so created and deleted tsconfigs count). `lib_globals_generated.rs` is the per-lib-file name table,
+  nearest-tsconfig lookup is not cached, so created and deleted tsconfigs count). The same
+  tsconfig supplies `emitDecoratorMetadata`/`experimentalDecorators` when the parser options
+  leave them unset, as typescript-eslint reads them from the program. `lib_globals_generated.rs` is the per-lib-file name table,
   **generated** by `cargo xtask codegen lint-globals` from the pinned TypeScript lib files;
   never edit it by hand (`cargo xtask codegen --check` verifies it).
 - `directives.rs`: `eslint-disable*`, `/* eslint */`, `/* global */`, unused-directive reports.

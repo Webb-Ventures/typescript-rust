@@ -3,7 +3,8 @@
 //! Backward liveness over the code-path graph of each function (or program / static
 //! block): a write is reported when no read of the variable is reachable from it before
 //! the next write. Variables read from another function are skipped (a closure may run at
-//! any time), as are exported variables, globals and unreachable writes.
+//! any time), as are exported variables, globals and unreachable writes, and (as ESLint does)
+//! writes inside the block of a `try` statement of the same code path.
 
 use super::prelude::*;
 use crate::cfg::Cfg;
@@ -70,6 +71,29 @@ fn is_for_head(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
             | Node::Spread { .. }
             | Node::Paren { .. } => {}
             _ => return false,
+        }
+        prev = p;
+        cur = cx.parent(p);
+    }
+    false
+}
+
+/// The write sits in the block of a `try` statement of its own code path (observed: ESLint
+/// never reports those, whatever the `catch` or `finally` do).
+fn in_try_block(cx: &Ctx<'_, '_>, node: NodeId, home: NodeId) -> bool {
+    let mut prev = node;
+    let mut cur = cx.parent(node);
+    while let Some(p) = cur {
+        if p == home {
+            return false;
+        }
+        match *cx.node(p) {
+            Node::Try { block, .. } if block == prev => return true,
+            Node::FunctionDecl { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::StaticBlock { .. } => return false,
+            _ => {}
         }
         prev = p;
         cur = cx.parent(p);
@@ -186,9 +210,10 @@ impl Rule for NoUselessAssignment {
                     if !write && !is_read(r.flags) {
                         continue;
                     }
-                    let candidate = write
-                        && !(skip_init && r.flags.contains(RefFlags::INIT))
-                        && !is_for_head(cx, r.node);
+                    let skipped = (skip_init && r.flags.contains(RefFlags::INIT))
+                        || is_for_head(cx, r.node)
+                        || in_try_block(cx, r.node, home);
+                    let candidate = write && !skipped;
                     events.insert(r.node, (k, r.flags, candidate));
                 }
             }
@@ -271,4 +296,73 @@ fn dead_writes(
         .filter(|&(_, live)| !live)
         .map(|(w, _)| w)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{ConfigFile, ConfigKind, ResolveOptions, objects_from_eslint_json};
+    use crate::engine::lint_source;
+    use crate::registry::Registry;
+    use crate::types::{FileKey, NoTypeInfo};
+
+    /// The 1-based lines of the rule's reports.
+    fn lines(code: &str) -> Vec<usize> {
+        let cfg = serde_json::json!([{
+            "files": ["**/*.ts"],
+            "languageOptions": { "parser": "typescript-eslint/parser" },
+            "rules": { "no-useless-assignment": "error" },
+        }]);
+        let objs = objects_from_eslint_json(&cfg, Registry::global()).unwrap();
+        let cfg = ConfigFile::new(ConfigKind::Eslint, None, "/p".into(), objs);
+        let fc = cfg.file_config("a.ts", &ResolveOptions::new()).unwrap();
+        lint_source("/p/a.ts", code, &fc, &NoTypeInfo, FileKey(0))
+            .diagnostics
+            .iter()
+            .filter(|d| d.rule == Some("no-useless-assignment"))
+            .map(|d| code[..d.span.start as usize].matches('\n').count() + 1)
+            .collect()
+    }
+
+    #[test]
+    fn writes_inside_a_try_block_are_skipped() {
+        // Observed from ESLint 10: only the declaration outside the inner try (line 2) is
+        // reported; writes in any try block of the function never are.
+        let code = "export async function f(run: () => Promise<number>) {
+    let raw: number | undefined = undefined
+    try {
+        raw = await run()
+    } catch (error) {
+        throw error
+    }
+    return raw
+}
+export async function g(run: () => Promise<number>) {
+    try {
+        let raw: number | undefined = undefined
+        try {
+            raw = await run()
+        } catch (error) {
+            throw error
+        }
+        return raw
+    } finally {
+        await run()
+    }
+}
+";
+        assert_eq!(lines(code), vec![2]);
+    }
+
+    #[test]
+    fn decorator_arguments_read_variables() {
+        let code = "const trim = { to: (v: string) => v };
+class A {
+    @Column({ transformer: [trim] })
+    name = '';
+}
+export { A };
+declare function Column(o: object): PropertyDecorator;
+";
+        assert_eq!(lines(code), Vec::<usize>::new());
+    }
 }

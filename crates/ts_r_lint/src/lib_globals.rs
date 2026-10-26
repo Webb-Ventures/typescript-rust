@@ -148,6 +148,10 @@ pub struct ProjectLib {
     pub service: bool,
     /// The lib globals come from the tsconfig (no `parserOptions.lib`).
     pub lib_from_tsconfig: bool,
+    /// `parserOptions.emitDecoratorMetadata` / `experimentalDecorators`. Unset ones come
+    /// from the file's tsconfig, as typescript-eslint takes them from the program.
+    pub emit_decorator_metadata: Option<bool>,
+    pub experimental_decorators: Option<bool>,
 }
 
 impl ProjectLib {
@@ -165,6 +169,26 @@ impl ProjectLib {
             Some(cfg) => tsconfig_libs(&cfg),
             None => LibGlobals::default_lib(),
         }
+    }
+
+    /// Whether decorated classes in `file` (absolute path) reference their parameter and
+    /// property types as values: `emitDecoratorMetadata` and `experimentalDecorators`, each
+    /// from the parser options or else the file's tsconfig.
+    pub fn decorator_metadata(&self, file: &str) -> bool {
+        if self.emit_decorator_metadata == Some(false)
+            || self.experimental_decorators == Some(false)
+        {
+            return false;
+        }
+        let from_tsconfig = match (self.emit_decorator_metadata, self.experimental_decorators) {
+            (Some(true), Some(true)) => return true,
+            _ => self
+                .tsconfig_for(file)
+                .map(|c| load(&c).decorators)
+                .unwrap_or((false, false)),
+        };
+        self.emit_decorator_metadata.unwrap_or(from_tsconfig.0)
+            && self.experimental_decorators.unwrap_or(from_tsconfig.1)
     }
 
     /// The tsconfig typescript-eslint would build `file`'s program from (absolute path).
@@ -205,6 +229,8 @@ fn nearest_tsconfig(dir: &str) -> Option<String> {
 struct LoadedTsconfig {
     libs: Arc<LibGlobals>,
     files: Arc<Vec<String>>,
+    /// `emitDecoratorMetadata`, `experimentalDecorators`.
+    decorators: (bool, bool),
     /// The tsconfig and every config it extends, with their modification time and size
     /// when loaded; the entry is reloaded once any of them changes.
     stamps: Vec<(String, Option<(SystemTime, u64)>)>,
@@ -235,6 +261,10 @@ fn load(path: &str) -> Arc<LoadedTsconfig> {
         .collect();
     let r = Arc::new(LoadedTsconfig {
         libs: LibGlobals::for_files(&roots),
+        decorators: (
+            parsed.options.emit_decorator_metadata() == Some(true),
+            parsed.options.experimental_decorators() == Some(true),
+        ),
         files: Arc::new(parsed.file_names),
         stamps,
     });
@@ -385,6 +415,8 @@ mod tests {
             projects: Vec::new(),
             service: false,
             lib_from_tsconfig: true,
+            emit_decorator_metadata: None,
+            experimental_decorators: None,
         };
         let file = sub.join("a.ts").to_string_lossy().into_owned();
         let dom = || project.resolve(&file).is_global("RequestInit");
@@ -407,6 +439,35 @@ mod tests {
         assert!(!dom());
         std::fs::remove_file(&nearer).unwrap();
         assert!(dom());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn decorator_metadata_comes_from_tsconfig_when_unset() {
+        let dir = std::env::temp_dir().join(format!("ts-r-lint-deco-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("tsconfig.json"),
+            r#"{"compilerOptions": {"emitDecoratorMetadata": true, "experimentalDecorators": true}}"#,
+        )
+        .unwrap();
+        let file = dir.join("a.ts").to_string_lossy().into_owned();
+        let project = |emit, exp| ProjectLib {
+            root_dir: dir.clone(),
+            projects: Vec::new(),
+            service: false,
+            lib_from_tsconfig: true,
+            emit_decorator_metadata: emit,
+            experimental_decorators: exp,
+        };
+        assert!(project(None, None).decorator_metadata(&file));
+        assert!(project(Some(true), None).decorator_metadata(&file));
+        // An explicit parser option wins over the tsconfig.
+        assert!(!project(Some(false), None).decorator_metadata(&file));
+        assert!(!project(None, Some(false)).decorator_metadata(&file));
+        std::fs::write(dir.join("tsconfig.json"), r#"{"compilerOptions": {}}"#).unwrap();
+        assert!(!project(None, None).decorator_metadata(&file));
+        assert!(project(Some(true), Some(true)).decorator_metadata(&file));
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -344,6 +344,8 @@ impl ConfigFile {
                 projects,
                 service,
                 lib_from_tsconfig: lang.lib.is_none(),
+                emit_decorator_metadata: lang.emit_decorator_metadata,
+                experimental_decorators: lang.experimental_decorators,
             }));
         }
         env
