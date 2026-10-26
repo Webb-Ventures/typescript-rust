@@ -1783,8 +1783,8 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   discarded with `void`; there is no type information, so no receiver is known not to be a
   promise. The async-IIFE suggestion follows the plugin's indentation rules (first body
   line, else one level deeper than the nearest line-starting ancestor, else the file's
-  indent unit). 109/110: `promise.then(await => await)` in a `.ts` file is a parse error in
-  ts_r_parser (`await` as an arrow parameter outside a module), not a rule gap.
+  indent unit). 110/110 since emit7's parser fix (`promise.then(await => await)` in a `.ts`
+  file parses).
 - **no-error-property-assignment**: assignments to `message`, `name`, `cause`, `stack` (and
   `Object.assign(err, {..})` with the global `Object`) on a `const`/`let` freshly bound to
   `new <builtin Error>(..)` in the same statement list, before anything else could have
@@ -2576,8 +2576,8 @@ Rules the track lead wrote this round, all `NO_PRESET` (unicorn presets are coun
 tagged), each at 100% of its oracle cases except require-proxy-trap-boolean-return.
 
 - `no-anonymous-default-export`, `default-export-style`, `consistent-export-decorator-position`
-  (the parser keeps only one decorator group when decorators sit on both sides of `export`,
-  `@a export @b class X {}`; the rule works from the source text there).
+  (it reads the class's decorator list; since emit7's parser fix that list holds both
+  groups when decorators sit on both sides of `export`, `@a export @b class X {}`).
 - `no-accessor-recursion`, `no-incomplete-accessor-override`, `no-uncalled-method`,
   `class-reference-in-static-methods`, `prefer-private-class-fields`.
 - `no-unreadable-object-destructuring`, `prefer-single-object-destructuring`,
