@@ -61,8 +61,12 @@ pub enum Loader {
     Text,
     /// Copied to the output directory; the module exports its URL.
     File,
-    /// CSS passed through into a `.css` output next to the JS.
+    /// A stylesheet, bundled into a `.css` output next to the JS (`crate::css`).
     Css,
+    /// A CSS module: classes, IDs and keyframe names are local (`local-css`).
+    LocalCss,
+    /// A stylesheet whose names are global unless `:local` (`global-css`).
+    GlobalCss,
     /// The module is empty.
     Empty,
     Base64,
@@ -84,6 +88,8 @@ impl Loader {
             "text" => Loader::Text,
             "file" => Loader::File,
             "css" => Loader::Css,
+            "local-css" => Loader::LocalCss,
+            "global-css" => Loader::GlobalCss,
             "empty" => Loader::Empty,
             "base64" => Loader::Base64,
             "dataurl" => Loader::DataUrl,
@@ -96,6 +102,10 @@ impl Loader {
         matches!(self, Loader::Js | Loader::Jsx | Loader::Ts | Loader::Tsx)
     }
 
+    pub fn is_css(self) -> bool {
+        matches!(self, Loader::Css | Loader::LocalCss | Loader::GlobalCss)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Loader::Js => "js",
@@ -106,6 +116,8 @@ impl Loader {
             Loader::Text => "text",
             Loader::File => "file",
             Loader::Css => "css",
+            Loader::LocalCss => "local-css",
+            Loader::GlobalCss => "global-css",
             Loader::Empty => "empty",
             Loader::Base64 => "base64",
             Loader::DataUrl => "dataurl",
@@ -389,9 +401,12 @@ impl BuildOptions {
         }
         let lower = name.to_ascii_lowercase();
         let Some((_, e)) = lower.rsplit_once('.') else {
-            // Extensionless files are JavaScript.
-            return Some(Loader::Js);
+            // Extensionless files are JavaScript, unless `--loader:=x` says otherwise.
+            return Some(self.loaders.get("").copied().unwrap_or(Loader::Js));
         };
+        if lower.ends_with(".module.css") {
+            return Some(Loader::LocalCss);
+        }
         Some(match e {
             "js" | "mjs" | "cjs" => Loader::Js,
             "jsx" => Loader::Jsx,

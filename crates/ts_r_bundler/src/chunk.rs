@@ -2,7 +2,6 @@
 //! namespace objects, entry exports and format wrapper, and concatenates source maps.
 
 use std::borrow::Cow;
-use std::fmt::Write as _;
 use std::sync::Arc;
 
 use crate::expr::Expr;
@@ -298,7 +297,21 @@ pub fn assemble(
         let (m, f) = frags[i];
         let module = &graph.modules[m as usize];
         // Resolve a file loader's URL in its small fragment, before copying it into the chunk.
-        let code = if let Some(a) = &module.source.asset {
+        let code = if let Some(sheet) = module.source.css.as_deref()
+            && !sheet.locals.is_empty()
+        {
+            let mut code = f.code.clone();
+            for (k, v) in plan.css.values[m as usize].iter().enumerate() {
+                let ph = format!(
+                    "\"{}\"",
+                    crate::prepare::css_placeholder(&sheet.id, k as u32)
+                );
+                let mut quoted = String::new();
+                ts_r_codegen::literals::quote_string(v, '"', &mut quoted);
+                code = code.replace(&ph, &quoted);
+            }
+            Cow::Owned(code)
+        } else if let Some(a) = &module.source.asset {
             let rel = crate::bundle::asset_path(&a.rel_path, &module.path, outbase);
             let url =
                 crate::bundle::asset_url(&plan.outdir, &file, &rel, &opts.public_path) + &a.query;
@@ -386,20 +399,14 @@ pub fn assemble(
     }
     // CSS.
     if !c.css.is_empty() {
-        let mut css = String::new();
-        for &m in &c.css {
-            let module = &graph.modules[m as usize];
-            if let Some(text) = &module.source.css {
-                if !compact {
-                    let _ = writeln!(css, "/* {} */", module.pretty);
-                }
-                css.push_str(text);
-                if !text.ends_with('\n') {
-                    css.push('\n');
-                }
-            }
-        }
-        result.css = Some(css);
+        let host = CssHost {
+            graph,
+            plan,
+            file: &file,
+            opts,
+            outbase,
+        };
+        result.css = crate::css::order::bundle(&host, &c.css, compact, opts.minify_syntax);
     }
     if out.col != 0 {
         out.push("\n");
@@ -438,6 +445,81 @@ fn global_assign_target(g: &str) -> String {
         e = format!("({e} ??= {{}}).{p}");
     }
     format!("({e} ??= {{}}).{}", parts[parts.len() - 1])
+}
+
+/// The bundle as `css::order` sees it for one chunk: `url()`s relative to the chunk's
+/// stylesheet (next to its JavaScript file), or inlined for the data loaders.
+struct CssHost<'a> {
+    graph: &'a Graph,
+    plan: &'a Plan,
+    /// The chunk's output file (absolute).
+    file: &'a str,
+    opts: &'a BuildOptions,
+    outbase: &'a str,
+}
+
+impl crate::css::order::Host for CssHost<'_> {
+    fn sheet(&self, m: ModuleId) -> Option<&crate::css::Sheet> {
+        self.graph.modules[m as usize].source.css.as_deref()
+    }
+
+    fn target(&self, m: ModuleId, r: u32) -> crate::graph::Target {
+        self.graph.modules[m as usize]
+            .targets
+            .get(r as usize)
+            .cloned()
+            .unwrap_or(crate::graph::Target::Missing)
+    }
+
+    fn url(&self, m: ModuleId, r: u32) -> String {
+        let module = &self.graph.modules[m as usize];
+        let spec = || {
+            module
+                .meta
+                .records
+                .get(r as usize)
+                .map(|x| x.spec.clone())
+                .unwrap_or_default()
+        };
+        match module.targets.get(r as usize) {
+            Some(crate::graph::Target::Module(t)) => {
+                let tm = &self.graph.modules[*t as usize];
+                if let Some(u) = &tm.source.inline_url {
+                    return u.to_string();
+                }
+                if let Some(a) = &tm.source.asset {
+                    let rel = crate::bundle::asset_path(&a.rel_path, &tm.path, self.outbase);
+                    return crate::bundle::asset_url(
+                        &self.plan.outdir,
+                        self.file,
+                        &rel,
+                        &self.opts.public_path,
+                    ) + &a.query;
+                }
+                spec()
+            }
+            Some(crate::graph::Target::External(e)) => crate::graph::split_external(e).0.to_owned(),
+            _ => spec(),
+        }
+    }
+
+    fn local(&self, m: ModuleId, n: u32) -> String {
+        self.plan
+            .css
+            .names
+            .get(m as usize)
+            .and_then(|v| v.get(n as usize))
+            .cloned()
+            .or_else(|| {
+                self.sheet(m)
+                    .and_then(|s| s.locals.get(n as usize).cloned())
+            })
+            .unwrap_or_default()
+    }
+
+    fn pretty(&self, m: ModuleId) -> String {
+        self.graph.modules[m as usize].pretty.clone()
+    }
 }
 
 #[cfg(test)]

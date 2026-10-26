@@ -18,6 +18,21 @@ pub enum RecordKind {
     Require,
     /// `import("x")`.
     Dynamic,
+    /// A stylesheet's `@import` (the record's `node` is its index in the [`crate::css::Sheet`]).
+    CssImport,
+    /// A stylesheet's `url()`.
+    CssUrl,
+    /// A stylesheet's `composes: x from "file"`.
+    CssComposes,
+}
+
+impl RecordKind {
+    pub fn is_css(self) -> bool {
+        matches!(
+            self,
+            RecordKind::CssImport | RecordKind::CssUrl | RecordKind::CssComposes
+        )
+    }
 }
 
 /// One import/require of another module.
@@ -175,6 +190,9 @@ impl ModuleMeta {
                 RecordKind::ReExport => 1,
                 RecordKind::Require => 2,
                 RecordKind::Dynamic => 3,
+                RecordKind::CssImport => 4,
+                RecordKind::CssUrl => 5,
+                RecordKind::CssComposes => 6,
             });
             w.str(&r.spec);
             w.u32(r.start);
@@ -267,6 +285,9 @@ impl ModuleMeta {
                 1 => RecordKind::ReExport,
                 2 => RecordKind::Require,
                 3 => RecordKind::Dynamic,
+                4 => RecordKind::CssImport,
+                5 => RecordKind::CssUrl,
+                6 => RecordKind::CssComposes,
                 _ => return None,
             };
             m.records.push(Record {

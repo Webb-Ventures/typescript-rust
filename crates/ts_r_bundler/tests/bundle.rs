@@ -1746,7 +1746,8 @@ fn a_css_entry_without_bundling_is_a_css_output() {
     let mut o = opts(&["entry.js", "entry.css"]);
     o.bundle = false;
     let r = run_build(&fs, o);
-    assert_eq!(file(&r, "/proj/out/entry.css"), "a { color: red }\n");
+    // Printed, as esbuild prints it.
+    assert_eq!(file(&r, "/proj/out/entry.css"), "a {\n  color: red;\n}\n");
     assert!(file(&r, "/proj/out/entry.js").contains("x = 1"));
 }
 
@@ -2395,4 +2396,71 @@ fn alias_runs_before_external_patterns() {
     let code = file(&r, "/proj/out/entry.js");
     assert!(code.contains("alias/pkg/x"), "{code}");
     assert!(code.contains("console.log('other')"), "{code}");
+}
+
+#[test]
+fn javascript_imports_css_modules_and_gets_their_names() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import { foo } from './a.module.css';\nimport s from './b.module.css';\nimport './g.css';\nconsole.log(foo, s.bar);\n",
+        ),
+        ("a.module.css", ".foo { color: red }\n.g { color: blue }\n"),
+        (
+            "b.module.css",
+            ".bar { composes: foo from './a.module.css'; color: green }\n",
+        ),
+        ("g.css", "@import './a.module.css';\n.g { color: black }\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let css = file(&r, "/proj/out/entry.css");
+    // As esbuild 0.28.2 prints it: JavaScript's imports in order (`a`, `b`, `g`), each
+    // expanded by its `@import`s, where the first copy of `a.module.css` gives way to the
+    // later one `g.css` imports.
+    assert_eq!(
+        css,
+        "/* b.module.css */\n.b_bar {\n  color: green;\n}\n\n/* a.module.css */\n.a_foo {\n  color: red;\n}\n.a_g {\n  color: blue;\n}\n\n/* g.css */\n.g {\n  color: black;\n}\n"
+    );
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(js.contains("\"a_foo\""), "{js}");
+    assert!(js.contains("\"a_foo b_bar\""), "{js}");
+}
+
+#[test]
+fn a_missing_css_module_name_is_an_error() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import { missing } from './a.css';\nconsole.log(missing);\n",
+        ),
+        ("a.css", ".a { color: red }\n"),
+    ]);
+    let ctx = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone())).expect("options");
+    let r = ctx.build();
+    assert!(
+        r.messages.iter().any(|m| m
+            .to_string()
+            .contains("No matching export in \"a.css\" for import \"missing\"")),
+        "{:?}",
+        r.messages.iter().map(|m| m.to_string()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn css_imports_keep_the_last_copy_and_the_layer_order() {
+    let fs = project(&[
+        (
+            "entry.css",
+            "@import './a.css';\n@import './b.css';\n@import './a.css';\n@import 'http://x/y.css';\n",
+        ),
+        ("a.css", "@layer first { body { color: red } }\n"),
+        ("b.css", "@layer last { body { color: green } }\n"),
+    ]);
+    let mut o = opts(&["entry.css"]);
+    o.minify_whitespace = true;
+    let r = run_build(&fs, o);
+    assert_eq!(
+        file(&r, "/proj/out/entry.css"),
+        "@import\"http://x/y.css\";@layer first;@layer last{body{color:green}}@layer first{body{color:red}}\n"
+    );
 }

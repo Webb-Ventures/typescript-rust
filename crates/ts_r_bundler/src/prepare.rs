@@ -28,8 +28,12 @@ use crate::{Message, Severity};
 pub struct Source {
     /// JavaScript source text (the file itself for JS/TS loaders).
     pub js: Arc<str>,
-    /// CSS text for the `css` loader.
-    pub css: Option<Arc<str>>,
+    /// The parsed stylesheet for the CSS loaders (`js` is then its JavaScript face: an
+    /// `export default` of its local names).
+    pub css: Option<Arc<crate::css::Sheet>>,
+    /// What a stylesheet's `url()` of this module becomes when it is inlined (`dataurl`,
+    /// `base64`, `binary`, `text`; `Some("")` for `empty`).
+    pub inline_url: Option<Arc<str>>,
     /// Bytes to emit as a separate file (the `file` loader).
     pub asset: Option<Asset>,
     /// Top-level JSON object keys before rewriting JavaScript-only computed properties.
@@ -102,6 +106,7 @@ pub fn load(
     let js_value = |expr: String, hash| Source {
         js: Arc::from(format!("module.exports = {expr};\n")),
         css: None,
+        inline_url: None,
         asset: None,
         json_keys: None,
         hash,
@@ -114,6 +119,7 @@ pub fn load(
             Ok(Source {
                 js: Arc::from(text),
                 css: None,
+                inline_url: None,
                 asset: None,
                 json_keys: None,
                 hash,
@@ -156,32 +162,50 @@ pub fn load(
         Loader::Text => {
             let text = read_text()?;
             let hash = hash_of(text.as_bytes());
-            Ok(js_value(js_string(&text), hash))
+            let mut b = String::new();
+            ts_r_codegen::sourcemap::base64_encode(text.as_bytes(), &mut b);
+            let mut s = js_value(js_string(&text), hash);
+            s.inline_url = Some(Arc::from(format!("data:text/plain;base64,{b}")));
+            Ok(s)
         }
         Loader::Base64 => {
             let bytes = read_bytes()?;
             let hash = hash_of(&bytes);
             let mut b = String::new();
             ts_r_codegen::sourcemap::base64_encode(&bytes, &mut b);
-            Ok(js_value(js_string(&b), hash))
+            let mut s = js_value(js_string(&b), hash);
+            s.inline_url = Some(Arc::from(format!(
+                "data:{};base64,{b}",
+                mime_type(path, &bytes)
+            )));
+            Ok(s)
         }
         Loader::DataUrl => {
             let bytes = read_bytes()?;
             let hash = hash_of(&bytes);
-            Ok(js_value(js_string(&data_url(path, &bytes)), hash))
+            let url = data_url(path, &bytes);
+            let mut s = js_value(js_string(&url), hash);
+            // A CSS `url(./x.svg#id)` keeps its `#id` (esbuild issue 4370); a `?query` goes.
+            let suffix = if query.starts_with('#') { query } else { "" };
+            s.inline_url = Some(Arc::from(format!("{url}{suffix}")));
+            Ok(s)
         }
         Loader::Binary => {
             let bytes = read_bytes()?;
             let hash = hash_of(&bytes);
             let mut b = String::new();
             ts_r_codegen::sourcemap::base64_encode(&bytes, &mut b);
-            Ok(js_value(
+            let mut s = js_value(
                 format!(
                     "Uint8Array.from(atob({}), (c) => c.charCodeAt(0))",
                     js_string(&b)
                 ),
                 hash,
-            ))
+            );
+            s.inline_url = Some(Arc::from(format!(
+                "data:application/octet-stream;base64,{b}"
+            )));
+            Ok(s)
         }
         Loader::Bytes => {
             let bytes = read_bytes()?;
@@ -224,12 +248,25 @@ pub fn load(
             });
             Ok(s)
         }
-        Loader::Css => {
+        Loader::Css | Loader::LocalCss | Loader::GlobalCss => {
             let text = read_text()?;
+            let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
             let hash = hash_of(text.as_bytes());
+            let mode = if loader == Loader::LocalCss {
+                crate::css::NameMode::Local
+            } else {
+                crate::css::NameMode::Global
+            };
+            let mut sheet = crate::css::parse(Arc::from(text), mode);
+            let h = blake3::hash(key.as_bytes());
+            sheet.id = h.as_bytes()[..8]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
             Ok(Source {
-                js: Arc::from(""),
-                css: Some(Arc::from(text)),
+                js: Arc::from(css_stub(&sheet)),
+                css: Some(Arc::new(sheet)),
+                inline_url: None,
                 asset: None,
                 json_keys: None,
                 hash,
@@ -238,11 +275,53 @@ pub fn load(
         Loader::Empty => Ok(Source {
             js: Arc::from(""),
             css: None,
+            inline_url: Some(Arc::from("")),
             asset: None,
             json_keys: None,
             hash: hash_of(b""),
         }),
     }
+}
+
+/// The JavaScript face of a stylesheet: `export default` of an object mapping each local
+/// name to a placeholder string ([`css_placeholder`]) that chunk assembly replaces with the
+/// final class list (names are only final once the whole bundle is known).
+fn css_stub(sheet: &crate::css::Sheet) -> String {
+    if sheet.locals.is_empty() {
+        return "export default {};\n".to_owned();
+    }
+    // Names that are identifiers are also named exports (`import { foo } from "./a.module.css"`).
+    let named =
+        |n: &str| ts_r_minify::names::is_identifier(n) && !ts_r_minify::names::is_reserved(n);
+    let mut s = String::new();
+    for (i, name) in sheet.locals.iter().enumerate() {
+        if named(name) {
+            s.push_str(&format!(
+                "export var {name} = {};\n",
+                js_string(&css_placeholder(&sheet.id, i as u32))
+            ));
+        }
+    }
+    s.push_str("export default {\n");
+    for (i, name) in sheet.locals.iter().enumerate() {
+        s.push_str("  ");
+        if named(name) {
+            s.push_str(name);
+        } else {
+            s.push_str(&js_string(name));
+            s.push_str(": ");
+            s.push_str(&js_string(&css_placeholder(&sheet.id, i as u32)));
+        }
+        s.push_str(",\n");
+    }
+    s.push_str("};\n");
+    s
+}
+
+/// The placeholder for local name `n` of the stylesheet with [`crate::css::Sheet::id`]
+/// `id` (letters, digits and `_`).
+pub fn css_placeholder(id: &str, n: u32) -> String {
+    format!("__TSR_CSS_{id}_{n}__")
 }
 
 fn js_string(s: &str) -> String {

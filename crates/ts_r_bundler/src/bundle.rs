@@ -416,6 +416,7 @@ impl BuildContext {
         {
             messages.extend(self.string_name_errors(&graph, &lk.included));
         }
+        messages.extend(crate::css::link::check(&graph, &lk));
         if messages.iter().any(Message::is_error) {
             return fail(sorted(messages));
         }
@@ -429,12 +430,32 @@ impl BuildContext {
                 .map(|(i, e)| self.entry_file_name(e, &outbase, entry_names[i].as_deref()))
                 .collect(),
         };
+        // Each entry's stylesheet: the entry template with `[ext]` = `css` (a CSS entry with
+        // `--outfile` writes to that file as named, as esbuild does).
+        let entry_css_files: Vec<String> = match &outfile_name {
+            Some(f) => {
+                let css_entry = graph
+                    .entries
+                    .first()
+                    .is_some_and(|&e| graph.modules[e as usize].loader.is_css());
+                vec![if css_entry {
+                    f.clone()
+                } else {
+                    with_css_extension(f)
+                }]
+            }
+            None => entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| self.entry_name(e, &outbase, entry_names[i].as_deref(), "css"))
+                .collect(),
+        };
         let dynamic_files: Vec<String> = dynamic_entries
             .iter()
             .map(|&t| self.dynamic_file_name(&graph.modules[t as usize]))
             .collect();
         timer.lap("link");
-        let pl = plan(&PlanInput {
+        let mut pl = plan(&PlanInput {
             graph: &graph,
             link: &lk,
             opts,
@@ -535,21 +556,37 @@ impl BuildContext {
                 assets.push((a, asset_path(&a.rel_path, &m.path, &outbase)));
             }
         }
+        // Final names: `[hash]` from the contents; a CSS entry's chunk is its stylesheet.
+        for (ci, co) in chunk_outs.iter().enumerate() {
+            let c = &pl.chunks[ci];
+            let css_entry = c
+                .entry
+                .is_some_and(|e| graph.modules[e as usize].loader.is_css());
+            let name = match c.user_entry {
+                Some(i) if css_entry => fill_hash(
+                    &entry_css_files[i],
+                    co.css.as_deref().unwrap_or("").as_bytes(),
+                ),
+                _ => fill_hash(&c.file, co.code.as_bytes()),
+            };
+            pl.chunks[ci].file = name;
+        }
         // The outputs take the chunks' text (the metafile only needs `module_bytes`).
         for (ci, co) in chunk_outs.iter_mut().enumerate() {
             let file = format!("{outdir}/{}", pl.chunks[ci].file);
+            let css_file = match pl.chunks[ci].user_entry {
+                Some(i) => format!("{outdir}/{}", entry_css_files[i]),
+                None => with_css_extension(&file),
+            };
             // A CSS entry point produces only its stylesheet.
             let css_entry = pl.chunks[ci]
                 .entry
-                .is_some_and(|e| lk.kinds[e as usize] == crate::link::Kind::Css);
-            if css_entry && let Some(css) = &co.css {
-                let css_file = match file.rsplit_once('.') {
-                    Some((b, _)) => format!("{b}.css"),
-                    None => format!("{file}.css"),
-                };
+                .is_some_and(|e| graph.modules[e as usize].loader.is_css());
+            if css_entry {
+                let css = co.css.take().unwrap_or_default();
                 outputs.push(OutputFile {
-                    path: css_file,
-                    contents: css.as_bytes().to_vec(),
+                    path: file,
+                    contents: css.into_bytes(),
                 });
                 continue;
             }
@@ -564,14 +601,17 @@ impl BuildContext {
                 contents: std::mem::take(&mut co.code).into_bytes(),
             });
             if let Some(css) = &co.css {
-                let css_file = match file.rsplit_once('.') {
-                    Some((b, _)) => format!("{b}.css"),
-                    None => format!("{file}.css"),
-                };
-                outputs.push(OutputFile {
-                    path: css_file,
-                    contents: css.as_bytes().to_vec(),
-                });
+                let path = fill_hash(&css_file, css.as_bytes());
+                // Entries with the same stylesheet under a `[hash]` name share one file.
+                if !outputs
+                    .iter()
+                    .any(|o: &OutputFile| o.path == path && o.contents == css.as_bytes())
+                {
+                    outputs.push(OutputFile {
+                        path,
+                        contents: css.as_bytes().to_vec(),
+                    });
+                }
             }
         }
         // Assets from the file loader.
@@ -618,6 +658,12 @@ impl BuildContext {
     }
 
     fn entry_file_name(&self, entry: &str, outbase: &str, name: Option<&str>) -> String {
+        self.entry_name(entry, outbase, name, "js")
+    }
+
+    /// An entry's output path from `--entry-names`: `[ext]` is `js` or `css` (`ext`), and
+    /// `[hash]` stays until the contents are known ([`fill_hash`]).
+    fn entry_name(&self, entry: &str, outbase: &str, name: Option<&str>, ext: &str) -> String {
         let dir = path::directory_of(entry);
         let mut rel_dir = path::relative(outbase, dir, true);
         if rel_dir == "." {
@@ -637,12 +683,16 @@ impl BuildContext {
         } else {
             n = n.replace("[dir]", &rel_dir);
         }
-        n = n.replace("[name]", &stem).replace("[hash]", "");
+        n = n.replace("[name]", &stem).replace("[ext]", ext);
         let n = n
             .trim_start_matches("./")
             .trim_start_matches('/')
             .to_owned();
-        format!("{n}{}", self.opts.out_extension_js)
+        if ext == "css" {
+            format!("{n}.css")
+        } else {
+            format!("{n}{}", self.opts.out_extension_js)
+        }
     }
 
     /// The file of a module that only `import()` makes an entry: esbuild names it with the
@@ -743,8 +793,10 @@ impl BuildContext {
                 Err(m) => return Err(vec![Message::new(Severity::Error, None, m)]),
             };
             let pretty = pretty_path(&wd, &e);
-            if let Some(css) = &source.css {
-                // A CSS entry is its own `.css` output (copied: there is no CSS printer).
+            if let Some(sheet) = &source.css {
+                // A CSS entry is its own `.css` output, printed as written.
+                let css =
+                    crate::css::print_sheet(sheet, opts.minify_whitespace, opts.minify_syntax);
                 let file = match outfile {
                     Some(f) => f.to_owned(),
                     None => {
@@ -999,6 +1051,26 @@ fn common_dir(entries: &[String]) -> String {
     }
     let s = dir.join("/");
     if s.is_empty() { "/".into() } else { s }
+}
+
+/// `file` with its extension replaced by `.css`.
+fn with_css_extension(file: &str) -> String {
+    let name_start = file.rfind('/').map_or(0, |i| i + 1);
+    match file[name_start..].rfind('.') {
+        Some(i) if i > 0 => format!("{}.css", &file[..name_start + i]),
+        _ => format!("{file}.css"),
+    }
+}
+
+/// An output path with `[hash]` (from `--entry-names`) replaced by a hash of its contents.
+fn fill_hash(path: &str, contents: &[u8]) -> String {
+    if !path.contains("[hash]") {
+        return path.to_owned();
+    }
+    path.replace(
+        "[hash]",
+        &crate::hash_text(blake3::hash(contents).as_bytes()),
+    )
 }
 
 /// Writes the outputs in parallel (a bundle and its source map are large); one error

@@ -32,7 +32,8 @@ syntax that an ES5 target forbids is an error, as in esbuild (`features.rs`, `lo
    built-ins external on `--platform=node`, `--external` patterns with `*`, and
    `--packages=external`. Results are cached per `(spec, dir, kind)` until a structural change.
 2. **Prepare** (`prepare.rs`). Load with the loader for the extension (`js jsx ts tsx json
-   text file css empty base64 dataurl binary`; non-JS loaders become small CommonJS modules),
+   text file css local-css global-css empty base64 dataurl binary`; other non-JS loaders
+   become small CommonJS modules, stylesheets are parsed by `css/` into a `Sheet`),
    parse, run `ts_r_transform` with module format `Preserve` (types, enums, decorators, JSX),
    apply `--define` (plus esbuild's automatic `process.env.NODE_ENV` for browser bundles), fold
    constants (`ts_r_minify::fold`, so dead `NODE_ENV` branches never reach the import scan),
@@ -51,7 +52,8 @@ syntax that an ES5 target forbids is an error, as in esbuild (`features.rs`, `lo
 4. **Graph** (`graph.rs`). Modules load in parallel on a std-thread pool (at most
    `TS_R_THREADS`), then get ids in **DFS pre-order** from the entries, which is the
    evaluation order and makes everything downstream deterministic.
-5. **Link** (`link.rs`). Each module is `Esm`, `Cjs` or `Css`. A module is CommonJS if it has
+5. **Link** (`link.rs`). Each module is `Esm` or `Cjs` (a stylesheet is an `Esm` stub whose
+   exports are its local names). A module is CommonJS if it has
    no ESM exports and uses `module`/`exports`, or is `require`d, or is a non-JS loader. CJS
    modules are wrapped (`__tsrCjs`); ESM modules reached by `require()` or a non-splitting
    `import()` are lazily wrapped (`__tsrEsm`), which propagates to their static ESM
@@ -211,8 +213,10 @@ linked batch runs under Node.
 
 ## Known gaps
 
-- No CSS bundling (CSS imports are concatenated into a sibling `.css` file, `@import` is not
-  followed), no plugins, no `--watch` serve mode, no legal-comment extraction.
+- CSS is bundled (`@import` order, duplicates, `@layer`/`@supports`/`@media` conditions,
+  `url()` assets, `local-css`/`global-css` and `composes`), but without esbuild's syntax
+  lowering and minification rewrites beyond dropping repeated rules, and with our own
+  minified local names. No plugins, no `--watch` serve mode, no legal-comment extraction.
 - No lowering below ES2015: `const`, classes, destructuring and the like are errors at
   `--target=es5`, as in esbuild; arrows and template literals are kept.
 - IIFE output is not re-indented; runtime helpers are repeated per chunk.

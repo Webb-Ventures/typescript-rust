@@ -157,6 +157,8 @@ pub struct Plan {
     pub format: Format,
     /// Output directory (absolute).
     pub outdir: String,
+    /// Final local CSS names and the class lists JavaScript sees.
+    pub css: crate::css::link::CssNames,
 }
 
 /// Global name allocation.
@@ -459,7 +461,7 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
     let chunks = p.make_chunks(input, &order);
     let mut module_chunk = vec![None; n];
     for (ci, c) in chunks.iter().enumerate() {
-        for &m in c.modules.iter().chain(&c.css) {
+        for &m in &c.modules {
             module_chunk[m as usize] = Some(ci);
         }
     }
@@ -470,6 +472,7 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         helper_names: p.helper_names.clone(),
         format,
         outdir: input.outdir.clone(),
+        css: crate::css::link::assign(g, l, o.minify_identifiers),
     };
     // Module plans and chunk-level code.
     let mut chunk_refs: Vec<FxHashSet<String>> = vec![FxHashSet::default(); out.chunks.len()];
@@ -647,7 +650,6 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                         }
                     }
                 }
-                (Kind::Css, _) => {}
             }
         }
         // Externals.
@@ -798,7 +800,7 @@ impl Planner<'_> {
     fn name_module(&mut self, m: ModuleId) {
         let mi = m as usize;
         let l = self.l;
-        if !l.included[mi] || l.kinds[mi] == Kind::Css {
+        if !l.included[mi] {
             return;
         }
         let stem = self.stem(m);
@@ -1092,7 +1094,6 @@ impl Planner<'_> {
                                 Expr::call(&to_cjs, vec![Expr::ident(&self.ns_name[ti])]),
                             ])
                         }
-                        Kind::Css => Expr::Object(Vec::new()),
                     })
                 }
                 (RecordKind::Dynamic, Target::Module(t)) => {
@@ -1127,7 +1128,6 @@ impl Planner<'_> {
                                     Expr::promise_then(Expr::Seq(vec![init, ns]))
                                 }
                             }
-                            Kind::Css => Expr::promise_then(Expr::Object(Vec::new())),
                         })
                     }
                 }
@@ -1412,8 +1412,7 @@ impl Planner<'_> {
     fn make_chunks(&mut self, input: &PlanInput<'_>, order: &[ModuleId]) -> Vec<Chunk> {
         let g = self.g;
         let l = self.l;
-        let js = |m: ModuleId| l.included[m as usize] && l.kinds[m as usize] != Kind::Css;
-        let css = |m: ModuleId| l.included[m as usize] && l.kinds[m as usize] == Kind::Css;
+        let js = |m: ModuleId| l.included[m as usize];
         let ext = &self.o.out_extension_js;
         if !self.o.splitting {
             let mut chunks = Vec::new();
@@ -1424,11 +1423,7 @@ impl Planner<'_> {
                     .copied()
                     .filter(|&m| reach[m as usize] && js(m))
                     .collect();
-                let cssm: Vec<ModuleId> = order
-                    .iter()
-                    .copied()
-                    .filter(|&m| reach[m as usize] && css(m))
-                    .collect();
+                let cssm = css_roots(g, e, true);
                 chunks.push(Chunk {
                     entry: Some(e),
                     user_entry: Some(i),
@@ -1494,8 +1489,13 @@ impl Planner<'_> {
             };
             if js(m) {
                 chunks[ci].modules.push(m);
-            } else if css(m) {
-                chunks[ci].css.push(m);
+            }
+        }
+        // Every entry chunk gets the stylesheets its static imports reach; shared chunks
+        // have none (esbuild does not split CSS).
+        for c in chunks.iter_mut() {
+            if let Some(e) = c.entry {
+                c.css = css_roots(g, e, false);
             }
         }
         // Shared chunk names: content of the chunk (module keys) decides the hash.
@@ -1522,6 +1522,46 @@ impl Planner<'_> {
     }
 }
 
+/// The stylesheets an entry uses, in the order JavaScript first imports them (each once;
+/// `css::order` expands their `@import`s): a CSS entry is its own root. Observed in
+/// esbuild: `a.js` importing `x.css` and `y.css`, then `b.js` importing `z.css` and `x.css`,
+/// orders `x`, `y`, `z`.
+pub fn css_roots(g: &Graph, e: ModuleId, dynamic: bool) -> Vec<ModuleId> {
+    if g.modules[e as usize].loader.is_css() {
+        return vec![e];
+    }
+    let mut seen = vec![false; g.modules.len()];
+    let mut roots = Vec::new();
+    // Depth-first in import order, iteratively: (module, next record).
+    let mut stack = vec![(e, 0usize)];
+    seen[e as usize] = true;
+    while let Some(&mut (m, ref mut next)) = stack.last_mut() {
+        let module = &g.modules[m as usize];
+        if *next >= module.targets.len() {
+            stack.pop();
+            continue;
+        }
+        let i = *next;
+        *next += 1;
+        let kind = module.meta.records[i].kind;
+        if kind.is_css() || (!dynamic && kind == RecordKind::Dynamic) {
+            continue;
+        }
+        // Through JavaScript that tree shaking dropped too (see `link`).
+        if let Target::Module(u) = module.targets[i]
+            && !seen[u as usize]
+        {
+            seen[u as usize] = true;
+            if g.modules[u as usize].loader.is_css() {
+                roots.push(u);
+            } else {
+                stack.push((u, 0));
+            }
+        }
+    }
+    roots
+}
+
 /// Modules reachable from `e` over included targets (`dynamic`: follow `import()` too).
 fn reachable(g: &Graph, l: &Link, e: ModuleId, dynamic: bool) -> Vec<bool> {
     let mut seen = vec![false; g.modules.len()];
@@ -1530,7 +1570,8 @@ fn reachable(g: &Graph, l: &Link, e: ModuleId, dynamic: bool) -> Vec<bool> {
     while let Some(m) = stack.pop() {
         let module = &g.modules[m as usize];
         for (i, t) in module.targets.iter().enumerate() {
-            if !dynamic && module.meta.records[i].kind == RecordKind::Dynamic {
+            let kind = module.meta.records[i].kind;
+            if kind.is_css() || (!dynamic && kind == RecordKind::Dynamic) {
                 continue;
             }
             if let Target::Module(u) = t

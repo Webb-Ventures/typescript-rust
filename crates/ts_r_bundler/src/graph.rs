@@ -148,7 +148,11 @@ pub struct Module {
 
 impl Module {
     pub fn message_at(&self, severity: Severity, pos: u32, text: String) -> Message {
-        LineIndex::new(&self.source.js).message(severity, &self.pretty, pos, text)
+        let text_of = match &self.source.css {
+            Some(sheet) => &*sheet.src,
+            None => &*self.source.js,
+        };
+        LineIndex::new(text_of).message(severity, &self.pretty, pos, text)
     }
 }
 
@@ -347,6 +351,38 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
     g
 }
 
+/// A stylesheet's references as module records (after the JavaScript stub's, which has
+/// none, so record `i` is the sheet's record `i`), and its problems as messages.
+fn css_records(
+    sheet: &crate::css::Sheet,
+    meta: &mut ModuleMeta,
+    pretty: &str,
+    messages: &mut Vec<Message>,
+) {
+    use crate::css::RecKind;
+    debug_assert!(meta.records.is_empty());
+    for (i, r) in sheet.records.iter().enumerate() {
+        meta.records.push(crate::meta::Record {
+            kind: match r.kind {
+                RecKind::Import => RecordKind::CssImport,
+                RecKind::Url => RecordKind::CssUrl,
+                RecKind::Composes => RecordKind::CssComposes,
+            },
+            spec: r.spec.clone(),
+            start: r.pos,
+            end: r.pos,
+            node: i as u32,
+            in_try: false,
+            phase: crate::meta::PHASE_EVALUATION,
+            attrs: String::new(),
+        });
+    }
+    let lines = LineIndex::new(&sheet.src);
+    for m in sheet.messages.iter().filter(|m| m.error) {
+        messages.push(lines.message(Severity::Error, pretty, m.pos, m.text.clone()));
+    }
+}
+
 /// `path` relative to the working directory, `/`-separated.
 pub fn pretty_path(wd: &str, p: &str) -> String {
     if let Some(rest) = p.strip_prefix(DISABLED_PREFIX) {
@@ -378,11 +414,21 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     let mut targets = Vec::with_capacity(loaded.meta.records.len());
     let pretty = &loaded.pretty;
     let mut lines: Option<LineIndex> = None;
+    let text_of_lines: &str = match &loaded.source.css {
+        Some(sheet) => &sheet.src,
+        None => &loaded.source.js,
+    };
     for r in &loaded.meta.records {
         let kind = match r.kind {
             RecordKind::Require => ResolveKind::Require,
+            RecordKind::CssImport | RecordKind::CssComposes => ResolveKind::CssImport,
+            RecordKind::CssUrl => ResolveKind::CssUrl,
             _ => ResolveKind::Import,
         };
+        if r.kind.is_css() && !ctx.prep.opts.bundle {
+            targets.push(RawTarget::External(r.spec.clone()));
+            continue;
+        }
         let res = if p.starts_with(DISABLED_PREFIX) {
             Resolution::NotFound(String::new())
         } else if is_data && is_relative(&r.spec) {
@@ -409,7 +455,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
                 None
             };
             if let Some(text) = text {
-                let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
+                let lines = lines.get_or_insert_with(|| LineIndex::new(text_of_lines));
                 messages.push(lines.message(Severity::Error, pretty, r.start, text));
             }
         }
@@ -422,7 +468,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
                     Ok(Some(t)) => RawTarget::Path(format!("{f}{WITH_TYPE_SEP}{t}")),
                     Ok(None) => RawTarget::Path(f),
                     Err(text) => {
-                        let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
+                        let lines = lines.get_or_insert_with(|| LineIndex::new(text_of_lines));
                         messages.push(lines.message(Severity::Error, pretty, r.start, text));
                         RawTarget::Path(f)
                     }
@@ -443,7 +489,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             },
             Resolution::Disabled => RawTarget::Path(format!("{DISABLED_PREFIX}{}", r.spec)),
             Resolution::NotFound(msg) => {
-                let lines = lines.get_or_insert_with(|| LineIndex::new(&loaded.source.js));
+                let lines = lines.get_or_insert_with(|| LineIndex::new(text_of_lines));
                 let soft = r.in_try;
                 let sev = if soft {
                     Severity::Warning
@@ -545,6 +591,7 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
             Source {
                 js: Arc::from(""),
                 css: None,
+                inline_url: None,
                 asset: None,
                 json_keys: None,
                 hash: [0; 32],
@@ -582,8 +629,11 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
     ctx.parsed
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prepared = prepare::prepare(ctx.prep, p, &pretty, Arc::clone(&source.js), loader);
-    let meta = crate::scan::scan(&prepared, !opts.ignore_annotations);
+    let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations);
     messages.extend(prepared.messages.iter().cloned());
+    if let Some(sheet) = &source.css {
+        css_records(sheet, &mut meta, &pretty, &mut messages);
+    }
     if messages.is_empty()
         && let Some(disk) = ctx.disk
     {
