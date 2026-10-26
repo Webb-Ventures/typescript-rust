@@ -14,8 +14,11 @@
 //! unknown part makes it unknown. A boolean binding without a prefix is reported with a
 //! rename suggestion per prefix (fixed with the first prefix for a local, non-exported
 //! variable that does not hold a function); a prefixed binding that is non-boolean is
-//! reported without a fix. Files with JSDoc comments are left alone (JSDoc types are not
-//! read yet), and class or object members are not checked yet.
+//! reported without a fix. With `checkMethods`/`checkFields`, object and class members,
+//! parameter properties and interface or type-literal signatures are checked the same way
+//! (no suggestions); methods, getters and signatures count once per owner and name, merged
+//! interfaces sharing an owner, and overload signatures decide over the implementation.
+//! Files with JSDoc comments are left alone (JSDoc types are not read yet).
 
 use super::prelude::*;
 use super::unicorn_names::{RegexOpt, regex_list};
@@ -60,6 +63,8 @@ struct ConsistentBooleanName {
     check_variables: Mode,
     check_arguments: Mode,
     check_functions: Mode,
+    check_methods: Mode,
+    check_fields: Mode,
     prefixes: Vec<String>,
     ignore: Vec<RegexOpt>,
 }
@@ -90,6 +95,8 @@ impl FromOptions for ConsistentBooleanName {
             check_variables: mode(o, "checkVariables", Mode::Always),
             check_arguments: mode(o, "checkArguments", Mode::Always),
             check_functions: mode(o, "checkFunctions", Mode::Always),
+            check_methods: mode(o, "checkMethods", Mode::Never),
+            check_fields: mode(o, "checkFields", Mode::Never),
             prefixes: entries
                 .into_iter()
                 .filter(|(_, on)| *on)
@@ -2545,6 +2552,135 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         }
     }
 
+    // ---- members ----
+
+    fn param_property_sym(&self, param: NodeId) -> Option<SymbolId> {
+        let Node::Param { pattern, .. } = *self.ast().node(param) else {
+            return None;
+        };
+        self.cx.semantic().symbol_of_decl(pattern)
+    }
+
+    fn getter_state(&mut self, member: NodeId) -> St {
+        let ast = self.ast();
+        match *ast.node(member) {
+            Node::MethodSignature { return_type, .. } => {
+                self.direct_type_state(return_type, TS.fb(false).nl(false))
+            }
+            Node::MethodDef { value, .. } => {
+                let rt = fn_return_type(ast, value);
+                let s = self.type_state(rt, TS.fb(false));
+                if s != St::Unk {
+                    return s;
+                }
+                self.fn_body_state(value)
+            }
+            _ => St::Unk,
+        }
+    }
+
+    fn is_getter(&self, member: NodeId) -> bool {
+        matches!(
+            *self.ast().node(member),
+            Node::MethodDef {
+                kind: MethodKind::Get,
+                ..
+            } | Node::MethodSignature {
+                kind: MethodKind::Get,
+                ..
+            }
+        )
+    }
+
+    fn method_signature_state(&mut self, rt: Option<NodeId>) -> St {
+        let s = self.promised_return_state(rt);
+        if s == St::Unk
+            && !self.has_unresolved_param_ref(rt, EMPTY, false)
+            && self.promised_state(rt, TS.fb(false)) != St::Bool
+            && !self.is_promised(rt, TS)
+        {
+            self.type_state(rt, TS.fb(false).nl(false))
+        } else {
+            s
+        }
+    }
+
+    /// The plugin's `getExplicitPropertyBooleanState`.
+    fn explicit_member_state(&mut self, member: NodeId) -> St {
+        let ast = self.ast();
+        if self.is_getter(member) {
+            return self.getter_state(member);
+        }
+        match *ast.node(member) {
+            Node::Param { .. } => match self.param_property_sym(member) {
+                Some(sym) => self.var_state(sym, true),
+                None => St::Unk,
+            },
+            Node::ShorthandProp { name, .. } => match self.sym_of_ref(name) {
+                Some(sym) => self.var_state(sym, true),
+                None => St::Unk,
+            },
+            Node::Property { value, .. } => self.expr_state(Some(value), true),
+            Node::PropertyDef {
+                type_ann, value, ..
+            } => match type_ann {
+                Some(t) => self.direct_type_state(Some(t), TS),
+                None => self.expr_state(value, true),
+            },
+            Node::MethodDef { kind, value, .. } => match kind {
+                MethodKind::Constructor | MethodKind::Set => St::Unk,
+                _ => self.fn_state(value),
+            },
+            Node::PropertySignature { type_ann, .. } => {
+                self.direct_type_state(type_ann, TS.nl(false))
+            }
+            Node::MethodSignature { return_type, .. } => self.method_signature_state(return_type),
+            _ => St::Unk,
+        }
+    }
+
+    /// The plugin's `isBooleanProperty`.
+    fn is_boolean_member(&mut self, member: NodeId) -> bool {
+        let ast = self.ast();
+        if self.is_getter(member) {
+            return self.getter_state(member) == St::Bool;
+        }
+        match *ast.node(member) {
+            Node::Param { .. } => self
+                .param_property_sym(member)
+                .is_some_and(|sym| self.is_boolean_variable(sym)),
+            Node::ShorthandProp { name, .. } => self.is_boolean_value(Some(name)),
+            Node::Property { value, .. } => self.is_boolean_value(Some(value)),
+            Node::MethodDef { kind, value, .. } => {
+                !matches!(kind, MethodKind::Constructor | MethodKind::Set)
+                    && self.is_boolean_fn_value(value)
+            }
+            Node::PropertyDef {
+                type_ann, value, ..
+            } => match type_ann {
+                Some(t) => self.is_boolean_type_annotated(t),
+                None => self.is_boolean_value(value),
+            },
+            Node::PropertySignature { type_ann, .. } => {
+                type_ann.is_some_and(|t| self.is_boolean_type_annotated(t))
+            }
+            Node::MethodSignature { return_type, .. } => {
+                self.direct_type_state(return_type, TS.fb(false).nl(false)) == St::Bool
+                    || self.promised_return_state(return_type) == St::Bool
+            }
+            _ => false,
+        }
+    }
+
+    fn member_state(&mut self, member: NodeId) -> St {
+        let s = self.explicit_member_state(member);
+        if s == St::Unk && self.is_boolean_member(member) {
+            St::Bool
+        } else {
+            s
+        }
+    }
+
     fn in_declare_context(&self, node: NodeId) -> bool {
         let ast = self.ast();
         let mut cur = Some(node);
@@ -2786,7 +2922,382 @@ struct Problem {
     suggestions: Vec<(String, Fix)>,
 }
 
+/// Members reported once: (owner, static/private key, name), whether the prefix problem
+/// was reported, and the no-prefix problem with each member's state and overload flag.
+struct Group {
+    key: (String, String, String),
+    reported: bool,
+    problem: Option<Problem>,
+    states: Vec<(St, bool)>,
+}
+
+/// A class, object or type member to check.
+struct Member {
+    node: NodeId,
+    key: NodeId,
+    mode: Mode,
+    /// Methods, getters and signatures are reported once per owner and name.
+    dedup: Option<(String, String)>,
+}
+
+fn key_name(cx: &Ctx<'_, '_>, key: NodeId) -> Option<String> {
+    let ast = cx.ast();
+    match *ast.node(key) {
+        Node::Ident { name } => Some(ast.atom(name).to_owned()),
+        Node::PrivateName { .. } => Some(cx.text(key).trim_start_matches('#').to_owned()),
+        Node::StringLit { value } => Some(ast.atom(value).to_owned()),
+        Node::NumberLit { .. } => static_value_no_side_effects(cx, key)?.to_js_string(),
+        Node::ComputedKey { expr } => match *ast.node(skip_parens(ast, expr)) {
+            Node::StringLit { value } => Some(ast.atom(value).to_owned()),
+            _ => static_value_no_side_effects(cx, expr)?.to_js_string(),
+        },
+        _ => None,
+    }
+}
+
+fn collect_members(this: &ConsistentBooleanName, cx: &Ctx<'_, '_>) -> Vec<Member> {
+    let ast = cx.ast();
+    let sem = cx.semantic();
+    let mut out = Vec::new();
+    let member_key = |m: Modifiers, key: NodeId| {
+        format!(
+            "{}:{}",
+            if m.contains(Modifiers::STATIC) {
+                "static"
+            } else {
+                "instance"
+            },
+            if matches!(ast.node(key), Node::PrivateName { .. }) {
+                "private"
+            } else {
+                "public"
+            }
+        )
+    };
+    for id in (1..ast.node_count() as u32).filter_map(NodeId::from_raw) {
+        if ast.is_jsdoc(id) {
+            continue;
+        }
+        match *ast.node(id) {
+            Node::ObjectLit { props } => {
+                if is_assignment_pattern(cx, id) {
+                    continue;
+                }
+                for &p in ast.list(props) {
+                    match *ast.node(p) {
+                        Node::Property { key, .. } => out.push(Member {
+                            node: p,
+                            key,
+                            mode: this.check_fields,
+                            dedup: None,
+                        }),
+                        Node::ShorthandProp { name, .. } => out.push(Member {
+                            node: p,
+                            key: name,
+                            mode: this.check_fields,
+                            dedup: None,
+                        }),
+                        Node::MethodDef { key, modifiers, .. } => out.push(Member {
+                            node: p,
+                            key,
+                            mode: this.check_methods,
+                            dedup: Some((format!("n{}", id.raw()), member_key(modifiers, key))),
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+            Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => {
+                for &m in ast.list(members) {
+                    match *ast.node(m) {
+                        Node::MethodDef { key, modifiers, .. } => out.push(Member {
+                            node: m,
+                            key,
+                            mode: this.check_methods,
+                            dedup: Some((format!("n{}", id.raw()), member_key(modifiers, key))),
+                        }),
+                        Node::PropertyDef { key, .. } => out.push(Member {
+                            node: m,
+                            key,
+                            mode: this.check_fields,
+                            dedup: None,
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+            Node::Param { pattern, .. } => {
+                let is_prop = sem
+                    .symbol_of_decl(pattern)
+                    .is_some_and(|s| sem.symbol(s).flags.contains(SymbolFlags::PARAM_PROPERTY));
+                if is_prop && matches!(ast.node(pattern), Node::Ident { .. }) {
+                    out.push(Member {
+                        node: id,
+                        key: pattern,
+                        mode: this.check_fields,
+                        dedup: None,
+                    });
+                }
+            }
+            Node::Interface {
+                name,
+                body,
+                modifiers,
+                ..
+            } => {
+                let (owner, qualified) = interface_owner(cx, id, name, modifiers);
+                for &m in ast.list(body) {
+                    signature_member(this, ast, m, &owner, &qualified, &mut out);
+                }
+            }
+            Node::TypeLiteral { members } => {
+                for &m in ast.list(members) {
+                    signature_member(this, ast, m, &format!("n{}", id.raw()), "", &mut out);
+                }
+            }
+            _ => {}
+        }
+    }
+    out.sort_by_key(|m| cx.span(m.node).start);
+    out
+}
+
+fn signature_member(
+    this: &ConsistentBooleanName,
+    ast: &ts_r_ast::Ast,
+    m: NodeId,
+    owner: &str,
+    qualified: &str,
+    out: &mut Vec<Member>,
+) {
+    match *ast.node(m) {
+        Node::PropertySignature { key, .. } => out.push(Member {
+            node: m,
+            key,
+            mode: this.check_fields,
+            dedup: Some((owner.to_owned(), format!("{qualified}:instance:public"))),
+        }),
+        Node::MethodSignature { key, .. } => out.push(Member {
+            node: m,
+            key,
+            mode: this.check_methods,
+            dedup: Some((owner.to_owned(), format!("{qualified}:instance:public"))),
+        }),
+        _ => {}
+    }
+}
+
+/// Which members of merged interfaces are one: interfaces of the same name in the same
+/// namespace path (or, outside an ambient context, the same unexported block).
+fn interface_owner(
+    cx: &Ctx<'_, '_>,
+    iface: NodeId,
+    name: NodeId,
+    modifiers: Modifiers,
+) -> (String, String) {
+    let ast = cx.ast();
+    let iname = cx.text(name).to_owned();
+    let mut names: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    let mut ambient = false;
+    let mut external = false;
+    let mut first_block = None;
+    let mut cur = cx.parent(iface);
+    for _ in 0..1000 {
+        let Some(n) = cur else {
+            break;
+        };
+        if let Node::Module {
+            modifiers: m,
+            kind,
+            name: mname,
+            ..
+        } = *ast.node(n)
+        {
+            let literal = matches!(ast.node(mname), Node::StringLit { .. });
+            let global = kind == ModuleKind::Global;
+            ambient |= m.contains(Modifiers::DECLARE) || global || literal;
+            external |= literal || global;
+            let prefix = if global {
+                "global"
+            } else if literal {
+                "module"
+            } else {
+                "namespace"
+            };
+            let text = match *ast.node(mname) {
+                Node::StringLit { value } => ast.atom(value).to_owned(),
+                _ => cx.text(mname).to_owned(),
+            };
+            let ns: Vec<String> = text.split('.').map(|t| t.trim().to_owned()).collect();
+            for (i, t) in ns.iter().enumerate() {
+                names.insert(i, t.clone());
+                parts.insert(i, format!("{prefix}:{t}"));
+            }
+        } else if first_block.is_none() && matches!(ast.node(n), Node::ModuleBlock { .. }) {
+            first_block = Some(n);
+        }
+        cur = cx.parent(n);
+    }
+    let exported = modifiers.contains(Modifiers::EXPORT);
+    if !names.is_empty() && !ambient && !exported {
+        let block = first_block.unwrap_or(iface);
+        return (format!("n{}", block.raw()), iname);
+    }
+    let mut qualified = names.clone();
+    qualified.push(iname.clone());
+    let qualified = qualified.join(".");
+    if external || !names.is_empty() {
+        return (format!("p{}", parts.join("/")), qualified);
+    }
+    let sem = cx.semantic();
+    let owner = sem
+        .symbol_of_decl(name)
+        .map_or(format!("n{}", iface.raw()), |s| format!("s{}", s.0));
+    (owner, qualified)
+}
+
+/// An object literal that is (part of) an assignment target, an ESTree `ObjectPattern`.
+fn is_assignment_pattern(cx: &Ctx<'_, '_>, obj: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut cur = obj;
+    for _ in 0..1000 {
+        let Some(p) = cx.parent(cur) else {
+            return false;
+        };
+        match *ast.node(p) {
+            Node::Assign { left, .. } => return left == cur,
+            Node::ForOf { left, .. } | Node::ForIn { left, .. } => return left == cur,
+            Node::Property { value, .. } if value == cur => {}
+            Node::ShorthandProp { .. } | Node::Spread { .. } | Node::ArrayLit { .. } => {}
+            Node::ObjectLit { .. } | Node::Paren { .. } => {}
+            Node::AssignPattern { left, .. } if left == cur => {}
+            _ => return false,
+        }
+        cur = p;
+    }
+    false
+}
+
 impl ConsistentBooleanName {
+    fn check_members(&self, an: &mut An<'_, '_, '_>, out: &mut Vec<Problem>) {
+        let cx = an.cx;
+        let ast = cx.ast();
+        let list = self.prefix_list();
+        let mut groups: Vec<Group> = Vec::new();
+        for m in collect_members(self, cx) {
+            if m.mode == Mode::Never {
+                continue;
+            }
+            let Some(name) = key_name(cx, m.key) else {
+                continue;
+            };
+            if self.ignore.iter().any(|r| r.test(&name)) {
+                continue;
+            }
+            if matches!(
+                *ast.node(m.node),
+                Node::MethodDef {
+                    kind: MethodKind::Set,
+                    ..
+                } | Node::MethodSignature {
+                    kind: MethodKind::Set,
+                    ..
+                }
+            ) {
+                continue;
+            }
+            let span = match *ast.node(m.key) {
+                _ if matches!(ast.node(m.node), Node::Param { .. }) => estree_ident_span(cx, m.key),
+                Node::ComputedKey { expr } => cx.span(expr),
+                _ => cx.span(m.key),
+            };
+            let group = m.dedup.as_ref().map(|(owner, key)| {
+                let k = (owner.clone(), key.clone(), name.clone());
+                match groups.iter().position(|g| g.key == k) {
+                    Some(i) => i,
+                    None => {
+                        groups.push(Group {
+                            key: k,
+                            reported: false,
+                            problem: None,
+                            states: Vec::new(),
+                        });
+                        groups.len() - 1
+                    }
+                }
+            });
+            if let Some(prefix) = boolean_prefix(&name, &self.prefixes) {
+                if an.member_state(m.node) == St::Non {
+                    if let Some(g) = group {
+                        if groups[g].reported {
+                            continue;
+                        }
+                        groups[g].reported = true;
+                    }
+                    out.push(Problem {
+                        span,
+                        message: format!(
+                            "`{name}` starts with `{prefix}`, so it should be boolean."
+                        ),
+                        id: "non-boolean-prefix",
+                        fix: None,
+                        suggestions: Vec::new(),
+                    });
+                }
+                continue;
+            }
+            if m.mode != Mode::Always {
+                continue;
+            }
+            let problem = || Problem {
+                span,
+                message: format!("Boolean name `{name}` should start with {list}."),
+                id: "consistent-boolean-name",
+                fix: None,
+                suggestions: Vec::new(),
+            };
+            if let Some(g) = group {
+                let state = an.member_state(m.node);
+                let overload = matches!(*ast.node(m.node), Node::MethodDef { value, .. }
+                    if matches!(*ast.node(value), Node::FunctionExpr { body: None, .. }));
+                groups[g].states.push((state, overload));
+                if groups[g].problem.is_none() {
+                    groups[g].problem = Some(problem());
+                }
+                continue;
+            }
+            if !an.is_boolean_member(m.node) || an.explicit_member_state(m.node) == St::Non {
+                continue;
+            }
+            out.push(problem());
+        }
+        for Group {
+            problem, states, ..
+        } in groups
+        {
+            let has_overload = states.iter().any(|&(_, o)| o);
+            let kept: Vec<St> = states
+                .iter()
+                .filter(|&&(_, o)| !has_overload || o)
+                .map(|&(s, _)| s)
+                .collect();
+            if let Some(p) = problem
+                && combine(&kept) == St::Bool
+            {
+                out.push(p);
+            }
+        }
+    }
+
+    fn prefix_list(&self) -> String {
+        self.prefixes
+            .iter()
+            .map(|p| format!("`{p}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     fn mode_of(&self, an: &An<'_, '_, '_>, sym: SymbolId) -> Option<Mode> {
         if an.function_defs(sym).is_some() {
             return Some(self.check_functions);
@@ -2840,12 +3351,7 @@ impl ConsistentBooleanName {
         {
             return None;
         }
-        let list = self
-            .prefixes
-            .iter()
-            .map(|p| format!("`{p}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let list = self.prefix_list();
         let mut problem = Problem {
             span,
             message: format!("Boolean name `{checked}` should start with {list}."),
@@ -2895,9 +3401,13 @@ impl Rule for ConsistentBooleanName {
         let problems: Vec<Problem> = {
             let mut an = An::new(cx);
             let n = cx.semantic().symbols().len();
-            (0..n)
+            let mut out: Vec<Problem> = (0..n)
                 .filter_map(|i| self.check(&mut an, SymbolId(i as u32)))
-                .collect()
+                .collect();
+            if self.check_methods != Mode::Never || self.check_fields != Mode::Never {
+                self.check_members(&mut an, &mut out);
+            }
+            out
         };
         for p in problems {
             let mut r = cx.report(p.span, p.message).id(p.id).fix_opt(p.fix);

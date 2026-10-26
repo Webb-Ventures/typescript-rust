@@ -275,7 +275,7 @@ require-yield 15/15
 symbol-description 8/8
 unicorn/catch-error-name 120/120
 unicorn/consistent-assert 31/31
-unicorn/consistent-boolean-name 1444/2033
+unicorn/consistent-boolean-name 1589/2033
 unicorn/consistent-class-member-order 38/38
 unicorn/consistent-compound-words 154/154
 unicorn/consistent-date-clone 26/26
