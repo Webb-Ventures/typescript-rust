@@ -1712,6 +1712,7 @@ fn js_grammar_errors_stay_next_to_ts8xxx() {
     use crate::{ParseOptions, TsInJs, parse_with};
     let report = ParseOptions {
         ts_in_js: TsInJs::Report,
+        ..Default::default()
     };
     let cases: &[(&str, &[(u32, u32)])] = &[
         ("class C { const x = 1 }", &[(8009, 10), (1248, 16)]),
@@ -1949,9 +1950,11 @@ fn ts_in_js_matches_tsc() {
     ];
     let report = ParseOptions {
         ts_in_js: TsInJs::Report,
+        ..Default::default()
     };
     let allow = ParseOptions {
         ts_in_js: TsInJs::Allow,
+        ..Default::default()
     };
     for &(src, want) in cases {
         let r = parse_with(src, SourceKind::Js, report);
@@ -3084,6 +3087,7 @@ fn checked_js_grammar_is_grammar_only_in_javascript() {
             kind,
             crate::ParseOptions {
                 ts_in_js: crate::TsInJs::Report,
+                ..Default::default()
             },
         );
         assert_eq!(codes(&r.diagnostics), Vec::<u32>::new(), "{kind:?} checker");
@@ -3233,4 +3237,24 @@ fn import_call_keeps_type_arguments() {
             assert!(ta < call);
         }
     }
+}
+
+/// `ParseOptions::module` parses with the module goal without `import`/`export`: top-level
+/// `await` before a line break is the operator (espree `sourceType: "module"`).
+#[test]
+fn module_option_forces_top_level_await() {
+    let src = "Promise.all([\n\tawait\n\t\tpromise,\n]);";
+    let script = parse(src, SourceKind::Js);
+    assert!(!script.diagnostics.is_empty(), "the default stays tsc's");
+    let opts = crate::ParseOptions {
+        module: true,
+        ..Default::default()
+    };
+    let r = crate::parse_with(src, SourceKind::Js, opts);
+    assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+    let awaits = (1..r.ast.nodes.len() as u32)
+        .filter_map(ts_r_ast::NodeId::from_raw)
+        .filter(|&id| r.ast.kind(id) == NodeKind::Await)
+        .count();
+    assert_eq!(awaits, 1);
 }

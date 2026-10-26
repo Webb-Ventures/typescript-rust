@@ -145,6 +145,10 @@ pub enum TsInJs {
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub struct ParseOptions {
     pub ts_in_js: TsInJs,
+    /// Parse with the module goal even without `import`/`export`: top-level `await` is
+    /// always the operator (`await\n x` included), as espree's `sourceType: "module"` and
+    /// typescript-estree do. Off by default: tsc decides from the file's own syntax.
+    pub module: bool,
 }
 
 /// Parses `src` with the grammar for `kind`.
@@ -186,6 +190,13 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
         p.parse_program();
         p
     };
+    if opts.module && !kind.is_declaration() {
+        let mut p = start(true);
+        if js_ts && opts.ts_in_js == TsInJs::Report {
+            p.report_ts_in_js();
+        }
+        return p.finish();
+    }
     let mut p = start(false);
     // In a module, `await` at the top level is an operator even before a line break or
     // where only a name may appear: the file is parsed again when that changes anything

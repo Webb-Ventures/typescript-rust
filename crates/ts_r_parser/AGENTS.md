@@ -38,6 +38,11 @@ let opts = ParseOptions { ts_in_js: TsInJs::Report }; // or Allow (no TS8xxx), R
 let r = ts_r_parser::parse_with(src, SourceKind::Js, opts);
 ```
 
+`ParseOptions { module: true, .. }` parses with the module goal even when the file has no
+`import`/`export` (top-level `await` is always the operator, as espree's `sourceType:
+"module"` and typescript-estree; request from lint). The default (`false`) is tsc's: the
+file's own syntax decides.
+
 Files:
 - `stmt.rs`: statements, declarations, import/export.
 - `expr.rs`: expressions, arrows, literals, templates, binding patterns.
