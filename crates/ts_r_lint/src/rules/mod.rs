@@ -116,6 +116,7 @@ mod jsdoc_require_returns_check;
 mod jsdoc_require_returns_description;
 mod jsdoc_require_returns_type;
 mod jsdoc_require_tags;
+mod jsdoc_require_template;
 mod jsdoc_require_template_description;
 mod jsdoc_require_throws;
 mod jsdoc_require_throws_description;
@@ -124,6 +125,7 @@ mod jsdoc_require_yields;
 mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
+mod jsdoc_sort_tags;
 mod jsdoc_tag_lines;
 mod jsdoc_text_escaping;
 mod jsdoc_ts_method_signature_style;
@@ -1113,6 +1115,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_returns_description::RULE,
     &jsdoc_require_returns_type::RULE,
     &jsdoc_require_tags::RULE,
+    &jsdoc_require_template::RULE,
     &jsdoc_require_template_description::RULE,
     &jsdoc_require_throws::RULE,
     &jsdoc_require_throws_description::RULE,
@@ -1121,6 +1124,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_check::RULE,
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
+    &jsdoc_sort_tags::RULE,
     &jsdoc_tag_lines::RULE,
     &jsdoc_text_escaping::RULE,
     &jsdoc_ts_method_signature_style::RULE,

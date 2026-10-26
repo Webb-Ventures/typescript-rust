@@ -202,6 +202,7 @@ jsdoc/require-returns-check 111/111
 jsdoc/require-returns-description 16/16
 jsdoc/require-returns-type 11/11
 jsdoc/require-tags 6/6
+jsdoc/require-template 50/50
 jsdoc/require-template-description 3/3
 jsdoc/require-throws 31/31
 jsdoc/require-throws-description 2/2
@@ -210,6 +211,7 @@ jsdoc/require-yields 110/110
 jsdoc/require-yields-check 53/53
 jsdoc/require-yields-description 3/3
 jsdoc/require-yields-type 3/3
+jsdoc/sort-tags 42/42
 jsdoc/tag-lines 60/60
 jsdoc/text-escaping 20/20
 jsdoc/ts-method-signature-style 14/14
