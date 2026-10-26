@@ -12,12 +12,22 @@
 //! emitter does not write yet, so a file using one is refused rather than written
 //! without them (invariant 2; observed with tsc 7.0.2 on the emit baselines):
 //!
-//! - CommonJS (`module.exports = v`, `exports.x = v`: `export =` and exported declarations);
+//! - CommonJS (`exports.x = v`, `module.exports.x = v`, `require`, more than one
+//!   `module.exports = v`): exported declarations; one top-level `module.exports = v;` is
+//!   written ([`commonjs_export_assignment`]);
 //! - `this["x"] = v` in a class, and `this.x = v` where the checker's type is not yet tsc's
 //!   (a property a base class declares, a value that reads the property itself);
 //! - `C.x = v` on a class (tsc adds a static);
-//! - `@typedef`, `@callback`, `@template`, `@enum`, `@overload`, `@import`, `@private` /
-//!   `@protected` on an assignment, `@this` without a type.
+//! - `@enum`, `@overload`, `@private` / `@protected` on an assignment, `@this` without a
+//!   type, `@type` on a function declaration, a dotted `@typedef` name (a namespace), a
+//!   `@callback` rest parameter.
+//!
+//! `@typedef`, `@callback`, `@template` and `@import` are written: the aliases and imports
+//! JSDoc desugared into are statements of the tree, exported in a module, and print no
+//! comments of their own (the comment holding them stays the comment of the statement it
+//! documents; one in a class body is hoisted before the class). A `@property` description
+//! becomes the member's JSDoc (`Emitter::property_tag_description`); a name with a `-` is a
+//! quoted key (`"data-test-name"`), a `@param` one has `_` for `-`.
 //!
 //! What tsc 7 does not declare is written as it is: `this.x = v` in a function (tsc 7 has
 //! no constructor functions) or with a computed key (`this[k]`), nested targets
@@ -37,20 +47,35 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     let ast = &f.ast;
     for t in &ast.jsdoc_tags {
         let why = match t.kind {
-            JsDocTagKind::Typedef => "a JSDoc @typedef or @callback",
-            JsDocTagKind::Template => "a JSDoc @template",
             JsDocTagKind::Enum => "a JSDoc @enum",
             JsDocTagKind::Overload => "a JSDoc @overload",
             JsDocTagKind::Private | JsDocTagKind::Protected => "a JSDoc modifier on an assignment",
             JsDocTagKind::This if t.ty.is_none() => "a JSDoc @this without a type",
+            // tsc takes the function's signature from the type (its type parameters too).
+            JsDocTagKind::Type if matches!(ast.node(t.host), Node::FunctionDecl { .. }) => {
+                "a JSDoc @type on a function declaration"
+            }
             _ => continue,
         };
         return Some((t.span, why));
     }
+    // `@typedef {T} ns.Name` declares a namespace.
     if !ast.jsdoc_namespaces.is_empty() {
-        return Some((Span::EMPTY, "a JSDoc @typedef"));
+        return Some((Span::EMPTY, "a JSDoc @typedef with a dotted name"));
     }
     let parents = f.parents();
+    // `module.exports = v` alone is written (`export = v`); its `module` is no refusal.
+    let export_assignment = commonjs_export_assignment(c, file);
+    let allowed_module = export_assignment.and_then(|(stmt, _)| match *ast.node(stmt) {
+        Node::ExprStmt { expr } => match *ast.node(expr) {
+            Node::Assign { left, .. } => match *ast.node(left) {
+                Node::Member { obj, .. } => Some(obj),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    });
     // Per class, the member names it declares (`(is static, name)`), built on first use.
     let mut members: FxHashMap<NodeId, FxHashSet<(bool, &str)>> = FxHashMap::default();
     for raw in 1..=ast.node_count() as u32 {
@@ -58,8 +83,10 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
             continue;
         };
         let why = match *ast.node(n) {
-            Node::ImportDecl { .. } if ast.is_jsdoc(n) => Some("a JSDoc @import"),
-            Node::TypeAlias { .. } if ast.is_jsdoc(n) => Some("a JSDoc @typedef or @callback"),
+            // `@callback` with `@param {...T} a`: tsc writes `...a: T` (no array).
+            Node::TypeAlias { ty, .. } if ast.is_jsdoc(n) && callback_has_rest(ast, ty) => {
+                Some("a JSDoc @callback with a rest parameter")
+            }
             Node::Assign { left, right, .. } => {
                 assignment_target(c, file, ast, parents, &mut members, left, right)
             }
@@ -68,6 +95,7 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
                 // `module.exports` / `exports` read as the module object (no local of
                 // that name): a CommonJS pattern tsc declares.
                 ((text == "exports" || text == "module")
+                    && allowed_module != Some(n)
                     && !is_property_name(ast, parents, n)
                     && is_module_object(c, file, n))
                 .then_some("a CommonJS module")
@@ -79,6 +107,95 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
         }
     }
     None
+}
+
+/// The file's one CommonJS export when it is a top-level `module.exports = v;` statement
+/// and the file reads `module`/`exports` nowhere else: `(statement, v)`. tsc 7 writes it
+/// as `export = v;` first in the file (an entity name; any other value through a
+/// `declare const _exports: T;`), then the declarations as in a module with `export =`.
+pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(NodeId, NodeId)> {
+    let f = c.file(file);
+    // A package's file under `node_modules` stays refused: tsc 7 emits nothing for one
+    // that is also imported through the package (namespaceAssignmentToRequireAlias).
+    if !f.bound.commonjs || f.path.contains("/node_modules/") {
+        return None;
+    }
+    let ast = &f.ast;
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return None;
+    };
+    let is_name = |n: NodeId, text: &str| matches!(*ast.node(n), Node::Ident { name } if ast.atom(name) == text);
+    let mut found = None;
+    for &st in ast.list(stmts) {
+        let Node::ExprStmt { expr } = *ast.node(st) else {
+            continue;
+        };
+        let Node::Assign {
+            op: ts_r_ast::AssignOp::Assign,
+            left,
+            right,
+        } = *ast.node(expr)
+        else {
+            continue;
+        };
+        let Node::Member { obj, prop, .. } = *ast.node(left) else {
+            continue;
+        };
+        if is_name(obj, "module") && is_name(prop, "exports") {
+            if found.is_some() {
+                return None;
+            }
+            found = Some((st, right));
+        }
+    }
+    let (st, value) = found?;
+    // No other `module` / `exports` reference anywhere (`module.exports.x = v`, a second
+    // assignment in a function, `exports.x`).
+    let parents = f.parents();
+    let module = match *ast.node(st) {
+        Node::ExprStmt { expr } => match *ast.node(expr) {
+            Node::Assign { left, .. } => match *ast.node(left) {
+                Node::Member { obj, .. } => obj,
+                _ => return None,
+            },
+            _ => return None,
+        },
+        _ => return None,
+    };
+    for raw in 1..=ast.node_count() as u32 {
+        let Some(n) = NodeId::from_raw(raw) else {
+            continue;
+        };
+        if n == module || ast.is_jsdoc(n) {
+            continue;
+        }
+        // `require(...)` declares an `import x = require(...)` (not written yet).
+        if let Node::Call { callee, .. } = *ast.node(n)
+            && is_name(callee, "require")
+        {
+            return None;
+        }
+        if let Node::Ident { name } = *ast.node(n) {
+            let text = ast.atom(name);
+            if (text == "exports" || text == "module")
+                && !is_property_name(ast, parents, n)
+                && is_module_object(c, file, n)
+            {
+                return None;
+            }
+        }
+    }
+    Some((st, value))
+}
+
+/// `ty` (a `@callback`'s function type) has a rest parameter.
+fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {
+    let Node::FunctionType { params, .. } = *ast.node(ty) else {
+        return false;
+    };
+    ast.list(params)
+        .iter()
+        .any(|&p| matches!(ast.node(p), Node::Param { rest: true, .. }))
 }
 
 /// Identifier `n` is a name rather than a reference: a member access's property

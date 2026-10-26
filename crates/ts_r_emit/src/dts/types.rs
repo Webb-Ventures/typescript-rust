@@ -915,6 +915,10 @@ impl Emitter<'_, '_> {
     /// tsc keeps them inside lists: on the same line `/* c */ x`; a comment on its own line
     /// starts a new line, and so does the item after it.
     pub(super) fn inline_comments_before(&mut self, start: u32, after: &[char]) {
+        // A node JSDoc wrote (`@template T`) lies inside its comment: no comments of its own.
+        if self.inside_comment(start) {
+            return;
+        }
         let from = self.list_token_end(start, after);
         let comments: Vec<_> = self.ast.comments_between(from, start).to_vec();
         let mut prev = from;
@@ -1139,12 +1143,87 @@ impl Emitter<'_, '_> {
                     continue;
                 }
                 self.leading_jsdoc(m, prev_end);
+                if self.ast.is_jsdoc(m) {
+                    self.property_tag_description(m);
+                }
                 prev_end = self.ast.span(m).end;
             } else if let Some(&d) = self.member_docs.get(&m) {
                 self.object_member_jsdoc(d);
             }
             self.type_member(m);
         }
+    }
+
+    /// The description of a `@property` tag (`@property {T} name text`) as the member's
+    /// own JSDoc comment, `/**`, ` * text`, ` */` on lines of their own (observed with tsc
+    /// 7.0.2; the text keeps a leading `- `).
+    fn property_tag_description(&mut self, m: NodeId) {
+        if self.opts.remove_comments {
+            return;
+        }
+        let Node::PropertySignature { key, type_ann, .. } = *self.ast.node(m) else {
+            return;
+        };
+        let tag = self.ast.span(m);
+        // Members written from nested `@param` names keep no description (observed).
+        if !self
+            .src
+            .get(tag.start as usize..)
+            .is_some_and(|t| t.starts_with("@prop"))
+        {
+            return;
+        }
+        let mut from = self.ast.span(key).end;
+        if let Some(t) = type_ann {
+            let ts = self.ast.span(t);
+            if ts.end <= tag.end && ts.end > from {
+                from = ts.end;
+            }
+        }
+        let Some(text) = self.src.get(from as usize..tag.end as usize) else {
+            return;
+        };
+        // A bracketed name (`[a=1]`) ends at its `]`; a type written after the name ends at
+        // its `}`.
+        let mut text = text;
+        if text.trim_start().starts_with([']', '='])
+            && let Some(i) = text.find(']')
+        {
+            text = &text[i + 1..];
+        }
+        let mut lines: Vec<&str> = Vec::new();
+        for (i, line) in text.split('\n').enumerate() {
+            let line = line.trim();
+            let line = if i == 0 {
+                line
+            } else {
+                line.strip_prefix('*').unwrap_or(line).trim()
+            };
+            let line = line.strip_suffix("*/").unwrap_or(line).trim_end();
+            lines.push(line);
+        }
+        while lines.first().is_some_and(|l| l.is_empty()) {
+            lines.remove(0);
+        }
+        while lines.last().is_some_and(|l| l.is_empty()) {
+            lines.pop();
+        }
+        if lines.is_empty() {
+            return;
+        }
+        self.w("/**");
+        for l in lines {
+            self.nl();
+            if l.is_empty() {
+                self.w(" *");
+            } else {
+                self.w(" * ");
+                self.w(l);
+            }
+        }
+        self.nl();
+        self.w(" */");
+        self.nl();
     }
 
     pub(super) fn type_member(&mut self, m: NodeId) {

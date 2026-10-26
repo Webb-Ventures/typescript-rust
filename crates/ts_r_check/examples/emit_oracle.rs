@@ -368,19 +368,22 @@ impl Emitter for ProgramEmitter {
             specifiers: Some(&host),
         };
         let result = ts_r_emit::emit(&program, &resolver, &cfg);
-        // `EMIT_ORACLE_TSR=1` prints where declaration emit refused a type.
+        // `EMIT_ORACLE_TSR=1` prints where declaration emit refused a type or a JavaScript
+        // file's declarations.
         if std::env::var_os("EMIT_ORACLE_TSR").is_some() {
             for d in &result.diagnostics {
-                if d.code != ts_r_emit::dts::TSR_UNRESOLVED_TYPE {
-                    continue;
-                }
+                let code = match d.code {
+                    ts_r_emit::dts::TSR_UNRESOLVED_TYPE => "TSR2001",
+                    ts_r_emit::dts::TSR_JS_DECLARATIONS => "TSR2006",
+                    _ => continue,
+                };
                 let Some(f) = program.files.get(d.file.0 as usize) else {
                     continue;
                 };
                 let at = (d.span.start as usize).min(f.text.len());
                 let line = f.text[..at].matches('\n').count() + 1;
                 let snippet: String = f.text[at..].chars().take(60).collect();
-                eprintln!("TSR2001 {}:{line}: {} | {snippet:?}", f.path, d.message);
+                eprintln!("{code} {}:{line}: {} | {snippet:?}", f.path, d.message);
             }
         }
         let dts_reason = result.diagnostics.iter().find_map(|d| match d.code {

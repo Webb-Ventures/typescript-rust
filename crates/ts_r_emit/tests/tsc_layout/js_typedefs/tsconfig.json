@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "target": "esnext",
+    "allowJs": true,
+    "checkJs": true,
+    "declaration": true,
+    "strict": true,
+    "types": [],
+    "outDir": "out"
+  },
+  "files": ["types.ts", "lib.js", "script.js"]
+}

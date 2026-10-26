@@ -51,9 +51,15 @@ cost both. It never mutates the checker's AST.
   so the local it names is printed too and may be TS9010 itself
   (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
   declarations of JavaScript inputs that use a pattern tsc declares from and the emitter
-  does not write yet (TSR2006 naming it: CommonJS exports, `@typedef`/`@callback`/
-  `@template`/`@overload`/`@enum`/`@import`, a class's statics assigned from outside,
-  `this["x"] = v`; the list and the observed rules are in `dts/js.rs`). Other JavaScript
+  does not write yet (TSR2006 naming it: CommonJS exports other than one top-level
+  `module.exports = v;` in a file without `require` (written `export = v;` first, a value
+  that is no entity name through `declare const _exports: T;`), `@overload`/`@enum`, a dotted
+  `@typedef` name, a `@callback` rest parameter, `@type` on a function declaration, a
+  class's statics assigned from outside, `this["x"] = v`; the list and the observed rules
+  are in `dts/js.rs`). `@typedef`/`@callback`/`@template`/`@import` are written: the
+  aliases and imports are exported in a module, print no comments of their own (the
+  comment holding them stays the comment of the statement it documents, or an
+  end-of-file comment), and a `@property` description is the member's JSDoc. Other JavaScript
   files get their `.d.ts`: JSDoc types are written as tsc writes them (`String` is
   `string`, `Array` `any[]`, `T=` `T | undefined`, `?` alone `any`, `function` `Function`,
   `?T` in a union `(T | null)`; `Emitter::jsdoc_type`), and `this.x = v` in a class's
@@ -116,6 +122,10 @@ cost both. It never mutates the checker's AST.
   `tsbuild/resolveJsonModule/include-only*`).
 - Maps: see `maps.rs`'s module docs (location, `sources`, `sourceRoot`, `mapRoot`, URL
   forms, key order, inline data URLs).
+- The file's detached header comments are the first run of comments with no blank line
+  between them, when a blank line separates the run from the first statement written in
+  the source (JSDoc declarations, which sit inside comments, do not count). The comments
+  before a class body's empty `;` member go with it.
 - `.d.ts`: `stripInternal` drops a declaration when any of its leading comments (block or
   line) contains `@internal`; a comment on the line the previous token ends on is that
   token's trailing comment and does not count. An import whose bindings are all elided
@@ -211,14 +221,14 @@ import reference.
 
 ## Measurements
 
-Latest (2026-10-27, v1 checker round 6 on emit round 6, `cargo run --release -p ts_r_check --example
-emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,092 (96.9%), shape 2,141
-(99.2%; the 18 others are in `emit_known_gaps.txt`), map segments equal on 17 of 17
-bytes-exact outputs with a map baseline; all 17,352 outputs: 16,267 bytes-exact (93.7%), JS
-13,732 / 14,476 (94.9%), `.d.ts` 2,333 / 2,640 (88.4%). Declarations (E2): 1,365 of 1,499
-baselines without TSR2006 refusals have every `.d.ts` bytes-exact (91.1%); 1,365 / 1,634 over
-all baselines (83.5%). TSR2006 refuses 168 JavaScript inputs' `.d.ts` (was 552; v1 checker
-round 5: `.d.ts` 1,961, baselines 1,191 / 1,634).
+Latest (2026-10-27, v1 emit round 7, `cargo run --release -p ts_r_check --example
+emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,094 (97.0%), shape 2,141
+(99.2%; the 18 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18
+bytes-exact outputs with a map baseline; all 17,352 outputs: 16,340 bytes-exact (94.2%), JS
+13,734 / 14,476 (94.9%), `.d.ts` 2,404 / 2,640 (91.1%). Declarations (E2): 1,412 / 1,634
+baselines have every `.d.ts` bytes-exact (86.4%, gate 85% met; was 1,365, 83.5%); 1,412 of
+1,557 without TSR2006 refusals (90.7%). TSR2006 refuses 86 JavaScript inputs' `.d.ts` (was
+168; `@typedef`/`@callback`/`@template`/`@import` and `module.exports = v` are now written).
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946

@@ -81,6 +81,19 @@ pub fn declaration_file(
         Node::Program { stmts } => f.ast.list(*stmts).to_vec(),
         _ => Vec::new(),
     };
+    // CommonJS `module.exports = v;`: a module whose `export = v` comes first.
+    let mut order = stmts.clone();
+    if !f.ast.source_kind.is_typescript()
+        && let Some((st, value)) = js::commonjs_export_assignment(checker, file)
+    {
+        e.cjs_export = Some((st, value));
+        e.is_module = true;
+        order.retain(|&s| s != st);
+        order.insert(0, st);
+    }
+    if e.is_module {
+        e.export_jsdoc_aliases(&stmts);
+    }
     let cp = e.ast.checkpoint();
     // Each growing pass adds source nodes to the finite needed/used sets.
     loop {
@@ -91,7 +104,7 @@ pub fn declaration_file(
         } else {
             Scope::ScriptTop
         };
-        e.statements(&stmts, scope, None);
+        e.statements(&order, scope, None);
         e.eof_comments(&stmts);
         if !e.grew {
             break;
@@ -183,6 +196,9 @@ pub(crate) struct Emitter<'c, 'a> {
     opts: DtsOptions,
     host: Option<&'c dyn ModuleSpecifierHost>,
     is_module: bool,
+    /// A CommonJS file's `module.exports = v;` statement, written as `export = v` first
+    /// (`js::commonjs_export_assignment`).
+    cjs_export: Option<(NodeId, NodeId)>,
     out: String,
     indent: usize,
     type_depth: u32,
@@ -247,6 +263,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
             opts: *opts,
             host,
             is_module: f.bound.is_module,
+            cjs_export: None,
             out: String::new(),
             indent: 0,
             type_depth: 0,
@@ -551,7 +568,15 @@ impl<'c, 'a> Emitter<'c, 'a> {
         let span = self.ast.span(n);
         self.mark(span.start);
         let raw = self.raw(n).to_owned();
-        self.w(&raw);
+        match *self.ast.node(n) {
+            // A `@property` name that is no identifier (`[data-test-name]`) is a string
+            // key JSDoc wrote without quotes: tsc writes it quoted.
+            Node::StringLit { value } if self.ast.is_jsdoc(n) && !raw.starts_with(['"', '\'']) => {
+                let text = format!("\"{}\"", self.ast.atom(value));
+                self.w(&text);
+            }
+            _ => self.w(&raw),
+        }
         self.mark(span.end);
     }
 
@@ -566,6 +591,36 @@ impl<'c, 'a> Emitter<'c, 'a> {
 
     fn is_synth(&self, n: NodeId) -> bool {
         n.index() >= self.orig_len
+    }
+
+    /// The end of the last `;` between `from` and `to` outside comments (a class body's
+    /// empty `;` member: the comments before it are dropped with it, observed with tsc
+    /// 7.0.2), else `from`.
+    fn past_semicolons(&self, from: u32, to: u32) -> u32 {
+        let comments = self.ast.comments_between(from, to);
+        let bytes = self.src.as_bytes();
+        let (mut pos, mut out, mut ci) = (from as usize, from, 0);
+        let to = (to as usize).min(bytes.len());
+        while pos < to {
+            if let Some(c) = comments.get(ci)
+                && c.span.start as usize <= pos
+            {
+                pos = pos.max(c.span.end as usize);
+                ci += 1;
+                continue;
+            }
+            if bytes[pos] == b';' {
+                out = pos as u32 + 1;
+            }
+            pos += 1;
+        }
+        out
+    }
+
+    /// Position `pos` lies inside a source comment (where JSDoc declarations are written).
+    pub(super) fn inside_comment(&self, pos: u32) -> bool {
+        let i = self.ast.comments.partition_point(|c| c.span.start < pos);
+        i > 0 && self.ast.comments[i - 1].span.end > pos
     }
 
     fn raw(&self, n: NodeId) -> &'a str {
@@ -1178,8 +1233,11 @@ impl<'c, 'a> Emitter<'c, 'a> {
     /// from what follows): `/** Copyright header */` stays even when the first statement
     /// is elided (observed).
     fn file_header(&mut self, stmts: &[NodeId]) {
+        // JSDoc declarations (`@typedef`, `@import`) sit inside comments: the header ends at
+        // the first statement written in the source.
         let end = stmts
-            .first()
+            .iter()
+            .find(|&&s| !self.ast.is_jsdoc(s))
             .map_or(self.src.len() as u32, |&s| self.ast.span(s).start);
         let comments: Vec<_> = self.ast.comments_between(0, end).to_vec();
         // The hashbang line stays (observed, unmapped).
@@ -1192,17 +1250,21 @@ impl<'c, 'a> Emitter<'c, 'a> {
             self.w(&text);
             self.nl();
         }
-        let detached = comments
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|&(i, c)| {
-                let next = comments.get(i + 1).map_or(end, |n| n.span.start);
-                self.src
-                    .get(c.span.end as usize..next as usize)
-                    .is_some_and(|t| t.matches('\n').count() >= 2)
-            })
-            .map_or(0, |(i, _)| i + 1);
+        // The first run of comments with no blank line between them, when a blank line
+        // separates it from the first statement (tsc's copyright-header rule).
+        let blank_between = |from: u32, to: u32| {
+            self.src
+                .get(from as usize..to as usize)
+                .is_some_and(|t| t.matches('\n').count() >= 2)
+        };
+        let run = comments
+            .windows(2)
+            .position(|w| blank_between(w[0].span.end, w[1].span.start))
+            .map_or(comments.len(), |i| i + 1);
+        let detached = match comments.get(run.wrapping_sub(1)) {
+            Some(last) if blank_between(last.span.end, end) => run,
+            _ => 0,
+        };
         self.header_end = comments
             .get(detached.wrapping_sub(1))
             .map_or(0, |c| c.span.end);
@@ -1251,22 +1313,35 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 Node::ExportNamed { .. }
                 | Node::ExportAssignment { .. }
                 | Node::ExportDefaultExpr { .. } => has_export_decl = true,
+                _ if self.cjs_export.is_some_and(|(st, _)| st == s) => has_export_decl = true,
                 _ => {}
             }
-            let emitted = !self.is_internal(s, prev_end)
-                && self.statement(s, stmts, i, scope, keep_export, prev_end);
+            // A JSDoc declaration (`@typedef`, `@callback`, `@import`) lies inside a comment
+            // of the statement it is attached to and writes no comments of its own: the
+            // comments stay that statement's (observed with tsc 7.0.2).
+            // The CommonJS `export =` is written first, out of source order, without
+            // comments.
+            let jsdoc = self.ast.is_jsdoc(s) || self.cjs_export.is_some_and(|(st, _)| st == s);
+            let from = if jsdoc {
+                self.ast.span(s).start
+            } else {
+                prev_end
+            };
+            let emitted =
+                !self.is_internal(s, from) && self.statement(s, stmts, i, scope, keep_export, from);
             if emitted {
                 let mods = self.ast.node(s).modifiers();
-                let is_export_stmt = matches!(
-                    self.ast.node(s),
-                    Node::ImportDecl { .. }
-                        | Node::ImportEquals { .. }
-                        | Node::ExportNamed { .. }
-                        | Node::ExportAll { .. }
-                        | Node::ExportAssignment { .. }
-                        | Node::ExportDefaultExpr { .. }
-                        | Node::NamespaceExport { .. }
-                );
+                let is_export_stmt = self.cjs_export.is_some_and(|(st, _)| st == s)
+                    || matches!(
+                        self.ast.node(s),
+                        Node::ImportDecl { .. }
+                            | Node::ImportEquals { .. }
+                            | Node::ExportNamed { .. }
+                            | Node::ExportAll { .. }
+                            | Node::ExportAssignment { .. }
+                            | Node::ExportDefaultExpr { .. }
+                            | Node::NamespaceExport { .. }
+                    );
                 let augmentation = matches!(*self.ast.node(s), Node::Module { kind, name, .. }
                     if kind == ModuleKind::Global
                         || matches!(self.ast.node(name), Node::StringLit { .. }));
@@ -1280,7 +1355,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 }
             }
             let _ = start_len;
-            prev_end = self.ast.span(s).end;
+            if !jsdoc {
+                prev_end = self.ast.span(s).end;
+            }
         }
         if self.opts.isolated_declarations {
             let written: Vec<NodeId> = stmts
@@ -1307,6 +1384,19 @@ impl<'c, 'a> Emitter<'c, 'a> {
         }
     }
 
+    /// A JavaScript module's top-level `@typedef` and `@callback` aliases are exported
+    /// (observed with tsc 7.0.2: `export type T = ...`, and other modules import them).
+    fn export_jsdoc_aliases(&mut self, stmts: &[NodeId]) {
+        for &s in stmts {
+            if !self.ast.is_jsdoc(s) {
+                continue;
+            }
+            if let Node::TypeAlias { modifiers, .. } = self.ast.node_mut(s) {
+                *modifiers |= Modifiers::EXPORT;
+            }
+        }
+    }
+
     /// JSDoc comments after the file's last statement (observed: kept at the end of the
     /// declaration file).
     fn eof_comments(&mut self, stmts: &[NodeId]) {
@@ -1314,8 +1404,11 @@ impl<'c, 'a> Emitter<'c, 'a> {
             return;
         }
         let from = stmts
-            .last()
-            .map_or(self.header_end, |&s| self.ast.span(s).end);
+            .iter()
+            .rev()
+            .find(|&&s| !self.ast.is_jsdoc(s))
+            .map_or(self.header_end, |&s| self.ast.span(s).end)
+            .max(self.header_end);
         let comments: Vec<_> = self
             .ast
             .comments_between(from, self.src.len() as u32)
@@ -1449,6 +1542,11 @@ impl<'c, 'a> Emitter<'c, 'a> {
         prev_end: u32,
     ) -> bool {
         let node = *self.ast.node(s);
+        if let Some((st, value)) = self.cjs_export
+            && st == s
+        {
+            return self.export_value_named(s, value, "export = ", "_exports");
+        }
         match node {
             Node::ImportDecl { .. } => self.import_decl(s, scope, prev_end),
             Node::ImportEquals {
@@ -2022,6 +2120,12 @@ impl<'c, 'a> Emitter<'c, 'a> {
 
     /// `export = x;` / `export default x;`, or a `_default` constant for an expression.
     fn export_value(&mut self, s: NodeId, expr: NodeId, prefix: &str) -> bool {
+        self.export_value_named(s, expr, prefix, "_default")
+    }
+
+    /// [`Emitter::export_value`] with the name of the constant written for a value that is
+    /// no entity name (`_exports` for CommonJS, observed with tsc 7.0.2).
+    fn export_value_named(&mut self, s: NodeId, expr: NodeId, prefix: &str, base: &str) -> bool {
         let inner = skip_parens(&self.ast, expr);
         // `export default a.b` writes a `_default` constant; `export = a.b` stays.
         let entity = if prefix.starts_with("export default") {
@@ -2040,7 +2144,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if prefix.starts_with("export default") {
             self.iso_default(expr);
         }
-        let name = self.unique_name("_default");
+        let name = self.unique_name(base);
         self.w("declare const ");
         self.w(&name);
         let t = self.ck.check_expr(self.loc(expr));
@@ -2906,7 +3010,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
         let mut prev_end = self.body_open(class);
         let mut printed_private: FxHashSet<String> = FxHashSet::default();
         for (i, &m) in members.iter().enumerate() {
-            let pe = prev_end;
+            let pe = self.past_semicolons(prev_end, self.ast.span(m).start);
             prev_end = self.ast.span(m).end;
             if hoisted.contains(&m) || self.is_internal(m, pe) {
                 continue;

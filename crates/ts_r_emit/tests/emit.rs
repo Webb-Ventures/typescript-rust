@@ -804,14 +804,18 @@ fn dropped_aliases_release_their_imports() {
 
 /// JavaScript declarations are refused (TSR2006, the file's `.js` still written) when the
 /// file uses a pattern tsc declares from that the emitter does not write: CommonJS
-/// exports, `@typedef`, a `this` property a base class declares, a class's statics.
+/// exports, a dotted `@typedef` name, a `@callback` rest parameter, `@type` on a function
+/// declaration, a `this` property a base class declares, a class's statics.
 #[test]
 fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
     for src in [
-        "module.exports = { a: 1 };\n",
+        "module.exports = { a: 1 };\nmodule.exports.b = 2;\n",
+        "const y = require(\"./y\");\nmodule.exports = y;\n",
         "exports.a = 1;\n",
-        "/** @typedef {{ a: number }} T */\n/** @param {T} t */\nexport function f(t) {}\n",
+        "/** @typedef {number} ns.T */\nexport const x = 1;\n",
+        "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
+        "/** @type {(a: number) => number} */\nexport function f(a) { return a; }\n",
         "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = 2; } }\n",
         "export class C {}\nC.count = 1;\n",
         "export class D { m() { this.v = this.v + 1; } }\n",
@@ -843,6 +847,57 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
     }
 }
 
+/// A CommonJS file whose only export is `module.exports = v;` is `export = v;` first, then
+/// its declarations (tsc 7.0.2, jsDeclarationsExportAssignedClassInstance1); a value that
+/// is no entity name goes through `declare const _exports`.
+#[test]
+fn javascript_commonjs_export_assignment_is_written() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "class Foo {}\nmodule.exports = new Foo();\n",
+            "declare const _exports: Foo;\nexport = _exports;\ndeclare class Foo {\n}\n",
+        ),
+        (
+            "/** @typedef {number} N */\nfunction foo() {}\nmodule.exports = foo;\n",
+            "export = foo;\nexport type N = number;\n/** @typedef {number} N */\ndeclare function foo(): void;\n",
+        ),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .unwrap();
+        assert_eq!(d.text, want, "{src}");
+    }
+}
+
+/// A `@typedef` in a class body is hoisted before the class; the comments before an empty
+/// `;` member go with it (observed with tsc 7.0.2, typedefOnSemicolonClassElement).
+#[test]
+fn javascript_typedef_in_a_class_body_after_a_semicolon_member() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    let src =
+        "export class P {\n  /** @typedef {string} A */\n  ;\n  /** @type {A} */\n  a = 'ok'\n}\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .unwrap();
+    assert_eq!(
+        d.text,
+        "export type A = string;\nexport declare class P {\n    /** @type {A} */\n    a: A;\n}\n"
+    );
+}
+
 #[test]
 fn javascript_commonjs_refused_with_an_ambient_global_module() {
     // A global `module` / `exports` declared in a declaration file (as @types/node does) is
@@ -852,7 +907,7 @@ fn javascript_commonjs_refused_with_an_ambient_global_module() {
     for (types, src) in [
         (
             "declare var module: { exports: any };\n",
-            "module.exports = { a: 1 };\n",
+            "module.exports = { a: 1 };\nfunction f() { module.exports = 2; }\n",
         ),
         ("declare var exports: any;\n", "exports.a = 1;\n"),
     ] {
