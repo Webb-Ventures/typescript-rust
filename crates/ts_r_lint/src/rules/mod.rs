@@ -341,6 +341,7 @@ mod unicorn_no_abusive_eslint_disable;
 mod unicorn_no_accidental_bitwise_operator;
 mod unicorn_no_array_callback_reference;
 mod unicorn_no_array_concat_in_loop;
+mod unicorn_no_array_fill_with_reference_type;
 mod unicorn_no_array_from_fill;
 mod unicorn_no_array_front_mutation;
 mod unicorn_no_array_method_this_argument;
@@ -521,6 +522,7 @@ mod unicorn_prefer_queue_microtask;
 mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_response_static_json;
+mod unicorn_prefer_set_has;
 mod unicorn_prefer_set_methods;
 mod unicorn_prefer_set_size;
 mod unicorn_prefer_short_arrow_method;
@@ -528,7 +530,7 @@ mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_condition_first;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
-mod unicorn_prefer_single_replace;
+mod unicorn_prefer_single_call;
 mod unicorn_prefer_split_limit;
 mod unicorn_prefer_spread;
 mod unicorn_prefer_string_match_all;
@@ -941,6 +943,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_accidental_bitwise_operator::RULE,
     &unicorn_no_array_callback_reference::RULE,
     &unicorn_no_array_concat_in_loop::RULE,
+    &unicorn_no_array_fill_with_reference_type::RULE,
     &unicorn_no_array_reduce::RULE,
     &unicorn_no_array_reverse::RULE,
     &unicorn_no_array_sort::RULE,
@@ -1081,12 +1084,14 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_promise_try::RULE,
     &unicorn_prefer_queue_microtask::RULE,
     &unicorn_prefer_response_static_json::RULE,
+    &unicorn_prefer_set_has::RULE,
     &unicorn_prefer_set_methods::RULE,
     &unicorn_prefer_promise_with_resolvers::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_simple_condition_first::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
+    &unicorn_prefer_single_call::RULE,
     &unicorn_prefer_string_match_all::RULE,
     &unicorn_prefer_split_limit::RULE,
     &unicorn_prefer_string_repeat::RULE,

@@ -301,6 +301,7 @@ unicorn/no-abusive-eslint-disable 33/33
 unicorn/no-accidental-bitwise-operator 66/66
 unicorn/no-array-callback-reference 312/312
 unicorn/no-array-concat-in-loop 33/33
+unicorn/no-array-fill-with-reference-type 126/126
 unicorn/no-array-from-fill 30/30
 unicorn/no-array-method-this-argument 137/137
 unicorn/no-array-reduce 482/482
@@ -459,12 +460,13 @@ unicorn/prefer-queue-microtask 55/55
 unicorn/prefer-reflect-apply 79/79
 unicorn/prefer-regexp-test 273/273
 unicorn/prefer-response-static-json 39/39
+unicorn/prefer-set-has 275/275
 unicorn/prefer-set-methods 273/273
 unicorn/prefer-set-size 67/67
 unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-simple-sort-comparator 66/66
 unicorn/prefer-single-array-predicate 32/32
-unicorn/prefer-single-replace 86/86
+unicorn/prefer-single-call 226/226
 unicorn/prefer-split-limit 77/77
 unicorn/prefer-spread 626/626
 unicorn/prefer-string-match-all 68/68

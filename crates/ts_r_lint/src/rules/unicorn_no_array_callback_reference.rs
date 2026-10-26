@@ -25,6 +25,7 @@
 
 use super::prelude::*;
 use super::unicorn_ast::method_call;
+use super::unicorn_no_array_reduce::const_initializer as const_init;
 use super::unicorn_types::{Checker, INDEXED_COLLECTION};
 use super::unicorn_util::{parenthesized_span, skip_wrappers};
 use super::unicorn_util_h4::singular;
@@ -202,33 +203,6 @@ fn ignore_callback(cx: &Ctx<'_, '_>, cb: NodeId, method: &str, info: &MethodInfo
         || is_value_not_function(ast, cb)
         || (matches!(method, "every" | "filter" | "find" | "findLast")
             && is_type_predicate_callback(cx, cb))
-}
-
-/// unicorn's `getConstVariableInitializer`: the init of the single plain `const`
-/// declarator `id` names.
-fn const_init(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
-    let ast = cx.ast();
-    if !matches!(ast.node(id), Node::Ident { .. }) {
-        return None;
-    }
-    let sem = cx.semantic();
-    let sym = sem.reference(sem.reference_at(id)?).symbol()?;
-    let [d] = sem.symbol(sym).decls.as_slice() else {
-        return None;
-    };
-    let Node::VarDeclarator { name, init, .. } = *ast.node(d.node) else {
-        return None;
-    };
-    (name == d.name
-        && matches!(
-            ast.node(d.parent),
-            Node::VarDecl {
-                kind: VarKind::Const,
-                ..
-            }
-        ))
-    .then_some(init)
-    .flatten()
 }
 
 fn definitely_not_function(cx: &Ctx<'_, '_>, mut id: NodeId) -> bool {
