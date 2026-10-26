@@ -749,636 +749,113 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   `shouldAddParenthesesToUnaryExpressionReplacement`, `needsSemicolon` (read from the token
   before the replaced node and the deepest node ending there), `isSameReference`,
   `hasPossibleSideEffect`.
-- **Parser options.** `engine::parse_for_lint` sets `ParseOptions::module` for
-  `sourceType: "module"` (top-level `await` is the operator, as espree reads it) and
-  `assertion_continues` (`x < 0 as any ** 2` is `((x < 0) as any) ** 2`, as TypeScript 5
-  and typescript-estree parse it; tsc 7 rejects it, microsoft/TypeScript#63527).
+- **Known parser gap.** `unicorn/prefer-includes` is 243/247: the 4 failing cases are
+  `x < 0 as any ** 2` and `x < 0 satisfies boolean as any ** 2`. tsc and typescript-estree
+  keep parsing tighter binary operators after `as T` / `satisfies T`, but ts_r_parser stops
+  there and reports "';' expected". The fix belongs in the parser, not in the rule.
 
-## jsdoc rules (round 5: require-param, require-jsdoc, check-tag-names, ts-no-empty-object-type)
+## eslint-plugin-unicorn rules (round 5, h4)
 
-eslint-plugin-jsdoc 63.3.3; its tests are the oracle. What we learned, in our words:
+Current: catch-error-name 120/120, consistent-function-scoping 170/170, no-array-reduce
+482/482, no-await-expression-member 71/72, no-empty-file 58/58, no-for-each 431/431,
+no-negated-condition 134/134, no-object-as-default-parameter 62/62, no-process-exit 58/58,
+no-static-only-class 91/91, no-thenable 178/178, no-useless-fallback-in-spread 61/61,
+no-useless-length-check 165/165, no-useless-promise-resolve-reject 121/121,
+no-useless-spread 283/283, no-useless-switch-case 34/34, no-useless-undefined 271/271,
+prefer-export-from 158/158, prefer-module 152/152, prefer-switch 68/68,
+prefer-top-level-await 228/228, switch-case-braces 56/56.
 
-- **require-param** (`src/rules/jsdoc_require_param.rs`). Runs with the plugin's
-  `noTracking` iteration (`Contexts::no_tracking`): under `any`, every node that finds a
-  block checks it, even a block another node already claimed. Blocks the plugin's
-  `avoidDocs` skips (replacing tags, constructors unless `checkConstructors`, accessors
-  unless asked, `exemptedBy`) or that carry `@type` are left alone; `this` never needs a
-  tag. A destructured root uses its own name, the name of the plain `@param` in its
-  position, or the next generated name (`unnamedRootBase` entries, then the last one plus a
-  counter from `autoIncrementBase`); every flattened property path under it is required
-  too (rest properties only with `checkRestProperty`, nothing under a tag whose type is not
-  an object type per `checkTypesPattern`). With `interfaceExemptsParamsCheck`, a parameter with
-  its own type annotation (and no default) counts as a root with no property paths. The fixer inserts one
-  line per missing tag into the same mutated block: a root that fills an unnamed `@param`
-  replaces it; anything else goes before the first tag documenting a later parameter, else
-  after the last `@param`. The plugin computes that position as a count of tag lines and
-  then uses it as a tag index; we keep that arithmetic so fixes match. A one-line block is
-  made multi-line first. An arrow in a variable initializer whose return type is a function
-  type borrows the declaration's comment.
-- **require-jsdoc** (`src/rules/jsdoc_require_jsdoc.rs`, `src/jsdoc_export.rs`). Runs on
-  the ESTree view: built-in listeners for the six `require` types (arrows and function
-  expressions only where assigned, default-exported, initialising a variable or a property
-  value, unless `checkAllFunctionExpressions`), plus `contexts` (selectors or
-  `{context, inlineCommentBlock, minLineCount}`; naming a built-in type turns its check
-  on). A node passes when it has a block (with `skipInterveningOverloadedDeclarations`,
-  the block before the overload signatures above it), is shorter than `minLineCount`, is an
-  overloaded implementation (`exemptOverloadedImplementations`), is an accessor or
-  constructor `exemptSpecial`/`checkGetters`/`checkSetters`/`checkConstructors` leave out
-  (paired vs. unpaired accessors), an empty function or constructor with
-  `exemptEmptyFunctions`/`exemptEmptyConstructors` (no parameters, no returned value), or
-  a method implementing an interface member that has a block. With `publicOnly` only
-  exported nodes are reported; the export test mirrors the plugin's export parser: a
-  symbol table of the top-level statements (bounded steps and depth) following `export`
-  modifiers, `export default`/`export {}`, `module.exports`/`exports.x` (cjs) and
-  `window.x` (window), where finding a node's own declaration only follows `body` fields.
-  The report spans the node's first line (to column 0 of the next); the fix inserts an
-  empty block (or `/** msg */` with `inlineCommentBlock`) before the node's reduced form
-  or its first decorator, indented like that line.
-- **check-tag-names** (`src/rules/jsdoc_check_tag_names.rs`). Every block once. A tag is
-  known when it is a name or alias in the mode's table (`jsdoc`; `typescript` = jsdoc plus
-  TSDoc, TypeDoc and `import`/`internal`/`jsx`/`overload`/`satisfies`/`template`;
-  `closure`/`permissive` = typescript minus `inheritdoc`/`internal`/`overload`/`returns`/
-  `satisfies` plus Closure's own tags, with `return` taking `returns` as alias; an unknown
-  mode warns once per file at 1:2 and uses jsdoc) or comes from `definedTags`,
-  `tagNamePreference` keys or truthy values (an object's `replacement`), `structuredTags`
-  keys, or `template` with `typed`. The preferred name: a name that is a preference value
-  stays, a preference key (with or without a `tag ` prefix; the last such key wins) gives
-  its value, an alias gives its canonical tag. `false` or an object without `replacement`
-  blocks the tag (its message or ``Blacklisted tag found (`@x`)``, no fix); another falsy
-  value accepts it; a different name is reported with a fix that renames the first `@x`
-  ending at a word boundary in the original comment text. A preference value that is not
-  falsy, a string or an object reports a settings error at 1:2 for every block. With
-  `typed`: tags always redundant under a type system, tags redundant outside an ambient
-  context (not when the block has no node, not for a top-level node of a `.d.ts`, not when
-  the node or an ancestor declaration has `declare`; at the Program, the file must be a
-  `.d.ts`), and `@template` without a name are reported; the fixer (unless `enableFixer`
-  is off) clears the type (and for always-redundant tags the tag) when the tag has a
-  description, else removes the tag with `removeEmptyBlock` (the comment's lines may be
-  dropped rather than blanked; an emptied block is deleted). These fixes mutate the block
-  in place, so later reports in the same block see shifted line numbers, as upstream.
-  Inline tags not in `inlineTags` are reported without a trailing period: the block
-  description's at the first line containing `{@name` (else the last line), then each
-  tag's at its first such line (else line 0).
-- **ts-no-empty-object-type** (`src/rules/jsdoc_ts_no_empty_object_type.rs`). Only in
-  `typescript` mode; tags that may carry a type (typescript mode's `typeAllowed: false`
-  list, overridden by `structuredTags`: a required type always may, `type: false` may not),
-  except `@import`. One report per member-less object type in a type that parses. We
-  approximate "parses" by balanced brackets and closed quotes and find `{` + whitespace +
-  `}` outside quotes, instead of building the type tree (so `Foo<{}` with an unbalanced
-  `<` is skipped, but some types the type parser rejects for other reasons would still
-  be checked).
+Shared helpers of this round live in `unicorn_util_h4.rs` (method calls, identifier
+validity, free names, renames, ESTree identifier spans, same-line trailing comments,
+indentation, line breaks, `hasSideEffect` with the getter/conversion options, switch-case
+heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path`).
 
-Read to understand (not ported): eslint-plugin-jsdoc `src/rules/requireParam.js`,
-`src/rules/requireJsdoc.js`, `src/rules/checkTagNames.js`, `src/rules/tsNoEmptyObjectType.js`,
-`src/exportParser.js`, `src/tagNames.js`, `src/getDefaultTagStructureForMode.js`,
-`src/jsdocUtils.js` (getFunctionParameterNames, flattenRoots, exemptSpeciaMethods,
-hasAccessorPair, getIndent, enforcedContexts, getContextObject, getPreferredTagName,
-getPreferredTagNameSimple, isValidTag, getTagNamesForMode, getInlineTags,
-tagMightHaveTypePosition, overrideTagStructure), `src/iterateJsdoc.js` (iterateAllJsdocs
-and noTracking, makeMultiline, addLine, emptyTokens, changeTag, removeTag, reportJSDoc,
-reportSettings, makeReport, avoidDocs), `src/utils/hasReturnValue.js`;
-`@es-joy/jsdoccomment` `src/jsdoccomment.js` (getJSDocComment with checkOverloads,
-findJSDocComment, getTSFunctionComment, getReducedASTNode, the overload sibling helpers),
-`src/parseComment.js` (default no-type / no-name tags), `src/parseInlineTags.js`.
+- **Oracle data.** The generator writes RegExp-valued options as `{regex, flags}` (they
+  used to serialize as `{}`), and turns `reportUnusedDisableDirectives` off: a test with a
+  stray `eslint-disable` comment otherwise expects ESLint's directive-removal autofix as
+  the rule's output.
+- **Fix edit order.** Several fixes put more than one insertion at the same offset (the
+  `case` labels and `{` of prefer-switch, `break;` and `}` after a body). ESLint merges a
+  fix's edits sorted by range, keeping the order they were produced in for equal ranges;
+  `fix_of` does the same (a stable sort), so produce edits in the plugin's order.
+- **Extending a fix range.** no-for-each makes its fix cover the call's parent so two
+  nested fixes don't interleave; empty insertions at both ends of the parent do that.
+- **catch-error-name.** The new name comes from `available_name` (the wanted name, then
+  `_` appended until no scope in the catch clause's chain declares or reads it); the
+  rename edits every reference with ESTree spans (a shorthand property gets `key: name`).
+- **consistent-function-scoping.** The scopes a function "sits in" are the scope owning
+  its block (a function, catch clause, static block...), plus the loop's scope and each
+  bare block's scope when the block is a loop body. A variable used by the function makes
+  it stay when it is declared in one of those scopes (unless it is just a function's own
+  name), referenced from one, a parameter of the owning function, or a sibling function
+  declaration. Arrows that read `this`/`super`/`new.target` stay; so do React hook
+  callbacks' inner functions, IIFE bodies, and `jest.mock`/`vi.mock`/`vi.hoisted`
+  factories.
+- **no-await-expression-member: 71/72.** The missing case is a file without
+  `import`/`export` holding `const foo = (await -x)[0];`. ts_r_parser follows tsc's script
+  rule and reads `await - x` as a binary expression; ESLint parses the file as a module.
+  The fix belongs in the parser (module goal), not the rule.
+- **no-empty-file.** A file with only a BOM is reported at 1:1-1:1: the BOM is not part
+  of ESLint's text, so locations start after it.
+- **no-for-each.** The fix needs the receiver to be known as an array (`is_array`), one
+  plain or two simple parameters, and that no identifier in the call with a parameter's
+  name resolves outside the callback (or is unresolved). `return x;` becomes
+  `x; continue;`, braced when the `return` is an `if` branch, with a `;` first when the
+  previous token would join it.
+- **no-array-reduce.** The `Math.sumPrecise` suggestion ignores parameters whose annotation
+  can't be a number (`a: string`); h3's `is_known_non_number` only reads references, not a
+  parameter's own annotation. The loop fix's indentation unit is the most common step
+  between consecutive space-indented lines when spaces dominate, else a tab.
+- **no-useless-undefined.** Removing `undefined` takes its parentheses and the whitespace
+  before each, keeping a line break only when that whitespace starts with one. A default
+  `= undefined` on a typed parameter becomes `a?: T`; in a `.ts`-family file an untyped one
+  becomes `a?`.
+- **no-useless-spread.** Unwrapping `[...x]` adds parentheses when `x` binds looser than a
+  member access, gives up for a multi-line `yield`, and parenthesizes a multi-line
+  `return`/`throw` argument instead of fixing keyword spacing.
+- **prefer-switch.** A chain ends at the first `if` whose comparisons don't share the
+  current discriminant candidates; the candidates kept are the ones before that `if`.
+  Member references compare their computed keys after folding literals (`a["b" + ""]` is
+  `a.b`), which `is_same_reference` alone doesn't do.
+- **prefer-top-level-await.** Without type information `isKnownNonPromise` is always
+  false, so every unawaited promise-like top-level call is reported.
+- **prefer-export-from.** A new `export ... from` goes at the end of the source text (the
+  `Program` end, trailing comments and whitespace included). A type-only import or export
+  joins a `type` export of the same source if there is one, else a value one with an
+  inline `type`.
+- **no-thenable.** Under espree a shorthand `export {then}` is one identifier node playing
+  both roles, so it is reported twice; typescript-eslint makes two nodes and reports once.
 
-## eslint-plugin-unicorn rules (round 5, h1)
-
-`no-useless-recursion`, `no-array-from-fill`, `no-duplicate-if-branches`,
-`switch-case-break-position`, `consistent-assert`, `no-top-level-assignment-in-function`,
-`prefer-single-array-predicate`, `no-global-object-property-assignment`,
-`require-module-attributes`, `consistent-empty-array-spread`, `prefer-promise-with-resolvers`,
-`prefer-type-literal-last`, `consistent-class-member-order`, `consistent-optional-chaining`
-(each at 100% of its oracle). Each file's header states the rule as we learned it; the
-points below are the ones that are easy to get wrong. More helpers live in
-`rules/unicorn_util_h1.rs`: `unwrap_ts` (parentheses and TS wrappers, as ESTree sees through
-them), `static_string`, `is_same_reference` (same static string, `this`, `super`, name, equal
-literals, or member accesses with the same object and the same static or same computed
-property; nesting capped at 200), `logical_operands` / `is_outermost_logical` (flatten an
-`&&`/`||` chain), `token_runs` (non-space runs of a span outside comments) and `delete_all`.
-
-- **no-useless-recursion**: `return f(...)` inside the named function `f` (a plain
-  identifier resolving to the function's own name) is a loop in disguise; generators, calls
-  inside a `try`, and calls after a `using` / `await using` (whose cleanup runs after the
-  call) are left alone.
-- **no-duplicate-if-branches** compares a branch with the previous one in the chain by
-  tokens and tree shape (literals by raw text), ignoring comments, layout, empty statements
-  and a trailing `;`.
-- **switch-case-break-position**: a `break`/`continue`/`return`/`throw` after a case's only
-  block belongs inside it; only `break` and `continue` are fixed, moved before the block's
-  `}` at the indentation of its last statement, and not when a comment sits in between, the
-  block is on one line, or the statement has a trailing comment. The oracle harness
-  (`tests/rule_oracle.rs`, `config_for`) sets `reportUnusedDisableDirectives: "warn"` when a
-  case's expected messages include ESLint's "Unused eslint-disable directive" report (null
-  `ruleId`), because that report's fix shapes ESLint's output there.
-- **no-top-level-assignment-in-function** runs once per file over the Program's global and
-  module scopes: a write (not a declaration's initialiser) to a top-level binding from inside
-  a function, arrow or method is reported; `/* global */` comments declare nothing, and
-  class field initialisers and static blocks are not functions.
-- **no-global-object-property-assignment**: writes include compound and logical assignment,
-  update, destructuring targets and `for-in`/`of` heads; `delete` is not a write.
-- **prefer-promise-with-resolvers**: `new Promise<T>(...)` in a `.js` file is a comparison
-  (`new Promise < T > (...)`), so it has no argument and is not reported. The fix needs the
-  promise in a plain (not exported) single-declarator `const` in a statement list, preceded
-  only by the `let`s it replaces; a named function expression executor whose name is the
-  target resolves the assignment to that name, so the outer `let` does not match and there
-  is no fix.
-- **prefer-type-literal-last**: `null`/`undefined` stay last and unions/intersections are
-  skipped when looking for "another type", but in the fix a union or intersection member is
-  an ordinary other type. A comment between the token before the union and the token after
-  it, outside every member, drops the fix.
-- **consistent-class-member-order**: only the first out-of-order member is reported. The
-  suggestion needs comment-free bodies with every member starting its line, and refuses to
-  move a static field past a static block (or back), since both run in order.
-- **consistent-optional-chaining** reports the right side only; with `&&` any `?.` on the
-  right is unnecessary, with `||` the right must match the left.
-
-Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursion.js`,
-`rules/no-array-from-fill.js`, `rules/no-duplicate-if-branches.js`,
-`rules/switch-case-break-position.js`, `rules/consistent-assert.js`,
-`rules/no-top-level-assignment-in-function.js`, `rules/prefer-single-array-predicate.js`,
-`rules/no-global-object-property-assignment.js`, `rules/require-module-attributes.js`,
-`rules/consistent-empty-array-spread.js`, `rules/prefer-promise-with-resolvers.js`,
-`rules/prefer-type-literal-last.js`, `rules/consistent-class-member-order.js`,
-`rules/consistent-optional-chaining.js`, and the utils `get-enclosing-function.js`,
-`is-same-statement.js`, `is-same-tokens.js`, `get-indent-string.js`, `comments.js`
-(getLastTrailingCommentOnSameLine, getCommentSafeProblem), `is-same-reference.js`,
-`is-logical-expression.js`, `unwrap-typescript-expression.js`, `is-global-identifier.js`,
-`type-arguments.js`, `member-expression.js` (getMemberAccessOperatorRange),
-`fix/remove-object-property.js`, `ast/literal.js`, `ast/function-types.js`,
-`ast/call-or-new-expression.js`, `ast/matches-name-constraint.js`.
-- **Lengths that are not collection sizes** (`explicit-length-check`, from
-  `unicorn: rules/explicit-length-check.js`). `x.length` is skipped when its static value
-  isn't a safe non-negative integer, or `x` is a single-declaration variable initialised
-  with an object literal whose `length` isn't one. References to `x` before the read in the
-  same function, and every reference in another function or in conditional code (an `if`
-  branch the test doesn't decide, loop bodies, the right of `&&`/`||`/`??`, defaults,
-  `catch`, optional calls), are classified: a `for (x.length in ...)` head or an unknown
-  write makes it unknown (skip); a write of a known integer (`x.length = 3`,
-  `Object.defineProperty(x, "length", {value: 3})`, `Object.assign(x, {length: 3})`)
-  makes it a size (report); an accessor descriptor makes it unknown. A destructuring
-  default (`({length: x.length = 1} = y)`) is not a known value.
-- **DOM collections** (`prefer-at`, from `unicorn: rules/prefer-at.js`). `childNodes`,
-  `children` and the `getElementsBy*` / `querySelectorAll` calls (optional chains
-  included), and values typed `NodeList`/`NodeListOf`/`HTMLCollection`/`HTMLCollectionOf`
-  (nullish union members ignored), are not given `.at()`. Reports sit on the index without
-  its parentheses, as ESTree ranges exclude them.
-- **Regex patterns as strings** (`prefer-string-replace-all`, from
-  `unicorn: rules/prefer-string-replace-all.js`) use the crate's own `regex.rs` tree. A
-  fixed-string pattern keeps each character as written (`\n`, `\x41`, `\u{..}` stay; an
-  identity escape loses its backslash; `\cX` becomes `\r`/`\n`/`\t`/`\u{X}`; `\0`-`\7`
-  octal and null become `\u{X}`; `\8` is `8`; a lone Annex-B backslash, as in `\c_`,
-  becomes `\\`).
-- **Static regexes** (`unicorn_static::static_regexp`, `getStaticRegExp`): a regex value
-  without side effects, or a regex literal / `new RegExp(...)` of static primitive or regex
-  arguments, directly or through a never-reassigned variable, then evaluated in full.
-  `prefer-regexp-test` (from `unicorn: rules/prefer-regexp-test.js`) has no type checker,
-  so its "type information" step always answers unknown; the rule leans on annotations,
-  `const` initializers and static values. A parenthesized optional chain counts as closed
-  (ESTree makes it a whole `ChainExpression`).
-- **Arrays for spreading** (`prefer-spread`, from `unicorn: rules/prefer-spread.js` and
-  its `shared/` helpers). A receiver is an array by annotation (`T[]`, tuples,
-  `Array`/`ReadonlyArray`, `readonly`, aliases and constraints followed), an array literal
-  or an `Array(...)` call; not one by literals, templates, binary expressions,
-  class-like names, `.join()`, `String()`-style calls, `Buffer.concat`, `new X()`, the
-  non-array branch of an `Array.isArray` test, or class/interface/non-array annotations.
-  Without a type checker, every spread fix in a TypeScript file is a suggestion.
-  `mutable_member_access` walks into functions and classes (ESLint's evaluated children
-  only skip names), so `const f = () => f.concat(2)` has no fix.
-- **Known harness gap.** `unicorn/prefer-spread` is 625/626: the one failure has an
-  unused `eslint-disable-next-line` comment, and the expected output is ESLint's fix for
-  the unused directive. The oracle harness turns off `reportUnusedDisableDirectives`, so
-  that fix can't happen there; the rule's own report matches.
-
-## jsdoc type rules (round 5: valid-types, check-types, no-undefined-types, check-values)
-
-- **The type parser (`jsdoc_type.rs`).** Our own Pratt parser for JSDoc types in the
-  `jsdoc`, `closure` and `typescript` modes (`permissive` tries typescript, then closure,
-  then jsdoc). Each mode is a list of prefix and infix rules with binding powers; the
-  closure and jsdoc modes use the loose lexer (names may contain `-`, `/`, `:` and
-  similar), typescript the strict one. Results are a flat `TypeTree` (`N` nodes indexed by
-  `Id`) whose `type_name()`, child order (`children`, `walk`) and `stringify()` follow the
-  reference parser's output. `parse(text, mode, class_context)` rejects reserved words as
-  root types (`this` only outside class context), as the reference's default strict mode
-  does; the rules call it with `class_context` false except valid-types.
-  `parse_name_path(.., include_special)` and `parse_name` are the namepath and name
-  grammars. Recursion stops at depth 64 (`MAX_DEPTH`) with a failed parse; a regression
-  test checks deep nesting. Checked differentially against jsdoc-type-pratt-parser 8.0.0
-  on 635 type strings (every type in the jsdoc oracle data plus hand-written ones): tree,
-  stringify, namepath and name results agree in all 5715 comparisons (mode x entry point).
-  `JsdocTree`'s selector view still uses its own smaller parser (`parse_type`); switching it
-  over is left for a later round.
-- **Tag structure (`jsdoc_tags.rs`).** What each tag may or must carry per mode
-  (`namepathRole`, `typeAllowed`, `nameRequired`, `typeRequired`, `typeOrNameRequired`),
-  transcribed from the plugin's default structure for each mode, with
-  `settings.jsdoc.structuredTags` replacing a tag's entry. `Modes` answers "might/must" in
-  the current mode and says when only another mode would say yes, which valid-types turns
-  into `in "<mode>" mode` message suffixes.
-- **comment-parser problems.** `jsdoc::Tag::problems` holds the critical problems the
-  tokenizers stop at (`unpaired curlies`, `unpaired brackets`, `empty name`,
-  `empty default value`, `invalid default value syntax`); valid-types reports them as
-  `Invalid name: a; b` and checks nothing else on that tag.
-- **valid-types.** Per tag, in this order: problems; `@borrows` needs `x as y`; closure
-  `@suppress` names come from a fixed list; a name where the structure allows none; a type
-  where none is allowed; a missing required name (not for param/property tags, nor `@see`
-  with a `{@link`); a missing required type; a missing type-or-namepath; the type parses
-  (with class context) and, in closure/typescript mode, no object field's value is a
-  postfix-nullable type; namepaths parse (`@memberof x#`, `@module`/`@requires` without
-  `module:`, numeric jsdoc-mode properties and `@borrows .x` get one retry); in typescript
-  mode a name-defining tag's name parses as a name; inline `{@link}`-style tags have content.
-- **check-types.** Every name node of every typed tag (the type must parse) is looked up in
-  `preferredTypes`, on top of the mode's `Object` defaults (typescript: `object<>` and
-  `Object.<>` and their spellings report a "use object shorthand" message; other modes
-  prefer `Object<>`) unless the user maps any `Object` spelling. A name inside an angle
-  generic also matches the key with `.`, `.<>` or `<>` appended, and inside any generic the
-  bare `[]`/`<>`/`.<>` keys, but only with `unifyParentAndChildTypeChecks` (option or per
-  preference) or when it is the generic's own name; a preference keyed by the plain name
-  matches only at the root, unless unified. A preference that is a value of another
-  preference is not matched. Then `structuredTags` type lists, then (unless `noDefaults`)
-  native casing (`String` -> `string`, `array` -> `Array`; `object` only when the name has
-  a truthy preference and it isn't an element of `Object<..>`). The fix rewrites the
-  matched node (and its parent generic's brackets/dot for postfix preferences) and replaces
-  the first `{type}` in the comment with the reprinted tree. Non-string, non-object, truthy
-  preferences report the settings error at 1:2 and are skipped.
-- **no-undefined-types.** A name is defined when it is in: the global scope (configured
-  and built-in globals, `/* global */` comments, script-mode top-level declarations, lib
-  globals with the TS parser); the module scope (classes add `Class.member` for keyed
-  members and are "closed"; interfaces add `I.member`; namespaces add their type aliases,
-  classes, interfaces and nested namespaces and are closed; imports and `require()` are
-  noted as imports); names declared in any TS module scope; extra built-ins; namepath-
-  defining tags across the file; typescript-mode `@import` bindings; `definedTypes`;
-  preferredTypes replacements; for a method, its class's members (bare and `Class.m`);
-  top-level `Closed.x = ...` assignments; the block node's scope, the scopes above it and
-  the scopes one, three, five ... levels below it (that is what the plugin collects); and,
-  outside jsdoc mode, typescript utility globals and the `@template` names of the node and
-  its ancestors (of every block, for a block no node claims). A name followed by
-  `.prop` path parts is checked as the joined path unless the base is an import, global,
-  typedef or built-in; a path whose root is defined and not closed is fine. Type
-  parameters of function types and `infer X` don't count. `checkUsedTypedefs` reports,
-  after the file, every block whose first name-defining tag's name the *last* checked
-  block didn't use (the plugin keeps only the last block's list).
-- **check-values.** `@version`/`@since` are strict semver (`v` prefix allowed, no leading
-  zeros, numbers up to 2^53-1, at most 256 characters). `@variation` (with
-  `numericOnlyVariation`) follows JavaScript `Number()` (hex/octal/binary, exponents,
-  `Infinity`). `@license` runs `licensePattern` (`/src/flags` or a bare source with `v`,
-  always global) over the description; each match's group 1 (or the whole match) is the
-  license, and an empty match after a non-empty one ends the tag. Licenses are SPDX
-  expressions: tokens are case-insensitive `WITH`/`AND`/`OR` prefixes, `( ) : +`,
-  `DocumentRef-`/`LicenseRef-` ids and known license/exception ids (the id scanner searches
-  ahead rather than anchoring, as the reference does); `OR` binds looser than `AND`;
-  `+` may not follow a space. The id lists are data in `rules/jsdoc_check_values_spdx.txt`
-  (spdx-license-ids 3.0.24 with its deprecated list, spdx-exceptions 2.5.0). A typescript-
-  mode `@import` must read as an import statement ending in a quoted module name.
-- **Regex with captures (`regex_exec.rs`).** `match_all` runs a `crate::regex` tree with
-  capture groups, backreferences, lookahead, lookbehind (tried from every earlier start),
-  and the `i`/`m`/`s`/`g`/`y` flags, like `String.prototype.matchAll`. Quantified single
-  characters loop instead of recursing; other nesting stops at depth 400 and each attempt at
-  200,000 steps, giving "no match".
-
-Read to understand (not ported): eslint-plugin-jsdoc 63.3.3 `src/rules/validTypes.js`,
-`checkTypes.js`, `noUndefinedTypes.js`, `checkValues.js`,
-`src/buildRejectOrPreferRuleDefinition.js`, `src/getDefaultTagStructureForMode.js`,
-`src/jsdocUtils.js`, `src/iterateJsdoc.js`; jsdoc-type-pratt-parser 8.0.0 `src/` (lexer,
-grammars, parslets, stringify, visitor keys); @es-joy/jsdoccomment 0.91.0
-`src/parseInlineTags.js`; comment-parser `src/parser/tokenizers/`; spdx-expression-parse
-5.0.0 `scan.js`, `parse.js`; semver 7 `internal/re.js`. Behaviour was confirmed against
-their output, not translated.
-
-## eslint-plugin-unicorn rules (round 5, h2)
-
-`no-asterisk-prefix-in-documentation-comments`, `no-canvas-to-image`, `no-transition-all`,
-`no-ineffective-csp-directives`, `prefer-array-last-methods`, `prefer-then-catch`,
-`prefer-object-destructuring-defaults`, `no-undeclared-class-members`,
-`prefer-flat-math-min-max`, `no-this-outside-of-class`, `no-confusing-array-with`,
-`no-late-current-target-access` (each at 100% of its oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
-the initialiser of the plain `const` it names when that is declared once before the use and
-read only there; the declaration's initialising write is one of its two references) and
-`decode_jsx_entities` (JSX attribute strings with `&#45;`, `&#x2D;` and the HTML 4 names
-plus `&apos;` decoded, as ESTree parsers give their value; our AST keeps the raw text) and
-`remove_method_call` (the edits turning `obj.name(...)` into `obj`: from the end of the
-parenthesized object to the end of the member, and from the end of the parenthesized callee
-to the end of the call), `has_side_effect_strict` (eslint-utils' `hasSideEffect` with
-`considerGetters` and `considerImplicitTypeConversion`: every member access, converting
-unary/binary operators unless all operands are literals, non-literal computed keys; tagged
-templates are not side effects there, and function bodies are not entered), `plain_key_name`,
-`line_start`/`line_indent`, and `indent_unit` (the plugin's `getIndentUnit` over
-`detect-indent`: the most used indentation change between consecutive non-empty lines, single
-spaces ignored unless nothing else is found, continuation lines of comments, strings,
-template chunks and JSX text blanked; a tab when the winner is not spaces or there is none).
-
-- **no-asterisk-prefix-in-documentation-comments** looks at `/**` (not `/***`) block comments
-  that span lines and start a line (only spaces and tabs before them). Every line after the
-  first that is `<indent><spaces>*` loses the asterisk and one following space (` */` becomes
-  `*/`); the indentation all non-blank lines then share, when it is deeper than the comment's,
-  is moved back to the comment's, which also empties whitespace-only lines. When only some
-  content lines have the asterisk nothing is reported: they may be Markdown list markers.
-  Lines split at `\n`, `\r`, U+2028 and U+2029 (`\r\n` counts as a break and an empty line).
-- **no-canvas-to-image** reports the first argument of a plain `x.drawImage(...)` that is
-  (through `await`s and a single-use `const`) `loadImage(<canvas>.toDataURL())`, where the
-  receiver is an identifier or a `.name` whose name contains `canvas` (any case), and of
-  `x.putImageData(...)` that is `y.getImageData(...)`; optional chaining anywhere opts out.
-- **no-transition-all** reports only with type information: the receiver of `.transition =`,
-  `.transitionProperty =` or `.setProperty('transition' | 'transition-property', value,
-  priority?)` must be the lib's `CSSStyleDeclaration`/`CSSStyleProperties` (every non-nullish
-  member of a union), the value a static string whose top-level CSS components include the
-  identifier `all` (escapes decoded, any case; not inside a function such as `var()`; `!`
-  means it is not a plain value), and the priority missing, `''`, `important` or not a
-  literal. Its oracle cases carry no type information, so they all expect nothing; the CSS
-  file half of the plugin rule needs a CSS language.
-- **no-ineffective-csp-directives** checks JSX only (the HTML half needs an HTML language):
-  `<meta>` (lowercase identifier) without spreads, exactly one `httpEquiv`/`http-equiv` and
-  exactly one `content`, each a string or a container whose control-flow static value is a
-  string; header `content-security-policy` in any case; each of `frame-ancestors`, `sandbox`,
-  `report-uri` reported once per element on the `content` value, in policy order.
-- **prefer-array-last-methods** reports the property of a plain `.find`/`.findIndex`/
-  `.indexOf`/`.reduce` call on a plain argument-less `.reverse()`/`.toReversed()` call; the
-  suggestion renames it (`findLast`, `findLastIndex`, `lastIndexOf`, `reduceRight`) and
-  removes the reversing call, unless a comment lies in that call outside its receiver.
-- **prefer-then-catch** reports `.then` of a plain two-argument `then` call without spreads
-  where neither handler is nullish (`null`, `void x`, the unshadowed `undefined`, through TS
-  wrappers). With type information the non-nullable receiver must be `any`/`unknown`/an error
-  type, or the lib's `Promise` (some declaration in a lib file, so a user augmentation still
-  counts) whose `then` result has a callable `catch` on every union member. The suggestion
-  needs an identifier or function handler: it removes the comma before it (and a trailing
-  comma) and appends `.catch(<handler with its parentheses>)` after the call; a comment
-  outside the handler in the removed range, or right after the handler or its comma, drops it.
-- **prefer-object-destructuring-defaults** reports a declarator `{a, b: c} = {a: 1, b: 2,
-  ...rest}` (no type annotation; init an object literal through parentheses): every pattern
-  property a non-computed key with a plain identifier binding and no default, no
-  `Object.prototype` name; every object property but the last a non-computed `key: value` or
-  shorthand with a strictly side-effect-free value, names unique; the last a side-effect-free
-  spread; one default per pattern property, none referring to a binding name. The suggestion
-  (`{a = 1, b: c = 2} = {...rest}`, defaults with their parentheses) is dropped when the
-  declarator holds a comment.
-- **no-undeclared-class-members** runs once per file. A `this.x` belongs to the class whose
-  member list contains it on the way up, unless a function that is not a class method's value
-  (object-literal methods count as functions) comes first; heritage and class decorators pass
-  through to the outer class. Classes with `extends` are skipped. Declared: `constructor`,
-  non-static methods/accessors/fields by static key name (identifier, string, expression-free
-  template, also computed), parameter properties, and `this.x =` in the constructor body
-  outside nested functions and classes. Not reported in static members or blocks, keys and
-  decorators. The suggestion (first plain `=` target per name, not in the constructor) inserts
-  `<indent>x;` at the start of the line of the first member or the comment just before it,
-  unless that is the `{` line; the indent is the whitespace before the first member, or the
-  class line's indent plus `indent_unit`.
-- **prefer-flat-math-min-max** reports the outermost plain `Math.min(...)`/`Math.max(...)`
-  (`Math` an identifier, parentheses transparent) with an argument that is the same method's
-  call, and not itself an argument of one. The fix writes the callee text (without its
-  parentheses) and every argument of the flattened nest with its parentheses, and spaces a
-  glued keyword (`return(Math.max)(...)`); a comment outside the callee and the kept
-  arguments cancels it.
-- **no-this-outside-of-class** walks up from `this` past arrows: the first non-arrow function
-  decides (a class method's value, or a function with a `this` parameter, is allowed); before
-  that, a static block or a class field's value allows it. Object-literal `MethodDef`s are
-  functions here, so their `this` is reported. `this` named by a `typeof` type query
-  (through qualified names) is skipped.
-- **no-confusing-array-with** reports `.with` of a plain `x.with(i, ...)` with a non-spread
-  first argument that is a number literal under any `+`/`-` signs and TS wrappers whose
-  truncation is negative (`negative-index`), or `x.length` of the same reference
-  (`length-index`), unless `should_skip_known_non_array_receiver` says the receiver isn't an
-  array.
-- **no-late-current-target-access** checks `<name>.currentTarget` (object an identifier
-  through TS wrappers; `e`, `event`, `evt` or `[a-z][A-Za-z0-9]*Event`) whose binding has a
-  parameter declaration, unless the type guesser says it is not an event (an `EVENT`
-  `Checker` with the DOM event interfaces and React's event names, definitions preferred).
-  Inside a function nested in the declaring one it is `in-nested-function`; in the handler
-  itself it is `after-suspension` when an `await`, `yield` or `for await` of the handler
-  (not of nested functions) ends before the access starts (ESLint marks them on exit), or
-  when the access is in a loop part that repeats (`for` test/update/body, `for-in`/`for-of`
-  except the iterated expression, `while`, `do`) and that loop contains a suspension point.
-
-Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/`:
-`no-asterisk-prefix-in-documentation-comments.js`, `no-canvas-to-image.js`,
-`no-transition-all.js`, `no-ineffective-csp-directives.js`, `prefer-array-last-methods.js`,
-`prefer-then-catch.js`, `fix/remove-method-call.js`, `fix/replace-member-expression-property.js`,
-`fix/remove-argument.js`, `prefer-object-destructuring-defaults.js`,
-`no-undeclared-class-members.js`, `shared/class-this.js`, `prefer-flat-math-min-max.js`,
-`no-this-outside-of-class.js`, `ast/is-in-type-query.js`, `no-confusing-array-with.js`,
-`utils/numeric.js`, `utils/comparison.js`, `no-late-current-target-access.js`,
-`shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
-`utils/get-enclosing-function.js`, `utils/get-line-start.js`,
-`utils/reindent-text.js`, `utils/types.js`, `utils/comments.js`, `utils/get-references.js`,
-`utils/get-indent-string.js`, `utils/get-indent-unit.js`, `utils/get-line-indent.js`;
-@eslint-community/eslint-utils 4.10.1 `hasSideEffect`; detect-indent 7.0.2 `index.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's
-JSX parser decodes); only numeric references appear in the oracle.
-
-## eslint-plugin-unicorn rules (round 5, h5)
-
-Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its oracle, all
-`NO_PRESET`. Shared helpers are in `rules/unicorn_util_h5.rs`: `would_remove_comments` (a
-comment wholly inside the replaced range and outside every kept range), `expression_text` /
-`call_argument_text` (a node's text without redundant parentheses unless those hold a
-comment; a sequence is wrapped when it becomes one argument), `call_parens` /
-`call_arguments_text` (the argument list's `(`, `)` and inner text), `operator_after`,
-`has_side_effect` (eslint-utils' default: calls, `new`, writes, `await`, `yield`, `delete`;
-member reads don't count). What we learned, in our words:
-
-- **require-number-to-fixed-digits-argument**: a `.toFixed()` call without arguments (not
-  an optional call, not on a `new` expression) is reported from `(` to `)`; the fix puts `0`
-  before the `)`, after any comment.
-- **prefer-math-trunc**: `x | 0`, `>> 0`, `<< 0`, `^ 0` (any spelling of a zero literal,
-  quoted raw in the message), their compound assignments, the innermost `~~`, and
-  `[Number.]parseInt(String(x), 10)` with the globals. All suggestions; withheld when a
-  comment outside the copied operand would be lost (compound assignments copy the left side
-  into `Math.trunc(...)` and replace the operator by `=`, so they also need it free of side
-  effects).
-- **prefer-code-point**: `charCodeAt` calls are suggested `codePointAt` unless the result is
-  used as a number (climbing parentheses, logical operators, TS wrappers and `?:` branches,
-  the parent is arithmetic/bitwise, unary `+ - ~`, or an arithmetic compound assignment's
-  right side); `String.fromCharCode` always gets `fromCodePoint`.
-- **prefer-reflect-apply**: `fn.apply(null | this, [..] | arguments)` and
-  `Function.prototype.apply.call(fn, ...)` (non-optional calls of non-optional members;
-  static string keys count) become `Reflect.apply(fn, recv, list)`. Literal, array/object
-  literal and `super` receivers are skipped, as is a receiver chain with an optional link
-  outside parentheses (`a?.b.apply`). The fix is dropped when a comment lies outside the
-  target, receiver and list.
-- **prefer-prototype-methods**: the first argument of `Reflect.apply` or the object of
-  `.apply/.bind/.call`: `[].x`/`{}.x` (key evaluated with `const`s and well-known symbols,
-  `Symbol(Symbol.iterator)`), or a global read of an `Object.prototype` method (configured
-  global, or a member of the global object via `unicorn_util::is_global_object`, with a
-  key static without variables, since the reference tracker evaluates in the global
-  scope). No fix with a comment inside the replaced node.
-- **prefer-native-coercion-functions**: `v => String(v)` (also `Number`, `BigInt`,
-  `Boolean`, `Symbol`, written as the callee, TS wrappers dropped) and identity callbacks
-  of `.some()`-like methods (`Boolean`). Names and heads follow eslint-utils, not ESLint
-  (`utils_function_name_with_kind`: class fields holding functions are methods, an object
-  property's function is a method, `export default` is `'default'`;
-  `utils_function_head_span`: a computed key's function starts at its property). Fixes:
-  `foo: Name` for object methods, ` = Name;` for class methods (suggestion), a `;` when a
-  token on a later line, outside the parent, could continue the identifier.
-- **prefer-dom-node-append**: `x.appendChild(y)` with one non-spread argument, where
-  neither side is a value that can't be a node (`is_value_not_dom_node`: literals,
-  functions, classes, arrays, objects, templates, `undefined`), is reported as a whole; the
-  rename to `append` is a fix only when the value is unused (`is_value_not_usable`: an
-  expression statement, or a non-last sequence element), since `append` returns `undefined`.
-- **prefer-negative-index**: `slice`/`subarray` (arguments 0, 1), `splice`/`toSpliced`/`at`
-  (argument 0), called directly or as `Owner.m.call(x, ..)` / `Owner.m.apply(x, [..])` with
-  owner `[]`, `''` (slice only) or `Name.prototype` of a global that has the method. An
-  identifier key counts even when computed (`x[slice]`). An argument `x.length - n` (`n` a
-  positive safe integer literal; nested subtractions recurse into the left side) on the same
-  reference as the receiver (`is_same_reference`: identifiers, `this`, literals by value,
-  static keys by value, through TS wrappers) is reported on the call. The fix deletes the
-  parenthesized `x.length` plus following whitespace, and the whitespace between `-` and the
-  number; no fix with a comment inside the access. Only `length - 1` everywhere is a fix
-  (the same for any length); larger offsets are suggestions.
-- **prefer-add-event-listener**: any assignment to a non-computed `x.on<event>` (known DOM
-  event list) is reported at the property; `null`/`undefined`/`void` (through TS wrappers)
-  ask for `removeEventListener`. `beforeunload` without a block-bodied function free of
-  value `return`s, `message` and `error` get extra notes and no fix. The fix (plain `=` as
-  an expression statement, a value that can be a function, no comment outside receiver and
-  handler, and no other assignment in the file to the same reference) writes
-  `obj.addEventListener('event', handler)`, parenthesizing a receiver that would start the
-  statement with `{`/`class`/`function`/`let [`. A `require`/`import` of an excluded package
-  (`koa`, `sax` by default) turns it off for assignments that end after it, so the rule runs
-  as a `run_file` scan in source order.
-- **prefer-set-size**: `[...x].length` (one spread) and `Array.from(x).length` (one
-  argument, nothing optional) with `x` a `Set` per `unicorn_types::is_set`; not when the
-  `.length` is written (`is_left_hand_side`: assignment/update targets, destructuring,
-  `for` heads, `delete`). The fix renames to `size` and writes `x` as a member object
-  (`member_object_text`; extra parentheses inside an unparenthesized `new` callee when the
-  chain ends in a call; a `;` from `needs_semicolon`), unless the array has more comments.
-- **prefer-array-index-of**: `findIndex`/`findLastIndex` with one callback that is a
-  plain (non-async, non-generator) arrow/function of one identifier parameter returning
-  `p === v` or `v === p` (concise body or a lone `return`). Skipped for receivers
-  `should_skip_known_non_array_receiver` rejects, when the parameter has any other
-  reference, or a function expression uses `this`/`arguments` outside nested functions or
-  its own name. Fix: rename and replace the callback with `v` (wrapped when `v` was
-  parenthesized and the callback wasn't); a suggestion when `v` has side effects; nothing
-  with a comment in the callback. `simple_array_search` is shared (prefer-includes's
-  `some` form uses the same shape).
-- **prefer-array-some** (373/377): `find`/`findLast` (1–2 arguments, nothing optional, no
-  type arguments) compared with `undefined`/`null`, used for truthiness
-  (`is_boolean_context`: `!`, `Boolean()`, control-flow tests, through `&&`/`||` only, not
-  TS wrappers), or stored in a lone unannotated, unexported `const` whose reads are all
-  boolean uses (only `Boolean(x)` when the receiver isn't known to be indexed): always a
-  suggestion. `findIndex`/`findLastIndex` against `-1`/`0`: fixed by deleting from just
-  after the token or comment before the operator and adding `!` for `===`/`==`/`<`
-  (parenthesized as a member object, callee, tag, superclass or `**` base; no fix after a
-  line comment or with a comment inside); `findLastIndex` only fixes side-effect-free
-  inline callbacks. `filter(f).length > 0`/`!== 0` (raw `0`; not `$x`, not a non-function
-  argument): fixed for side-effect-free callbacks, else suggested. The 4 failures are
-  `x < 0 as any ** 2`: ESLint's TypeScript 5 parser accepts it, tsc 7 (and our parser)
-  report TS1005.
-- **prefer-array-flat-map**: `x.map(f).flat()` / `.flat(1)` (raw `1`), not on
-  `React.Children`/`Children` or known non-arrays, reported from `map` to the call's end;
-  fixed (remove `.flat()`, rename) when `f` is an arrow returning an array literal or a
-  side-effect-free inline function, suggested otherwise, nothing with comments outside the
-  `map` call or type arguments. `x.filter(p => t).flatMap(p => [a, b])` (plain untyped
-  expression arrows on the same name, 2+ elements, no optional link in `x`) suggests
-  `x.flatMap(p => t ? [a, b] : [])`, wrapping a test that is an arrow, assignment, class,
-  `?:`, function, object, sequence, TS wrapper or `yield`.
-- **prefer-array-flat**: `a.flatMap(x => x)` (not on a PascalCase identifier unless it is
-  a `const` array literal / `new Array`, nor a `const` holding an object, literal, template,
-  function, class or other `new`), `a.reduce((x, y) => x.concat(y), [])`, `[].concat(...a)`,
-  `[].concat.apply([], a)` / `Array.prototype.concat.call([], ...a)`, and one-argument
-  calls of `_.flatten`/`lodash.flatten`/`underscore.flatten` plus the `functions` option
-  (trimmed dotted paths). Each matching form reports once. Skips arrays
-  `is_known_non_array` accepts and `arguments`; the fix writes `<a>[?].flat()` when the
-  call has no comment outside the array.
-- **require-array-join-separator**: `x.join()` (receiver not a known non-array) and
-  `[].join.call(x)` / `Array.prototype.join.call(x)`, reported from the empty call's `(` (or
-  the end of the last argument token) to `)`; the fix inserts `','` before `)`.
-- **no-unreadable-array-destructuring**: array patterns (binding `ArrayPattern`s and array
-  literals that are assignment targets) with more consecutive holes than
-  `maximumIgnoredElements` (default 1); the report covers a type annotation on the
-  pattern. A declarator with an initializer and one non-default element (no annotation, an
-  indexable initializer, no comment outside the element) is fixed to `x = init[i]` /
-  `init.slice(i)`. Members whose nearest pattern (through TS wrappers, defaults, rest; an
-  object pattern stops) is an array pattern are reported as property assignments.
-- **prefer-dom-node-remove**: `parent.removeChild(child)` (one argument, not an optional
-  call, neither side a non-node value) is reported. With a side-effect-free parent and an
-  unused value it is fixed: `x.parentNode.removeChild(x)` replaces everything after `x`
-  with `[?].remove()` (not when the callee or `parentNode` is parenthesized), other
-  non-optional parents become `child.remove()`. Otherwise suggestions: `?.remove()` and
-  `.remove()` when the callee/parent member chain has an optional link, else `.remove()`.
-  Any comment in the call blocks fixes and suggestions.
-- **prefer-modern-dom-apis**: `p.replaceChild(a, b)` / `p.insertBefore(a, b)` on plain
-  identifiers (not `undefined`) become `b.replaceWith(a)` (fix) / `b.before(a)`
-  (suggestion; `insertBefore(x, null)` appends) when the value is unused; `r.insertAdjacent
-  Text|Element(pos, x)` with a known static position and a literal/identifier/static-string
-  `x` becomes `before`/`prepend`/`append`/`after` (not when an `insertAdjacentElement`
-  result is used); `while (p.firstChild) p.firstChild.remove();` becomes
-  `p.replaceChildren();` unless `p` has an optional link anywhere, can't be a node, or the
-  syntax checker (a `unicorn_types::Checker` with class syntax, `ParentNode`-like targets,
-  `Node`/`Text`/`Window`... non-targets, `window`/`self`/`globalThis` globals) rules it out.
-  `expression_start_needs_parens` now treats a statement replacement (the `while`) as a
-  statement start.
-- **prefer-query-selector**: `getElementById` / `getElementsBy{ClassName,TagName,Name}`
-  with one argument on a possible DOM node; `[0]` / `.at(0)` / `.item(0)` after an `All`
-  call turns it into `querySelector` and goes. Fixed only when the argument is `null` or a
-  non-blank static string whose value the selector reads the same (simple CSS identifiers;
-  `ByName` without quotes, backslashes or line breaks); the selector is `#id`, `.a.b`,
-  the tag or `[name='v']` (opposite quote), behind `:scope ` off `document`.
-- **prefer-dom-node-text-content**: `x.innerText` and a non-computed `innerText` key in a
-  binding pattern or an assigned object literal, unless a `unicorn_types::Checker` with
-  unicorn's DOM node names says the object (the typed parameter, the declarator's
-  annotation or initializer, the assignment's right side) is not a node. The suggestion
-  keeps a shorthand binding (`{textContent: innerText}`).
-- **prefer-keyboard-event-key**: `e.keyCode` / `charCode` / `which` on a plain parameter
-  of an enclosing `addEventListener(type, cb)` callback, JSX `onKey*` handler or
-  `KeyboardEvent`-annotated parameter (resolved through the scope's symbols; parameters the
-  checker knows are other events skipped), and those keys destructured from it. Only
-  `if (e.keyCode === N)` is fixed, from the virtual-key table and the code point; layout
-  dependent letters and non-listener contexts get a suggestion. Outside ASCII, "printable"
-  (letter, number, punctuation, symbol) is approximated with Rust's alphabetic/numeric
-  classes minus whitespace, control, format, private-use and combining-mark ranges.
-- **no-array-method-this-argument**: the `thisArg` of `every`...`some` (two arguments; not
-  library callees like `_.map` / `React.Children.forEach`, not a non-function callback, not
-  a known non-array receiver via `should_skip_known_non_array_receiver`) and of
-  `Array.from` / `Array.fromAsync` (three). Removal (from the comma before it) is a fix for
-  an arrow callback with an identifier/literal/`this`/static-string `thisArg`, otherwise a
-  suggestion; non-arrow callbacks also get `cb.bind(t)`.
-- **prefer-string-raw**: one-line strings / untagged templates whose only escapes are `\\`
-  (and the string's own quote) become ``String.raw`...` ``, except where a literal is
-  required (keys, module sources/specifiers, import attributes, JSX attribute values, enum
-  members, module names, literal and import types, abstract/signature keys), Jest inline
-  snapshots and `as const`. With the TypeScript grammar or a `.ts`-family name (no type
-  information) only `let`/`var` without annotation and `: string` declarators are fixed;
-  the rest get a suggestion. ``String.raw`...` `` without a backslash loses its tag (`'...'`
-  unless it has expressions or line breaks), with ASI `;`, `return`/`throw`/`yield`
-  parentheses when the template starts on a later line, and the tag's parentheses removed.
-- **prefer-default-parameters**: `x = x || v` / `??` / `||=` / `??=` statements in a function
-  body for its last plain parameter, and (`checkFallbackExpressions`) bindings whose every
-  read is `x ?? v` / `x || v` with one operator and one default, through the scope's symbols
-  and references. eslint-scope's "same definition node" is the function for parameters
-  (our `Decl.node` is the `Param`) and the declarator for variables. Defaults are static
-  literals (`-n` included, compared like `Object.is`, bigints by value) or an earlier,
-  never-reassigned binding of the same declaration; without type information every default
-  counts as compatible. Spans follow typescript-eslint: a parameter binding covers its `?`
-  and type annotation.
-- **prefer-object-from-entries**: `pairs.reduce(o => ({...o, k}) | Object.assign(o, {k}),
-  {})` (the accumulator referenced once, one plain non-`__proto__` property, receiver not a
-  known non-array) is fixed to `Object.fromEntries(pairs.map(...))`; `const o = {};` with
-  the next statement `for (const [k, v] of pairs) o[k] = v;` becomes
-  `Object.fromEntries(pairs)` with the loop removed (`remove_statement`, unicorn's
-  `removeStatement`: a `;` when ASI needs one, else the statement's own lines); one-argument
-  `_.fromPairs` / `lodash.fromPairs` / configured `functions` calls are renamed.
-- `unicorn/dom-node-dataset` (338/338): default mode reports `set/remove/hasAttribute`
-  (no `?.` on the member) and `getAttribute` (not awaited) with a static `data-*` name on a
-  receiver not known to be a non-DOM value or the global `document`, skipping names that
-  map to inherited `Object.prototype` members; the `.dataset` rewrite is a fix, a suggestion
-  for `getAttribute`. `preferAttributes` reverses it. A `x?.dataset` that ends the chain is
-  an ESTree `ChainExpression`, not a member, so `'k' in el?.dataset`, `Object.hasOwn(el?.dataset, …)`
-  and `const … = el?.dataset` are not reported, while `el?.dataset.k` is. A default
-  `[el.dataset.k = 1] = a` is a pattern, not a write. Computed keys are evaluated without a
-  scope (`dataset[k]` is never known, `dataset['a' + 'b']` is). The `const data = el.dataset`
-  suggestion inlines every `data.k` read and needs the element name to resolve to the same
-  never-reassigned binding at each use. Added `escape_string` (quote-js-string's escapes),
-  `is_identifier_name`, `indent_before` and `linebreak` to `unicorn_util_h5.rs`.
-- `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
-  not count tagged templates; `has_possible_side_effect` adds tagged templates and
-  spreads anywhere, like unicorn).
-- Shared parenthesization helpers in `unicorn_util_h5.rs`: `expression_start_needs_parens`
-  (a `{`/`class`/`function`/`async function`/`let [` start moved to a statement, arrow
-  body, `export default` or `for` init), `member_object_needs_parens` /
-  `member_object_text`, `in_unparenthesized_new_callee`, `member_on_needs_new_parens`, and
-  `needs_semicolon` (from the token before the insertion point: the statement it ends,
-  `]`, `)` except a control statement's head, a function/class expression's `}`, literals,
-  object literals, template ends, `!`, identifiers other than `for-of`'s `of` and
-  `await`).
-Read to understand (not ported), eslint-plugin-unicorn `rules/`:
-`require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
-`prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `prefer-modern-dom-apis.js`, `prefer-query-selector.js`, `prefer-dom-node-text-content.js`, `prefer-keyboard-event-key.js`, `no-array-method-this-argument.js`, `fix/remove-argument.js`, `prefer-string-raw.js`, `prefer-default-parameters.js`, `prefer-object-from-entries.js`, `shared/for-of-collection-loop.js`, `fix/remove-statement.js`, `utils/get-sibling-node.js`, `dom-node-dataset.js`, `utils/escape-string.js` (and `quote-js-string`), `utils/get-indent-string.js`, `utils/member-expression.js`, `utils/needs-semicolon.js`, `utils/is-string-literal-required.js`, `shared/is-jest-inline-snapshot.js`, `utils/get-unparenthesized-keyword-argument-parent.js`, `fix/add-parentheses-to-return-or-throw-expression.js`, `shared/event-keys.js`, `utils/is-dom-node.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement,is-node-matches,comments,get-const-variable-initializer,array-or-object-prototype-property,get-parent-pattern,single-statement,should-report-replace-children-receiver}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
-`@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
-`getFunctionHeadLocation`, `ReferenceTracker`).
+Read to understand (not ported), all from eslint-plugin-unicorn 79.0.0 `rules/`: the 24
+rule files of the list above, plus `utils/get-available-variable-name.js`,
+`fix/rename-variable.js`, `fix/replace-reference-identifier.js`,
+`utils/get-switch-case-head-location.js`, `utils/get-indent-string.js`,
+`utils/get-linebreak.js`, `utils/comments.js`,
+`fix/replace-node-or-token-and-spaces-before.js`, `utils/eslint-directive.js`,
+`utils/needs-semicolon.js`, `utils/get-unparenthesized-keyword-argument-parent.js`,
+`fix/add-parentheses-to-return-or-throw-expression.js`,
+`utils/should-add-parentheses-to-expression-statement-expression.js`,
+`utils/is-logical-expression.js`, `ast/is-method-call.js`,
+`ast/call-or-new-expression.js`, `ast/is-empty-node.js`, `ast/is-undefined.js`,
+`utils/unwrap-typescript-expression.js`, `fix/remove-spaces-after.js`,
+`fix/remove-parentheses.js`, `utils/escape-string.js`,
+`utils/is-in-unparenthesized-new-expression-callee.js`,
+`utils/get-enclosing-function.js`, `utils/is-known-non-iterable.js`,
+`fix/replace-member-expression-property.js`, `utils/numeric.js`,
+`utils/get-class-head-location.js`, `utils/get-call-argument-text.js`,
+`utils/get-concise-arrow-body-text.js`, `utils/get-expression-text.js`,
+`utils/get-precedence.js`, `utils/should-add-parentheses-to-await-expression-argument.js`,
+`utils/single-statement.js`, `utils/is-same-reference.js`,
+`utils/has-possible-side-effect.js`, `utils/is-side-effect-free-function.js`,
+`utils/reindent-text.js`, `utils/block-scope.js`, `utils/is-promise-type.js`,
+`utils/is-call-expression-value-discarded-with-void.js`, `fix/remove-specifier.js`,
+`utils/imports.js`, `utils/is-node-contains-lexical-this.js`, `utils/get-references.js`,
+`utils/comparison.js`, `utils/is-reference-context.js`, `utils/is-typescript-file.js`,
+`fix/remove-argument.js`, `fix/fix-space-around-keywords.js`,
+`utils/is-strong-precedence-node.js`, `utils/is-function-self-used-inside.js`,
+`ast/is-reference-identifier.js`, `utils/function-body.js`,
+`utils/is-node-value-not-function.js`, `utils/array-or-object-prototype-property.js`,
+`utils/has-optional-chain-element.js`, `utils/get-const-variable-initializer.js`,
+`utils/get-indent-unit.js`, `utils/get-line-indent.js`; and from
+`@eslint-community/eslint-utils`, `hasSideEffect`, `getFunctionHeadLocation` and
+`getFunctionNameWithKind`.
