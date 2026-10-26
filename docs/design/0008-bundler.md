@@ -192,7 +192,7 @@ linked batch runs under Node.
 
 ### Results (M3, Apple M-series, 4 threads)
 
-- esbuild oracle: 852 of 881 compared cases pass (96.7%), 13 of the 29 failures intended
+- esbuild oracle: 854 of 881 compared cases pass (96.9%), 13 of the 27 failures intended
   differences where ts-r-build follows tsc 7; see the oracle README.
 - A private app's server-rendered smoke entry (1983 modules; historical, no longer run):
   ts-r-build 65 ms without and 55 ms with the persistent cache, esbuild 86 ms; +2.7% size.
@@ -220,7 +220,7 @@ linked batch runs under Node.
 - `var` declarations nested in blocks of a lazily wrapped ESM module stay inside its closure.
 - No `--mangle-props`, no `--drop`, no `--pure`, no `--keep-names`.
 - Not implemented: `import defer`/`import source`, glob `require`/`import()` of template
-  strings, Yarn PnP. Missing
+  strings, Yarn PnP module resolution (only a tsconfig `extends` goes through PnP). Missing
   diagnostics: assignments to imports and constants, export cycles, strict `package.json`
   JSON. The oracle README lists the remaining failures by cause.
 - Minified output is 2.9% smaller than esbuild's in total over the top npm packages (median

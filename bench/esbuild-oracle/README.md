@@ -30,10 +30,10 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-wip/v1-emit at 9293c3c (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**852 of 881 compared cases pass (96.7%)**; 189 of the 1070 cases are skipped. Of the 29 failures, 13 are
+v1/resolve at 45ab2ad (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**854 of 881 compared cases pass (96.9%)**; 189 of the 1070 cases are skipped. Of the 27 failures, 13 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
-artifacts; the other 8 are gaps. The esbuild test files come from
+artifacts; the other 6 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
 Since 07d2cdd (832 of 872): dead `switch` cases, `@__NO_SIDE_EFFECTS__` and pure calls with
 spread arguments in DCE; top-level await in lazily initialized modules; CommonJS imports run
@@ -57,7 +57,7 @@ tests' `Defines` lists to `--define`, so 9 more cases are compared (8 pass).
 | bundler_splitting_test.go | 22 | 1 | 0 |
 | bundler_ts_test.go | 66 | 4 | 18 |
 | bundler_tsconfig_test.go | 68 | 3 | 9 |
-| bundler_yarnpnp_test.go | 0 | 2 | 1 |
+| bundler_yarnpnp_test.go | 2 | 0 | 1 |
 
 ### Intended differences (13): ts-r-build follows tsc 7
 
@@ -104,12 +104,10 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
 - `SplittingMinifyIdentifiersCrashIssue437`: the output differs only in which short name the
   minifier picks (`o` vs `f`), which shows in a thrown error.
 
-### Gaps (8)
+### Gaps (6)
 
 - **CSS** (5): CSS modules imported from JS, CSS-from-JS missing-import errors, and the
   `[ext]` placeholder in entry names with CSS bundles (`MetafileCSSBundleTwoToOne`).
-- **Yarn PnP** (2): a tsconfig `extends` that names a package resolved through
-  `.pnp.data.json`.
 - **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
   the enum, so `c = d` with `d=b` refers to the member `b`; ts-r substitutes after.
 
@@ -136,3 +134,4 @@ stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and
 | parity/bundler-2 at 07d2cdd: `data:` URL modules, `?query` suffixes, per-chunk `file` URLs, `--public-path` for chunks, `import()`-only modules named like chunks | 1070 | 872 | 832 | 40 | 198 | 95.4% |
 | v1 build parity at e5b1e2c: DCE of dead `switch` cases and `@__NO_SIDE_EFFECTS__`, async lazy modules, CommonJS imports in order, top-level `this`, `let`/`const`/`class` to `var`, unwrapped CommonJS entries, `define` on `import.meta` / optional chains; runner maps `Defines` | 1070 | 881 | 851 | 30 | 189 | 96.6% |
 | v1 emit parity at 9293c3c: async `super` below ES2017 (optional `super` calls, `super` in nested class keys) | 1070 | 881 | 852 | 29 | 189 | 96.7% |
+| v1 resolve parity at 45ab2ad: tsconfig `extends` of a package through Yarn PnP's `.pnp.data.json` | 1070 | 881 | 854 | 27 | 189 | 96.9% |
