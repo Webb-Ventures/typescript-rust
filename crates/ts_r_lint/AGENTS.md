@@ -773,3 +773,10 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   identity escape loses its backslash; `\cX` becomes `\r`/`\n`/`\t`/`\u{X}`; `\0`-`\7`
   octal and null become `\u{X}`; `\8` is `8`; a lone Annex-B backslash, as in `\c_`,
   becomes `\\`).
+- **Static regexes** (`unicorn_static::static_regexp`, `getStaticRegExp`): a regex value
+  without side effects, or a regex literal / `new RegExp(...)` of static primitive or regex
+  arguments, directly or through a never-reassigned variable, then evaluated in full.
+  `prefer-regexp-test` (from `unicorn: rules/prefer-regexp-test.js`) has no type checker,
+  so its "type information" step always answers unknown; the rule leans on annotations,
+  `const` initializers and static values. A parenthesized optional chain counts as closed
+  (ESTree makes it a whole `ChainExpression`).

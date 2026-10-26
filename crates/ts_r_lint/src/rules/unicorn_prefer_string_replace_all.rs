@@ -17,7 +17,7 @@
 //!   the call holds a comment.
 
 use super::prelude::*;
-use super::unicorn_static::{Static, static_value, static_value_no_side_effects};
+use super::unicorn_static::static_regexp;
 use super::unicorn_text::{has_comment_in, member_object_text, static_string_value};
 use super::unicorn_types::is_known_non_string;
 use crate::regex::{self, Flags, RId, RKind, Regex};
@@ -337,78 +337,6 @@ fn is_regexp_escape_call(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
         && static_string_value(ast, skip_parens(ast, replacement)).as_deref() == Some("\\$&")
 }
 
-fn is_safe_constructor_argument(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
-    !matches!(cx.node(id), Node::Spread { .. })
-        && matches!(
-            static_value_no_side_effects(cx, id),
-            Some(
-                Static::RegExp { .. }
-                    | Static::Null
-                    | Static::Undefined
-                    | Static::BigInt(_)
-                    | Static::Bool(_)
-                    | Static::Num(_)
-                    | Static::Str(_)
-            )
-        )
-}
-
-fn regexp_constructor_args(ast: &Ast, id: NodeId) -> Option<&[NodeId]> {
-    match *ast.node(skip_parens(ast, id)) {
-        Node::New { callee, args, .. } if ident_name(ast, callee) == Some("RegExp") => {
-            Some(ast.list(args))
-        }
-        _ => None,
-    }
-}
-
-/// The initializer of a single-definition plain-name variable that is never reassigned.
-fn unwritten_variable_initializer(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
-    let ast = cx.ast();
-    if !matches!(ast.node(id), Node::Ident { .. }) {
-        return None;
-    }
-    let sem = cx.semantic();
-    let sym = sem.symbol(sem.symbol_of_ident(id)?);
-    let [decl] = sym.decls.as_slice() else {
-        return None;
-    };
-    let Node::VarDeclarator {
-        name,
-        init: Some(init),
-        ..
-    } = *ast.node(decl.node)
-    else {
-        return None;
-    };
-    let written = sym.refs.iter().any(|&r| {
-        let r = sem.reference(r);
-        r.is_write() && !r.flags.contains(RefFlags::INIT)
-    });
-    (name == decl.name && !written).then_some(init)
-}
-
-/// `getStaticRegExp(...).global`.
-fn is_global_regexp(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
-    let ast = cx.ast();
-    let flags_global =
-        |v: Option<Static>| matches!(v, Some(Static::RegExp { flags, .. }) if flags.contains('g'));
-    if let Some(v @ Static::RegExp { .. }) = static_value_no_side_effects(cx, id) {
-        return flags_global(Some(v));
-    }
-    let inner = skip_parens(ast, id);
-    let init = unwritten_variable_initializer(cx, inner);
-    let init_literal = init.is_some_and(|i| regex_literal(ast, i).is_some());
-    let ctor_args = regexp_constructor_args(ast, inner)
-        .or_else(|| init.and_then(|i| regexp_constructor_args(ast, i)));
-    if !init_literal
-        && ctor_args.is_none_or(|args| args.iter().any(|&a| !is_safe_constructor_argument(cx, a)))
-    {
-        return false;
-    }
-    flags_global(static_value(cx, id))
-}
-
 fn check_replace(cx: &mut Ctx<'_, '_>, node: NodeId) {
     let ast = cx.ast();
     let Some((receiver, prop, &[pattern, _])) =
@@ -418,7 +346,7 @@ fn check_replace(cx: &mut Ctx<'_, '_>, node: NodeId) {
     };
     if is_regexp_escape_call(cx, node)
         || is_known_non_string(cx, receiver)
-        || !is_global_regexp(cx, pattern)
+        || !static_regexp(cx, pattern).is_some_and(|(_, flags)| flags.contains('g'))
     {
         return;
     }

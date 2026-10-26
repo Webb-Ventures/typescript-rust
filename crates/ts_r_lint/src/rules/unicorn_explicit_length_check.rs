@@ -157,7 +157,7 @@ fn length_check_node(cx: &Ctx<'_, '_>, node: NodeId, allow_ts: bool) -> Option<(
 }
 
 /// `Boolean(x)` with the global `Boolean` and one non-spread argument.
-fn is_global_boolean_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_global_boolean_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let ast = cx.ast();
     let Node::Call {
         callee,
@@ -249,7 +249,7 @@ fn is_control_flow_test(cx: &Ctx<'_, '_>, node: NodeId, depth: u32) -> bool {
     is_logical(ast, p, AND_OR) && is_control_flow_test(cx, p, depth + 1)
 }
 
-fn is_boolean_context(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+pub(crate) fn is_boolean_context(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
     is_boolean_expression(cx, node, 0) || is_control_flow_test(cx, node, 0)
 }
 

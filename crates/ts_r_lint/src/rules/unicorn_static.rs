@@ -1892,6 +1892,83 @@ fn unsafe_binding_in_path(cx: &Ctx<'_, '_>, id: NodeId, visited: &mut Vec<Symbol
     }
 }
 
+fn is_safe_constructor_argument(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    !matches!(cx.node(id), Node::Spread { .. })
+        && matches!(
+            static_value_no_side_effects(cx, id),
+            Some(
+                Static::RegExp { .. }
+                    | Static::Null
+                    | Static::Undefined
+                    | Static::BigInt(_)
+                    | Static::Bool(_)
+                    | Static::Num(_)
+                    | Static::Str(_)
+            )
+        )
+}
+
+fn regexp_constructor_args(ast: &Ast, id: NodeId) -> Option<&[NodeId]> {
+    match *ast.node(skip_parens(ast, id)) {
+        Node::New { callee, args, .. } if ident_name(ast, callee) == Some("RegExp") => {
+            Some(ast.list(args))
+        }
+        _ => None,
+    }
+}
+
+/// The initializer of a single-definition plain-name variable that is never reassigned.
+fn unwritten_variable_initializer(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
+    let ast = cx.ast();
+    if !matches!(ast.node(id), Node::Ident { .. }) {
+        return None;
+    }
+    let sem = cx.semantic();
+    let sym = sem.symbol(sem.symbol_of_ident(id)?);
+    let [decl] = sym.decls.as_slice() else {
+        return None;
+    };
+    let Node::VarDeclarator {
+        name,
+        init: Some(init),
+        ..
+    } = *ast.node(decl.node)
+    else {
+        return None;
+    };
+    let written = sym.refs.iter().any(|&r| {
+        let r = sem.reference(r);
+        r.is_write() && !r.flags.contains(RefFlags::INIT)
+    });
+    (name == decl.name && !written).then_some(init)
+}
+
+/// `getStaticRegExp`: the regex (`source`, `flags`) a node statically is: a regex value
+/// without side effects, or a regex literal / `new RegExp(...)` of static arguments, directly
+/// or through a never-reassigned variable.
+pub(crate) fn static_regexp(cx: &Ctx<'_, '_>, id: NodeId) -> Option<(String, String)> {
+    let ast = cx.ast();
+    let as_regexp = |v: Option<Static>| match v {
+        Some(Static::RegExp { source, flags }) => Some((source, flags)),
+        _ => None,
+    };
+    if let Some(r) = as_regexp(static_value_no_side_effects(cx, id)) {
+        return Some(r);
+    }
+    let inner = skip_parens(ast, id);
+    let init = unwritten_variable_initializer(cx, inner);
+    let init_literal =
+        init.is_some_and(|i| matches!(ast.node(skip_parens(ast, i)), Node::RegexLit { .. }));
+    let ctor_args = regexp_constructor_args(ast, inner)
+        .or_else(|| init.and_then(|i| regexp_constructor_args(ast, i)));
+    if !init_literal
+        && ctor_args.is_none_or(|args| args.iter().any(|&a| !is_safe_constructor_argument(cx, a)))
+    {
+        return None;
+    }
+    as_regexp(static_value(cx, id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

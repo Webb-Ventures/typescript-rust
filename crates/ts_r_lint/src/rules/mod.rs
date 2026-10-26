@@ -347,6 +347,7 @@ mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_string_replace_all;
 mod unicorn_prefer_string_slice;
 mod unicorn_prefer_string_starts_ends_with;
@@ -738,6 +739,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_regexp_test::RULE,
     &unicorn_prefer_string_replace_all::RULE,
     &unicorn_prefer_string_slice::RULE,
     &unicorn_prefer_string_starts_ends_with::RULE,
