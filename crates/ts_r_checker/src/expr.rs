@@ -9645,7 +9645,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// The type a write to property `p` must satisfy: the setter's parameter type for an
     /// accessor whose setter is annotated (`get x(): string; set x(v: string | number)`),
     /// else the property's type.
-    pub(crate) fn write_type_of_symbol(&mut self, p: SymId) -> TypeId {
+    pub fn write_type_of_symbol(&mut self, p: SymId) -> TypeId {
         let read = self.type_of_symbol(p);
         let (base, mapper) = match self.c.synth_sym(p) {
             Some(x)

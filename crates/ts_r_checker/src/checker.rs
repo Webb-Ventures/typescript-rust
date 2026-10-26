@@ -845,6 +845,9 @@ pub struct Ck<'c, 'a> {
     /// in scope by its own name is named through an import alias that reaches it or one
     /// of its namespaces (`a<a<string>>` for `import a = require("./a")`, `d.C`).
     pub(crate) print_via_aliases: bool,
+    /// Editor printing (`PrintMode::reuse_annotations`): members, parameters and return
+    /// types are written as annotated when the annotation writes their type.
+    pub(crate) print_reuse: bool,
     /// Types printed so far by the outermost `print_type` call (a budget against nested
     /// generic instantiations that double at each level).
     pub(crate) print_nodes: u32,
@@ -970,6 +973,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             print_module_qualified: false,
             print_omit_optional_undefined: false,
             print_via_aliases: false,
+            print_reuse: false,
             print_nodes: 0,
             compound_assigned: FxHashMap::default(),
             reverse_mapping: Vec::new(),

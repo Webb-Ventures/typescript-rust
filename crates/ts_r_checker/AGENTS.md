@@ -28,8 +28,10 @@ result.diagnostics; result.error_count();
 // scope), ck.signature_to_string_at(sig, kind, arrow, scope),
 // ck.type_to_string_with(t, PrintMode::quick_info(scope)) and
 // ck.signature_to_string_with(sig, kind, arrow, mode) (PrintMode: scope, `?` members without
-// the added `| undefined`, names through import aliases), ck.jsx_props_type(opening),
-// ck.pattern_parent_type(pattern)
+// the added `| undefined`, names through import aliases, annotations reused as written:
+// `(x: 'hi') => number`, `f: { (x: number): number; }`; a name that means something else
+// at the scope is qualified further: `typeof M.C`), ck.jsx_props_type(opening),
+// ck.pattern_parent_type(pattern), ck.write_type_of_symbol(p) (a setter's parameter type)
 ```
 
 Files, by layer:

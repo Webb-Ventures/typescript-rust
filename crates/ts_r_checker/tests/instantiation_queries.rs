@@ -264,3 +264,143 @@ fn quick_info_names_through_import_aliases() {
     assert_eq!(quick, ["a<a<string>>", "d.C<number>", "d.D", "d.D"]);
     assert_eq!(at, ["Foo<Foo<string>>", "M.N.C<number>", "M.N.D", "M.N.D"]);
 }
+
+/// Each variable declaration of `file` (in source order) with its symbol.
+fn var_syms(
+    checker: &Checker<'_>,
+    file: FileId,
+    ast: &ts_r_ast::Ast,
+) -> Vec<(ts_r_ast::NodeId, ts_r_types::SymId)> {
+    let mut out = Vec::new();
+    for i in 0..ast.node_count() {
+        let Some(id) = ts_r_ast::NodeId::from_raw(i as u32) else {
+            continue;
+        };
+        if let Node::VarDeclarator { name, .. } = *ast.node(id)
+            && let Some(s) = checker
+                .sym_of_decl(Loc::new(file, id))
+                .or_else(|| checker.sym_of_decl(Loc::new(file, name)))
+        {
+            out.push((id, s));
+        }
+    }
+    out.sort_by_key(|&(id, _)| ast.span(id).start);
+    out
+}
+
+/// Quick info reuses annotations that write exactly the printed type (tsc 7.0.2 hover,
+/// observed through `tsc --lsp`): string literals keep their quotes and unions their
+/// order (`callback: (x: 'hi') => number`, `p4: 'literal' | number`), and a member
+/// annotated with a type literal of one call signature stays a type literal. Diagnostics
+/// print from the types (`number | "literal"`, `(x: number) => number`; tsc 7.0.2 too).
+#[test]
+fn quick_info_reuses_annotations() {
+    let Some(program) = editor_program(&[(
+        "a.ts",
+        "declare function f(p1: 'literal', p4: 'literal' | number, cb: (x: 'hi') => number): 'a' | 1;\n\
+         declare var x: {\n    func1(x: number): number;\n    func2: (x: number) => number;\n    func3: { (x: number): number };\n};\n\
+         namespace N { export interface I { a: 'q' } }\n\
+         declare var y: { i: N.I; j: N.I | 'z' };\n",
+    )]) else {
+        return;
+    };
+    let a = program.file_index("/p/a.ts").unwrap();
+    let file = FileId(a as u32);
+    let ast = &program.files[a].ast;
+    let checker = Checker::new(&program);
+    let vars = var_syms(&checker, file, ast);
+    let mut ck = Ck::new(&checker, file);
+    let mut quick = Vec::new();
+    let mut plain = Vec::new();
+    for &(decl, s) in &vars {
+        let t = ck.type_of_symbol(s);
+        quick.push(
+            ck.type_to_string_with(t, ts_r_checker::PrintMode::quick_info(Loc::new(file, decl))),
+        );
+        plain.push(ck.type_to_string(t));
+    }
+    assert_eq!(
+        quick,
+        [
+            "{ func1(x: number): number; func2: (x: number) => number; func3: { (x: number): number; }; }",
+            "{ i: N.I; j: N.I | 'z'; }",
+        ]
+    );
+    assert_eq!(
+        plain,
+        [
+            "{ func1(x: number): number; func2: (x: number) => number; func3: (x: number) => number; }",
+            "{ i: I; j: \"z\" | I; }",
+        ]
+    );
+    // The function's signature, seen from the second variable.
+    let f = (0..ast.node_count())
+        .filter_map(|i| ts_r_ast::NodeId::from_raw(i as u32))
+        .find(|&id| matches!(ast.node(id), Node::FunctionDecl { .. }))
+        .and_then(|id| checker.sym_of_decl(Loc::new(file, id)))
+        .unwrap();
+    let ft = ck.type_of_symbol(f);
+    let sig = ck.signatures_of(ft, ts_r_checker::members::SigKind::Call)[0];
+    let mode = ts_r_checker::PrintMode::quick_info(Loc::new(file, vars[1].0));
+    assert_eq!(
+        ck.signature_to_string_with(sig, ts_r_checker::members::SigKind::Call, true, mode),
+        "(p1: 'literal', p4: 'literal' | number, cb: (x: 'hi') => number) => 'a' | 1"
+    );
+    assert_eq!(
+        ck.signature_to_string(sig),
+        "(p1: \"literal\", p4: number | \"literal\", cb: (x: \"hi\") => number): \"a\" | 1"
+    );
+}
+
+/// A name that means something else where the type is printed is qualified further (tsc
+/// 7.0.2 quick info `var M.C.C: typeof M.C`: inside `namespace C`, `C` is the variable).
+#[test]
+fn quick_info_qualifies_shadowed_names() {
+    let Some(program) = editor_program(&[(
+        "a.ts",
+        "namespace M {\n    export class C {\n        foo() { }\n    }\n    export namespace C {\n        export var C = M.C\n    }\n}\n",
+    )]) else {
+        return;
+    };
+    let a = program.file_index("/p/a.ts").unwrap();
+    let file = FileId(a as u32);
+    let ast = &program.files[a].ast;
+    let checker = Checker::new(&program);
+    let vars = var_syms(&checker, file, ast);
+    let mut ck = Ck::new(&checker, file);
+    let (decl, s) = vars[0];
+    let t = ck.type_of_symbol(s);
+    assert_eq!(
+        ck.type_to_string_with(t, ts_r_checker::PrintMode::quick_info(Loc::new(file, decl))),
+        "typeof M.C"
+    );
+}
+
+/// `write_type_of_symbol` is an accessor's setter type (tsc 7.0.2 quick info at the
+/// setter: `(accessor) C.myValue: string | Promise<string>`).
+#[test]
+fn setter_write_type() {
+    let Some(program) = editor_program(&[(
+        "a.ts",
+        "class C {\n    #x = Promise.resolve(\"\")\n    set myValue(x: Promise<string> | string) {\n        this.#x = Promise.resolve(x);\n    }\n    get myValue(): Promise<string> {\n        return this.#x;\n    }\n}\nlet instance = new C();\n",
+    )]) else {
+        return;
+    };
+    let a = program.file_index("/p/a.ts").unwrap();
+    let file = FileId(a as u32);
+    let ast = &program.files[a].ast;
+    let checker = Checker::new(&program);
+    let vars = var_syms(&checker, file, ast);
+    let mut ck = Ck::new(&checker, file);
+    let (decl, s) = vars[0];
+    let it = ck.type_of_symbol(s);
+    let p = ck.property_of_type(it, "myValue").unwrap();
+    let mode = ts_r_checker::PrintMode::quick_info(Loc::new(file, decl));
+    let read = ck.type_of_symbol(p);
+    let write = ck.write_type_of_symbol(p);
+    assert_eq!(ck.type_to_string_with(read, mode), "Promise<string>");
+    assert_eq!(
+        ck.type_to_string_with(write, mode),
+        "string | Promise<string>"
+    );
+}

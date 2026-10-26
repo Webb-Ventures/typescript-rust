@@ -28,6 +28,11 @@ pub struct PrintMode {
     /// import alias in scope that reaches it or one of its namespaces (`a<a<string>>` for
     /// `import a = require("./a")` of `export = Foo`; `d.C<number>` for `import d = M.N`).
     pub via_aliases: bool,
+    /// With `scope`, a type literal's member, a signature's parameter or its return type
+    /// whose declaration's annotation writes exactly its type prints as annotated (tsc 7
+    /// quick info reuses those nodes: `callback: (x: 'hi') => number`, `p: 'a' | number`,
+    /// `f: { (x: number): number; }`), when every name in it means the same at `scope`.
+    pub reuse_annotations: bool,
 }
 
 impl PrintMode {
@@ -46,6 +51,7 @@ impl PrintMode {
             scope: Some(scope),
             omit_optional_undefined: true,
             via_aliases: true,
+            reuse_annotations: true,
         }
     }
 }
@@ -225,11 +231,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.print_scope,
             self.print_omit_optional_undefined,
             self.print_via_aliases,
+            self.print_reuse,
         );
         if let Some(scope) = mode.scope {
             self.print_qualified = true;
             self.print_scope = Some(scope);
             self.print_via_aliases = mode.via_aliases;
+            self.print_reuse = mode.reuse_annotations;
         }
         self.print_omit_optional_undefined = mode.omit_optional_undefined;
         let r = f(self);
@@ -238,6 +246,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.print_scope,
             self.print_omit_optional_undefined,
             self.print_via_aliases,
+            self.print_reuse,
         ) = saved;
         r
     }
@@ -789,6 +798,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             return q;
         }
         let mut out = name;
+        // The symbol named by the leftmost part of `out`.
+        let mut head = sym;
         let mut cur = self.c.sym_parent(sym);
         let mut guard = 0;
         while let Some(p) = cur {
@@ -833,14 +844,32 @@ impl<'c, 'a> Ck<'c, 'a> {
                             ds.start <= span.start && span.end <= ds.end
                         }
                 });
-                if inside {
+                // ... unless its name means something else there (`typeof M.C` inside
+                // `namespace C { export var C = M.C }`; tsc: getAccessibleSymbolChain).
+                if inside && self.names_symbol_at(scope, head) {
                     break;
                 }
             }
             out = format!("{}.{}", self.c.sym_name(p), out);
+            head = p;
             cur = self.c.sym_parent(p);
         }
         out
+    }
+
+    /// Whether `sym`'s name, looked up at `scope`, finds `sym` (or a symbol with its
+    /// declaration).
+    fn names_symbol_at(&self, scope: Loc, sym: SymId) -> bool {
+        let name = self.c.sym_name(sym);
+        match self.resolve_name_at(scope, name, meaning::ALL) {
+            Some(s) => {
+                s == sym || {
+                    let (a, b) = (self.c.first_decl(s), self.c.first_decl(sym));
+                    a.is_some() && a == b
+                }
+            }
+            None => true,
+        }
     }
 
     /// `sym` named through an import alias visible at `scope` that resolves to it or to
@@ -1414,8 +1443,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                         pt = t2;
                     }
                 }
-                let ts = match self.error_annotation_text(p) {
-                    Some(text) if pt == TypeId::ERROR && !optional => text,
+                let reused = match self.member_annotation(p) {
+                    Some(ann) if self.print_reuse => {
+                        let declared = self.type_of_symbol(p);
+                        self.reused_annotation(ann, declared, optional)
+                    }
+                    _ => None,
+                };
+                let ts = match (reused, self.error_annotation_text(p)) {
+                    (Some(w), _) => w,
+                    (None, Some(text)) if pt == TypeId::ERROR && !optional => text,
                     _ => self.print_type(pt, depth + 1, stack),
                 };
                 items.push(format!("{ro}{pname}{q}: {ts};"));
@@ -1517,6 +1554,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         n: ts_r_ast::NodeId,
         depth: u32,
     ) -> Option<String> {
+        self.written_type_text_ext(file, n, depth, false)
+    }
+
+    /// [`Self::written_type_text`]; with `ext` (quick info's reused annotations) also
+    /// function and constructor types, type literals, tuples, `typeof` queries, indexed
+    /// access and `readonly`/`unique` operators, printed as tsc's emitter reprints them
+    /// (`{ (x: number): number; }`).
+    fn written_type_text_ext(
+        &self,
+        file: ts_r_diagnostics::FileId,
+        n: ts_r_ast::NodeId,
+        depth: u32,
+        ext: bool,
+    ) -> Option<String> {
         use ts_r_ast::KeywordTypeKind as K;
         if depth > 16 {
             return None;
@@ -1525,10 +1576,21 @@ impl<'c, 'a> Ck<'c, 'a> {
         let join = |list: ts_r_ast::NodeList, sep: &str| -> Option<String> {
             let mut parts = Vec::new();
             for &m in ast.list(list) {
-                parts.push(self.written_type_text(file, m, depth + 1)?);
+                parts.push(self.written_type_text_ext(file, m, depth + 1, ext)?);
             }
             Some(parts.join(sep))
         };
+        let src = |x: ts_r_ast::NodeId| -> Option<String> {
+            let sp = ast.span(x);
+            self.c
+                .file(file)
+                .text
+                .get(sp.start as usize..sp.end as usize)
+                .map(str::to_owned)
+        };
+        if ext && let Some(w) = self.written_ext_shape(file, n, depth, &join, &src) {
+            return w;
+        }
         Some(match *ast.node(n) {
             Node::KeywordType { kind } => match kind {
                 K::Any => "any",
@@ -1562,7 +1624,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             Node::ArrayType { elem } => {
-                let e = self.written_type_text(file, elem, depth + 1)?;
+                let e = self.written_type_text_ext(file, elem, depth + 1, ext)?;
                 if matches!(
                     ast.node(elem),
                     Node::UnionType { .. } | Node::IntersectionType { .. }
@@ -1574,7 +1636,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             Node::UnionType { types } => join(types, " | ")?,
             Node::IntersectionType { types } => join(types, " & ")?,
-            Node::ParenType { ty } => format!("({})", self.written_type_text(file, ty, depth + 1)?),
+            Node::ParenType { ty } => format!(
+                "({})",
+                self.written_type_text_ext(file, ty, depth + 1, ext)?
+            ),
             // Literals keep their spelling (`'bye'`).
             Node::StringLit { .. } | Node::NumberLit { .. } => {
                 let sp = ast.span(n);
@@ -1589,13 +1654,356 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::TypeOperator {
                 op: ts_r_ast::TypeOperatorKind::KeyOf,
                 ty,
-            } => format!("keyof {}", self.written_type_text(file, ty, depth + 1)?),
+            } => format!(
+                "keyof {}",
+                self.written_type_text_ext(file, ty, depth + 1, ext)?
+            ),
+            _ => return None,
+        })
+    }
+
+    /// The shapes [`Self::written_type_text_ext`] adds: `Some(None)` for one of them that
+    /// cannot be written, `None` for other nodes.
+    #[allow(clippy::type_complexity)]
+    fn written_ext_shape(
+        &self,
+        file: ts_r_diagnostics::FileId,
+        n: ts_r_ast::NodeId,
+        depth: u32,
+        join: &dyn Fn(ts_r_ast::NodeList, &str) -> Option<String>,
+        src: &dyn Fn(ts_r_ast::NodeId) -> Option<String>,
+    ) -> Option<Option<String>> {
+        let ast = self.ast(file);
+        let ty = |x: ts_r_ast::NodeId| self.written_type_text_ext(file, x, depth + 1, true);
+        let sig = |tps: Option<ts_r_ast::NodeId>,
+                   params: ts_r_ast::NodeList,
+                   ret: Option<ts_r_ast::NodeId>,
+                   arrow: bool|
+         -> Option<String> {
+            let mut out = String::new();
+            if let Some(tps) = tps {
+                let Node::TypeParams { params } = *ast.node(tps) else {
+                    return None;
+                };
+                let mut parts = Vec::new();
+                for &tp in ast.list(params) {
+                    let Node::TypeParam {
+                        modifiers,
+                        name,
+                        constraint,
+                        default,
+                    } = *ast.node(tp)
+                    else {
+                        return None;
+                    };
+                    if !modifiers.is_empty() {
+                        return None;
+                    }
+                    let mut t = crate::nodes::ident_text(ast, name)?.to_owned();
+                    if let Some(c) = constraint {
+                        t.push_str(&format!(" extends {}", ty(c)?));
+                    }
+                    if let Some(d) = default {
+                        t.push_str(&format!(" = {}", ty(d)?));
+                    }
+                    parts.push(t);
+                }
+                out.push_str(&format!("<{}>", parts.join(", ")));
+            }
+            let mut ps = Vec::new();
+            for &p in ast.list(params) {
+                let Node::Param {
+                    rest,
+                    pattern,
+                    optional,
+                    type_ann,
+                    init: None,
+                    ..
+                } = *ast.node(p)
+                else {
+                    return None;
+                };
+                let name = crate::nodes::ident_text(ast, pattern)?;
+                let t = match type_ann {
+                    Some(a) => ty(a)?,
+                    None => "any".to_owned(),
+                };
+                let dots = if rest { "..." } else { "" };
+                let q = if optional { "?" } else { "" };
+                ps.push(format!("{dots}{name}{q}: {t}"));
+            }
+            out.push_str(&format!("({})", ps.join(", ")));
+            out.push_str(if arrow { " => " } else { ": " });
+            out.push_str(&ty(ret?)?);
+            Some(out)
+        };
+        let key = |k: ts_r_ast::NodeId| -> Option<String> {
+            match *ast.node(k) {
+                Node::Ident { .. } | Node::StringLit { .. } | Node::NumberLit { .. } => src(k),
+                _ => None,
+            }
+        };
+        Some(match *ast.node(n) {
+            Node::FunctionType {
+                type_params,
+                params,
+                return_type,
+            } => sig(type_params, params, Some(return_type), true),
+            Node::ConstructorType {
+                is_abstract,
+                type_params,
+                params,
+                return_type,
+            } => sig(type_params, params, Some(return_type), true).map(|s| {
+                let a = if is_abstract { "abstract " } else { "" };
+                format!("{a}new {s}")
+            }),
+            Node::TypeLiteral { members } => {
+                let mut items = Vec::new();
+                for &m in ast.list(members) {
+                    let item = match *ast.node(m) {
+                        Node::PropertySignature {
+                            modifiers,
+                            key: k,
+                            optional,
+                            type_ann: Some(a),
+                        } => {
+                            let ro = if modifiers.contains(ts_r_ast::Modifiers::READONLY) {
+                                "readonly "
+                            } else {
+                                ""
+                            };
+                            let q = if optional { "?" } else { "" };
+                            Some(format!("{ro}{}{q}: {};", key(k)?, ty(a)?))
+                        }
+                        Node::MethodSignature {
+                            kind: ts_r_ast::MethodKind::Method,
+                            key: k,
+                            optional,
+                            type_params,
+                            params,
+                            return_type,
+                            ..
+                        } => {
+                            let q = if optional { "?" } else { "" };
+                            Some(format!(
+                                "{}{q}{};",
+                                key(k)?,
+                                sig(type_params, params, return_type, false)?
+                            ))
+                        }
+                        Node::CallSignature {
+                            type_params,
+                            params,
+                            return_type,
+                        } => Some(format!(
+                            "{};",
+                            sig(type_params, params, return_type, false)?
+                        )),
+                        Node::ConstructSignature {
+                            type_params,
+                            params,
+                            return_type,
+                        } => Some(format!(
+                            "new {};",
+                            sig(type_params, params, return_type, false)?
+                        )),
+                        _ => None,
+                    };
+                    let Some(item) = item else {
+                        return Some(None);
+                    };
+                    items.push(item);
+                }
+                if items.is_empty() {
+                    Some("{}".to_owned())
+                } else {
+                    Some(format!("{{ {} }}", items.join(" ")))
+                }
+            }
+            Node::TupleType { elems } => join(elems, ", ").map(|e| format!("[{e}]")),
+            Node::NamedTupleMember {
+                rest,
+                name,
+                optional,
+                ty: t,
+            } => (|| {
+                let nm = crate::nodes::ident_text(ast, name)?;
+                let dots = if rest { "..." } else { "" };
+                let q = if optional { "?" } else { "" };
+                Some(format!("{dots}{nm}{q}: {}", ty(t)?))
+            })(),
+            Node::OptionalType { ty: t } => ty(t).map(|x| format!("{x}?")),
+            Node::RestType { ty: t } => ty(t).map(|x| format!("...{x}")),
+            Node::TypeQuery {
+                expr_name,
+                type_args: None,
+            } => {
+                let t = crate::nodes::entity_text(ast, expr_name);
+                (!t.is_empty()).then(|| format!("typeof {t}"))
+            }
+            Node::IndexedAccessType { obj, index } => {
+                (|| Some(format!("{}[{}]", ty(obj)?, ty(index)?)))()
+            }
+            Node::TypeOperator {
+                op: op @ (ts_r_ast::TypeOperatorKind::Readonly | ts_r_ast::TypeOperatorKind::Unique),
+                ty: t,
+            } => {
+                let o = if op == ts_r_ast::TypeOperatorKind::Readonly {
+                    "readonly"
+                } else {
+                    "unique"
+                };
+                ty(t).map(|x| format!("{o} {x}"))
+            }
             _ => return None,
         })
     }
 
     /// The type annotation of a parameter of a function or arrow expression (not a
     /// method's, whose body is a function expression under its `MethodDef`).
+    /// The annotation of property `p`'s one declaration (a property signature or a class
+    /// property), through the copies instantiation and spreads make.
+    fn member_annotation(&self, p: SymId) -> Option<Loc> {
+        let mut p = p;
+        for _ in 0..8 {
+            match self.c.synth_sym(p) {
+                Some(x) if x.decl.is_none() && x.origins.len() == 1 => p = x.origins[0],
+                _ => break,
+            }
+        }
+        let [d] = self.c.decls(p)[..] else {
+            return None;
+        };
+        match *self.ast(d.file).node(d.node) {
+            Node::PropertySignature {
+                type_ann: Some(t), ..
+            }
+            | Node::PropertyDef {
+                type_ann: Some(t), ..
+            } => Some(Loc::new(d.file, t)),
+            _ => None,
+        }
+    }
+
+    /// The annotation of parameter `p`'s declaration.
+    fn param_annotation_of(&self, p: SymId) -> Option<Loc> {
+        if p == SymId::NONE {
+            return None;
+        }
+        let d = self.c.first_decl(p)?;
+        match *self.ast(d.file).node(d.node) {
+            Node::Param {
+                type_ann: Some(t), ..
+            } => Some(Loc::new(d.file, t)),
+            _ => None,
+        }
+    }
+
+    /// The return annotation of signature `sig`'s declaration (not a type predicate).
+    fn return_annotation_of(&self, sig: SigId) -> Option<Loc> {
+        let d = self.store().sig(sig).decl.and_then(Loc::unpack)?;
+        let ast = self.ast(d.file);
+        let r = match *ast.node(d.node) {
+            Node::MethodSignature { return_type, .. }
+            | Node::CallSignature { return_type, .. }
+            | Node::ConstructSignature { return_type, .. } => return_type,
+            Node::FunctionType { return_type, .. } | Node::ConstructorType { return_type, .. } => {
+                Some(return_type)
+            }
+            _ => crate::nodes::fn_parts(ast, d.node).and_then(|f| f.return_type),
+        }?;
+        if matches!(ast.node(r), Node::TypePredicate { .. }) {
+            return None;
+        }
+        Some(Loc::new(d.file, r))
+    }
+
+    /// Annotation `ann` as written, when quick info reuses it for a member, parameter or
+    /// return type of type `t` (see [`PrintMode::reuse_annotations`]): it writes `t` (for
+    /// an `optional` declaration, `t` without `undefined`), names nothing that means
+    /// something else at the print scope, has no `this` type, and is of a shape
+    /// [`Self::written_type_text`] writes.
+    fn reused_annotation(&mut self, ann: Loc, t: TypeId, optional: bool) -> Option<String> {
+        let scope = self.print_scope?;
+        if self.store().is_error(t) || t == TypeId::UNRESOLVED {
+            return None;
+        }
+        let at = self.type_from_node(ann);
+        let same = at == t
+            || (optional && {
+                let t2 = self.filter_type(t, |ck, x| {
+                    !ck.store().flags(x).contains(TypeFlags::UNDEFINED)
+                });
+                t2 == at
+            });
+        if !same || !self.annotation_names_visible(ann, scope) {
+            return None;
+        }
+        self.written_type_text_ext(ann.file, ann.node, 0, true)
+    }
+
+    /// Whether every name type node `ann` uses resolves at `scope` to what it resolves to
+    /// where it is written (names declared inside it and type parameters excepted; a `this`
+    /// type is never visible).
+    fn annotation_names_visible(&self, ann: Loc, scope: Loc) -> bool {
+        let ast = self.ast(ann.file);
+        let span = ast.span(ann.node);
+        let leftmost = |mut e: ts_r_ast::NodeId| {
+            for _ in 0..1000 {
+                match *ast.node(e) {
+                    Node::QualifiedName { left, .. } => e = left,
+                    Node::Member { obj, .. } => e = obj,
+                    _ => break,
+                }
+            }
+            e
+        };
+        let mut stack = vec![ann.node];
+        let mut seen = 0u32;
+        while let Some(n) = stack.pop() {
+            seen += 1;
+            if seen > 2000 {
+                return false;
+            }
+            let (id, m) = match *ast.node(n) {
+                Node::ThisType {} | Node::This {} | Node::ImportType { .. } => return false,
+                Node::TypeRef { name, .. } => {
+                    let m = if matches!(ast.node(name), Node::QualifiedName { .. }) {
+                        meaning::NAMESPACE
+                    } else {
+                        meaning::TYPE
+                    };
+                    (Some(leftmost(name)), m)
+                }
+                Node::TypeQuery { expr_name, .. } => (Some(leftmost(expr_name)), meaning::VALUE),
+                _ => (None, 0),
+            };
+            if let Some(id) = id {
+                let Some(name) = crate::nodes::ident_text(ast, id) else {
+                    return false;
+                };
+                let Some(s) = self.resolve_name_at(Loc::new(ann.file, id), name, m) else {
+                    return false;
+                };
+                let inside = self.c.first_decl(s).is_some_and(|d| {
+                    d.file == ann.file && {
+                        let ds = self.ast(d.file).span(d.node);
+                        span.start <= ds.start && ds.end <= span.end
+                    }
+                });
+                if !inside
+                    && !self.c.sym_flags(s).intersects(SymbolFlags::TYPE_PARAMETER)
+                    && self.resolve_name_at(scope, name, m) != Some(s)
+                {
+                    return false;
+                }
+            }
+            ast.for_each_child(n, |c| stack.push(c));
+        }
+        true
+    }
+
     fn expr_param_annotation(&self, p: SymId) -> Option<Loc> {
         if p == SymId::NONE {
             return None;
@@ -1974,6 +2382,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ps.extend(expanded);
                 continue;
             }
+            let reused = match self.param_annotation_of(p.sym) {
+                Some(a) if self.print_reuse && written.is_none() => {
+                    self.reused_annotation(a, p.ty, optional && question)
+                }
+                _ => None,
+            };
+            let written = written.or(reused);
             let ts = match self.error_annotation_text(p.sym) {
                 Some(text)
                     if ty == TypeId::ERROR && p.sym != SymId::NONE && !optional && !question =>
@@ -2026,7 +2441,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             None => match self.error_return_annotation_text(sig) {
                 Some(text) if r == TypeId::ERROR => text,
-                _ => self.print_type(r, depth + 1, stack),
+                _ => match self.return_annotation_of(sig) {
+                    Some(a) if self.print_reuse => match self.reused_annotation(a, r, false) {
+                        Some(w) => w,
+                        None => self.print_type(r, depth + 1, stack),
+                    },
+                    _ => self.print_type(r, depth + 1, stack),
+                },
             },
         };
         out.push_str(&rs);
