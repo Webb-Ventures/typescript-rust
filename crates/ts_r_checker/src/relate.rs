@@ -3005,6 +3005,43 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return false;
         }
+        // Two deferred conditionals without `infer` relate when their `extends` types are
+        // identical, one check type relates to the other and the branches relate pairwise
+        // (tsc: relater.go, structuredTypeRelatedToWorker).
+        if sf.contains(TypeFlags::CONDITIONAL)
+            && tf.contains(TypeFlags::CONDITIONAL)
+            && !self.conditional_has_infer(s)
+            && !self.conditional_has_infer(t)
+            && let (Some(ds), Some(dt)) = (st.conditional_data(s), st.conditional_data(t))
+        {
+            let mut parts = [[TypeId::UNRESOLVED; 4]; 2];
+            for (p, d) in parts.iter_mut().zip([ds, dt]) {
+                let root = *self.store().conditional_root_data(d.root);
+                let a = self.conditional_branch(root.decl, true);
+                let b = self.conditional_branch(root.decl, false);
+                *p = [root.check, root.extends, a, b].map(|x| self.instantiate(x, d.mapper));
+            }
+            let [[sc, se, sa, sb], [tc, te, ta, tb]] = parts;
+            if self.related_to(se, te, RelationKind::Identity, false, None)
+                && (self.related_to(sc, tc, rel, false, None)
+                    || self.related_to(tc, sc, rel, false, None))
+                && self.related_to(sa, ta, rel, false, None)
+                && self.related_to(sb, tb, rel, false, None)
+            {
+                return true;
+            }
+            // Else to each branch of the target that can be taken, or through the source's
+            // constraint (`T extends number ? One : never` is a `One`).
+            if let Some((a, b)) = self.conditional_target_branches(s, t)
+                && a.is_none_or(|a| self.related_to(s, a, rel, false, None))
+                && b.is_none_or(|b| self.related_to(s, b, rel, false, None))
+            {
+                return true;
+            }
+            return self
+                .conditional_constraint(s)
+                .is_some_and(|c| c != s && self.related_to(c, t, rel, report, None));
+        }
         // Deferred generic forms we do not model: be permissive.
         if tf.intersects(
             TypeFlags::INDEXED_ACCESS

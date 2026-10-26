@@ -3214,6 +3214,12 @@ Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7
   type (not in unchecked JS); otherwise it narrows `v` like `v instanceof C` for the
   nearest class declaring `#x` (`typeof C` for a static member) (tsc: checkInExpression,
   narrowTypeByPrivateIdentifierInInExpression) (`private_name_in_undeclared`).
+- Two deferred conditionals without `infer` relate when their `extends` types are
+  identical, one check type relates to the other and the branches relate pairwise; else
+  the source relates to the target's branches that can be taken, or through its own
+  constraint. They were always related, so `Equals<A, B>` built from
+  `<T>() => T extends A ? 1 : 2` was `true` for any `A` and `B` (tsc: relater.go,
+  structuredTypeRelatedToWorker) (`conditional_pair_relation`).
 
 ## Levels (`layers.rs`, design record 0005)
 
