@@ -34,7 +34,6 @@
 //!   gets no help.
 
 use super::Ctx;
-use super::hover::jsdoc_markdown;
 use super::locate::name_text;
 use super::signature_site::{SiteKind, sites_at};
 use serde_json::{Value, json};
@@ -1141,7 +1140,8 @@ fn signature_docs(ck: &Ck<'_, '_>, sig: SigId) -> Option<String> {
         return None;
     }
     let raw = comment.span.text(text);
-    raw.starts_with("/**").then(|| jsdoc_markdown(raw))
+    raw.starts_with("/**")
+        .then(|| super::jsdoc::render(&super::jsdoc::parse(raw), &mut |_| None))
 }
 
 #[cfg(test)]

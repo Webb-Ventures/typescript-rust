@@ -799,7 +799,7 @@ fn sig_type_args(ck: &mut Ck<'_, '_>, sig: SigId) -> String {
 
 /// The signatures to show for `s` at `at`: at a call of an overloaded or generic function,
 /// the one the call resolved to; otherwise all of them.
-fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Loc) -> Vec<SigId> {
+pub(super) fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Loc) -> Vec<SigId> {
     // An optional method's type carries the `undefined` optionality adds.
     let t = ck.type_of_symbol(s);
     let t = ck.remove_optionality(t);

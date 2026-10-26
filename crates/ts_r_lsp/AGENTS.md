@@ -402,6 +402,38 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   declaration describes the declaration; a string or number literal that names a member
   (`o["a"]`, `{ 1: x }`) describes that member.
 
+## Documentation (`tsr/features/jsdoc.rs`, `doc_source.rs`)
+
+Rules from `tsc: tsc/internal/ls/hover.go` (`getDocumentationFromDeclaration`,
+`getJSDocOrTag`, `writeNameLink`) and `tsc: tsc/internal/parser/jsdoc.go` (where a tag
+starts), v7.0.2, in our words.
+
+- `jsdoc.rs` parses `/** */` text itself (the parser's JSDoc pass only lowers types): a
+  tag starts at any `@` followed by an identifier start, except in a fenced block, an
+  inline `` `code` `` span (to the end of its line), `{@link ...}` and `@author`'s
+  `<email>`. Markdown: the comment, then per tag except `@type`/`@typedef`/`@callback`
+  `\n\n*@tag*`, its name in backticks (`@param`/`@property`, a missing name as an empty
+  one; `@template` names comma-joined; `@augments` class) and ` — comment` (just
+  ` comment` when it starts with `-`). Types in braces are not shown except `@throws`'s;
+  an unclosed `{ {...}` type ends after its inner braces; `@param o.a` after `o` is
+  dropped. `@example` is a `tsx` fence (`<caption>` after ` — `). `@see name` and
+  `{@link name text}` link to the name's declaration as `file#line,col-line,col` (1-based,
+  the name's span, through aliases), a URL as `[text](url)`, or print `name text` when the
+  name does not resolve; names resolve in the documented function's body first (its
+  parameters).
+- `doc_source.rs` picks the one declaration documented (see its module docs): the
+  overload or constructor hovered, the single signature a call resolved to, an
+  interface's call or construct signature at a call, else the value declaration (or the
+  first interface, enum, namespace, type parameter, type alias); a union property declared
+  in several places has none. Its own nearest `/**` comment (other comments may sit
+  between) wins, else a parameter's `@param` (by name, a binding pattern by position), a
+  type parameter's `@template`, the statement of a first declarator, the variable or
+  property a function or class expression initializes, a destructured property's
+  declaration, the first overload, then the same-named member of the base types.
+  `namespace a.b` documents `a` only. A property read through an index signature shows
+  that signature's comment (the first applicable non-`string` index, else the `string`
+  one). A comment with `@typedef`/`@callback` documents that type, not what follows it.
+
 ## Keywords and navigation (`tsr/features/keywords.rs`, `nav.rs`)
 
 Syntax-only rules for the keywords tsc 7 answers without a symbol. Learned from the fourslash

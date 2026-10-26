@@ -2539,3 +2539,73 @@ fn references_through_inheritance_meanings_and_aliases() {
     );
     c.shutdown();
 }
+
+const DOCS_A: &str = "export class Target {}
+class Base {
+  /** Base method. */ m() {} }
+class Sub extends Base { m() {} }
+interface Opts {
+  /** The width. */
+  width: number;
+  /** Any other key. */
+  [k: string]: any;
+}
+/**
+ * Draws. See {@link Target} and {@link https://ts-r.dev|the site}.
+ * @param o - the options `@param` stays
+ * @param {number} n count @returns nothing
+ * @example
+ * draw(o, 1)
+ */
+function draw({ width }: Opts, n: number, o2: Opts) {
+  wid¦th; o2.ot¦her; n¦;
+}
+new Sub().¦m();
+dr¦aw;
+";
+
+#[test]
+fn hover_documentation_follows_tsc() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(DOCS_A);
+    let env = Env::new(
+        "hoverdocs",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", &a)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let ua = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let doc = |c: &mut ScriptedClient, (l, ch): (u32, u32)| {
+        let h = hover_text(c, &ua, l, ch);
+        h.split_once("\n```\n")
+            .map(|(_, d)| d.trim().to_string())
+            .unwrap_or_default()
+    };
+    // A destructured property: the property's comment.
+    assert_eq!(doc(&mut c, m[0]), "The width.");
+    // Through an index signature: its comment.
+    assert_eq!(doc(&mut c, m[1]), "Any other key.");
+    // A parameter: its `@param` tag (types stripped; a later `@tag` starts a new tag).
+    assert_eq!(doc(&mut c, m[2]), "count");
+    // An override without a comment: the base member's.
+    assert_eq!(doc(&mut c, m[3]), "Base method.");
+    let d = doc(&mut c, m[4]);
+    assert!(d.starts_with("Draws. See [Target](file://"), "{d}");
+    assert!(
+        d.contains("/src/a.ts#1,14-1,20) and [the site](https://ts-r.dev)."),
+        "{d}"
+    );
+    assert!(
+        d.contains("*@param* `o` - the options `@param` stays"),
+        "{d}"
+    );
+    assert!(
+        d.contains("*@param* `n` — count\n\n*@returns* — nothing"),
+        "{d}"
+    );
+    assert!(d.contains("*@example*\n```tsx\ndraw(o, 1)\n```"), "{d}");
+    c.shutdown();
+}
