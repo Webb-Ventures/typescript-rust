@@ -33,8 +33,8 @@
 // test files are loaded as ES modules with `require`/`__dirname` shims, the plugin's
 // eslintrc-style cases become flat config, the generator runs from the plugin root, and each
 // case's `filename` is kept relative to `tests/files`; Babel and Flow parser cases are
-// skipped, and cases whose expected messages include "Resolve error" record the missing
-// webpack and TypeScript resolvers).
+// skipped, as are cases that need the webpack or TypeScript resolver (not installed: ESLint
+// reports "Resolve error") or name an absolute path in the plugin's checkout).
 
 import { registerHooks, createRequire, isBuiltin } from 'node:module';
 import fs from 'node:fs';
@@ -444,6 +444,10 @@ function observe(ruleId, isTs, testerConfig, c) {
   }
   const merged = parserKind(lo.parser);
   if (merged === 'fixture' || merged === 'other') return { skipped: 'unsupported case' };
+  // Settings or code naming an absolute path in eslint-plugin-import's checkout.
+  if (importFiles && JSON.stringify({ ...c, filename: undefined }).includes(path.dirname(importFiles))) {
+    return { skipped: 'machine-specific path' };
+  }
   const useTs = isTs || merged === 'ts';
   const jsx = !!lo.parserOptions?.ecmaFeatures?.jsx;
   // eslint-plugin-import's cases name files in its fixture tree (`tests/files`), which its
@@ -499,6 +503,10 @@ function observe(ruleId, isTs, testerConfig, c) {
   }
   if (messages.some((m) => m.ruleId == null && /No matching configuration/.test(m.message))) return { skipped: 'no config' };
   if (messages.some((m) => m.fatal)) return { skipped: 'parse error: ' + messages.find((m) => m.fatal).message };
+  // The webpack and TypeScript resolvers aren't installed: ESLint reports only that.
+  if (messages.some((m) => m.message.startsWith('Resolve error: unable to load resolver'))) {
+    return { skipped: 'resolver plugin not installed' };
+  }
   const fixes = messages.map((m) => m.fix).filter(Boolean);
   const output = fixes.length ? applyFixes(c.code, fixes) : null;
   return {
