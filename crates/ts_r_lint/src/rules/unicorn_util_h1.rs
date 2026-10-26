@@ -305,3 +305,44 @@ pub(crate) fn is_direct_eval_call(ast: &Ast, id: NodeId) -> bool {
         _ => false,
     }
 }
+
+/// `child` is a type (a literal there is a literal type) as the direct child of `parent`.
+pub(crate) fn is_type_slot(ast: &Ast, parent: NodeId, child: NodeId) -> bool {
+    match *ast.node(parent) {
+        Node::As { ty, .. } | Node::Satisfies { ty, .. } | Node::TypeAssertion { ty, .. } => {
+            ty == child
+        }
+        Node::TypeAlias { ty, .. } => ty == child,
+        Node::VarDeclarator { type_ann, .. }
+        | Node::Param { type_ann, .. }
+        | Node::PropertyDef { type_ann, .. }
+        | Node::PropertySignature { type_ann, .. }
+        | Node::IndexSignature { type_ann, .. } => type_ann == Some(child),
+        Node::FunctionDecl { return_type, .. }
+        | Node::FunctionExpr { return_type, .. }
+        | Node::Arrow { return_type, .. }
+        | Node::MethodSignature { return_type, .. }
+        | Node::CallSignature { return_type, .. }
+        | Node::ConstructSignature { return_type, .. } => return_type == Some(child),
+        Node::FunctionType { return_type, .. } | Node::ConstructorType { return_type, .. } => {
+            return_type == child
+        }
+        Node::UnionType { .. }
+        | Node::IntersectionType { .. }
+        | Node::ArrayType { .. }
+        | Node::TupleType { .. }
+        | Node::NamedTupleMember { .. }
+        | Node::OptionalType { .. }
+        | Node::RestType { .. }
+        | Node::ParenType { .. }
+        | Node::TypeOperator { .. }
+        | Node::IndexedAccessType { .. }
+        | Node::ConditionalType { .. }
+        | Node::MappedType { .. }
+        | Node::TemplateLitType { .. }
+        | Node::TypeArgs { .. }
+        | Node::TypeParam { .. }
+        | Node::TypePredicate { .. } => true,
+        _ => false,
+    }
+}

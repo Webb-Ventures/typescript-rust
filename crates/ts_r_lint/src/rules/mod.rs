@@ -290,7 +290,9 @@ mod unicorn_error_message;
 mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
 mod unicorn_new_for_builtins;
-mod unicorn_no_array_reduce;
+mod unicorn_no_accidental_bitwise_operator;
+mod unicorn_no_array_concat_in_loop;
+mod unicorn_no_array_from_fill;
 mod unicorn_no_array_reverse;
 mod unicorn_no_array_sort;
 mod unicorn_no_async_promise_finally;
@@ -352,6 +354,7 @@ mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_location_assign;
+mod unicorn_prefer_math_constants;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
@@ -686,7 +689,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_escape_case::RULE,
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
-    &unicorn_no_array_reduce::RULE,
+    &unicorn_no_accidental_bitwise_operator::RULE,
+    &unicorn_no_array_concat_in_loop::RULE,
     &unicorn_no_array_reverse::RULE,
     &unicorn_no_array_sort::RULE,
     &unicorn_no_async_promise_finally::RULE,
@@ -747,6 +751,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_iterator_to_array::RULE,
     &unicorn_prefer_location_assign::RULE,
+    &unicorn_prefer_math_constants::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,

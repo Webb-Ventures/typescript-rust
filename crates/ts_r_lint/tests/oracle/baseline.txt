@@ -281,7 +281,9 @@ unicorn/error-message 106/106
 unicorn/escape-case 198/198
 unicorn/explicit-length-check 224/224
 unicorn/new-for-builtins 366/366
-unicorn/no-array-reduce 482/482
+unicorn/no-accidental-bitwise-operator 66/66
+unicorn/no-array-concat-in-loop 33/33
+unicorn/no-array-from-fill 30/30
 unicorn/no-array-reverse 28/28
 unicorn/no-array-sort 76/76
 unicorn/no-async-promise-finally 39/39
@@ -343,6 +345,7 @@ unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 243/247
 unicorn/prefer-iterator-to-array 61/61
 unicorn/prefer-location-assign 54/54
+unicorn/prefer-math-constants 66/66
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-object-from-entries 172/172
 unicorn/prefer-optional-catch-binding 25/25
