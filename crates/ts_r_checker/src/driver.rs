@@ -197,6 +197,12 @@ fn check_program_impl<'a>(
             }
             syntax.push(d.with_file(FileId(i as u32)));
         }
+        // A malformed `/// <reference />` is a parse error in tsc (TS1084).
+        let invalid = crate::references::invalid_reference_diagnostics(f);
+        if !invalid.is_empty() {
+            broken[i] = true;
+        }
+        syntax.extend(invalid.into_iter().map(|d| d.with_file(FileId(i as u32))));
     }
     // Program diagnostics (`/// <reference path>` targets) come with the syntax ones.
     let paths: rustc_hash::FxHashSet<&str> =

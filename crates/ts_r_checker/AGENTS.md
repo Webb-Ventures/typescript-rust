@@ -488,7 +488,9 @@ Files, by layer:
   (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
   type of the first `extends` clause is checked; the rest of `extends A, B` and a second
   `extends` clause are grammar errors only (tsc: checker.go, checkClassLikeDeclaration
-  through GetExtendsHeritageClauseElement). An `implements`
+  through GetExtendsHeritageClauseElement). An element whose expression the parser
+  recovered as missing is not counted: `class C extends await<string>` in a module checks
+  `string` (TS2863), as tsc's list holds no such element. An `implements`
   or interface `extends` element that is not an identifier or a dotted chain of them (a
   call, an optional chain `a?.B`) is TS2500 / TS2499 at the expression, besides the
   reference's own errors (`check_heritage_entity_name`; tsc: checker/checker.go).
@@ -581,6 +583,13 @@ Files, by layer:
   so history can report and refresh them without parsing every file.
   `/// <reference lib="x" />` naming no lib is TS2727 with the closest lib name
   (`relate::spelling_suggestion` over `ts_r_config::enums::LIBS`), else TS2726.
+  A leading `/// <reference ... />` is read as tsc's parser reads it: after `///`, blanks
+  and the tag `<reference` (letters and `-` only, any case), a run of `name="value"`
+  arguments that stops at `/>` or at anything else. The last argument of a name wins, and
+  the directive is the first of `no-default-lib="true"`, `types`, `lib` and `path` it has;
+  with none of them it is TS1084 at the whole comment (`invalid_reference_diagnostics`).
+  TS1084 is a parse error in tsc, so the driver counts the file as having syntax errors
+  (tsc: `extractPragmas` and `processPragmasIntoFields` in tsc/internal/parser/parser.go).
 - Missing global types: `driver::missing_global_type_diagnostics` (TS2318 for each of the
   ten core global types no file declares, observed with `noLib`; `CallableFunction` and
   `NewableFunction` only under `strictBindCallApply`). Global diagnostics; the

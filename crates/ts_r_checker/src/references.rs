@@ -117,6 +117,106 @@ pub fn reference_diagnostics(
     out
 }
 
+/// TS1084 for each `/// <reference ... />` in the leading comments of `f` that names none
+/// of `path`, `types`, `lib` or `no-default-lib="true"`, at the whole comment. A parse
+/// error in tsc, so the caller treats the file as having syntax errors.
+///
+/// The directive is read the way tsc's parser reads it (tsc: `extractPragmas` in
+/// tsc/internal/parser/parser.go): after `///`, blanks and `<reference`, a run of
+/// `name = "value"` (or `'value'`) arguments, stopping at `/>` or at the first thing that
+/// is not one. Names are letters and `-`, compared case-insensitively.
+pub fn invalid_reference_diagnostics(f: &SourceFile) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    if f.is_lib || f.is_json() {
+        return out;
+    }
+    let ast = &f.ast;
+    let first_stmt = match ast.node(ast.root) {
+        Node::Program { stmts } => ast.list(*stmts).first().map(|&s| ast.span(s).start),
+        _ => None,
+    }
+    .unwrap_or(u32::MAX);
+    for c in &ast.comments {
+        if c.span.start >= first_stmt {
+            break;
+        }
+        if c.kind != CommentKind::Line {
+            continue;
+        }
+        let Some(args) = directive_arguments(c.span.text(&f.text)) else {
+            continue;
+        };
+        let valid = args.iter().any(|(name, _, value)| match name.as_str() {
+            "no-default-lib" => *value == "true",
+            "types" | "lib" | "path" => true,
+            _ => false,
+        });
+        if !valid {
+            out.push(Diagnostic::new(
+                msg(dg::INVALID_REFERENCE_DIRECTIVE_SYNTAX_1084),
+                c.span,
+                &[],
+            ));
+        }
+    }
+    out
+}
+
+/// The arguments of a `/// <reference ... />` comment (lower-cased names, the offset of
+/// each value in `text`, and the values), or `None` when `text` is not one.
+fn directive_arguments(text: &str) -> Option<Vec<(String, usize, &str)>> {
+    let b = text.as_bytes();
+    let blanks = |mut i: usize| {
+        while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
+            i += 1;
+        }
+        i
+    };
+    let name_end = |mut i: usize| {
+        while i < b.len() && (b[i].is_ascii_alphabetic() || b[i] == b'-') {
+            i += 1;
+        }
+        i
+    };
+    let rest = text.strip_prefix("///")?;
+    let mut i = blanks(text.len() - rest.len());
+    if b.get(i) != Some(&b'<') {
+        return None;
+    }
+    let tag_end = name_end(i + 1);
+    if !text[i + 1..tag_end].eq_ignore_ascii_case("reference") {
+        return None;
+    }
+    i = tag_end;
+    let mut args = Vec::new();
+    // Each round consumes a name and a quoted value, or stops.
+    loop {
+        i = blanks(i);
+        if text[i..].starts_with("/>") {
+            break;
+        }
+        let end = name_end(i);
+        if end == i {
+            break;
+        }
+        let name = text[i..end].to_ascii_lowercase();
+        i = blanks(end);
+        if b.get(i) != Some(&b'=') {
+            break;
+        }
+        i = blanks(i + 1);
+        let Some(&q) = b.get(i).filter(|&&q| q == b'"' || q == b'\'') else {
+            break;
+        };
+        let Some(len) = text[i + 1..].find(q as char) else {
+            break;
+        };
+        args.push((name, i + 1, &text[i + 1..i + 1 + len]));
+        i += len + 2;
+    }
+    Some(args)
+}
+
 /// TS2688 for each `/// <reference types="..." />` of `f` whose name is in `missing` (the
 /// names the loader could not resolve from `f`), at the name.
 pub fn type_reference_diagnostics(f: &SourceFile, missing: &[&str]) -> Vec<Diagnostic> {
@@ -210,14 +310,19 @@ fn path_references(f: &SourceFile) -> Vec<(Span, &str)> {
         if c.kind != CommentKind::Line {
             continue;
         }
-        let t = c.span.text(&f.text);
-        // Only `path` directives (`types` and `lib` ones are reported elsewhere).
-        if crate::program::reference_attribute(t, "types").is_some()
-            || crate::program::reference_attribute(t, "lib").is_some()
+        let Some(args) = directive_arguments(c.span.text(&f.text)) else {
+            continue;
+        };
+        // tsc takes the first of `no-default-lib="true"`, `types`, `lib` and `path` the
+        // directive has; only `path` ones are reported here.
+        let arg = |key: &str| args.iter().rev().find(|(n, _, _)| n == key);
+        if arg("no-default-lib").is_some_and(|(_, _, v)| *v == "true")
+            || arg("types").is_some()
+            || arg("lib").is_some()
         {
             continue;
         }
-        if let Some((at, v)) = attribute_value(t, "path") {
+        if let Some(&(_, at, v)) = arg("path") {
             let start = c.span.start + at as u32;
             out.push((Span::new(start, start + v.len() as u32), v));
         }
