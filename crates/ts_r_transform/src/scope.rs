@@ -106,7 +106,8 @@ pub(crate) struct Scopes {
     /// `const x = init` without a type annotation: declaring identifier → initializer (enum
     /// initializers fold such constants, as tsc's evaluator does).
     pub const_inits: FxHashMap<NodeId, NodeId>,
-    /// Identifiers declared by a `declare var/let/const` (no declaration in the output).
+    /// Identifiers declared by a `declare var/let/const`, `declare class` or `declare
+    /// function` (no declaration in the output).
     pub ambient_vars: FxHashSet<NodeId>,
 }
 
@@ -416,6 +417,9 @@ impl Walker<'_> {
                         BindingKind::Function,
                         modifiers.contains(Modifiers::EXPORT),
                     );
+                    if modifiers.contains(Modifiers::DECLARE) {
+                        self.out.ambient_vars.insert(nm);
+                    }
                 }
                 if modifiers.contains(Modifiers::EXPORT) {
                     self.out.has_module_syntax |= scope == 0;
@@ -434,6 +438,9 @@ impl Walker<'_> {
                         BindingKind::Class,
                         modifiers.contains(Modifiers::EXPORT),
                     );
+                    if modifiers.contains(Modifiers::DECLARE) {
+                        self.out.ambient_vars.insert(nm);
+                    }
                 }
                 if modifiers.contains(Modifiers::EXPORT) && scope == 0 {
                     self.out.has_module_syntax = true;

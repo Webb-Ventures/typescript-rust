@@ -679,9 +679,9 @@ impl<'a> Tx<'a> {
     /// A statement in a single-statement position (`if` branch, loop body).
     fn sub_stmt(&mut self, id: NodeId) {
         let mut out = Vec::new();
-        self.list_depth += 1;
+        // No new statement list: an enum or namespace here is still in the enclosing one's
+        // scope (`label: enum E {}` at the top writes `var E;`, observed).
         self.stmt(id, &mut out);
-        self.list_depth -= 1;
         match out.len() {
             1 if out[0] == id => {}
             1 => replace(self.ast, id, out[0]),

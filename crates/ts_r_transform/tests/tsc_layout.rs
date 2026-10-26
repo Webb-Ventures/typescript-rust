@@ -283,3 +283,11 @@ fn statement_comments() {
 fn class_semicolons() {
     check("class_semicolons");
 }
+
+/// A namespace merged with a `declare class` or `declare function` writes its own `var`
+/// (the ambient declaration emits nothing), and an enum under a top-level label is still a
+/// top-level `var`.
+#[test]
+fn ambient_merges() {
+    check("ambient_merges");
+}
