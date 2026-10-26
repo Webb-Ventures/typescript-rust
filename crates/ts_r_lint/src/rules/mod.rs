@@ -96,6 +96,7 @@ mod jsdoc_prefer_import_tag;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
+mod jsdoc_require_description_complete_sentence;
 mod jsdoc_require_example;
 mod jsdoc_require_file_overview;
 mod jsdoc_require_hyphen_before_param_description;
@@ -1095,6 +1096,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_reject_any_type::RULE,
     &jsdoc_reject_function_type::RULE,
     &jsdoc_require_asterisk_prefix::RULE,
+    &jsdoc_require_description_complete_sentence::RULE,
     &jsdoc_require_example::RULE,
     &jsdoc_require_file_overview::RULE,
     &jsdoc_require_hyphen_before_param_description::RULE,

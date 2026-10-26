@@ -182,6 +182,7 @@ jsdoc/prefer-import-tag 51/51
 jsdoc/reject-any-type 5/5
 jsdoc/reject-function-type 4/4
 jsdoc/require-asterisk-prefix 24/24
+jsdoc/require-description-complete-sentence 91/91
 jsdoc/require-example 35/35
 jsdoc/require-file-overview 31/31
 jsdoc/require-hyphen-before-param-description 32/32
