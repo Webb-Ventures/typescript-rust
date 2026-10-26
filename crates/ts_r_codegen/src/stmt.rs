@@ -1785,6 +1785,7 @@ impl Printer<'_> {
             if !self.is_synthetic(m) {
                 let start = self.span(m).start;
                 while let Some(p) = semis.next_if(|&p| p < start) {
+                    self.leading_comments(p);
                     self.newline();
                     self.map_token(";", Some(p));
                     self.trailing_comments(p + 1);
@@ -1806,6 +1807,7 @@ impl Printer<'_> {
             }
         }
         for p in semis {
+            self.leading_comments(p);
             self.newline();
             self.map_token(";", Some(p));
             self.trailing_comments(p + 1);

@@ -24,3 +24,10 @@ class B {
 }
 _B_instances = new WeakSet(), _B_m = function _B_m() { return 1; };
 export { A, B };
+class K {
+    // before the semicolon
+    ;
+    m() { }
+    /* before the last one */
+    ;
+}

@@ -11,3 +11,10 @@ class B {
     z = class { ; };
 }
 export { A, B };
+class K {
+    // before the semicolon
+    ;
+    m() {}
+    /* before the last one */
+    ;
+}
