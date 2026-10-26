@@ -226,3 +226,28 @@ fn cjs_jsx_pragma() {
 fn jsx_classic_layout() {
     check("jsx_classic_layout");
 }
+
+/// Once the automatic JSX runtime is imported, the file's leading comments are not detached:
+/// they follow the runtime's `require` and lead the first statement.
+#[test]
+fn jsx_runtime_comments() {
+    check("jsx_runtime_comments");
+}
+
+/// ... and go with that statement when it is erased.
+#[test]
+fn jsx_runtime_comments_erased() {
+    check("jsx_runtime_comments_erased");
+}
+
+/// A triple-slash directive in front of an elided import goes with it.
+#[test]
+fn triple_slash_elided_import() {
+    check("triple_slash_elided_import");
+}
+
+/// A triple-slash directive in front of an erased interface is kept.
+#[test]
+fn triple_slash_erased_interface() {
+    check("triple_slash_erased_interface");
+}

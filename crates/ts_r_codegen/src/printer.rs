@@ -776,6 +776,17 @@ impl<'a> Printer<'a> {
         (e.end > from).then_some(e.end)
     }
 
+    /// The first erased range at or after `pos` is an import (`import ...`, elided).
+    fn erased_import_after(&self, pos: u32) -> bool {
+        let erased = self.hints.erased;
+        let i = erased.partition_point(|s| s.start < pos);
+        erased.get(i).is_some_and(|e| {
+            let text = self.src.get(e.start as usize..).unwrap_or("");
+            text.strip_prefix("import")
+                .is_some_and(|rest| !rest.bytes().next().is_some_and(is_word_byte))
+        })
+    }
+
     /// Start of the erased range holding `pos`.
     pub(crate) fn erased_start(&self, pos: u32) -> Option<u32> {
         let erased = self.hints.erased;
@@ -807,9 +818,14 @@ impl<'a> Printer<'a> {
             None => self.comment_cursor,
         };
         let comments = &self.ast.comments;
-        if self.tsc && from != self.comment_cursor && self.opts.comments {
+        if self.tsc
+            && from != self.comment_cursor
+            && self.opts.comments
+            && !self.erased_import_after(self.comment_cursor)
+        {
             // Triple-slash directives at the top of the file outlive the erased declaration
-            // they lead (`/// <reference types="x" />` above `export interface I {}`).
+            // they lead (`/// <reference types="x" />` above `export interface I {}`), not an
+            // elided import (observed).
             let mut j = comments.partition_point(|c| c.span.start < self.comment_cursor);
             while let Some(&c) = comments.get(j) {
                 if c.span.start >= from {
@@ -1438,6 +1454,7 @@ impl<'a> Printer<'a> {
             }
         }
         if self.tsc
+            && !self.hints.no_detached_comments
             && let Some(end) = self.detached_comments_end()
         {
             // tsc prints the file's detached comments (those a blank line separates from the

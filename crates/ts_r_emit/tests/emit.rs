@@ -602,3 +602,39 @@ fn no_common_source_directory() {
     assert_eq!(run("a:/foo/baz.ts", true), vec![5009]);
     assert_eq!(run("a:/foo/baz.ts", false), Vec::<u32>::new());
 }
+
+/// With the automatic JSX runtime, an unused `React` import is elided only when the runtime
+/// module resolves in the program (tsc then does not mark the classic factory's root used).
+#[test]
+fn jsx_runtime_found_elides_unused_react_import() {
+    const JSX_CONFIG: &str = r#"{"compilerOptions":{"target":"es2022","module":"esnext","jsx":"react-jsx","rootDir":"src","outDir":"out","types":[]}}"#;
+    const REACT: &str = "declare module \"react\" { const React: any; export default React; }\n\
+        declare namespace JSX { interface IntrinsicElements { [k: string]: any } }\n";
+    const RUNTIME: &str =
+        "declare module \"react/jsx-runtime\" { export function jsx(...a: any[]): any; }\n";
+    const APP: &str = "import React from \"react\";\nexport const a = <div />;\n";
+    let found = emit(&[
+        ("tsconfig.json", JSX_CONFIG),
+        ("src/react.d.ts", REACT),
+        ("src/rt.d.ts", RUNTIME),
+        ("src/a.tsx", APP),
+    ]);
+    let a = found
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.js")
+        .unwrap();
+    assert!(!a.text.contains("from \"react\""), "{}", a.text);
+    assert!(a.text.contains("react/jsx-runtime"), "{}", a.text);
+    let missing = emit(&[
+        ("tsconfig.json", JSX_CONFIG),
+        ("src/react.d.ts", REACT),
+        ("src/a.tsx", APP),
+    ]);
+    let a = missing
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.js")
+        .unwrap();
+    assert!(a.text.contains("import React from \"react\""), "{}", a.text);
+}

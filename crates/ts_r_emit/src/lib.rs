@@ -516,6 +516,8 @@ pub struct CheckerResolver<'c, 'a> {
     preserve_const_enums: bool,
     /// `isolatedModules`: const enums of other files are not inlined (observed).
     isolated_modules: bool,
+    /// Per file: its implicit automatic JSX runtime import resolves to a module.
+    jsx_runtime_found: Vec<bool>,
 }
 
 impl<'c, 'a> CheckerResolver<'c, 'a> {
@@ -524,6 +526,7 @@ impl<'c, 'a> CheckerResolver<'c, 'a> {
             checker,
             preserve_const_enums: options.effective().preserve_const_enums(),
             isolated_modules: options.effective().isolated_modules(),
+            jsx_runtime_found: jsx_runtimes_found(checker, options),
         }
     }
 
@@ -541,7 +544,41 @@ impl std::fmt::Debug for CheckerResolver<'_, '_> {
     }
 }
 
+/// Per file of the checker: whether the automatic JSX runtime it imports implicitly
+/// (`react/jsx-runtime`) resolves to a module, ambient or a program file, as the checker
+/// resolves it to type the file's JSX.
+fn jsx_runtimes_found(checker: &Checker<'_>, options: &CompilerOptions) -> Vec<bool> {
+    if options.jsx().is_none() {
+        return Vec::new();
+    }
+    let paths: rustc_hash::FxHashSet<&str> =
+        checker.files.iter().map(|f| f.path.as_str()).collect();
+    checker
+        .files
+        .iter()
+        .map(|f| {
+            let Some(spec) = ts_r_checker::jsx_runtime::runtime_specifier(f, options) else {
+                return false;
+            };
+            if checker.link.find_ambient_module(&spec).is_some() {
+                return true;
+            }
+            matches!(
+                checker.resolutions.get(&(f.path.clone(), spec)),
+                Some(Some(r)) if paths.contains(r.resolved.as_str())
+            )
+        })
+        .collect()
+}
+
 impl EmitResolver for CheckerResolver<'_, '_> {
+    fn jsx_runtime_found(&self, file: FileId) -> bool {
+        self.jsx_runtime_found
+            .get(file.0 as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+
     fn is_value_alias(&self, file: FileId, alias: NodeId) -> Answer {
         match self
             .checker
@@ -983,6 +1020,7 @@ fn emit_js(ctx: &Ctx, i: usize) -> FileOut {
         single_quoted: &r.single_quoted,
         map_ranges: &r.map_ranges,
         moved_comments: &r.moved_comments,
+        no_detached_comments: r.no_detached_comments,
         strip_numeric_separators: opts.strip_numeric_separators,
     };
     let printed = ts_r_codegen::print_with(&ast, &f.text, &codegen, &hints);

@@ -176,7 +176,10 @@ so the file is refused with TSR2002. `const_enum_value` answers an access of ano
 file's const enum member (`E.A`, `E["A"]`, `ns.E.A` through an import), or a local enum
 whose initializer depends on an import, with
 `Checker::const_enum_access_value`; under `isolatedModules` it answers nothing, so tsc's
-property access stays. Without the program (per-file
+property access stays. `jsx_runtime_found` is precomputed per file
+(`jsx_runtimes_found`): the file's runtime specifier
+(`ts_r_checker::jsx_runtime::runtime_specifier`) names an ambient module or resolves to a
+program file. Without the program (per-file
 transpile) `SyntacticResolver` keeps today's isolatedModules behaviour. ts-r-check builds a
 second `Checker` for emit (the check's checker is internal to `check_program`); alias
 resolution is lazy, so this costs the link step only.

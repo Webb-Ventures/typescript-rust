@@ -120,6 +120,11 @@ pub struct PrintHints<'a> {
     /// (after the previous token's line), those inside it and those trailing it on its last
     /// line. They are not printed where the node was.
     pub moved_comments: &'a [(NodeId, Span)],
+    /// [`Layout::Tsc`]: print no detached comments after the prologue. tsc has none once
+    /// its JSX transform adds statements at the top (the runtime import, `_jsxFileName`):
+    /// the file's leading comments then lead its first statement, and go with it if it is
+    /// erased.
+    pub no_detached_comments: bool,
     /// Print a numeric literal written with `_` separators by its value (`10_000` →
     /// `10000`), as tsc does without a `target` or below ES2021.
     pub strip_numeric_separators: bool,

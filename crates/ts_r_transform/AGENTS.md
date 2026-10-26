@@ -24,7 +24,10 @@ import alias names a value (`Yes`/`No`/`Unknown`). `SyntacticResolver` (per-file
 answers from the file alone, as isolatedModules; `ts_r_emit::CheckerResolver` asks the
 checker. `const_enum_value` gives the value of another file's const enum member for an
 access whose root is an import, or a local const enum member the file-only evaluator could
-not resolve (`enums.rs` inlines it as `0 /* E.A */`).
+not resolve (`enums.rs` inlines it as `0 /* E.A */`). `jsx_runtime_found` says the
+automatic JSX runtime module (`react/jsx-runtime`) resolves in the program: JSX then no
+longer keeps the classic factory's root import (`React`) alive, as in tsc; the per-file
+default is `false` (keep it).
 `export default X` where `X` is an import of a type only (`type_alias_imports`) is erased
 with the import, as tsc does. Constructs answered `Unknown` are listed in `TransformResult::unknown`; a program
 emitter must not write that file (TSR2002).

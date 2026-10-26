@@ -71,6 +71,8 @@ pub struct TransformResult {
     /// Statements standing for moved source nodes ([`PrintHints::moved_comments`]). Sorted
     /// by node.
     pub moved_comments: Vec<(NodeId, Span)>,
+    /// The JSX transform added statements at the top ([`PrintHints::no_detached_comments`]).
+    pub no_detached_comments: bool,
 }
 
 /// Rewrites `ast` (parsed from `src`) into a JavaScript tree.
@@ -168,6 +170,7 @@ pub fn transpile(
         single_quoted: &result.single_quoted,
         map_ranges: &result.map_ranges,
         moved_comments: &result.moved_comments,
+        no_detached_comments: result.no_detached_comments,
         strip_numeric_separators: opts.strip_numeric_separators,
     };
     let out = ts_r_codegen::print_with(&ast, src, codegen, &hints);

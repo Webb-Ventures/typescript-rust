@@ -109,6 +109,8 @@ pub(crate) struct Tx<'a> {
     pub single_line: Vec<NodeId>,
     pub multi_line: Vec<NodeId>,
     pub single_quoted: Vec<NodeId>,
+    /// [`crate::TransformResult::no_detached_comments`].
+    pub no_detached_comments: bool,
     /// Source-map ranges of synthesized nodes ([`crate::TransformResult::map_ranges`]).
     pub map_ranges: Vec<(NodeId, Span)>,
     /// Statements standing for source nodes moved elsewhere
@@ -181,6 +183,7 @@ pub(crate) fn run(
         single_line: Vec::new(),
         multi_line: Vec::new(),
         single_quoted: Vec::new(),
+        no_detached_comments: false,
         map_ranges: Vec::new(),
         moved_comments: Vec::new(),
     };
@@ -232,6 +235,7 @@ pub(crate) fn run(
         single_line: sorted(tx.single_line),
         multi_line: sorted(tx.multi_line),
         single_quoted: sorted(tx.single_quoted),
+        no_detached_comments: tx.no_detached_comments,
         map_ranges: {
             // The last range given to a node wins.
             let mut r = tx.map_ranges;
@@ -551,6 +555,7 @@ impl<'a> Tx<'a> {
             self.stmt(s, &mut out);
         }
         let mut jsx_imports = crate::jsx::finish(self);
+        self.no_detached_comments = !jsx_imports.is_empty();
         if self.opts.is_cjs() {
             out = crate::cjs::finish(self, out, std::mem::take(&mut jsx_imports));
         }
@@ -1732,9 +1737,18 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// The classic JSX factory's root identifier keeps its import alive.
-    fn jsx_needs(&self, local: NodeId) -> bool {
+    /// The classic JSX factory's root identifier keeps its import alive, also under the
+    /// automatic runtime unless that runtime's module resolves (tsc marks the factory's
+    /// root referenced only when there is no implicit runtime import to type the JSX).
+    fn jsx_needs(&mut self, local: NodeId) -> bool {
         if !self.sc.has_jsx {
+            return false;
+        }
+        if matches!(
+            crate::jsx::mode(self),
+            crate::JsxMode::Automatic | crate::JsxMode::AutomaticDev
+        ) && self.resolver.jsx_runtime_found(self.file)
+        {
             return false;
         }
         let root = self.jsx.factory_root(self.opts);

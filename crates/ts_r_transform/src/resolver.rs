@@ -69,6 +69,15 @@ pub trait EmitResolver: Sync {
         let _ = (file, decl);
         Answer::Yes
     }
+
+    /// Whether the automatic JSX runtime `file` imports implicitly (`react/jsx-runtime`)
+    /// resolves to a module. When it does, JSX no longer keeps an import of the classic
+    /// factory's root (`import * as React from "react"`) alive; when it does not (or the
+    /// file is transpiled alone), it does, as for the classic runtime.
+    fn jsx_runtime_found(&self, file: FileId) -> bool {
+        let _ = file;
+        false
+    }
 }
 
 /// The file-local behaviour: every alias the transform keeps stays.

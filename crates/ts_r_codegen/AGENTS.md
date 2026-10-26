@@ -9,7 +9,7 @@ AST: [../../docs/design/0001-ast.md](../../docs/design/0001-ast.md).
 
 ```rust
 let out = ts_r_codegen::print(&ast, src, &CodegenOptions::default());
-// or print_with(&ast, src, &opts, &PrintHints { erased, prelude, single_line, multi_line, map_ranges, moved_comments, .. })
+// or print_with(&ast, src, &opts, &PrintHints { erased, prelude, single_line, multi_line, single_quoted, map_ranges, moved_comments, no_detached_comments, .. })
 // after a transform (`..Default::default()` for the hints you do not have)
 out.code; out.map /* Option<SourceMap>: to_json, to_data_url, decode */; out.specifiers;
 ```
@@ -119,7 +119,8 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
     fixtures: `ts_r_emit/tests/tsc_layout/`.
   - `/// <reference ...>` and `/// <amd-...>` directives at the top of the file survive the
     erased declaration they lead (printed with the next statement's comments), and come
-    before the `export {};` of a module whose statements were all erased.
+    before the `export {};` of a module whose statements were all erased. An elided import
+    takes them with it (`erased_import_after`).
   - Imports a transform adds at the top (`react/jsx-runtime`, `tslib`) print before the
     file's detached comments and triple-slash directives.
   - Moved statements (`PrintHints::moved_comments`, `(statement, original span)` sorted by
@@ -132,7 +133,10 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
     breaks are measured from its `<`.
   - The file's detached comments (up to the last one a blank line follows) print right after
     the prologue, before helpers and `Object.defineProperty(exports, ...)`, and survive when
-    the first statement is erased.
+    the first statement is erased. Not with `PrintHints::no_detached_comments` (set when the
+    JSX transform added the runtime import or `_jsxFileName`): tsc then has none, and the
+    comments lead the first statement (after the runtime's `require`), going with it if it
+    is erased.
   - Comments after `{` on its line: kept in statement blocks (also `{ /* c */ }`), `switch`
     and after `case x:`; dropped in function bodies (also `{ /* c */ }` and an empty
     multi-line body `{ // c\n}`), class bodies and multi-line objects. A leading block comment followed by code on its line stays there
