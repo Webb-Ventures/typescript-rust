@@ -294,16 +294,21 @@ mod unicorn_error_message;
 mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
 mod unicorn_new_for_builtins;
-mod unicorn_no_array_from_fill;
+mod unicorn_no_array_concat_in_loop;
+mod unicorn_no_array_reverse;
+mod unicorn_no_array_sort;
+mod unicorn_no_asterisk_prefix_in_documentation_comments;
+mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
+mod unicorn_no_canvas_to_image;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
 mod unicorn_no_double_comparison;
 mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_exports_in_scripts;
-mod unicorn_no_global_object_property_assignment;
+mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
@@ -318,7 +323,7 @@ mod unicorn_no_new_array;
 mod unicorn_no_null;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_this_assignment;
-mod unicorn_no_top_level_assignment_in_function;
+mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
@@ -371,7 +376,7 @@ mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
 mod unicorn_util;
-mod unicorn_util_h1;
+mod unicorn_util_h2;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -691,9 +696,14 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_escape_case::RULE,
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
-    &unicorn_no_array_from_fill::RULE,
+    &unicorn_no_array_concat_in_loop::RULE,
+    &unicorn_no_array_reverse::RULE,
+    &unicorn_no_array_sort::RULE,
+    &unicorn_no_asterisk_prefix_in_documentation_comments::RULE,
+    &unicorn_no_async_promise_finally::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
+    &unicorn_no_canvas_to_image::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
@@ -702,7 +712,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_duplicate_set_values::RULE,
     &unicorn_no_duplicate_if_branches::RULE,
     &unicorn_no_exports_in_scripts::RULE,
-    &unicorn_no_global_object_property_assignment::RULE,
+    &unicorn_no_ineffective_csp_directives::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
@@ -717,7 +727,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_null::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_this_assignment::RULE,
-    &unicorn_no_top_level_assignment_in_function::RULE,
+    &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,

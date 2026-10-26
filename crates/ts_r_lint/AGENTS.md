@@ -647,3 +647,44 @@ grammars, parslets, stringify, visitor keys); @es-joy/jsdoccomment 0.91.0
 `src/parseInlineTags.js`; comment-parser `src/parser/tokenizers/`; spdx-expression-parse
 5.0.0 `scan.js`, `parse.js`; semver 7 `internal/re.js`. Behaviour was confirmed against
 their output, not translated.
+
+## eslint-plugin-unicorn rules (round 5, h2)
+
+`no-asterisk-prefix-in-documentation-comments`, `no-canvas-to-image`, `no-transition-all`,
+`no-ineffective-csp-directives` (each at 100% of its oracle). Helpers these rules share are in
+`rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
+the initialiser of the plain `const` it names when that is declared once before the use and
+read only there; the declaration's initialising write is one of its two references) and
+`decode_jsx_entities` (JSX attribute strings with `&#45;`, `&#x2D;` and the HTML 4 names
+plus `&apos;` decoded, as ESTree parsers give their value; our AST keeps the raw text).
+
+- **no-asterisk-prefix-in-documentation-comments** looks at `/**` (not `/***`) block comments
+  that span lines and start a line (only spaces and tabs before them). Every line after the
+  first that is `<indent><spaces>*` loses the asterisk and one following space (` */` becomes
+  `*/`); the indentation all non-blank lines then share, when it is deeper than the comment's,
+  is moved back to the comment's, which also empties whitespace-only lines. When only some
+  content lines have the asterisk nothing is reported: they may be Markdown list markers.
+  Lines split at `\n`, `\r`, U+2028 and U+2029 (`\r\n` counts as a break and an empty line).
+- **no-canvas-to-image** reports the first argument of a plain `x.drawImage(...)` that is
+  (through `await`s and a single-use `const`) `loadImage(<canvas>.toDataURL())`, where the
+  receiver is an identifier or a `.name` whose name contains `canvas` (any case), and of
+  `x.putImageData(...)` that is `y.getImageData(...)`; optional chaining anywhere opts out.
+- **no-transition-all** reports only with type information: the receiver of `.transition =`,
+  `.transitionProperty =` or `.setProperty('transition' | 'transition-property', value,
+  priority?)` must be the lib's `CSSStyleDeclaration`/`CSSStyleProperties` (every non-nullish
+  member of a union), the value a static string whose top-level CSS components include the
+  identifier `all` (escapes decoded, any case; not inside a function such as `var()`; `!`
+  means it is not a plain value), and the priority missing, `''`, `important` or not a
+  literal. Its oracle cases carry no type information, so they all expect nothing; the CSS
+  file half of the plugin rule needs a CSS language.
+- **no-ineffective-csp-directives** checks JSX only (the HTML half needs an HTML language):
+  `<meta>` (lowercase identifier) without spreads, exactly one `httpEquiv`/`http-equiv` and
+  exactly one `content`, each a string or a container whose control-flow static value is a
+  string; header `content-security-policy` in any case; each of `frame-ancestors`, `sandbox`,
+  `report-uri` reported once per element on the `content` value, in policy order.
+
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/`:
+`no-asterisk-prefix-in-documentation-comments.js`, `no-canvas-to-image.js`,
+`no-transition-all.js`, `no-ineffective-csp-directives.js`, `utils/get-line-start.js`,
+`utils/reindent-text.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's
+JSX parser decodes); only numeric references appear in the oracle.
