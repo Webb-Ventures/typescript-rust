@@ -310,6 +310,7 @@ unicorn/no-array-sort 76/76
 unicorn/no-array-sort-for-min-max 82/82
 unicorn/no-array-splice 95/95
 unicorn/no-asterisk-prefix-in-documentation-comments 56/56
+unicorn/no-async-iterator-callback 144/144
 unicorn/no-async-promise-finally 39/39
 unicorn/no-await-expression-member 72/72
 unicorn/no-await-in-promise-methods 111/111

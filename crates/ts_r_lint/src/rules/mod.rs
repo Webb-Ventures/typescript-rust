@@ -349,6 +349,7 @@ mod unicorn_no_array_sort;
 mod unicorn_no_array_sort_for_min_max;
 mod unicorn_no_array_splice;
 mod unicorn_no_asterisk_prefix_in_documentation_comments;
+mod unicorn_no_async_iterator_callback;
 mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_expression_member;
 mod unicorn_no_await_in_promise_methods;
@@ -964,6 +965,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_sort_for_min_max::RULE,
     &unicorn_no_asterisk_prefix_in_documentation_comments::RULE,
     &unicorn_no_array_splice::RULE,
+    &unicorn_no_async_iterator_callback::RULE,
     &unicorn_no_async_promise_finally::RULE,
     &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_expression_member::RULE,
