@@ -494,3 +494,27 @@ fn namespace_jsx_members_respect_shadowing() {
     let m = messages(&h, "import/namespace", serde_json::json!([]), "a.jsx", code);
     assert_eq!(m, ["'e' not found in imported namespace 'Names'."]);
 }
+
+#[test]
+fn deprecated_reports_references_only() {
+    let h = host(&[(
+        "/p/dep.js",
+        "/** @deprecated use g */\nexport function fn() {}\nexport const ok = 1;\n".into(),
+    )]);
+    let code = "import { fn } from './dep';\n\
+                const obj = { fn: 1, [fn]: 2, fn };\n\
+                obj.fn;\n\
+                fn: for (;;) { break fn; }\n\
+                fn();\n\
+                export { obj };\n";
+    let m = messages(
+        &h,
+        "import/no-deprecated",
+        serde_json::json!([]),
+        "a.js",
+        code,
+    );
+    // The import itself, then `[fn]`, the shorthand `fn` and the call.
+    assert_eq!(m.len(), 4, "{m:?}");
+    assert!(m.iter().all(|s| s == "Deprecated: use g"), "{m:?}");
+}

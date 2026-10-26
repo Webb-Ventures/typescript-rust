@@ -141,7 +141,14 @@ impl Rule for NoDeprecated {
                     _ => {}
                 }
             }
-            if declared_scope(cx, name, id) != Some(ScopeKind::Module) {
+            // Only references to the module-level binding: not object keys, labels or
+            // other names spelled the same (the plugin checks the spelling and the scope
+            // that declares it, so it also flags `{ fn: 1 }`).
+            let sem = cx.semantic();
+            let Some(sym) = sem.reference_at(id).and_then(|r| sem.reference(r).symbol()) else {
+                continue;
+            };
+            if sem.scope(sem.symbol(sym).scope).kind != ScopeKind::Module {
                 continue;
             }
             let d = d.clone();

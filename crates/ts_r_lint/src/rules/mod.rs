@@ -444,6 +444,7 @@ mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_manually_wrapped_comments;
 mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
+mod unicorn_no_missing_local_resource;
 mod unicorn_no_multiple_promise_resolver_calls;
 mod unicorn_no_named_default;
 mod unicorn_no_negated_array_predicate;
