@@ -91,6 +91,8 @@ mod jsdoc_no_multi_asterisks;
 mod jsdoc_no_restricted_syntax;
 mod jsdoc_no_types;
 mod jsdoc_no_undefined_types;
+mod jsdoc_normalize_see_links;
+mod jsdoc_prefer_import_tag;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
@@ -1122,6 +1124,8 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_match_description::RULE,
     &jsdoc_match_name::RULE,
     &jsdoc_no_bad_blocks::RULE,
+    &jsdoc_normalize_see_links::RULE,
+    &jsdoc_prefer_import_tag::RULE,
     &jsdoc_require_description::RULE,
     // end jsdoc, round 8 (h1)
     // eslint-plugin-unicorn
