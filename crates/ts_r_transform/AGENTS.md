@@ -179,6 +179,25 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   nested classes with the outer flags but only a synthesized key-capture block of theirs
   (`Tx::inline_static`), never their methods or field initializers. A class expression's key
   captures come before its `__setFunctionName` call (observed).
+- **Static privates of class-decorated classes** (`static_privates.rs`, ES2022 <= target <
+  ESNext): as tsc does, every static private member becomes a variable declared first in
+  the decorator IIFE (a class decorator may replace the class, so `#x` brand checks go
+  through `_classThis`). A field becomes `static { _C_f = { value: v }; }`
+  in place; methods and accessors become one static block of `_C_m = function _C_m() {}`
+  assignments, after the `_classThis` and `__setFunctionName` blocks. An undecorated
+  `accessor #x`'s storage variable comes after its `_get`/`_set` ones. Uses become
+  `__classPrivateFieldGet/Set/In` with `_classThis` as the brand, visited in source order
+  (that order requests the helpers). A nested class that declares the same private name
+  shadows it. Observed in tsc's `esDecorators-classDeclaration-classThisReference`,
+  `esDecorators-classDeclaration-{fields,methods,accessors}-staticPrivate*`
+  baselines (no tsc source read).
+- **Named evaluation** (`transform.rs` `key_class_hint` / `expr_named`): an anonymous
+  decorated class gets `__setFunctionName(_classThis, "n")` from where it is assigned:
+  `x = class {}`, `let x = class {}`, an object literal key (identifier, string, number or
+  a computed literal; never a plain `__proto__`), shorthand and binding defaults
+  (`{ e = class {} }`, `{ f: g = class {} }` takes `g`), a class field's key, and
+  `export default (class {})` (`"default"`). Observed in tsc's
+  `esDecorators-classExpression-namedEvaluation.*` baselines (no tsc source read).
 - **Bundler-only options**: `TransformOptions::default_class_name` names an anonymous
   `export default class` that ES2022 lowering must name (the bundler passes `<stem>_default`,
   esbuild's name); tsc never sets it (`None`).
@@ -209,8 +228,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-26, v1/emit): 1,678 match, 50 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
-  syntax errors are skipped); `--filter esDecorators`: 119 match, 21 mismatch.
+  Last run (2026-10-26, v1/emit2): 1,693 match, 35 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  syntax errors are skipped); `--filter esDecorators`: 134 match, 6 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
   tsc's emit. Last run: 48/48 packages pass.
@@ -281,11 +300,14 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   an async arrow outside an async method and computed keys inside a pattern nested under an
   object rest (tsc flattens them too) are not handled. Private methods using `super`, and
   private classes evaluated in a loop with an outer `await` or `yield`, are refused (TSR2003).
-- TC39 decorators: static private members of class-decorated classes keep native `#x` (tsc
-  moves them to `__classPrivateFieldGet` storage), writes to `super` properties in their
-  static members stay as written (tsc uses `Reflect.set` and temporaries; reads, calls and
-  tags already go through `Reflect.get(_classSuper, k, _classThis)`), and named evaluation only covers
-  `x = class {}` / `let x = class {}` (not object literal keys, defaults or destructuring).
+- TC39 decorators: writes to `super` properties in static members stay as written (tsc
+  uses `Reflect.set` and temporaries; reads, calls and tags already go through
+  `Reflect.get(_classSuper, k, _classThis)`). Static privates of class-decorated classes
+  (`static_privates.rs`) leave `++`/`--`, logical assignments, destructuring targets and
+  compound assignments on a non-`this` receiver as written (tsc caches the receiver in a
+  function-scoped temporary). Named evaluation does not cover computed keys that are not
+  literals (tsc: `[_a = __propKey(f())]` and `__setFunctionName(_classThis, _a)`), nor a
+  decorated class in a decorated static field's initializer.
 - `module: preserve` adds an `export {}` marker where tsc 7 adds none (tsc never adds it
   under `preserve`; the bundler relies on the marker, so only `.cts`/`.cjs` files and files
   with `export =` or `import x = require()` drop it). Program emit sets

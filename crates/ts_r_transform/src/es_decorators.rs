@@ -29,8 +29,10 @@
 //! In static fields and blocks of a class-decorated derived class, `super` reads, calls and
 //! tags go through `Reflect.get(_classSuper, k, _classThis)`.
 //!
-//! Not done (tsc does): static private members of class-decorated classes are not moved to
-//! `WeakMap`-style storage, writes to `super` properties in their static members are not
+//! At ES2022 and later (below ESNext) the static private members of a class-decorated class
+//! are lowered to `{ value }` storage and functions anyway (static_privates.rs).
+//!
+//! Not done (tsc does): writes to `super` properties in their static members are not
 //! lowered to `Reflect.set` (with temporaries), and anonymous classes get no
 //! `__setFunctionName` from the binding they are assigned to (named evaluation).
 
@@ -531,6 +533,7 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
         let this = tx.this(at);
         out.push(set_function_name_block(tx, this, n, at));
     }
+    let lead = out.len();
     out.extend_from_slice(&members[..key_blocks]);
     let decoration = static_block(tx, &block, at);
     out.push(decoration);
@@ -538,6 +541,29 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
     if !trailing.is_empty() {
         out.push(static_block(tx, &trailing, at));
     }
+    // At ES2022 and later (below ESNext) the static private members of a class-decorated
+    // class are still lowered (static_privates.rs); below ES2022 the lowering pass does it.
+    let private_vars = match class_this {
+        Some(ct)
+            if static_code
+                && tx.opts.target >= ts_r_config::ScriptTarget::ES2022
+                && tx.opts.target < ts_r_config::ScriptTarget::ESNext =>
+        {
+            let name = class_name
+                .clone()
+                .unwrap_or_else(|| tx.ast.atom(binding).to_owned());
+            let decorated: Vec<Atom> = st
+                .decorated
+                .iter()
+                .filter_map(|d| match d.name {
+                    Name::Private(n) if d.is_static => Some(n),
+                    _ => None,
+                })
+                .collect();
+            crate::static_privates::lower(tx, &mut out, lead, &name, ct, &decorated)
+        }
+        _ => Vec::new(),
+    };
     p.members = tx.new_list(&out);
     p.modifiers = Modifiers::NONE;
     p.is_expr = true;
@@ -550,6 +576,9 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
     // The IIFE body.
     let temps = tx.temps.pop().unwrap_or_default();
     let mut body: Vec<NodeId> = Vec::new();
+    if let Some(v) = tx.temps_decl(private_vars) {
+        body.push(v);
+    }
     if let Some(t) = tx.temps_decl(temps) {
         body.push(t);
     }
