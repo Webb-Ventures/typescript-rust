@@ -361,6 +361,25 @@ const HTML_ENTITIES: &[(&str, u32)] = &[
     ("zwnj", 8204),
 ];
 
+/// Adds to `fix` the edits that turn the call `obj.name(...)` into `obj`: the member's
+/// `.name` (from the end of the parenthesized object) and everything from the end of the
+/// parenthesized callee to the end of the call.
+pub(crate) fn remove_method_call(cx: &Ctx<'_, '_>, call: NodeId, fix: Fix) -> Fix {
+    let ast = cx.ast();
+    let Node::Call { callee, .. } = *ast.node(call) else {
+        return fix;
+    };
+    let member = skip_parens(ast, callee);
+    let Node::Member { obj, .. } = *ast.node(member) else {
+        return fix;
+    };
+    let obj_end = super::unicorn_text::paren_span(cx, obj).end;
+    let member_span = cx.span(member);
+    let callee_end = super::unicorn_text::paren_span(cx, member).end;
+    fix.and(Span::new(obj_end, member_span.end), "")
+        .and(Span::new(callee_end, cx.span(call).end), "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{HTML_ENTITIES, decode_jsx_entities};

@@ -343,9 +343,8 @@ mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener_options;
-mod unicorn_prefer_array_from_range;
-mod unicorn_prefer_array_slice;
-mod unicorn_prefer_at;
+mod unicorn_prefer_array_last_methods;
+mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_global_number_constants;
@@ -364,6 +363,7 @@ mod unicorn_prefer_string_slice;
 mod unicorn_prefer_string_starts_ends_with;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
+mod unicorn_prefer_then_catch;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
 mod unicorn_prefer_unary_minus;
@@ -747,8 +747,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
-    &unicorn_prefer_array_from_range::RULE,
-    &unicorn_prefer_array_slice::RULE,
+    &unicorn_prefer_array_last_methods::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_block_statement_over_iife::RULE,
     &unicorn_prefer_at::RULE,
@@ -769,6 +768,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_slice::RULE,
     &unicorn_prefer_string_starts_ends_with::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
+    &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,
     &unicorn_require_array_sort_compare::RULE,

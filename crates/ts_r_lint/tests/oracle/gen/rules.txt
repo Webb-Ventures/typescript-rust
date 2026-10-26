@@ -304,3 +304,5 @@ unicorn/no-asterisk-prefix-in-documentation-comments
 unicorn/no-canvas-to-image
 unicorn/no-transition-all
 unicorn/no-ineffective-csp-directives
+unicorn/prefer-array-last-methods
+unicorn/prefer-then-catch

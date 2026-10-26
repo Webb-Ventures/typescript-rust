@@ -651,12 +651,15 @@ their output, not translated.
 ## eslint-plugin-unicorn rules (round 5, h2)
 
 `no-asterisk-prefix-in-documentation-comments`, `no-canvas-to-image`, `no-transition-all`,
-`no-ineffective-csp-directives` (each at 100% of its oracle). Helpers these rules share are in
-`rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
+`no-ineffective-csp-directives`, `prefer-array-last-methods`, `prefer-then-catch` (each at
+100% of its oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
 the initialiser of the plain `const` it names when that is declared once before the use and
 read only there; the declaration's initialising write is one of its two references) and
 `decode_jsx_entities` (JSX attribute strings with `&#45;`, `&#x2D;` and the HTML 4 names
-plus `&apos;` decoded, as ESTree parsers give their value; our AST keeps the raw text).
+plus `&apos;` decoded, as ESTree parsers give their value; our AST keeps the raw text) and
+`remove_method_call` (the edits turning `obj.name(...)` into `obj`: from the end of the
+parenthesized object to the end of the member, and from the end of the parenthesized callee
+to the end of the call).
 
 - **no-asterisk-prefix-in-documentation-comments** looks at `/**` (not `/***`) block comments
   that span lines and start a line (only spaces and tabs before them). Every line after the
@@ -682,9 +685,22 @@ plus `&apos;` decoded, as ESTree parsers give their value; our AST keeps the raw
   exactly one `content`, each a string or a container whose control-flow static value is a
   string; header `content-security-policy` in any case; each of `frame-ancestors`, `sandbox`,
   `report-uri` reported once per element on the `content` value, in policy order.
+- **prefer-array-last-methods** reports the property of a plain `.find`/`.findIndex`/
+  `.indexOf`/`.reduce` call on a plain argument-less `.reverse()`/`.toReversed()` call; the
+  suggestion renames it (`findLast`, `findLastIndex`, `lastIndexOf`, `reduceRight`) and
+  removes the reversing call, unless a comment lies in that call outside its receiver.
+- **prefer-then-catch** reports `.then` of a plain two-argument `then` call without spreads
+  where neither handler is nullish (`null`, `void x`, the unshadowed `undefined`, through TS
+  wrappers). With type information the non-nullable receiver must be `any`/`unknown`/an error
+  type, or the lib's `Promise` (some declaration in a lib file, so a user augmentation still
+  counts) whose `then` result has a callable `catch` on every union member. The suggestion
+  needs an identifier or function handler: it removes the comma before it (and a trailing
+  comma) and appends `.catch(<handler with its parentheses>)` after the call; a comment
+  outside the handler in the removed range, or right after the handler or its comma, drops it.
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/`:
 `no-asterisk-prefix-in-documentation-comments.js`, `no-canvas-to-image.js`,
-`no-transition-all.js`, `no-ineffective-csp-directives.js`, `utils/get-line-start.js`,
-`utils/reindent-text.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's
+`no-transition-all.js`, `no-ineffective-csp-directives.js`, `prefer-array-last-methods.js`,
+`prefer-then-catch.js`, `fix/remove-method-call.js`, `fix/replace-member-expression-property.js`,
+`fix/remove-argument.js`, `utils/get-line-start.js`, `utils/reindent-text.js`, `utils/types.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's
 JSX parser decodes); only numeric references appear in the oracle.
