@@ -179,6 +179,7 @@ mod require_yield;
 mod symbol_description;
 mod this_binding;
 mod ts_array_type;
+mod ts_adjacent_overload_signatures;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
 mod ts_consistent_generic_constructors;
@@ -430,6 +431,7 @@ pub static ALL: &[&RuleDef] = &[
     &radix::RULE,
     &require_yield::RULE,
     &ts_array_type::RULE,
+    &ts_adjacent_overload_signatures::RULE,
     &ts_await_thenable::RULE,
     &ts_ban_ts_comment::RULE,
     &ts_consistent_generic_constructors::RULE,
