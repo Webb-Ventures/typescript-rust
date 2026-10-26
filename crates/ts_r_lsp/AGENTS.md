@@ -1097,7 +1097,7 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 2085 of 2516 tests at 682d76b, lists the rest by cause:
+- Features (the fourslash oracle, 2131 of 2513 tests at 91f3b08, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
   or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes

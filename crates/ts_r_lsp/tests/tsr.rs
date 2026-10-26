@@ -1168,8 +1168,12 @@ fn definition_type_definition_references_rename() {
         "textDocument/rename",
         json!({"textDocument": {"uri": ub}, "position": {"line": 1, "character": 11}, "newName": "size"}),
     );
-    assert_eq!(e["changes"][&ua].as_array().unwrap().len(), 1, "{e}");
-    assert_eq!(e["changes"][&ub].as_array().unwrap().len(), 2, "{e}");
+    // At a use of a name-keeping import only the alias is renamed (as tsc 7 does): the
+    // specifier becomes `len as size`, the declaration in `a.ts` stays.
+    assert!(e["changes"].get(&ua).is_none(), "{e}");
+    let edits = e["changes"][&ub].as_array().unwrap();
+    assert_eq!(edits.len(), 2, "{e}");
+    assert_eq!(edits[0]["newText"], "len as size", "{e}");
     // Lib symbols cannot be renamed (`length` of `s.length`).
     let r = c
         .call("textDocument/prepareRename", at(&ua, 2, 13), T)
