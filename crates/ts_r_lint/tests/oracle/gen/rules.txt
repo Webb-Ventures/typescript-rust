@@ -309,3 +309,4 @@ unicorn/prefer-set-size
 unicorn/prefer-array-index-of
 unicorn/prefer-array-some
 unicorn/prefer-array-flat-map
+unicorn/prefer-array-flat

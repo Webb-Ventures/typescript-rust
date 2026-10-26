@@ -347,6 +347,7 @@ mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener;
+mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
 mod unicorn_prefer_array_index_of;
 mod unicorn_prefer_array_some;
@@ -745,6 +746,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
     &unicorn_prefer_add_event_listener::RULE,
+    &unicorn_prefer_array_flat::RULE,
     &unicorn_prefer_array_flat_map::RULE,
     &unicorn_prefer_array_index_of::RULE,
     &unicorn_prefer_array_some::RULE,

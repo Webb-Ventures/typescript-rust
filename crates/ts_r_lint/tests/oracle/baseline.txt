@@ -336,6 +336,7 @@ unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
 unicorn/prefer-add-event-listener 97/97
+unicorn/prefer-array-flat 330/330
 unicorn/prefer-array-flat-map 114/114
 unicorn/prefer-array-index-of 158/158
 unicorn/prefer-array-some 373/377
