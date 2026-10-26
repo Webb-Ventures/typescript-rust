@@ -287,6 +287,7 @@ fn handle_change(
         let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         g.node(id).url.clone()
     };
+    server::forget_load(shared, Some(path));
     let Ok(source) = server::module_source(shared, path, &own_url) else {
         return;
     };
@@ -313,12 +314,22 @@ fn handle_change(
             match result {
                 Ok((_, pruned)) => note_pruned(shared, pruned, timestamp, out),
                 Err(e) => {
-                    shared
-                        .graph
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .node_mut(id)
-                        .errored = true;
+                    let dead_end = {
+                        let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+                        g.node_mut(id).errored = true;
+                        g.propagate(id, false).full_reload.is_some()
+                    };
+                    // Vite propagates a change through the graph before transforming it: with
+                    // no module accepting it the page reloads, and the reloaded page gets the
+                    // error (`vite: packages/vite/src/node/server/hmr.ts`, `updateModules`).
+                    if dead_end {
+                        shared.log(&format!(
+                            "page reload: {node_url} changed and failed: {}",
+                            e.message
+                        ));
+                        out.full_reload = Some(None);
+                        return;
+                    }
                     report_error(shared, &e);
                     out.errored = true;
                     return;
@@ -388,6 +399,14 @@ fn reprepare(
     if out.full_reload.is_some() {
         return;
     }
+    let file = shared
+        .graph
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .node(id)
+        .file
+        .clone();
+    server::forget_load(shared, Some(&file));
     let (file, url, kind, css_use, pruned) = {
         let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let n = g.node(id);
@@ -656,6 +675,38 @@ pub(crate) fn on_client_lifecycle(shared: &Shared, connected: bool) {
             "vite:client:disconnect"
         };
         host.client_event(event, &Value::Null);
+    }
+}
+
+/// `server.reloadModule(mod)` from a plugin: the module (a plugin module's id, or a file's
+/// path) is prepared again, and the update propagates as if its file had changed
+/// (`vite: packages/vite/src/node/server/index.ts`, `reloadModule`).
+pub(crate) fn reload_module(shared: &Shared, id: &str) {
+    if shared.shutdown.load(Ordering::SeqCst) {
+        return;
+    }
+    let _serial = shared.change_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let module = {
+        let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+        g.by_url(&crate::plugin::plugin_url(id))
+            .or_else(|| g.by_file(std::path::Path::new(crate::plugin::id_file(id))))
+    };
+    let Some(module) = module else {
+        return;
+    };
+    let mut timing = UpdateTiming {
+        id: shared.update_seq.fetch_add(1, Ordering::Relaxed),
+        origin: Some(SystemTime::now()),
+        ..Default::default()
+    };
+    let timestamp = server::next_timestamp(shared);
+    let mut out = Outcome {
+        started: Some(Instant::now()),
+        ..Outcome::default()
+    };
+    reprepare(shared, module, timestamp, &mut timing, &mut out);
+    if !out.files.is_empty() {
+        finish(shared, out, timing);
     }
 }
 

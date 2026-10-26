@@ -963,6 +963,18 @@ fn read_loop(
             if let Some(s) = server.get() {
                 (s.broadcast)(&v["ws"].to_string());
             }
+        } else if let Some(id) = v["reload"].as_str() {
+            if let Some(s) = server.get() {
+                (s.reload_module)(id);
+            }
+        } else if let Some(id) = v["forget"].as_str() {
+            if let Some(s) = server.get() {
+                (s.forget_load)(Some(id));
+            }
+        } else if v["forget_all"].as_bool() == Some(true) {
+            if let Some(s) = server.get() {
+                (s.forget_load)(None);
+            }
         } else if !v["ready"].is_null() {
             let _ = ready.send(Ok(v["ready"].take()));
         } else if let Some(f) = v["fatal"].as_str() {

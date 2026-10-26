@@ -979,3 +979,30 @@ fn inline_module_scripts_are_served_through_html_proxy_urls() {
     );
     server.shutdown();
 }
+
+/// A change that fails to transform where nothing accepts the update reloads the page,
+/// as Vite propagates before it transforms; the error shows when the page fetches it.
+#[test]
+fn a_failing_change_with_no_boundary_reloads_the_page() {
+    let f = start();
+    f.load_page();
+    let mut ws = f.ws();
+    f.app.write(
+        "src/plain.js",
+        "import './nope.js';\nexport const label = 'plain-v2';\n",
+    );
+    let m = loop {
+        let m = next(&mut ws);
+        if m["type"] == "error" || m["type"] == "full-reload" {
+            break m;
+        }
+    };
+    assert_eq!(m["type"], "full-reload", "{m}");
+    let log = f.log.lock().unwrap().clone();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("/src/plain.js changed and failed")),
+        "{log:?}"
+    );
+    assert_eq!(f.get("/src/plain.js").0, 500);
+}

@@ -92,6 +92,11 @@ are cached by content hash. Change `cache_id` when output for the same input can
   reload (Vite keeps the module with no importers: a dead end;
   `vite: packages/vite/src/node/server/hmr.ts`, `handleHMRUpdate`/`propagateUpdate`); a
   deletion in the batch that pruned it (import removed and file deleted together) only prunes.
+- **A change that fails to transform is propagated first.** If nothing accepts the update
+  (a dead end), the page reloads and shows the error when it fetches the module again (Vite
+  propagates before it transforms, so a broken import added to a module with no boundary
+  reloads). Otherwise the error goes to the overlay and the module is marked errored
+  (`vite: packages/vite/src/node/server/hmr.ts`, `handleHMRUpdate`).
 - **Prune runs the module's dispose callbacks, then its prune callbacks**, after
   `vite:beforePrune`, queued behind any update in flight; then its `hot.data` is dropped, so
   a module imported again starts with fresh data (`vite: packages/vite/src/client/client.ts`
@@ -313,6 +318,16 @@ are cached by content hash. Change `cache_id` when output for the same input can
   text); the file behind an id with a query is a watch dependency, so editing it re-loads and
   hot-updates the module. `/@id/` serves only ids the graph knows. Plugin `transform` maps
   are composed (see source maps above).
+- **A plugin module's `load` result is kept** (`Shared::plugin_loads`, by id) until the
+  module is invalidated: its file (or the file behind its id) changed, it is re-prepared
+  (`reprepare`), the host calls `ServerHandle::reload_module` (`server.reloadModule`), or
+  `ServerHandle::forget_load` (`moduleGraph.invalidateModule` / `invalidateAll`). An
+  importer's update fetching it again with `?t=` reuses the kept code, like Vite's soft
+  invalidation, so a `load` that counts calls sees one per invalidation
+  (`vite: packages/vite/src/node/server/moduleGraph.ts`, `invalidateModule`).
+  `reload_module(id)` finds the node by `/@id/` URL or file, re-prepares it and sends the
+  update as for a changed file; the handle runs it on its own thread, since the host's reader
+  thread must never block (`vite: packages/vite/src/node/server/index.ts`, `reloadModule`).
 - **Wasm** (`wasm.rs`, `vite: packages/vite/src/node/plugins/wasm.ts`; the direct-import
   behaviour from the wasm playground's specs): `x.wasm?init` exports a function
   `opts => init(opts, url)` that instantiates the file with the given imports (the helper at

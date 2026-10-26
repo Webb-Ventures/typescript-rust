@@ -337,6 +337,10 @@ pub(crate) struct Shared {
     pub html_inject: String,
     pub virtual_modules: HashMap<String, String>,
     pub plugins: Option<Arc<dyn PluginHost>>,
+    /// What plugins' `load` returned, by module id: kept until the module is invalidated
+    /// (its file changed, `server.reloadModule`, `moduleGraph.invalidateModule`), so an
+    /// importer's update fetches it again without loading it again.
+    pub plugin_loads: Mutex<HashMap<String, Arc<Vec<u8>>>>,
     /// `plugins`' hooks (all false without plugins).
     pub plugin_hooks: PluginHooks,
     /// The error currently shown (replayed to clients that connect later), and the module.
@@ -622,6 +626,7 @@ impl DevServer {
             html_inject: config.html_inject.concat(),
             virtual_modules: config.virtual_modules.iter().cloned().collect(),
             plugins: config.plugins.clone(),
+            plugin_loads: Mutex::default(),
             plugin_hooks: config
                 .plugins
                 .as_ref()
@@ -2789,13 +2794,28 @@ pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<V
         return fs::read(file).map_err(|e| format!("{}: {e}", file.display()));
     }
     let id = crate::paths::id(file);
+    let cached = shared
+        .plugin_loads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id.as_ref())
+        .cloned();
+    if let Some(code) = cached {
+        return Ok(code.as_ref().clone());
+    }
     if let Some(host) = shared
         .plugins
         .as_deref()
         .filter(|_| shared.plugin_hooks.load)
         && let Some(code) = host.load(&id)?
     {
-        return Ok(code.into_bytes());
+        let code = code.into_bytes();
+        shared
+            .plugin_loads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.into_owned(), Arc::new(code.clone()));
+        return Ok(code);
     }
     let real = Path::new(plugins::id_file(&id));
     if !id.starts_with('\0') && real.is_absolute() && real.is_file() {
@@ -2813,6 +2833,22 @@ pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<V
     ))
 }
 
+/// Drops what plugins' `load` returned for the module of `file` (`None`: every module),
+/// so the next request loads it again (Vite: a hard invalidation, which an importer's
+/// update is not; `vite: packages/vite/src/node/server/moduleGraph.ts`, `invalidateModule`).
+pub(crate) fn forget_load(shared: &Shared, file: Option<&Path>) {
+    let mut loads = shared
+        .plugin_loads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    match file {
+        Some(f) => {
+            loads.remove(crate::paths::id(f).as_ref());
+        }
+        None => loads.clear(),
+    }
+}
+
 /// Plugin `configureServer` middlewares for a request no built-in route served.
 fn plugin_middleware(shared: &Shared, req: &Request, body: &[u8]) -> Option<Response> {
     let host = shared
@@ -2828,12 +2864,32 @@ fn plugin_middleware(shared: &Shared, req: &Request, body: &[u8]) -> Option<Resp
     }
 }
 
-/// What a plugin host may use of the server: broadcasting and the built-in resolver. Holds
+/// What a plugin host may use of the server: broadcasting, the built-in resolver and
+/// reloading a module. Holds
 /// the server weakly (the host lives inside it).
 fn server_handle(shared: &Arc<Shared>) -> ServerHandle {
     let weak = Arc::downgrade(shared);
     let weak2 = Arc::downgrade(shared);
+    let weak3 = Arc::downgrade(shared);
+    let weak4 = Arc::downgrade(shared);
     ServerHandle {
+        forget_load: Arc::new(move |id: Option<&str>| {
+            if let Some(s) = weak4.upgrade() {
+                forget_load(&s, id.map(Path::new));
+            }
+        }),
+        reload_module: Arc::new(move |id: &str| {
+            let weak = weak3.clone();
+            let id = id.to_owned();
+            // The host may be waiting on this thread (a hook reply); never block it.
+            let _ = std::thread::Builder::new()
+                .name("ts-r-reload-module".into())
+                .spawn(move || {
+                    if let Some(s) = weak.upgrade() {
+                        crate::hmr::reload_module(&s, &id);
+                    }
+                });
+        }),
         broadcast: Arc::new(move |text: &str| {
             if let Some(s) = weak.upgrade() {
                 s.hub.broadcast(text);

@@ -317,7 +317,10 @@ async function opLoad({ moduleId }) {
     } catch (e) {
       throw new Error(hookError(h.plugin, e))
     }
-    if (r != null) return typeof r === 'string' ? r : (r.code ?? null)
+    if (r != null) {
+      loadedModule(moduleId)
+      return typeof r === 'string' ? r : (r.code ?? null)
+    }
   }
   return null
 }
@@ -601,12 +604,31 @@ const ws = {
   close: async () => {},
   clients: new Set(),
 }
+// Modules a plugin's `load` produced, for `moduleGraph.getModuleById` and `reloadModule`.
+const loadedModules = new Map()
+function loadedModule(id) {
+  let mod = loadedModules.get(id)
+  if (!mod) {
+    const url = '/@id/' + id.replaceAll('\0', '__x00__')
+    mod = { id, url, file: null, type: 'js', importers: new Set(), importedModules: new Set(), transformResult: null }
+    loadedModules.set(id, mod)
+  }
+  return mod
+}
+async function reloadModule(mod) {
+  if (typeof mod?.id === 'string') send({ reload: mod.id })
+  else ws.send({ type: 'full-reload' })
+}
 const moduleGraph = {
-  getModuleById: () => undefined,
+  getModuleById: (id) => loadedModules.get(id),
   getModuleByUrl: async () => undefined,
   getModulesByFile: () => undefined,
-  invalidateModule() {},
-  invalidateAll() {},
+  invalidateModule(mod) {
+    if (typeof mod?.id === 'string') send({ forget: mod.id })
+  },
+  invalidateAll() {
+    send({ forget_all: true })
+  },
   idToModuleMap: new Map(),
   urlToModuleMap: new Map(),
   fileToModulesMap: new Map(),
@@ -627,13 +649,13 @@ const server = {
   hot: ws,
   watcher,
   moduleGraph,
-  environments: { client: { name: 'client', hot: ws, moduleGraph, get config() { return resolved } } },
+  environments: { client: { name: 'client', hot: ws, moduleGraph, reloadModule, get config() { return resolved } } },
   httpServer: null,
   resolvedUrls: null,
   transformIndexHtml: (url, html) => opHtml({ url, file: path.join(root, 'index.html'), html }),
   transformRequest: async () => null,
   warmupRequest: async () => {},
-  reloadModule: async () => ws.send({ type: 'full-reload' }),
+  reloadModule,
   ssrLoadModule: async () => {
     throw new Error('ssrLoadModule is not supported by ts-r-dev')
   },

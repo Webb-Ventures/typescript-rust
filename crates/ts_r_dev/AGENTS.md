@@ -180,7 +180,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 ## Gaps
 
 - Vite plugins: the seam gaps in [`ts_r_hmr`](../ts_r_hmr/AGENTS.md#gaps) apply; `this.parse`,
-  `this.load`, `ssrLoadModule` throw; `server.moduleGraph` is a stub; `server.watcher` only
+  `this.load`, `ssrLoadModule` throw; `server.moduleGraph` only knows modules a plugin's `load` produced (`getModuleById`, a minimal module record); `invalidateModule`/`invalidateAll` drop the server's kept `load` result and `server.reloadModule` (also on `environments.client`) re-loads and hot-updates the module (sidecar messages `forget`, `forget_all`, `reload`); `server.watcher` only
   sees changes that reach `handleHotUpdate`; `this.addWatchFile` is a no-op. The sidecar costs ~25 ms to start with inline plugins and
   ~80–440 ms when the config imports `vite` (cold disk cache); with a cached manifest that happens in the background after "ready".
 - From `vite.config`: no `css.*` (preprocessor options, CSS modules), `server.hmr`,
