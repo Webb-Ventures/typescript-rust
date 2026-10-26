@@ -2,10 +2,9 @@
 //! `module.*` or `exports.*` (CommonJS). At the first such member expression every import
 //! seen so far is reported, once per file. A `module` or `exports` declared in any scope
 //! other than the module scope (the last such scope is the one looked at) turns the check
-//! off, and so does importing the name. Files matching an `exceptions` glob are skipped.
-//!
-//! The plugin also skips the package's entry point (`main` of the nearest package.json);
-//! the linter does not resolve packages, so that exception is not made.
+//! off, and so does importing the name. Files matching an `exceptions` glob are skipped,
+//! and so is the package's entry point (what the directory of the nearest `package.json`
+//! resolves to: its `main`, else `index.js`).
 
 use super::import_util::walk;
 use super::prelude::*;
@@ -96,7 +95,13 @@ impl Rule for NoImportModuleExports {
                 _ => {}
             }
         });
-        let Some(n) = found else { return };
+        let Some(n) = found.filter(|&n| n > 0) else {
+            return;
+        };
+        let m = cx.file.modules();
+        if m.entry_point().is_some_and(|e| e == m.file) {
+            return;
+        }
         for &i in &imports[..n] {
             cx.report_node(
                 i,

@@ -1,6 +1,7 @@
 //! `import/no-unassigned-import`: side-effect imports (`import "x"`, and `require("x")` as
 //! a statement), except module paths matching an `allow` glob. A relative or absolute
-//! specifier is resolved against the file's directory before matching.
+//! specifier is resolved against the file's directory before matching, and each glob is
+//! tried as written and joined to the cwd.
 
 use super::prelude::*;
 use crate::config::glob::Glob;
@@ -18,15 +19,16 @@ pub static RULE: RuleDef = RuleDef {
 #[derive(Debug)]
 struct NoUnassignedImport {
     allow: Vec<Glob>,
+    /// The `allow` patterns as written (also matched joined to the cwd).
+    patterns: Vec<String>,
 }
 
 impl FromOptions for NoUnassignedImport {
     fn from_options(opts: &[Value]) -> Result<Self, String> {
+        let patterns = str_list(obj_opt(opts, 0), "allow");
         Ok(NoUnassignedImport {
-            allow: str_list(obj_opt(opts, 0), "allow")
-                .iter()
-                .map(|g| Glob::new(g))
-                .collect(),
+            allow: patterns.iter().map(|g| Glob::new(g)).collect(),
+            patterns,
         })
     }
 }
@@ -59,7 +61,17 @@ impl NoUnassignedImport {
         } else {
             source.to_owned()
         };
-        self.allow.iter().any(|g| g.matches(&path))
+        if self.allow.iter().any(|g| g.matches(&path)) {
+            return true;
+        }
+        // Upstream also matches each pattern joined to the cwd.
+        let Some(cwd) = cx.env().cwd.as_deref() else {
+            return false;
+        };
+        let cwd = cwd.replace('\\', "/");
+        self.patterns
+            .iter()
+            .any(|g| Glob::new(&resolve_path(&cwd, g)).matches(&path))
     }
 }
 

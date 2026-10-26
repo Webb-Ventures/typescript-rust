@@ -17,27 +17,42 @@ mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
 mod import_consistent_type_specifier_style;
+mod import_default;
 mod import_dynamic_import_chunkname;
+mod import_export;
 mod import_exports_last;
+mod import_extensions;
 mod import_first;
 mod import_max_dependencies;
+mod import_named;
+mod import_namespace;
 mod import_newline_after_import;
 mod import_no_absolute_path;
 mod import_no_amd;
 mod import_no_anonymous_default_export;
 mod import_no_commonjs;
+mod import_no_cycle;
+mod import_no_deprecated;
 mod import_no_duplicates;
 mod import_no_dynamic_require;
 mod import_no_empty_named_blocks;
 mod import_no_import_module_exports;
+mod import_no_internal_modules;
 mod import_no_mutable_exports;
+mod import_no_named_as_default;
+mod import_no_named_as_default_member;
 mod import_no_named_default;
 mod import_no_namespace;
 mod import_no_nodejs_modules;
+mod import_no_relative_packages;
+mod import_no_restricted_paths;
+mod import_no_self_import;
 mod import_no_unassigned_import;
+mod import_no_unresolved;
+mod import_no_useless_path_segments;
 mod import_no_webpack_loader_syntax;
 mod import_prefer_default_export;
-mod import_util;
+pub(crate) mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_param_names;
@@ -585,7 +600,7 @@ mod unicorn_prefer_modern_math_apis;
 mod unicorn_prefer_module;
 mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_negative_index;
-mod unicorn_prefer_node_protocol;
+pub(crate) mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_is_safe_integer;
 mod unicorn_prefer_number_properties;
@@ -756,6 +771,21 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_webpack_loader_syntax::RULE,
     &import_no_named_default::RULE,
     &import_no_amd::RULE,
+    &import_no_restricted_paths::RULE,
+    &import_no_internal_modules::RULE,
+    &import_extensions::RULE,
+    &import_no_cycle::RULE,
+    &import_no_useless_path_segments::RULE,
+    &import_no_relative_packages::RULE,
+    &import_no_self_import::RULE,
+    &import_export::RULE,
+    &import_no_deprecated::RULE,
+    &import_no_named_as_default_member::RULE,
+    &import_no_named_as_default::RULE,
+    &import_namespace::RULE,
+    &import_default::RULE,
+    &import_named::RULE,
+    &import_no_unresolved::RULE,
     &max_depth::RULE,
     &max_nested_callbacks::RULE,
     &max_params::RULE,

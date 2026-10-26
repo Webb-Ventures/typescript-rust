@@ -59,6 +59,7 @@ impl LintOptions {
             warn_ignored: true,
             resolve: ResolveOptions {
                 cwd: Some(cwd_str),
+                modules: Some(crate::modules::ModuleHost::real()),
                 ..ResolveOptions::new()
             },
             node: NodeOptions::default(),

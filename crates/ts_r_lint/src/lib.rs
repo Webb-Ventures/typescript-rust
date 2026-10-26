@@ -20,6 +20,7 @@ pub mod jsdoc_util;
 pub mod lib_globals;
 #[rustfmt::skip]
 pub mod lib_globals_generated;
+pub mod modules;
 pub mod output;
 pub mod project;
 pub mod regex;

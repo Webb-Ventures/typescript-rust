@@ -178,6 +178,131 @@ pub(crate) fn var_scope_kind(cx: &Ctx<'_, '_>, node: NodeId) -> ScopeKind {
     }
 }
 
+/// The module visitor's shared options (`makeOptionsSchema`): module systems and
+/// `ignore` patterns matched against the specifier.
+#[derive(Debug, Clone)]
+pub(crate) struct VisitorOptions {
+    pub systems: ModuleSystems,
+    pub ignore: Vec<String>,
+}
+
+impl VisitorOptions {
+    pub(crate) fn from_options(opts: &[Value], esmodule: bool, commonjs: bool) -> VisitorOptions {
+        VisitorOptions {
+            systems: ModuleSystems::from_options(opts, esmodule, commonjs),
+            ignore: str_list(obj_opt(opts, 0), "ignore"),
+        }
+    }
+
+    /// The specifier matches an `ignore` pattern.
+    pub(crate) fn ignores(&self, value: &str) -> bool {
+        self.ignore
+            .iter()
+            .any(|re| crate::regex::compile(re).is_some_and(|r| r.is_match(value, false)))
+    }
+
+    /// The specifiers `node` names that are not ignored, with their text.
+    pub(crate) fn refs<'a>(&self, ast: &'a Ast, node: NodeId) -> Vec<(ModuleRef, &'a str)> {
+        module_refs(ast, node, self.systems)
+            .into_iter()
+            .filter_map(|r| {
+                let v = string_literal(ast, r.source)?;
+                (!self.ignores(v)).then_some((r, v))
+            })
+            .collect()
+    }
+}
+
+/// Reports a resolver that failed to load ("Resolve error: ..."), once per rule and file,
+/// at line 1, column 1.
+pub(crate) fn report_resolve_error(cx: &mut Ctx<'_, '_>, message: &str) {
+    if cx.file.modules().first_error(cx.rule) {
+        cx.report(Span::at(0), format!("Resolve error: {message}"))
+            .loc(crate::diagnostic::Loc::at(1, 1));
+    }
+}
+
+/// Resolves `spec` from the linted file, reporting a resolver error (then `None`).
+pub(crate) fn resolve(cx: &mut Ctx<'_, '_>, spec: &str) -> Option<crate::modules::Resolved> {
+    match cx.file.modules().resolve(spec) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            report_resolve_error(cx, &e);
+            None
+        }
+    }
+}
+
+/// The export map of the module `spec` names (`ExportMapBuilder.get`), reporting a
+/// resolver error.
+pub(crate) fn exports_of(
+    cx: &mut Ctx<'_, '_>,
+    spec: &str,
+) -> Option<std::sync::Arc<crate::modules::ExportMap>> {
+    match cx.file.modules().exports_of(spec) {
+        Ok(m) => m,
+        Err(e) => {
+            report_resolve_error(cx, &e);
+            None
+        }
+    }
+}
+
+/// "Parse errors in imported module '<spec>': <errors>" on `at` (the source string or the
+/// declaration, as each rule does).
+pub(crate) fn report_parse_errors(
+    cx: &mut Ctx<'_, '_>,
+    map: &crate::modules::ExportMap,
+    at: NodeId,
+    spec: &str,
+) {
+    let span = cx.span(at);
+    cx.report(
+        span,
+        format!(
+            "Parse errors in imported module '{spec}': {}",
+            map.errors.join(", ")
+        ),
+    );
+}
+
+/// The kind of the scope declaring `name` as seen from `at` (`declaredScope`): `Module`
+/// for a top-level binding of a module.
+pub(crate) fn declared_scope(cx: &Ctx<'_, '_>, name: &str, at: NodeId) -> Option<ScopeKind> {
+    let sem = cx.semantic();
+    let sym = sem.lookup(sem.enclosing_scope(at), name)?;
+    Some(sem.scope(sem.symbol(sym).scope).kind)
+}
+
+/// The top-level statements of the file.
+pub(crate) fn program_statements(ast: &Ast) -> &[NodeId] {
+    match *ast.node(ast.root) {
+        Node::Program { stmts } => ast.list(stmts),
+        _ => &[],
+    }
+}
+
+/// The imported name of an import specifier (`a` in `{ a as b }`, `default`, `*`).
+pub(crate) fn specifier_imported(ast: &Ast, sp: NodeId) -> Option<&str> {
+    match *ast.node(sp) {
+        Node::ImportSpecifier {
+            imported, local, ..
+        } => crate::modules::export_map::module_name(ast, imported.unwrap_or(local)),
+        Node::ImportDefaultSpecifier { .. } => Some("default"),
+        _ => None,
+    }
+}
+
+/// The local name an import specifier binds.
+pub(crate) fn specifier_local(ast: &Ast, sp: NodeId) -> Option<&str> {
+    match *ast.node(sp) {
+        Node::ImportSpecifier { local, .. }
+        | Node::ImportDefaultSpecifier { local }
+        | Node::ImportNamespaceSpecifier { local } => ident_name(ast, local),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::config::{ConfigFile, ConfigKind, ResolveOptions, objects_from_eslint_json};

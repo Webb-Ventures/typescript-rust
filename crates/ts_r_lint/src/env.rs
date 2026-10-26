@@ -138,6 +138,10 @@ pub struct LintEnv {
     /// ESLint's `cwd` (the CLI's working directory): `unicorn/filename-case` checks the
     /// directory names of a file's path relative to it. `None` checks the filename only.
     pub cwd: Option<Arc<str>>,
+    /// The module host the eslint-plugin-import rules resolve and read other files
+    /// through (shared by a run's files). `None`: each file uses a fresh host over the
+    /// real file system.
+    pub modules: Option<Arc<crate::modules::ModuleHost>>,
 }
 
 impl LintEnv {
@@ -166,6 +170,7 @@ impl Default for LintEnv {
             lib: None,
             project_lib: None,
             cwd: None,
+            modules: None,
         }
     }
 }

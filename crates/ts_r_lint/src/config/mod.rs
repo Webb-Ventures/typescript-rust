@@ -476,6 +476,7 @@ impl ConfigFile {
             lib: None,
             project_lib: None,
             cwd: opts.cwd.clone(),
+            modules: opts.modules.clone(),
         };
         let env = self.with_lib(env, &lang);
         let reg = opts.registry;
@@ -598,6 +599,8 @@ pub struct ResolveOptions {
     pub notes: Mutex<Vec<String>>,
     /// The working directory rules see as ESLint's `cwd` ([`LintEnv::cwd`]).
     pub cwd: Option<Arc<str>>,
+    /// The module host rules see as [`LintEnv::modules`].
+    pub modules: Option<Arc<crate::modules::ModuleHost>>,
 }
 
 impl ResolveOptions {
@@ -611,6 +614,7 @@ impl ResolveOptions {
             only_rules: None,
             notes: Mutex::new(Vec::new()),
             cwd: None,
+            modules: None,
         }
     }
     fn note(&self, s: String) {

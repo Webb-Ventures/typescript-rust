@@ -154,6 +154,39 @@ fn typed_fixtures() -> &'static Vec<(String, String)> {
     })
 }
 
+/// eslint-plugin-import's fixture tree (`tests/oracle/import-fixtures`: its `tests/files`
+/// and package name), mounted once in a case-insensitive memory file system at `/import`
+/// (the plugin's checkout root, the cwd its tests ran in; the data was recorded on a
+/// case-insensitive file system). `import/*` cases lint `tests/files/<filename>` there.
+fn import_host() -> std::sync::Arc<ts_r_lint::modules::ModuleHost> {
+    static H: std::sync::OnceLock<std::sync::Arc<ts_r_lint::modules::ModuleHost>> =
+        std::sync::OnceLock::new();
+    H.get_or_init(|| {
+        let root = oracle_dir().join("import-fixtures");
+        let mut fs = ts_r_config::MemoryFs::case_insensitive();
+        fs.set_cwd("/import");
+        let mut stack = vec![root.clone()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                let rel = p
+                    .strip_prefix(&root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if p.is_dir() {
+                    fs.add_dir(&format!("/import/{rel}"));
+                    stack.push(p);
+                } else if let Ok(b) = std::fs::read(&p) {
+                    fs.add_file(&format!("/import/{rel}"), &String::from_utf8_lossy(&b));
+                }
+            }
+        }
+        ts_r_lint::modules::ModuleHost::with_fs(std::sync::Arc::new(fs))
+    })
+    .clone()
+}
+
 fn libs() -> Option<&'static ts_r_checker::LibStore> {
     static L: std::sync::OnceLock<Option<ts_r_checker::LibStore>> = std::sync::OnceLock::new();
     L.get_or_init(ts_r_checker::LibStore::locate).as_ref()
@@ -242,6 +275,11 @@ fn run_case(reg: &'static Registry, rule: &str, case: &Value) -> Result<(), Stri
     let cfg = ConfigFile::new(ConfigKind::Eslint, None, base, objs);
     let mut opts = ResolveOptions::new();
     opts.types_available = typed;
+    let import_rule = rule.starts_with("import/");
+    if import_rule {
+        opts.cwd = Some("/import".into());
+        opts.modules = Some(import_host());
+    }
     let fc = cfg
         .file_config(filename, &opts)
         .map_err(|e| format!("not linted: {e:?}"))?;
@@ -254,7 +292,11 @@ fn run_case(reg: &'static Registry, rule: &str, case: &Value) -> Result<(), Stri
             None => return Ok(()),
         }
     } else {
-        let path = format!("/oracle/{filename}");
+        let path = if import_rule {
+            normalize_path(&format!("/import/tests/files/{filename}"))
+        } else {
+            format!("/oracle/{filename}")
+        };
         lint_source(&path, code, &fc, &NoTypeInfo, FileKey(0))
     };
     if let Some(f) = r.diagnostics.iter().find(|d| d.fatal) {
