@@ -288,6 +288,7 @@ unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
 unicorn/no-duplicate-if-branches 30/30
 unicorn/no-exports-in-scripts 22/22
+unicorn/no-global-object-property-assignment 34/34
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-leading-empty-lines 28/28
@@ -334,6 +335,7 @@ unicorn/prefer-promise-static-methods 51/51
 unicorn/prefer-queue-microtask 55/55
 unicorn/prefer-response-static-json 39/39
 unicorn/prefer-short-escape-sequences 28/28
+unicorn/prefer-single-array-predicate 32/32
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112

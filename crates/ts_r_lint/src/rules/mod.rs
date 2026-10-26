@@ -300,6 +300,7 @@ mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
 mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_exports_in_scripts;
+mod unicorn_no_global_object_property_assignment;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_leading_empty_lines;
@@ -346,6 +347,7 @@ mod unicorn_prefer_promise_static_methods;
 mod unicorn_prefer_queue_microtask;
 mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_short_escape_sequences;
+mod unicorn_prefer_single_array_predicate;
 mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
@@ -358,6 +360,7 @@ mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
 mod unicorn_util;
+mod unicorn_util_h1;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -681,6 +684,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_duplicate_if_branches::RULE,
     &unicorn_no_exports_in_scripts::RULE,
+    &unicorn_no_global_object_property_assignment::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_leading_empty_lines::RULE,
@@ -727,6 +731,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_queue_microtask::RULE,
     &unicorn_prefer_response_static_json::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
+    &unicorn_prefer_single_array_predicate::RULE,
     &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
