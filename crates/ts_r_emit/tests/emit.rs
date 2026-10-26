@@ -862,6 +862,11 @@ fn javascript_commonjs_export_assignment_is_written() {
             "/** @typedef {number} N */\nfunction foo() {}\nmodule.exports = foo;\n",
             "export = foo;\nexport type N = number;\n/** @typedef {number} N */\ndeclare function foo(): void;\n",
         ),
+        // A local `module` does not stop it: tsc 7.0.2 writes the same `export =`.
+        (
+            "const module = { exports: 0 };\nmodule.exports = 1;\n",
+            "declare const _exports = 1;\nexport = _exports;\n",
+        ),
     ] {
         let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
         assert!(
@@ -876,6 +881,27 @@ fn javascript_commonjs_export_assignment_is_written() {
             .unwrap();
         assert_eq!(d.text, want, "{src}");
     }
+}
+
+/// A `@property` description is trimmed of the blank lines around it, however many there
+/// are (by index, not by shifting the lines; expectation from tsc 7.0.2 with 5 blank lines).
+#[test]
+fn javascript_property_description_with_many_blank_lines() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    let blank = " *\n".repeat(100_000);
+    let src = format!(
+        "/**\n * @typedef {{Object}} T\n * @property {{number}} x\n{blank} * the x\n *\n * more\n{blank} * @property {{number}} y\n{blank} */\n\n/** @type {{T}} */\nexport const t = {{ x: 1, y: 2 }};\n"
+    );
+    let r = emit(&[("tsconfig.json", config), ("a.js", &src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .unwrap();
+    let want = "export type T = {\n    /**\n     * the x\n     *\n     * more\n     */\n    x: number;\n    y: number;\n};\n";
+    let tail: Vec<&str> = d.text.lines().rev().take(12).collect();
+    assert!(d.text.contains(want), "{tail:?}");
 }
 
 /// A `@typedef` in a class body is hoisted before the class; the comments before an empty

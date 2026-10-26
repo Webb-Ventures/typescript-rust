@@ -1202,17 +1202,13 @@ impl Emitter<'_, '_> {
             let line = line.strip_suffix("*/").unwrap_or(line).trim_end();
             lines.push(line);
         }
-        while lines.first().is_some_and(|l| l.is_empty()) {
-            lines.remove(0);
-        }
-        while lines.last().is_some_and(|l| l.is_empty()) {
-            lines.pop();
-        }
-        if lines.is_empty() {
+        // Blank lines around the text are dropped (by index: a description can have many).
+        let Some(first) = lines.iter().position(|l| !l.is_empty()) else {
             return;
-        }
+        };
+        let last = lines.iter().rposition(|l| !l.is_empty()).unwrap_or(first);
         self.w("/**");
-        for l in lines {
+        for &l in &lines[first..=last] {
             self.nl();
             if l.is_empty() {
                 self.w(" *");
