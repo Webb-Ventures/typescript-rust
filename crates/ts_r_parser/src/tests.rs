@@ -3258,3 +3258,15 @@ fn module_option_forces_top_level_await() {
         .count();
     assert_eq!(awaits, 1);
 }
+
+/// TS1228 (a type predicate outside a return type) is tsc's checker's, reported while
+/// checking the predicate: it stays next to syntax errors (a kept grammar error).
+#[test]
+fn misplaced_type_predicate_is_kept_next_to_syntax_errors() {
+    let r = parse("var x: this is string;\nlet = ;", SourceKind::Ts);
+    let codes: Vec<u32> = r.diagnostics.iter().map(|d| d.code).collect();
+    assert!(codes.contains(&1228), "{codes:?}");
+    assert!(codes.contains(&1109), "{codes:?}");
+    assert!(r.grammar.iter().any(|d| d.code == 1228));
+    assert!(r.syntax_errors().iter().all(|d| d.code != 1228));
+}
