@@ -2005,36 +2005,108 @@ obvious from the plugin's docs:
   pieces, `short_body_problem`, `is_boolean_expression`, `is_process_exit_call`,
   `expression_exits` and `always_exits`.
 
-Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
-`logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
-`prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`,
-`no-negated-comparison.js`, `no-chained-comparison.js`, `no-invalid-character-comparison.js`,
-`no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`, `no-error-property-assignment.js`,
-`no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`,
-`no-subtraction-comparison.js`, `prefer-simple-condition-first.js`,
-`prefer-includes-over-repeated-comparisons.js`, `no-useless-logical-operand.js`,
-`prefer-continue.js`, `prefer-early-return.js`, `no-unnecessary-boolean-comparison.js`,
-`prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`,
-`no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`,
-`prefer-simplified-conditions.js`, `no-declarations-before-early-exit.js`, `prefer-else-if.js`,
-`custom-error-definition.js`, `consistent-destructuring.js`,
-`no-unnecessary-default-arguments.js`, `no-unused-properties.js`;
-`rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
-`should-add-parentheses-to-await-expression-argument.js`,
-`should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
-`comments.js`, `comparison.js`, `is-logical-expression.js`,
-`get-unparenthesized-keyword-argument-parent.js`, `boolean.js`, `unwrap-typescript-expression.js`,
-`has-optional-chain-element.js`, `get-const-variable-initializer.js`, `single-statement.js`,
-`is-same-reference.js`, `is-promise-type.js`, `is-call-expression-value-discarded-with-void.js`,
-`contains-suspension-point.js`, `get-references.js`, `get-indent-string.js`, `get-indent-unit.js`,
-`get-line-indent.js`, `reindent-text.js`, `get-assignment-targets.js`, `member-expression.js`,
-`is-branch-exit.js`, `track-branch-exits.js`, `is-array.js`, `is-global-identifier.js`,
-`type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`,
-`is-boolean.js`, `is-reference-context.js`, `get-unwrapped-branch-text.js`, `block-scope.js`, `function-body.js`, `get-sibling-node.js`, `is-same-statement.js`, `get-references.js`;
-`rules/ast/is-reference-identifier.js`, `rules/ast/is-direct-eval-call.js`; `rules/utils/imports.js`,
-`rules/utils/get-member-access-operator-range.js`; ESLint's `SourceCode#isGlobalReference`; the `reserved-identifiers` package's list;
-`rules/ast/is-in-directive-prologue.js`; `rules/fix/replace-node-with-expression.js`; `rules/fix/remove-statement.js`,
-`add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
-`rules/shared/nullish-check.js`, `builtin-errors.js`, `early-exit.js`,
-`short-body-conditional.js`. ESLint docs for `operator-assignment` and
-`logical-assignment-operators`.
+- `prefer-dom-node-replace-children` (`unicorn_prefer_dom_node_replace_children.rs`):
+  `x.innerHTML = ""` (static key whose computed form has no side effects, empty string or
+  template), `while (x.firstChild) x.removeChild(x.firstChild)` (or `lastChild`), and
+  `x.replaceChildren(); x.append/prepend(…)` as consecutive statements. The receiver is
+  skipped when it can't be a node, has an optional link anywhere, is known not to be a DOM
+  node, or not a `ParentNode` (`prefer-modern-dom-apis`' `REPLACE_CHILDREN_RECEIVER`, now
+  `pub(crate)`). For `innerHTML`, `Document`/`DocumentFragment`/`ParentNode` are excluded too,
+  as are the global `document` (`window.document`-style, `const` aliases), a
+  `createElement("template")` / `createElementNS(<HTML or unknown namespace>, "template")`
+  result (an unknown tag counts when its expression reads a possibly mutated member) and
+  possible `HTMLTemplateElement`s. Messages quote the receiver as written at its own place, and
+  the fix as written at the statement. Replace-and-add is a suggestion when an argument is not
+  a non-regex literal or substitution-free template, the receiver has getter side effects, or
+  it may be a document; with a comment inside the first call there is no fix.
+
+- `better-dom-traversing` (`unicorn_better_dom_traversing.rs`): read-only `x.childNodes[0]` /
+  `x.children[0]` (plain member names, a non-negative integer literal) suggest `.firstChild` /
+  `.firstElementChild` (renaming the member and dropping `[0]`, so parentheses around the
+  collection stay; no suggestion with a comment inside); another `x.children[N]` hints at
+  `.querySelector()`, except the inner index of `x.children[1].children[2]` and
+  `props.children` / `x.props.children`. The outermost `.parentElement.parentElement` chain
+  hints at `.closest()`. The outermost run of two or more one-argument static-string
+  `.querySelector()` calls (the next call up not another static one, no optional link
+  anywhere on the chain's member/call spine, which parentheses end) suggests one call with the
+  selectors joined by spaces, prefixed `:scope ` unless the root is `document` /
+  `window.document` / `globalThis.document`; none when a selector has `,` or `:scope` or there
+  is a comment inside. The quote is `"` only when the innermost selector is a `"` string.
+  Receivers that can't be nodes stop all three.
+
+- `no-invalid-argument-count` (`unicorn_no_invalid_argument_count.rs`, data in
+  `unicorn_argument_counts.rs`): calls and `new` on known globals, by the callee's dotted path
+  of plain names (through parentheses, TS wrappers and optional links) with leading
+  `globalThis`/`global`/`self`/`window` dropped, only when the root is the global binding.
+  Counts are exact, `{min, max}` or a set of allowed counts; with a spread only the other
+  arguments count, against the maximum, and the message says "at least N". Options add
+  patterns (`*` matches one segment) matched on the raw path without scope; one naming a
+  default replaces it and stays global-only. Defaults come first, then options in order, and
+  the first broken one reports on the callee. Failing that, a spread-free call to a function
+  written in place or a never-reassigned single declaration (`listener_function` in
+  `unicorn_prefer_observer_apis`, now `pub(crate)`) with more arguments than parameters
+  (`this` aside, no rest) reports; too few never does. The table of about 870 API counts is
+  data (facts about the APIs): it was generated from the plugin's published table into a
+  sorted Rust array, not translated code.
+
+- `prefer-uint8array-hex` (`unicorn_prefer_uint8array_hex.rs`): hand-written hex encoding
+  (`[...x]` / `Array.from(x)` `.map(cb)`, `Array.from(x, cb)`, `Array.prototype.map.call` /
+  `[].map.call(x, cb)`, then `.join('')`; the callback one plain parameter returning
+  `p.toString(16).padStart(2, '0')` or a `'0'`/`'00'`-prefixed `.slice(-2)`) and
+  `x.toString('hex')` (any case) become `x.toHex()`: fixed when `x` is known bytes, suggested
+  when unknown, left alone otherwise. Three `unicorn_types::Checker`s (`Buffer`, byte array
+  `Buffer | Uint8Array`, and a decoding variant where any static value and `+` are not bytes)
+  follow the plugin's `shared/buffer-reference.js` policy (expression shapes, constructor
+  references, `Array`/typed-array factories are not buffers). `Buffer.from(<bytes>)
+  .toString('hex')` converts the bytes. `Buffer.from(x, 'hex')` with `x` possibly a string,
+  and `new Uint8Array(s.match(<hex-pair regex>).map(p => parseInt(p, 16)))` / `Uint8Array.from`
+  forms, suggest `Uint8Array.fromHex(x)` (no suggestion when a `Buffer.from` result is read
+  right away). Optional chains (any optional link on the spine), `super` and comments that
+  would go stop the fix. `return_expression` and `is_array_prototype_property` in
+  `unicorn_no_array_reduce` are now `pub(crate)`.
+
+- `prefer-uint8array-base64` (`unicorn_prefer_uint8array_base64.rs`): a bare `x.toBase64()`
+  followed by `replace`/`replaceAll` calls turning `+`→`-` and `/`→`_` (only together) and/or
+  stripping `=` padding, each at most once, is fixed to `toBase64({alphabet: 'base64url',
+  omitPadding: true})` (the options inserted before the closing parenthesis, each call removed
+  keeping parentheses). Global `atob`/`btoa` calls (`unicorn_util::global_path`) report on the
+  callee. `Buffer.from(s, 'base64' | 'base64url')` with exactly two arguments, unless `s` is
+  known bytes / a non-string / derived from `toBase64()` (a `Buffer` checker where static
+  values are not buffers, nullish ones ignored in unions, and any known non-buffer union member
+  decides; `+` may be a string), suggests `Uint8Array.fromBase64(s[, {alphabet:
+  'base64url'}])`, but not when optional or when the result is read right away through `?:`,
+  logical operators, `await`, sequences, assignments or TS wrappers. `x.toString('base64…')`
+  reports on `toString` unless `x` is a known non-buffer, a known string, or a `toBase64()`
+  result. It shares the `Buffer` policy (`is_buffer_expression`, `is_non_buffer_node`, the
+  name lists) with `unicorn_prefer_uint8array_hex`.
+
+Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
+`relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
+`utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
+`fix/replace-node-or-token-and-spaces-before.js`, `fix/remove-parentheses.js`,
+`prefer-classlist-toggle.js`, `utils/get-negated-expression-text.js`,
+`utils/should-add-parentheses-to-unary-expression.js`, `utils/single-statement.js`,
+`fix/replace-member-expression-property.js`, `ast/is-expression-statement.js`,
+`ast/literal.js`, `no-blob-to-file.js`, `utils/comments.js`, `fix/append-argument.js`,
+`fix/remove-statement.js`, `no-unsafe-sqlite-interpolation.js`, `no-late-event-control.js`,
+`shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
+`prefer-abort-signal-timeout.js`, `shared/abort-controller.js`,
+`utils/is-global-identifier.js`, `utils/function-body.js`, `prefer-url-search-parameters.js`,
+`ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`,
+`require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
+`no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`, `no-invalid-integrity.js`, `prefer-scoped-selector.js`,
+`prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`,
+`no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`,
+`no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`,
+`no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`,
+`no-selector-as-dom-name.js`, `consistent-json-file-read.js`,
+`require-text-decoder-streaming.js`, `utils/single-statement.js`, `fix/append-argument.js`,
+`prefer-https.js`, `prefer-temporal-conversion.js`,
+`no-unnecessary-fetch-options.js`, `fix/remove-argument.js`, `fix/remove-object-property.js`,
+`utils/get-static-value.js`, `prefer-abort-signal-any.js`,
+`utils/is-array.js`, `prefer-dom-node-replace-children.js`,
+`utils/should-report-replace-children-receiver.js`, `utils/is-dom-node.js`,
+`utils/is-node-value-not-dom-node.js`, `better-dom-traversing.js`,
+`utils/is-left-hand-side.js`, `ast/is-member-expression.js`, `no-invalid-argument-count.js`, `prefer-uint8array-hex.js`,
+`shared/buffer-reference.js`, `prefer-uint8array-base64.js`,
+`utils/global-reference-tracker.js`, `fix/remove-method-call.js`.

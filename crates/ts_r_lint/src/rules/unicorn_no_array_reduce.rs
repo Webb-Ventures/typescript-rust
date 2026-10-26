@@ -134,7 +134,7 @@ fn is_not_function(ast: &Ast, id: NodeId) -> bool {
 
 /// `getFunctionReturnExpression`: a concise arrow body, or the argument of a body that is
 /// only `return x;` (parentheses skipped).
-fn return_expression(ast: &Ast, f: NodeId) -> Option<NodeId> {
+pub(crate) fn return_expression(ast: &Ast, f: NodeId) -> Option<NodeId> {
     let body = match *ast.node(f) {
         Node::Arrow { flags, body, .. } => {
             if flags.contains(FnFlags::EXPRESSION_BODY) {
@@ -185,7 +185,7 @@ fn param_ident(ast: &Ast, p: NodeId) -> Option<NodeId> {
 }
 
 /// `[].prop` or `Array.prototype.prop`, `prop` in `props`.
-fn is_array_prototype_property(ast: &Ast, id: NodeId, props: &[&str]) -> bool {
+pub(crate) fn is_array_prototype_property(ast: &Ast, id: NodeId, props: &[&str]) -> bool {
     let Node::Member {
         obj,
         optional: false,

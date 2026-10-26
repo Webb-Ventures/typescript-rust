@@ -612,6 +612,8 @@ mod unicorn_prefer_toggle_attribute;
 mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
+mod unicorn_prefer_uint8array_base64;
+mod unicorn_prefer_uint8array_hex;
 mod unicorn_prefer_unary_minus;
 mod unicorn_prefer_unicode_code_point_escapes;
 mod unicorn_prefer_url_can_parse;
@@ -1222,6 +1224,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_toggle_attribute::RULE,
     &unicorn_prefer_type_error::RULE,
+    &unicorn_prefer_uint8array_base64::RULE,
+    &unicorn_prefer_uint8array_hex::RULE,
     &unicorn_prefer_unary_minus::RULE,
     &unicorn_prefer_url_can_parse::RULE,
     &unicorn_prefer_url_href::RULE,
