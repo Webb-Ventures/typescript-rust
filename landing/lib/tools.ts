@@ -90,7 +90,7 @@ Usage: ts-r-dev [root] [options]
       'No plugins and no JavaScript config file or API',
       'No CSS bundling; @import is not followed',
       'No lowering below ES2015: const, classes and destructuring are errors at --target=es5',
-      'No --mangle-props, --drop, --pure or --keep-names',
+      'No --mangle-props, --drop or --pure',
     ],
     usage: `Usage: ts-r-build [options] [entry points]
 

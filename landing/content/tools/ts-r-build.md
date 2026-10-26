@@ -30,7 +30,7 @@ esbuild, it strips types without checking them. Run [ts-r-check](ts-r-check.md) 
 - No CSS bundling. CSS imports are concatenated into a sibling `.css` file and `@import` is
   not followed.
 - No serve mode with `--watch`, and no legal-comment extraction.
-- No `--mangle-props`, `--drop`, `--pure` or `--keep-names`.
+- No `--mangle-props`, `--drop` or `--pure`.
 - Syntax lowering goes through tsc 7's down-level passes, so ES2015 is the lowest output.
   With `--target=es5` (or `--supported:<feature>=false` for an ES2015 feature) `const`,
   classes, destructuring and similar syntax are errors, as in esbuild; arrows and template
@@ -146,7 +146,7 @@ agree: both load in Node with the same exports; ts-r's is 2.2% larger.
 
 Correctness:
 
-- esbuild's end-to-end bundler tests, run against ts-r-build: 931 of 957 compared cases
+- esbuild's end-to-end bundler tests, run against ts-r-build: 938 of 964 compared cases
   pass (97.3%); 13 of the 26 failures are intended differences where ts-r-build follows
   tsc 7.
 - Ecosystem bundle stage: all 915 compared packages pass (100%). Minified output is 2.9%
