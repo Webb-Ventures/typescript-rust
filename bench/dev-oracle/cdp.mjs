@@ -194,12 +194,12 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
     return r.result.value
   }
   const query = async (selector) => {
-    const r = await send('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(cssOf(selector))})` })
+    const r = await send('Runtime.evaluate', { expression: queryExpr(selector) })
     if (r.exceptionDetails) throw new Error(`bad selector ${selector}`)
     return r.result.objectId ? handle(r.result.objectId) : null
   }
   const waitFor = async (selector, { timeout = ACTION_TIMEOUT, state = 'attached' } = {}) => {
-    cssOf(selector)
+    queryExpr(selector)
     const end = Date.now() + timeout
     for (;;) {
       const h = await query(selector).catch(() => null)
@@ -361,7 +361,14 @@ export async function newPage(browser, { contextId, mapText = (t) => t } = {}) {
     },
     get mouse() { throw new Unsupported('page.mouse') },
     route: () => { throw new Unsupported('page.route') },
-    frame: () => { throw new Unsupported('page.frame') },
+    // A same-origin child frame by name; only its `content()` is supported.
+    frame: (name) => {
+      if (typeof name !== 'string') throw new Unsupported('page.frame({...})')
+      const doc = `document.querySelector('iframe[name=' + ${JSON.stringify(JSON.stringify(name))} + ']')?.contentDocument`
+      return {
+        content: () => evaluate(`(${doc})?.documentElement.outerHTML ?? ''`),
+      }
+    },
     frameLocator: () => { throw new Unsupported('page.frameLocator') },
     getByText: () => { throw new Unsupported('page.getByText') },
     getByRole: () => { throw new Unsupported('page.getByRole') },
@@ -383,10 +390,29 @@ function lower(h) {
   return Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]))
 }
 
-/** Playwright selectors the specs use beyond CSS: `text=...` is unsupported. */
+/** Playwright selectors the specs use beyond CSS: `text=...` only in `query`. */
 function cssOf(selector) {
   if (/^(text|xpath|id)=/.test(selector) || selector.includes('>>') || /:has-text\(|:text\(/.test(selector)) {
     throw new Unsupported(`selector ${selector}`)
   }
   return selector
+}
+
+/**
+ * A page expression for the first element `selector` matches. `text=Foo` (unquoted) is
+ * Playwright's text selector: the innermost element whose whitespace-normalized text
+ * contains `Foo`, ignoring case.
+ */
+function queryExpr(selector) {
+  const m = /^text=([^"'].*)$/.exec(selector)
+  if (!m) return `document.querySelector(${JSON.stringify(cssOf(selector))})`
+  const want = JSON.stringify(m[1].trim().replace(/\s+/g, ' ').toLowerCase())
+  return `(() => {
+    const norm = (e) => (e.textContent || '').replace(/\s+/g, ' ').toLowerCase()
+    const hit = (e) => e.tagName !== 'SCRIPT' && e.tagName !== 'STYLE' && norm(e).includes(${want})
+    for (const e of document.body ? document.body.querySelectorAll('*') : []) {
+      if (hit(e) && ![...e.children].some(hit)) return e
+    }
+    return null
+  })()`
 }

@@ -2682,3 +2682,23 @@ fn define_in_enum_initializer() {
     assert!(text.contains("\"e\"] = 5"), "{text}");
     assert!(text.contains(", b)"), "{text}");
 }
+
+/// `--external:./path` matches the resolved path (esbuild's post-resolve externals): the
+/// import stays, relative to the output directory, even when the file doesn't exist.
+#[test]
+fn path_externals_match_after_resolution() {
+    let fs = project(&[
+        (
+            "src/a.js",
+            "import x from './dir/../lib.js'\nimport './gone.js'\nconsole.log(x)\n",
+        ),
+        ("src/lib.js", "export default 1\n"),
+    ]);
+    let mut o = opts(&["src/a.js"]);
+    o.external = vec!["./src/lib.js".into(), "/proj/src/gone.js".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(text.contains("\"../src/lib.js\""), "{text}");
+    assert!(text.contains("\"../src/gone.js\""), "{text}");
+    assert!(!text.contains("export default 1"), "{text}");
+}

@@ -319,8 +319,14 @@ function flagsFor(c) {
       case 'ExternalSettings': {
         const es = asObject(v);
         for (const [phase, m] of Object.entries(es)) {
-          if (phase !== 'PreResolve') { why.push(`External.${phase}`); continue; }
           const mm = asObject(m);
+          // Paths matched after resolution: the CLI's `--external:<absolute path>`.
+          if (phase === 'PostResolve') {
+            if (Object.keys(mm).some((x) => x !== 'Exact')) { why.push(`External.${phase}`); continue; }
+            for (const it of mm.Exact.items) flags.push(`--external:\0IN${it.key}`);
+            continue;
+          }
+          if (phase !== 'PreResolve') { why.push(`External.${phase}`); continue; }
           for (const [kind, val] of Object.entries(mm)) {
             if (kind === 'Exact') for (const it of val.items) flags.push(`--external:${it.key}`);
             else if (kind === 'Patterns') {
@@ -336,10 +342,27 @@ function flagsFor(c) {
       // `es(2019)`: everything newer than ES2019 is unsupported, which is `--target=es2019`.
       // `compat.ClassField | compat.Arrow`: those features, `--supported:class-field=false`.
       case 'UnsupportedJSFeatures': {
-        if (v.call === 'es' && v.args.length === 1 && v.args[0].t === 'num') { flags.push(`--target=es${v.args[0].v}`); break; }
+        if (v.call === 'es' && v.args.length === 1 && v.args[0].t === 'num') {
+          if (!flags.includes(`--target=es${v.args[0].v}`)) flags.push(`--target=es${v.args[0].v}`);
+          break;
+        }
         const set = v.or ?? [v];
         if (!set.every((f) => f.ident?.startsWith('compat.'))) { why.push(k); break; }
         for (const f of set) flags.push(`--supported:${kebab(f.ident.slice(7))}=false`);
+        break;
+      }
+      // The `--target` the options came from (it also makes esbuild ignore tsconfig's).
+      case 'OriginalTargetEnv': {
+        const t = `--target=${String(v).toLowerCase()}`;
+        if (!/^--target=(esnext|es\d+)$/.test(t)) { why.push(k); break; }
+        if (!flags.includes(t)) flags.push(t);
+        break;
+      }
+      // CSS features: only nesting has a CLI name ts-r-build lowers.
+      case 'UnsupportedCSSFeatures': {
+        const set = v.or ?? [v];
+        if (!set.every((f) => f.ident === 'compat.Nesting')) { why.push(k); break; }
+        flags.push('--supported:nesting=false');
         break;
       }
       case 'JSBanner': flags.push(`--banner:js=${v}`); break;

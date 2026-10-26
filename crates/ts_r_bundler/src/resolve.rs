@@ -388,6 +388,10 @@ pub struct Resolver {
     /// `extensions` for files inside `node_modules`: JavaScript before TypeScript.
     node_modules_extensions: Vec<String>,
     external: Vec<String>,
+    /// `--external:` paths (`./x`, `../x`, `/x`): absolute, matched after resolution.
+    post_external: FxHashSet<String>,
+    /// The output directory, which such externals are imported relative to.
+    out_dir: String,
     packages_external: bool,
     /// `--alias` keys and replacements, longest key first.
     alias: Vec<(String, String)>,
@@ -457,6 +461,22 @@ impl Resolver {
             extensions: opts.resolve_extensions.clone(),
             node_modules_extensions: javascript_first(&opts.resolve_extensions),
             external: opts.external.clone(),
+            post_external: opts
+                .external
+                .iter()
+                .filter(|p| {
+                    !p.contains('*')
+                        && (p.starts_with('/') || p.starts_with("./") || p.starts_with("../"))
+                })
+                .map(|p| path::resolve(&opts.working_dir, p))
+                .collect(),
+            out_dir: match (&opts.outdir, &opts.outfile) {
+                (Some(d), _) => path::resolve(&opts.working_dir, d),
+                (None, Some(f)) => {
+                    path::directory_of(&path::resolve(&opts.working_dir, f)).to_owned()
+                }
+                _ => opts.working_dir.clone(),
+            },
             packages_external: opts.packages_external,
             alias: {
                 let mut a = opts.alias.clone();
@@ -597,6 +617,9 @@ impl Resolver {
             } else {
                 path::resolve(dir, spec)
             };
+            if let Some(r) = self.post_external(&target) {
+                return r;
+            }
             if let Some(r) = self.browser_replace_file(&target, dir) {
                 return r;
             }
@@ -712,6 +735,9 @@ impl Resolver {
         };
         let css_import = kind == ResolveKind::CssImport;
         for target in &candidates {
+            if let Some(r) = self.post_external(target) {
+                return r;
+            }
             if self.fs.file_exists(target) {
                 return self.finish(target.clone());
             }
@@ -758,7 +784,23 @@ impl Resolver {
     }
 
     /// Real path plus the target package's `browser` file map.
+    /// `target` named by a path `--external:` (esbuild's post-resolve externals): imported
+    /// by its path relative to the output directory.
+    fn post_external(&self, target: &str) -> Option<Resolution> {
+        if self.post_external.is_empty() || !self.post_external.contains(target) {
+            return None;
+        }
+        Some(Resolution::External(path::relative_dotted(
+            &self.out_dir,
+            target,
+            true,
+        )))
+    }
+
     fn finish(&self, file: String) -> Resolution {
+        if let Some(r) = self.post_external(&file) {
+            return r;
+        }
         let real = if file.contains("/node_modules/") {
             path::normalize_slashes(&self.fs.realpath(&file))
         } else {

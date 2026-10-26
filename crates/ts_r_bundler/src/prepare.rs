@@ -258,6 +258,9 @@ pub fn load(
                 crate::css::NameMode::Global
             };
             let mut sheet = crate::css::parse(Arc::from(text), mode);
+            if opts.unsupported().has(crate::features::Feature::Nesting) {
+                crate::css::nesting::lower(&mut sheet);
+            }
             let h = blake3::hash(key.as_bytes());
             sheet.id = h.as_bytes()[..8]
                 .iter()

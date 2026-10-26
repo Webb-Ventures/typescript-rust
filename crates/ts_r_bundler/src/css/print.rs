@@ -130,7 +130,37 @@ impl Printer<'_> {
                     }
                     p => p,
                 };
-                self.values(prelude, out);
+                if self.minify {
+                    self.values(prelude, out);
+                } else {
+                    // One selector of a list per line, as esbuild prints them.
+                    // Top-level commas (not those inside a written `:is(`).
+                    let mut depth = 0usize;
+                    let is_comma = |cv: &Cv| match cv {
+                        Cv::Raw(r) if r.ends_with('(') => {
+                            depth += 1;
+                            false
+                        }
+                        Cv::Raw(r) if &**r == ")" => {
+                            depth = depth.saturating_sub(1);
+                            false
+                        }
+                        Cv::Tok(t) => t.t == T::Comma && depth == 0,
+                        Cv::Raw(r) => &**r == "," && depth == 0,
+                        _ => false,
+                    };
+                    for (i, sel) in prelude.split(is_comma).enumerate() {
+                        if i > 0 {
+                            out.push_str(",\n");
+                            self.pad(indent, out);
+                        }
+                        let ws =
+                            |cv: &Cv| matches!(cv, Cv::Space | Cv::Tok(Token { t: T::Ws, .. }));
+                        let start = sel.iter().position(|c| !ws(c)).unwrap_or(sel.len());
+                        let end = sel.iter().rposition(|c| !ws(c)).map_or(start, |e| e + 1);
+                        self.values(&sel[start..end.max(start)], out);
+                    }
+                }
                 self.block(body, indent, true, out);
             }
             Node::At {
@@ -259,13 +289,15 @@ impl Printer<'_> {
         } = ctx;
         let tight = |cv: &Cv| {
             is_tight(cv, self.sheet)
+                || matches!(cv, Cv::Raw(r) if &**r == ",")
                 || ctx.calc
                     && matches!(cv, Cv::Tok(t) if t.t == T::Delim && matches!(self.sheet.text(t), "*" | "/"))
         };
         let n = v.len();
         for (i, cv) in v.iter().enumerate() {
             match cv {
-                Cv::Tok(t) if t.t == T::Ws => {
+                Cv::Raw(text) => out.push_str(text),
+                Cv::Tok(Token { t: T::Ws, .. }) | Cv::Space => {
                     if i == 0 || i + 1 == n {
                         continue;
                     }
