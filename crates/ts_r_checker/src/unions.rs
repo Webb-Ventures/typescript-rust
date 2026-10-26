@@ -304,8 +304,23 @@ impl<'a> Checker<'a> {
                         self.compare_lists(la, lb, depth + 1)
                     })
             }
-            (TypeKind::Intersection { list: x, .. }, TypeKind::Intersection { list: y, .. })
-            | (TypeKind::Union { list: x, .. }, TypeKind::Union { list: y, .. }) => {
+            // Aliased intersections sort first, by alias name (then alias arguments), and
+            // the rest by their members (`OneToOne | Str` for `type Str = B<string> & {..}`).
+            (TypeKind::Intersection { list: x, .. }, TypeKind::Intersection { list: y, .. }) => {
+                match (s.alias_of(a), s.alias_of(b)) {
+                    (Some(p), Some(q)) if p.sym != q.sym => {
+                        self.sym_name(p.sym).cmp(self.sym_name(q.sym))
+                    }
+                    (Some(p), Some(q)) => {
+                        self.compare_lists(s.list_items(p.args), s.list_items(q.args), depth + 1)
+                    }
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+                .then_with(|| self.compare_lists(s.list_items(x), s.list_items(y), depth + 1))
+            }
+            (TypeKind::Union { list: x, .. }, TypeKind::Union { list: y, .. }) => {
                 self.compare_lists(s.list_items(x), s.list_items(y), depth + 1)
             }
             (TypeKind::Index(x), TypeKind::Index(y)) => self.compare_types(x, y, depth + 1),

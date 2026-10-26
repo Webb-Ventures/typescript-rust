@@ -1100,7 +1100,9 @@ Files, by layer:
   (declared, referenced, aliased) come first by name; unnamed ones (type literals, object
   literals, `typeof` types) follow by declaration position, interleaved; a written `{}` is a
   single shared type with no declaration, so it sorts after them (with mapped types); tuples
-  last (`Checker::object_sort_key`). Unique symbol types sort as enum members do, by their
+  last (`Checker::object_sort_key`). Intersections with an alias sort before unaliased
+  ones, by alias name and then alias arguments (`O2O | StrAttr`, whatever order they were
+  written in). Unique symbol types sort as enum members do, by their
   symbol's first declaration and then by name (`typeof zebra | typeof apple` when `zebra`
   is declared first). A spread's result lists its properties by where each
   was declared, ones with no declaration last by name, not left-then-right
@@ -1524,7 +1526,19 @@ Files, by layer:
   are then related without the check (`RelState::skip_excess_props`). With only object
   members, each property must also be assignable to the union of its types in the selected
   members (index signature types, `undefined` for a member without it), reported at the
-  property (`{ foo: "x" }` against `StringKeys | NumberKeys`).
+  property (`{ foo: "x" }` against `StringKeys | NumberKeys`). Primitive members are
+  dropped first and don't skip this check (`number | { [k: string]: number } | number[] |
+  undefined` with `{ b: "x" }` is `Types of property 'b' are incompatible`); only `object`
+  or `{}` members do. For this check a discriminant never selects a primitive member
+  (`string | StrAttr | NumAttr` with `{ type: "string", autoIncrement: true }` reports
+  `autoIncrement` against `StrAttr`; `excess_discriminant_type`). Elaboration keeps
+  primitives in `matching_discriminant_type`. A union with several object members and a
+  primitive reports a fresh literal against its object members' best match
+  (`number | { a: number } | string[]` picks `{ a: number }`), and a widened object literal
+  (`const o = {...}`, `ObjectFlags::WIDENED_LITERAL`) is no longer an object literal there,
+  so it is not matched with the first non-array member (tsc: `relater.go`,
+  hasExcessProperties, getTypeOfPropertyInTypes, discriminateTypeByDiscriminableItems and
+  getBestMatchingType, read as a reference; `object_literal_union_with_primitives`).
 - **Variadic splits.** A target `[...A, ...B]` infers only once `A` has a fixed-length tuple
   candidate: `A` takes that many source elements and `B` the rest. Calls infer from a `this`
   receiver (through its base signature) before the rest arguments and again after them, so

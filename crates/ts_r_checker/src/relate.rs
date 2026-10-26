@@ -1909,7 +1909,21 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // An object source against a union of at most three members with `null` or
         // `undefined` is matched against the other members (`X[] | X | undefined` picks `X`).
-        let pick_from = if report
+        // A fresh object literal is matched against the union's non-primitive members
+        // (`number | { a: number } | string[]` picks `{ a: number }`, observed tsc 7).
+        let fresh_object = report
+            && st
+                .object_of(s)
+                .is_some_and(|o| o.flags.contains(ObjectFlags::FRESH_LITERAL));
+        let primitive = |m: TypeId| st.flags(m).intersects(TypeFlags::PRIMITIVE);
+        let non_primitive: Vec<TypeId> = if fresh_object {
+            members.iter().copied().filter(|&m| !primitive(m)).collect()
+        } else {
+            Vec::new()
+        };
+        let pick_from = if non_primitive.len() > 1 && non_primitive.len() < members.len() {
+            self.union(&non_primitive)
+        } else if report
             && st.flags(s).contains(TypeFlags::OBJECT)
             && members.len() <= 3
             && members
@@ -2112,11 +2126,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return Some(m);
         }
-        // Object literal vs a union with array members: the non-array member.
-        if st
-            .object_of(s)
-            .is_some_and(|o| o.flags.contains(ObjectFlags::OBJECT_LITERAL))
-            && members.iter().any(|&m| self.c.is_array_like_type(m))
+        // Object literal vs a union with array members: the non-array member. A widened
+        // literal (`const o = { a: "x" }`) no longer counts (observed tsc 7: `o` against
+        // `{ b: number } | string[]` is not elaborated).
+        if st.object_of(s).is_some_and(|o| {
+            o.flags.contains(ObjectFlags::OBJECT_LITERAL)
+                && !o.flags.contains(ObjectFlags::WIDENED_LITERAL)
+        }) && members.iter().any(|&m| self.c.is_array_like_type(m))
             && let Some(m) = members
                 .iter()
                 .copied()
@@ -2208,7 +2224,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         t: TypeId,
         rel: RelationKind,
     ) -> Option<TypeId> {
-        self.discriminant_members(s, t, rel, true)
+        self.discriminant_members(s, t, rel, true, false)
     }
 
     /// [`Ck::matching_discriminant_type`] as excess property checks see it: a discriminant
@@ -2220,7 +2236,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         t: TypeId,
         rel: RelationKind,
     ) -> Option<TypeId> {
-        self.discriminant_members(s, t, rel, true)
+        self.discriminant_members(s, t, rel, true, true)
     }
 
     fn discriminant_members(
@@ -2229,6 +2245,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         t: TypeId,
         rel: RelationKind,
         unmatched_keeps_all: bool,
+        drop_primitives: bool,
     ) -> Option<TypeId> {
         let st = self.store();
         if !st.flags(t).contains(TypeFlags::UNION)
@@ -2240,7 +2257,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let members = st.members_of_union(t).to_vec();
         let sprops = self.properties_of(s);
-        let mut candidates: Vec<bool> = vec![true; members.len()];
+        // For excess property checks primitive members are never picked (`string | { type:
+        // "a" } | { type: "b" }` with `{ type: "a", x: 1 }` reports `x` against `{ type:
+        // "a" }`).
+        let mut candidates: Vec<bool> = members
+            .iter()
+            .map(|&m| !drop_primitives || !self.store().flags(m).intersects(TypeFlags::PRIMITIVE))
+            .collect();
         let mut discriminated = false;
         for (name, sp) in sprops {
             // A discriminant: present in some member with a unit type.
@@ -5543,7 +5566,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         // at the property (observed:
         // `{ foo: "x" }` against `StringKeys | NumberKeys` is `Type 'string' is not
         // assignable to type 'IValue'`, though `NumberKeys` alone accepts the structure).
-        // (Not when the union has `object`, `{}` or primitives: they take any object.)
+        // (Not when the union has `object` or `{}`: they take any object. Primitives are
+        // filtered out above: `string | { a: number } | { b: number }` checks `{ a: 1,
+        // b: "x" }`, observed tsc 7.)
         let open = self.store().flags(t).contains(TypeFlags::UNION)
             && self
                 .store()
@@ -5551,9 +5576,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .to_vec()
                 .into_iter()
                 .any(|m| {
-                    let f = self.store().flags(m);
-                    (f.intersects(TypeFlags::NON_PRIMITIVE | TypeFlags::PRIMITIVE)
-                        && !f.intersects(TypeFlags::NULLABLE))
+                    self.store().flags(m).intersects(TypeFlags::NON_PRIMITIVE)
                         || self.is_empty_object_type(m)
                 });
         if !open && self.store().flags(reduced).contains(TypeFlags::UNION) {
@@ -5611,15 +5634,6 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
                 if report {
-                    // Nullish array unions keep their whole-object error when no member
-                    // accepts the structure (`X[] | X | undefined`).
-                    if self
-                        .some_member(t, |m| self.store().flags(m).intersects(TypeFlags::NULLABLE))
-                        && self.some_member(t, |m| self.c.is_array_like_type(m))
-                        && !self.type_related_to_some_type(s, t, rel, false)
-                    {
-                        return false;
-                    }
                     // Reported at the whole object: `Types of property 'p' are
                     // incompatible` (elaboration reports at the property when the union
                     // or its best matching member has it).
