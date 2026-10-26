@@ -15,8 +15,8 @@
 //! otherwise a suggestion.
 
 use super::prelude::*;
+use super::unicorn_util::{is_same_reference, static_string, would_remove_comments};
 use super::unicorn_util::{parenthesized_span, skip_wrappers};
-use super::unicorn_util_h5::{is_same_reference, static_string, would_remove_comments};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

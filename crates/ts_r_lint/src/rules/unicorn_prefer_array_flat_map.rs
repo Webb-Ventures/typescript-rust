@@ -15,7 +15,7 @@
 
 use super::prelude::*;
 use super::unicorn_types::{is_known_non_indexed_collection, should_skip_known_non_array_receiver};
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     has_type_arguments, has_unparenthesized_optional_chain, is_parenthesized,
     is_side_effect_free_function, member_object_text, method_call_of, node_matches_path,
     parenthesized_text, remove_method_call, would_remove_comments,

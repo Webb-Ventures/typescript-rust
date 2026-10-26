@@ -15,7 +15,7 @@
 //! No type information is used, so `isKnownNonPromise` is always false here.
 
 use super::prelude::*;
-use super::unicorn_util_h4::prev_token_end;
+use super::unicorn_util::prev_token_end;
 use ts_r_ast::{Ast, FnFlags};
 
 pub static RULE: RuleDef = RuleDef {

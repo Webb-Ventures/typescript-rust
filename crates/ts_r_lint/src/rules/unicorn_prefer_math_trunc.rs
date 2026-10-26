@@ -15,11 +15,11 @@
 //! effects (and, as it copies the left side, no comment anywhere).
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    call_argument_text, call_arguments_text, call_parens, has_side_effect, is_number_literal,
-    operator_after, would_remove_comments,
+use super::unicorn_util::{
+    call_argument_text, call_arguments_text, call_parens, is_number_literal, operator_after,
+    would_remove_comments,
 };
+use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -132,7 +132,8 @@ fn check_bitwise(
     } else {
         vec![parenthesized_span(cx, left)]
     };
-    let ok = (!assignment || !has_side_effect(cx, left)) && !would_remove_comments(cx, span, &kept);
+    let ok = (!assignment || !super::unicorn_static::has_side_effect(cx.ast(), left))
+        && !would_remove_comments(cx, span, &kept);
     let fix = if !ok {
         None
     } else if assignment {

@@ -8,8 +8,8 @@
 
 use super::prelude::*;
 use super::unicorn_ast::{remove_argument, would_remove_comments};
+use super::unicorn_text::static_string_value;
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h1::static_string;
 use ts_r_ast::Ast;
 use ts_r_span::Span;
 
@@ -33,7 +33,7 @@ fn description(ast: &Ast, id: NodeId) -> Option<&'static str> {
         Node::ArrayLit { elements } if ast.list(elements).is_empty() => Some("empty array"),
         Node::NullLit {} => Some("`null`"),
         Node::Ident { .. } if ident_name(ast, id) == Some("undefined") => Some("`undefined`"),
-        _ => static_string(ast, id)
+        _ => static_string_value(ast, id)
             .is_some_and(|s| s.is_empty())
             .then_some("empty string"),
     }

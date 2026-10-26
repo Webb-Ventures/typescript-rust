@@ -14,7 +14,7 @@
 //! only the return type annotation counts.
 
 use super::prelude::*;
-use super::unicorn_util_h1::static_property_name;
+use super::unicorn_util::static_property_name;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

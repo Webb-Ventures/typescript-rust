@@ -13,7 +13,7 @@ use super::prelude::*;
 use super::unicorn_ast::{method_call, would_remove_comments};
 use super::unicorn_types::{is_known_bigint_typed_array, should_skip_known_non_array_receiver};
 use super::unicorn_util::has_optional_chain;
-use super::unicorn_util_h1::is_same_reference;
+use super::unicorn_util::is_same_reference;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

@@ -17,13 +17,14 @@
 //! whose single returned expression can be inlined with its parameters renamed.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
 use super::unicorn_static::has_side_effect as static_has_side_effect;
 use super::unicorn_text::{is_same_reference, paren_text};
 use super::unicorn_types::{
     is_known_bigint_typed_array, is_known_non_number, should_skip_known_non_array_receiver,
 };
+use super::unicorn_util::{available_name, trailing_comment_same_line};
 use super::unicorn_util::{has_optional_chain, skip_wrappers};
-use super::unicorn_util_h4::{available_name, linebreak, trailing_comment_same_line};
 use crate::semantic::{DeclKind, RefFlags, ScopeId, SymbolId};
 use ts_r_ast::{Ast, BinaryOp, FnFlags, KeywordTypeKind, MethodKind, VarKind};
 

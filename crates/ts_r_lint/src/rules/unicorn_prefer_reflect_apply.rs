@@ -11,11 +11,11 @@
 //! outside those three.
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     has_unparenthesized_optional_chain, member_object, static_member_name, static_string,
     would_remove_comments,
 };
+use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

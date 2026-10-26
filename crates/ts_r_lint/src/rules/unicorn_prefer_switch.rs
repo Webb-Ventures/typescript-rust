@@ -17,9 +17,10 @@
 //! suggestion when the discriminant may run a getter or a test has side effects.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
 use super::unicorn_static::{Static, static_value};
 use super::unicorn_text::{is_same_reference, static_string_value, would_remove_comments};
-use super::unicorn_util_h4::{fix_of, has_side_effect, indent_before, linebreak};
+use super::unicorn_util::{fix_of, has_side_effect_with, indent_before};
 use ts_r_ast::{Ast, BinaryOp};
 
 pub static RULE: RuleDef = RuleDef {
@@ -447,7 +448,7 @@ impl Rule for PreferSwitch {
                 continue;
             };
             let span = Span::new(cx.span(node).start, cx.span(cons).start);
-            let fixable = !has_side_effect(ast, disc, false, false)
+            let fixable = !has_side_effect_with(ast, disc, false, false)
                 && branches
                     .iter()
                     .all(|b| !has_break_inside(cx, &breaks, b.stmt));
@@ -457,9 +458,9 @@ impl Rule for PreferSwitch {
                 None
             };
             let suggest = fixable
-                && (has_side_effect(ast, disc, true, false)
+                && (has_side_effect_with(ast, disc, true, false)
                     || branches.iter().any(|b| match *ast.node(b.stmt) {
-                        Node::If { test, .. } => has_side_effect(ast, test, false, false),
+                        Node::If { test, .. } => has_side_effect_with(ast, test, false, false),
                         _ => false,
                     }));
             let report = cx.report(span, MESSAGE).id("prefer-switch");

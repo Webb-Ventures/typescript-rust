@@ -9,7 +9,7 @@
 
 use super::prelude::*;
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h1::{delete_all, token_runs};
+use super::unicorn_util::{delete_all, token_runs};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

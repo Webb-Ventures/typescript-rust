@@ -14,7 +14,7 @@
 
 use super::prelude::*;
 use super::unicorn_util::in_unparenthesized_new_callee;
-use super::unicorn_util_h4::{fix_of, next_token_start, rename_identifier_edit};
+use super::unicorn_util::{fix_of, next_token_start, rename_identifier_edit};
 use crate::semantic::{Resolution, SymbolFlags};
 
 pub static RULE: RuleDef = RuleDef {

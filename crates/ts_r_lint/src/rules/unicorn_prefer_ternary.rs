@@ -15,8 +15,8 @@
 
 use super::prelude::*;
 use super::unicorn_text::{is_parenthesized, is_same_reference, needs_semicolon, paren_text};
+use super::unicorn_util::{has_side_effect_with, trailing_comment_same_line};
 use super::unicorn_util::{parenthesized_span, skip_wrappers};
-use super::unicorn_util_h4::{has_side_effect, trailing_comment_same_line};
 use crate::semantic::RefFlags;
 use ts_r_ast::{AssignOp, Ast, VarKind};
 
@@ -420,8 +420,8 @@ impl PreferTernary {
         }) {
             return;
         }
-        if has_side_effect(ast, init_inner, false, false)
-            || has_side_effect(ast, test, false, false)
+        if has_side_effect_with(ast, init_inner, false, false)
+            || has_side_effect_with(ast, test, false, false)
         {
             return;
         }

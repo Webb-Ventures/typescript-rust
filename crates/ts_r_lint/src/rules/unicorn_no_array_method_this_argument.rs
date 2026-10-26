@@ -16,7 +16,7 @@
 use super::prelude::*;
 use super::unicorn_types::should_skip_known_non_array_receiver;
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     is_parenthesized, is_value_not_function, member_object_needs_parens, method_call_of,
     node_matches_path, parenthesized_text, static_string, would_remove_comments,
 };

@@ -20,8 +20,8 @@
 use super::prelude::*;
 use super::unicorn_ast::remove_argument;
 use super::unicorn_text::{is_same_reference, needs_semicolon};
+use super::unicorn_util::{fix_of, has_side_effect_with, is_typescript_path};
 use super::unicorn_util::{skip_wrappers, space_around_keyword};
-use super::unicorn_util_h4::{fix_of, has_side_effect, is_typescript_path};
 use ts_r_ast::{Ast, BinaryOp, FnFlags, KeywordTypeKind, UnaryOp, VarKind};
 
 pub static RULE: RuleDef = RuleDef {
@@ -299,8 +299,8 @@ fn indexed_access(ast: &Ast, branch: NodeId) -> Option<Access> {
         return None;
     };
     if contains_optional_chain(ast, skip_wrappers(ast, branch))
-        || has_side_effect(ast, obj, true, false)
-        || has_side_effect(ast, index, true, false)
+        || has_side_effect_with(ast, obj, true, false)
+        || has_side_effect_with(ast, index, true, false)
     {
         return None;
     }

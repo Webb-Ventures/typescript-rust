@@ -7,8 +7,8 @@
 //! parenthesized `await`.
 
 use super::prelude::*;
+use super::unicorn_util::fix_of;
 use super::unicorn_util::{parenthesized_span, skip_wrappers};
-use super::unicorn_util_h4::fix_of;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

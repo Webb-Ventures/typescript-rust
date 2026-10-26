@@ -11,12 +11,12 @@
 //! an optional link, else `.remove()`. A comment inside the call blocks both.
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     has_possible_side_effect, is_parenthesized, is_same_reference, is_value_not_dom_node,
     is_value_not_usable, member_object_text, method_call_of, needs_semicolon,
     would_remove_comments,
 };
+use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

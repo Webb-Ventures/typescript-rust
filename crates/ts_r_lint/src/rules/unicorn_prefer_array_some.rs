@@ -23,7 +23,7 @@
 use super::prelude::*;
 use super::unicorn_types::{is_indexed_collection, is_known_non_indexed_collection};
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     is_boolean_context, is_global_boolean_call, is_side_effect_free_function,
     is_value_not_function, method_call_of, needs_semicolon, parent_through_parens,
 };

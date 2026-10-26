@@ -16,10 +16,11 @@
 //!   name or path is replaced by `Object.fromEntries`.
 
 use super::prelude::*;
+use super::unicorn_ast::remove_statements;
 use super::unicorn_types::is_known_non_array;
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
-    has_type_arguments, method_call_of, node_matches_path, parenthesized_text, remove_statement,
+use super::unicorn_util::{
+    has_type_arguments, method_call_of, node_matches_path, parenthesized_text,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -466,7 +467,7 @@ fn check_loop(cx: &mut Ctx<'_, '_>, decl: NodeId) {
                 parenthesized_text(cx, skip_parens(ast, right))
             ),
         )
-        .and_fix(remove_statement(cx, lp))
+        .and_fix(remove_statements(cx, lp, lp, false))
     });
     cx.report_node(lp, "Prefer `Object.fromEntries()` over a `for-of` loop.")
         .id("loop")

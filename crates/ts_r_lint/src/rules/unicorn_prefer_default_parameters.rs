@@ -20,7 +20,7 @@
 //! type information every default is treated as compatible.
 
 use super::prelude::*;
-use super::unicorn_util_h5::{needs_semicolon, parent_through_parens, static_string};
+use super::unicorn_util::{needs_semicolon, parent_through_parens, static_string};
 use crate::semantic::{DeclKind, SymbolId};
 
 pub static RULE: RuleDef = RuleDef {

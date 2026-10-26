@@ -16,7 +16,7 @@
 
 use super::prelude::*;
 use super::unicorn_types::Checker;
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     is_same_reference, is_value_not_dom_node, is_value_not_usable, member_object_needs_parens,
     method_call_of, needs_semicolon, static_string, would_remove_comments,
 };

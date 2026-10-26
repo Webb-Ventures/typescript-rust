@@ -19,14 +19,15 @@
 //! inherited names are left alone.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
+use super::unicorn_ast::remove_statements;
 use super::unicorn_static::{is_global_ident, static_value};
 use super::unicorn_types::Checker;
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     escape_string, has_possible_side_effect, has_unparenthesized_optional_chain,
     in_unparenthesized_new_callee, indent_before, is_identifier_name, is_left_hand_side,
-    is_parenthesized, is_value_not_usable, linebreak, member_object_text, method_call_of,
-    needs_semicolon, parent_through_parens, parenthesized_text, remove_statement, static_string,
-    would_remove_comments,
+    is_parenthesized, is_value_not_usable, member_object_text, method_call_of, needs_semicolon,
+    parent_through_parens, parenthesized_text, static_string, would_remove_comments,
 };
 use crate::semantic::RefFlags;
 use ts_r_ast::{AssignOp, BinaryOp, UnaryOp, VarKind};
@@ -567,7 +568,7 @@ fn declarator(cx: &mut Ctx<'_, '_>, node: NodeId) {
         }
         let object = member_object_text(cx, obj, obj);
         let span = cx.span(declaration);
-        let separator = format!(";{}{}", linebreak(cx), indent_before(cx, span.start));
+        let separator = format!(";{}{}", linebreak(cx.src()), indent_before(cx, span.start));
         let text = simple
             .iter()
             .map(|(key, value)| {
@@ -668,7 +669,7 @@ fn inline_fix(cx: &Ctx<'_, '_>, decl: NodeId, name: NodeId, dataset: NodeId) -> 
         return None;
     }
     let object = member_object_text(cx, obj, obj);
-    let mut fix = remove_statement(cx, declaration);
+    let mut fix = remove_statements(cx, declaration, declaration, false);
     for (member, key) in members {
         let quote = match *cx.node(member) {
             Node::Index { index, .. } => key_quote(cx, index),

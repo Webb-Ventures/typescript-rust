@@ -20,9 +20,10 @@
 
 use super::prelude::*;
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
+use super::unicorn_util::skip_wrappers;
+use super::unicorn_util::{
     is_left_hand_side, is_number_literal, is_value_not_dom_node, method_call_of,
-    parent_through_parens, remove_method_call, unwrap_ts, would_remove_comments,
+    parent_through_parens, remove_method_call, would_remove_comments,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -221,7 +222,7 @@ impl Rule for PreferQuerySelector {
             return;
         }
         let method = ident_name(ast, prop).unwrap_or_default();
-        let inner = unwrap_ts(ast, arg);
+        let inner = skip_wrappers(ast, arg);
         if self.allow_with_variables
             && matches!(method, "getElementById" | "getElementsByClassName")
             && is_non_literal_argument(ast, inner)

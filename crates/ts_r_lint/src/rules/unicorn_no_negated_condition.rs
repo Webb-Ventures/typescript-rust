@@ -8,11 +8,11 @@
 //! line (and gives up for `yield`), or adds a `;` against ASI.
 
 use super::prelude::*;
-use super::unicorn_util::{joins_previous_statement, space_around_keyword};
-use super::unicorn_util_h4::{
+use super::unicorn_util::{
     fix_of, keyword_argument_parent, next_token_start, parenthesize_keyword_argument,
     prev_token_end,
 };
+use super::unicorn_util::{joins_previous_statement, space_around_keyword};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

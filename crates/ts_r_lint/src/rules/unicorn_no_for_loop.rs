@@ -20,6 +20,7 @@
 //! `document.getElementsBy*()`).
 
 use super::prelude::*;
+use super::unicorn_ast::remove_statements;
 use super::unicorn_no_array_reduce::const_initializer;
 use super::unicorn_no_useless_undefined::is_reference_context;
 use super::unicorn_static::{
@@ -27,10 +28,8 @@ use super::unicorn_static::{
 };
 use super::unicorn_text::has_comment_in;
 use super::unicorn_types::{binding_annotation, is_array, is_number};
+use super::unicorn_util::{available_name, fix_of, is_method_call, scope_within, singular};
 use super::unicorn_util::{has_optional_chain, parenthesized_span};
-use super::unicorn_util_h4::{
-    available_name, fix_of, is_method_call, remove_statement, scope_within, singular,
-};
 use crate::semantic::{DeclKind, RefId, Reference, ScopeId, Semantic, SymbolId};
 use ts_r_ast::{
     AssignOp, Ast, BinaryOp, KeywordTypeKind, TypeOperatorKind, UnaryOp, UpdateOp, VarKind,
@@ -846,7 +845,12 @@ impl NoForLoop {
             if !remove_declaration {
                 edits.push((range, element));
             } else if decls.len() == 1 {
-                edits.push(remove_statement(cx, declaration));
+                edits.extend(
+                    remove_statements(cx, declaration, declaration, false)
+                        .edits
+                        .into_iter()
+                        .map(|e| (e.span, e.text)),
+                );
             } else {
                 edits.push((range, String::new()));
             }

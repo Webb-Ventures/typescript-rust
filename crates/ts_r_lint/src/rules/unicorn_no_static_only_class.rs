@@ -14,7 +14,7 @@
 //! code that would continue the expression gets a `;`.
 
 use super::prelude::*;
-use super::unicorn_util_h4::{keyword_argument_parent, next_token_start, prev_token_end};
+use super::unicorn_util::{keyword_argument_parent, next_token_start, prev_token_end};
 use ts_r_ast::{HeritageKind, Modifiers, NodeList};
 
 pub static RULE: RuleDef = RuleDef {
@@ -331,7 +331,7 @@ fn fix(cx: &Ctx<'_, '_>, node: NodeId, c: &Class) -> Option<Fix> {
     for &m in ast.list(c.members) {
         member_edits(cx, m, &mut edits)?;
     }
-    Some(super::unicorn_util_h4::fix_of(edits))
+    Some(super::unicorn_util::fix_of(edits))
 }
 
 impl Rule for NoStaticOnlyClass {

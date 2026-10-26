@@ -17,8 +17,8 @@
 use super::prelude::*;
 use super::unicorn_static::has_side_effect;
 use super::unicorn_types::is_known_non_indexed_collection;
+use super::unicorn_util::indent_before;
 use super::unicorn_util::{joins_previous_statement, parenthesized_span, skip_wrappers};
-use super::unicorn_util_h4::indent_before;
 use std::borrow::Cow;
 use ts_r_ast::Ast;
 

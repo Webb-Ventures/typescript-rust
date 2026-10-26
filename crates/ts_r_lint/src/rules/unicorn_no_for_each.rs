@@ -19,8 +19,8 @@ use super::unicorn_text::{
     starts_with_declaration_like_token,
 };
 use super::unicorn_types::{is_array, should_skip_known_non_array_receiver};
+use super::unicorn_util::{fix_of, has_side_effect_with};
 use super::unicorn_util::{parenthesized_span, space_around_keyword};
-use super::unicorn_util_h4::{fix_of, has_side_effect};
 use crate::semantic::{DeclKind, RefFlags, Resolution, ScopeId};
 use ts_r_ast::{Ast, FnFlags};
 
@@ -555,7 +555,8 @@ impl Rule for NoForEach {
         }
         let fix = if is_array(cx, object) {
             fixable_candidate(cx, node).and_then(|c| {
-                let suggest = c.member_optional && has_side_effect(ast, c.callee, false, false);
+                let suggest =
+                    c.member_optional && has_side_effect_with(ast, c.callee, false, false);
                 build_fix(cx, &c).map(|f| (f, suggest))
             })
         } else {

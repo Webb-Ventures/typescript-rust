@@ -7,7 +7,7 @@
 
 use super::prelude::*;
 use super::unicorn_text::{paren_text, would_remove_comments};
-use super::unicorn_util_h2::{has_side_effect_strict, plain_key_name};
+use super::unicorn_util::{has_side_effect_strict, plain_key_name};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

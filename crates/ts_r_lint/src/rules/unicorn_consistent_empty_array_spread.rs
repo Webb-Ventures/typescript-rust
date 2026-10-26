@@ -5,7 +5,7 @@
 
 use super::prelude::*;
 use super::unicorn_static::{Static, static_value_no_side_effects};
-use super::unicorn_util_h1::static_string;
+use super::unicorn_text::static_string_value;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -22,7 +22,7 @@ pub static RULE: RuleDef = RuleDef {
 struct ConsistentEmptyArraySpread;
 
 fn is_empty_string(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
-    static_string(cx.ast(), id).is_some_and(|s| s.is_empty())
+    static_string_value(cx.ast(), id).is_some_and(|s| s.is_empty())
 }
 
 fn is_array(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
