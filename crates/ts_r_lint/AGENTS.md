@@ -613,10 +613,20 @@ member reads don't count). What we learned, in our words:
   parenthesized `x.length` plus following whitespace, and the whitespace between `-` and the
   number; no fix with a comment inside the access. Only `length - 1` everywhere is a fix
   (the same for any length); larger offsets are suggestions.
+- **prefer-add-event-listener**: any assignment to a non-computed `x.on<event>` (known DOM
+  event list) is reported at the property; `null`/`undefined`/`void` (through TS wrappers)
+  ask for `removeEventListener`. `beforeunload` without a block-bodied function free of
+  value `return`s, `message` and `error` get extra notes and no fix. The fix (plain `=` as
+  an expression statement, a value that can be a function, no comment outside receiver and
+  handler, and no other assignment in the file to the same reference) writes
+  `obj.addEventListener('event', handler)`, parenthesizing a receiver that would start the
+  statement with `{`/`class`/`function`/`let [`. A `require`/`import` of an excluded package
+  (`koa`, `sax` by default) turns it off for assignments that end after it, so the rule runs
+  as a `run_file` scan in source order.
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).

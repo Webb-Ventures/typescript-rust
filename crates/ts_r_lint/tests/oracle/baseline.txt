@@ -335,6 +335,7 @@ unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
+unicorn/prefer-add-event-listener 97/97
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
 unicorn/prefer-dom-node-append 69/69
