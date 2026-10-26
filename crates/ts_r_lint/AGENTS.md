@@ -994,12 +994,21 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
 - **Manual padding** (`prefer-string-pad-start-end`, from `unicorn:
   rules/prefer-string-pad-start-end.js`). A name stands for its `const` initializer
   (parentheses dropped, as ESTree does) or its function/class declaration when it has one
-  definition and no later write. The plugin's 750-line `isBoolean` is cut down to
-  literals, `!`, comparisons and global `Boolean`/`isFinite`/`isNaN` calls, which is all
-  the oracle needs; JSDoc and TS annotations go through `is_known_non_string`.
+  definition and no later write. JSDoc and TS annotations go through
+  `is_known_non_string`, booleans through `unicorn_types::is_boolean`.
 - **Set methods** (`prefer-set-methods`, from `unicorn: rules/prefer-set-methods.js`).
   "Is a Set" is `builtin_collection_type == Some("Set")`. Operands must be free of side
   effects with getters counted (`unicorn_static::has_side_effect_with_getters`, eslint-utils'
   `considerGetters`, shared with `no-collection-bracket-access`), so `obj.set` is never an
   operand. A `filter` inside `new Set(...)` is reported on the `new`, and the inner call
   then skips itself as a call argument.
+- **Booleans and useless coercions** (`no-useless-coercion`, from `unicorn:
+  rules/no-useless-coercion.js`, `utils/is-boolean.js` and
+  `fix/replace-node-with-expression.js`). `is_boolean` is a `Checker` on the shared engine
+  (annotations, JSDoc, declarations, function returns) plus syntax: `!`/`delete`,
+  comparisons, logical and conditional expressions whose operands all are, global
+  `Boolean`/`isFinite`/`isNaN` and boolean static methods (`Array.isArray`, ...), and
+  instance methods picked by the receiver's kind (`includes` on arrays and strings, `has`
+  on keyed collections, `test` on regexps; `delete` only on mutable collections). A type
+  predicate (`x is T`, not `asserts`) is a boolean annotation. "TypeScript" for the
+  `Boolean()` exemption is the file extension or the TS parser.

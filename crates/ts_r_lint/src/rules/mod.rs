@@ -334,8 +334,8 @@ mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_boolean_cast;
-mod unicorn_no_useless_collection_argument;
-mod unicorn_no_useless_concat;
+mod unicorn_no_useless_coercion;
+mod unicorn_no_useless_compound_assignment;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_re_export;
@@ -765,8 +765,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_string_trim::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
-    &unicorn_no_useless_collection_argument::RULE,
-    &unicorn_no_useless_concat::RULE,
+    &unicorn_no_useless_coercion::RULE,
+    &unicorn_no_useless_compound_assignment::RULE,
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_re_export::RULE,

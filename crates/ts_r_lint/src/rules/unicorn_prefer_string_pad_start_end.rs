@@ -15,7 +15,7 @@ use super::unicorn_text::{
     has_comment_in, has_unparenthesized_optional_chain, is_same_reference, needs_semicolon,
     paren_text,
 };
-use super::unicorn_types::{is_known_non_string, is_number};
+use super::unicorn_types::{is_boolean, is_known_non_string, is_number};
 use super::unicorn_util::skip_wrappers;
 use crate::semantic::DeclKind;
 
@@ -78,39 +78,6 @@ fn identifier_value_node(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-/// A rough `isBoolean`: a boolean literal, `!x`, a comparison, or a `Boolean()`,
-/// `isFinite()` or `isNaN()` call of the global.
-fn is_boolean(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
-    let ast = cx.ast();
-    match *ast.node(skip_wrappers(ast, id)) {
-        Node::BoolLit { .. }
-        | Node::Unary {
-            op: UnaryOp::Not, ..
-        } => true,
-        Node::Binary { op, .. } => matches!(
-            op,
-            BinaryOp::Lt
-                | BinaryOp::LtEq
-                | BinaryOp::Gt
-                | BinaryOp::GtEq
-                | BinaryOp::Eq
-                | BinaryOp::StrictEq
-                | BinaryOp::NotEq
-                | BinaryOp::StrictNotEq
-                | BinaryOp::In
-                | BinaryOp::InstanceOf
-        ),
-        Node::Call {
-            callee,
-            optional: false,
-            ..
-        } => ["Boolean", "isFinite", "isNaN"]
-            .iter()
-            .any(|n| cx.is_global_ref(callee, n)),
-        _ => false,
     }
 }
 

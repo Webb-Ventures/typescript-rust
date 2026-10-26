@@ -325,8 +325,8 @@ unicorn/no-unnecessary-splice 97/97
 unicorn/no-unnecessary-string-trim 95/95
 unicorn/no-unreadable-iife 14/14
 unicorn/no-useless-boolean-cast 61/61
-unicorn/no-useless-collection-argument 67/67
-unicorn/no-useless-concat 69/69
+unicorn/no-useless-coercion 638/638
+unicorn/no-useless-compound-assignment 79/79
 unicorn/no-useless-continue 43/43
 unicorn/no-useless-error-capture-stack-trace 53/53
 unicorn/no-useless-re-export 22/22

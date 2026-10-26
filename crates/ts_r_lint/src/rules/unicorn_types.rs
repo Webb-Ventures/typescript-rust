@@ -3392,6 +3392,281 @@ pub(crate) fn is_known_non_bigint(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     BIGINT.is_known_non_target(cx, id)
 }
 
+// ---- Booleans (`isBoolean`) --------------------------------------------------------------
+
+/// Global `Object.method`s that return booleans.
+const BOOLEAN_STATIC_METHODS: &[(&str, &[&str])] = &[
+    ("Array", &["isArray"]),
+    ("ArrayBuffer", &["isView"]),
+    ("Atomics", &["isLockFree"]),
+    ("Error", &["isError"]),
+    (
+        "Number",
+        &["isFinite", "isInteger", "isNaN", "isSafeInteger"],
+    ),
+    (
+        "Object",
+        &["hasOwn", "is", "isExtensible", "isFrozen", "isSealed"],
+    ),
+    (
+        "Reflect",
+        &[
+            "defineProperty",
+            "deleteProperty",
+            "has",
+            "isExtensible",
+            "preventExtensions",
+            "set",
+            "setPrototypeOf",
+        ],
+    ),
+    ("URL", &["canParse"]),
+];
+
+static KEYED_COLLECTION: Checker = Checker {
+    target_names: &[
+        "Map",
+        "ReadonlyMap",
+        "WeakMap",
+        "URLSearchParams",
+        "Headers",
+        "FormData",
+    ],
+    class_heritage: false,
+    ..Checker::DEFAULT
+};
+
+static NAMED_SET: Checker = Checker {
+    target_names: &["Set", "ReadonlySet"],
+    class_heritage: false,
+    ..Checker::DEFAULT
+};
+
+static NAMED_WEAK_SET: Checker = Checker {
+    target_names: &["WeakSet"],
+    class_heritage: false,
+    ..Checker::DEFAULT
+};
+
+static NAMED_REGEXP: Checker = Checker {
+    target_names: &["RegExp"],
+    class_heritage: false,
+    ..Checker::DEFAULT
+};
+
+static MUTABLE_KEYED_COLLECTION: Checker = Checker {
+    target_names: &["Map", "Set", "WeakMap", "WeakSet"],
+    non_target_names: &["ReadonlyMap", "ReadonlySet"],
+    target_ctors: &["Map", "Set", "WeakMap", "WeakSet"],
+    class_heritage: false,
+    ..Checker::DEFAULT
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ValueKind {
+    Array,
+    KeyedCollection,
+    RegExp,
+    Set,
+    String,
+    WeakSet,
+}
+
+fn checked_value_kind(cx: &Ctx<'_, '_>, id: NodeId) -> Option<ValueKind> {
+    if is_indexed_collection(cx, id) {
+        Some(ValueKind::Array)
+    } else if KEYED_COLLECTION.is_target(cx, id) {
+        Some(ValueKind::KeyedCollection)
+    } else if NAMED_REGEXP.is_target(cx, id) {
+        Some(ValueKind::RegExp)
+    } else if NAMED_SET.is_target(cx, id) {
+        Some(ValueKind::Set)
+    } else if is_string(cx, id) {
+        Some(ValueKind::String)
+    } else if NAMED_WEAK_SET.is_target(cx, id) {
+        Some(ValueKind::WeakSet)
+    } else {
+        None
+    }
+}
+
+/// What kind of value a method's receiver is, by syntax first, then by guessing.
+fn value_kind(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> Option<ValueKind> {
+    let ast = cx.ast();
+    if depth > 50 {
+        return None;
+    }
+    let id = skip_parens(ast, id);
+    match *ast.node(id) {
+        Node::ArrayLit { .. } => Some(ValueKind::Array),
+        Node::StringLit { .. } | Node::TemplateLit { .. } => Some(ValueKind::String),
+        Node::RegexLit { .. } => Some(ValueKind::RegExp),
+        Node::NumberLit { .. }
+        | Node::BoolLit { .. }
+        | Node::NullLit {}
+        | Node::BigIntLit { .. } => None,
+        Node::New { callee, .. } => {
+            let global = |n: &str| cx.is_global_ref(callee, n);
+            if global("RegExp") {
+                Some(ValueKind::RegExp)
+            } else if ["Map", "WeakMap", "URLSearchParams", "Headers", "FormData"]
+                .iter()
+                .any(|n| global(n))
+            {
+                Some(ValueKind::KeyedCollection)
+            } else if global("Set") {
+                Some(ValueKind::Set)
+            } else if global("WeakSet") {
+                Some(ValueKind::WeakSet)
+            } else {
+                checked_value_kind(cx, id)
+            }
+        }
+        Node::Ident { .. } => {
+            if let Some(k) = checked_value_kind(cx, id) {
+                return Some(k);
+            }
+            if jsdoc_type_annotation(cx, id).is_some() {
+                return None;
+            }
+            let (_, init) = super::unicorn_static::const_definition(cx, id)?;
+            value_kind(cx, init, depth + 1)
+        }
+        Node::NonNull { expr } | Node::Satisfies { expr, .. } => value_kind(cx, expr, depth + 1),
+        _ => checked_value_kind(cx, id),
+    }
+}
+
+/// The name of a non-optional `obj.name` / `obj["name"]` member.
+fn member_name(ast: &Ast, id: NodeId) -> Option<(NodeId, String)> {
+    match *ast.node(id) {
+        Node::Member {
+            obj,
+            prop,
+            optional: false,
+        } => ident_name(ast, prop).map(|n| (obj, n.to_owned())),
+        Node::Index {
+            obj,
+            index,
+            optional: false,
+        } => super::unicorn_text::static_string_value(ast, index).map(|n| (obj, n)),
+        _ => None,
+    }
+}
+
+fn boolean_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let ast = cx.ast();
+    let Node::Call { callee, .. } = *ast.node(id) else {
+        return false;
+    };
+    let callee = skip_parens(ast, callee);
+    if let Some((obj, method)) = member_name(ast, callee) {
+        let obj = skip_parens(ast, obj);
+        if matches!(ast.node(obj), Node::Ident { .. })
+            && BOOLEAN_STATIC_METHODS
+                .iter()
+                .any(|(o, ms)| cx.is_global_ref(obj, o) && ms.contains(&method.as_str()))
+        {
+            return true;
+        }
+        if method == "delete" {
+            return MUTABLE_KEYED_COLLECTION.is_target(cx, obj);
+        }
+        let methods: &[&str] = match value_kind(cx, obj, 0) {
+            Some(ValueKind::Array) => &["every", "includes", "some"],
+            Some(ValueKind::KeyedCollection) | Some(ValueKind::WeakSet) => &["has"],
+            Some(ValueKind::RegExp) => &["test"],
+            Some(ValueKind::Set) => &["has", "isDisjointFrom", "isSubsetOf", "isSupersetOf"],
+            Some(ValueKind::String) => &["endsWith", "includes", "isWellFormed", "startsWith"],
+            None => &[],
+        };
+        return methods.contains(&method.as_str());
+    }
+    ["Boolean", "isFinite", "isNaN"]
+        .iter()
+        .any(|n| cx.is_global_ref(callee, n))
+}
+
+fn boolean_node(cx: &Ctx<'_, '_>, id: NodeId, recurse: &dyn Fn(NodeId) -> bool) -> bool {
+    let ast = cx.ast();
+    match *ast.node(id) {
+        Node::Unary {
+            op: UnaryOp::Not | UnaryOp::Delete,
+            ..
+        } => true,
+        Node::Binary { left, op, right } => match op {
+            BinaryOp::Lt
+            | BinaryOp::LtEq
+            | BinaryOp::Gt
+            | BinaryOp::GtEq
+            | BinaryOp::Eq
+            | BinaryOp::StrictEq
+            | BinaryOp::NotEq
+            | BinaryOp::StrictNotEq
+            | BinaryOp::In
+            | BinaryOp::InstanceOf => true,
+            BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::Coalesce => {
+                recurse(left) && recurse(right)
+            }
+            _ => false,
+        },
+        Node::Conditional { cons, alt, .. } => recurse(cons) && recurse(alt),
+        Node::Seq { exprs } => ast.list(exprs).last().is_some_and(|&e| recurse(e)),
+        Node::Await { arg } => recurse(arg),
+        Node::NonNull { expr } => recurse(expr),
+        Node::Call { .. } => boolean_call(cx, id),
+        Node::Member { .. } | Node::Index { .. } => {
+            member_name(ast, id).is_some_and(|(obj, name)| {
+                value_kind(cx, obj, 0) == Some(ValueKind::RegExp)
+                    && [
+                        "dotAll",
+                        "global",
+                        "hasIndices",
+                        "ignoreCase",
+                        "multiline",
+                        "sticky",
+                        "unicode",
+                        "unicodeSets",
+                    ]
+                    .contains(&name.as_str())
+            })
+        }
+        _ => false,
+    }
+}
+
+fn boolean_annotation(ast: &Ast, id: NodeId) -> bool {
+    matches!(
+        ast.node(id),
+        Node::KeywordType {
+            kind: KeywordTypeKind::Boolean,
+        } | Node::BoolLit { .. }
+            | Node::TypePredicate { asserts: false, .. }
+    )
+}
+
+fn boolean_static_type(v: &Static, _ast: &Ast, _id: NodeId) -> Guess {
+    if matches!(v, Static::Bool(_)) {
+        Guess::Target
+    } else {
+        Guess::Unknown
+    }
+}
+
+pub(crate) static BOOLEAN: Checker = Checker {
+    target_names: &["boolean"],
+    non_target_names: &["Array", "ReadonlyArray", "Promise", "PromiseLike"],
+    target_node: Some(boolean_node),
+    target_annotation: Some(boolean_annotation),
+    static_type: Some(boolean_static_type),
+    ..Checker::DEFAULT
+};
+
+/// `isBoolean`.
+pub(crate) fn is_boolean(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    BOOLEAN.is_target(cx, id)
+}
+
 // ---- Built-in collections (`getBuiltinCollectionType`) ----------------------------------
 
 /// The built-in collection names an expression may hold (`Map`, `ReadonlyMap`, `Set`,

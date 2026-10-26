@@ -93,7 +93,7 @@ fn unwrap_ts(ast: &Ast, mut id: NodeId) -> NodeId {
     }
 }
 
-fn is_ts_file(cx: &Ctx<'_, '_>) -> bool {
+pub(crate) fn is_ts_file(cx: &Ctx<'_, '_>) -> bool {
     let p = cx.file.path;
     [".ts", ".tsx", ".mts", ".cts"]
         .iter()
