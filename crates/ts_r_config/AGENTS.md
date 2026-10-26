@@ -106,13 +106,11 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   (default `npx -y -p typescript@7.0.2 tsc`).
 - Real projects: `TS_R_EXTERNAL_PROJECTS=/repo1:/repo2 cargo test -p ts_r_config --test oracle -- --ignored external`
   compares every `tsconfig*.json` (outside `node_modules`) with `tsc --showConfig` and diagnostics.
-  Public bench repos (2026-10-24, `ea41eac`, tsc 7.0.2; `bench --fetch-repos` checkouts of
+  Public bench repos (2026-10-26, `b5938d0`, tsc 7.0.2; `bench --fetch-repos` checkouts of
   trpc, date-fns, rxjs, typeorm and playwright): 114 configs, 114 `--showConfig` outputs
-  identical, 3 configs whose diagnostics differ in message text only: TS18003 prints the
-  `include` patterns with `${configDir}` expanded where tsc keeps it (date-fns
-  `pkgs/dev/config`), and TS5102's suggested `paths` for a removed `baseUrl` differs (tsc
-  `../../src/*`, ours `./src/*` in rxjs `tools/marbles`; tsc `./../*`, ours `../*` in
-  playwright `tests`).
+  identical, 114 with the same diagnostics (the last 3, TS18003 quoting `${configDir}`
+  specs as written and TS5102's `paths` hint relative to the leaf config, fixed in
+  `b5938d0`).
 - The harness runs tsc under `scripts/limit.sh` and caps its own memory
   (`ts_r_testing::cap_memory!()`, a dev-dependency).
 - Fixture `node_modules` are checked in (`tests/fixtures/.gitignore` re-includes them) and one
