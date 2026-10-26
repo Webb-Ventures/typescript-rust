@@ -559,6 +559,7 @@ impl<'a> Tx<'a> {
         let has_use_strict = items[..prologue].iter().any(|&s| {
             matches!(self.n(s), Node::Directive { value } if self.ast.atom(value) == "use strict")
         });
+        self.release_dropped_aliases();
         if self.opts.is_cjs() {
             crate::cjs::prepare(self, &items[prologue..]);
         }
@@ -1963,6 +1964,88 @@ impl<'a> Tx<'a> {
         self.name(local) == root || self.name(local) == self.jsx.fragment_root(self.opts)
     }
 
+    /// An `import x = a.b` that the output drops does not keep the import of `a` alive:
+    /// tsc counts the target's root as used only through an alias that stays (observed:
+    /// `import * as ns from "./a"; import A = ns.A;` with `A` unused, or `export import
+    /// A = ns.A` of an interface, is `export {};`). Repeated until nothing changes, so a
+    /// chain of dropped aliases releases its root too. Only imports are released: their
+    /// references decide elision, while namespaces and locals are emitted regardless.
+    fn release_dropped_aliases(&mut self) {
+        if !self.is_module || self.opts.verbatim_module_syntax {
+            return;
+        }
+        let aliases: Vec<NodeId> = (1..self.source_nodes as u32)
+            .filter_map(NodeId::from_raw)
+            .filter(|&id| {
+                matches!(self.n(id), Node::ImportEquals { module_ref, .. }
+                    if self.kind(module_ref) != NodeKind::ExternalModuleRef)
+            })
+            .collect();
+        if aliases.is_empty() {
+            return;
+        }
+        if self.sc.has_jsx {
+            crate::jsx::read_pragmas(self);
+        }
+        let mut released = vec![false; aliases.len()];
+        loop {
+            let mut changed = false;
+            for (i, &id) in aliases.iter().enumerate() {
+                if released[i] {
+                    continue;
+                }
+                let Node::ImportEquals {
+                    modifiers,
+                    type_only,
+                    name,
+                    module_ref,
+                } = self.n(id)
+                else {
+                    continue;
+                };
+                let exported = modifiers.contains(Modifiers::EXPORT);
+                let dropped = type_only
+                    || (!exported && !self.binding_used(name) && !self.jsx_needs(name))
+                    || (exported && self.alias_of_type(id, module_ref));
+                if !dropped {
+                    continue;
+                }
+                released[i] = true;
+                let mut root = module_ref;
+                while let Node::QualifiedName { left, .. } = self.n(root) {
+                    root = left;
+                }
+                if let Some(b) = self.sc.binding_of_ref(root)
+                    && matches!(
+                        self.sc.binding(b).kind,
+                        crate::scope::BindingKind::Import | crate::scope::BindingKind::ImportEquals
+                    )
+                {
+                    let binding = &mut self.sc.bindings[b as usize];
+                    binding.refs = binding.refs.saturating_sub(1);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Whether the exported alias `export import X = <module_ref>` (`id`) names only a type:
+    /// an uninstantiated namespace of this file, or, for a target the file cannot see
+    /// (`export import A = ns.A` of an imported interface), the program resolver's `No`.
+    fn alias_of_type(&self, id: NodeId, module_ref: NodeId) -> bool {
+        match crate::namespace::alias_target_is_value(self, module_ref) {
+            Some(v) => !v,
+            None => {
+                let span = self.span(id);
+                span.start < span.end
+                    && self.resolver.is_value_alias(self.file, id) == crate::Answer::No
+            }
+        }
+    }
+
     fn import_equals(&mut self, id: NodeId, out: &mut Vec<NodeId>) {
         let Node::ImportEquals {
             modifiers,
@@ -2007,7 +2090,7 @@ impl<'a> Tx<'a> {
         let type_target = exported
             && !self.opts.verbatim_module_syntax
             && self.kind(module_ref) != NodeKind::ExternalModuleRef
-            && crate::namespace::alias_target_is_value(self, module_ref) == Some(false);
+            && self.alias_of_type(id, module_ref);
         if type_only
             || type_target
             || !(exported || used || kept_by_verbatim || script_global || jsx)
