@@ -473,7 +473,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             RecordKind::CssUrl => ResolveKind::CssUrl,
             _ => ResolveKind::Import,
         };
-        if r.kind.is_css() && !ctx.prep.opts.bundle {
+        if r.kind.is_css() && (!ctx.prep.opts.bundle || ctx.prep.opts.css_prebundled) {
             targets.push(RawTarget::External(r.spec.clone()));
             continue;
         }

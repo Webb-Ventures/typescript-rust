@@ -237,6 +237,10 @@ pub struct BuildOptions {
     /// stays external, importing `url`. The dev server's dependency adapter keeps
     /// `import("./x.css")` in a package as a request for the original file this way.
     pub dynamic_import_url: Option<DynamicImportUrl>,
+    /// Not an esbuild option: the CSS the file system returns is already bundled, its
+    /// `@import`s inlined and its `url()`s the URLs the files are served at, so they stay as
+    /// written. The dev server's dependency adapter reads dependency CSS this way.
+    pub css_prebundled: bool,
 }
 
 /// See [`BuildOptions::dynamic_import_url`]: resolved file path to URL, or `None` to bundle.
@@ -303,6 +307,7 @@ impl Default for BuildOptions {
             legal_comments_inline: true,
             require_to_import: false,
             dynamic_import_url: None,
+            css_prebundled: false,
         }
     }
 }

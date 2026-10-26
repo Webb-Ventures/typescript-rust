@@ -149,6 +149,8 @@ impl DepBundle {
             write: false,
             threads: 2,
             persistent_cache: false,
+            // Read through `Overlay`, which bundles CSS for the dev server (`ts_r_hmr::css`).
+            css_prebundled: self.root.is_some(),
             dynamic_import_url: self.root.clone().map(|root| {
                 DynamicImportUrl(Arc::new(move |file: &str| {
                     is_style_file(file)

@@ -34,7 +34,9 @@ code-split `batch` that `ts-r-dev` uses, with source maps whose `sources` are re
 the served URL when `DepBundle::serve_root` is set, and CSS outputs passed through; an entry
 is ESM when it has module syntax or Node would load it as a module (`.mjs`, `"type": "module"`),
 and a dependency's dynamic `import()` of a stylesheet stays external as the served URL of the
-original file, through `BuildOptions::dynamic_import_url`, as Vite does);
+original file, through `BuildOptions::dynamic_import_url`, as Vite does; dependency CSS is
+read already bundled by `ts_r_hmr::css`, so `BuildOptions::css_prebundled` keeps its
+`url()`s, served URLs like `/@ts-r/up/1/...`, as written instead of resolving them);
 `css/` is the stylesheet side: `lexer.rs` (CSS Syntax tokens, escapes, quoting), `mod.rs`
 (rules, `@import`/`url()`/`composes` records, local names for `local-css`), `print.rs`,
 `color.rs` (shortest colors for `--minify-syntax`; the CSS named-color table),
