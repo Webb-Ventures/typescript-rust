@@ -404,6 +404,7 @@ mod unicorn_no_invalid_style_set_property;
 mod unicorn_no_invalid_temporal_arithmetic;
 mod unicorn_no_invalid_url_protocol_comparison;
 mod unicorn_no_invalid_well_known_symbol_methods;
+mod unicorn_no_keyword_prefix;
 mod unicorn_no_late_current_target_access;
 mod unicorn_no_late_event_control;
 mod unicorn_no_leading_empty_lines;
@@ -1285,6 +1286,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_nonstandard_builtin_properties::RULE,
     &unicorn_no_unsafe_json_serialization::RULE,
     &unicorn_consistent_function_style::RULE,
+    &unicorn_no_keyword_prefix::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
