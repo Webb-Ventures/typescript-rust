@@ -1654,6 +1654,7 @@ fn first_error_matches_tsc() {
         ("var f = ()\n=> 1;", 1200, 12),
         ("function f(! b) {}", 1003, 12),
         ("const x = A<T>.foo;", 1477, 12),
+        ("const x = A<T>?.foo;", 1477, 12),
         ("class B extends A x {}", 1005, 19),
         ("function f(null) {}", 1359, 12),
         ("function f(export) {}", 1359, 12),
@@ -3143,4 +3144,15 @@ fn top_level_await_is_an_operator_in_a_module() {
     // A script: `await` is a name.
     let r = parse(body, SourceKind::Ts);
     assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+}
+
+/// After `?.` only a name makes a property access, so an instantiation expression followed
+/// by an optional call (`f<T>?.()`, `f<T>?.<U>()`) or element access is not TS1477
+/// (instantiationExpressionErrors).
+#[test]
+fn instantiation_before_optional_call_is_not_a_property_access() {
+    for src in ["f<number>?.();", "f<number>?.<number>();", "f<number>?.[0];"] {
+        let r = parse(src, SourceKind::Ts);
+        assert!(r.diagnostics.is_empty(), "{src}: {:?}", r.diagnostics);
+    }
 }

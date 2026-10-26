@@ -1429,10 +1429,12 @@ impl<'a> Parser<'a> {
                         _ => {
                             in_chain = false;
                             expr = self.finish_node(start, Node::Instantiation { expr, type_args });
-                            // tsc reports this at the type arguments, not at the `.`. An
-                            // optional call (`a<b>?.()`) is not a property access.
+                            // tsc reports this at the type arguments, not at the `.`. After
+                            // `?.` only a name makes a property access: an optional call
+                            // (`a<b>?.()`, `a<b>?.<c>()`) or element access is not one.
                             if self.at(T::Dot)
-                                || (self.at(T::QuestionDot) && self.peek().kind != T::LParen)
+                                || (self.at(T::QuestionDot)
+                                    && self.peek().kind.is_identifier_or_keyword())
                             {
                                 let span = self.ast.span(type_args);
                                 self.error_at(
