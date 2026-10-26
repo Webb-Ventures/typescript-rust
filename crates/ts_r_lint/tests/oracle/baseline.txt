@@ -337,8 +337,10 @@ unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
+unicorn/prefer-dom-node-append 69/69
 unicorn/prefer-math-trunc 142/142
 unicorn/prefer-native-coercion-functions 110/110
+unicorn/prefer-negative-index 167/167
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-coercion 60/60
 unicorn/prefer-number-properties 474/474

@@ -578,7 +578,6 @@ member reads don't count). What we learned, in our words:
   used as a number (climbing parentheses, logical operators, TS wrappers and `?:` branches,
   the parent is arithmetic/bitwise, unary `+ - ~`, or an arithmetic compound assignment's
   right side); `String.fromCharCode` always gets `fromCodePoint`.
-
 - **prefer-reflect-apply**: `fn.apply(null | this, [..] | arguments)` and
   `Function.prototype.apply.call(fn, ...)` (non-optional calls of non-optional members;
   static string keys count) become `Reflect.apply(fn, recv, list)`. Literal, array/object
@@ -599,10 +598,25 @@ member reads don't count). What we learned, in our words:
   `utils_function_head_span`: a computed key's function starts at its property). Fixes:
   `foo: Name` for object methods, ` = Name;` for class methods (suggestion), a `;` when a
   token on a later line, outside the parent, could continue the identifier.
+- **prefer-dom-node-append**: `x.appendChild(y)` with one non-spread argument, where
+  neither side is a value that can't be a node (`is_value_not_dom_node`: literals,
+  functions, classes, arrays, objects, templates, `undefined`), is reported as a whole; the
+  rename to `append` is a fix only when the value is unused (`is_value_not_usable`: an
+  expression statement, or a non-last sequence element), since `append` returns `undefined`.
+- **prefer-negative-index**: `slice`/`subarray` (arguments 0, 1), `splice`/`toSpliced`/`at`
+  (argument 0), called directly or as `Owner.m.call(x, ..)` / `Owner.m.apply(x, [..])` with
+  owner `[]`, `''` (slice only) or `Name.prototype` of a global that has the method. An
+  identifier key counts even when computed (`x[slice]`). An argument `x.length - n` (`n` a
+  positive safe integer literal; nested subtractions recurse into the left side) on the same
+  reference as the receiver (`is_same_reference`: identifiers, `this`, literals by value,
+  static keys by value, through TS wrappers) is reported on the call. The fix deletes the
+  parenthesized `x.length` plus following whitespace, and the whitespace between `-` and the
+  number; no fix with a comment inside the access. Only `length - 1` everywhere is a fix
+  (the same for any length); larger offsets are suggestions.
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).

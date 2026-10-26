@@ -387,3 +387,129 @@ fn literal_concat(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> Option<String> {
         _ => None,
     }
 }
+
+/// unicorn's `isNodeValueNotDomNode`: a literal, array, object, function, class, template
+/// or `undefined` (through parentheses).
+pub(crate) fn is_value_not_dom_node(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
+    let id = skip_parens(ast, id);
+    matches!(
+        ast.node(id),
+        Node::ArrayLit { .. }
+            | Node::Arrow { .. }
+            | Node::ClassExpr { .. }
+            | Node::FunctionExpr { .. }
+            | Node::StringLit { .. }
+            | Node::NumberLit { .. }
+            | Node::BigIntLit { .. }
+            | Node::BoolLit { .. }
+            | Node::NullLit {}
+            | Node::RegexLit { .. }
+            | Node::ObjectLit { .. }
+            | Node::TemplateLit { .. }
+    ) || ident_name(ast, id) == Some("undefined")
+}
+
+/// unicorn's `isValueNotUsable`: the expression is a statement of its own, or a sequence
+/// element whose value is dropped.
+pub(crate) fn is_value_not_usable(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut id = id;
+    for _ in 0..10_000 {
+        let Some(p) = parent_skip_parens(ast, cx.file.parents, id) else {
+            return false;
+        };
+        match *cx.node(p) {
+            Node::ExprStmt { .. } => return true,
+            Node::Seq { exprs } => {
+                if ast.list(exprs).last().map(|&e| skip_parens(ast, e)) != Some(id) {
+                    return true;
+                }
+                id = p;
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Parentheses and TS wrappers stripped (unicorn's `unwrapChainAndTypeScriptExpression`;
+/// optional chains have no node of their own here).
+pub(crate) fn unwrap_ts(ast: &ts_r_ast::Ast, id: NodeId) -> NodeId {
+    super::unicorn_util::skip_wrappers(ast, id)
+}
+
+/// The static name of a member access for reference comparison: `a.b` gives `b`, a
+/// computed key gives the string form of its static value (`a[1]` and `a["1"]` agree).
+fn reference_property_name(cx: &Ctx<'_, '_>, id: NodeId) -> Option<String> {
+    let ast = cx.ast();
+    match *ast.node(id) {
+        Node::Member { prop, .. } => match *ast.node(prop) {
+            Node::Ident { name } => Some(ast.atom(name).to_owned()),
+            _ => None,
+        },
+        Node::Index { index, .. } => static_value_string(ast, cx.src(), index)
+            .map(|c| c.into_owned())
+            .or_else(|| literal_concat(cx, index, 0)),
+        _ => None,
+    }
+}
+
+/// unicorn's `isSameReference`: the same identifier, `this`, `super`, literal value, static
+/// string, or member chain (static keys compared by value), through parentheses and TS
+/// wrappers.
+pub(crate) fn is_same_reference(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId) -> bool {
+    fn same(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId, depth: u32) -> bool {
+        if depth > 64 {
+            return false;
+        }
+        let ast = cx.ast();
+        let a = unwrap_ts(ast, a);
+        let b = unwrap_ts(ast, b);
+        if let Some(sa) = static_string(ast, a) {
+            return static_string(ast, b) == Some(sa);
+        }
+        match (*ast.node(a), *ast.node(b)) {
+            (Node::This {}, Node::This {}) | (Node::Super {}, Node::Super {}) => true,
+            (Node::Ident { name: x }, Node::Ident { name: y })
+            | (Node::PrivateName { name: x }, Node::PrivateName { name: y }) => {
+                ast.atom(x) == ast.atom(y)
+            }
+            (Node::NumberLit { value: x }, Node::NumberLit { value: y }) => x.get() == y.get(),
+            (Node::BigIntLit { value: x }, Node::BigIntLit { value: y }) => {
+                parse_bigint(ast.atom(x)) == parse_bigint(ast.atom(y))
+            }
+            (Node::BoolLit { value: x }, Node::BoolLit { value: y }) => x == y,
+            (Node::NullLit {}, Node::NullLit {}) => true,
+            (
+                Node::RegexLit {
+                    pattern: p1,
+                    flags: f1,
+                },
+                Node::RegexLit {
+                    pattern: p2,
+                    flags: f2,
+                },
+            ) => ast.atom(p1) == ast.atom(p2) && ast.atom(f1) == ast.atom(f2),
+            (
+                Node::Member { obj: o1, .. } | Node::Index { obj: o1, .. },
+                Node::Member { obj: o2, .. } | Node::Index { obj: o2, .. },
+            ) => {
+                if let Some(name) = reference_property_name(cx, a) {
+                    return same(cx, o1, o2, depth + 1)
+                        && reference_property_name(cx, b).as_deref() == Some(name.as_str());
+                }
+                match (*ast.node(a), *ast.node(b)) {
+                    (Node::Index { index: i1, .. }, Node::Index { index: i2, .. }) => {
+                        same(cx, o1, o2, depth + 1) && same(cx, i1, i2, depth + 1)
+                    }
+                    (Node::Member { prop: p1, .. }, Node::Member { prop: p2, .. }) => {
+                        same(cx, o1, o2, depth + 1) && same(cx, p1, p2, depth + 1)
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+    same(cx, a, b, 0)
+}

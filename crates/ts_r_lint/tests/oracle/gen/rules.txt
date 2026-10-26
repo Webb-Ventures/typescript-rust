@@ -302,3 +302,5 @@ unicorn/prefer-code-point
 unicorn/prefer-reflect-apply
 unicorn/prefer-prototype-methods
 unicorn/prefer-native-coercion-functions
+unicorn/prefer-dom-node-append
+unicorn/prefer-negative-index

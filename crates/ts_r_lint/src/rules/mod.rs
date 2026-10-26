@@ -348,8 +348,10 @@ mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_math_trunc;
 mod unicorn_prefer_native_coercion_functions;
+mod unicorn_prefer_negative_index;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
@@ -739,8 +741,10 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_numeric_separators_style::RULE,
     &unicorn_prefer_code_point::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_dom_node_append::RULE,
     &unicorn_prefer_math_trunc::RULE,
     &unicorn_prefer_native_coercion_functions::RULE,
+    &unicorn_prefer_negative_index::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
