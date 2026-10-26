@@ -310,7 +310,7 @@ mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_better_dom_traversing;
 mod unicorn_catch_error_name;
-mod unicorn_conditions;
+mod unicorn_consistent_arrow_return_style;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_boolean_name;
 mod unicorn_consistent_class_member_order;
@@ -1287,6 +1287,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unsafe_json_serialization::RULE,
     &unicorn_consistent_function_style::RULE,
     &unicorn_no_keyword_prefix::RULE,
+    &unicorn_consistent_arrow_return_style::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
