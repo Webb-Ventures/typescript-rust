@@ -446,3 +446,69 @@ pub(crate) fn switch_case_head(cx: &Ctx<'_, '_>, case: NodeId) -> Span {
     }
     span
 }
+
+/// The `return`, `throw` or non-delegating `yield` whose unparenthesized argument starts
+/// with `node` (through enclosing expressions that start where it does).
+pub(crate) fn keyword_argument_parent(cx: &Ctx<'_, '_>, node: NodeId) -> Option<NodeId> {
+    let mut cur = node;
+    for _ in 0..100_000 {
+        let parent = cx.parent(cur)?;
+        match *cx.node(parent) {
+            Node::Paren { .. } => return None,
+            Node::Return { arg: Some(a) } | Node::Throw { arg: a } if a == cur => {
+                return Some(parent);
+            }
+            Node::Yield {
+                delegate: false,
+                arg: Some(a),
+            } if a == cur => return Some(parent),
+            _ => {}
+        }
+        if cx.span(parent).start != cx.span(cur).start {
+            return None;
+        }
+        cur = parent;
+    }
+    None
+}
+
+/// Edits wrapping the argument of a `return`/`throw` in parentheses: ` (` after the
+/// keyword and `)` before the statement's `;` (or after it).
+pub(crate) fn parenthesize_keyword_argument(cx: &Ctx<'_, '_>, stmt: NodeId) -> Vec<(Span, String)> {
+    let span = cx.span(stmt);
+    let kw = match cx.node(stmt) {
+        Node::Return { .. } => "return",
+        Node::Throw { .. } => "throw",
+        _ => return Vec::new(),
+    };
+    let close = if cx.text(stmt).ends_with(';') {
+        span.end - 1
+    } else {
+        span.end
+    };
+    vec![
+        (Span::at(span.start + kw.len() as u32), " (".to_owned()),
+        (Span::at(close), ")".to_owned()),
+    ]
+}
+
+/// The end of the token before `pos` (comments skipped).
+pub(crate) fn prev_token_end(cx: &Ctx<'_, '_>, pos: u32) -> u32 {
+    skip_trivia_backward(cx.ast(), cx.src(), pos as usize) as u32
+}
+
+/// The start of the token at or after `pos` (comments skipped).
+pub(crate) fn next_token_start(cx: &Ctx<'_, '_>, pos: u32) -> u32 {
+    skip_trivia_forward(cx.src(), pos as usize) as u32
+}
+
+/// A fix made of `edits` (kept in source order).
+pub(crate) fn fix_of(mut edits: Vec<(Span, String)>) -> Fix {
+    edits.sort_by_key(|(s, _)| (s.start, s.end));
+    Fix {
+        edits: edits
+            .into_iter()
+            .map(|(span, text)| crate::diagnostic::Edit { span, text })
+            .collect(),
+    }
+}

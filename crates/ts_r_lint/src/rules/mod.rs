@@ -297,10 +297,7 @@ mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
-mod unicorn_no_magic_array_flat_depth;
-mod unicorn_no_misrefactored_assignment;
-mod unicorn_no_named_default;
-mod unicorn_no_negation_in_equality_check;
+mod unicorn_no_negated_condition;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
@@ -677,10 +674,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
-    &unicorn_no_magic_array_flat_depth::RULE,
-    &unicorn_no_misrefactored_assignment::RULE,
-    &unicorn_no_named_default::RULE,
-    &unicorn_no_negation_in_equality_check::RULE,
+    &unicorn_no_negated_condition::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,

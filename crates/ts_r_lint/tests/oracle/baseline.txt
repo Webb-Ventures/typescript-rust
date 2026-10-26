@@ -288,10 +288,7 @@ unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-late-current-target-access 49/49
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
-unicorn/no-magic-array-flat-depth 27/27
-unicorn/no-misrefactored-assignment 79/79
-unicorn/no-named-default 66/66
-unicorn/no-negation-in-equality-check 34/34
+unicorn/no-negated-condition 134/134
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
 unicorn/no-null 94/94
