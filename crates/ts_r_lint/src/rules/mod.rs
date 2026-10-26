@@ -331,6 +331,10 @@ mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
 mod unicorn_prefer_array_index_of;
 mod unicorn_prefer_array_some;
+mod unicorn_prefer_at;
+mod unicorn_prefer_blob_reading_methods;
+mod unicorn_prefer_block_statement_over_iife;
+mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_default_parameters;
@@ -713,6 +717,51 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
+    &unicorn_prefer_add_event_listener_options::RULE,
+    &unicorn_prefer_array_from_range::RULE,
+    &unicorn_prefer_array_slice::RULE,
+    &unicorn_prefer_array_last_methods::RULE,
+    &unicorn_prefer_blob_reading_methods::RULE,
+    &unicorn_prefer_block_statement_over_iife::RULE,
+    &unicorn_prefer_at::RULE,
+    &unicorn_prefer_class_fields::RULE,
+    &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_flat_math_min_max::RULE,
+    &unicorn_prefer_global_number_constants::RULE,
+    &unicorn_prefer_global_this::RULE,
+    &unicorn_prefer_identifier_import_export_specifiers::RULE,
+    &unicorn_prefer_includes::RULE,
+    &unicorn_prefer_location_assign::RULE,
+    &unicorn_prefer_math_min_max::RULE,
+    &unicorn_prefer_node_protocol::RULE,
+    &unicorn_prefer_number_coercion::RULE,
+    &unicorn_prefer_number_properties::RULE,
+    &unicorn_prefer_object_destructuring_defaults::RULE,
+    &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_promise_static_methods::RULE,
+    &unicorn_prefer_promise_try::RULE,
+    &unicorn_prefer_queue_microtask::RULE,
+    &unicorn_prefer_response_static_json::RULE,
+    &unicorn_prefer_promise_with_resolvers::RULE,
+    &unicorn_prefer_short_escape_sequences::RULE,
+    &unicorn_prefer_single_array_predicate::RULE,
+    &unicorn_prefer_string_repeat::RULE,
+    &unicorn_prefer_structured_clone::RULE,
+    &unicorn_prefer_regexp_test::RULE,
+    &unicorn_prefer_spread::RULE,
+    &unicorn_prefer_string_replace_all::RULE,
+    &unicorn_prefer_string_slice::RULE,
+    &unicorn_prefer_string_starts_ends_with::RULE,
+    &unicorn_prefer_string_trim_start_end::RULE,
+    &unicorn_prefer_then_catch::RULE,
+    &unicorn_prefer_type_error::RULE,
+    &unicorn_prefer_unary_minus::RULE,
+    &unicorn_require_array_sort_compare::RULE,
+    &unicorn_require_css_escape::RULE,
+    &unicorn_prefer_type_literal_last::RULE,
+    &unicorn_require_module_attributes::RULE,
+    &unicorn_switch_case_break_position::RULE,
     &unicorn_prefer_add_event_listener::RULE,
     &unicorn_prefer_array_flat::RULE,
     &unicorn_prefer_array_flat_map::RULE,

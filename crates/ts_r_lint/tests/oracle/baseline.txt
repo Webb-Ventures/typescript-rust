@@ -322,6 +322,10 @@ unicorn/prefer-array-flat 330/330
 unicorn/prefer-array-flat-map 114/114
 unicorn/prefer-array-index-of 158/158
 unicorn/prefer-array-some 373/377
+unicorn/prefer-at 482/482
+unicorn/prefer-blob-reading-methods 12/12
+unicorn/prefer-block-statement-over-iife 38/38
+unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
 unicorn/prefer-default-parameters 538/538

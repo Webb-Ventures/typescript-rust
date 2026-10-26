@@ -324,3 +324,4 @@ unicorn/prefer-default-parameters
 unicorn/prefer-object-from-entries
 unicorn/dom-node-dataset
 unicorn/no-useless-override
+unicorn/prefer-class-fields

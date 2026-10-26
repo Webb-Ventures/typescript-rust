@@ -636,6 +636,8 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
 - **no-useless-override** does not yet read types: the plugin reports `async` forwards of a
   promise-returning call and bare `super.m()` statements of a `void` call only with type
   information, so here those stay unreported even in typed runs (no oracle case has types).
+- **prefer-class-fields** writes a new private field with its `#` (the plugin writes the bare
+  name, which would declare a public field; no oracle case covers it).
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -676,7 +678,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `no-useless-compound-assignment.js`, `no-unsafe-string-replacement.js`,
 `utils/get-const-variable-initializer.js`, `no-double-comparison.js`,
 `utils/get-comparison-operand-text.js`, `prefer-array-from-range.js`, `shared/array-range.js`,
-`no-useless-override.js`, `utils/member-expression.js`, `fix/replace-node-or-token-and-spaces-before.js`.
+`no-useless-override.js`, `utils/member-expression.js`, `fix/replace-node-or-token-and-spaces-before.js`,
+`prefer-class-fields.js`, `utils/get-indent-string.js`.
 
 ## eslint-plugin-unicorn type guessing (round 5)
 
