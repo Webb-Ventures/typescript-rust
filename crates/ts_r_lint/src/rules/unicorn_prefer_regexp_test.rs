@@ -21,8 +21,8 @@ use super::unicorn_static::{
     Static, mutable_member_access, static_regexp, static_value, static_value_no_side_effects,
 };
 use super::unicorn_text::{
-    has_comment_in, is_parenthesized, member_object_needs_parens, needs_semicolon, paren_span,
-    static_string_value,
+    has_comment_in, has_unparenthesized_optional_chain, is_parenthesized,
+    member_object_needs_parens, needs_semicolon, paren_span, static_string_value,
 };
 use super::unicorn_types::{binding_annotation, is_string};
 use super::unicorn_util::space_around_keyword;
@@ -421,36 +421,6 @@ fn search_check(cx: &Ctx<'_, '_>, call: NodeId) -> Option<SearchCheck> {
     })
 }
 
-/// `hasUnparenthesizedOptionalChainElement`.
-fn has_unparenthesized_optional(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
-    let ast = cx.ast();
-    if depth > 1000 {
-        return false;
-    }
-    match *ast.node(id) {
-        Node::As { expr, .. }
-        | Node::Satisfies { expr, .. }
-        | Node::NonNull { expr }
-        | Node::TypeAssertion { expr, .. }
-        | Node::Instantiation { expr, .. } => {
-            !is_parenthesized(cx, id) && has_unparenthesized_optional(cx, expr, depth + 1)
-        }
-        // A parenthesized chain is a whole `ChainExpression` in ESTree.
-        Node::Member { .. } | Node::Index { .. } | Node::Call { .. }
-            if is_parenthesized(cx, id) =>
-        {
-            false
-        }
-        Node::Member { obj, optional, .. } | Node::Index { obj, optional, .. } => {
-            optional || has_unparenthesized_optional(cx, obj, depth + 1)
-        }
-        Node::Call {
-            callee, optional, ..
-        } => optional || has_unparenthesized_optional(cx, callee, depth + 1),
-        _ => false,
-    }
-}
-
 impl Rule for PreferRegexpTest {
     fn kinds(&self) -> &'static [NodeKind] {
         &[NodeKind::Call]
@@ -497,7 +467,7 @@ impl Rule for PreferRegexpTest {
         } else {
             (obj, arg_inner)
         };
-        if method == "match" && has_unparenthesized_optional(cx, string, 0) {
+        if method == "match" && has_unparenthesized_optional_chain(cx, string) {
             return;
         }
         let static_re = static_regexp(cx, regexp);

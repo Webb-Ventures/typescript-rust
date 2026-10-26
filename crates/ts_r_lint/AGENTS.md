@@ -780,3 +780,16 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   so its "type information" step always answers unknown; the rule leans on annotations,
   `const` initializers and static values. A parenthesized optional chain counts as closed
   (ESTree makes it a whole `ChainExpression`).
+- **Arrays for spreading** (`prefer-spread`, from `unicorn: rules/prefer-spread.js` and
+  its `shared/` helpers). A receiver is an array by annotation (`T[]`, tuples,
+  `Array`/`ReadonlyArray`, `readonly`, aliases and constraints followed), an array literal
+  or an `Array(...)` call; not one by literals, templates, binary expressions,
+  class-like names, `.join()`, `String()`-style calls, `Buffer.concat`, `new X()`, the
+  non-array branch of an `Array.isArray` test, or class/interface/non-array annotations.
+  Without a type checker, every spread fix in a TypeScript file is a suggestion.
+  `mutable_member_access` walks into functions and classes (ESLint's evaluated children
+  only skip names), so `const f = () => f.concat(2)` has no fix.
+- **Known harness gap.** `unicorn/prefer-spread` is 625/626: the one failure has an
+  unused `eslint-disable-next-line` comment, and the expected output is ESLint's fix for
+  the unused directive. The oracle harness turns off `reportUnusedDisableDirectives`, so
+  that fix can't happen there; the rule's own report matches.

@@ -307,3 +307,4 @@ unicorn/prefer-at
 unicorn/prefer-string-starts-ends-with
 unicorn/prefer-string-replace-all
 unicorn/prefer-regexp-test
+unicorn/prefer-spread

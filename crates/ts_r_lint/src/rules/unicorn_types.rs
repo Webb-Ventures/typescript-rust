@@ -2375,7 +2375,7 @@ fn type_name_text(ast: &Ast, id: NodeId) -> Option<String> {
 
 /// The nearest type-like declaration (class, import, enum, alias, interface, type
 /// parameter) of `name`, from `scope` outwards.
-fn type_definition(
+pub(crate) fn type_definition(
     cx: &Ctx<'_, '_>,
     name: &str,
     scope: ScopeId,

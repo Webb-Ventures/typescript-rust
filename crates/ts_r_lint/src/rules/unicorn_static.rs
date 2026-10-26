@@ -1770,9 +1770,34 @@ pub(crate) fn mutable_member_access(
     if matches!(ast.node(id), Node::Member { .. } | Node::Index { .. }) {
         return !is_safe_global_member(cx, id) && !is_safe_static_member(cx, id, visited);
     }
-    evaluated_children(ast, id)
+    named_children_skipped(ast, id)
         .into_iter()
         .any(|c| mutable_member_access(cx, c, visited))
+}
+
+/// Value children without names (non-computed member properties and keys); unlike
+/// [`evaluated_children`] this walks into functions and classes too.
+fn named_children_skipped(ast: &Ast, id: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut key_and_value = |key: NodeId, value: Option<NodeId>| {
+        if let Node::ComputedKey { expr } = *ast.node(key) {
+            out.push(expr);
+        }
+        out.extend(value);
+    };
+    match *ast.node(id) {
+        Node::Property { key, value, .. } => key_and_value(key, Some(value)),
+        Node::MethodDef { key, value, .. } => key_and_value(key, Some(value)),
+        Node::PropertyDef { key, value, .. } => key_and_value(key, value),
+        Node::FunctionExpr { .. } | Node::Arrow { .. } | Node::ClassExpr { .. } => ast
+            .for_each_child(id, |c| {
+                if is_value_child(ast, c) {
+                    out.push(c);
+                }
+            }),
+        _ => return evaluated_children(ast, id),
+    }
+    out
 }
 
 fn no_side_effects_value(

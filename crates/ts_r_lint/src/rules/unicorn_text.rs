@@ -612,3 +612,38 @@ pub(crate) fn is_written(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
         _ => false,
     }
 }
+
+/// `hasUnparenthesizedOptionalChainElement`: an optional `?.` in the member/call chain of
+/// `id` that parentheses don't close off.
+pub(crate) fn has_unparenthesized_optional_chain(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    unparenthesized_optional(cx, id, 0)
+}
+
+fn unparenthesized_optional(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    let ast = cx.ast();
+    if depth > 1000 {
+        return false;
+    }
+    match *ast.node(id) {
+        Node::As { expr, .. }
+        | Node::Satisfies { expr, .. }
+        | Node::NonNull { expr }
+        | Node::TypeAssertion { expr, .. }
+        | Node::Instantiation { expr, .. } => {
+            !is_parenthesized(cx, id) && unparenthesized_optional(cx, expr, depth + 1)
+        }
+        // A parenthesized chain is a whole `ChainExpression` in ESTree.
+        Node::Member { .. } | Node::Index { .. } | Node::Call { .. }
+            if is_parenthesized(cx, id) =>
+        {
+            false
+        }
+        Node::Member { obj, optional, .. } | Node::Index { obj, optional, .. } => {
+            optional || unparenthesized_optional(cx, obj, depth + 1)
+        }
+        Node::Call {
+            callee, optional, ..
+        } => optional || unparenthesized_optional(cx, callee, depth + 1),
+        _ => false,
+    }
+}
