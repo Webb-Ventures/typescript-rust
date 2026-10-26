@@ -326,15 +326,7 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
-mod unicorn_prefer_default_parameters;
-mod unicorn_prefer_dom_node_append;
-mod unicorn_prefer_dom_node_remove;
-mod unicorn_prefer_dom_node_text_content;
-mod unicorn_prefer_keyboard_event_key;
-mod unicorn_prefer_math_trunc;
-mod unicorn_prefer_modern_dom_apis;
-mod unicorn_prefer_native_coercion_functions;
-mod unicorn_prefer_negative_index;
+mod unicorn_prefer_module;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
@@ -701,14 +693,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_date_now::RULE,
-    &unicorn_prefer_event_target::RULE,
-    &unicorn_prefer_flat_math_min_max::RULE,
-    &unicorn_prefer_global_number_constants::RULE,
-    &unicorn_prefer_global_this::RULE,
-    &unicorn_prefer_identifier_import_export_specifiers::RULE,
-    &unicorn_prefer_includes::RULE,
-    &unicorn_prefer_location_assign::RULE,
-    &unicorn_prefer_math_min_max::RULE,
+    &unicorn_prefer_module::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,

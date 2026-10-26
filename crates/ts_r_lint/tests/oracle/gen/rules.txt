@@ -304,3 +304,4 @@ unicorn/no-object-as-default-parameter
 unicorn/no-useless-fallback-in-spread
 unicorn/no-empty-file
 unicorn/no-negated-condition
+unicorn/prefer-module

@@ -317,15 +317,7 @@ unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
-unicorn/prefer-default-parameters 538/538
-unicorn/prefer-dom-node-append 69/69
-unicorn/prefer-dom-node-remove 118/118
-unicorn/prefer-dom-node-text-content 31/31
-unicorn/prefer-keyboard-event-key 116/116
-unicorn/prefer-math-trunc 142/142
-unicorn/prefer-modern-dom-apis 142/142
-unicorn/prefer-native-coercion-functions 110/110
-unicorn/prefer-negative-index 167/167
+unicorn/prefer-module 152/152
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-object-from-entries 172/172
 unicorn/prefer-optional-catch-binding 25/25
