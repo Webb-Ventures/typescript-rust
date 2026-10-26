@@ -326,6 +326,7 @@ mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
 mod unicorn_length_or_infinity;
+mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
 mod unicorn_no_accessor_recursion;
@@ -425,6 +426,7 @@ mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
+mod unicorn_operator_assignment;
 mod unicorn_prefer_add_event_listener;
 mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_array_flat;
@@ -876,6 +878,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,
     &unicorn_explicit_timer_delay::RULE,
+    &unicorn_logical_assignment_operators::RULE,
     &unicorn_max_nested_calls::RULE,
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
@@ -970,6 +973,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
+    &unicorn_operator_assignment::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_array_from_range::RULE,
     &unicorn_prefer_array_slice::RULE,

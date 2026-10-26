@@ -1707,3 +1707,23 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-invalid-well-kn
   on keyed collections, `test` on regexps; `delete` only on mutable collections). A type
   predicate (`x is T`, not `asserts`) is a boolean annotation. "TypeScript" for the
   `Boolean()` exemption is the file extension or the TS parser.
+
+## eslint-plugin-unicorn rules (round 6, h3)
+
+Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` set, each at
+100% of its oracle. `tests/unicorn_h3.rs` covers forms the oracle data leaves out.
+
+- **operator-assignment** and **logical-assignment-operators** wrap ESLint core rules that
+  ts-r-lint did not have, so the core behaviour is written here too (from ESLint's docs):
+  `a = a op b` / `a op= b` per `"always"`/`"never"`, `a || (a = b)`, and the
+  `enforceForIfStatements` `if` forms (`if (a)`, `if (!a)`, `if (a == null)`,
+  `if (a === null || a === undefined)`). A plain-name target is fixed, a property target
+  suggested (an `if` with a non-logical test on a single property access is fixed); a
+  comment inside the node withholds the fix. Unicorn's additions: `x = \`${x}…\`` gets a
+  `+=` suggestion, and a falsy `if` (`||=`) is reported as `ifNullish` with `||=` and `??=`
+  suggestions instead of a fix. `eslint_same_reference` (in `unicorn_operator_assignment.rs`)
+  is ESLint's `isSameReference`, with or without static computed keys.
+
+Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
+`logical-assignment-operators.js`; ESLint docs for `operator-assignment` and
+`logical-assignment-operators`.

@@ -289,6 +289,7 @@ unicorn/error-message 106/106
 unicorn/escape-case 198/198
 unicorn/explicit-length-check 224/224
 unicorn/explicit-timer-delay 60/60
+unicorn/logical-assignment-operators 19/19
 unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
 unicorn/no-accidental-bitwise-operator 66/66
@@ -382,6 +383,7 @@ unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
+unicorn/operator-assignment 21/21
 unicorn/prefer-add-event-listener 97/97
 unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-array-flat 330/330
