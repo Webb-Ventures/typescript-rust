@@ -21,6 +21,7 @@ mod es2022;
 pub(crate) mod lower;
 mod operators;
 mod private;
+pub(crate) use private::compound_op;
 mod rest;
 mod template;
 pub(crate) mod using;

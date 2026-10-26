@@ -303,6 +303,12 @@ pub(crate) fn set_parts(tx: &mut Tx, id: NodeId, p: ClassParts) {
     tx.set(id, node);
 }
 
+/// Whether `accessor` fields become getter/setter pairs (below ES2022, or with decorators
+/// that are not native).
+fn lower_accessors_for(tx: &Tx) -> bool {
+    !tx.opts.native_decorators()
+}
+
 /// Strips types and lowers fields of a class in place. Decorator lists are kept (their
 /// expressions transformed) for the decorator transforms.
 pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
@@ -413,6 +419,11 @@ fn class_body_inner(tx: &mut Tx, id: NodeId) {
             keep.insert(f);
         }
     }
+    // A misplaced `accessor` (`accessor class C {}`, an error) stays where the class is
+    // not lowered (autoAccessorDisallowedModifiers, tsc 7.0.2).
+    if p.modifiers.contains(Modifiers::ACCESSOR) && !lower_accessors_for(tx) {
+        keep.insert(Modifiers::ACCESSOR);
+    }
     p.modifiers = keep;
     // With TC39 class decorators the class is `_classThis` in its static accessors
     // (observed).
@@ -422,7 +433,7 @@ fn class_body_inner(tx: &mut Tx, id: NodeId) {
         p.name.map(|n| tx.name(n).to_owned())
     };
     let define = tx.opts.use_define_for_class_fields;
-    let lower_accessors = !tx.opts.native_decorators();
+    let lower_accessors = lower_accessors_for(tx);
 
     // Constructor and its parameter properties (read before the params are stripped).
     let members = tx.items(p.members);
@@ -525,6 +536,11 @@ fn class_body_inner(tx: &mut Tx, id: NodeId) {
                 let mut mm = Modifiers::NONE;
                 if modifiers.contains(Modifiers::STATIC) {
                     mm.insert(Modifiers::STATIC);
+                }
+                // `accessor` on a method, accessor or constructor (an error) is kept as
+                // written unless accessors are lowered (autoAccessorDisallowedModifiers).
+                if modifiers.contains(Modifiers::ACCESSOR) && !lower_accessors {
+                    mm.insert(Modifiers::ACCESSOR);
                 }
                 tx.set(
                     m,

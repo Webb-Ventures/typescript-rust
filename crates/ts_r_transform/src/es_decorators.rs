@@ -27,19 +27,19 @@
 //! into the decoration block when no computed key follows (`this` there becomes `_outerThis`).
 //!
 //! In static fields and blocks of a class-decorated derived class, `super` reads, calls and
-//! tags go through `Reflect.get(_classSuper, k, _classThis)`.
+//! tags go through `Reflect.get(_classSuper, k, _classThis)`, writes through `Reflect.set`
+//! (with temporaries).
 //!
 //! At ES2022 and later (below ESNext) the static private members of a class-decorated class
 //! are lowered to `{ value }` storage and functions anyway (static_privates.rs).
 //!
-//! Not done (tsc does): writes to `super` properties in their static members are not
-//! lowered to `Reflect.set` (with temporaries), and anonymous classes get no
-//! `__setFunctionName` from the binding they are assigned to (named evaluation).
+//! Not done (tsc does): anonymous classes get no `__setFunctionName` from the binding they
+//! are assigned to (named evaluation).
 
 use rustc_hash::FxHashSet;
 use ts_r_ast::{
-    Atom, BinaryOp, FnFlags, HeritageKind, MethodKind, Modifiers, Node, NodeId, NodeKind, NodeList,
-    UnaryOp, VarKind,
+    AssignOp, Atom, BinaryOp, FnFlags, HeritageKind, MethodKind, Modifiers, Node, NodeId, NodeKind,
+    NodeList, UnaryOp, VarKind,
 };
 
 use crate::builder::{Build, clone_node, deep_clone, replace};
@@ -419,15 +419,18 @@ fn lower(
                 } if modifiers.contains(Modifiers::STATIC) => {
                     replace_this(tx, v, ct);
                     if let Some(sup) = sup {
-                        replace_super_reads(tx, v, ct, sup);
+                        let nv = StaticSuper::field(tx, v, ct, sup);
+                        if nv != v {
+                            replace(tx.ast, v, nv);
+                        }
                     }
                 }
                 Node::StaticBlock { body } => {
                     for s in tx.items(body) {
                         replace_this(tx, s, ct);
-                        if let Some(sup) = sup {
-                            replace_super_reads(tx, s, ct, sup);
-                        }
+                    }
+                    if let Some(sup) = sup {
+                        StaticSuper::block(tx, m, ct, sup);
                     }
                 }
                 _ => {}
@@ -1745,108 +1748,501 @@ fn is_super_prop(tx: &Tx, e: NodeId) -> bool {
 }
 
 /// In the static fields and blocks of a class-decorated derived class, the decorator may
-/// replace the class, so tsc reads `super` through the saved heritage and the final class
-/// (observed, tsc 7.0.2): `super.x` is `Reflect.get(_classSuper, "x", _classThis)`,
-/// `super.m(a)` is `Reflect.get(..).call(_classThis, a)` and `` super.m`t` `` is
-/// `` Reflect.get(..).bind(_classThis)`t` ``. Writes to `super` properties (which tsc lowers
-/// through `Reflect.set` and temporaries) are left as written. Nested functions and classes
-/// have their own `super` and are skipped; arrows are not.
-fn replace_super_reads(tx: &mut Tx, root: NodeId, this: Atom, sup: Atom) {
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
+/// replace the class, so tsc reads and writes `super` through the saved heritage and the
+/// final class (observed, tsc 7.0.2, esDecorators-classDeclaration-classSuper.*):
+/// - `super.x` is `Reflect.get(_classSuper, "x", _classThis)`, `super.m(a)` is
+///   `Reflect.get(..).call(_classThis, a)` and `` super.m`t` `` is
+///   `` Reflect.get(..).bind(_classThis)`t` ``;
+/// - `super.x = v` is `Reflect.set(_classSuper, "x", v, _classThis)` where its value is
+///   discarded (an expression statement, a comma operand, a `for` initializer or update),
+///   else `(Reflect.set(.., _a = v, ..), _a)`; `+=` (and `??=`, `||=`, `&&=`, which do not
+///   short-circuit there) reads with `Reflect.get`, `++` goes
+///   through a temporary (`(_a = Reflect.get(..), _a++, _a)`), and a computed key other
+///   than a literal read twice is captured (`_b = x`). Temporaries are made key, result,
+///   read, in source order;
+/// - a destructuring target `super.x` is `({ set value(_a) { Reflect.set(.., _a, ..); } }).value`;
+///   a `for...in` / `for...of` target is read like any other `super.x` (tsc 7.0.2 does so).
+///
+/// The temporaries belong to the static block (a `var` first in it), an arrow (its body
+/// becomes a block) or the field initializer (wrapped in `(() => { var _a; return v; })()`):
+/// each is a scope of its own, named from `_a` again. Nested functions and classes have
+/// their own `super` and are skipped; arrows are not.
+struct StaticSuper {
+    this: Atom,
+    sup: Atom,
+    /// The temporaries of the innermost scope (static block, field or arrow).
+    temps: Vec<Atom>,
+}
+
+impl StaticSuper {
+    /// Rewrites a static field initializer; returns the new initializer.
+    fn field(tx: &mut Tx, value: NodeId, this: Atom, sup: Atom) -> NodeId {
+        let mut s = StaticSuper {
+            this,
+            sup,
+            temps: Vec::new(),
+        };
+        s.walk(tx, value, false);
+        let temps = std::mem::take(&mut s.temps);
+        if temps.is_empty() {
+            return value;
+        }
+        let at = tx.at(value);
+        let ret = return_of(tx, value, at);
+        let body = scope_body(tx, temps, &[ret], at);
+        let arrow = tx.mk(
+            Node::Arrow {
+                flags: FnFlags::NONE,
+                type_params: None,
+                params: NodeList::EMPTY,
+                return_type: None,
+                body,
+            },
+            at,
+        );
+        let callee = tx.paren(arrow, at);
+        tx.call(callee, &[], at)
+    }
+
+    /// Rewrites the statements of a static block in place, `var` of temporaries first.
+    fn block(tx: &mut Tx, block: NodeId, this: Atom, sup: Atom) {
+        let Node::StaticBlock { body } = tx.n(block) else {
+            return;
+        };
+        let mut s = StaticSuper {
+            this,
+            sup,
+            temps: Vec::new(),
+        };
+        let stmts = tx.items(body);
+        for &st in &stmts {
+            s.walk(tx, st, false);
+        }
+        let temps = std::mem::take(&mut s.temps);
+        if temps.is_empty() {
+            return;
+        }
+        release(tx, &temps);
+        let Some(decl) = tx.temps_decl(temps) else {
+            return;
+        };
+        let mut list = vec![decl];
+        list.extend(stmts);
+        let body = tx.new_list(&list);
+        tx.set(block, Node::StaticBlock { body });
+    }
+
+    /// A temporary of the current scope.
+    fn temp(&mut self, tx: &mut Tx) -> Atom {
+        let t = tx.temp_name();
+        tx.temp_atoms.push(t);
+        self.temps.push(t);
+        t
+    }
+
+    /// Visits `root`; `discard` says whether the value of the expression is unused.
+    fn walk(&mut self, tx: &mut Tx, root: NodeId, discard: bool) {
+        let (this, sup) = (self.this, self.sup);
+        let mut stack = vec![(root, discard)];
+        while let Some((n, discard)) = stack.pop() {
+            let at = tx.at(n);
+            match tx.n(n) {
+                Node::Call {
+                    mut callee,
+                    optional,
+                    type_args,
+                    args,
+                } => {
+                    while let Node::Paren { expr } = tx.n(callee) {
+                        callee = expr;
+                    }
+                    if !is_super_prop(tx, callee) {
+                        tx.ast.for_each_child(n, |c| stack.push((c, false)));
+                        continue;
+                    }
+                    stack.extend(tx.items(args).into_iter().map(|a| (a, false)));
+                    let get = super_get(tx, callee, this, sup, &mut stack);
+                    let prop = tx.ident("call", at);
+                    let f = tx.mk(
+                        Node::Member {
+                            obj: get,
+                            optional,
+                            prop,
+                        },
+                        at,
+                    );
+                    let mut list = vec![tx.ident_atom(this, at)];
+                    list.extend(tx.items(args));
+                    let args = tx.new_list(&list);
+                    tx.set(
+                        n,
+                        Node::Call {
+                            callee: f,
+                            optional: false,
+                            type_args,
+                            args,
+                        },
+                    );
+                }
+                Node::TaggedTemplate {
+                    tag,
+                    type_args,
+                    quasi,
+                } if is_super_prop(tx, tag) => {
+                    stack.push((quasi, false));
+                    let get = super_get(tx, tag, this, sup, &mut stack);
+                    let bind = tx.member(get, "bind", at);
+                    let r = tx.ident_atom(this, at);
+                    let bound = tx.call(bind, &[r], at);
+                    tx.set(
+                        n,
+                        Node::TaggedTemplate {
+                            tag: bound,
+                            type_args,
+                            quasi,
+                        },
+                    );
+                }
+                Node::Member { .. } | Node::Index { .. } if is_super_prop(tx, n) => {
+                    let get = super_get(tx, n, this, sup, &mut stack);
+                    replace(tx.ast, n, get);
+                }
+                Node::Assign { left, .. } if is_super_prop(tx, left) => {
+                    let out = self.write(tx, n, discard);
+                    replace(tx.ast, n, out);
+                }
+                Node::Update { arg, .. } if is_super_prop(tx, arg) => {
+                    let out = self.write(tx, n, discard);
+                    replace(tx.ast, n, out);
+                }
+                Node::Assign {
+                    op: AssignOp::Assign,
+                    left,
+                    right,
+                } if matches!(tx.kind(left), NodeKind::ObjectLit | NodeKind::ArrayLit) => {
+                    // Children first: the value is read before the target is written.
+                    self.target(tx, left);
+                    self.walk(tx, right, false);
+                }
+                Node::ExprStmt { expr } => stack.push((expr, true)),
+                Node::Paren { expr } => stack.push((expr, discard)),
+                Node::Seq { exprs } => {
+                    let items = tx.items(exprs);
+                    let last = items.len().saturating_sub(1);
+                    for (i, e) in items.into_iter().enumerate() {
+                        stack.push((e, i < last || discard));
+                    }
+                }
+                Node::For {
+                    init,
+                    test,
+                    update,
+                    body,
+                } => {
+                    stack.push((body, false));
+                    if let Some(u) = update {
+                        stack.push((u, true));
+                    }
+                    if let Some(t) = test {
+                        stack.push((t, false));
+                    }
+                    if let Some(i) = init {
+                        stack.push((i, true));
+                    }
+                }
+                Node::Arrow { .. } => self.arrow(tx, n),
+                Node::FunctionExpr { .. }
+                | Node::FunctionDecl { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. }
+                | Node::MethodDef { .. } => {}
+                _ => tx.ast.for_each_child(n, |c| stack.push((c, false))),
+            }
+        }
+    }
+
+    /// An arrow is a scope for temporaries: they go in a `var` first in its body (a
+    /// concise body becomes `{ var _a; return v; }`).
+    fn arrow(&mut self, tx: &mut Tx, n: NodeId) {
+        let Node::Arrow {
+            flags,
+            type_params,
+            params,
+            return_type,
+            body,
+        } = tx.n(n)
+        else {
+            return;
+        };
+        let saved = std::mem::take(&mut self.temps);
+        for p in tx.items(params) {
+            self.walk(tx, p, false);
+        }
+        let concise = flags.contains(FnFlags::EXPRESSION_BODY);
+        self.walk(tx, body, false);
+        let temps = std::mem::replace(&mut self.temps, saved);
+        if temps.is_empty() {
+            return;
+        }
+        let at = tx.at(body);
+        let body = if concise {
+            let ret = return_of(tx, body, at);
+            scope_body(tx, temps, &[ret], at)
+        } else {
+            let Node::Block { stmts } = tx.n(body) else {
+                return;
+            };
+            let stmts = tx.items(stmts);
+            scope_body(tx, temps, &stmts, at)
+        };
+        let mut flags = flags;
+        flags.remove(FnFlags::EXPRESSION_BODY);
+        tx.set(
+            n,
+            Node::Arrow {
+                flags,
+                type_params,
+                params,
+                return_type,
+                body,
+            },
+        );
+    }
+
+    /// The key of `super.x` / `super[k]` (`"x"` / `k`), its reads visited.
+    fn key(&mut self, tx: &mut Tx, prop: NodeId) -> NodeId {
+        let at = tx.at(prop);
+        match tx.n(prop) {
+            Node::Index { index, .. } => {
+                self.walk(tx, index, false);
+                index
+            }
+            Node::Member { prop, .. } => {
+                let text = tx
+                    .atom_of(prop)
+                    .map(|a| tx.ast.atom(a).to_owned())
+                    .unwrap_or_default();
+                tx.string(&text, at)
+            }
+            _ => tx.string("", at),
+        }
+    }
+
+    /// The key for a write and the read before it: a computed key other than a literal is
+    /// captured (`_a = k`, then `_a`).
+    fn key_twice(&mut self, tx: &mut Tx, prop: NodeId) -> (NodeId, NodeId) {
+        let at = tx.at(prop);
+        let key = self.key(tx, prop);
+        if tx.kind(prop) == NodeKind::Index
+            && !matches!(tx.kind(key), NodeKind::StringLit | NodeKind::NumberLit)
+        {
+            let t = self.temp(tx);
+            let a = tx.ident_atom(t, at);
+            let first = tx.assign(a, key, at);
+            return (first, tx.ident_atom(t, at));
+        }
+        (key, clone_node(tx.ast, key))
+    }
+
+    /// `Reflect.get(_classSuper, key, _classThis)` / `Reflect.set(_classSuper, key, v, _classThis)`.
+    fn reflect(&self, tx: &mut Tx, f: &str, key: NodeId, value: Option<NodeId>, at: u32) -> NodeId {
+        let f = tx.dotted(f, at);
+        let h = tx.ident_atom(self.sup, at);
+        let r = tx.ident_atom(self.this, at);
+        let mut args = vec![h, key];
+        args.extend(value);
+        args.push(r);
+        tx.call(f, &args, at)
+    }
+
+    /// `_a = v` with a new result temporary, unless the value is discarded.
+    fn result(
+        &mut self,
+        tx: &mut Tx,
+        value: NodeId,
+        discard: bool,
+        at: u32,
+    ) -> (NodeId, Option<Atom>) {
+        if discard {
+            return (value, None);
+        }
+        let t = self.temp(tx);
+        let a = tx.ident_atom(t, at);
+        (tx.assign(a, value, at), Some(t))
+    }
+
+    /// `(set, _a)` when the write's value is used.
+    fn with_result(tx: &mut Tx, set: NodeId, result: Option<Atom>, at: u32) -> NodeId {
+        let Some(r) = result else {
+            return set;
+        };
+        let ra = tx.ident_atom(r, at);
+        let seq = tx.seq(&[set, ra], at);
+        tx.paren(seq, at)
+    }
+
+    /// The `Reflect.set` form of an assignment or update of `super.x` / `super[k]`.
+    fn write(&mut self, tx: &mut Tx, n: NodeId, discard: bool) -> NodeId {
         let at = tx.at(n);
         match tx.n(n) {
-            Node::Call {
-                mut callee,
-                optional,
-                type_args,
-                args,
+            Node::Assign {
+                op: AssignOp::Assign,
+                left,
+                right,
             } => {
-                while let Node::Paren { expr } = tx.n(callee) {
-                    callee = expr;
+                let key = self.key(tx, left);
+                self.walk(tx, right, false);
+                let (value, result) = self.result(tx, right, discard, at);
+                let set = self.reflect(tx, "Reflect.set", key, Some(value), at);
+                Self::with_result(tx, set, result, at)
+            }
+            Node::Assign { op, left, right } => {
+                let (k1, k2) = self.key_twice(tx, left);
+                // Logical assignments too: tsc 7 stores `Reflect.get(..) ?? v` without
+                // short-circuiting the write (observed).
+                let bop = crate::downlevel::compound_op(op);
+                let get = self.reflect(tx, "Reflect.get", k2, None, at);
+                self.walk(tx, right, false);
+                let v = tx.binary(get, bop, right, at);
+                let (value, result) = self.result(tx, v, discard, at);
+                let set = self.reflect(tx, "Reflect.set", k1, Some(value), at);
+                Self::with_result(tx, set, result, at)
+            }
+            Node::Update { op, prefix, arg } => {
+                let (k1, k2) = self.key_twice(tx, arg);
+                let result = (!discard).then(|| self.temp(tx));
+                let t = self.temp(tx);
+                let get = self.reflect(tx, "Reflect.get", k2, None, at);
+                let a = tx.ident_atom(t, at);
+                let first = tx.assign(a, get, at);
+                let b = tx.ident_atom(t, at);
+                let mut upd = tx.mk(Node::Update { op, prefix, arg: b }, at);
+                if let Some(r) = result {
+                    let ra = tx.ident_atom(r, at);
+                    upd = tx.assign(ra, upd, at);
                 }
-                if !is_super_prop(tx, callee) {
-                    tx.ast.for_each_child(n, |c| stack.push(c));
-                    continue;
+                let mut items = vec![first, upd];
+                if !prefix {
+                    items.push(tx.ident_atom(t, at));
                 }
-                stack.extend(tx.items(args));
-                let get = super_get(tx, callee, this, sup, &mut stack);
-                let prop = tx.ident("call", at);
-                let f = tx.mk(
-                    Node::Member {
-                        obj: get,
-                        optional,
-                        prop,
-                    },
-                    at,
-                );
-                let mut list = vec![tx.ident_atom(this, at)];
-                list.extend(tx.items(args));
-                let args = tx.new_list(&list);
-                tx.set(
-                    n,
-                    Node::Call {
-                        callee: f,
-                        optional: false,
-                        type_args,
-                        args,
-                    },
-                );
+                let seq = tx.seq(&items, at);
+                let v = tx.paren(seq, at);
+                let set = self.reflect(tx, "Reflect.set", k1, Some(v), at);
+                Self::with_result(tx, set, result, at)
             }
-            Node::TaggedTemplate {
-                tag,
-                type_args,
-                quasi,
-            } if is_super_prop(tx, tag) => {
-                stack.push(quasi);
-                let get = super_get(tx, tag, this, sup, &mut stack);
-                let bind = tx.member(get, "bind", at);
-                let r = tx.ident_atom(this, at);
-                let bound = tx.call(bind, &[r], at);
-                tx.set(
-                    n,
-                    Node::TaggedTemplate {
-                        tag: bound,
-                        type_args,
-                        quasi,
-                    },
-                );
-            }
-            Node::Member { .. } | Node::Index { .. } if is_super_prop(tx, n) => {
-                let get = super_get(tx, n, this, sup, &mut stack);
-                replace(tx.ast, n, get);
-            }
-            // Write targets keep `super`; only their computed keys and values are reads.
-            Node::Assign { left, right, .. } => {
-                stack.push(right);
-                push_target(tx, left, &mut stack);
-            }
-            Node::Update { arg, .. } => push_target(tx, arg, &mut stack),
-            Node::ForIn { left, right, body }
-            | Node::ForOf {
-                left, right, body, ..
-            } => {
-                stack.push(body);
-                stack.push(right);
-                push_target(tx, left, &mut stack);
-            }
-            Node::FunctionExpr { .. }
-            | Node::FunctionDecl { .. }
-            | Node::ClassDecl { .. }
-            | Node::ClassExpr { .. }
-            | Node::MethodDef { .. } => {}
-            _ => tx.ast.for_each_child(n, |c| stack.push(c)),
+            _ => n,
         }
+    }
+
+    /// A destructuring target: `super.x` there becomes
+    /// `({ set value(_a) { Reflect.set(_classSuper, "x", _a, _classThis); } }).value`;
+    /// computed keys and defaults are reads.
+    fn target(&mut self, tx: &mut Tx, id: NodeId) {
+        match tx.n(id) {
+            Node::ObjectLit { props } => {
+                for p in tx.items(props) {
+                    match tx.n(p) {
+                        Node::Property { key, value, .. } => {
+                            if tx.kind(key) == NodeKind::ComputedKey {
+                                self.walk(tx, key, false);
+                            }
+                            self.target(tx, value);
+                        }
+                        Node::Spread { arg } => self.target(tx, arg),
+                        _ => self.walk(tx, p, false),
+                    }
+                }
+            }
+            Node::ArrayLit { elements } => {
+                for e in tx.items(elements) {
+                    match tx.n(e) {
+                        Node::Spread { arg } => self.target(tx, arg),
+                        _ => self.target(tx, e),
+                    }
+                }
+            }
+            Node::Assign {
+                op: AssignOp::Assign,
+                left,
+                right,
+            } => {
+                self.target(tx, left);
+                self.walk(tx, right, false);
+            }
+            Node::Paren { expr } => self.target(tx, expr),
+            _ if is_super_prop(tx, id) => {
+                let at = tx.at(id);
+                let key = self.key(tx, id);
+                // The setter is a function of its own: its parameter is named from `_a`,
+                // whatever this scope's temporaries are.
+                release(tx, &self.temps);
+                let p = tx.temp_name();
+                release(tx, &[p]);
+                for &t in &self.temps {
+                    let n = tx.ast.atom(t).to_owned();
+                    tx.taken.insert(n);
+                }
+                let v = tx.ident_atom(p, at);
+                let set = self.reflect(tx, "Reflect.set", key, Some(v), at);
+                let stmt = tx.expr_stmt(set, at);
+                let k = tx.ident("value", at);
+                let pname = tx.ident_atom(p, at);
+                let param = tx.param(pname, at);
+                let setter = tx.method(Modifiers::NONE, MethodKind::Set, k, &[param], &[stmt], at);
+                tx.mark_single_line_body(setter);
+                let o = tx.object(&[setter], at);
+                let par = tx.paren(o, at);
+                let m = tx.member(par, "value", at);
+                replace(tx.ast, id, m);
+            }
+            _ => self.walk(tx, id, false),
+        }
+    }
+}
+
+/// `return v;`, without the parentheses of a written-back `(Reflect.set(..), _a)`.
+fn return_of(tx: &mut Tx, value: NodeId, at: u32) -> NodeId {
+    let mut v = value;
+    if let Node::Paren { expr } = tx.n(v)
+        && tx.kind(expr) == NodeKind::Seq
+        && tx.ast.span(v).is_empty()
+    {
+        v = expr;
+    }
+    tx.ret(Some(v), at)
+}
+
+/// A block of `var <temps>;` and `stmts`; the temporaries' names are released (the scope
+/// ends here, the next one names from `_a` again).
+fn scope_body(tx: &mut Tx, temps: Vec<Atom>, stmts: &[NodeId], at: u32) -> NodeId {
+    release(tx, &temps);
+    let mut list = Vec::with_capacity(stmts.len() + 1);
+    list.extend(tx.temps_decl(temps));
+    list.extend_from_slice(stmts);
+    tx.block(&list, at)
+}
+
+/// Makes temporary names available again once their scope is closed.
+fn release(tx: &mut Tx, temps: &[Atom]) {
+    for &t in temps {
+        let n = tx.ast.atom(t).to_owned();
+        tx.taken.remove(&n);
     }
 }
 
 /// `Reflect.get(sup, key, this)` for `super.x` / `super[k]`; a computed key is pushed to be
 /// visited.
-fn super_get(tx: &mut Tx, prop: NodeId, this: Atom, sup: Atom, stack: &mut Vec<NodeId>) -> NodeId {
+fn super_get(
+    tx: &mut Tx,
+    prop: NodeId,
+    this: Atom,
+    sup: Atom,
+    stack: &mut Vec<(NodeId, bool)>,
+) -> NodeId {
     let at = tx.at(prop);
     let key = match tx.n(prop) {
         Node::Index { index, .. } => {
-            stack.push(index);
+            stack.push((index, false));
             index
         }
         Node::Member { prop, .. } => {
@@ -1862,43 +2258,6 @@ fn super_get(tx: &mut Tx, prop: NodeId, this: Atom, sup: Atom, stack: &mut Vec<N
     let h = tx.ident_atom(sup, at);
     let r = tx.ident_atom(this, at);
     tx.call(f, &[h, key, r], at)
-}
-
-/// Visits the reads inside a write target: the keys of `super` properties, the objects of
-/// other members and the defaults and computed keys of patterns, not `super.x` itself.
-fn push_target(tx: &Tx, target: NodeId, stack: &mut Vec<NodeId>) {
-    match tx.n(target) {
-        Node::Member { obj, .. } if tx.kind(obj) == NodeKind::Super => {}
-        Node::Index { obj, index, .. } if tx.kind(obj) == NodeKind::Super => stack.push(index),
-        Node::ObjectLit { .. } | Node::ArrayLit { .. } | Node::Paren { .. } => {
-            tx.ast.for_each_child(target, |c| {
-                if is_super_prop(tx, c) {
-                    push_target(tx, c, stack);
-                } else {
-                    // Nested patterns, defaults (`a = d`) and `key: target` properties.
-                    push_target_or_read(tx, c, stack);
-                }
-            });
-        }
-        _ => stack.push(target),
-    }
-}
-
-fn push_target_or_read(tx: &Tx, n: NodeId, stack: &mut Vec<NodeId>) {
-    match tx.n(n) {
-        Node::Property { key, value, .. } => {
-            if tx.kind(key) == NodeKind::ComputedKey {
-                stack.push(key);
-            }
-            push_target(tx, value, stack);
-        }
-        Node::Spread { arg } => push_target(tx, arg, stack),
-        Node::Assign { left, right, .. } => {
-            stack.push(right);
-            push_target(tx, left, stack);
-        }
-        _ => push_target(tx, n, stack),
-    }
 }
 
 /// Replaces `this` (outside nested functions and classes) with `name`.

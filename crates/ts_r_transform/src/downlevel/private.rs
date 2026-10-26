@@ -478,7 +478,7 @@ impl Lower<'_, '_> {
 }
 
 /// The binary operator of a compound assignment.
-pub(super) fn compound_op(op: AssignOp) -> BinaryOp {
+pub(crate) fn compound_op(op: AssignOp) -> BinaryOp {
     match op {
         AssignOp::AddAssign => BinaryOp::Add,
         AssignOp::SubAssign => BinaryOp::Sub,

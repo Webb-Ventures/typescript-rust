@@ -196,11 +196,16 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         } else {
             VarKind::Let
         };
-        let mods = if exported && top_level && !tx.opts.is_cjs() {
+        let mut mods = if exported && top_level && !tx.opts.is_cjs() {
             Modifiers::EXPORT
         } else {
             Modifiers::NONE
         };
+        // The `var` takes the enum's JavaScript modifiers: a misplaced `accessor enum E {}`
+        // is `accessor var E;` (autoAccessorDisallowedModifiers, tsc 7.0.2).
+        if modifiers.contains(Modifiers::ACCESSOR) {
+            mods.insert(Modifiers::ACCESSOR);
+        }
         let n = tx.ident_atom(name_atom, at);
         let v = tx.var(kind, mods, n, None, at);
         tx.ast.set_span(v, ts_r_span::Span::new(at, at));
