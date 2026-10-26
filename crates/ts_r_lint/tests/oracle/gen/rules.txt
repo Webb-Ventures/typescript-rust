@@ -305,3 +305,4 @@ unicorn/no-useless-fallback-in-spread
 unicorn/no-empty-file
 unicorn/no-negated-condition
 unicorn/prefer-module
+unicorn/no-await-expression-member

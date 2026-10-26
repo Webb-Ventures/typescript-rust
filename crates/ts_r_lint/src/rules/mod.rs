@@ -286,7 +286,7 @@ mod unicorn_error_message;
 mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
 mod unicorn_new_for_builtins;
-mod unicorn_no_array_method_this_argument;
+mod unicorn_no_await_expression_member;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
@@ -655,7 +655,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_escape_case::RULE,
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
-    &unicorn_no_array_method_this_argument::RULE,
+    &unicorn_no_await_expression_member::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
