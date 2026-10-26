@@ -109,6 +109,14 @@ Files, by layer:
   JavaScript whose resolved path is under `node_modules` is loaded only within
   `maxNodeModuleJsDepth` (default 0) imports of other files, also through a relative
   import (`../../node_modules/eslint/lib/linter`); past it the import is untyped (TS7016).
+  Package deduplication (`deduplicatePackages`, default on): walking the files depth-first
+  from the roots, then the `types` entries, a file's `/// <reference>` targets before its
+  imports, the first file with a package identity (`name`, path in the package, `version`
+  with peers) keeps it; a later file of the same identity at another path is redirected to
+  it (`package_redirects`): resolutions to it point at the kept file
+  (`Resolution::redirected_from` keeps the original for TS2306's name), and neither it nor
+  what only it imports is in the program (tsc: `collectFiles` in
+  `tsc/internal/compiler/filesparser.go`).
 - Expressions: `expr.rs`, `func.rs` (function expressions, contextual typing), `call.rs`
   (calls, `new`, overload resolution, arity and TS2769 reporting), `infer.rs`, JSX:
   `jsx_check.rs` (the `JSX` namespace of an element: global, factory-scoped or from the

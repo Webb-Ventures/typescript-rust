@@ -8901,7 +8901,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let unsupported_tsx = !self.c.opts.jsx_set
                         && (target.path.ends_with(".tsx") || target.path.ends_with(".jsx"));
                     if names && !unsupported_tsx && !self.is_ambient_module_name(&spec) {
-                        let p = target.path.clone();
+                        let p = match resolved {
+                            Some(Some(r)) => r.redirected_from.as_ref(),
+                            _ => None,
+                        }
+                        .unwrap_or(&target.path)
+                        .clone();
                         self.error(
                             Loc::new(file, source),
                             dg::FILE_0_IS_NOT_A_MODULE_2306,

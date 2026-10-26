@@ -1538,6 +1538,8 @@ impl<'a, F: FileSystem> Run<'a, F> {
                     included: x.included,
                     package: x.package,
                     package_name: None,
+                    package_id: None,
+                    redirected_from: None,
                     alternate: None,
                     reference_source: None,
                     ts_extension: written_ts_extension_found(&r.spec, &x.path, x.ext),
