@@ -420,6 +420,7 @@ mod unicorn_no_thenable;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
 mod unicorn_no_top_level_assignment_in_function;
+mod unicorn_no_top_level_side_effects;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_uncalled_method;
@@ -516,7 +517,7 @@ mod unicorn_prefer_iterator_zip;
 mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_literal_ascii;
 mod unicorn_prefer_location_assign;
-mod unicorn_prefer_map_from_entries;
+mod unicorn_prefer_logical_operator_over_ternary;
 mod unicorn_prefer_math_abs;
 mod unicorn_prefer_math_constants;
 mod unicorn_prefer_math_min_max;
@@ -1035,6 +1036,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_top_level_assignment_in_function::RULE,
     &unicorn_no_this_outside_of_class::RULE,
+    &unicorn_no_top_level_side_effects::RULE,
     &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_undeclared_class_members::RULE,
@@ -1113,7 +1115,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_iterator_to_array_at_end::RULE,
     &unicorn_prefer_iterator_zip::RULE,
     &unicorn_prefer_location_assign::RULE,
-    &unicorn_prefer_map_from_entries::RULE,
+    &unicorn_prefer_logical_operator_over_ternary::RULE,
     &unicorn_prefer_math_abs::RULE,
     &unicorn_prefer_math_min_max::RULE,
     &unicorn_prefer_minimal_ternary::RULE,

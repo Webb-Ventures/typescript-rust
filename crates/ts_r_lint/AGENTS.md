@@ -1865,6 +1865,33 @@ A second batch adds six more, also at 100% of their oracle cases: `isolated-func
   in the block, or the alias holds a value reference, `typeof`, `this`, a reserved word
   (the `reserved-identifiers` list), a multi-line token, or a name that resolves
   differently from the block's scope. The reported span includes the type annotation.
+- **no-top-level-side-effects** (1015/1015): only in files with a runtime export (not
+  `export type`/`interface`/`declare`, `export {}`, specifiers that are all type-only, a
+  default export of a type-only name, or `export =`) and no hashbang. Module evaluation
+  is everything outside functions and non-static field initializers. A global mutation
+  (`global-mutation`) writes a configured/built-in/comment global or a member chain on
+  one (ESLint's `isGlobalReference`: unresolved names don't count) by assignment
+  (through destructuring), `for (x.y of/in ..)`, update, `delete`, or the mutating
+  `Object`/`Reflect` methods with a global first argument (`Reflect.set` only with three
+  plain arguments). With `checkUnknownCalls`, calls, `new`, tagged templates and
+  `import()` are reported unless `/* #__PURE__ */`-annotated (through comments and their
+  own parentheses, or on the outermost TS wrapper), the callee of an annotated call,
+  inside a global mutation, or a call of a known pure export (the built-in table plus
+  `allow`, matched by import source and export name or member path, also through a
+  `const {name} = import` destructuring). Reports mark their invocation ancestors, so
+  only the innermost problem shows. The rule walks the file itself in `run_file` to get
+  ESLint's enter/exit order.
+- **prefer-logical-operator-over-ternary** (424/424): one branch a boolean constant (a
+  literal through `!`/`satisfies`, `as const` and matching literal-type assertions, or a
+  same-function `const` alias of one declared before) and the other known boolean becomes
+  `||`/`&&` (test negated, or coerced with `Boolean()` when not known boolean), fixed
+  only outside TypeScript (parser and file name); a nullish test whose reference is the
+  other branch suggests `??`; `undefined` against a plain member of the reference
+  suggests `?.` (not when called, tagged or deleted); `a ? a : b` and `!b ? a : b`
+  suggest `??` and `||`. `isSameNode` and `getNullishTest` are private copies here.
+  `isBoolean` gives up on a `const` alias chain 256 deep (upstream overflows its stack
+  and returns false), treats a binding annotated with a type parameter as not boolean,
+  and counts calls of a binding annotated with a function type returning `boolean`.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
@@ -1883,7 +1910,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `no-subtraction-comparison.js`, `prefer-simple-condition-first.js`,
 `prefer-includes-over-repeated-comparisons.js`, `no-useless-logical-operand.js`,
 `prefer-continue.js`, `prefer-early-return.js`, `no-unnecessary-boolean-comparison.js`,
-`prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`;
+`prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`,
+`no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
@@ -1896,7 +1924,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `is-branch-exit.js`, `track-branch-exits.js`, `is-array.js`, `is-global-identifier.js`,
 `type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`,
 `is-boolean.js`, `is-reference-context.js`, `get-unwrapped-branch-text.js`, `block-scope.js`, `function-body.js`, `get-sibling-node.js`, `is-same-statement.js`, `get-references.js`;
-`rules/ast/is-reference-identifier.js`, `rules/ast/is-direct-eval-call.js`; the `reserved-identifiers` package's list;
+`rules/ast/is-reference-identifier.js`, `rules/ast/is-direct-eval-call.js`; `rules/utils/imports.js`,
+`rules/utils/get-member-access-operator-range.js`; ESLint's `SourceCode#isGlobalReference`; the `reserved-identifiers` package's list;
 `rules/ast/is-in-directive-prologue.js`; `rules/fix/replace-node-with-expression.js`; `rules/fix/remove-statement.js`,
 `add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
 `rules/shared/nullish-check.js`, `builtin-errors.js`, `early-exit.js`,
