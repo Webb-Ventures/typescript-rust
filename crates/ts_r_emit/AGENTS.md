@@ -229,6 +229,8 @@ bytes-exact outputs with a map baseline; all 17,352 outputs: 16,340 bytes-exact 
 baselines have every `.d.ts` bytes-exact (86.4%, gate 85% met; was 1,365, 83.5%); 1,412 of
 1,557 without TSR2006 refusals (90.7%). TSR2006 refuses 86 JavaScript inputs' `.d.ts` (was
 168; `@typedef`/`@callback`/`@template`/`@import` and `module.exports = v` are now written).
+Tests with every output bytes-exact: 11,007 of 11,925. Extra outputs: 13 (was 25; the oracle
+now passes only the last file when it reads `require(` or `reference path`, as the harness does).
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946

@@ -409,6 +409,9 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   an async arrow outside an async method and computed keys inside a pattern nested under an
   object rest (tsc flattens them too) are not handled. Private methods using `super`, and
   private classes evaluated in a loop with an outer `await` or `yield`, are refused (TSR2003).
+  `o?.#x` (an error, TS18030) is refused too; tsc 7.0.2 drops the `?.` there, and panics on
+  `o?.#m()` below ES2020. `p?.a.#x` gives `__classPrivateFieldGet(p?.a, ...)` (below ES2020,
+  the lowered chain), the same as tsc, which also loses the short circuit past `.a`.
 - TC39 decorators: static privates of class-decorated classes
   (`static_privates.rs`) leave `++`/`--`, logical assignments, destructuring targets and
   compound assignments on a non-`this` receiver as written (tsc caches the receiver in a

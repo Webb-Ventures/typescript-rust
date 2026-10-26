@@ -900,6 +900,15 @@ struct Outcome {
     probe: Vec<(String, Kind, Status)>,
 }
 
+/// `reference` followed by one whitespace character and `path` (the harness's test).
+fn references_path(src: &str) -> bool {
+    src.match_indices("reference").any(|(i, m)| {
+        let rest = &src[i + m.len()..];
+        let mut chars = rest.chars();
+        chars.next().is_some_and(|c| c.is_ascii_whitespace()) && chars.as_str().starts_with("path")
+    })
+}
+
 fn abs_name(n: &str) -> String {
     let n = n.trim_start_matches("./");
     if n.starts_with('/') {
@@ -937,6 +946,19 @@ fn run_with(test: &Test, emitter: &dyn Emitter, at_es2022: bool) -> Outcome {
             continue;
         }
         roots.push(a);
+    }
+    // The harness passes only the last file when it reaches the others itself: it reads
+    // `require(` or `reference path`, or the test sets `noImplicitReferences`.
+    if tsconfig.is_none()
+        && let Some((last, src)) = test.files.last()
+        && (test
+            .options
+            .iter()
+            .any(|(k, v)| k == "noimplicitreferences" && !v.is_empty())
+            || src.contains("require(")
+            || references_path(src))
+    {
+        roots = vec![abs_name(last)];
     }
     if test.files.iter().any(|(_, src)| src.contains("/.lib/")) {
         for (p, src) in test_libs() {
