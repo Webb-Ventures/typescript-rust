@@ -1,0 +1,4 @@
+a.ts(7,7): error TS2322: Type '(info: string, gesture?: boolean | undefined) => void' is not assignable to type 'number'.
+a.ts(13,7): error TS2322: Type '{ v: "a"; }' is not assignable to type 'number'.
+a.ts(16,7): error TS2322: Type '((...args: number[]) => void) | ((args_0: string) => void)' is not assignable to type 'number'.
+  Type '(...args: number[]) => void' is not assignable to type 'number'.

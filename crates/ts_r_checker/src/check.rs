@@ -5253,9 +5253,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = p;
         }
         if !constraints.is_empty() {
+            let c = if constraints.len() == 1 {
+                constraints[0]
+            } else {
+                self.intersection(&constraints)
+            };
             // The constraints come first (`T & number`), as tsc's substitution types read.
             constraints.push(t);
-            return self.intersection(&constraints);
+            let r = self.intersection(&constraints);
+            return self.implied_intersection(r, t, c);
         }
         let s = self.store();
         let f = s.flags(t);
@@ -5307,6 +5313,39 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         t
+    }
+
+    /// `r`, the intersection `C & T` made for `T` read under the implied constraint `C`,
+    /// marked so that instantiation can drop `C` again: the intersection is stored with a
+    /// symbol-less alias holding `[T, C]` (see [`Self::implied_parts`]). Other results
+    /// (a reduced intersection, a union) are returned as they are.
+    pub(crate) fn implied_intersection(&mut self, r: TypeId, t: TypeId, c: TypeId) -> TypeId {
+        let s = self.store();
+        match s.kind(r) {
+            TypeKind::Intersection { list, alias } if alias == ts_r_types::AliasId::NONE => {
+                let members = s.list_items(list).to_vec();
+                let origin = s.alias(ts_r_types::SymId::NONE, s.list(&[t, c]));
+                s.intersection_sorted(&members, Some(origin))
+            }
+            _ => r,
+        }
+    }
+
+    /// The type and the implied constraint of an intersection made by
+    /// [`Self::implied_intersection`].
+    pub(crate) fn implied_parts(&self, r: TypeId) -> Option<(TypeId, TypeId)> {
+        let s = self.store();
+        let TypeKind::Intersection { alias, .. } = s.kind(r) else {
+            return None;
+        };
+        let info = s.alias_info(alias)?;
+        if info.sym != ts_r_types::SymId::NONE {
+            return None;
+        }
+        match *s.list_items(info.args) {
+            [t, c] => Some((t, c)),
+            _ => None,
+        }
     }
 
     pub(crate) fn every_array_or_tuple(&mut self, t: TypeId) -> bool {

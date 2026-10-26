@@ -80,6 +80,36 @@ impl<'c, 'a> Ck<'c, 'a> {
         s.alias(info.sym, s.list(&mapped))
     }
 
+    /// An instantiation of `C & T`, `T` read under the constraint `C` implied by the true
+    /// branch of a conditional type: it is `T` alone once `T` is known to satisfy `C`, as the
+    /// conditional would then pick its true branch, and stays an implied intersection while
+    /// `T` is a type variable (tsc: checker.go, instantiateTypeWorker, substitution types).
+    fn instantiate_implied(&mut self, t: TypeId, m: MapperId) -> TypeId {
+        let Some((base, constraint)) = self.implied_parts(t) else {
+            return t;
+        };
+        let nb = self.instantiate(base, m);
+        let nc = self.instantiate(constraint, m);
+        let var = self
+            .store()
+            .flags(nb)
+            .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS);
+        // (tsc compares restrictive instantiations, where type parameters have no
+        // constraint; a still-generic `T` is kept here instead.)
+        if !(var && self.is_generic_type(nc))
+            && (self.store().flags(nc).intersects(TypeFlags::ANY_OR_UNKNOWN)
+                || !self.is_generic_type(nb) && self.quietly(|ck| ck.is_assignable(nb, nc)))
+        {
+            return nb;
+        }
+        let r = self.intersection(&[nc, nb]);
+        if var {
+            self.implied_intersection(r, nb, nc)
+        } else {
+            r
+        }
+    }
+
     fn instantiate_inner(&mut self, t: TypeId, m: MapperId) -> TypeId {
         let s = self.store();
         match s.kind(t) {
@@ -94,6 +124,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.instantiate_alias(alias, m)
                 };
                 self.union_with(&mapped, crate::unions::Reduction::Literal, a)
+            }
+            TypeKind::Intersection { .. } if self.implied_parts(t).is_some() => {
+                self.instantiate_implied(t, m)
             }
             TypeKind::Intersection { list, alias } => {
                 let items = s.list_items(list).to_vec();

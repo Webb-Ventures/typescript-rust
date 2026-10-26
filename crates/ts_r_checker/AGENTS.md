@@ -1381,7 +1381,12 @@ Files, by layer:
   contravariant position only takes it for a type variable), `C["a"]` there is
   `C["a"] & E["a"]`. Parameter types of signatures written as types take it too, so in
   `number extends T ? (cb: (n: number) => void) => void : never` the `n` is `T & number`
-  (two parameter positions: covariant). The key `K` of a
+  (two parameter positions: covariant). Such an `E & C` remembers `C` and `E` (a
+  symbol-less alias on the intersection, `implied_intersection`): instantiated, it is `C`
+  alone when `C` is no longer generic and satisfies `E`, as the conditional would pick its
+  true branch then, so `(...args: T[K]) => void` with `T[K] = [a: A, b?: B]` is
+  `(a: A, b?: B) => void`, not `(...args: unknown[] & [a: A, b?: B]) => void` (tsc:
+  checker.go, instantiateTypeWorker, substitution types). The key `K` of a
   homomorphic `{ [K in keyof T]: X }` whose `T` is constrained to arrays or tuples is
   `K & (number | `${number}`)` inside `X`. An unconstrained `...infer R` in a rest position
   is indexed as `R & unknown[]`, and a conditional object as its constraint with such an
