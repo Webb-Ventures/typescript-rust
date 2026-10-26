@@ -432,7 +432,7 @@ pub fn accessed_property(ck: &mut Ck<'_, '_>, t: TypeId, name: &str) -> Option<S
 }
 
 /// The property a destructuring key reads: `const { a } = o`, `function f({ a }: T)`.
-fn binding_property(ck: &mut Ck<'_, '_>, bp: Loc, name: &str) -> Option<SymId> {
+pub(super) fn binding_property(ck: &mut Ck<'_, '_>, bp: Loc, name: &str) -> Option<SymId> {
     let c = ck.c;
     let pattern = c.parent(bp)?;
     let t = pattern_source_type(ck, pattern)?;
@@ -440,7 +440,7 @@ fn binding_property(ck: &mut Ck<'_, '_>, bp: Loc, name: &str) -> Option<SymId> {
 }
 
 /// The type a binding pattern destructures (one level: declarators and parameters).
-fn pattern_source_type(ck: &mut Ck<'_, '_>, pattern: Loc) -> Option<TypeId> {
+pub(super) fn pattern_source_type(ck: &mut Ck<'_, '_>, pattern: Loc) -> Option<TypeId> {
     let c = ck.c;
     let holder = c.parent(pattern)?;
     match *c.node(holder) {

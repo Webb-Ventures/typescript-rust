@@ -2668,3 +2668,78 @@ fn hover_names_like_tsc() {
     assert!(h(m[5]).contains("namespace m.N"), "{}", h(m[5]));
     c.shutdown();
 }
+
+/// Go to definition follows tsc 7 on calls (`new C()` adds the constructor, shown whole; a
+/// called arrow is named by its variable), ambient module names, object literal and
+/// binding pattern members (the contextual or destructured type's property, a
+/// discriminated union member), index signatures and `typeof this`.
+#[test]
+fn definitions_of_calls_literals_and_ambient_modules() {
+    if !libs_present() {
+        return;
+    }
+    let text = "class C {\n  constructor(n: number) {}\n}\nnew C(1);\nconst f = () => 0;\nf();\n\
+                import x from \"m\";\nx;\n\
+                interface A { kind: \"a\"; p: number }\ninterface B { kind: \"b\"; p: string }\n\
+                const u: A | B = { kind: \"a\", p: 0 };\n\
+                const p = 1;\nconst o: { p: number } = { p };\n\
+                function g({ p: q }: A) { return q; }\n\
+                declare const ix: { [k: string]: boolean };\nix.foo;\n\
+                function h(this: A) { type T = typeof this; }\n";
+    let env = Env::new(
+        "def-calls",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/k.ts", text),
+            ("src/m.d.ts", "declare module \"m\";\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/k.ts");
+    let u = env.uri("src/k.ts");
+    let um = env.uri("src/m.d.ts");
+    let spans = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(String, u64, u64, u64, u64)> {
+        let d = result(c, "textDocument/definition", at(&u, line, ch));
+        let mut v: Vec<_> = d
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|l| {
+                let r = &l["range"];
+                let n = |x: &Value| x.as_u64().unwrap();
+                (
+                    if l["uri"] == um.as_str() { "m" } else { "k" }.to_string(),
+                    n(&r["start"]["line"]),
+                    n(&r["start"]["character"]),
+                    n(&r["end"]["line"]),
+                    n(&r["end"]["character"]),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let k = |a, b, c, d| ("k".to_string(), a, b, c, d);
+    // `new C(1)`: the class and the whole constructor.
+    assert_eq!(spans(&mut c, 3, 4), vec![k(0, 6, 0, 7), k(1, 2, 1, 27)]);
+    // `f()`: the arrow, named by its variable.
+    assert_eq!(spans(&mut c, 5, 0), vec![k(4, 6, 4, 7)]);
+    // An import of a shorthand ambient module, and its specifier: the module.
+    let m = vec![("m".to_string(), 0, 15, 0, 18)];
+    assert_eq!(spans(&mut c, 7, 0), m);
+    assert_eq!(spans(&mut c, 6, 15), m);
+    // `kind` of a literal typed `A | B` with `kind: "a"`: only `A`'s.
+    assert_eq!(spans(&mut c, 10, 20), vec![k(8, 14, 8, 18)]);
+    // A shorthand: the variable and the contextual property.
+    assert_eq!(
+        spans(&mut c, 12, 27),
+        vec![k(11, 6, 11, 7), k(12, 11, 12, 12)]
+    );
+    // A binding key: the destructured type's property.
+    assert_eq!(spans(&mut c, 13, 13), vec![k(8, 25, 8, 26)]);
+    // A property only an index signature declares.
+    assert_eq!(spans(&mut c, 15, 3), vec![k(14, 20, 14, 40)]);
+    // `typeof this` goes to the `this` parameter.
+    assert_eq!(spans(&mut c, 16, 38), vec![k(16, 11, 16, 15)]);
+    c.shutdown();
+}

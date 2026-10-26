@@ -939,6 +939,11 @@ pub fn keyword_definition(d: &Doc<'_>, offset: u32) -> Option<KeywordTarget> {
                     this_definition(d, n).into_iter().collect(),
                 ));
             }
+            Node::Ident { .. } if is_this(d, n) => {
+                return Some(KeywordTarget::Spans(
+                    this_definition(d, n).into_iter().collect(),
+                ));
+            }
             _ => {}
         }
     }
@@ -1165,9 +1170,27 @@ pub fn member_is_static(d: &Doc<'_>, m: NodeId) -> bool {
 fn is_this(d: &Doc<'_>, n: NodeId) -> bool {
     match d.node(n) {
         Node::This {} | Node::ThisType {} => true,
-        Node::Ident { .. } => d.name(n) == Some("this") && is_param_name(d, n),
+        Node::Ident { .. } => {
+            d.name(n) == Some("this") && (is_param_name(d, n) || is_type_query_head(d, n))
+        }
         _ => false,
     }
+}
+
+/// Whether `n` is the first name of a `typeof` query (`typeof this`, `typeof this.x`).
+fn is_type_query_head(d: &Doc<'_>, n: NodeId) -> bool {
+    let mut cur = n;
+    for _ in 0..MAX_DEPTH {
+        let Some(p) = d.parent(cur) else {
+            return false;
+        };
+        match d.node(p) {
+            Node::QualifiedName { left, .. } if left == cur => cur = p,
+            Node::TypeQuery { expr_name, .. } => return expr_name == cur,
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn is_param_name(d: &Doc<'_>, n: NodeId) -> bool {

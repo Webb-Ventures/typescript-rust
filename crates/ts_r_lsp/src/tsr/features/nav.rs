@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use ts_r_ast::{MethodKind, Node, NodeId};
 use ts_r_binder::SymbolFlags;
-use ts_r_checker::{Ck, Loc};
+use ts_r_checker::{Checker, Ck, Loc};
 use ts_r_diagnostics::FileId;
 use ts_r_types::{ObjectKind, SymId, TypeId, TypeKind};
 
@@ -22,10 +22,41 @@ pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let ast = c.ast(cx.file);
     if let Some(n) = node_at(ast, offset)
         && let Node::StringLit { value } = *ast.node(n)
-        && let Some(target) = module_specifier_target(cx, n, ast.atom(value))
     {
-        let mut lc = LinesCache::default();
-        return json!([lc.location(c, target, 0, 0)]);
+        let spec = ast.atom(value);
+        if let Some(target) = module_specifier_target(cx, n, spec) {
+            let mut lc = LinesCache::default();
+            return json!([lc.location(c, target, 0, 0)]);
+        }
+        // A specifier naming an ambient module (`declare module "x"`), or that name itself.
+        let names_module = c
+            .file(cx.file)
+            .parents()
+            .parent(n)
+            .is_some_and(|p| matches!(*ast.node(p), Node::Module { name, .. } if name == n));
+        if names_module || is_module_specifier(cx, n) {
+            let decls = ambient_module_decls(c, spec);
+            if !decls.is_empty() {
+                return decl_locations(cx, decls);
+            }
+        }
+        // A string name in an import or export specifier (`export { a as "b" }`): what the
+        // specifier's alias resolves to.
+        if let Some(p) = c.file(cx.file).parents().parent(n) {
+            let names = match *ast.node(p) {
+                Node::ImportSpecifier { local, .. } => vec![local, p],
+                Node::ExportSpecifier {
+                    local, exported, ..
+                } => exported.into_iter().chain([p, local]).collect(),
+                _ => Vec::new(),
+            };
+            for x in names {
+                if let Some(s) = c.sym_of_decl(Loc::new(cx.file, x)) {
+                    let t = c.resolve_alias(s).unwrap_or(s);
+                    return decl_locations(cx, c.decls(t));
+                }
+            }
+        }
     }
     // `break l` / `continue l` go to the label.
     let d = Doc::new(c, cx.file);
@@ -48,20 +79,349 @@ pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let Some(n) = ident_at(ast, offset) else {
         return Value::Null;
     };
+    if let Some(decls) = literal_member_definition(cx, ck, n) {
+        return decl_locations(cx, decls);
+    }
     let m = meaning_at(ck, Loc::new(cx.file, n));
     let mut decls = Vec::new();
+    let mut own = Vec::new();
     for s in m.iter() {
-        let s = c.resolve_alias(s).unwrap_or(s);
-        decls.extend(c.decls(s));
+        own.extend(c.decls(s));
+        match c.resolve_alias(s) {
+            Some(t) => decls.extend(c.decls(t)),
+            // An import from a shorthand ambient module (`declare module "x";`) has nothing
+            // to resolve to but the module.
+            None => match shorthand_import_module(cx, s) {
+                Some(m) => decls.extend(m),
+                None => decls.extend(c.decls(s)),
+            },
+        }
     }
-    // A call goes to the overload it resolves to.
-    if decls.len() > 1
-        && let Some(d) = called_overload(ck, Loc::new(cx.file, n))
-        && decls.contains(&d)
+    if let Some(called) = called_overload(ck, Loc::new(cx.file, n))
+        && is_navigable_signature(c, called)
     {
-        decls = vec![d];
+        decls = with_called_signature(c, &own, decls, called);
+    }
+    if decls.is_empty() {
+        decls = index_signatures_at(ck, Loc::new(cx.file, n));
     }
     decl_locations(cx, decls)
+}
+
+/// For `o.name` that no property declares, the index signatures of `o`'s type that apply to
+/// the key (every member of a union; template-pattern keys the name matches).
+fn index_signatures_at(ck: &mut Ck<'_, '_>, name: Loc) -> Vec<Loc> {
+    let c = ck.c;
+    let Some(p) = c.parent(name) else {
+        return Vec::new();
+    };
+    let Node::Member { obj, prop, .. } = *c.node(p) else {
+        return Vec::new();
+    };
+    if prop != name.node {
+        return Vec::new();
+    }
+    let Some(key) = name_text(c.ast(name.file), name.node).map(str::to_string) else {
+        return Vec::new();
+    };
+    let t = ck.check_expr(Loc::new(name.file, obj));
+    let numeric = key.parse::<f64>().is_ok_and(|n| n.is_finite());
+    let lit = ck.store().string_literal(&key, false);
+    let mut out = Vec::new();
+    for u in ck.union_members(t) {
+        let a = ck.apparent_type(u);
+        let infos = ck.resolved_members(a).index.to_vec();
+        for i in infos {
+            let applies = if i.key == TypeId::STRING {
+                true
+            } else if i.key == TypeId::NUMBER {
+                numeric
+            } else if i.key == TypeId::SYMBOL {
+                false
+            } else {
+                ck.is_assignable(lit, i.key)
+            };
+            if applies
+                && let Some(d) = i.decl.and_then(Loc::unpack)
+                && (d.file.0 as usize) < c.files.len()
+                && !out.contains(&d)
+            {
+                out.push(d);
+            }
+        }
+    }
+    out
+}
+
+/// Go to definition on a name in an object literal or an object binding pattern (observed
+/// tsc 7): a binding key goes to the property of the destructured type (each union member's
+/// that has it; nothing for an untyped pattern); a shorthand `{ x }` to the variable and
+/// the contextual type's property; another member name of a contextually typed literal to
+/// the contextual type's property only. `None` elsewhere.
+fn literal_member_definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, n: NodeId) -> Option<Vec<Loc>> {
+    let c = cx.checker;
+    let at = Loc::new(cx.file, n);
+    let p = c.parent(at)?;
+    let ast = c.ast(cx.file);
+    match *c.node(p) {
+        Node::BindingProperty { key, .. } if key == n => {
+            let name = name_text(ast, n)?.to_string();
+            let pattern = c.parent(p)?;
+            if !matches!(c.node(pattern), Node::ObjectPattern { .. }) {
+                return None;
+            }
+            let mut out = Vec::new();
+            if let Some(t) = super::locate::pattern_source_type(ck, pattern) {
+                for u in ck.union_members(t) {
+                    if let Some(prop) = super::locate::property_of(ck, u, &name) {
+                        out.extend(c.decls(prop));
+                    }
+                }
+            } else if let Some(prop) = super::locate::binding_property(ck, p, &name) {
+                out.extend(c.decls(prop));
+            }
+            Some(out)
+        }
+        Node::ShorthandProp { name, .. } if name == n => {
+            let m = meaning_at(ck, at);
+            let mut out = Vec::new();
+            if let Some(v) = m.shorthand {
+                out.extend(c.decls(c.resolve_alias(v).unwrap_or(v)));
+            }
+            if let Some(s) = m.contextual {
+                let lit = c.parent(p)?;
+                out.extend(contextual_member_decls(ck, lit, p, s));
+            }
+            Some(out)
+        }
+        Node::Property { key, .. } | Node::MethodDef { key, .. } if key == n => {
+            let lit = c.parent(p)?;
+            if !matches!(c.node(lit), Node::ObjectLit { .. }) {
+                return None;
+            }
+            let s = meaning_at(ck, at).contextual?;
+            let decls = contextual_member_decls(ck, lit, p, s);
+            (!decls.is_empty()).then_some(decls)
+        }
+        _ => None,
+    }
+}
+
+/// The declarations of the contextual type's property `s` that member `member` of object
+/// literal `lit` implements: of the union members the literal's discriminants select
+/// (`kind: "a"` picks `A` of `A | B`; all of them when none matches), and when the
+/// contextual type was inferred from this very literal (`fn<T extends C>(arg: T)`), of the
+/// declared parameter type with type parameters replaced by their constraints.
+fn contextual_member_decls(ck: &mut Ck<'_, '_>, lit: Loc, member: Loc, s: SymId) -> Vec<Loc> {
+    let c = ck.c;
+    let Some(name) = member_name(ck, member) else {
+        return c.decls(s);
+    };
+    let decls = c.decls(s);
+    let mut types: Vec<TypeId> = Vec::new();
+    if decls.contains(&member) || decls.iter().any(|d| c.parent(*d) == Some(lit)) {
+        if let Some(t) = uninferred_parameter_type(ck, lit) {
+            for u in ck.union_members(t) {
+                let u = if ck.store().type_param_data(u).is_some() {
+                    match ck.type_param_constraint(u) {
+                        Some(k) => k,
+                        None => continue,
+                    }
+                } else {
+                    u
+                };
+                types.extend(ck.union_members(u));
+            }
+        }
+    } else if let Some(t) = ck.contextual_type(lit) {
+        types = ck.union_members(t);
+    }
+    if types.is_empty() {
+        return decls;
+    }
+    let types = discriminate(ck, lit, types);
+    let mut out = Vec::new();
+    for t in types {
+        if let Some(p) = super::locate::property_of(ck, t, &name) {
+            for d in c.decls(p) {
+                if !out.contains(&d) {
+                    out.push(d);
+                }
+            }
+        }
+    }
+    if out.is_empty() { decls } else { out }
+}
+
+/// The key text of an object literal member.
+fn member_name(ck: &Ck<'_, '_>, member: Loc) -> Option<String> {
+    let c = ck.c;
+    let key = match *c.node(member) {
+        Node::Property { key, .. } | Node::MethodDef { key, .. } => key,
+        Node::ShorthandProp { name, .. } => name,
+        _ => return None,
+    };
+    super::locate::key_text(ck, Loc::new(member.file, key))
+}
+
+/// The declared (uninstantiated) type of the parameter that object literal `lit` is passed
+/// to, when it is an argument of a call to a generic signature.
+fn uninferred_parameter_type(ck: &mut Ck<'_, '_>, lit: Loc) -> Option<TypeId> {
+    let c = ck.c;
+    let call = c.parent(lit)?;
+    let args = match *c.node(call) {
+        Node::Call { args, .. } | Node::New { args, .. } => args,
+        _ => return None,
+    };
+    let i = c
+        .ast(lit.file)
+        .list(args)
+        .iter()
+        .position(|&a| a == lit.node)?;
+    let sig = ck.resolved_signature(call)?;
+    let store = ck.store();
+    let (target, _) = store.sig(sig).target?;
+    store.sig(target).params.get(i).map(|p| p.ty)
+}
+
+/// The members of a contextual union that the literal's discriminant properties (members
+/// with a unit-typed value, `kind: "a"`) are assignable to; all of them when none is.
+fn discriminate(ck: &mut Ck<'_, '_>, lit: Loc, types: Vec<TypeId>) -> Vec<TypeId> {
+    if types.len() < 2 {
+        return types;
+    }
+    let c = ck.c;
+    let Node::ObjectLit { props } = *c.node(lit) else {
+        return types;
+    };
+    let mut kept = types.clone();
+    for &prop in c.ast(lit.file).list(props) {
+        let Node::Property { key, value, .. } = *c.ast(lit.file).node(prop) else {
+            continue;
+        };
+        let Some(name) = super::locate::key_text(ck, Loc::new(lit.file, key)) else {
+            continue;
+        };
+        let v = ck.check_expr(Loc::new(lit.file, value));
+        let v = ck.store().regular(v);
+        if !ck.is_unit(v) {
+            continue;
+        }
+        let mut discriminant = false;
+        let mut matching = Vec::new();
+        for &t in &kept {
+            let Some(p) = super::locate::property_of(ck, t, &name) else {
+                continue;
+            };
+            let pt = ck.type_of_symbol(p);
+            if ck.union_members(pt).iter().any(|&m| ck.is_unit(m)) {
+                discriminant = true;
+            }
+            if ck.is_assignable(v, pt) {
+                matching.push(t);
+            }
+        }
+        if discriminant && !matching.is_empty() {
+            kept = matching;
+        }
+    }
+    kept
+}
+
+/// The declarations go to definition shows for the callee of a call, `new` or tagged
+/// template that resolves to the signature declared at `called` (observed tsc 7; the rule is
+/// written up in AGENTS.md, "Keywords and navigation"). `own` are the declarations of the
+/// symbol at the cursor before aliases are followed.
+fn with_called_signature(c: &Checker<'_>, own: &[Loc], decls: Vec<Loc>, called: Loc) -> Vec<Loc> {
+    let ctor_class = constructor_class(c, called);
+    let parent = c.parent(called);
+    let own_signature = own.contains(&called)
+        || ctor_class.is_some_and(|k| own.contains(&k))
+        || parent.is_some_and(|p| match *c.node(p) {
+            Node::Assign { .. } => true,
+            Node::Call { .. } | Node::New { .. } | Node::TaggedTemplate { .. } => false,
+            _ => own.contains(&p),
+        });
+    let mut out: Vec<Loc> = if !own_signature {
+        decls.into_iter().filter(|&d| d != called).collect()
+    } else if ctor_class.is_some() {
+        decls
+            .into_iter()
+            .filter(|&d| {
+                d != called && matches!(c.node(d), Node::ClassDecl { .. } | Node::ClassExpr { .. })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    out.push(called);
+    out
+}
+
+/// A signature declaration go to definition can show: function-like, not a function type
+/// (`() => void` goes to the value that has it instead; `new () => T` is shown).
+fn is_navigable_signature(c: &Checker<'_>, l: Loc) -> bool {
+    matches!(
+        c.node(l),
+        Node::FunctionDecl { .. }
+            | Node::ConstructorType { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::MethodDef { .. }
+            | Node::MethodSignature { .. }
+            | Node::CallSignature { .. }
+            | Node::ConstructSignature { .. }
+    )
+}
+
+/// The name an unnamed function, arrow or class expression gets from where it is assigned
+/// (`const f = () => 0`, `{ m: function () {} }`, `x.y = class {}`), which go to definition
+/// shows for it.
+fn assigned_name(c: &Checker<'_>, d: Loc) -> Option<Loc> {
+    let named = match *c.node(d) {
+        Node::FunctionExpr { name, .. } | Node::ClassExpr { name, .. } => name.is_some(),
+        Node::Arrow { .. } => false,
+        _ => return None,
+    };
+    if named {
+        return None;
+    }
+    let p = c.parent(d)?;
+    let at = |n: NodeId| Some(Loc::new(p.file, n));
+    match *c.node(p) {
+        Node::VarDeclarator { name, init, .. } if init == Some(d.node) => {
+            matches!(c.ast(p.file).node(name), Node::Ident { .. })
+                .then_some(())
+                .and_then(|_| at(name))
+        }
+        Node::Property { key, value, .. } if value == d.node => at(key),
+        Node::PropertyDef { key, value, .. } if value == Some(d.node) => at(key),
+        Node::Assign { left, right, .. } if right == d.node => match *c.ast(p.file).node(left) {
+            Node::Ident { .. } => at(left),
+            Node::Member { prop, .. } => at(prop),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The class a constructor declaration belongs to.
+fn constructor_class(c: &Checker<'_>, l: Loc) -> Option<Loc> {
+    let mut m = l;
+    if matches!(c.node(m), Node::FunctionExpr { .. }) {
+        m = c.parent(m)?;
+    }
+    if !matches!(
+        c.node(m),
+        Node::MethodDef {
+            kind: MethodKind::Constructor,
+            ..
+        }
+    ) {
+        return None;
+    }
+    let k = c.parent(m)?;
+    matches!(c.node(k), Node::ClassDecl { .. } | Node::ClassExpr { .. }).then_some(k)
 }
 
 /// Where go to definition on a keyword leads (see [`keywords::keyword_definition`]).
@@ -166,19 +526,64 @@ fn called_overload(ck: &mut Ck<'_, '_>, name: Loc) -> Option<Loc> {
     Some(Loc::new(FileId(f), ck.node_id(n)?))
 }
 
-/// The file a module specifier string resolves to.
-fn module_specifier_target(cx: &Ctx<'_, '_>, lit: ts_r_ast::NodeId, spec: &str) -> Option<FileId> {
+/// The declarations of the ambient module `declare module "<spec>"` (or the pattern that
+/// matches it).
+fn ambient_module_decls(c: &Checker<'_>, spec: &str) -> Vec<Loc> {
+    let Some(i) = c.link.find_ambient_module(spec) else {
+        return Vec::new();
+    };
+    c.link
+        .module_symbols(ts_r_binder::program::ModuleTarget::Ambient(i))
+        .into_iter()
+        .flat_map(|r| c.decls(c.sym_ref(r)))
+        .collect()
+}
+
+/// For an import (`import x from "m"`, `import { x } from "m"`) of a shorthand ambient
+/// module, that module's declarations.
+fn shorthand_import_module(cx: &Ctx<'_, '_>, s: SymId) -> Option<Vec<Loc>> {
     let c = cx.checker;
-    let parent = c.file(cx.file).parents().parent(lit)?;
-    let is_spec = match *c.ast(cx.file).node(parent) {
+    let d = c.first_decl(s)?;
+    let mut p = c.parent(d)?;
+    for _ in 0..4 {
+        if let Node::ImportDecl { source, .. } = *c.node(p) {
+            let Node::StringLit { value } = *c.ast(p.file).node(source) else {
+                return None;
+            };
+            let i = c.link.find_ambient_module(c.ast(p.file).atom(value))?;
+            let target = ts_r_binder::program::ModuleTarget::Ambient(i);
+            let &first = c.link.module_symbols(target).first()?;
+            if !c.is_shorthand_ambient_module(c.sym_ref(first)) {
+                return None;
+            }
+            return Some(ambient_module_decls(c, c.ast(p.file).atom(value)));
+        }
+        p = c.parent(p)?;
+    }
+    None
+}
+
+/// Whether string literal `lit` is a module specifier (imports, exports, `import x =
+/// require(..)`, `import(..)`, import types).
+fn is_module_specifier(cx: &Ctx<'_, '_>, lit: ts_r_ast::NodeId) -> bool {
+    let c = cx.checker;
+    let Some(parent) = c.file(cx.file).parents().parent(lit) else {
+        return false;
+    };
+    match *c.ast(cx.file).node(parent) {
         Node::ImportDecl { source, .. } | Node::ExportAll { source, .. } => source == lit,
         Node::ExportNamed { source, .. } => source == Some(lit),
         Node::ExternalModuleRef { expr } => expr == lit,
         Node::ImportCall { arg, .. } => arg == lit,
         Node::ImportType { .. } => true,
         _ => false,
-    };
-    if !is_spec {
+    }
+}
+
+/// The file a module specifier string resolves to.
+fn module_specifier_target(cx: &Ctx<'_, '_>, lit: ts_r_ast::NodeId, spec: &str) -> Option<FileId> {
+    let c = cx.checker;
+    if !is_module_specifier(cx, lit) {
         return None;
     }
     let from = &c.file(cx.file).path;
@@ -415,7 +820,25 @@ fn decl_locations(cx: &Ctx<'_, '_>, decls: Vec<Loc>) -> Value {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for d in decls {
-        let (s, e) = decl_span(c, d);
+        // A constructor has no name: the whole declaration is shown.
+        let (s, e) = match constructor_class(c, d) {
+            Some(_) => {
+                let m = if matches!(c.node(d), Node::FunctionExpr { .. }) {
+                    c.parent(d).unwrap_or(d)
+                } else {
+                    d
+                };
+                let sp = c.ast(m.file).span(m.node);
+                (sp.start, sp.end)
+            }
+            None => match assigned_name(c, d) {
+                Some(n) => {
+                    let sp = c.ast(n.file).span(n.node);
+                    (sp.start, sp.end)
+                }
+                None => decl_span(c, d),
+            },
+        };
         if seen.insert((d.file, s, e)) {
             out.push(lc.location(c, d.file, s, e));
         }

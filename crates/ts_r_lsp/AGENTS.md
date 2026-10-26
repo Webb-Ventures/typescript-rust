@@ -486,6 +486,33 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   initializes the variable) replaced by its single signature's return type, and a type-only
   symbol whose type has no declaration going to itself. Keywords before a name stand for
   the name.
+- **Go to definition on names** (`nav.rs`, from observed tsc 7 and `tsc:
+  tsc/internal/ls/definition.go`):
+  - *Calls.* When the name is the callee of a call, `new` or tagged template (directly or
+    as `o.name`) and the resolved signature has a declaration that is function-like (a
+    function, method, arrow, call/construct signature or constructor type; not a function
+    type), that declaration is added. If it is the cursor symbol's own (one of its
+    declarations, the constructor of its class, or the function its variable, property or
+    assignment holds), a function shows only that overload and a constructor shows the
+    class declarations (not merged namespaces) plus that constructor; otherwise the
+    symbol's declarations plus the signature (`new I()` through a construct signature).
+    Through an import the symbol is the alias, so every overload stays.
+  - *Spans.* A constructor has no name: the whole declaration is shown. An unnamed
+    function, arrow or class expression is shown by the name it is assigned to (`const f =
+    () => 0`, `{ m: function () {} }`, `x.y = class {}`).
+  - *Object literals and patterns.* A key of an object binding pattern goes to the
+    property of the destructured type (each union member's; nothing for an untyped
+    pattern). `{ x }` goes to the variable and the contextual property; another member
+    name of a contextually typed literal goes only to the contextual property, of the
+    union members its unit-valued discriminants are assignable to (all when none is), and,
+    when the contextual type was inferred from this literal, of the declared parameter
+    type with type parameters replaced by their constraints.
+  - *Modules.* A specifier, or the name of `declare module "x"`, that names an ambient
+    module goes to its declarations; an import from a shorthand ambient module goes to the
+    module. A string name in an import or export specifier goes where the alias resolves.
+  - *Fallbacks.* `o.k` with no property goes to the index signatures of `o`'s type that
+    apply to `k` (every union member). `typeof this` and a `this` parameter behave like
+    the `this` keyword.
 - `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
   (`a|()`), as tsserver's touching-name lookup does.
 - **Inherited members** (`inherit.rs`, from `tsc: tsc/internal/ls/findallreferences.go`,
