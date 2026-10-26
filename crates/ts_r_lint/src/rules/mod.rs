@@ -319,6 +319,7 @@ mod unicorn_no_useless_fallback_in_spread;
 mod unicorn_no_useless_length_check;
 mod unicorn_no_useless_promise_resolve_reject;
 mod unicorn_no_useless_switch_case;
+mod unicorn_no_useless_undefined;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
@@ -698,6 +699,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_length_check::RULE,
     &unicorn_no_useless_promise_resolve_reject::RULE,
     &unicorn_no_useless_switch_case::RULE,
+    &unicorn_no_useless_undefined::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,

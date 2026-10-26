@@ -347,3 +347,4 @@ unicorn/no-array-reverse
 unicorn/no-array-sort
 unicorn/consistent-function-scoping
 unicorn/prefer-switch
+unicorn/no-useless-undefined

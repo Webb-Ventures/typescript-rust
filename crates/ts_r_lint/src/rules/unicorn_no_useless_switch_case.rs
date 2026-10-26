@@ -4,7 +4,7 @@
 //! the clause, unless its test has a side effect or a comment is inside it.
 
 use super::prelude::*;
-use super::unicorn_util_h4::{has_side_effect, switch_case_head};
+use super::unicorn_util_h4::{has_side_effect, is_typescript_path, switch_case_head};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -28,13 +28,6 @@ pub(crate) fn is_empty_stmt(ast: &Ast, id: NodeId) -> bool {
         Node::Block { stmts } => ast.list(stmts).iter().all(|&s| is_empty_stmt(ast, s)),
         _ => false,
     }
-}
-
-fn is_typescript_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    [".ts", ".mts", ".cts", ".tsx"]
-        .iter()
-        .any(|e| lower.ends_with(e))
 }
 
 impl Rule for NoUselessSwitchCase {

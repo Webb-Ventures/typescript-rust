@@ -512,3 +512,11 @@ pub(crate) fn fix_of(mut edits: Vec<(Span, String)>) -> Fix {
             .collect(),
     }
 }
+
+/// `isTypeScriptFile`: the path ends in `.ts`, `.mts`, `.cts` or `.tsx` (any case).
+pub(crate) fn is_typescript_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    [".ts", ".mts", ".cts", ".tsx"]
+        .iter()
+        .any(|e| lower.ends_with(e))
+}

@@ -310,6 +310,7 @@ unicorn/no-useless-fallback-in-spread 61/61
 unicorn/no-useless-length-check 165/165
 unicorn/no-useless-promise-resolve-reject 121/121
 unicorn/no-useless-switch-case 34/34
+unicorn/no-useless-undefined 271/271
 unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
