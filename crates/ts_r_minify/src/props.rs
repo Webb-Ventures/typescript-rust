@@ -500,6 +500,9 @@ pub fn apply(
             .map(|i| names[i].1.as_str())
     };
     let found = mangled_sites(ast, src, scopes, opts);
+    // `(parent, old child, new child)`, applied once per parent at the end: remapping a
+    // parent per child would copy its child list (an array of 30,000 keys) every time.
+    let mut pending: Vec<(NodeId, NodeId, NodeId)> = Vec::new();
     for (s, atom, ok) in found {
         if !ok {
             continue;
@@ -512,7 +515,7 @@ pub fn apply(
             SiteKind::Name => {
                 let new = ast.add(Node::Ident { name: short_atom }, span);
                 if let Some(p) = s.parent {
-                    replace_child(ast, p, s.child, new);
+                    pending.push((p, s.child, new));
                 }
             }
             SiteKind::Shorthand => {
@@ -561,19 +564,29 @@ pub fn apply(
                     Span::new(span.start, span.start),
                 );
                 if let Some(p) = s.parent {
-                    replace_child(ast, p, s.child, new);
+                    pending.push((p, s.child, new));
                 }
             }
         }
     }
+    replace_children(ast, &mut pending);
 }
 
-/// Points `parent`'s child `old` at `new` (children are never mutated in place: the
-/// transform may share a node between two parents).
-fn replace_child(ast: &mut Ast, parent: NodeId, old: NodeId, new: NodeId) {
-    let node = *ast.node(parent);
-    let mapped = node.map_children(ast, &mut |_, c| if c == old { new } else { c });
-    *ast.node_mut(parent) = mapped;
+/// Points each parent's child `old` at `new`, remapping every parent once (children are
+/// never mutated in place: the transform may share a node between two parents).
+fn replace_children(ast: &mut Ast, pending: &mut [(NodeId, NodeId, NodeId)]) {
+    pending.sort_by_key(|&(p, old, _)| (p.raw(), old.raw()));
+    for group in pending.chunk_by(|a, b| a.0 == b.0) {
+        let parent = group[0].0;
+        let node = *ast.node(parent);
+        let mapped = node.map_children(ast, &mut |_, c| match group
+            .binary_search_by_key(&c.raw(), |&(_, old, _)| old.raw())
+        {
+            Ok(i) => group[i].2,
+            Err(_) => c,
+        });
+        *ast.node_mut(parent) = mapped;
+    }
 }
 
 #[cfg(test)]
@@ -600,6 +613,28 @@ mod tests {
 
     fn underscore(n: &str) -> bool {
         n.ends_with('_')
+    }
+
+    /// Thousands of rewritten children of one parent remap that parent once: the list
+    /// storage grows by one copy of the array, not one copy per element.
+    #[test]
+    fn many_keys_in_one_array_stay_linear() {
+        let n = 32_768;
+        let src = format!("x = [{}];", "/* @__KEY__ */ 'x_',".repeat(n));
+        let mut ast = ts_r_parser::parse(&src, SourceKind::Js).ast;
+        let opts = PropOptions {
+            mangles: &underscore,
+            quoted: false,
+            skip_namespace_members: false,
+        };
+        let names = collect(&ast, &src, None, &opts);
+        let map = assign([&names]);
+        let before = ast.list_items.len();
+        apply(&mut ast, &src, None, &opts, &map);
+        let grown = ast.list_items.len() - before;
+        assert!(grown <= n + 16, "list storage grew by {grown}");
+        let out = ts_r_codegen::print(&ast, &src, &ts_r_codegen::CodegenOptions::default()).code;
+        assert_eq!(out.matches("\"a\"").count(), n, "{}", &out[..80]);
     }
 
     #[test]

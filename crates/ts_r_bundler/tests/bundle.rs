@@ -2701,4 +2701,82 @@ fn path_externals_match_after_resolution() {
     assert!(text.contains("\"../src/lib.js\""), "{text}");
     assert!(text.contains("\"../src/gone.js\""), "{text}");
     assert!(!text.contains("export default 1"), "{text}");
+    // Relative to the output directory, not the chunk's: esbuild 0.28.2 prints
+    // `../src/lib.js` in `out/sub/a.js` too (observed), so ts-r-build does the same.
+    let mut o = opts(&["src/a.js"]);
+    o.external = vec!["./src/lib.js".into(), "/proj/src/gone.js".into()];
+    o.entry_names = "sub/[name]".into();
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/sub/a.js");
+    assert!(text.contains("\"../src/lib.js\""), "{text}");
+}
+
+/// `& &` at each of 30 levels doubles the lowered selector every level (2^30 copies of `a`
+/// from under 200 bytes): lowering stops with an error under the memory cap.
+#[test]
+fn css_nesting_blowup_is_an_error() {
+    let css = format!("a {{{}x:y{}}}", "& & {".repeat(30), "}".repeat(31));
+    let fs = project(&[("entry.css", &css)]);
+    let mut o = opts(&["entry.css"]);
+    o.supported = vec![(ts_r_bundler::Feature::Nesting, false)];
+    let ctx = BuildContext::new(o, Arc::new(fs.clone())).expect("options");
+    let r = ctx.build();
+    let errors: Vec<String> = r.errors().map(|m| m.to_string()).collect();
+    assert!(
+        errors.iter().any(|e| e.contains("selectors too large")),
+        "{errors:?}"
+    );
+}
+
+/// An injected file's exports decide how every other module is prepared: when they change,
+/// an unchanged module that refers to a newly injected name is prepared again.
+#[test]
+fn rebuild_after_injected_exports_change() {
+    let fs = Arc::new(SharedFs(std::sync::RwLock::new(project(&[
+        ("entry.js", "console.log(typeof obj)\n"),
+        ("shim.js", "export const x = 1\n"),
+    ]))));
+    let mut o = opts(&["entry.js"]);
+    o.inject = vec!["shim.js".into()];
+    let ctx = BuildContext::new(o, fs.clone()).expect("options");
+    let r = ctx.build();
+    assert!(!file(&r, "/proj/out/entry.js").contains("obj = {"));
+    fs.0.write().expect("lock").add_file(
+        "/proj/shim.js",
+        "export const x = 1\nexport const obj = { v: 1 }\n",
+    );
+    ctx.invalidate(&["shim.js".to_owned()]);
+    let r = ctx.build();
+    assert!(!r.has_errors(), "{:?}", r.messages);
+    let text = file(&r, "/proj/out/entry.js");
+    assert!(
+        text.contains("typeof obj") && text.contains("obj = { v: 1 }"),
+        "{text}"
+    );
+}
+
+/// A plain `export * from` in an injected file injects none of the star-exported names:
+/// esbuild 0.28.2 leaves `obj` and `deep` global here too (observed).
+#[test]
+fn injected_star_reexports_inject_nothing() {
+    let fs = project(&[
+        ("entry.js", "console.log(obj.v, deep, named)\n"),
+        (
+            "barrel.js",
+            "export * from './shim.js'\nexport { named } from './shim.js'\n",
+        ),
+        (
+            "shim.js",
+            "export const obj = { v: 1 }\nexport const deep = 2\nexport const named = 3\n",
+        ),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.inject = vec!["barrel.js".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/entry.js");
+    assert!(text.contains("console.log(obj.v, deep, named)"), "{text}");
+    assert!(
+        !text.contains("obj = {") && text.contains("named = 3"),
+        "{text}"
+    );
 }

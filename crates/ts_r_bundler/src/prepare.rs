@@ -875,8 +875,13 @@ impl PrepareContext {
         Arc::clone(&self.inject.read().unwrap_or_else(|e| e.into_inner()))
     }
 
-    pub fn set_inject(&self, inject: crate::inject::Inject) {
-        *self.inject.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(inject);
+    /// Sets the `--inject` settings; `true` when they differ from the last build's (what the
+    /// injected files export changed), so no cached module may be trusted unchecked.
+    pub fn set_inject(&self, inject: crate::inject::Inject) -> bool {
+        let mut cur = self.inject.write().unwrap_or_else(|e| e.into_inner());
+        let changed = cur.key != inject.key;
+        *cur = Arc::new(inject);
+        changed
     }
 }
 

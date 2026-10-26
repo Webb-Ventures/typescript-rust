@@ -234,7 +234,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   except `@media` and `@layer`, as esbuild does.
 - **CSS nesting** (`css/nesting.rs`) is lowered with `--supported:nesting=false` (no
   target table yet), as esbuild does: descendant or `&`-substituted selectors, `:is()` for a
-  parent list, `:scope` for a top-level rule a CSS module left without a selector. Pretty
+  parent list, `:scope` for a top-level rule a CSS module left without a selector; `&`
+  inside selector functions is replaced too. Lowering has a budget of 2^20 component values
+  plus 4 per input byte (`& &` doubles a selector per level): past it the sheet gets an
+  error and lowering stops. Pretty
   output prints one selector of a list per line. `Cv::Raw` / `Cv::Space` are the only
   component values not backed by source text.
 - **Local names** (`local-css`) also cover `@container` names, `container` /
@@ -243,7 +246,9 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   `:global` inside a function's selector list (`:nth-child(2n of ...)`) lasts past its commas.
 - **Path externals** (`--external:./x`, `/x`): matched against the resolved path, before
   extension probing and after resolution (esbuild's post-resolve externals); the import is
-  written relative to the output directory.
+  written relative to the output directory, also when the chunk is in a subdirectory of it
+  (`--entry-names=sub/[name]` gives `../src/lib.js` in `out/sub/main.js`, as esbuild 0.28.2
+  prints it, observed). This is esbuild's behaviour, kept on purpose.
 - A define also applies inside TypeScript enum initializers before the enum transform, so
   its value can name a member of that enum (`prepare::enum_initializers`).
 - Never panic on user input; every problem is a `Message` (esbuild-style text).

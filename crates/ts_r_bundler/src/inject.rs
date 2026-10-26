@@ -1,8 +1,11 @@
 //! `--inject:file` (esbuild's inject, from its docs and observed output).
 //!
-//! Every name an injected file exports (`export let x`, `export { y as "a.b" }`, re-exports
-//! included) replaces the same free name in every other module: a global identifier `x`, or
-//! a member chain `a.b` on a global `a` (also `import.meta`), the longest key first. The
+//! Every name an injected file exports (`export let x`, `export { y as "a.b" }`, named
+//! re-exports and `export * as ns from` included) replaces the same free name in every other
+//! module. Names that only come through a plain `export * from` do not: esbuild 0.28.2 leaves
+//! them global too (observed), so an injected barrel of `export *` injects nothing. A name
+//! replaces a global identifier `x`, or a member chain `a.b` on a global `a` (also
+//! `import.meta`), the longest key first. The
 //! module gets an import of that export from the injected file, which runs before the entry
 //! points' code: each entry point first imports every injected file for its side effects, in
 //! the order given. `define` runs first, so a define that names an injected export forwards

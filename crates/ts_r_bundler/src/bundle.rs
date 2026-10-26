@@ -316,13 +316,13 @@ impl BuildContext {
     }
 
     /// `--inject`: resolves the injected files (like entry points) and reads their exports.
-    fn resolve_inject(&self, entries: &[String]) -> Result<(), Vec<Message>> {
+    fn resolve_inject(&self, entries: &[String]) -> Result<bool, Vec<Message>> {
         let opts = &*self.opts;
         if opts.inject.is_empty() {
             if !self.prep.inject().is_empty() {
-                self.prep.set_inject(crate::inject::Inject::default());
+                return Ok(self.prep.set_inject(crate::inject::Inject::default()));
             }
-            return Ok(());
+            return Ok(false);
         }
         let wd = &opts.working_dir;
         let fs = self.prep.resolver.fs();
@@ -361,9 +361,9 @@ impl BuildContext {
         if !errs.is_empty() {
             return Err(errs);
         }
-        self.prep
-            .set_inject(crate::inject::Inject::new(&**fs, opts, files, entries));
-        Ok(())
+        Ok(self
+            .prep
+            .set_inject(crate::inject::Inject::new(&**fs, opts, files, entries)))
     }
 
     /// Runs a build.
@@ -386,9 +386,10 @@ impl BuildContext {
             Ok(e) => e,
             Err(m) => return BuildResult::fail(m),
         };
-        if let Err(m) = self.resolve_inject(&entries) {
-            return BuildResult::fail(m);
-        }
+        let inject_changed = match self.resolve_inject(&entries) {
+            Ok(c) => c,
+            Err(m) => return BuildResult::fail(m),
+        };
         let (outdir, outfile_name) = self.output_location(&entries);
         if !opts.bundle {
             return self.transform_only(&entries, &entry_names, &outdir, outfile_name.as_deref());
@@ -397,7 +398,10 @@ impl BuildContext {
             .trusted
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .take();
+            .take()
+            // Every module's preparation depends on what the injected files export: when
+            // that changed, each cached module is checked against its preparation key.
+            .filter(|_| !inject_changed);
         let gctx = GraphContext {
             prep: &self.prep,
             cache: &self.modules,

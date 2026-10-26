@@ -41,7 +41,8 @@ the helper and reserves its name), `props.rs` (esbuild's `--mangle-props`, from 
 and observed output: property names the caller's predicate accepts get one short name per
 output unit, most used first, never a name a property keeps; the module docs list what counts
 as a property name on the transformed tree, including the strings the transform writes for
-lowered fields, `__decorate` and `__rest`).
+lowered fields, `__decorate` and `__rest`; replacements are batched so each parent's
+children are remapped once, which keeps memory linear in the number of renamed keys).
 
 ## Invariants
 

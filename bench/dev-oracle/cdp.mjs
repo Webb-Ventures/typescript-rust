@@ -403,12 +403,12 @@ function cssOf(selector) {
  * Playwright's text selector: the innermost element whose whitespace-normalized text
  * contains `Foo`, ignoring case.
  */
-function queryExpr(selector) {
+export function queryExpr(selector) {
   const m = /^text=([^"'].*)$/.exec(selector)
   if (!m) return `document.querySelector(${JSON.stringify(cssOf(selector))})`
   const want = JSON.stringify(m[1].trim().replace(/\s+/g, ' ').toLowerCase())
   return `(() => {
-    const norm = (e) => (e.textContent || '').replace(/\s+/g, ' ').toLowerCase()
+    const norm = (e) => (e.textContent || '').replace(/\\s+/g, ' ').toLowerCase()
     const hit = (e) => e.tagName !== 'SCRIPT' && e.tagName !== 'STYLE' && norm(e).includes(${want})
     for (const e of document.body ? document.body.querySelectorAll('*') : []) {
       if (hit(e) && ![...e.children].some(hit)) return e
