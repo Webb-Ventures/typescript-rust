@@ -177,6 +177,171 @@ pub fn is_type_location(c: &Checker<'_>, file: FileId, anchor: NodeId, word: u32
     }
 }
 
+/// Words that may stand in a type argument list being scanned backwards: identifiers, and
+/// of the keywords only these.
+const TYPE_ARG_KEYWORDS: &[&str] = &[
+    "typeof",
+    "extends",
+    "keyof",
+    "true",
+    "false",
+    "any",
+    "unknown",
+    "number",
+    "bigint",
+    "boolean",
+    "string",
+    "symbol",
+    "void",
+    "undefined",
+    "null",
+    "never",
+    "object",
+    "this",
+];
+
+/// Reserved words that are not identifiers (a `<` after one of them starts no type
+/// arguments).
+const RESERVED: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+    "let",
+    "await",
+];
+
+/// For a word at `pos` that may be a type argument of an incomplete `f<...` (`f<|`,
+/// `new C<A, |`, `f<{ a: 1 }, |`): the start of the identifier before the unmatched `<` and
+/// how many type arguments come before the word. Scans tokens backwards, balancing `<>`,
+/// braces, parens and brackets, and gives up at a token no type contains (tsc: the possible
+/// type arguments scan in `tsc/internal/ls/utilities.go`).
+pub fn possible_type_arguments(ast: &Ast, text: &str, pos: u32) -> Option<(u32, u32)> {
+    if !text.as_bytes()[..(pos as usize).min(text.len())].contains(&b'<') {
+        return None;
+    }
+    let b = text.as_bytes();
+    // The token before `p`, a string literal taken whole.
+    let prev = |p: u32| -> Option<(u32, &str)> {
+        let (at, tok) = token_before(ast, text, p)?;
+        if matches!(tok, "\"" | "'" | "`") {
+            let n = node_covering(ast, at)?;
+            if matches!(
+                ast.node(n),
+                Node::StringLit { .. } | Node::TemplateLit { .. } | Node::TemplateElement { .. }
+            ) {
+                let start = ast.span(n).start;
+                return Some((start, &text[start as usize..at as usize + 1]));
+            }
+        }
+        Some((at, tok))
+    };
+    let mut remaining = 0u32;
+    let mut args = 0u32;
+    let mut close: Vec<u8> = Vec::new();
+    let mut p = pos;
+    for _ in 0..100_000 {
+        let (at, tok) = prev(p)?;
+        if !close.is_empty() {
+            match tok {
+                ")" | "]" | "}" => close.push(tok.as_bytes()[0]),
+                "(" | "[" | "{" => {
+                    let want = match tok {
+                        "(" => b')',
+                        "[" => b']',
+                        _ => b'}',
+                    };
+                    if close.pop() != Some(want) {
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+            p = at;
+            continue;
+        }
+        match tok {
+            "<" => {
+                let mut q = prev(at)?;
+                if q.1 == "." && at > 0 && prev(q.0).is_some_and(|r| r.1 == "?") {
+                    q = prev(prev(q.0)?.0)?;
+                }
+                let (cs, word) = q;
+                let ident = word
+                    .bytes()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_' || c == b'$')
+                    && !RESERVED.contains(&word);
+                if !ident {
+                    return None;
+                }
+                if remaining == 0 {
+                    return Some((cs, args));
+                }
+                remaining -= 1;
+            }
+            ">" => {
+                // `=>` is one token.
+                if at > 0 && b[at as usize - 1] == b'=' {
+                    p = at - 1;
+                    continue;
+                }
+                remaining += 1;
+            }
+            ")" | "]" | "}" => close.push(tok.as_bytes()[0]),
+            "," => args += 1,
+            "." | "|" | "?" | ":" => {}
+            _ if tok.starts_with(['"', '\'', '`']) => {}
+            _ => {
+                let first = tok.as_bytes()[0];
+                if first.is_ascii_digit() {
+                } else if is_ident_byte(first) {
+                    if RESERVED.contains(&tok) && !TYPE_ARG_KEYWORDS.contains(&tok) {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+        p = at;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +357,21 @@ mod tests {
         let src = "é ";
         let ast = ts_r_parser::parse(src, ts_r_ast::SourceKind::Ts).ast;
         assert_eq!(token_before(&ast, src, 3), Some((0, "é")));
+    }
+
+    #[test]
+    fn possible_type_arguments_scan_back_to_the_callee() {
+        let at = |src: &str, needle: &str| {
+            let ast = ts_r_parser::parse(src, ts_r_ast::SourceKind::Ts).ast;
+            let pos = src.find(needle).expect("needle") as u32;
+            possible_type_arguments(&ast, src, pos)
+        };
+        assert_eq!(at("f<Ty", "Ty"), Some((0, 0)));
+        assert_eq!(at("x; f2<A, () => B, Ty", "Ty"), Some((3, 2)));
+        assert_eq!(at("new C<C<Ty;", "Ty"), Some((6, 0)));
+        assert_eq!(at("g<{ a: \"<\" }, Ty", "Ty"), Some((0, 1)));
+        assert_eq!(at("a < b; Ty", "Ty"), None);
+        assert_eq!(at("return <Ty", "Ty"), None);
+        assert_eq!(at("no angle", "angle"), None);
     }
 }

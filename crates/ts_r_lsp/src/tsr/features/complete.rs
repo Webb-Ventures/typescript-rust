@@ -653,10 +653,19 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         }
         Context::Scope {
             anchor,
-            types_only,
-            values_only,
+            mut types_only,
+            mut values_only,
             jsx_tag,
         } => {
+            // `f<|` of a generic `f`: a type argument is being written.
+            let ws = ws_of(c, cx.file, offset);
+            let after_typeof =
+                super::position::token_before(c.ast(cx.file), &c.file(cx.file).text, ws)
+                    .is_some_and(|(_, t)| t == "typeof");
+            if !types_only && !after_typeof && possibly_type_argument(ck, cx.file, ws, 0) {
+                types_only = true;
+                values_only = false;
+            }
             if jsx_tag {
                 for (name, s) in super::jsx_items::intrinsic_tags(ck, Loc::new(cx.file, anchor)) {
                     items.push(json!({
@@ -790,6 +799,80 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         }
     }
     json!({"isIncomplete": incomplete, "items": items})
+}
+
+/// Whether the word at `pos` may be a type argument of an unclosed `f<...`: the identifier
+/// before the `<` is part of a type, has call (construct, after `new`) signatures with at
+/// least as many type parameters as arguments come before, or is itself such an argument.
+fn possibly_type_argument(ck: &mut Ck<'_, '_>, file: FileId, pos: u32, depth: u32) -> bool {
+    const MAX_DEPTH: u32 = 16;
+    let c = ck.c;
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let Some((start, n)) = super::position::possible_type_arguments(ast, text, pos) else {
+        return false;
+    };
+    let Some(id) = super::position::node_covering(ast, start) else {
+        return false;
+    };
+    if !matches!(ast.node(id), Node::Ident { .. }) {
+        return false;
+    }
+    let parent = c.file(file).parents().parent(id);
+    if let Some(p) = parent {
+        let pn = ast.node(p);
+        if declares(pn, id) {
+            return false;
+        }
+        if matches!(
+            pn,
+            Node::TypeRef { .. } | Node::QualifiedName { .. } | Node::TypeQuery { .. }
+        ) {
+            return true;
+        }
+    }
+    // `o.m<|`: the type of the access.
+    let callee = match parent.map(|p| (p, ast.node(p))) {
+        Some((p, Node::Member { prop, .. })) if *prop == id => p,
+        _ => id,
+    };
+    let parent = c.file(file).parents().parent(callee);
+    // `new Bar<|` reads as type arguments whatever `Bar` is (observed tsc 7).
+    if super::position::token_before(ast, text, start).is_some_and(|(_, t)| t == "new") {
+        return true;
+    }
+    // The parser already made type arguments of it: a type position.
+    if let Some(
+        Node::New {
+            callee: x,
+            type_args: Some(ta),
+            ..
+        }
+        | Node::Call {
+            callee: x,
+            type_args: Some(ta),
+            ..
+        },
+    ) = parent.map(|p| ast.node(p))
+        && *x == callee
+        && ast.span(*ta).start <= pos
+        && pos <= ast.span(*ta).end
+    {
+        return true;
+    }
+    let l = Loc::new(file, callee);
+    let t = ck.check_expr(l);
+    let a = ck.apparent_type(t);
+    let kind = match parent.map(|p| ast.node(p)) {
+        Some(Node::New { callee: x, .. }) if *x == callee => SigKind::Construct,
+        _ => SigKind::Call,
+    };
+    let generic = ck.signatures_of(a, kind).into_iter().any(|sig| {
+        let store = ck.store();
+        let k = store.list_items(store.sig(sig).type_params).len();
+        k > 0 && k >= n as usize
+    });
+    generic || (depth < MAX_DEPTH && possibly_type_argument(ck, file, start, depth + 1))
 }
 
 /// Whether `s` has a meaning in `want`; an alias by what it resolves to (an alias that

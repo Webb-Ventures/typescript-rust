@@ -337,6 +337,13 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
 - Positions (`position.rs`): the token before an offset and the node covering it, and
   whether an offset sits in a type (annotation, type arguments, `extends`/`implements`,
   `as`/`satisfies`), which switches the scope list to types and namespaces.
+- Possible type arguments (`tsc: tsc/internal/ls/utilities.go`, the backward scan for a
+  `<` that might open type arguments): reading tokens back from the offset over balanced
+  `<>`, `()`, `[]`, `{}` and the tokens a type may hold, to an identifier right before an
+  unmatched `<`, counts the arguments already written. The list is types when the callee
+  has a signature with at least that many type parameters (construct signatures after
+  `new`), when it is a type reference already, or after `new X<` whatever `X` is; not when
+  `typeof` precedes, and not when the identifier is being declared.
 - Scope: a variable is not offered inside its own initializer (`const x = |`), except when
   the cursor is past the initializer's end with nothing typed, or inside a JSX tag; blocks,
   arrows and patterns end the search. A CommonJS JavaScript file (one that refers to

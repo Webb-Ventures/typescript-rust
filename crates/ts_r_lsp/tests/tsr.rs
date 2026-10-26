@@ -1389,6 +1389,47 @@ fn completion_function_members_and_arguments() {
     c.shutdown();
 }
 
+/// After `f<` with a generic `f` (or `new X<` whatever `X` is) the list is types, as tsc
+/// reads a possible type argument list; a plain `a < ` comparison stays a value position.
+#[test]
+fn completion_in_possible_type_arguments() {
+    if !libs_present() {
+        return;
+    }
+    let text = "interface Shape { w: number }\nconst v = 1;\nfunction f<T>(x?: T) {}\n\
+                class Bar {}\nf<\nfunction g() { new Bar< }\nconst c = v < \n";
+    let env = Env::new(
+        "complete-typeargs",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for (line, ch) in [(4, 2), (5, 23)] {
+        let l = labels(&result(
+            &mut c,
+            "textDocument/completion",
+            at(&uc, line, ch),
+        ));
+        assert!(l.iter().any(|x| x == "Shape"), "{line}:{ch} {l:?}");
+        assert!(!l.iter().any(|x| x == "v"), "{line}:{ch} {l:?}");
+    }
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 14)));
+    assert!(l.iter().any(|x| x == "v"), "{l:?}");
+    assert!(!l.iter().any(|x| x == "Shape"), "{l:?}");
+    c.shutdown();
+}
+
 /// Class bodies: the inherited members not written yet (and member keywords) where a member
 /// name goes, `this` members among the names in a method, and private or protected members
 /// only where they may be read.
