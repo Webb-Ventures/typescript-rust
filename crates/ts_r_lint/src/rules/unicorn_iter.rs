@@ -355,3 +355,58 @@ pub(crate) fn referenced_by_nested_function(
         scope != own && (cx.span(ident).start < loop_end || declaration)
     })
 }
+
+/// `isGlobalNameAvailable`: no runtime binding named `name` is visible at `node`, so code
+/// inserted there can use the global (type aliases, interfaces and type-only imports
+/// can't shadow a value).
+pub(crate) fn global_name_available(cx: &Ctx<'_, '_>, name: &str, node: NodeId) -> bool {
+    let ast = cx.ast();
+    let sem = cx.semantic();
+    let Some(s) = sem.lookup(sem.enclosing_scope(node), name) else {
+        return true;
+    };
+    sem.symbol(s).decls.iter().all(|d| match d.kind {
+        DeclKind::TypeAlias | DeclKind::Interface => true,
+        DeclKind::ImportNamed | DeclKind::ImportDefault | DeclKind::ImportNamespace => {
+            matches!(
+                *ast.node(d.parent),
+                Node::ImportDecl {
+                    type_only: true,
+                    ..
+                }
+            ) || matches!(
+                *ast.node(d.node),
+                Node::ImportSpecifier {
+                    type_only: true,
+                    ..
+                }
+            )
+        }
+        _ => false,
+    })
+}
+
+/// An `await`, `yield` or `for await` in `root`, outside nested functions.
+pub(crate) fn contains_suspension_point(ast: &Ast, root: NodeId) -> bool {
+    let mut stack = vec![root];
+    let mut guard = 0u32;
+    while let Some(id) = stack.pop() {
+        guard += 1;
+        if guard > 1_000_000 {
+            return true;
+        }
+        if matches!(
+            ast.node(id),
+            Node::Await { .. } | Node::Yield { .. } | Node::ForOf { is_await: true, .. }
+        ) {
+            return true;
+        }
+        if crate::ast_util::is_function(ast.kind(id))
+            || matches!(ast.node(id), Node::MethodDef { .. })
+        {
+            continue;
+        }
+        ast.for_each_child(id, |c| stack.push(c));
+    }
+    false
+}

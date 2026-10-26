@@ -18,6 +18,7 @@
 
 use super::prelude::*;
 use super::unicorn_ast::{method_call, no_spread_in};
+use super::unicorn_iter::global_name_available;
 use super::unicorn_static::static_value;
 use super::unicorn_text::{
     call_argument_text, has_comment_in, has_possible_side_effect, needs_semicolon, paren_text,
@@ -56,19 +57,6 @@ const INHERITED: &[&str] = &[
     "valueOf",
 ];
 
-/// No runtime binding named `name` is visible at `node` (type-only ones don't count).
-fn global_available(cx: &Ctx<'_, '_>, name: &str, node: NodeId) -> bool {
-    let sem = cx.semantic();
-    match sem.lookup(sem.enclosing_scope(node), name) {
-        None => true,
-        Some(s) => sem
-            .symbol(s)
-            .decls
-            .iter()
-            .all(|d| matches!(d.kind, DeclKind::TypeAlias | DeclKind::Interface)),
-    }
-}
-
 /// `Object.<method>(..)` on the identifier `Object`.
 fn object_call<'a>(ast: &'a Ast, id: NodeId) -> Option<super::unicorn_ast::MethodCall<'a>> {
     let call = method_call(ast, id)?;
@@ -90,7 +78,7 @@ fn is_object_entries_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
         c.name == "entries"
             && c.args.len() == 1
             && no_spread_in(ast, c.args, 1)
-            && global_available(cx, "Object", id)
+            && global_name_available(cx, "Object", id)
     })
 }
 
@@ -239,7 +227,7 @@ fn object_method_operation(cx: &Ctx<'_, '_>, ident: NodeId) -> Option<Option<Ope
     let parent = parent_np(cx, ident)?;
     let call = object_call(ast, parent)?;
     if !matches!(call.name, "hasOwn" | "entries" | "keys" | "values")
-        || !global_available(cx, "Object", parent)
+        || !global_name_available(cx, "Object", parent)
         || call.args.first().map(|&a| skip_parens(ast, a)) != Some(ident)
     {
         return None;
@@ -410,8 +398,8 @@ impl Rule for PreferMapFromEntries {
                     ..
                 }
             )
-            || !global_available(cx, "Object", init)
-            || !global_available(cx, "Map", init)
+            || !global_name_available(cx, "Object", init)
+            || !global_name_available(cx, "Map", init)
             || !is_known_string_key_entries(cx, call.args[0])
         {
             return;

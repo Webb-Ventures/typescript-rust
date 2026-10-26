@@ -346,6 +346,7 @@ unicorn/no-late-current-target-access 49/49
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
 unicorn/no-magic-array-flat-depth 27/27
+unicorn/no-mismatched-map-key 103/103
 unicorn/no-misrefactored-assignment 79/79
 unicorn/no-named-default 66/66
 unicorn/no-negated-array-predicate 73/73
@@ -409,8 +410,10 @@ unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-array-find 411/411
 unicorn/prefer-array-flat 330/330
 unicorn/prefer-array-flat-map 114/114
+unicorn/prefer-array-from-map 99/99
 unicorn/prefer-array-from-range 90/90
 unicorn/prefer-array-index-of 158/158
+unicorn/prefer-array-iterable-methods 107/107
 unicorn/prefer-array-last-methods 43/43
 unicorn/prefer-array-slice 61/61
 unicorn/prefer-array-some 377/377

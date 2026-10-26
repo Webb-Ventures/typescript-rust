@@ -393,6 +393,7 @@ mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_magic_array_flat_depth;
+mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
 mod unicorn_no_named_default;
 mod unicorn_no_negated_array_predicate;
@@ -466,8 +467,10 @@ mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_array_find;
 mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
+mod unicorn_prefer_array_from_map;
 mod unicorn_prefer_array_from_range;
 mod unicorn_prefer_array_index_of;
+mod unicorn_prefer_array_iterable_methods;
 mod unicorn_prefer_array_last_methods;
 mod unicorn_prefer_array_slice;
 mod unicorn_prefer_array_some;
@@ -993,6 +996,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_magic_array_flat_depth::RULE,
+    &unicorn_no_mismatched_map_key::RULE,
     &unicorn_no_misrefactored_assignment::RULE,
     &unicorn_no_named_default::RULE,
     &unicorn_no_negated_array_predicate::RULE,
@@ -1055,7 +1059,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_operator_assignment::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_array_find::RULE,
+    &unicorn_prefer_array_from_map::RULE,
     &unicorn_prefer_array_from_range::RULE,
+    &unicorn_prefer_array_iterable_methods::RULE,
     &unicorn_prefer_array_slice::RULE,
     &unicorn_prefer_array_last_methods::RULE,
     &unicorn_prefer_await::RULE,
