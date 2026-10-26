@@ -337,14 +337,29 @@ fn check_program_impl<'a>(
             i += 1;
             i <= n_syntax
                 // (TS1294, `erasableSyntaxOnly`, TS1141 for `import(x)` types, TS1539 for
-                // bigint property names, TS1156 for a `let`/`const` statement as the body of
+                // bigint property names, TS1225/TS1228/TS1229/TS1230 for type predicates,
+                // TS1156 for a `let`/`const` statement as the body of
                 // `if`/`while`/... (the parser keeps the `type`/`interface` one back), and the
                 // import checks TS1192, TS1205, TS1340, TS1361, TS1362, TS1484 and TS1485 are
                 // semantic errors to tsc 7.)
                 || !((1000..2000).contains(&d.code)
                     && !matches!(
                         d.code,
-                        1141 | 1156 | 1192 | 1205 | 1294 | 1340 | 1361 | 1362 | 1484 | 1485 | 1539
+                        1141
+                            | 1156
+                            | 1192
+                            | 1205
+                            | 1225
+                            | 1228
+                            | 1229
+                            | 1230
+                            | 1294
+                            | 1340
+                            | 1361
+                            | 1362
+                            | 1484
+                            | 1485
+                            | 1539
                     )
                     || matches!(d.code, 8020 | 17019 | 17020))
                 || !broken.get(d.file.0 as usize).copied().unwrap_or(false)

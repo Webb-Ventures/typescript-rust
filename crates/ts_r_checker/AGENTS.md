@@ -1253,6 +1253,13 @@ Files, by layer:
   arrows; `jsdoc_illegal_tags`), and an untyped parameter under a `@type` without call
   signature is TS7006. A failed JSDoc cast is reported at its
   type (TS2352), a JSDoc type predicate outside a return type is TS1228.
+- **Type predicates** (`check_type_predicate`; tsc: checker.go, checkTypePredicate): in the
+  return type of a function, method, call signature or function type, `x is T` names a
+  parameter (else TS1225 at the name, or TS1230 when the name is only an element of a
+  binding-pattern parameter), not the last rest parameter (TS1229), and `T` must be
+  assignable to that parameter's type (TS2677 over the relation chain, at `T`). These are
+  checker errors, kept in files with syntax errors; there the checker also reports the
+  parser's deferred TS1228 (which only a clean parse keeps).
 - **JSDoc type syntax in TypeScript** (`check_jsdoc_syntax`, from `Ast::jsdoc_syntax`):
   TS17019 (postfix `?`/`!`), TS17020 (prefix) and TS8020 (`*`), suggesting the inner type
   (`!`), `T | undefined` (postfix `?`) or `T | null | undefined` (prefix `?`), with

@@ -4771,6 +4771,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_generic_indexed_access_type(Loc::new(file, n), Loc::new(file, obj));
                 }
                 // A JSDoc type predicate other than a return type (`/** @type {x is T} */`).
+                Node::TypePredicate { asserts, param, ty } if !ast.is_jsdoc(n) => {
+                    self.check_type_predicate(Loc::new(file, n), asserts, param, ty);
+                }
                 Node::TypePredicate { .. } if ast.is_jsdoc(n) => {
                     let l = Loc::new(file, n);
                     if self
@@ -4833,6 +4836,130 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// `static readonly` class property (TS1331, at its name) or a `readonly` property
     /// signature (TS1330, at its name); anywhere else it is TS1335. Files with syntax
     /// errors get none of these.
+    /// A type predicate in the return type of a function, method, call signature or
+    /// function type (elsewhere the parser reports TS1228): its parameter must exist
+    /// (TS1225, or TS1230 when the name is an element of a binding pattern), not be a rest
+    /// parameter (TS1229), and its type must be assignable to the parameter's (TS2677, at
+    /// the type). (tsc: checker.go, checkTypePredicate.)
+    fn check_type_predicate(&mut self, l: Loc, _asserts: bool, param: NodeId, ty: Option<NodeId>) {
+        let file = l.file;
+        let ast = self.ast(file);
+        let Some(owner) = self.c.parent(l) else {
+            return;
+        };
+        let allowed = match *ast.node(owner.node) {
+            Node::Arrow { .. }
+            | Node::CallSignature { .. }
+            | Node::FunctionDecl { .. }
+            | Node::FunctionType { .. } => true,
+            Node::MethodSignature { kind, .. } => kind == ts_r_ast::MethodKind::Method,
+            Node::FunctionExpr { .. } => !matches!(
+                self.c.parent(owner).map(|m| ast.node(m.node)),
+                Some(Node::MethodDef { kind, .. }) if *kind != ts_r_ast::MethodKind::Method
+            ),
+            _ => false,
+        };
+        let return_type = match *ast.node(owner.node) {
+            Node::FunctionType { return_type, .. } => Some(return_type),
+            _ => fn_parts(ast, owner.node).and_then(|p| p.return_type),
+        };
+        if !allowed || return_type != Some(l.node) {
+            // The parser defers its TS1228 to a clean parse; tsc's checker reports it in any
+            // file, so a file with syntax errors gets it from here.
+            if self.has_syntax_errors(file) {
+                self.error(
+                    l,
+                    dg::A_TYPE_PREDICATE_IS_ONLY_ALLOWED_IN_RETURN_TYPE_POSITION_FOR_FUNCTIONS_AND_METHO_1228,
+                    &[],
+                );
+            }
+            return;
+        }
+        // `this is T` / `asserts this`: nothing to look up.
+        let Some(name) = ident_text(ast, param) else {
+            return;
+        };
+        let params = match *ast.node(owner.node) {
+            Node::FunctionType { params, .. } => params,
+            _ => match fn_parts(ast, owner.node) {
+                Some(p) => p.params,
+                None => return,
+            },
+        };
+        let list: Vec<NodeId> = ast
+            .list(params)
+            .iter()
+            .copied()
+            .filter(|&p| !is_this_param(ast, p))
+            .collect();
+        let found = list.iter().position(|&p| {
+            matches!(*ast.node(p), Node::Param { pattern, .. } if ident_text(ast, pattern) == Some(name)
+                && matches!(ast.node(pattern), Node::Ident { .. }))
+        });
+        let Some(index) = found else {
+            let in_pattern = list.iter().any(|&p| {
+                matches!(*ast.node(p), Node::Param { pattern, .. }
+                    if !matches!(ast.node(pattern), Node::Ident { .. })
+                        && pattern_declares(ast, pattern, name))
+            });
+            let info = if in_pattern {
+                dg::A_TYPE_PREDICATE_CANNOT_REFERENCE_ELEMENT_0_IN_A_BINDING_PATTERN_1230
+            } else {
+                dg::CANNOT_FIND_PARAMETER_0_1225
+            };
+            let name = name.to_owned();
+            self.error(Loc::new(file, param), info, &[&name]);
+            return;
+        };
+        if index + 1 == list.len()
+            && matches!(*ast.node(list[index]), Node::Param { rest: true, .. })
+        {
+            self.error(
+                Loc::new(file, param),
+                dg::A_TYPE_PREDICATE_CANNOT_REFERENCE_A_REST_PARAMETER_1229,
+                &[],
+            );
+            return;
+        }
+        let Some(ty) = ty else {
+            return;
+        };
+        let at = Loc::new(file, ty);
+        let source = self.type_from_node(at);
+        let sig = self.signature_from_decl(owner);
+        let target = match self
+            .store()
+            .sig(sig)
+            .params
+            .get(index)
+            .map(|p| (p.sym, p.ty))
+        {
+            Some((sym, _)) if !sym.is_none() => self.type_of_symbol(sym),
+            Some((_, t)) => t,
+            None => return,
+        };
+        if source == TypeId::UNRESOLVED
+            || target == TypeId::UNRESOLVED
+            || self.store().is_error(source)
+            || self.store().is_error(target)
+            || self.is_assignable(source, target)
+            || !self.reporting(file)
+        {
+            return;
+        }
+        let (mut chain, _) =
+            self.relation_error_chain(source, target, ts_r_types::RelationKind::Assignable, None);
+        for (i, level) in &mut chain.nested {
+            *i += 1;
+            *level += 1;
+        }
+        chain.push_front(
+            dg::A_TYPE_PREDICATE_S_TYPE_MUST_BE_ASSIGNABLE_TO_ITS_PARAMETER_S_TYPE_2677,
+            &[],
+        );
+        self.error_chain(at, &chain);
+    }
+
     fn check_unique_symbol_type(&mut self, l: Loc, operand: NodeId) {
         if self.has_syntax_errors(l.file) {
             return;
@@ -10604,4 +10731,41 @@ fn regex_needs_target(d: &Diagnostic, target: ts_r_config::ScriptTarget) -> bool
         .nth(1)
         .and_then(ts_r_config::ScriptTarget::parse);
     needed.is_some_and(|needed| target < needed)
+}
+
+/// Whether binding pattern `pattern` declares `name` in one of its elements, at any depth
+/// (bounded).
+fn pattern_declares(ast: &ts_r_ast::Ast, pattern: NodeId, name: &str) -> bool {
+    let mut stack = vec![pattern];
+    let mut steps = 0;
+    while let Some(n) = stack.pop() {
+        steps += 1;
+        if steps > 10_000 {
+            return false;
+        }
+        match *ast.node(n) {
+            Node::ObjectPattern { props } => {
+                for &p in ast.list(props) {
+                    match *ast.node(p) {
+                        Node::BindingProperty { value: Some(v), .. } => stack.push(v),
+                        Node::BindingProperty {
+                            key, value: None, ..
+                        } => stack.push(key),
+                        Node::Rest { arg } => stack.push(arg),
+                        _ => {}
+                    }
+                }
+            }
+            Node::ArrayPattern { elements } => {
+                for &e in ast.list(elements) {
+                    stack.push(e);
+                }
+            }
+            Node::AssignPattern { left, .. } => stack.push(left),
+            Node::Rest { arg } => stack.push(arg),
+            Node::Ident { .. } if ident_text(ast, n) == Some(name) => return true,
+            _ => {}
+        }
+    }
+    false
 }
