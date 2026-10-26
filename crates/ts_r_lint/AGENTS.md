@@ -194,11 +194,27 @@ Round 3 adds 57 core rules, each at 100% of its oracle (`no-return-assign` throu
   source text.
 - **no-useless-rename** reports but does not fix when removing the key would drop a comment,
   or when the target with a default is wrapped in parentheses.
-- Not done yet: `no-promise-executor-return`, `grouped-accessor-pairs`, `no-else-return`.
+- Round 4 adds `no-promise-executor-return`, `grouped-accessor-pairs` and `no-else-return`,
+  each at 100% of its oracle.
+- **no-promise-executor-return** checks the first argument of `new Promise(...)` (the
+  global `Promise`): a `return` with a value or an arrow's expression body. With
+  `allowVoid` the suggestion prepends `void` (adding parentheses below unary precedence);
+  an expression body also suggests braces unless it is an anonymous function or class.
+- **grouped-accessor-pairs** matches keys by static name, else by tokens (a private name
+  never equals a public one); a key with two getters or two setters is skipped; static and
+  instance members are separate lists. Reports go on the latter accessor's head, whose `(`
+  is searched for after the key (a computed key can hold parentheses).
+- **no-else-return** checks `if`s directly in a statement list. Its fix unwraps the `else`
+  unless a name the `else` block declares is declared in, captured by a reference in, or
+  hoisted into the surrounding scope (a function's implicit `arguments` counts), or ASI
+  could merge statements; the fix's range is the enclosing function (or the file), so one
+  applies per function per pass.
+- `function_name_with_kind` shows private members bare (`private getter #x`), as ESLint.
 
 Read to understand (not ported), ESLint `lib/rules/`: `no-eval.js`, `no-lonely-if.js`,
 `no-alert.js`, `eqeqeq.js`, `no-throw-literal.js`, `radix.js`, `no-extra-bind.js`,
-`no-lone-blocks.js`, `prefer-numeric-literals.js`, `no-extend-native.js`,
+`no-lone-blocks.js`, `prefer-numeric-literals.js`, `no-promise-executor-return.js`,
+`grouped-accessor-pairs.js`, `no-else-return.js` (and `utils/fix-tracker.js`), `no-extend-native.js`,
 `prefer-object-has-own.js`, `no-useless-computed-key.js`, `no-restricted-properties.js`,
 `no-restricted-globals.js`, `yoda.js`, `no-useless-rename.js`, and `utils/ast-utils.js`
 (the default-`this` test, when braces are needed, same-reference and static property names).

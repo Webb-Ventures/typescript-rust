@@ -392,15 +392,9 @@ pub fn function_name_with_kind(ast: &Ast, src: &str, parents: &ParentMap, f: Nod
                     .into(),
                 );
                 if kind != MethodKind::Constructor {
-                    if let Some(n) = key_name(ast, src, key)
-                        && !matches!(ast.node(key), Node::ComputedKey { .. })
-                    {
-                        let n = if is_private {
-                            format!("#{n}")
-                        } else {
-                            n.into_owned()
-                        };
-                        tokens.push(format!("'{n}'"));
+                    // A private name is shown bare (`#x`), others quoted.
+                    if is_private && let Some(n) = key_name(ast, src, key) {
+                        tokens.push(format!("#{n}"));
                     } else if let Some(n) = key_name(ast, src, key) {
                         tokens.push(format!("'{n}'"));
                     }
@@ -443,12 +437,11 @@ pub fn function_name_with_kind(ast: &Ast, src: &str, parents: &ParentMap, f: Nod
                     .into(),
                 );
                 if let Some(n) = key_name(ast, src, key) {
-                    let n = if is_private {
+                    tokens.push(if is_private {
                         format!("#{n}")
                     } else {
-                        n.into_owned()
-                    };
-                    tokens.push(format!("'{n}'"));
+                        format!("'{n}'")
+                    });
                 }
                 return tokens.join(" ");
             }
@@ -519,9 +512,18 @@ pub fn function_head_span(ast: &Ast, src: &str, parents: &ParentMap, f: NodeId) 
                     Node::MethodDef { .. } | Node::PropertyDef { .. }
                 )
             {
-                // From the start of the method (or key) to the `(`.
+                // From the start of the method (or key) to the `(` of its parameters,
+                // which follows the key (a computed key can hold parentheses).
                 let start = ast.span(p).start;
-                let paren = paren_after(src, start, span.end).unwrap_or(span.start);
+                let key_end = match *ast.node(p) {
+                    Node::MethodDef { key, .. } | Node::PropertyDef { key, .. } => {
+                        ast.span(key).end.max(start)
+                    }
+                    _ => start,
+                };
+                let paren = paren_after(src, key_end, span.end)
+                    .or_else(|| paren_after(src, start, span.end))
+                    .unwrap_or(span.start);
                 return Span::new(start, paren);
             }
             // ESTree's function declaration starts after `export` / `default` / `declare`.

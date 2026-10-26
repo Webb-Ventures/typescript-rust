@@ -88,6 +88,7 @@ default-param-last 96/96
 eqeqeq 77/77
 for-direction 100/100
 getter-return 81/81
+grouped-accessor-pairs 150/150
 guard-for-in 12/12
 jsdoc/check-access 18/18
 jsdoc/check-alignment 20/20
@@ -157,6 +158,7 @@ no-dupe-class-members 78/78
 no-dupe-else-if 89/89
 no-dupe-keys 50/50
 no-duplicate-case 29/29
+no-else-return 91/91
 no-empty 35/35
 no-empty-character-class 42/42
 no-empty-pattern 31/31
@@ -196,6 +198,7 @@ no-object-constructor 56/56
 no-octal 17/17
 no-octal-escape 94/94
 no-plusplus 23/23
+no-promise-executor-return 126/126
 no-proto 9/9
 no-prototype-builtins 47/47
 no-redeclare 71/71

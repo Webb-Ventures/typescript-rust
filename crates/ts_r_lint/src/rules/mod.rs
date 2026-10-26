@@ -14,6 +14,7 @@ mod default_param_last;
 mod eqeqeq;
 mod for_direction;
 mod getter_return;
+mod grouped_accessor_pairs;
 mod guard_for_in;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
@@ -83,6 +84,7 @@ mod no_dupe_class_members;
 mod no_dupe_else_if;
 mod no_dupe_keys;
 mod no_duplicate_case;
+mod no_else_return;
 mod no_empty;
 mod no_empty_character_class;
 mod no_empty_pattern;
@@ -122,6 +124,7 @@ mod no_object_constructor;
 mod no_octal;
 mod no_octal_escape;
 mod no_plusplus;
+mod no_promise_executor_return;
 mod no_proto;
 mod no_prototype_builtins;
 mod no_redeclare;
@@ -294,6 +297,7 @@ pub static ALL: &[&RuleDef] = &[
     &eqeqeq::RULE,
     &for_direction::RULE,
     &getter_return::RULE,
+    &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
     &max_depth::RULE,
     &max_nested_callbacks::RULE,
@@ -324,6 +328,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_dupe_else_if::RULE,
     &no_dupe_keys::RULE,
     &no_duplicate_case::RULE,
+    &no_else_return::RULE,
     &no_empty::RULE,
     &no_empty_character_class::RULE,
     &no_empty_pattern::RULE,
@@ -363,6 +368,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_octal::RULE,
     &no_octal_escape::RULE,
     &no_plusplus::RULE,
+    &no_promise_executor_return::RULE,
     &no_proto::RULE,
     &no_prototype_builtins::RULE,
     &no_redeclare::RULE,

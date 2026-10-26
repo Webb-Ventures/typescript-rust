@@ -252,3 +252,6 @@ jsdoc/no-missing-syntax
 jsdoc/require-property
 jsdoc/require-asterisk-prefix
 jsdoc/check-param-names
+no-promise-executor-return
+grouped-accessor-pairs
+no-else-return
