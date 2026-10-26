@@ -178,12 +178,13 @@ mod radix;
 mod require_yield;
 mod symbol_description;
 mod this_binding;
-mod ts_array_type;
 mod ts_adjacent_overload_signatures;
+mod ts_array_type;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
 mod ts_consistent_generic_constructors;
 mod ts_consistent_indexed_object_style;
+mod ts_consistent_type_assertions;
 mod ts_consistent_type_imports;
 mod ts_dot_notation;
 mod ts_no_array_constructor;
@@ -245,8 +246,8 @@ mod ts_non_nullable_type_assertion_style;
 mod ts_only_throw_error;
 mod ts_prefer_as_const;
 mod ts_prefer_find;
-mod ts_prefer_function_type;
 mod ts_prefer_for_of;
+mod ts_prefer_function_type;
 mod ts_prefer_includes;
 mod ts_prefer_literal_enum_member;
 mod ts_prefer_namespace_keyword;
@@ -438,6 +439,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_ban_ts_comment::RULE,
     &ts_consistent_generic_constructors::RULE,
     &ts_consistent_indexed_object_style::RULE,
+    &ts_consistent_type_assertions::RULE,
     &ts_consistent_type_imports::RULE,
     &ts_dot_notation::RULE,
     &ts_no_array_constructor::RULE,
