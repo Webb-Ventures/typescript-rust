@@ -389,3 +389,5 @@ unicorn/prefer-simple-sort-comparator
 unicorn/no-useless-collection-argument
 unicorn/prefer-dom-node-html-methods
 unicorn/prefer-string-match-all
+unicorn/require-module-specifiers
+unicorn/no-useless-concat

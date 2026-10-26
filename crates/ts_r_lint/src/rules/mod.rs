@@ -326,6 +326,7 @@ mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_collection_argument;
+mod unicorn_no_useless_concat;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_re_export;
@@ -371,7 +372,14 @@ mod unicorn_prefer_switch;
 mod unicorn_prefer_ternary;
 mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
-mod unicorn_switch_case_braces;
+mod unicorn_prefer_type_literal_last;
+mod unicorn_require_array_sort_compare;
+mod unicorn_require_css_escape;
+mod unicorn_require_module_attributes;
+mod unicorn_require_module_specifiers;
+mod unicorn_static;
+mod unicorn_switch_case_break_position;
+mod unicorn_text;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
@@ -730,6 +738,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_collection_argument::RULE,
+    &unicorn_no_useless_concat::RULE,
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_re_export::RULE,
@@ -775,7 +784,12 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_ternary::RULE,
     &unicorn_prefer_top_level_await::RULE,
     &unicorn_prefer_type_error::RULE,
-    &unicorn_switch_case_braces::RULE,
+    &unicorn_require_array_sort_compare::RULE,
+    &unicorn_require_css_escape::RULE,
+    &unicorn_prefer_type_literal_last::RULE,
+    &unicorn_require_module_attributes::RULE,
+    &unicorn_require_module_specifiers::RULE,
+    &unicorn_switch_case_break_position::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
 ];
