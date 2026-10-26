@@ -320,7 +320,7 @@ mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_existence_index_check;
 mod unicorn_consistent_export_decorator_position;
 mod unicorn_consistent_function_scoping;
-mod unicorn_consistent_json_file_read;
+mod unicorn_consistent_function_style;
 mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
@@ -1284,6 +1284,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unused_builtin_method_return::RULE,
     &unicorn_no_nonstandard_builtin_properties::RULE,
     &unicorn_no_unsafe_json_serialization::RULE,
+    &unicorn_consistent_function_style::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
