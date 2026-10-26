@@ -277,6 +277,7 @@ mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_consistent_date_clone;
+mod unicorn_consistent_existence_index_check;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
@@ -312,6 +313,7 @@ mod unicorn_no_typeof_undefined;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
+mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_continue;
@@ -340,6 +342,7 @@ mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
+mod unicorn_require_css_escape;
 mod unicorn_static;
 mod unicorn_text;
 mod unicorn_text_encoding_identifier_case;
@@ -647,6 +650,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_tag_lines::RULE,
     // eslint-plugin-unicorn
     &unicorn_consistent_date_clone::RULE,
+    &unicorn_consistent_existence_index_check::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
     &unicorn_empty_brace_spaces::RULE,
@@ -681,6 +685,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
+    &unicorn_no_unnecessary_nested_ternary::RULE,
     &unicorn_no_unnecessary_slice_end::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_continue::RULE,
@@ -709,6 +714,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
+    &unicorn_require_css_escape::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
 ];

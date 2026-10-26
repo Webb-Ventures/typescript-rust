@@ -310,3 +310,6 @@ unicorn/prefer-queue-microtask
 unicorn/prefer-location-assign
 unicorn/no-constant-zero-expression
 unicorn/prefer-identifier-import-export-specifiers
+unicorn/consistent-existence-index-check
+unicorn/no-unnecessary-nested-ternary
+unicorn/require-css-escape

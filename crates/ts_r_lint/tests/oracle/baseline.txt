@@ -266,6 +266,7 @@ radix 91/91
 require-yield 15/15
 symbol-description 8/8
 unicorn/consistent-date-clone 26/26
+unicorn/consistent-existence-index-check 56/56
 unicorn/consistent-template-literal-escape 20/20
 unicorn/consistent-tuple-labels 30/30
 unicorn/empty-brace-spaces 213/213
@@ -300,6 +301,7 @@ unicorn/no-typeof-undefined 100/100
 unicorn/no-unnecessary-array-flat-depth 20/20
 unicorn/no-unnecessary-array-splice-count 78/78
 unicorn/no-unnecessary-await 63/66
+unicorn/no-unnecessary-nested-ternary 39/39
 unicorn/no-unnecessary-slice-end 39/39
 unicorn/no-unreadable-iife 14/14
 unicorn/no-useless-continue 43/43
@@ -327,6 +329,7 @@ unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112
+unicorn/require-css-escape 54/54
 unicorn/text-encoding-identifier-case 101/101
 unicorn/throw-new-error 86/86
 use-isnan 234/234

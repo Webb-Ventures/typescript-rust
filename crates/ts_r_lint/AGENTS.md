@@ -652,7 +652,11 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `utils/imports.js`, `prefer-response-static-json.js`, `prefer-queue-microtask.js`,
 `utils/is-node-contains-lexical-this.js`, `utils/is-value-not-usable.js`,
 `prefer-location-assign.js`, `no-constant-zero-expression.js`,
-`prefer-identifier-import-export-specifiers.js`.
+`prefer-identifier-import-export-specifiers.js`, `consistent-existence-index-check.js`,
+`utils/should-add-parentheses-to-comparison.js`, `utils/get-precedence.js`,
+`no-unnecessary-nested-ternary.js`, `utils/should-add-parentheses-to-logical-expression-child.js`,
+`utils/should-add-parentheses-to-conditional-expression-child.js`, `require-css-escape.js`,
+`utils/is-node-value-not-dom-node.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:
