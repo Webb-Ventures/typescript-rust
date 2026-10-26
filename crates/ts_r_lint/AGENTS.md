@@ -1800,6 +1800,29 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   `typeof x` undefined-guard earlier in the chain protects that name. The fix moves every
   simple operand first when the complex operands it passes are themselves `?:` of simple
   parts; otherwise the `/unsafe` message without a fix.
+- **no-useless-logical-operand**: in an outermost `&&`/`||` chain (operands flattened
+  through parentheses), a leading absorbing literal is the whole value and identity
+  literals drop out; the last one stays when the chain's value is more than a condition and
+  the other operands aren't known booleans (`x satisfies boolean` counts as one). Chains
+  that are called, tagged or deleted are skipped, and so is a lone string left in a
+  directive prologue. One remaining operand goes through `replaceNodeWithExpression`'s
+  parenthesization (`unicorn_no_useless_coercion::replace_with_expression`).
+- **prefer-continue** and **prefer-early-return** share the early-exit rewrite in
+  `unicorn_conditions.rs` (`shared/early-exit.js`): the loop or function body's last
+  statement, an `if` without `else` holding more than `maximumStatements` statements
+  (for loops, not one that already ends in an exit), becomes `if (<negated>) { exit; }`, a
+  blank line and the unwrapped body. No fix for non-`let`/`const` block declarations, a
+  multi-line string or template piece, a comment outside the condition and body, a
+  multi-line unbraced body, a line comment that would swallow a token after `}`, or moved
+  `let`/`const` names that the test reads (unless bound inside it), a direct `eval` in the
+  test, a body with other statements, or (functions) a clash with the function's own
+  scope (parameters, `var`s, `arguments`; not a function expression's name). A comment
+  right after the `if` turns prefer-early-return's fix into a suggestion and drops
+  prefer-continue's. Relational tests also get an operator-flipping suggestion. With
+  `checkShortBodies`, the last bare `continue;`/`return;` guard (not part of a guard
+  chain) followed by, or with an `else` of, 1 to `maximumStatements` statements is
+  reported instead, its fix wrapping that body in the negated condition; the fix carries
+  an empty edit at the owner's start so other fixes in that body wait a pass.
 - Not done: **prefer-includes-over-repeated-comparisons**. Its `.ts` cases were recorded
   with a TypeScript program (loose `==` needs both sides typed string or number, a union
   receiver is skipped) but the rule oracle lints them without type information, so they
@@ -1809,7 +1832,9 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   identifier searches, joining fixes, `global_value_available` (type-only bindings
   don't shadow a global value), optional-chain and TS-wrapper unwrapping,
   `reindent_text` (`reindentText`), `indent_if_line_start`, `outermost_ts_wrapper`,
-  `logical_child_text` (`getLogicalExpressionChildText`) and `comment_next_to`.
+  `logical_child_text` (`getLogicalExpressionChildText`), `comment_next_to`/`comment_before`/
+  `comment_after`, `has_multiline_token`, `is_block_scoped_declaration`, the early-exit
+  pieces and `short_body_problem`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
@@ -1818,7 +1843,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`, `no-error-property-assignment.js`,
 `no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`,
 `no-subtraction-comparison.js`, `prefer-simple-condition-first.js`,
-`prefer-includes-over-repeated-comparisons.js`;
+`prefer-includes-over-repeated-comparisons.js`, `no-useless-logical-operand.js`,
+`prefer-continue.js`, `prefer-early-return.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
@@ -1829,7 +1855,10 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `contains-suspension-point.js`, `get-references.js`, `get-indent-string.js`, `get-indent-unit.js`,
 `get-line-indent.js`, `reindent-text.js`, `get-assignment-targets.js`, `member-expression.js`,
 `is-branch-exit.js`, `track-branch-exits.js`, `is-array.js`, `is-global-identifier.js`,
-`type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`; `rules/fix/remove-statement.js`,
+`type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`,
+`is-boolean.js`, `is-reference-context.js`, `get-unwrapped-branch-text.js`, `block-scope.js`;
+`rules/ast/is-in-directive-prologue.js`; `rules/fix/replace-node-with-expression.js`; `rules/fix/remove-statement.js`,
 `add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
-`rules/shared/nullish-check.js`, `builtin-errors.js`. ESLint docs for `operator-assignment` and
+`rules/shared/nullish-check.js`, `builtin-errors.js`, `early-exit.js`,
+`short-body-conditional.js`. ESLint docs for `operator-assignment` and
 `logical-assignment-operators`.

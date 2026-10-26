@@ -424,6 +424,7 @@ mod unicorn_no_useless_delete_check;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_fallback_in_spread;
 mod unicorn_no_useless_length_check;
+mod unicorn_no_useless_logical_operand;
 mod unicorn_no_useless_override;
 mod unicorn_no_useless_promise_resolve_reject;
 mod unicorn_no_useless_re_export;
@@ -454,12 +455,14 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_boolean_return;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
+mod unicorn_prefer_continue;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_default_parameters;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
 mod unicorn_prefer_dom_node_text_content;
+mod unicorn_prefer_early_return;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_export_from;
 mod unicorn_prefer_flat_math_min_max;
@@ -984,6 +987,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_delete_check::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
+    &unicorn_no_useless_logical_operand::RULE,
     &unicorn_no_useless_override::RULE,
     &unicorn_no_useless_re_export::RULE,
     &unicorn_no_useless_recursion::RULE,
@@ -1010,8 +1014,10 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_boolean_return::RULE,
     &unicorn_prefer_class_fields::RULE,
+    &unicorn_prefer_continue::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
+    &unicorn_prefer_early_return::RULE,
     &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_flat_math_min_max::RULE,
     &unicorn_prefer_export_from::RULE,
