@@ -181,6 +181,9 @@ texts), `dump.rs`.
 - **Entity names through merged globals.** `Program::resolve_entity` looks a member of a
   global namespace up in every file's declaration of it (`A.B` from inside `namespace A.C`
   of one file finds `B` from another file's `namespace A`).
+- **Assignment-pattern defaults** (`[x = d] = v`, `{ x = d } = v`) are bound in order with
+  no branch, unlike a binding pattern's defaults (`bind_assign_target`; tsc: binder.go,
+  destructuring assignment flow; parity fixture `thenables_tuples_and_pattern_defaults`).
 - Front-end crates are read-only for this crate; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 

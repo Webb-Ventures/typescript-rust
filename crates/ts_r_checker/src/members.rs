@@ -955,14 +955,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.union(&lits)
         };
         let len_name = s.intern_str("length");
+        // `length` is read-only only in a readonly tuple (`t.length = 0` of a `[number]`
+        // is TS2322 against `1`; tsc: createTupleTargetType).
+        let len_flags = if shape.readonly {
+            check_flags::TUPLE | check_flags::READONLY
+        } else {
+            check_flags::TUPLE
+        };
         let lp = self.c.new_synth(
-            SynthSym::new(
-                len_name,
-                SymbolFlags::PROPERTY,
-                check_flags::TUPLE | check_flags::READONLY,
-            )
-            .with_type(len_ty)
-            .with_parent(Some(t)),
+            SynthSym::new(len_name, SymbolFlags::PROPERTY, len_flags)
+                .with_type(len_ty)
+                .with_parent(Some(t)),
         );
         props.push((len_name, lp));
         let elem = self.union(&elem_types);

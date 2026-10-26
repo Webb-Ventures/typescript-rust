@@ -2057,6 +2057,11 @@ impl<'a> Binder<'a> {
         }
     }
 
+    /// A destructuring assignment target. Its defaults (`[x = d] = v`, `{ x = d } = v`) are
+    /// bound in order, without the branch a binding pattern's defaults get: tsc's flow for
+    /// an assignment pattern evaluates each default, then its target
+    /// (controlFlowAssignmentPatternOrder; tsc: binder.go, the destructuring assignment
+    /// flow).
     fn bind_assign_target(&mut self, target: NodeId, simple: bool) {
         if !self.enter(target) {
             self.depth -= 1;
@@ -2108,7 +2113,7 @@ impl<'a> Binder<'a> {
                             op: AssignOp::Assign,
                             right,
                         } => {
-                            self.bind_default(right);
+                            self.bind_expr(right);
                             self.bind_assign_target(left, false);
                         }
                         Node::Hole {} => {}
@@ -2129,7 +2134,7 @@ impl<'a> Binder<'a> {
                                     op: AssignOp::Assign,
                                     right,
                                 } => {
-                                    self.bind_default(right);
+                                    self.bind_expr(right);
                                     self.bind_assign_target(left, false);
                                 }
                                 _ => self.bind_assign_target(value, false),
@@ -2137,7 +2142,7 @@ impl<'a> Binder<'a> {
                         }
                         Node::ShorthandProp { name, init, .. } => {
                             if let Some(i) = init {
-                                self.bind_default(i);
+                                self.bind_expr(i);
                             }
                             self.bind_assign_target(name, false);
                         }

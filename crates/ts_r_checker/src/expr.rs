@@ -372,6 +372,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                     );
                 }
                 let t = self.check_expr(at(arg));
+                // TS1320: a thenable that is no valid promise (tsc: checkAwaitExpression).
+                if self.reporting(e.file) && self.is_invalid_thenable(t) {
+                    self.error(
+                        e,
+                        dg::TYPE_OF_AWAIT_OPERAND_MUST_EITHER_BE_A_VALID_PROMISE_OR_MUST_NOT_CONTAIN_A_CALLA_1320,
+                        &[],
+                    );
+                }
                 self.awaited_type(t)
             }
             Node::Yield { arg, delegate } => {

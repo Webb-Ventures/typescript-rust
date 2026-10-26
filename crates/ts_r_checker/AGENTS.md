@@ -3002,6 +3002,17 @@ Files, by layer:
   - `import m = A.B` resolves `A.B` through every declaration of a global namespace `A`.
     So an alias written inside `namespace A.C` of one file finds `B` declared in another
     file's `namespace A` (binder `resolve_entity_in`; `tests/const_enum_access.rs`).
+  - A tuple's `length` is read-only only on a readonly tuple (`members.rs`).
+  - A thenable whose `then` has no onfulfilled parameter is not a valid promise. Its
+    awaited type is unresolved: TS1320 at an `await` of it, and TS1058 at an async
+    function's `return` of it (at the name when the function has no return annotation).
+    The TS1064 hint then suggests `Promise<void>` (checkAwaitedType, getAwaitedType).
+  - Generic tuples (`relate.rs`): a mutable `[...T]` relates to other types through `T`.
+    A target `[...T]` accepts a source that relates to `T` when the target is readonly or
+    the source's constraint is a mutable array or tuple. `keyof <tuple>` as a target is
+    the fixed indexes plus `keyof` the global `Array` (or `ReadonlyArray`) type. The
+    generic `Array` type prints as `T[]`. Fixture:
+    `tests/parity/thenables_tuples_and_pattern_defaults`.
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 

@@ -1,0 +1,8 @@
+a.ts(3,23): error TS1064: The return type of an async function or method must be the global Promise<T> type. Did you mean to write 'Promise<void>'?
+a.ts(4,16): error TS1058: The return type of an async function must either be a valid promise or must not contain a callable 'then' member.
+a.ts(5,25): error TS1320: Type of 'await' operand must either be a valid promise or must not contain a callable 'then' member.
+a.ts(10,4): error TS2540: Cannot assign to 'length' because it is a read-only property.
+a.ts(22,5): error TS2322: Type 'readonly [...T]' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'readonly [...T]'.
+a.ts(31,5): error TS2322: Type 'string' is not assignable to type 'keyof [1, 2, ...T]'.
+  Type '"2"' is not assignable to type '"0" | "1" | keyof T[]'.

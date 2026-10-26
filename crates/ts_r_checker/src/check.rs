@@ -2619,7 +2619,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             // TS1064: an async function's annotation must be `Promise<T>` (a subclass or
             // `PromiseLike` is not), with the awaited type as the suggestion. The checks
             // below still run (asyncFunctionDeclaration15_es6: TS2355 for `(): number {}`).
+            // A thenable that is no valid promise has no awaited type: `void` is suggested.
             let awaited = self.awaited_type(declared);
+            let awaited = if awaited == TypeId::UNRESOLVED {
+                TypeId::VOID
+            } else {
+                awaited
+            };
             let text = self.type_to_string(awaited);
             self.error(
                 Loc::new(file, rt),
@@ -3654,6 +3660,36 @@ impl<'c, 'a> Ck<'c, 'a> {
         let parts = fn_parts(ast, f.node);
         let at = arg.map(|a| self.check_expr(Loc::new(file, a)));
         let Some(parts) = parts else { return };
+        // TS1058: an async function returning a thenable that is no valid promise, at the
+        // `return` when the function is annotated, else at the function (tsc:
+        // checkReturnExpression, getReturnTypeFromBody).
+        if parts.flags.contains(ts_r_ast::FnFlags::ASYNC)
+            && !parts.flags.contains(ts_r_ast::FnFlags::GENERATOR)
+            && let Some(t) = at
+            && self.reporting(file)
+            && self.is_invalid_thenable(t)
+        {
+            let at_node = match parts.return_type {
+                Some(_) => l,
+                None => match *ast.node(f.node) {
+                    Node::FunctionDecl { name: Some(n), .. }
+                    | Node::FunctionExpr { name: Some(n), .. } => Loc::new(file, n),
+                    _ => self
+                        .c
+                        .parent(f)
+                        .and_then(|p| match *self.node(p) {
+                            Node::MethodDef { key, .. } => Some(Loc::new(file, key)),
+                            _ => None,
+                        })
+                        .unwrap_or(f),
+                },
+            };
+            self.error(
+                at_node,
+                dg::THE_RETURN_TYPE_OF_AN_ASYNC_FUNCTION_MUST_EITHER_BE_A_VALID_PROMISE_OR_MUST_NOT_C_1058,
+                &[],
+            );
+        }
         // A setter's `return` takes no value (tsc: checkReturnStatement).
         if arg.is_some()
             && let Some(p) = self.c.parent(f)

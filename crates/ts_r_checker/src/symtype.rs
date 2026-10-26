@@ -1842,8 +1842,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             let Some(&sig) = sigs.first() else {
                 return cur;
             };
+            // A `then` without an `onfulfilled` parameter: a thenable that is no valid
+            // promise, with no awaited type (tsc: getPromisedTypeOfPromise, TS1058/TS1320).
             let Some(cb) = self.store().sig(sig).params.first().map(|p| p.ty) else {
-                return cur;
+                return TypeId::UNRESOLVED;
             };
             let cb = self.non_nullable(cb);
             let cbsigs = self.signatures_of(cb, crate::members::SigKind::Call);
@@ -1855,6 +1857,40 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             cur = v;
         }
+    }
+
+    /// Whether `t` (or a member of the union `t`) is a thenable that is no valid promise:
+    /// its `then` is callable, but no signature of it takes an `onfulfilled` callback
+    /// (tsc: getAwaitedTypeNoAlias, isThenableType).
+    pub(crate) fn is_invalid_thenable(&mut self, t: TypeId) -> bool {
+        let members = if self.store().flags(t).contains(TypeFlags::UNION) {
+            self.store().members_of_union(t).to_vec()
+        } else {
+            vec![t]
+        };
+        members.into_iter().any(|m| {
+            let f = self.store().flags(m);
+            if !f.contains(TypeFlags::OBJECT) || f.intersects(TypeFlags::INSTANTIABLE) {
+                return false;
+            }
+            let Some(then) = self.quietly(|ck| ck.property_of_type(m, "then")) else {
+                return false;
+            };
+            let tt = self.type_of_symbol(then);
+            let tt = self.non_nullable(tt);
+            let sigs = self.signatures_of(tt, crate::members::SigKind::Call);
+            !sigs.is_empty()
+                && sigs.iter().all(|&s| {
+                    let Some(cb) = self.store().sig(s).params.first().map(|p| p.ty) else {
+                        return true;
+                    };
+                    let cb = self.non_nullable(cb);
+                    !self.store().flags(cb).intersects(TypeFlags::ANY)
+                        && self
+                            .signatures_of(cb, crate::members::SigKind::Call)
+                            .is_empty()
+                })
+        })
     }
 
     /// Promise<T> (or unresolved without lib).
