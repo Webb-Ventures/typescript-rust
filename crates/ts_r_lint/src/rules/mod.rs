@@ -335,6 +335,9 @@ mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
+mod unicorn_prefer_add_event_listener_options;
+mod unicorn_prefer_array_from_range;
+mod unicorn_prefer_array_slice;
 mod unicorn_prefer_at;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
@@ -728,6 +731,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
+    &unicorn_prefer_add_event_listener_options::RULE,
+    &unicorn_prefer_array_from_range::RULE,
+    &unicorn_prefer_array_slice::RULE,
+    &unicorn_prefer_blob_reading_methods::RULE,
+    &unicorn_prefer_block_statement_over_iife::RULE,
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,

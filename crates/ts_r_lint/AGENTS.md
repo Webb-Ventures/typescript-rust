@@ -677,7 +677,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `prefer-promise-try.js`, `no-invalid-fetch-options.js`, `no-misrefactored-assignment.js`,
 `no-useless-compound-assignment.js`, `no-unsafe-string-replacement.js`,
 `utils/get-const-variable-initializer.js`, `no-double-comparison.js`,
-`utils/get-comparison-operand-text.js`.
+`utils/get-comparison-operand-text.js`, `prefer-array-from-range.js`, `shared/array-range.js`.
 
 ## eslint-plugin-unicorn type guessing (round 5)
 

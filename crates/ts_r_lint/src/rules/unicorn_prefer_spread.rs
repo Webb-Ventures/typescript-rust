@@ -236,19 +236,23 @@ fn is_array_ctor_with_one_arg_global(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
 
 /// `getArrayRangeLength`: `Array(n).keys()` with a valid static or immutable length.
 fn is_array_range(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    array_range_length(cx, id).is_some()
+}
+
+/// The length `n` of `Array(n).keys()` / `new Array(n).keys()` (the global `Array`), when
+/// it is a valid array length or not statically known and not read from a mutable member.
+pub(crate) fn array_range_length(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
     let ast = cx.ast();
-    let Some(m) = method_call(cx, unwrap_ts(ast, id), "keys", Some(0)) else {
-        return false;
-    };
+    let m = method_call(cx, unwrap_ts(ast, id), "keys", Some(0))?;
     if !m.args.is_empty() {
-        return false;
+        return None;
     }
     let receiver = unwrap_ts(ast, m.obj);
     if !is_array_ctor_with_one_arg_global(cx, receiver) {
-        return false;
+        return None;
     }
     let (Node::Call { args, .. } | Node::New { args, .. }) = *ast.node(receiver) else {
-        return false;
+        return None;
     };
     let length = ast.list(args)[0];
     let invalid = match static_value_no_side_effects(cx, length) {
@@ -256,7 +260,7 @@ fn is_array_range(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
         Some(_) => true,
         None => mutable_member_access(cx, length, &mut Vec::new()),
     };
-    !invalid
+    (!invalid).then_some(length)
 }
 
 fn is_to_array_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {

@@ -324,6 +324,9 @@ unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
+unicorn/prefer-add-event-listener-options 26/26
+unicorn/prefer-array-from-range 90/90
+unicorn/prefer-array-slice 61/61
 unicorn/prefer-at 482/482
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46
