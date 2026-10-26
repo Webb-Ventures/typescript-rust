@@ -973,6 +973,7 @@ impl Planner<'_> {
     fn glob_maps(
         &self,
         meta: &crate::meta::ModuleMeta,
+        targets: &[Target],
         live: &FxHashSet<u32>,
         records: &mut [Option<Expr>],
         helpers: &mut Helpers,
@@ -991,9 +992,23 @@ impl Planner<'_> {
             if !matches!(r.kind, RecordKind::Require | RecordKind::Dynamic) {
                 continue;
             }
-            if let Some(&gi) = owner.get(&r.node)
-                && let Some(e) = records[ri].take()
-            {
+            let Some(&gi) = owner.get(&r.node) else {
+                continue;
+            };
+            // An external file (`--external:./src/a.js`) has no replacement, as a kept call:
+            // its entry is the call itself, as esbuild writes it.
+            let e = records[ri]
+                .take()
+                .or_else(|| match (r.kind, targets.get(ri)) {
+                    (RecordKind::Require, Some(Target::External(x))) => {
+                        Some(Expr::call("require", vec![Expr::Str(x.clone())]))
+                    }
+                    (RecordKind::Dynamic, Some(Target::External(x))) => {
+                        Some(Expr::Import(x.clone()))
+                    }
+                    _ => None,
+                });
+            if let Some(e) = e {
                 maps[gi].push((r.spec.clone(), Expr::Arrow(Box::new(e))));
             }
         }
@@ -1265,7 +1280,7 @@ impl Planner<'_> {
             };
             records.push(e);
         }
-        let globs = self.glob_maps(meta, &live_records, &mut records, helpers);
+        let globs = self.glob_maps(meta, &module.targets, &live_records, &mut records, helpers);
         // Prologue: static imports in order, then anything else bindings need.
         let mut prologue = Vec::new();
         if !self.import_meta[mi].is_empty() {

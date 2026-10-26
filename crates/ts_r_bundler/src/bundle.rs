@@ -61,6 +61,9 @@ pub struct BuildResult {
     /// Absolute paths of every file the build read (modules), for watch mode. Also filled
     /// when the build failed after the graph was built.
     pub inputs: Vec<String>,
+    /// Directories whose listing the build depends on (glob `require`/`import()`
+    /// patterns), sorted: a file added or removed there changes the bundle.
+    pub watch_dirs: Vec<String>,
 }
 
 impl BuildResult {
@@ -422,6 +425,7 @@ impl BuildContext {
             .collect();
         let fail = |m: Vec<Message>| BuildResult {
             inputs: inputs.clone(),
+            watch_dirs: graph.glob_dirs.clone(),
             ..BuildResult::fail(m)
         };
         let mut messages = graph.messages.clone();
@@ -734,6 +738,7 @@ impl BuildContext {
             metafile,
             stats,
             inputs,
+            watch_dirs: graph.glob_dirs.clone(),
         }
     }
 
@@ -1135,6 +1140,7 @@ impl BuildContext {
                 .then(|| crate::metafile::render_transform(&metas, &opts.working_dir)),
             stats: BuildStats::default(),
             inputs: entries.to_vec(),
+            watch_dirs: Vec::new(),
         }
     }
 }
@@ -1456,11 +1462,52 @@ fn import_errors(g: &Graph, l: &crate::link::Link, opts: &BuildOptions) -> Vec<M
     out
 }
 
-/// The `type` value of printed import attributes (`assert { type: 'json' }`).
-fn attribute_type(attrs: &str) -> Option<&str> {
-    let at = attrs.find("type")?;
-    let rest = attrs[at + 4..].trim_start().strip_prefix(':')?.trim_start();
-    let q = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
-    let body = &rest[1..];
-    body.find(q).map(|end| &body[..end])
+/// The `type` value of printed import attributes (`assert { type: "json" }`, or a quoted
+/// key: `assert { "type": "json" }`).
+fn attribute_type(attrs: &str) -> Option<String> {
+    let inner = attrs.split_once('{')?.1;
+    let mut chars = inner.chars().peekable();
+    // Each step consumes a character, so this ends.
+    loop {
+        while chars.next_if(|c| c.is_whitespace() || *c == ',').is_some() {}
+        let key = match chars.peek()? {
+            '}' => return None,
+            '"' | '\'' => quoted(&mut chars)?,
+            _ => {
+                let mut k = String::new();
+                while let Some(c) = chars.next_if(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                {
+                    k.push(c);
+                }
+                if k.is_empty() {
+                    return None;
+                }
+                k
+            }
+        };
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        chars.next_if_eq(&':')?;
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        let value = quoted(&mut chars)?;
+        if key == "type" {
+            return Some(value);
+        }
+    }
+}
+
+/// A `"..."` or `'...'` string at the iterator (escapes kept as written but skipped over).
+fn quoted(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+    let q = chars.next().filter(|c| *c == '"' || *c == '\'')?;
+    let mut out = String::new();
+    while let Some(c) = chars.next() {
+        if c == q {
+            return Some(out);
+        }
+        if c == '\\' {
+            out.push(chars.next()?);
+        } else {
+            out.push(c);
+        }
+    }
+    None
 }

@@ -128,7 +128,9 @@ const GUARD_DIR: &str = ".ts-r-guard";
 /// Collects the files below `base` (the absolute form of [`Pattern::dir`]) that match, as
 /// `prefix` + their relative path (`./src/a.js`). Reads at most `max_depth` levels and
 /// `max_entries` directories and files; returns `false` when a limit cut the walk short
-/// (then `out` is incomplete and must not be used).
+/// (then `out` is incomplete and must not be used). Every directory listed is added to
+/// `dirs` (watch mode rebuilds when one of them changes).
+#[allow(clippy::too_many_arguments)]
 pub fn walk(
     fs: &dyn FileSystem,
     base: &str,
@@ -137,6 +139,7 @@ pub fn walk(
     max_depth: usize,
     max_entries: usize,
     out: &mut Vec<String>,
+    dirs: &mut Vec<String>,
 ) -> bool {
     let depth_limit = if pattern.deep {
         max_depth
@@ -147,7 +150,10 @@ pub fn walk(
     // (absolute directory, its path below `base` with a trailing `/`, depth)
     let mut stack = vec![(base.to_owned(), String::new(), 0usize)];
     while let Some((dir, rel, depth)) = stack.pop() {
-        for e in fs.read_dir(&dir) {
+        let entries = fs.read_dir(&dir);
+        dirs.push(dir);
+        let dir = dirs.last().map_or("", String::as_str);
+        for e in entries {
             // `ts-r-build`'s `parse<T>` validators are virtual modules in a directory that
             // mirrors the project (`ts_r_guard::vfs::VDIR`): not files a pattern names.
             if e.name == GUARD_DIR {
@@ -166,7 +172,7 @@ pub fn walk(
                 }
                 EntryKind::Directory if depth < depth_limit => {
                     stack.push((
-                        path::combine(&dir, &e.name),
+                        path::combine(dir, &e.name),
                         format!("{child_rel}/"),
                         depth + 1,
                     ));
@@ -219,9 +225,15 @@ mod tests {
         fs.add_file("/p/src/x.js", "");
         let deep = Pattern::parse("./src/**/*.js");
         let mut out = Vec::new();
-        assert!(walk(&fs, "/p/src", "./src/", &deep, 64, 100, &mut out));
+        let mut dirs = Vec::new();
+        assert!(walk(
+            &fs, "/p/src", "./src/", &deep, 64, 100, &mut out, &mut dirs
+        ));
         out.sort();
         assert_eq!(out, ["./src/a/b/c/d.js", "./src/x.js"]);
+        // Every listed directory, for watch mode.
+        dirs.sort();
+        assert_eq!(dirs, ["/p/src", "/p/src/a", "/p/src/a/b", "/p/src/a/b/c"]);
         assert!(!walk(
             &fs,
             "/p/src",
@@ -229,6 +241,7 @@ mod tests {
             &deep,
             2,
             100,
+            &mut Vec::new(),
             &mut Vec::new()
         ));
         assert!(!walk(
@@ -238,17 +251,36 @@ mod tests {
             &deep,
             64,
             3,
+            &mut Vec::new(),
             &mut Vec::new()
         ));
         // A `parse<T>` build's virtual validator directory is not walked.
         fs.add_file("/p/src/.ts-r-guard/x.js/T.js", "");
         let mut out = Vec::new();
-        assert!(walk(&fs, "/p/src", "./src/", &deep, 64, 100, &mut out));
+        assert!(walk(
+            &fs,
+            "/p/src",
+            "./src/",
+            &deep,
+            64,
+            100,
+            &mut out,
+            &mut Vec::new()
+        ));
         assert_eq!(out.len(), 2, "{out:?}");
         // Without `**` the pattern's own depth bounds the walk: not an error.
         let flat = Pattern::parse("./src/*.js");
         let mut out = Vec::new();
-        assert!(walk(&fs, "/p/src", "./src/", &flat, 64, 100, &mut out));
+        assert!(walk(
+            &fs,
+            "/p/src",
+            "./src/",
+            &flat,
+            64,
+            100,
+            &mut out,
+            &mut Vec::new()
+        ));
         assert_eq!(out, ["./src/x.js"]);
     }
 }

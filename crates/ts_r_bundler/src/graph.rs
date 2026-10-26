@@ -161,6 +161,9 @@ pub struct Graph {
     pub modules: Vec<Module>,
     pub entries: Vec<ModuleId>,
     pub messages: Vec<Message>,
+    /// Directories glob `require`/`import()` patterns listed, sorted: watch mode rebuilds
+    /// when their contents change.
+    pub glob_dirs: Vec<String>,
 }
 
 impl Graph {
@@ -205,6 +208,8 @@ struct Node {
     /// The module's meta with glob records expanded ([`expand_globs`]), when it has any.
     /// The cached [`Loaded`] keeps the meta as scanned: the files may change.
     globbed: Option<Arc<ModuleMeta>>,
+    /// Directories its glob records listed ([`expand_globs`]).
+    glob_dirs: Vec<String>,
     targets: Vec<RawTarget>,
     side_effects: bool,
     node_mode: bool,
@@ -315,6 +320,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
     let mut g = Graph::default();
     for p in &order {
         let Some(n) = nodes.remove(p) else { continue };
+        g.glob_dirs.extend(n.glob_dirs.iter().cloned());
         g.messages.extend(n.loaded.messages.iter().cloned());
         g.messages.extend(n.messages);
         let targets = n
@@ -349,6 +355,8 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             .unwrap_or_else(|e| e.into_inner())
             .insert(p.clone(), n.loaded);
     }
+    g.glob_dirs.sort();
+    g.glob_dirs.dedup();
     copy_imports_external(&mut g);
     g.entries = entries.iter().filter_map(|e| ids.get(e).copied()).collect();
     g
@@ -473,10 +481,13 @@ enum GlobFound {
 /// relative to `dir` and sorted, as esbuild bundles `require("./src/" + x)`: each file is
 /// bundled, and the call looks the path up in a map of them at run time (`plan.rs`). The
 /// added records share the glob record's call node and part, after every scanned record.
+/// `dirs` gets every directory the patterns listed, or for a missing one its nearest
+/// existing parent: a file or directory added there changes the expansion (watch mode).
 fn expand_globs(
     fs: &dyn ts_r_config::fs::FileSystem,
     dir: &str,
     meta: &ModuleMeta,
+    dirs: &mut Vec<String>,
 ) -> (ModuleMeta, FxHashMap<usize, GlobFound>) {
     let mut out = meta.clone();
     let mut found = FxHashMap::default();
@@ -494,6 +505,18 @@ fn expand_globs(
         let base = path::resolve(dir, pattern.dir());
         if !fs.directory_exists(&base) {
             found.insert(ri, GlobFound::NoDirectory);
+            // Each step is a shorter path, so this ends.
+            let mut up = path::directory_of(&base);
+            while !up.is_empty() && !fs.directory_exists(up) {
+                let next = path::directory_of(up);
+                if next.len() >= up.len() {
+                    break;
+                }
+                up = next;
+            }
+            if !up.is_empty() {
+                dirs.push(up.to_owned());
+            }
             continue;
         }
         let mut files = Vec::new();
@@ -505,6 +528,7 @@ fn expand_globs(
             GLOB_MAX_DEPTH,
             GLOB_MAX_FILES,
             &mut files,
+            dirs,
         );
         if !complete {
             found.insert(ri, GlobFound::TooMany);
@@ -549,12 +573,13 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
         path::directory_of(p).to_owned()
     };
     let mut messages = Vec::new();
+    let mut glob_dirs = Vec::new();
     let (globbed, glob_found) = if ctx.prep.opts.bundle
         && !is_data
         && !p.starts_with(DISABLED_PREFIX)
         && loaded.meta.records.iter().any(|r| r.kind.is_glob())
     {
-        let (m, found) = expand_globs(resolver.fs().as_ref(), &dir, &loaded.meta);
+        let (m, found) = expand_globs(resolver.fs().as_ref(), &dir, &loaded.meta, &mut glob_dirs);
         (Some(Arc::new(m)), found)
     } else {
         (None, FxHashMap::default())
@@ -746,6 +771,7 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     Node {
         loaded,
         globbed,
+        glob_dirs,
         targets,
         side_effects,
         node_mode,

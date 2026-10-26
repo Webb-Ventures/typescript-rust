@@ -3036,3 +3036,71 @@ fn exports_arrays_stop_at_a_valid_target_and_bare_paths_match_local_browser_keys
     let r = run_build(&fs, o);
     assert!(file(&r, "/proj/out/entry.js").contains("works()"));
 }
+
+#[test]
+fn assert_json_with_a_quoted_key_needs_the_json_loader_too() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import foo from './foo.json' assert { 'type': 'json' };\nconsole.log(foo);\n",
+        ),
+        ("foo.json", "{}"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.loaders.insert(".json".into(), ts_r_bundler::Loader::Js);
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter()
+            .any(|m| m.contains("The file \"foo.json\" was loaded with the \"js\" loader")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn glob_directories_are_watch_dependencies() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import('./locales/' + globalThis.lang + '.json');\nrequire('./gone/' + globalThis.x);\n",
+        ),
+        ("locales/en.json", "{}"),
+        ("locales/new/.keep.json", "{}"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    // Every directory the pattern listed, and for the missing `gone/` its parent.
+    assert_eq!(
+        r.watch_dirs,
+        ["/proj", "/proj/locales", "/proj/locales/new"]
+    );
+}
+
+#[test]
+fn external_glob_files_keep_their_call_in_the_map() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "console.log(require('./src/' + globalThis.x + '.js'));\nimport('./src/' + globalThis.x + '.js');\n",
+        ),
+        ("src/a.js", "module.exports = 'a';\n"),
+        ("src/b.js", "module.exports = 'b';\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.external = vec!["./src/a.js".into()];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(
+        js.contains(
+            "\"./src/a.js\": () => require(\"./src/a.js\"), \"./src/b.js\": () => require_b()"
+        ),
+        "{js}"
+    );
+    assert!(
+        js.contains("\"./src/a.js\": () => import(\"./src/a.js\")"),
+        "{js}"
+    );
+}

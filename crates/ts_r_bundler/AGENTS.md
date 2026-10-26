@@ -228,7 +228,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   calls it with the original argument; an unknown path throws esbuild's
   `Module not found in bundle: <path>`. A missing directory is `Could not resolve
   require("./src/**/*")`, no match a warning, and passing 10,000 entries or 64 levels an
-  error (never a partial map). Without `--bundle` the call stays.
+  error (never a partial map). An external match keeps its call in the map
+  (`() => require("./src/a.js")`, as esbuild). Every directory a pattern listed (or a
+  missing one's nearest parent) is in `BuildResult::watch_dirs`. Without `--bundle` the call
+  stays.
 - **`--pure:name`** (`BuildOptions::pure`, `ts_r_minify::purity::Purity::pure_calls`):
   calls of those globals (`a.b` member chains too) are removable when unused, in tree
   shaking only. `--ignore-annotations` ignores them and `sideEffects: false` too.
