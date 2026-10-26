@@ -1,0 +1,5 @@
+a.ts(31,9): error TS2322: Type 'string | number | Date' is not assignable to type 'string'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(37,17): error TS2322: Type 'string | { a: 1; }' is not assignable to type 'object'.
+  Type 'string' is not assignable to type 'object'.
+a.ts(38,9): error TS2322: Type 'string' is not assignable to type 'never'.

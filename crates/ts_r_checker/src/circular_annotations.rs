@@ -15,7 +15,9 @@
 //! function bodies, contextual types and loop flow resolve variable types in a different
 //! order from tsc's, so only cycles made of variable types alone (no accessor, method or
 //! function symbol on the path) are reported, for declarations outside loops whose
-//! initializer has no function, method, class or `this`, and class properties (any key
+//! initializer has no function, method, class or `this` or names the variable outside them
+//! (`var b = { f: () => 1, g: b.f() }`: computing the type reads `b` in any order), and
+//! class properties (any key
 //! but a computed non-literal one) whose initializer has no function, method or class, and
 //! `for`-`in`/`of` variables whose iterated expression has none either.
 //!
@@ -61,7 +63,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 ..
             } if self.c.opts.no_implicit_any
                 && !self.in_loop(file, n)
-                && !has_function(ast, init, true) =>
+                && (!has_function(ast, init, true)
+                    || self
+                        .c
+                        .sym_of_decl(Loc::new(file, n))
+                        .or_else(|| self.c.sym_of_decl(Loc::new(file, name)))
+                        .is_some_and(|s| self.names_outside_functions(file, name, init, s))) =>
             {
                 implicit = true;
                 name
@@ -263,7 +270,8 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// types in an order tsc does not).
     /// Whether `s` is a variable whose type is `any` after a cycle through its initializer:
     /// declared once, unannotated, outside loops, with an initializer that has no
-    /// function, method, class or `this` (the TS7022 declarations above).
+    /// function, method, class or `this`, or that names the variable outside them (the
+    /// TS7022 declarations above).
     pub(crate) fn is_circular_variable(&self, s: SymId) -> bool {
         if !self.c.sym_flags(s).intersects(SymbolFlags::VARIABLE) {
             return false;
@@ -292,10 +300,52 @@ impl<'c, 'a> Ck<'c, 'a> {
             } => {
                 matches!(ast.node(name), Node::Ident { .. })
                     && !self.in_loop(d.file, d.node)
-                    && !has_function(ast, init, true)
+                    && (!has_function(ast, init, true)
+                        || self.names_outside_functions(d.file, name, init, s))
             }
             _ => false,
         }
+    }
+
+    /// The initializer `init` of the declaration of `s` (named `name`) names `s` outside the
+    /// functions and classes in it (`bar: b.foo()` in `var b = { foo: () => 1, bar: b.foo() }`):
+    /// computing its type reads the variable's own type whatever the order functions are
+    /// checked in, so the cycle is tsc's too.
+    fn names_outside_functions(&self, file: FileId, name: NodeId, init: NodeId, s: SymId) -> bool {
+        let ast = self.ast(file);
+        let Some(text) = ast.name_of(name) else {
+            return false;
+        };
+        let mut stack = vec![init];
+        let mut seen = 0u32;
+        while let Some(c) = stack.pop() {
+            seen += 1;
+            if seen > 10_000 {
+                return false;
+            }
+            match *ast.node(c) {
+                Node::FunctionExpr { .. }
+                | Node::Arrow { .. }
+                | Node::MethodDef { .. }
+                | Node::ClassExpr { .. } => {}
+                Node::Ident { .. } => {
+                    if ast.name_of(c) == Some(text)
+                        && self.c.resolve_ident(Loc::new(file, c), meaning::VALUE) == Some(s)
+                    {
+                        return true;
+                    }
+                }
+                Node::Member { obj, .. } => stack.push(obj),
+                Node::Property { key, value, .. } => {
+                    stack.push(value);
+                    if matches!(ast.node(key), Node::ComputedKey { .. }) {
+                        stack.push(key);
+                    }
+                }
+                _ => ast.for_each_child(c, |x| stack.push(x)),
+            }
+        }
+        false
     }
 
     fn in_loop(&self, file: FileId, n: NodeId) -> bool {
