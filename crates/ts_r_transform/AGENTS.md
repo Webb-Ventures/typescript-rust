@@ -169,6 +169,16 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `__awaiter` generator, which can't see `super`, so the enclosing method gets the same
   `_super` object of `super` property getters an async method gets (`super_in_async_arrow`,
   `super_names`, `es2017.rs`); only code inside lowered async functions reads through it.
+  Those walks also enter a nested class's heritage, computed keys and key captures
+  (`class_outer_code`), which run in the method. Below ES2020 an optional `super` call
+  (`super.m?.()`) goes through the optional chain lowering with `_super.m` as its base and
+  `this` as the receiver (`(_a = _super.m) === null || _a === void 0 ? void 0 :
+  _a.call(this)`, `lower_chain`).
+- **Static `super` in nested classes** (`es2022.rs` `usage` / `subst`): a key capture is
+  evaluated outside its class, so its `this` and `super` are the outer ones; the walks enter
+  nested classes with the outer flags but only a synthesized key-capture block of theirs
+  (`Tx::inline_static`), never their methods or field initializers. A class expression's key
+  captures come before its `__setFunctionName` call (observed).
 - **Bundler-only options**: `TransformOptions::default_class_name` names an anonymous
   `export default class` that ES2022 lowering must name (the bundler passes `<stem>_default`,
   esbuild's name); tsc never sets it (`None`).
@@ -263,7 +273,10 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   helper order when `__setFunctionName` is requested between the two `using` helpers.
 - Below ES2022: a private member as a `for...of` / `for...in` destructuring target and
   `#x in o` outside any class are refused (TSR2003); nor is `super` in
-  the static code of a class without `extends` lowered. Helper order
+  the static code of a class without `extends` lowered (tsc moves it out unchanged, a
+  SyntaxError; we keep the class so it runs). A class expression with computed static keys
+  names its alias after the key temporaries (`_b = class {}, _a = k()`); tsc names the alias
+  first (`_a = class {}, _b = k()`). Helper order
   follows our visit order (the constructor before methods), not always tsc's. `super` inside
   an async arrow outside an async method and computed keys inside a pattern nested under an
   object rest (tsc flattens them too) are not handled. Private methods using `super`, and

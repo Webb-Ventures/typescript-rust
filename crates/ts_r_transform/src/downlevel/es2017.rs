@@ -19,7 +19,9 @@
 //!   every entry gets `set: v => super.m = v` and `_superIndex` caches getter/setter objects
 //!   (`_superIndex(k).value`).
 
-use ts_r_ast::{Atom, FnFlags, MethodKind, Modifiers, Node, NodeId, NodeList, UnaryOp, VarKind};
+use ts_r_ast::{
+    Atom, FnFlags, MethodKind, Modifiers, Node, NodeId, NodeKind, NodeList, UnaryOp, VarKind,
+};
 
 use super::lower::{FnCtx, Group, Lower, SuperUse};
 use crate::builder::Build;
@@ -286,10 +288,11 @@ impl Lower<'_, '_> {
         let mut stack = vec![body];
         while let Some(id) = stack.pop() {
             match self.n(id) {
-                Node::FunctionDecl { .. }
-                | Node::FunctionExpr { .. }
-                | Node::ClassDecl { .. }
-                | Node::ClassExpr { .. } => continue,
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => continue,
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                    self.class_outer_code(id, &mut stack);
+                    continue;
+                }
                 Node::Arrow { flags, .. }
                     if flags.contains(FnFlags::ASYNC) && self.has_super_property(id) =>
                 {
@@ -309,10 +312,11 @@ impl Lower<'_, '_> {
         let mut stack = vec![body];
         while let Some(id) = stack.pop() {
             match self.n(id) {
-                Node::FunctionDecl { .. }
-                | Node::FunctionExpr { .. }
-                | Node::ClassDecl { .. }
-                | Node::ClassExpr { .. } => continue,
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => continue,
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                    self.class_outer_code(id, &mut stack);
+                    continue;
+                }
                 Node::Member { obj, prop, .. } if self.n(obj) == Node::Super {} => {
                     if let Node::Ident { name } = self.n(prop)
                         && !names.contains(&name)
@@ -423,10 +427,11 @@ impl Lower<'_, '_> {
         let mut stack = vec![body];
         while let Some(id) = stack.pop() {
             match self.n(id) {
-                Node::FunctionDecl { .. }
-                | Node::FunctionExpr { .. }
-                | Node::ClassDecl { .. }
-                | Node::ClassExpr { .. } => continue,
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => continue,
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                    self.class_outer_code(id, &mut stack);
+                    continue;
+                }
                 Node::Assign { left, .. }
                 | Node::Update { arg: left, .. }
                 | Node::ForIn { left, .. }
@@ -442,14 +447,43 @@ impl Lower<'_, '_> {
         false
     }
 
+    /// The code of class `id` that runs in the enclosing function: the heritage, computed
+    /// member keys and the key captures the TypeScript transform moved into static blocks.
+    fn class_outer_code(&self, id: NodeId, out: &mut Vec<NodeId>) {
+        let Some(p) = crate::class::parts(self.tx, id) else {
+            return;
+        };
+        out.extend(self.tx.items(p.heritage));
+        for m in self.tx.items(p.members) {
+            match self.n(m) {
+                Node::MethodDef { key, .. } | Node::PropertyDef { key, .. }
+                    if self.tx.kind(key) == NodeKind::ComputedKey =>
+                {
+                    out.push(key)
+                }
+                Node::StaticBlock { body } if self.tx.inline_static.contains(&m) => {
+                    for st in self.tx.items(body) {
+                        if let Node::ExprStmt { expr } = self.n(st)
+                            && self.is_temp_capture(expr)
+                        {
+                            out.push(expr);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn has_super_property(&self, id: NodeId) -> bool {
         let mut stack = vec![id];
         while let Some(id) = stack.pop() {
             match self.n(id) {
-                Node::FunctionDecl { .. }
-                | Node::FunctionExpr { .. }
-                | Node::ClassDecl { .. }
-                | Node::ClassExpr { .. } => continue,
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => continue,
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                    self.class_outer_code(id, &mut stack);
+                    continue;
+                }
                 Node::Member { obj, .. } | Node::Index { obj, .. }
                     if self.n(obj) == Node::Super {} =>
                 {

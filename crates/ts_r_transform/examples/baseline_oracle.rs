@@ -336,7 +336,12 @@ fn main() {
                 .get_or_insert_with(|| {
                     let (name, text) = &files[i];
                     let cjs = is_cjs_file(name, &files);
-                    let result = transpile(name, text, &options_for(name, cjs), &CodegenOptions::default());
+                    let result = transpile(
+                        name,
+                        text,
+                        &options_for(name, cjs),
+                        &CodegenOptions::default(),
+                    );
                     (!result.has_errors()).then_some(result.code)
                 })
                 .clone()

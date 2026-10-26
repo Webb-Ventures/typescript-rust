@@ -407,7 +407,14 @@ impl Lower<'_, '_> {
             {
                 self.super_access(id)
             }
-            Node::Call { callee, .. } if self.is_super_access(callee) => self.super_call(id),
+            // `super.m?.()` below ES2020 is lowered as a chain, which passes `this` itself.
+            Node::Call {
+                callee, optional, ..
+            } if self.is_super_access(callee)
+                && !(optional && self.below(ScriptTarget::ES2020)) =>
+            {
+                self.super_call(id)
+            }
             Node::Await { .. } if self.below(ScriptTarget::ES2018) && self.in_async_gen() => {
                 self.await_in_async_gen(id)
             }
@@ -835,6 +842,14 @@ impl Lower<'_, '_> {
     /// Declares `frame`'s temporaries in the body of function `id`.
     fn add_temps(&mut self, id: NodeId, body: NodeId, frame: Frame) {
         if frame.groups.iter().all(Vec::is_empty) {
+            // The TypeScript transform's `var` may still lose temporaries a nested
+            // function adopted (a key capture in an async arrow's class).
+            if !self.moved.is_empty()
+                && let Node::Block { stmts } = self.n(body)
+            {
+                let stmts = self.with_temps(stmts, frame);
+                self.tx.set(body, Node::Block { stmts });
+            }
             return;
         }
         match self.n(body) {
@@ -906,7 +921,10 @@ impl Lower<'_, '_> {
 
     /// `stmts` with `frame`'s `var` statements after the directive prologue.
     fn with_temps(&mut self, stmts: NodeList, frame: Frame) -> NodeList {
-        if frame.groups.iter().all(Vec::is_empty) {
+        if frame.groups.iter().all(Vec::is_empty)
+            && (self.moved.is_empty()
+                || !self.tx.ast.list(stmts).iter().any(|&s| self.is_ts_temps(s)))
+        {
             return stmts;
         }
         let items = self.tx.items(stmts);

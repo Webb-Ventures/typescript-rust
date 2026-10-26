@@ -88,7 +88,8 @@ impl TsTransform {
             nearest: Mutex::default(),
             loaded: Mutex::default(),
         });
-        let config = ts_r_config::path::normalize_slashes(&root.join("tsconfig.json").to_string_lossy());
+        let config =
+            ts_r_config::path::normalize_slashes(&root.join("tsconfig.json").to_string_lossy());
         let options = match configs.load(&config) {
             Some(c) => TransformOptions::from_compiler_options(&c.parsed.options, "", false),
             None => TransformOptions::default(),
@@ -100,7 +101,10 @@ impl TsTransform {
 
     /// Applies `f` to every file's options after its tsconfig's (and to
     /// [`TsTransform::options`]); the per-file lookup is kept.
-    pub fn map_options(mut self, f: impl Fn(&mut TransformOptions) + Send + Sync + 'static) -> TsTransform {
+    pub fn map_options(
+        mut self,
+        f: impl Fn(&mut TransformOptions) + Send + Sync + 'static,
+    ) -> TsTransform {
         f(&mut self.options);
         self.options = for_browser(self.options);
         self.cache_id = cache_id_of(&self.options);
@@ -258,7 +262,11 @@ impl Loaded {
     /// tests it (no default excludes).
     fn includes(&self, file: &str, fs: &dyn FileSystem) -> bool {
         let cs = fs.case_sensitive();
-        if self.files.iter().any(|f| ts_r_config::path::eq(f, file, cs)) {
+        if self
+            .files
+            .iter()
+            .any(|f| ts_r_config::path::eq(f, file, cs))
+        {
             return true;
         }
         let allow_js = self.parsed.options.effective().allow_js();
@@ -266,7 +274,10 @@ impl Loaded {
             return false;
         }
         self.include.iter().any(|p| p.matches(file, cs))
-            && !self.exclude.iter().any(|p| p.matches_self_or_ancestor(file, cs))
+            && !self
+                .exclude
+                .iter()
+                .any(|p| p.matches_self_or_ancestor(file, cs))
     }
 }
 
@@ -429,7 +440,10 @@ mod tests {
         let t = t.map_options(|o| o.jsx_import_source = "preact".into());
         let nested = run_with(&t, "/p/nested/main.ts", TYPE_ONLY_USE);
         assert!(!nested.contains("not-used-type"), "{nested}");
-        assert_eq!(t.options_for(Path::new("/p/src/a.tsx")).jsx_import_source, "preact");
+        assert_eq!(
+            t.options_for(Path::new("/p/src/a.tsx")).jsx_import_source,
+            "preact"
+        );
         // The cache key covers the configs a file's options come from.
         let deps = t.deps(&TransformInput {
             path: Path::new("/p/nested/main.ts"),
