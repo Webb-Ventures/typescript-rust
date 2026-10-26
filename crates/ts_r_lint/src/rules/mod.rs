@@ -384,6 +384,7 @@ mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_process_exit;
+mod unicorn_no_redundant_comparison;
 mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_single_promise_in_promise_methods;
 mod unicorn_no_static_only_class;
@@ -936,6 +937,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_process_exit::RULE,
+    &unicorn_no_redundant_comparison::RULE,
     &unicorn_no_single_promise_in_promise_methods::RULE,
     &unicorn_no_static_only_class::RULE,
     &unicorn_no_thenable::RULE,

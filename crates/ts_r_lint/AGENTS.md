@@ -1724,6 +1724,34 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   suggestions instead of a fix. `eslint_same_reference` (in `unicorn_operator_assignment.rs`)
   is ESLint's `isSameReference`, with or without static computed keys.
 
+- **no-single-promise-in-promise-methods**: awaited `race` (and awaited `all` as a
+  statement) is fixed to `await x`; other awaited `all`s only through `const [v] = await
+  Promise.all([x])` / `(await Promise.all([x]))[0]`; `any` and non-awaited calls get the
+  unwrap and `Promise.resolve(..)` suggestions. An assignment target `[v]` is an `ArrayLit`.
+- **prefer-while-loop-condition**: an infinite loop starting with `if (c) break;` and no
+  other unlabeled `break` for it becomes `while (!c)`; not when `c` reads a lexical binding
+  declared in the body, nor for a labeled loop.
+- **prefer-boolean-return**: `if (x) return true; [else] return false;` becomes
+  `return x;` / `return !x;`, wrapping a non-boolean test in `Boolean(..)` (reported without
+  a fix when a value binding shadows `Boolean`; a type alias doesn't). A chain of flat guards
+  returning the same boolean is left alone.
+- **no-redundant-comparison**: within an outermost `&&` chain, strict (in)equalities between
+  two references form equality classes; a predicate on a class member implied by another
+  (same operator and value, or static numeric bounds) is redundant, and so is `b !== k`
+  after `a === k && a !== b`. Any side effect or tagged template between the first and last
+  analyzed operand stops it; a removal that could run getters or conversions is a
+  suggestion.
+- `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
+  (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
+  identifier searches, joining fixes, and `global_value_available` (type-only bindings
+  don't shadow a global value).
+
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
-`logical-assignment-operators.js`; ESLint docs for `operator-assignment` and
+`logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
+`prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`;
+`rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
+`should-add-parentheses-to-await-expression-argument.js`,
+`should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
+`comments.js`, `comparison.js`, `is-logical-expression.js`; `rules/fix/remove-statement.js`;
+`rules/shared/nullish-check.js`. ESLint docs for `operator-assignment` and
 `logical-assignment-operators`.

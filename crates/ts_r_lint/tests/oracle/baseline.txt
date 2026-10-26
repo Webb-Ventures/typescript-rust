@@ -343,6 +343,7 @@ unicorn/no-object-as-default-parameter 62/62
 unicorn/no-object-methods-with-collections 78/78
 unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-process-exit 58/58
+unicorn/no-redundant-comparison 87/87
 unicorn/no-shorthand-property-overrides 62/62
 unicorn/no-single-promise-in-promise-methods 137/137
 unicorn/no-static-only-class 91/91
