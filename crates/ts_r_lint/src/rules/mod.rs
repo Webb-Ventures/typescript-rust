@@ -502,6 +502,7 @@ mod unicorn_prefer_flat_math_min_max;
 mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
+mod unicorn_prefer_group_by;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
@@ -1095,6 +1096,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
+    &unicorn_prefer_group_by::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,

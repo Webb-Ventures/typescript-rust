@@ -445,6 +445,7 @@ unicorn/prefer-flat-math-min-max 47/47
 unicorn/prefer-get-or-insert-computed 62/62
 unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
+unicorn/prefer-group-by 181/181
 unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 247/247
 unicorn/prefer-iterable-in-constructor 76/76

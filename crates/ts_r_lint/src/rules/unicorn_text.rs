@@ -501,7 +501,17 @@ fn static_member_name(ast: &Ast, id: NodeId) -> Option<String> {
             _ => None,
         },
         Node::Index { index, .. } => {
-            let index = skip_parens(ast, index);
+            let mut index = skip_parens(ast, index);
+            // A sequence's value is its last expression (`a[(f(), "b")]` is `a.b`).
+            for _ in 0..10_000 {
+                match *ast.node(index) {
+                    Node::Seq { exprs } => match ast.list(exprs).last() {
+                        Some(&last) => index = skip_parens(ast, last),
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
             match *ast.node(index) {
                 Node::NumberLit { value } => Some(number_to_string(value.get())),
                 // `String(value)` of the other primitive literals (`a[null]` is `a.null`).
