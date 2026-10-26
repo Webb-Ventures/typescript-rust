@@ -145,12 +145,12 @@ Usage: ts-r-dev [root] [options]
     name: 'ts-r-lint',
     title: 'linter',
     replaces: 'ESLint + typescript-eslint',
-    body: 'A linter that reads your ESLint flat config, runs 154 ESLint and typescript-eslint rules, 51 of them type-aware, and honours eslint-disable comments.',
+    body: 'A linter that reads your ESLint flat config, runs 157 ESLint, typescript-eslint and jsdoc rules, 51 of them type-aware, and honours eslint-disable comments.',
     intro:
       'ts-r-lint runs ESLint-compatible rules over JavaScript and TypeScript. It reads the config you already have, reports in ESLint’s formats and exits with ESLint’s codes, so it can stand in for eslint in scripts and CI when your config only uses the rules it has.',
     works: [
-      '154 rules: all 64 of ESLint 10’s recommended set and typescript-eslint’s recommended and strict rules; 51 are type-aware, on ts-r’s own checker',
-      '15,495 of 15,517 cases of the published ESLint and typescript-eslint tests for those rules match',
+      '157 rules: all 64 of ESLint 10’s recommended set, typescript-eslint’s recommended and strict rules and three jsdoc rules; 51 are type-aware, on ts-r’s own checker',
+      '15,706 of 15,732 cases of the published ESLint, typescript-eslint and eslint-plugin-jsdoc tests for those rules match',
       'ESLint flat config, .oxlintrc.json and biome.json',
       '--fix, eslint-disable comments and inline config, with unused-disable reports',
       'Output as stylish, json, sarif or GitHub Actions annotations',

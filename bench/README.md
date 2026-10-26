@@ -514,8 +514,8 @@ Linter (`ts_r_lint`):
    (`type F = (date: Date) => void`, `(arg2: Arg2, arg1: Arg1): Result;`): 117 problems on
    date-fns `pkgs/core/src` that oxlint does not report (oxlint reports none). ts-r-lint also
    notes that oxlint's `env` is not mapped.
-9. **typeorm, `--no-type-check`:** 2,174 of ESLint's 7,392 problems match and 2 are only ours;
-   most of the 5,218 missing are `jsdoc/*` plugin rules (4,928) and type-aware rules (off).
+9. **typeorm, `--no-type-check`:** 7,378 of ESLint's 7,750 problems match and 0 are only ours;
+   all 372 missing come from type-aware rules (off). The `jsdoc/*` problems now match (2026-10-26).
 
 Bundler (`ts_r_build`):
 
