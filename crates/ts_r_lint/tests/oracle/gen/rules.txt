@@ -266,4 +266,5 @@ unicorn/no-console-spaces
 @typescript-eslint/prefer-function-type
 @typescript-eslint/consistent-generic-constructors
 @typescript-eslint/no-inferrable-types
+@typescript-eslint/prefer-for-of
 @typescript-eslint/adjacent-overload-signatures

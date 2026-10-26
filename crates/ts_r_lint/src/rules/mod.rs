@@ -246,6 +246,7 @@ mod ts_only_throw_error;
 mod ts_prefer_as_const;
 mod ts_prefer_find;
 mod ts_prefer_function_type;
+mod ts_prefer_for_of;
 mod ts_prefer_includes;
 mod ts_prefer_literal_enum_member;
 mod ts_prefer_namespace_keyword;
@@ -499,6 +500,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_as_const::RULE,
     &ts_prefer_find::RULE,
     &ts_prefer_function_type::RULE,
+    &ts_prefer_for_of::RULE,
     &ts_prefer_includes::RULE,
     &ts_prefer_literal_enum_member::RULE,
     &ts_prefer_namespace_keyword::RULE,
