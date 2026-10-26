@@ -2438,38 +2438,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let mut cur = msym;
         if let Some(q) = qualifier {
-            let mut names = Vec::new();
-            let mut n = q;
-            let mut guard = 0;
-            loop {
-                guard += 1;
-                if guard > 1000 {
-                    return TypeId::UNRESOLVED;
-                }
-                match *ast.node(n) {
-                    Node::QualifiedName { left, right } => {
-                        names.push(right);
-                        n = left;
-                    }
-                    _ => {
-                        names.push(n);
-                        break;
-                    }
-                }
-            }
-            names.reverse();
-            for nm in names {
-                let Some(text) = crate::nodes::ident_text(ast, nm) else {
-                    return TypeId::UNRESOLVED;
-                };
-                let Some(next) = self.c.export_of(cur, text) else {
-                    return TypeId::ERROR;
-                };
-                cur = match self.c.resolve_alias(next) {
-                    Some(x) => x,
-                    None => return TypeId::ERROR,
-                };
-            }
+            let Some(s) = self.import_qualifier_symbol(l.file, msym, q) else {
+                return TypeId::ERROR;
+            };
+            cur = s;
         } else if !is_typeof {
             return TypeId::ERROR;
         }
@@ -2485,6 +2457,79 @@ impl<'c, 'a> Ck<'c, 'a> {
             _ => Vec::new(),
         };
         self.type_from_symbol_reference(cur, &args)
+    }
+
+    /// The symbol `import("m").A.B` (not `typeof`) names, through aliases.
+    pub(crate) fn import_type_symbol(&mut self, l: Loc) -> Option<SymId> {
+        let ast = self.ast(l.file);
+        let Node::ImportType {
+            is_typeof: false,
+            arg,
+            qualifier: Some(q),
+            ..
+        } = *ast.node(l.node)
+        else {
+            return None;
+        };
+        let lit = match *ast.node(arg) {
+            Node::TypeRef { name, .. } => name,
+            _ => arg,
+        };
+        let req = self
+            .c
+            .bound(l.file)
+            .module_requests
+            .iter()
+            .position(|r| r.node == lit || r.node == arg)?;
+        let target = self.c.link.module_target(l.file, req as u32);
+        let &first = self.c.link.module_symbols(target).first()?;
+        let msym = self.c.sym_ref(first);
+        if let Some(d) = self.c.first_decl(msym)
+            && self.c.file(d.file).is_js()
+            && self.c.file(d.file).is_commonjs_module()
+        {
+            return None;
+        }
+        self.import_qualifier_symbol(l.file, msym, q)
+    }
+
+    /// The entity the qualifier `q` (`A.B`) of an import type names in module `msym`.
+    fn import_qualifier_symbol(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        msym: SymId,
+        q: NodeId,
+    ) -> Option<SymId> {
+        let ast = self.ast(file);
+        let mut cur = msym;
+        {
+            let mut names = Vec::new();
+            let mut n = q;
+            let mut guard = 0;
+            loop {
+                guard += 1;
+                if guard > 1000 {
+                    return None;
+                }
+                match *ast.node(n) {
+                    Node::QualifiedName { left, right } => {
+                        names.push(right);
+                        n = left;
+                    }
+                    _ => {
+                        names.push(n);
+                        break;
+                    }
+                }
+            }
+            names.reverse();
+            for nm in names {
+                let text = crate::nodes::ident_text(ast, nm)?;
+                let next = self.c.export_of(cur, text)?;
+                cur = self.c.resolve_alias(next)?;
+            }
+        }
+        Some(cur)
     }
 
     /// The anonymous type of a symbol-keyed declaration (`typeof f`, `typeof C`, `typeof N`).

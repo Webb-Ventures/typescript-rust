@@ -4699,8 +4699,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                     is_typeof: false,
                     qualifier: Some(q),
                     arg,
+                    type_args,
                     ..
-                } => self.check_import_type_qualifier(Loc::new(file, n), arg, q),
+                } => {
+                    self.check_import_type_qualifier(Loc::new(file, n), arg, q);
+                    // Arity and constraints of `import("m").Foo<T>` (TS2344, TS2314).
+                    if let Some(ta) = type_args
+                        && let Some(sym) = self.import_type_symbol(Loc::new(file, n))
+                    {
+                        let n_args = match *ast.node(ta) {
+                            Node::TypeArgs { args } => ast.list(args).len(),
+                            _ => 0,
+                        };
+                        self.check_resolved_type_reference(
+                            Loc::new(file, n),
+                            q,
+                            sym,
+                            n_args,
+                            type_args,
+                        );
+                    }
+                }
                 Node::TypeParam { .. } => {
                     self.check_type_param_modifiers(file, n);
                     self.check_circular_constraint(Loc::new(file, n));
@@ -6058,6 +6077,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(sym) = self.c.resolve_alias(sym) else {
             return;
         };
+        self.check_resolved_type_reference(r, name, sym, n_args, type_args);
+    }
+
+    /// The arity and constraint checks of a type reference `r` (written `name`, with
+    /// `n_args` type arguments) to the type symbol `sym`; also for `import("m").Foo<T>`.
+    fn check_resolved_type_reference(
+        &mut self,
+        r: Loc,
+        name: NodeId,
+        sym: ts_r_types::SymId,
+        n_args: usize,
+        type_args: Option<NodeId>,
+    ) {
+        let file = r.file;
+        let ast = self.ast(file);
+        let nl = Loc::new(file, name);
         if !self.c.has_meaning(sym, meaning::TYPE) {
             return;
         }
