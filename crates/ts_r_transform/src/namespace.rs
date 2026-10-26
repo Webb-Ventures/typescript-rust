@@ -568,6 +568,14 @@ pub(crate) fn target_with(
 
 /// True if the namespace declaration contains runtime code.
 pub(crate) fn is_instantiated(tx: &Tx, id: NodeId) -> bool {
+    let declare = matches!(tx.n(id), Node::Module { modifiers, .. } if modifiers.contains(Modifiers::DECLARE));
+    !declare && body_instantiates(tx, id)
+}
+
+/// True if the namespace's body has a value declaration, `declare` ones included: tsc
+/// gives `namespace N { export declare const x: T }` its (empty) IIFE (tsc:
+/// tsc/internal/ast/utilities.go, getModuleInstanceStateWorker).
+fn body_instantiates(tx: &Tx, id: NodeId) -> bool {
     let Node::Module {
         modifiers,
         kind,
@@ -577,10 +585,8 @@ pub(crate) fn is_instantiated(tx: &Tx, id: NodeId) -> bool {
     else {
         return false;
     };
-    if modifiers.contains(Modifiers::DECLARE)
-        || kind == ModuleKind::Global
-        || tx.kind(name) == NodeKind::StringLit
-    {
+    let _ = modifiers;
+    if kind == ModuleKind::Global || tx.kind(name) == NodeKind::StringLit {
         return false;
     }
     let Some(body) = body else {
@@ -594,16 +600,14 @@ pub(crate) fn is_instantiated(tx: &Tx, id: NodeId) -> bool {
 
 fn stmt_instantiates(tx: &Tx, s: NodeId) -> bool {
     let n = tx.n(s);
-    if n.modifiers().contains(Modifiers::DECLARE) {
-        return false;
-    }
+    let declare = n.modifiers().contains(Modifiers::DECLARE);
     match n {
         Node::Interface { .. } | Node::TypeAlias { .. } | Node::Empty {} => false,
-        Node::FunctionDecl { body, .. } => body.is_some(),
+        Node::FunctionDecl { body, .. } => declare || body.is_some(),
         Node::Enum { modifiers, .. } => {
             !modifiers.contains(Modifiers::CONST) || tx.opts.preserve_const_enums
         }
-        Node::Module { .. } => is_instantiated(tx, s),
+        Node::Module { .. } => body_instantiates(tx, s),
         Node::ImportEquals {
             type_only,
             modifiers,

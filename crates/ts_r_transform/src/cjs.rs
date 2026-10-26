@@ -1189,9 +1189,14 @@ pub(crate) fn export_named(tx: &mut Tx, id: NodeId, kept: &[NodeId], out: &mut V
 
 /// `import("x")` → `Promise.resolve().then(() => __importStar(require("x")))`.
 pub(crate) fn import_call(tx: &mut Tx, id: NodeId) {
-    let Node::ImportCall { arg, .. } = tx.n(id) else {
+    let Node::ImportCall { arg, phase, .. } = tx.n(id) else {
         return;
     };
+    // `import.defer(...)` / `import.source(...)` stay as written (an error in CommonJS;
+    // observed, tsc 7.0.2 `importDeferCallCommonJS`).
+    if phase != ts_r_ast::ImportPhase::Evaluation {
+        return;
+    }
     let at = tx.at(id);
     let promise = tx.dotted("Promise.resolve", at);
     let literal = tx.kind(arg) == NodeKind::StringLit;

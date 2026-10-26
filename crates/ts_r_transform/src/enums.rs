@@ -342,7 +342,11 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
                 // Members of this enum, including those of earlier declarations of the same
                 // (merged) enum, come before outer names (observed: `declare let y` loses to
                 // member `y`).
-                _ => own.values.get(n).cloned(),
+                _ => own
+                    .values
+                    .get(n)
+                    .cloned()
+                    .or_else(|| const_value(tx, e, own, own_name)),
             }
         }
         Node::Member { obj, prop, .. } => {
@@ -399,6 +403,32 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
         }
         _ => None,
     }
+}
+
+thread_local! {
+    /// Nesting of [`const_value`] (a chain of constants is bounded).
+    static CONST_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The value of a reference to a `const` declared before it without a type annotation,
+/// from its initializer (tsc: tsc/internal/checker/checker.go, `evaluateEntity`).
+fn const_value(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
+    let b = tx.sc.binding_of_ref(e)?;
+    let decl = tx.sc.binding(b).decl;
+    if tx.sc.binding(b).kind != BindingKind::Const || tx.span(decl).end > tx.span(e).start {
+        return None;
+    }
+    let init = *tx.sc.const_inits.get(&decl)?;
+    let depth = CONST_DEPTH.with(|d| d.get());
+    if depth >= 64 {
+        return None;
+    }
+    CONST_DEPTH.with(|d| d.set(depth + 1));
+    // The initializer is outside the enum: its names are not members.
+    let _ = (own, own_name);
+    let v = eval(tx, init, &EnumInfo::default(), "");
+    CONST_DEPTH.with(|d| d.set(depth));
+    v
 }
 
 /// The evaluated enum an expression names (`E` or the enum being declared).
@@ -477,10 +507,14 @@ fn imported_const_enum_value(tx: &mut Tx, access: NodeId, obj: NodeId) -> Option
         match tx.n(root) {
             Node::Member { obj, .. } => root = obj,
             _ => {
-                break tx
-                    .sc
-                    .binding_of_ref(root)
-                    .is_some_and(|b| tx.sc.binding(b).kind == BindingKind::Import);
+                // An import, or an `import x = N.M` alias (of a namespace another file
+                // may declare: `mappa.E.A`, constEnumOnlyModuleImportAliasEmit).
+                break tx.sc.binding_of_ref(root).is_some_and(|b| {
+                    matches!(
+                        tx.sc.binding(b).kind,
+                        BindingKind::Import | BindingKind::ImportEquals
+                    )
+                });
             }
         }
     };

@@ -340,6 +340,17 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `sub_stmt`).
 - TC39 decorators on a class that `extends null`: the synthesized constructor has no
   `super(...arguments)`.
+- An enum member initializer that names a same-file `const x = <constant>` (no type
+  annotation, declared earlier) folds to the value (`A = base * 2` → `8`); a `const`
+  declared later stays a reference (`enums::const_value`, `Scopes::const_inits`,
+  `isolatedDeclarationErrorsEnums`).
+- A namespace is instantiated by an exported `declare function` or a `declare namespace`
+  holding a value (`export declare namespace I { const x: number; }`): the empty IIFE is
+  kept. Types and type-only nested namespaces still make it a type (`uniqueSymbolsPropertyNames`).
+- CommonJS leaves `import.defer(...)` and `import.source(...)` as written; only plain
+  `import()` becomes `Promise.resolve().then(() => require())` (`importDeferCallCommonJS`).
+- A const enum read through an `import X = M.E` alias asks the program resolver, like an
+  imported root.
 
 ## Dependencies
 

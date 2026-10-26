@@ -103,6 +103,9 @@ pub(crate) struct Scopes {
     ns_namespaces: FxHashMap<(BindingId, Atom), BindingId>,
     /// JSX element or fragment → the scope it is in (classic factories resolve there).
     pub jsx_scope: FxHashMap<NodeId, u32>,
+    /// `const x = init` without a type annotation: declaring identifier → initializer (enum
+    /// initializers fold such constants, as tsc's evaluator does).
+    pub const_inits: FxHashMap<NodeId, NodeId>,
 }
 
 impl Scopes {
@@ -191,6 +194,7 @@ pub(crate) fn analyze<'a>(
             ns_enums: FxHashMap::default(),
             ns_namespaces: FxHashMap::default(),
             jsx_scope: FxHashMap::default(),
+            const_inits: FxHashMap::default(),
         },
         refs: Vec::new(),
         metadata: decorator_metadata,
@@ -794,6 +798,13 @@ impl Walker<'_> {
                 self.pattern(name, target, bk, exported);
                 if declare {
                     continue;
+                }
+                if kind == VarKind::Const
+                    && type_ann.is_none()
+                    && let Some(i) = init
+                    && matches!(self.ast.node(name), Node::Ident { .. })
+                {
+                    self.out.const_inits.insert(name, i);
                 }
                 if let Some(t) = type_ann {
                     self.type_keys(t, scope);
