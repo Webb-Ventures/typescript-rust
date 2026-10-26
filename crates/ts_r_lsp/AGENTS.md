@@ -408,6 +408,8 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   types; static: the base constructor type), else its own name; any other modifier and the
   `function`/`class`/`interface`/`enum`/`type`/`namespace`/`const`/`let`/`var` keyword to the
   definition of the declared name. A variable statement's modifier goes nowhere.
+  Find-all-references on such a keyword (`keyword_name`) lists the declared name's
+  references; document highlights on it do not move to the name (`const` alone has none).
 - **Type definition** follows tsc's symbol-of-type rule: the declarations of each union
   member's symbol (not the alias: `Pick<T, K>` goes to its mapped type), the first type
   argument of a well-known global generic first (`Array`, `Promise`, `Map`, `Pick`, ... the

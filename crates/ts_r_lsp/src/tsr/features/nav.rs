@@ -202,13 +202,7 @@ pub fn type_definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Va
     let c = cx.checker;
     let ast = c.ast(cx.file);
     let d = Doc::new(c, cx.file);
-    let keyword_name = match keywords::keyword_definition(&d, offset) {
-        Some(
-            keywords::KeywordTarget::Name(n) | keywords::KeywordTarget::Override { name: n, .. },
-        ) => Some(n),
-        _ => None,
-    };
-    let Some(n) = keyword_name
+    let Some(n) = keywords::keyword_name(&d, offset)
         .or_else(|| ident_at(ast, offset))
         .or_else(|| node_at(ast, offset))
     else {
@@ -510,7 +504,12 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
     if let Some(refs) = special_references(cx, offset, scope) {
         return refs;
     }
-    let Some(n) = ident_at(c.ast(cx.file), offset) else {
+    // For find-all-references, a modifier or declaration keyword stands for the declared
+    // name; document highlights on such a keyword are the keyword's own (or none).
+    let keyword_name = (scope == Scope::Project)
+        .then(|| keywords::keyword_name(&Doc::new(c, cx.file), offset))
+        .flatten();
+    let Some(n) = keyword_name.or_else(|| ident_at(c.ast(cx.file), offset)) else {
         return Vec::new();
     };
     let Some(target) = Target::at(ck, Loc::new(cx.file, n)) else {

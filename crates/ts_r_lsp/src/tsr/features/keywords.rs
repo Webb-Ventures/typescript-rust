@@ -974,7 +974,12 @@ pub fn keyword_definition(d: &Doc<'_>, offset: u32) -> Option<KeywordTarget> {
                 .map(|k| vec![k]),
             // `function` goes to its function, `const` to the first variable, `class`
             // (and the other declaration keywords) to the declared name.
-            Node::FunctionDecl { .. } | Node::FunctionExpr { .. } if word == "function" => {
+            Node::FunctionDecl { name, .. } | Node::FunctionExpr { name, .. }
+                if word == "function" =>
+            {
+                if let Some(name) = name {
+                    return Some(KeywordTarget::Name(name));
+                }
                 Some(function_target_of(d, n))
             }
             Node::VarDecl { .. } if matches!(word, "const" | "let" | "var") => {
@@ -1013,6 +1018,15 @@ pub fn keyword_definition(d: &Doc<'_>, offset: u32) -> Option<KeywordTarget> {
         n = d.parent(n)?;
     }
     None
+}
+
+/// The declared name a keyword before it stands for (a modifier, `function`, `class`,
+/// `const`, ...), as references and type definition read it.
+pub fn keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
+    match keyword_definition(d, offset)? {
+        KeywordTarget::Name(n) | KeywordTarget::Override { name: n, .. } => Some(n),
+        _ => None,
+    }
 }
 
 /// The name a declaration is shown at (the first variable of `export const a = 1, b`).

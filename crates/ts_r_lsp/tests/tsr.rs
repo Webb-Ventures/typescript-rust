@@ -895,6 +895,23 @@ fn keyword_definitions_and_type_definitions() {
     // A type-only symbol goes to itself.
     let d = result(&mut c, "textDocument/typeDefinition", at(&u, 6, 10));
     assert_eq!(start(&d, 0), json!({"line": 6, "character": 10}), "{d}");
+    // References on a declaration keyword are those of the declared name ...
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": u}, "position": {"line": 1, "character": 1},
+               "context": {"includeDeclaration": true}}),
+    );
+    let lines: Vec<u64> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    assert_eq!(lines, vec![1, 4, 5], "{r}");
+    // ... but highlights on `const` are none (tsserver does not move to the name there).
+    let h = result(&mut c, "textDocument/documentHighlight", at(&u, 4, 1));
+    assert!(h.as_array().is_none_or(Vec::is_empty), "{h}");
     c.shutdown();
 }
 
