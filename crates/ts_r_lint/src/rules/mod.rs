@@ -327,6 +327,7 @@ mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
 mod unicorn_filename_case;
+mod unicorn_import_style;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
@@ -540,6 +541,7 @@ mod unicorn_splice;
 mod unicorn_static;
 mod unicorn_switch_case_braces;
 mod unicorn_switch_case_break_position;
+mod unicorn_template_indent;
 mod unicorn_text;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
@@ -1107,6 +1109,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_throw_new_error::RULE,
     &unicorn_no_abusive_eslint_disable::RULE,
     &unicorn_filename_case::RULE,
+    &unicorn_import_style::RULE,
+    &unicorn_template_indent::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

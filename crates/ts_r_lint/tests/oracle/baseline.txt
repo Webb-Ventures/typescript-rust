@@ -290,6 +290,7 @@ unicorn/escape-case 198/198
 unicorn/explicit-length-check 224/224
 unicorn/explicit-timer-delay 60/60
 unicorn/filename-case 279/279
+unicorn/import-style 191/191
 unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
 unicorn/no-abusive-eslint-disable 33/33
@@ -480,6 +481,7 @@ unicorn/require-module-specifiers 67/68
 unicorn/require-number-to-fixed-digits-argument 15/15
 unicorn/switch-case-braces 56/56
 unicorn/switch-case-break-position 30/30
+unicorn/template-indent 79/79
 unicorn/text-encoding-identifier-case 101/101
 unicorn/throw-new-error 86/86
 use-isnan 234/234
