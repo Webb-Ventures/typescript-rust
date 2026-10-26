@@ -21,6 +21,18 @@ pub static RULE: RuleDef = RuleDef {
     create: create::<First>,
 };
 
+/// `import/imports-first`: the deprecated name of `import/first`, same behaviour.
+pub static IMPORTS_FIRST: RuleDef = RuleDef {
+    meta: meta(
+        "import/imports-first",
+        "Replaced by `import/first`.",
+        NO_PRESET,
+        Category::Style,
+    )
+    .fixable(),
+    create: create::<First>,
+};
+
 #[derive(Debug)]
 struct First {
     absolute_first: bool,

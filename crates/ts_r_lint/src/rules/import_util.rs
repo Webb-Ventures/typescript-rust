@@ -143,6 +143,74 @@ pub(crate) fn is_export_statement(ast: &Ast, stmt: NodeId) -> bool {
     }
 }
 
+/// What ESTree makes of a statement that exports (typescript-estree wraps any declaration
+/// whose modifiers start with `export`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExportDecl {
+    /// `ExportNamedDeclaration`; `type_kind` is its `exportKind: "type"` (`export type {}`,
+    /// interfaces, type aliases and `declare` declarations).
+    Named { type_kind: bool },
+    /// `ExportDefaultDeclaration`.
+    Default,
+    /// `ExportAllDeclaration`.
+    All,
+}
+
+pub(crate) fn export_decl(ast: &Ast, stmt: NodeId) -> Option<ExportDecl> {
+    let n = ast.node(stmt);
+    match *n {
+        Node::ExportNamed { type_only, .. } => Some(ExportDecl::Named {
+            type_kind: type_only,
+        }),
+        Node::ExportAll { .. } => Some(ExportDecl::All),
+        Node::ExportDefaultExpr { .. } => Some(ExportDecl::Default),
+        _ => {
+            let m = n.modifiers();
+            if !m.contains(Modifiers::EXPORT) {
+                None
+            } else if m.contains(Modifiers::DEFAULT) {
+                Some(ExportDecl::Default)
+            } else {
+                let type_kind = matches!(n, Node::Interface { .. } | Node::TypeAlias { .. })
+                    || m.contains(Modifiers::DECLARE);
+                Some(ExportDecl::Named { type_kind })
+            }
+        }
+    }
+}
+
+/// The name an export or import specifier part spells (an identifier or a string).
+pub(crate) fn module_export_name(ast: &Ast, id: NodeId) -> Option<&str> {
+    ident_name(ast, id).or_else(|| string_literal(ast, id))
+}
+
+/// The start of the token after the one at `start` (ESLint's `getFirstTokens(node)[1]`
+/// for a node starting with a keyword or `{`), and that token's end when it is `{` or a
+/// word.
+pub(crate) fn second_token(src: &str, start: u32) -> Span {
+    let bytes = src.as_bytes();
+    let mut i = start as usize;
+    while i < bytes.len()
+        && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'$')
+    {
+        i += 1;
+    }
+    let tok = skip_trivia_forward(src, i);
+    let mut end = tok;
+    while end < bytes.len()
+        && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'$')
+    {
+        end += 1;
+    }
+    if end == tok {
+        end += src
+            .get(tok..)
+            .and_then(|r| r.chars().next())
+            .map_or(0, char::len_utf8);
+    }
+    Span::new(tok as u32, end as u32)
+}
+
 /// Every node of the file in source order (depth first, parents before children).
 pub(crate) fn walk(ast: &Ast, mut f: impl FnMut(NodeId)) {
     let mut stack = vec![ast.root];

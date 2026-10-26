@@ -543,9 +543,10 @@ function observe(ruleId, isTs, testerConfig, c) {
   const jsx = !!lo.parserOptions?.ecmaFeatures?.jsx;
   // eslint-plugin-import's cases name files in its fixture tree (`tests/files`), which its
   // rules read; the recorded name is relative to that tree.
-  const importFile = ruleId.startsWith('import/') && c.filename && importFiles && path.isAbsolute(c.filename);
+  // A relative name is relative to the cwd, the checkout root (`/import` in the harness).
+  const importFile = ruleId.startsWith('import/') && c.filename && importFiles;
   let filename = importFile
-    ? path.relative(importFiles, c.filename).split(path.sep).join('/')
+    ? path.relative(importFiles, path.resolve(importRoot, c.filename)).split(path.sep).join('/')
     : c.filename
     ? path.basename(c.filename)
     : isTs

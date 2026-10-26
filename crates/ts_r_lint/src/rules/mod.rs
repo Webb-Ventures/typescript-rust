@@ -19,10 +19,12 @@ mod guard_for_in;
 mod import_consistent_type_specifier_style;
 mod import_default;
 mod import_dynamic_import_chunkname;
+mod import_enforce_node_protocol_usage;
 mod import_export;
 mod import_exports_last;
 mod import_extensions;
 mod import_first;
+mod import_group_exports;
 mod import_max_dependencies;
 mod import_named;
 mod import_namespace;
@@ -32,19 +34,23 @@ mod import_no_amd;
 mod import_no_anonymous_default_export;
 mod import_no_commonjs;
 mod import_no_cycle;
+mod import_no_default_export;
 mod import_no_deprecated;
 mod import_no_duplicates;
 mod import_no_dynamic_require;
 mod import_no_empty_named_blocks;
+mod import_no_extraneous_dependencies;
 mod import_no_import_module_exports;
 mod import_no_internal_modules;
 mod import_no_mutable_exports;
 mod import_no_named_as_default;
 mod import_no_named_as_default_member;
 mod import_no_named_default;
+mod import_no_named_export;
 mod import_no_namespace;
 mod import_no_nodejs_modules;
 mod import_no_relative_packages;
+mod import_no_relative_parent_imports;
 mod import_no_restricted_paths;
 mod import_no_self_import;
 mod import_no_unassigned_import;
@@ -52,6 +58,7 @@ mod import_no_unresolved;
 mod import_no_useless_path_segments;
 mod import_no_webpack_loader_syntax;
 mod import_prefer_default_export;
+mod import_unambiguous;
 pub(crate) mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
@@ -789,6 +796,14 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_anonymous_default_export::RULE,
     &import_newline_after_import::RULE,
     &import_first::RULE,
+    &import_first::IMPORTS_FIRST,
+    &import_enforce_node_protocol_usage::RULE,
+    &import_group_exports::RULE,
+    &import_no_default_export::RULE,
+    &import_no_named_export::RULE,
+    &import_no_relative_parent_imports::RULE,
+    &import_unambiguous::RULE,
+    &import_no_extraneous_dependencies::RULE,
     &import_no_empty_named_blocks::RULE,
     &import_no_commonjs::RULE,
     &import_no_mutable_exports::RULE,
