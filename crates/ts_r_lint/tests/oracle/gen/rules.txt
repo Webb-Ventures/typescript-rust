@@ -308,3 +308,11 @@ unicorn/prefer-add-event-listener-options
 unicorn/prefer-global-this
 unicorn/no-named-default
 unicorn/prefer-string-repeat
+unicorn/no-unnecessary-array-flat-depth
+unicorn/no-magic-array-flat-depth
+unicorn/consistent-template-literal-escape
+unicorn/no-break-in-nested-loop
+unicorn/no-useless-re-export
+unicorn/prefer-global-number-constants
+unicorn/max-nested-calls
+unicorn/prefer-short-escape-sequences

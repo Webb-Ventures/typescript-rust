@@ -2,6 +2,7 @@
 //! name), on our AST: parentheses around the callee are transparent, as in ESTree.
 
 use super::prelude::*;
+use super::unicorn_util::parenthesized_span;
 use ts_r_ast::Ast;
 
 /// `obj.name(args)`: a call whose callee (through parentheses) is a non-computed member
@@ -344,6 +345,117 @@ pub(crate) fn is_jest_inline_snapshot(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
         && call.args == [node]
         && matches!(*ast.node(skip_parens(ast, call.obj)), Node::Call { callee, optional: false, args, .. }
             if ident_name(ast, skip_parens(ast, callee)) == Some("expect") && ast.list(args).len() == 1)
+}
+
+/// The file's first line break (ESLint's `getLinebreak`), `\n` without one.
+pub(crate) fn linebreak(src: &str) -> &'static str {
+    match src.find(['\n', '\r', '\u{2028}', '\u{2029}']) {
+        Some(i) if src[i..].starts_with("\r\n") => "\r\n",
+        Some(i) if src[i..].starts_with('\r') => "\r",
+        Some(i) if src[i..].starts_with('\u{2028}') => "\u{2028}",
+        Some(i) if src[i..].starts_with('\u{2029}') => "\u{2029}",
+        _ => "\n",
+    }
+}
+
+/// The fix removing argument `index` of the call or `new` `call`, with its parentheses and
+/// one comma: the only argument takes a trailing comma along, the first of several the
+/// comma after it and the spaces up to the next token or comment, any other the comma
+/// before it. Comments in the removed range are kept (moved in front of the rest when the
+/// first of several goes); a line comment gets a line break after it.
+pub(crate) fn remove_argument(cx: &Ctx<'_, '_>, call: NodeId, index: usize) -> Option<Fix> {
+    let ast = cx.ast();
+    let src = cx.src();
+    let args = match *ast.node(call) {
+        Node::Call { args, .. } | Node::New { args, .. } => ast.list(args),
+        _ => return None,
+    };
+    let arg = parenthesized_span(cx, *args.get(index)?);
+    let (mut start, mut end) = (arg.start, arg.end);
+    let comma_after = || {
+        let at = skip_trivia_forward(src, arg.end as usize);
+        (src.as_bytes().get(at) == Some(&b',')).then_some(at as u32)
+    };
+    let mut first_of_several = None;
+    if args.len() == 1 {
+        if let Some(c) = comma_after() {
+            end = c + 1;
+        }
+    } else if index == 0 {
+        let c = comma_after()?;
+        end = skip_spaces(src, c as usize + 1) as u32;
+        first_of_several = Some(c);
+    } else {
+        let at = skip_trivia_backward(ast, src, arg.start as usize);
+        if at == 0 || src.as_bytes()[at - 1] != b',' {
+            return None;
+        }
+        start = at as u32 - 1;
+    }
+    let range = Span::new(start, end);
+    let comments: Vec<_> = ast
+        .comments_in(range)
+        .iter()
+        .filter(|c| c.span.end <= end)
+        .collect();
+    if comments.is_empty() {
+        return Some(Fix::replace(range, ""));
+    }
+    let text = |c: &ts_r_ast::Comment| {
+        let t = c.span.text(src);
+        if matches!(c.kind, ts_r_ast::CommentKind::Line) {
+            format!("{t}{}", linebreak(src))
+        } else {
+            t.to_owned()
+        }
+    };
+    let replacement = match first_of_several {
+        Some(comma) => {
+            let inside: Vec<String> = comments
+                .iter()
+                .filter(|c| c.span.end <= arg.end)
+                .map(|c| text(c))
+                .collect();
+            format!(
+                "{}{}{}",
+                inside.join(" "),
+                &src[arg.end as usize..comma as usize],
+                &src[comma as usize + 1..end as usize]
+            )
+        }
+        None => comments.iter().map(|c| format!(" {}", text(c))).collect(),
+    };
+    Some(Fix::replace(range, replacement))
+}
+
+/// `node` (through parentheses and TS wrappers) is written to: an assignment or default
+/// target, an update or `delete` operand, a destructuring element or property value, or a
+/// `for-in`/`for-of` head.
+pub(crate) fn is_left_hand_side(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut cur = node;
+    let parent = loop {
+        let Some(p) = cx.parent(cur) else {
+            return false;
+        };
+        match ast.node(p) {
+            Node::Paren { .. }
+            | Node::As { .. }
+            | Node::Satisfies { .. }
+            | Node::NonNull { .. }
+            | Node::TypeAssertion { .. } => cur = p,
+            _ => break p,
+        }
+    };
+    match *ast.node(parent) {
+        Node::Update { arg, .. } => arg == cur,
+        Node::Unary {
+            op: UnaryOp::Delete,
+            arg,
+        } => arg == cur,
+        Node::Assign { left, .. } if left == cur => true,
+        _ => is_assignment_target(ast, cx.file.parents, cur),
+    }
 }
 
 #[cfg(test)]

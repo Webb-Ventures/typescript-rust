@@ -276,11 +276,14 @@ mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_ast;
 mod unicorn_consistent_date_clone;
+mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
 mod unicorn_escape_case;
+mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
 mod unicorn_no_await_in_promise_methods;
+mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_console_spaces;
 mod unicorn_no_document_cookie;
 mod unicorn_no_exports_in_scripts;
@@ -288,6 +291,7 @@ mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
+mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_named_default;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
@@ -295,9 +299,11 @@ mod unicorn_no_new_array;
 mod unicorn_no_null;
 mod unicorn_no_this_assignment;
 mod unicorn_no_typeof_undefined;
+mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_await;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_error_capture_stack_trace;
+mod unicorn_no_useless_re_export;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
@@ -306,9 +312,11 @@ mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
+mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
@@ -618,11 +626,14 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_tag_lines::RULE,
     // eslint-plugin-unicorn
     &unicorn_consistent_date_clone::RULE,
+    &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_escape_case::RULE,
+    &unicorn_max_nested_calls::RULE,
     &unicorn_new_for_builtins::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
+    &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_exports_in_scripts::RULE,
@@ -630,6 +641,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
+    &unicorn_no_magic_array_flat_depth::RULE,
     &unicorn_no_named_default::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
@@ -637,9 +649,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_null::RULE,
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_typeof_undefined::RULE,
+    &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_await::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
+    &unicorn_no_useless_re_export::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
@@ -648,9 +662,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_type_error::RULE,

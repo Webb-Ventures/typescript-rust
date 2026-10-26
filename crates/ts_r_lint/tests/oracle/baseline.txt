@@ -266,11 +266,14 @@ radix 91/91
 require-yield 15/15
 symbol-description 8/8
 unicorn/consistent-date-clone 26/26
+unicorn/consistent-template-literal-escape 20/20
 unicorn/consistent-tuple-labels 30/30
 unicorn/empty-brace-spaces 213/213
 unicorn/escape-case 198/198
+unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
 unicorn/no-await-in-promise-methods 110/111
+unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
 unicorn/no-document-cookie 21/21
 unicorn/no-exports-in-scripts 22/22
@@ -278,6 +281,7 @@ unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
+unicorn/no-magic-array-flat-depth 27/27
 unicorn/no-named-default 66/66
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
@@ -285,9 +289,11 @@ unicorn/no-new-array 111/111
 unicorn/no-null 94/94
 unicorn/no-this-assignment 23/23
 unicorn/no-typeof-undefined 100/100
+unicorn/no-unnecessary-array-flat-depth 20/20
 unicorn/no-unnecessary-await 63/66
 unicorn/no-unreadable-iife 14/14
 unicorn/no-useless-error-capture-stack-trace 53/53
+unicorn/no-useless-re-export 22/22
 unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
@@ -296,9 +302,11 @@ unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46
+unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-optional-catch-binding 25/25
+unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-structured-clone 47/47
 unicorn/prefer-type-error 112/112

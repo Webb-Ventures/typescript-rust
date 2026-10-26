@@ -608,6 +608,14 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
   non-computed keys and any key of an abstract member or signature, module sources and
   specifiers, import attributes, JSX attribute values, enum members, module names,
   `require` references, any child of a type) and `expect(x).toMatchInlineSnapshot(lit)`.
+- **remove_argument** (`unicorn_ast.rs`) removes one call argument with its parentheses
+  and one comma, keeping comments in the removed range (no-unnecessary-array-flat-depth).
+- **no-magic-array-flat-depth** ignores a disable/enable directive in the argument list;
+  any other comment there explains the depth and silences it.
+- **no-unnecessary-array-flat-depth**, **consistent-template-literal-escape**,
+  **no-break-in-nested-loop**, **no-useless-re-export**, **prefer-global-number-constants**
+  (`is_left_hand_side` in `unicorn_ast.rs`), **max-nested-calls**,
+  **prefer-short-escape-sequences**: see each file's header.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -618,4 +626,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `prefer-event-target.js`, `no-exports-in-scripts.js`, `consistent-tuple-labels.js`,
 `no-leading-empty-lines.js`, `prefer-add-event-listener-options.js`, `utils/needs-semicolon.js`,
 `fix/add-parentheses-to-return-or-throw-expression.js`, `prefer-global-this.js`,
-`no-named-default.js`, `prefer-string-repeat.js`, `utils/is-string-literal-required.js`.
+`no-named-default.js`, `prefer-string-repeat.js`, `utils/is-string-literal-required.js`,
+`no-unnecessary-array-flat-depth.js`, `no-magic-array-flat-depth.js`, `fix/remove-argument.js`,
+`utils/comments.js`, `utils/eslint-directive.js`, `consistent-template-literal-escape.js`,
+`no-break-in-nested-loop.js`, `no-useless-re-export.js`, `prefer-global-number-constants.js`,
+`utils/is-left-hand-side.js`, `max-nested-calls.js`, `prefer-short-escape-sequences.js`.

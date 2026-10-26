@@ -10,6 +10,7 @@
 //! first line break.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -24,16 +25,6 @@ pub static RULE: RuleDef = RuleDef {
 
 #[derive(Debug, Default)]
 struct NoNamedDefault;
-
-fn linebreak(src: &str) -> &'static str {
-    match src.find(['\n', '\r', '\u{2028}', '\u{2029}']) {
-        Some(i) if src[i..].starts_with("\r\n") => "\r\n",
-        Some(i) if src[i..].starts_with('\r') => "\r",
-        Some(i) if src[i..].starts_with('\u{2028}') => "\u{2028}",
-        Some(i) if src[i..].starts_with('\u{2029}') => "\u{2029}",
-        _ => "\n",
-    }
-}
 
 fn has_comment_between(ast: &ts_r_ast::Ast, a: u32, b: u32) -> bool {
     a < b && !ast.comments_in(Span::new(a, b)).is_empty()
