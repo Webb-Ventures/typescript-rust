@@ -108,6 +108,7 @@ pub(crate) struct Tx<'a> {
     /// Layout hints for codegen ([`crate::TransformResult::single_line`]).
     pub single_line: Vec<NodeId>,
     pub multi_line: Vec<NodeId>,
+    pub single_quoted: Vec<NodeId>,
     /// Source-map ranges of synthesized nodes ([`crate::TransformResult::map_ranges`]).
     pub map_ranges: Vec<(NodeId, Span)>,
     /// Statements standing for source nodes moved elsewhere
@@ -179,6 +180,7 @@ pub(crate) fn run(
         type_alias_imports: FxHashSet::default(),
         single_line: Vec::new(),
         multi_line: Vec::new(),
+        single_quoted: Vec::new(),
         map_ranges: Vec::new(),
         moved_comments: Vec::new(),
     };
@@ -229,6 +231,7 @@ pub(crate) fn run(
         unlowered,
         single_line: sorted(tx.single_line),
         multi_line: sorted(tx.multi_line),
+        single_quoted: sorted(tx.single_quoted),
         map_ranges: {
             // The last range given to a node wins.
             let mut r = tx.map_ranges;
@@ -715,6 +718,10 @@ impl<'a> Tx<'a> {
                 }
             }
             Node::ExportAssignment { expr } => {
+                if crate::namespace::export_assignment_elided(self, id) {
+                    self.erase(id);
+                    return;
+                }
                 self.expr(expr);
                 match self.opts.module {
                     ModuleFormat::CommonJs | ModuleFormat::Preserve => {
@@ -1437,7 +1444,7 @@ impl<'a> Tx<'a> {
 
     /// After rewriting `f` into `mod.f` (CommonJS imports), a call `f()` must not pass `mod`
     /// as `this`: print `(0, mod.f)()`.
-    fn fix_detached_callee(&mut self, callee: NodeId) {
+    pub(crate) fn fix_detached_callee(&mut self, callee: NodeId) {
         if self.cjs.detached.remove(&callee) {
             let at = self.at(callee);
             let moved = crate::builder::clone_node(self.ast, callee);
@@ -1759,8 +1766,21 @@ impl<'a> Tx<'a> {
             && !self.binding_used(name)
             && crate::namespace::entity_is_value(self, module_ref) != Some(false)
             && self.value_alias(id);
-        if type_only || !(exported || self.binding_used(name) || kept_by_verbatim || script_global)
-        {
+        // The JSX factory's root keeps the alias, as it does an import (`import React =
+        // require("react")` with `<div />`, in every JSX mode).
+        if self.sc.has_jsx {
+            crate::jsx::read_pragmas(self);
+        }
+        let jsx = !type_only && self.jsx_needs(name);
+        // A used `import x = require("m")` whose module exports only a type (`export = I`
+        // of an interface) stands for no value: tsc drops it, uses and all.
+        let used = self.binding_used(name)
+            && (exported
+                || kept_by_verbatim
+                || jsx
+                || self.kind(module_ref) != NodeKind::ExternalModuleRef
+                || self.value_alias(id));
+        if type_only || !(exported || used || kept_by_verbatim || script_global || jsx) {
             self.erase(id);
             return;
         }

@@ -630,6 +630,10 @@ impl<'a> Printer<'a> {
         self.tsc && self.hints.multi_line.binary_search(&id).is_ok()
     }
 
+    pub(crate) fn hint_single_quoted(&self, id: NodeId) -> bool {
+        self.tsc && self.hints.single_quoted.binary_search(&id).is_ok()
+    }
+
     pub(crate) fn is_synthetic(&self, id: NodeId) -> bool {
         let s = self.ast.span(id);
         s.start >= s.end

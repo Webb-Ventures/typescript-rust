@@ -679,6 +679,20 @@ pub(crate) fn entity_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
     member_is_value(tx, &top, root, &path, 0, false)
 }
 
+/// `export = X;` where this file declares `X` only as a type (an interface, a type alias, a
+/// namespace of types): tsc writes nothing for it, and the module gets the `__esModule`
+/// marker as if it had no export assignment.
+pub(crate) fn export_assignment_elided(tx: &Tx, stmt: NodeId) -> bool {
+    let Node::ExportAssignment { expr } = tx.n(stmt) else {
+        return false;
+    };
+    // verbatimModuleSyntax keeps it as written (observed).
+    !tx.opts.verbatim_module_syntax
+        && tx.ast.source_kind.is_typescript()
+        && matches!(tx.n(expr), Node::Ident { .. })
+        && entity_is_value(tx, expr) == Some(false)
+}
+
 /// Whether `name` (then `rest`) declared among `stmts` is a value. `ambient`: the
 /// statements are a `declare namespace`'s body, where every member is exported.
 fn member_is_value(
@@ -730,6 +744,16 @@ fn member_is_value(
                 found_type = true;
             }
             Node::ImportEquals { name: nm, .. } if named(Some(nm)) => return None,
+            Node::ImportDecl { specifiers, .. }
+                if tx.ast.list(specifiers).iter().any(|&sp| match tx.n(sp) {
+                    Node::ImportSpecifier { local, .. }
+                    | Node::ImportDefaultSpecifier { local }
+                    | Node::ImportNamespaceSpecifier { local } => named(Some(local)),
+                    _ => false,
+                }) =>
+            {
+                return None;
+            }
             Node::Interface { name: nm, .. } | Node::TypeAlias { name: nm, .. }
                 if named(Some(nm)) =>
             {

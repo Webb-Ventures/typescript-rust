@@ -104,6 +104,9 @@ pub struct PrintHints<'a> {
     /// (`(_a = class {\n    },\n    _a.x = 1,\n    _a)`), and blocks printed over several
     /// lines though the source has them on one. Sorted.
     pub multi_line: &'a [NodeId],
+    /// [`Layout::Tsc`]: synthesized string literals printed with `'` (a JSX attribute string
+    /// written with single quotes keeps them: `x='1'` → `{ x: '1' }`). Sorted.
+    pub single_quoted: &'a [NodeId],
     /// [`Layout::Tsc`] source maps: the source range tsc maps a synthesized node to (its
     /// start and end segments, as for an original node), sorted by node id. A synthesized
     /// block's range is the original block whose `}` it maps. A start or end of

@@ -980,6 +980,7 @@ fn emit_js(ctx: &Ctx, i: usize) -> FileOut {
         prelude: &r.prelude,
         single_line: &r.single_line,
         multi_line: &r.multi_line,
+        single_quoted: &r.single_quoted,
         map_ranges: &r.map_ranges,
         moved_comments: &r.moved_comments,
         strip_numeric_separators: opts.strip_numeric_separators,

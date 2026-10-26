@@ -332,6 +332,8 @@ fn root_ref(tx: &mut Tx, name: &str, at: u32) -> NodeId {
         && let Some(b) = tx.sc.module_binding(atom)
     {
         crate::cjs::rewrite_ref(tx, id, b);
+        // `React_1.createElement` keeps `React_1` as `this`; a one-name factory call asks
+        // for `(0, m.f)` itself ([`classic`]).
         tx.cjs.detached.remove(&id);
     }
     id
@@ -357,10 +359,21 @@ pub(crate) fn jsx(tx: &mut Tx, id: NodeId) {
         Node::JsxFragment { children } => (None, Vec::new(), tx.items(children)),
         _ => return,
     };
+    // tsc's classic layout: a child element starts its own line, and so does every child
+    // when there are several (`h("p", null,\n    h("b", null))`).
+    let element_child = children
+        .iter()
+        .any(|&c| matches!(tx.n(c), Node::JsxElement { .. } | Node::JsxFragment { .. }));
     let kids = children_exprs(tx, &children);
     tx.jsx.scope = tx.sc.jsx_scope.get(&id).copied();
     let call = match m {
-        JsxMode::Classic => classic(tx, tag, &attrs, kids, at),
+        JsxMode::Classic => {
+            if kids.len() > 1 || element_child {
+                // The call is moved into `id`.
+                tx.mark_multi_line(id);
+            }
+            classic(tx, tag, &attrs, kids, at)
+        }
         _ => automatic(tx, tag, &attrs, kids, at, m == JsxMode::AutomaticDev),
     };
     replace(tx.ast, id, call);
@@ -547,7 +560,11 @@ fn attr_value(tx: &mut Tx, value: Option<NodeId>, at: u32) -> NodeId {
                 _ => text,
             };
             let decoded = crate::entities::decode(raw);
-            tx.string(&decoded, span.start)
+            let s = tx.string(&decoded, span.start);
+            if text.starts_with('\'') {
+                tx.single_quoted.push(s);
+            }
+            s
         }
         Node::JsxExprContainer { expr: Some(e) } => {
             tx.expr(e);
@@ -578,6 +595,18 @@ fn classic(
         .clone()
         .unwrap_or_else(|| tx.opts.jsx_factory.clone());
     let callee = entity(tx, &factory, at);
+    // A factory that is one imported (or exported) name, `dom` from `import { dom }`, is
+    // called without its module as `this`: `(0, renderer_1.dom)(...)`, as any call of an
+    // import is (observed).
+    if !factory.contains('.')
+        && tx.opts.is_cjs()
+        && let Some(atom) = tx.ast.atoms.find(&factory)
+        && tx.sc.module_binding(atom).is_some()
+        && matches!(tx.n(callee), Node::Member { .. })
+    {
+        tx.cjs.detached.insert(callee);
+        tx.fix_detached_callee(callee);
+    }
     let ty = match tag {
         Some(t) => tag_expr(tx, t),
         None => {

@@ -244,7 +244,12 @@ impl Printer<'_> {
                     None if self.tsc => {
                         let v = self.ast.atom(value);
                         let mut s = String::with_capacity(v.len() + 2);
-                        crate::literals::quote_string_ascii(v, &mut s);
+                        let quote = if self.hint_single_quoted(id) {
+                            '\''
+                        } else {
+                            '"'
+                        };
+                        crate::literals::quote_string_ascii_with(v, quote, &mut s);
                         self.tok(&s);
                     }
                     _ => {
@@ -917,21 +922,41 @@ impl Printer<'_> {
             self.tok(")");
             return;
         }
-        self.args(args);
+        // A classic JSX factory call with several children (the transform marks it) puts
+        // each child on its own line: `h("p", null,\n    a,\n    b)`, as tsc does.
+        let children_from = if self.hint_multi_line(call) {
+            2
+        } else {
+            usize::MAX
+        };
+        self.args_lines(args, children_from);
     }
 
-    fn args(&mut self, args: ts_r_ast::NodeList) {
+    /// The arguments; those from index `lines_from` on each start a line, indented once.
+    fn args_lines(&mut self, args: ts_r_ast::NodeList, lines_from: usize) {
         self.tok("(");
         let saved = self.no_in;
         self.no_in = false;
         let items = self.ast.list(args).to_vec();
+        let mut indented = false;
         for (i, a) in items.iter().enumerate() {
             if i > 0 {
                 self.tok(",");
                 self.comma_comments(items[i - 1], *a);
-                self.space();
+                if i >= lines_from {
+                    if !indented {
+                        self.indent();
+                        indented = true;
+                    }
+                    self.newline();
+                } else {
+                    self.space();
+                }
             }
             self.arg(*a);
+        }
+        if indented {
+            self.dedent();
         }
         self.no_in = saved;
         self.tok(")");

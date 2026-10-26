@@ -64,6 +64,8 @@ pub struct TransformResult {
     /// Synthesized array literals tsc prints one element per line, and blocks it prints
     /// over several lines ([`PrintHints::multi_line`]). Sorted.
     pub multi_line: Vec<NodeId>,
+    /// Synthesized strings tsc prints with `'` ([`PrintHints::single_quoted`]). Sorted.
+    pub single_quoted: Vec<NodeId>,
     /// Source-map ranges of synthesized nodes ([`PrintHints::map_ranges`]). Sorted by node.
     pub map_ranges: Vec<(NodeId, Span)>,
     /// Statements standing for moved source nodes ([`PrintHints::moved_comments`]). Sorted
@@ -163,6 +165,7 @@ pub fn transpile(
         prelude: &result.prelude,
         single_line: &result.single_line,
         multi_line: &result.multi_line,
+        single_quoted: &result.single_quoted,
         map_ranges: &result.map_ranges,
         moved_comments: &result.moved_comments,
         strip_numeric_separators: opts.strip_numeric_separators,

@@ -1,4 +1,4 @@
-//! `Layout::Tsc` after a transform: each `tests/tsc_layout/<name>.ts` transpiles (options from
+//! `Layout::Tsc` after a transform: each `tests/tsc_layout/<name>.ts` (or `.tsx`) transpiles (options from
 //! its `// @option: value` header) byte-for-byte to the `.js` next to it, which is tsc 7's
 //! output for the same file.
 
@@ -11,7 +11,10 @@ mod support;
 
 fn check(name: &str) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tsc_layout");
-    let path = dir.join(format!("{name}.ts"));
+    let mut path = dir.join(format!("{name}.ts"));
+    if !path.exists() {
+        path = dir.join(format!("{name}.tsx"));
+    }
     let src = std::fs::read_to_string(&path).unwrap();
     let want = std::fs::read_to_string(dir.join(format!("{name}.js"))).unwrap();
     let path = path.to_string_lossy().to_string();
@@ -190,4 +193,36 @@ fn es_decorated_statics() {
 #[test]
 fn script_import_alias() {
     check("script_import_alias");
+}
+
+/// A name exported twice (`export { foo, foo as bar }; export { foo }`) is set to `void 0`
+/// once.
+#[test]
+fn cjs_export_names() {
+    check("cjs_export_names");
+}
+
+/// `export =` of an interface emits nothing, and does not make the module an `export =` one.
+#[test]
+fn cjs_export_type() {
+    check("cjs_export_type");
+}
+
+/// The classic JSX factory's root keeps its `import React = require("react")`.
+#[test]
+fn cjs_jsx_factory() {
+    check("cjs_jsx_factory");
+}
+
+/// A one-name imported JSX factory (`/** @jsx dom */`) is called as `(0, renderer_1.dom)(..)`.
+#[test]
+fn cjs_jsx_pragma() {
+    check("cjs_jsx_pragma");
+}
+
+/// Classic JSX: attribute strings keep their quotes; a child element, and every child when
+/// there are several, starts its own line.
+#[test]
+fn jsx_classic_layout() {
+    check("jsx_classic_layout");
 }
