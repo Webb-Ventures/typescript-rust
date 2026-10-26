@@ -327,6 +327,7 @@ unicorn/filename-case 279/279
 unicorn/id-match 29/29
 unicorn/import-style 191/191
 unicorn/isolated-functions 78/78
+unicorn/iteration-fallback-style 108/108
 unicorn/logical-assignment-operators 19/19
 unicorn/max-nested-calls 26/26
 unicorn/name-replacements 377/377
@@ -389,6 +390,7 @@ unicorn/no-invalid-boolean-attribute-value 349/349
 unicorn/no-invalid-character-comparison 115/115
 unicorn/no-invalid-dom-token 181/181
 unicorn/no-invalid-fetch-options 70/70
+unicorn/no-invalid-file-input-accept 49/49
 unicorn/no-invalid-integrity 115/115
 unicorn/no-invalid-intl-options 450/450
 unicorn/no-invalid-property-descriptor 237/237
@@ -405,8 +407,10 @@ unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
 unicorn/no-loop-iterable-mutation 197/197
 unicorn/no-magic-array-flat-depth 27/27
+unicorn/no-manually-wrapped-comments 107/107
 unicorn/no-mismatched-map-key 103/103
 unicorn/no-misrefactored-assignment 79/79
+unicorn/no-missing-local-resource 34/34
 unicorn/no-named-default 66/66
 unicorn/no-negated-array-predicate 73/73
 unicorn/no-negated-comparison 117/117
@@ -424,6 +428,7 @@ unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-prevent-default-in-passive-listener 111/111
 unicorn/no-process-exit 58/58
 unicorn/no-redundant-comparison 87/87
+unicorn/no-repeated-call-wrappers 107/108
 unicorn/no-return-array-push 187/187
 unicorn/no-selector-as-dom-name 149/149
 unicorn/no-shorthand-property-overrides 62/62
@@ -458,6 +463,7 @@ unicorn/no-unreadable-iife 14/14
 unicorn/no-unreadable-new-expression 37/37
 unicorn/no-unreadable-object-destructuring 78/78
 unicorn/no-unsafe-buffer-conversion 137/137
+unicorn/no-unsafe-dom-html 95/95
 unicorn/no-unsafe-json-serialization 212/212
 unicorn/no-unsafe-promise-all-settled-values 163/163
 unicorn/no-unsafe-property-key 271/271
@@ -525,6 +531,7 @@ unicorn/prefer-continue 223/223
 unicorn/prefer-date-now 61/61
 unicorn/prefer-default-parameters 538/538
 unicorn/prefer-direct-iteration 119/119
+unicorn/prefer-dispose 56/56
 unicorn/prefer-dom-node-append 69/69
 unicorn/prefer-dom-node-html-methods 67/67
 unicorn/prefer-dom-node-remove 118/118
@@ -545,12 +552,15 @@ unicorn/prefer-has-check 211/211
 unicorn/prefer-hoisting-branch-code 107/107
 unicorn/prefer-https 165/165
 unicorn/prefer-identifier-import-export-specifiers 56/56
+unicorn/prefer-import-meta-properties 48/48
 unicorn/prefer-includes 247/247
 unicorn/prefer-iterable-in-constructor 76/76
+unicorn/prefer-iterator-concat 87/87
 unicorn/prefer-iterator-helpers 138/138
 unicorn/prefer-iterator-to-array 61/61
 unicorn/prefer-iterator-to-array-at-end 74/74
 unicorn/prefer-iterator-zip 107/107
+unicorn/prefer-json-import 82/82
 unicorn/prefer-keyboard-event-key 116/116
 unicorn/prefer-literal-ascii 110/110
 unicorn/prefer-location-assign 54/54
@@ -614,6 +624,7 @@ unicorn/prefer-string-starts-ends-with 249/249
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-structured-clone 47/47
 unicorn/prefer-switch 68/68
+unicorn/prefer-temporal 93/93
 unicorn/prefer-temporal-conversion 165/165
 unicorn/prefer-ternary 142/142
 unicorn/prefer-then-catch 43/43
@@ -637,6 +648,7 @@ unicorn/require-module-attributes 35/35
 unicorn/require-module-specifiers 68/68
 unicorn/require-number-to-fixed-digits-argument 15/15
 unicorn/require-passive-events 95/95
+unicorn/require-post-message-target-origin 43/43
 unicorn/require-proxy-trap-boolean-return 166/167
 unicorn/require-text-decoder-streaming 159/159
 unicorn/single-line-block-comment-style 173/173

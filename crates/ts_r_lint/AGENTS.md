@@ -2636,3 +2636,66 @@ prefer-short-arrow-method}.js`; `rules/shared/nullish-check.js`,
 `rules/ast/is-undefined.js`, `rules/utils/get-function-from-identifier.js`,
 `rules/utils/has-unsafe-arrow-conversion-reference.js`,
 `rules/utils/get-concise-arrow-body-text.js`, `rules/utils/comments.js`.
+
+## eslint-plugin-unicorn rules (round 7, h2)
+
+Twelve opt-in rules, each at its full oracle count except no-repeated-call-wrappers:
+require-post-message-target-origin (43/43), no-repeated-call-wrappers (107/108),
+prefer-iterator-concat (87/87), no-unsafe-dom-html (95/95), prefer-json-import (82/82),
+prefer-import-meta-properties (48/48), prefer-temporal (93/93), iteration-fallback-style
+(108/108), no-manually-wrapped-comments (107/107), prefer-dispose (56/56),
+no-invalid-file-input-accept (49/49), no-missing-local-resource (34/34).
+
+**Local call targets are shared.** `unicorn_no_unnecessary_parameters::local_call_targets`
+gives every local function with the calls that reach it (`None` when the file has dynamic
+scope, so no rule guesses); no-repeated-call-wrappers uses it too. The target lookup is an
+id-to-index map, not a linear search. A name used in `export type {x}` or `export {type x}`
+is not a runtime reference. The one no-repeated-call-wrappers miss is `this?.#getWords(x)`,
+which ts_r_parser rejects ("An optional chain cannot contain private identifiers") though
+ESTree parsers accept it; the fix belongs in the parser.
+
+**No type information in the oracle.** prefer-temporal's `checkMethods` and prefer-dispose's
+"is the resource disposable" check need types; the published outputs were made without
+them, so both do nothing more than the untyped path (prefer-dispose reports any matching
+`try`).
+
+**Comment prose.** no-manually-wrapped-comments works on the file's comment list in
+`run_file`. Lines are split the ESLint way (`\r\n`, `\r`, `\n`, U+2028, U+2029), columns
+compared in UTF-16 units. A sentence ends in `.`, `!`, `?`, `:` or an
+`Extended_Pictographic` character (optionally plus a variation selector), or in an emoji
+sequence ending in a skin tone, a regional-indicator pair, a keycap or a tag. The pictograph
+table is Unicode 17 (what Node 24 matches), generated with Node and pasted as ranges: our
+regex engine only approximates `\p{...}`, so the rule does not use it. Inside a block comment
+lines are split at `\n` only, as the plugin does, and a copyright, `SPDX-` or `@license`
+line exempts the whole comment.
+
+**prefer-dispose ordering.** `using` disposes in reverse declaration order, so the
+`finally` must already dispose the resources last-declared-first; the declarations must be
+the statements just before the `try`. The suggestion re-indents with
+`unicorn_iteration_fallback_style::reindent` (now `pub(super)`), unless a template literal in
+the `try` spans lines.
+
+**MIME types.** no-invalid-file-input-accept parses a MIME type like Node's `MIMEType`:
+type and subtype must be non-empty HTTP token characters, whitespace before `;` is dropped
+from the subtype, parameters never make it invalid; the essence is lowercased.
+
+**The file system.** no-missing-local-resource is the one rule that reads the disk: it
+lists each directory on the way (cached for the one lookup) and compares entries exactly,
+then ignoring case (an ambiguous case-insensitive match counts as missing). When a directory
+can't be listed the whole path's existence decides. The oracle lints `/oracle/<file>`,
+which does not exist, so every published case is "missing"; a unit test with a temp
+directory covers the existing and wrongly cased paths. Percent-escapes decode as
+`decodeURIComponent`, falling back to each run of escapes alone; the casing fix keeps the
+escapes the author wrote where the decoded text lines up.
+
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
+`rules/{require-post-message-target-origin,no-repeated-call-wrappers,prefer-iterator-concat,
+no-unsafe-dom-html,prefer-json-import,prefer-import-meta-properties,prefer-temporal,
+iteration-fallback-style,no-manually-wrapped-comments,prefer-dispose,
+no-invalid-file-input-accept,no-missing-local-resource}.js`;
+`rules/utils/track-local-function-calls.js`, `rules/utils/global-reference-tracker.js`,
+`rules/utils/reindent-text.js`, `rules/utils/needs-semicolon.js`,
+`rules/utils/eslint-directive.js`, `rules/utils/get-comments.js`,
+`rules/utils/get-line-indent.js`, `rules/fix/replace-string-raw.js`,
+`rules/ast/call-or-new-expression.js`, `rules/ast/literal.js`, `rules/ast/is-method-call.js`,
+`rules/ast/is-member-expression.js`, `rules/utils/matches-name-constraint.js`.
