@@ -3104,3 +3104,12 @@ fn external_glob_files_keep_their_call_in_the_map() {
         "{js}"
     );
 }
+
+#[test]
+fn a_bigint_define_value_is_a_bigint_literal() {
+    let fs = project(&[("main.js", "console.log(x);\n")]);
+    let mut o = opts(&["main.js"]);
+    o.define = vec![("x".into(), "1n".into())];
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/main.js").contains("console.log(1n);"));
+}
