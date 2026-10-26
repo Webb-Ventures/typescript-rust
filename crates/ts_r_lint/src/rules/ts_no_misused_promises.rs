@@ -483,7 +483,13 @@ impl NoMisusedPromises {
             FlagUnions::Strict => {
                 let mut awaited: Vec<Ty> = Vec::new();
                 for p in promises {
-                    awaited.extend(parts(ti, ti.awaited_type(p)));
+                    // A circular thenable has no awaited type (tsc's getAwaitedType gives
+                    // undefined): typescript-eslint then finds no matching type argument.
+                    let a = ti.awaited_type(p);
+                    if a == Ty::UNRESOLVED {
+                        return false;
+                    }
+                    awaited.extend(parts(ti, a));
                 }
                 let same =
                     |a: Ty, b: Ty| a == b || (ti.is_assignable(a, b) && ti.is_assignable(b, a));
@@ -721,7 +727,16 @@ impl NoMisusedPromises {
                 continue;
             }
             for (bt, bname) in &base_types {
-                let Some(s) = ti.property_of_type(*bt, &name) else {
+                // typescript-eslint's getMemberIfExists reads the type symbol's members
+                // first: for `typeof SomeClass` (a class's static side) those are the
+                // instance members, which the construct signatures return.
+                let Some(s) = ti.property_of_type(*bt, &name).or_else(|| {
+                    let inst = match ti.type_symbol(*bt) {
+                        Some(sym) => ti.declared_type_of_symbol(sym)?,
+                        None => ti.return_type(*ti.signatures(*bt, true).first()?),
+                    };
+                    ti.property_of_type(inst, &name)
+                }) else {
                     continue;
                 };
                 let pt = ti.type_of_symbol(s);
