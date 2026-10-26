@@ -182,7 +182,8 @@ jsdoc/prefer-import-tag 51/51
 jsdoc/reject-any-type 5/5
 jsdoc/reject-function-type 4/4
 jsdoc/require-asterisk-prefix 24/24
-jsdoc/require-description 60/60
+jsdoc/require-example 35/35
+jsdoc/require-file-overview 31/31
 jsdoc/require-hyphen-before-param-description 32/32
 jsdoc/require-jsdoc 198/198
 jsdoc/require-next-description 2/2
@@ -195,6 +196,7 @@ jsdoc/require-property 15/15
 jsdoc/require-property-description 8/8
 jsdoc/require-property-name 7/7
 jsdoc/require-property-type 7/7
+jsdoc/require-rejects 32/32
 jsdoc/require-returns 158/158
 jsdoc/require-returns-check 111/111
 jsdoc/require-returns-description 16/16
@@ -209,6 +211,7 @@ jsdoc/require-yields-check 53/53
 jsdoc/require-yields-description 3/3
 jsdoc/require-yields-type 3/3
 jsdoc/tag-lines 60/60
+jsdoc/text-escaping 20/20
 jsdoc/ts-method-signature-style 14/14
 jsdoc/ts-no-empty-object-type 6/6
 jsdoc/ts-no-unnecessary-template-expression 15/15

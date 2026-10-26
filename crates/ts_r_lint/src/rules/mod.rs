@@ -96,7 +96,8 @@ mod jsdoc_prefer_import_tag;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
-mod jsdoc_require_description;
+mod jsdoc_require_example;
+mod jsdoc_require_file_overview;
 mod jsdoc_require_hyphen_before_param_description;
 mod jsdoc_require_jsdoc;
 mod jsdoc_require_next_description;
@@ -109,6 +110,7 @@ mod jsdoc_require_property;
 mod jsdoc_require_property_description;
 mod jsdoc_require_property_name;
 mod jsdoc_require_property_type;
+mod jsdoc_require_rejects;
 mod jsdoc_require_returns;
 mod jsdoc_require_returns_check;
 mod jsdoc_require_returns_description;
@@ -123,6 +125,7 @@ mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
 mod jsdoc_tag_lines;
+mod jsdoc_text_escaping;
 mod jsdoc_ts_method_signature_style;
 mod jsdoc_ts_no_empty_object_type;
 mod jsdoc_ts_no_unnecessary_template_expression;
@@ -1090,6 +1093,8 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_reject_any_type::RULE,
     &jsdoc_reject_function_type::RULE,
     &jsdoc_require_asterisk_prefix::RULE,
+    &jsdoc_require_example::RULE,
+    &jsdoc_require_file_overview::RULE,
     &jsdoc_require_hyphen_before_param_description::RULE,
     &jsdoc_require_jsdoc::RULE,
     &jsdoc_require_next_description::RULE,
@@ -1102,6 +1107,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_property_description::RULE,
     &jsdoc_require_property_name::RULE,
     &jsdoc_require_property_type::RULE,
+    &jsdoc_require_rejects::RULE,
     &jsdoc_require_returns::RULE,
     &jsdoc_require_returns_check::RULE,
     &jsdoc_require_returns_description::RULE,
@@ -1116,6 +1122,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
+    &jsdoc_text_escaping::RULE,
     &jsdoc_ts_method_signature_style::RULE,
     &jsdoc_ts_no_empty_object_type::RULE,
     &jsdoc_ts_no_unnecessary_template_expression::RULE,

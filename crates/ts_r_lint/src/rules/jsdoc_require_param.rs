@@ -24,8 +24,8 @@ use super::prelude::*;
 use crate::jsdoc::{Block, Doc, Finder, Tag, Target, Tokens};
 use crate::jsdoc_util::{
     ContextOpts, Flat, Inner, ItemName, ParamName, drop_path_quotes, exempted_by, flatten_roots,
-    function_param_names_with, has_exempting_tag, regex_string_matches, replaced_docs, same_path,
-    target_params,
+    function_param_names_with, has_exempting_tag, make_multiline, regex_string_matches,
+    replaced_docs, same_path, target_params,
 };
 
 const DEFAULT_TYPES: &str = "/^(?:[oO]bject|[aA]rray|PlainObject|Generic(?:Object|Array))$/";
@@ -410,52 +410,6 @@ impl RequireParam {
             }
         }
     }
-}
-
-/// `makeMultiline`: a one-line block becomes `/**`, its content line and the closing line.
-fn make_multiline(b: &mut Block, indent: &str) {
-    let first = b.source[0];
-    let t = b.lines[first].tokens.clone();
-    let (mut post_name, mut post_type, mut post_tag) = (t.post_name, t.post_type, t.post_tag);
-    if t.description.is_empty() {
-        if !post_name.is_empty() {
-            post_name.clear();
-        } else if !post_type.is_empty() {
-            post_type.clear();
-        } else if !post_tag.is_empty() {
-            post_tag.clear();
-        }
-    }
-    let line_end = t.line_end.clone();
-    let delimiter = b.lines[first].tokens.delimiter.clone();
-    b.lines[first].tokens = Tokens {
-        delimiter,
-        ..Tokens::default()
-    };
-    let content = Tokens {
-        start: format!("{indent} "),
-        delimiter: "*".to_owned(),
-        post_delimiter: t.post_delimiter,
-        tag: t.tag,
-        post_tag,
-        typ: t.typ,
-        post_type,
-        name: t.name,
-        post_name,
-        description: t.description.trim_end().to_owned(),
-        ..Tokens::default()
-    };
-    let closing = Tokens {
-        start: format!("{indent} "),
-        end: "*/".to_owned(),
-        line_end,
-        ..Tokens::default()
-    };
-    let n = b.lines[first].number;
-    let a = b.new_line(n + 1, content);
-    let c = b.new_line(n + 2, closing);
-    b.source.push(a);
-    b.source.push(c);
 }
 
 /// JavaScript's `splice` start: negative counts from the end, clamped to the length.

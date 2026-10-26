@@ -192,6 +192,52 @@ pub fn each_block_checking(
     run(cx, &settings, &all_blocks(), checks, f);
 }
 
+/// `makeMultiline`: a one-line block becomes `/**`, its content line and the closing line.
+pub fn make_multiline(b: &mut Block, indent: &str) {
+    let first = b.source[0];
+    let t = b.lines[first].tokens.clone();
+    let (mut post_name, mut post_type, mut post_tag) = (t.post_name, t.post_type, t.post_tag);
+    if t.description.is_empty() {
+        if !post_name.is_empty() {
+            post_name.clear();
+        } else if !post_type.is_empty() {
+            post_type.clear();
+        } else if !post_tag.is_empty() {
+            post_tag.clear();
+        }
+    }
+    let line_end = t.line_end.clone();
+    let delimiter = b.lines[first].tokens.delimiter.clone();
+    b.lines[first].tokens = Tokens {
+        delimiter,
+        ..Tokens::default()
+    };
+    let content = Tokens {
+        start: format!("{indent} "),
+        delimiter: "*".to_owned(),
+        post_delimiter: t.post_delimiter,
+        tag: t.tag,
+        post_tag,
+        typ: t.typ,
+        post_type,
+        name: t.name,
+        post_name,
+        description: t.description.trim_end().to_owned(),
+        ..Tokens::default()
+    };
+    let closing = Tokens {
+        start: format!("{indent} "),
+        end: "*/".to_owned(),
+        line_end,
+        ..Tokens::default()
+    };
+    let n = b.lines[first].number;
+    let a = b.new_line(n + 1, content);
+    let c = b.new_line(n + 2, closing);
+    b.source.push(a);
+    b.source.push(c);
+}
+
 /// Adds a line holding just `@tag`: after the first line of the last tag, or (with no tags)
 /// before the last line.
 pub fn add_tag(doc: &mut Doc, tag: &str) {
@@ -588,6 +634,11 @@ pub fn column_span(finder: &Finder<'_>, doc: &Doc, rel: i64) -> ts_r_span::Span 
 /// A tag's description (`getTagDescription`): the text after the tag, type and name on its
 /// first line, then its other lines, joined with newlines.
 pub fn tag_description(b: &Block, tag: usize) -> String {
+    tag_description_lines(b, tag).join("\n")
+}
+
+/// [`tag_description`] as one string per line (`getTagDescription(tag, true)`).
+pub fn tag_description_lines(b: &Block, tag: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for &id in &b.tags[tag].source {
         let t = &b.lines[id].tokens;
@@ -609,7 +660,7 @@ pub fn tag_description(b: &Block, tag: usize) -> String {
         }
         out.push(d);
     }
-    out.join("\n")
+    out
 }
 
 /// `hasThrowValue`: whether function `id` (not async) throws, looking only through
