@@ -285,8 +285,7 @@ unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
-unicorn/no-duplicate-logical-operands 61/61
-unicorn/no-duplicate-set-values 40/40
+unicorn/no-duplicate-if-branches 30/30
 unicorn/no-exports-in-scripts 22/22
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-remove-event-listener 42/42
@@ -336,8 +335,7 @@ unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112
-unicorn/require-array-sort-compare 64/64
-unicorn/require-css-escape 54/54
+unicorn/switch-case-break-position 30/30
 unicorn/text-encoding-identifier-case 101/101
 unicorn/throw-new-error 86/86
 use-isnan 234/234

@@ -107,10 +107,21 @@ fn config_for(rule: &str, case: &Value) -> Value {
     if let Some(opts) = case["options"].as_array() {
         value.extend(opts.iter().cloned());
     }
+    // ESLint reported (and fixed) an unused directive in this case: its fix shapes the
+    // expected output, so report them too (the messages are not compared).
+    let unused = case["messages"].as_array().is_some_and(|ms| {
+        ms.iter().any(|m| {
+            m["ruleId"].is_null()
+                && m["message"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("Unused eslint-disable directive"))
+        })
+    });
+    let report_unused = if unused { "warn" } else { "off" };
     json!([{
         "files": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"],
         "languageOptions": language,
-        "linterOptions": { "reportUnusedDisableDirectives": "off" },
+        "linterOptions": { "reportUnusedDisableDirectives": report_unused },
         "settings": case.get("settings").cloned().unwrap_or(json!({})),
         "rules": { rule: value },
     }])

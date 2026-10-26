@@ -322,3 +322,5 @@ unicorn/max-nested-calls
 unicorn/prefer-short-escape-sequences
 unicorn/no-useless-recursion
 unicorn/no-array-from-fill
+unicorn/no-duplicate-if-branches
+unicorn/switch-case-break-position

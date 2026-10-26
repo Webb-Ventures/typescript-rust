@@ -297,8 +297,7 @@ mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
-mod unicorn_no_duplicate_logical_operands;
-mod unicorn_no_duplicate_set_values;
+mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_exports_in_scripts;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_remove_event_listener;
@@ -352,7 +351,7 @@ mod unicorn_prefer_type_error;
 mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
 mod unicorn_static;
-mod unicorn_text;
+mod unicorn_switch_case_break_position;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
@@ -677,8 +676,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
-    &unicorn_no_duplicate_logical_operands::RULE,
-    &unicorn_no_duplicate_set_values::RULE,
+    &unicorn_no_duplicate_if_branches::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
@@ -729,8 +727,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
-    &unicorn_require_array_sort_compare::RULE,
-    &unicorn_require_css_escape::RULE,
+    &unicorn_switch_case_break_position::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
 ];
