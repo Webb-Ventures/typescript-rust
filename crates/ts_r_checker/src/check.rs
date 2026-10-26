@@ -6088,8 +6088,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.store().is_error(at) || at == TypeId::UNRESOLVED || c == TypeId::UNRESOLVED {
                 continue;
             }
-            // `infer X` parameters take implied constraints from where they appear.
-            if self.is_infer_type_param(at) {
+            // `infer X` parameters take implied constraints from where they appear. A
+            // template literal placeholder's (`${infer X}`) is `string`, which decides
+            // `Box<X>` in the true branch like a declared constraint.
+            if self.is_infer_type_param(at) && !self.is_template_infer_param(at) {
                 continue;
             }
             if !self.is_assignable(at, c) {

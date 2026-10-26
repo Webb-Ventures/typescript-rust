@@ -2102,7 +2102,12 @@ Files, by layer:
 - **Template `infer` placeholders.** With nothing inferred, an `infer X` placeholder is
   `string`; a source that cannot match a pattern made of placeholders only (`string`
   against `${infer F}${infer R}`) infers `never` for each, so recursion over `string`
-  stops (`template_infer_placeholders`).
+  stops (`template_infer_placeholders`). An unconstrained placeholder's constraint is
+  `string` (`implied_infer_constraint`), so `{ [K in X | keyof O]: .. }` takes it as a key
+  and `Box<X>` in the true branch is checked against `Box`'s constraint (TS2344); other
+  `infer` parameters are still not checked as type arguments
+  (tsc: `getInferredTypeParameterConstraint` in `tsc/internal/checker/checker.go`;
+  `template_infer_string_constraint`, hono's `ExtractParams`).
 - **Chain order.** Pending property levels (and the head they deferred) are flushed before
   "Types of parameters 'a' and 'b' are incompatible" is added, so they nest below it.
 - **Elaboration paths.** Pending levels flush outermost first. A property level starts a path
@@ -2157,7 +2162,11 @@ Files, by layer:
   parameter position) or the predicate types' elaboration. Two classes' `#x` members give
   TS18015 naming the declaring classes, unless one class derives from the other: through
   every base (`class_derives_from`), so a class extending a global interface's constructor
-  derives from each class that interface extends, one per merged declaration. A function or arrow expression's `?` parameter
+  derives from each class that interface extends, one per merged declaration. The base
+  matches by declaration as well as by symbol: an imported `export default class B` is typed
+  through its export symbol (`default`), its declaration binds a separate local `B`, and the
+  export symbol prints as the declaration names it except after a module path
+  (`import("./b").default`; `default_export_class_base`, @nodelib/fs.walk). A function or arrow expression's `?` parameter
   prints as annotated (`x?: string`; declarations and methods add `| undefined`)
   (`predicates_private_names_optional_params`). Its parameters in general print their
   annotation as written (`x: 'bye'`, `Array<T>`, aliases) while the signature is not

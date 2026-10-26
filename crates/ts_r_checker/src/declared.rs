@@ -1005,7 +1005,8 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// (`Box<infer U>` with `Box<X extends string>`), when that constraint mentions no type
     /// parameters; with `rest`, `unknown[]` as a rest parameter or rest tuple element type
     /// (only what an `infer` with no candidates falls back to: `Parameters<any>` is
-    /// `unknown[]`).
+    /// `unknown[]`); `string` for a template literal placeholder.
+    /// (`tsc: tsc/internal/checker/checker.go`, `getInferredTypeParameterConstraint`.)
     pub(crate) fn implied_infer_constraint(&mut self, d: Loc, rest: bool) -> Option<TypeId> {
         if !matches!(self.node(d), Node::TypeParam { .. }) {
             return None;
@@ -1031,6 +1032,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::NamedTupleMember { rest: true, ty, .. } if rest && ty == child.node => {
                 Some(self.create_array(TypeId::UNKNOWN, false))
             }
+            // A template literal placeholder (`${infer X}`) holds a string.
+            Node::TemplateLitType { .. } if !rest => Some(TypeId::STRING),
             Node::TypeArgs { args } if !rest => {
                 let idx = ast.list(args).iter().position(|&a| a == child.node)?;
                 let r = self.c.parent(parent)?;

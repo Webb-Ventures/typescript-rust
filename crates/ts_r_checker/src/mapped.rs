@@ -872,11 +872,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let name_raw = self.mapped_name_raw(&info);
         let modifiers = self.mapped_modifiers_type(&info);
-        let keys: Vec<TypeId> = if generic_modifiers || self.keyof_constraint_operand(&info).is_some() {
-            self.mapped_keys_of_modifiers(modifiers)
-        } else {
-            self.union_members(constraint)
-        };
+        let keys: Vec<TypeId> =
+            if generic_modifiers || self.keyof_constraint_operand(&info).is_some() {
+                self.mapped_keys_of_modifiers(modifiers)
+            } else {
+                self.union_members(constraint)
+            };
         // Properties in key order with the keys that map to each (their union is built once
         // at the end: building it key by key is quadratic).
         let mut props: Vec<(StrId, Vec<TypeId>)> = Vec::new();
