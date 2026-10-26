@@ -2606,6 +2606,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !matches!(ast.node(f.node), Node::FunctionExpr { .. }) {
             return None;
         }
+        // Only under `noImplicitThis` (or in JavaScript): otherwise `this` is `any`.
+        if !self.c.opts.no_implicit_this && !self.c.file(f.file).is_js() {
+            return None;
+        }
         let mut cur = f;
         for _ in 0..64 {
             let p = self.c.parent(cur)?;
@@ -2900,6 +2904,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// JavaScript, when `allow_self` and `ol` is in a position nothing contextually types)
     /// the widened type of `ol` itself (`any` while that type is being computed).
     fn object_literal_this(&mut self, ol: Loc, allow_self: bool) -> TypeId {
+        // Without `noImplicitThis`, a TypeScript object literal gives its methods no `this`
+        // type: it is `any` (tsc: checker.go, getContextualThisParameterType).
+        if !self.c.opts.no_implicit_this && !self.c.file(ol.file).is_js() {
+            return TypeId::ANY;
+        }
         let mut lit = ol;
         for _ in 0..64 {
             if let Some(ct) = self.contextual_type(lit)
