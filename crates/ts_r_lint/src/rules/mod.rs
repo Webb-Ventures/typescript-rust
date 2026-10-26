@@ -307,6 +307,7 @@ mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_abort;
 mod unicorn_array_mutate;
 mod unicorn_ast;
+mod unicorn_better_dom_traversing;
 mod unicorn_catch_error_name;
 mod unicorn_conditions;
 mod unicorn_consistent_assert;
@@ -965,6 +966,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
     // eslint-plugin-unicorn
+    &unicorn_better_dom_traversing::RULE,
     &unicorn_consistent_assert::RULE,
     &unicorn_consistent_class_member_order::RULE,
     &unicorn_consistent_date_clone::RULE,

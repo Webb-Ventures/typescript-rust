@@ -1905,6 +1905,20 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   a non-regex literal or substitution-free template, the receiver has getter side effects, or
   it may be a document; with a comment inside the first call there is no fix.
 
+- `better-dom-traversing` (`unicorn_better_dom_traversing.rs`): read-only `x.childNodes[0]` /
+  `x.children[0]` (plain member names, a non-negative integer literal) suggest `.firstChild` /
+  `.firstElementChild` (renaming the member and dropping `[0]`, so parentheses around the
+  collection stay; no suggestion with a comment inside); another `x.children[N]` hints at
+  `.querySelector()`, except the inner index of `x.children[1].children[2]` and
+  `props.children` / `x.props.children`. The outermost `.parentElement.parentElement` chain
+  hints at `.closest()`. The outermost run of two or more one-argument static-string
+  `.querySelector()` calls (the next call up not another static one, no optional link
+  anywhere on the chain's member/call spine, which parentheses end) suggests one call with the
+  selectors joined by spaces, prefixed `:scope ` unless the root is `document` /
+  `window.document` / `globalThis.document`; none when a selector has `,` or `:scope` or there
+  is a comment inside. The quote is `"` only when the innermost selector is a `"` string.
+  Receivers that can't be nodes stop all three.
+
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
 `utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
@@ -1931,4 +1945,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/get-static-value.js`, `prefer-abort-signal-any.js`,
 `utils/is-array.js`, `prefer-dom-node-replace-children.js`,
 `utils/should-report-replace-children-receiver.js`, `utils/is-dom-node.js`,
-`utils/is-node-value-not-dom-node.js`.
+`utils/is-node-value-not-dom-node.js`, `better-dom-traversing.js`,
+`utils/is-left-hand-side.js`, `ast/is-member-expression.js`.
