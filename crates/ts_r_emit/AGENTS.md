@@ -211,12 +211,12 @@ import reference.
 
 ## Measurements
 
-Latest (2026-10-27, v1 emit round 6, `cargo run --release -p ts_r_check --example
+Latest (2026-10-27, v1 checker round 6 on emit round 6, `cargo run --release -p ts_r_check --example
 emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,092 (96.9%), shape 2,141
 (99.2%; the 18 others are in `emit_known_gaps.txt`), map segments equal on 17 of 17
-bytes-exact outputs with a map baseline; all 17,352 outputs: 16,266 bytes-exact (93.7%), JS
-13,732 / 14,476 (94.9%), `.d.ts` 2,332 / 2,640 (88.3%). Declarations (E2): 1,364 of 1,499
-baselines without TSR2006 refusals have every `.d.ts` bytes-exact (91.0%); 1,364 / 1,634 over
+bytes-exact outputs with a map baseline; all 17,352 outputs: 16,267 bytes-exact (93.7%), JS
+13,732 / 14,476 (94.9%), `.d.ts` 2,333 / 2,640 (88.4%). Declarations (E2): 1,365 of 1,499
+baselines without TSR2006 refusals have every `.d.ts` bytes-exact (91.1%); 1,365 / 1,634 over
 all baselines (83.5%). TSR2006 refuses 168 JavaScript inputs' `.d.ts` (was 552; v1 checker
 round 5: `.d.ts` 1,961, baselines 1,191 / 1,634).
 The paragraphs below are the milestone measurements.
