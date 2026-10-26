@@ -264,15 +264,18 @@ fn main() -> ExitCode {
     if let Some(m) = plugins.as_ref().map(|p| &p.manifest)
         && (m.jsx_import_source.is_some() || m.jsx_classic)
     {
-        // JSX options the plugins set (`react({ jsxImportSource })`).
-        let mut o = ts_transform.options().clone();
-        if let Some(s) = &m.jsx_import_source {
-            o.jsx_import_source = s.clone();
-        }
-        if m.jsx_classic {
-            o.jsx = ts_r_transform::JsxMode::Classic;
-        }
-        ts_transform = ts_r_transform::hmr::TsTransform::new(o);
+        // JSX options the plugins set (`react({ jsxImportSource })`), over every file's
+        // own tsconfig options (`map_options` keeps the per-file lookup).
+        let source = m.jsx_import_source.clone();
+        let classic = m.jsx_classic;
+        ts_transform = ts_transform.map_options(move |o| {
+            if let Some(s) = &source {
+                o.jsx_import_source = s.clone();
+            }
+            if classic {
+                o.jsx = ts_r_transform::JsxMode::Classic;
+            }
+        });
     }
     let ts: Arc<dyn Transform> = Arc::new(guard::GuardTransform::new(
         Arc::new(ts_transform),
@@ -318,7 +321,16 @@ fn main() -> ExitCode {
             let weak = weak.clone();
             Arc::new(move |url: &str| weak.upgrade()?.proxy_rewrite(index, url))
         };
-        let dev_warnings = vite_plugins::apply_dev_options(&p.manifest.dev, &mut config, &rewrite);
+        let weak = Arc::downgrade(&p);
+        let bypass = move |index: usize| -> ts_r_hmr::proxy::BypassFn {
+            let weak = weak.clone();
+            Arc::new(move |req: &ts_r_hmr::http::Request| match weak.upgrade() {
+                Some(p) => p.proxy_bypass(index, req),
+                None => ts_r_hmr::proxy::Bypass::Proxy,
+            })
+        };
+        let dev_warnings =
+            vite_plugins::apply_dev_options(&p.manifest.dev, &mut config, &rewrite, &bypass);
         open_config = match &p.manifest.dev["server"]["open"] {
             serde_json::Value::String(s) => Some(s.clone()),
             serde_json::Value::Bool(true) => Some(String::new()),
