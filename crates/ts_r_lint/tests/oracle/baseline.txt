@@ -338,6 +338,7 @@ unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
+unicorn/prefer-dom-node-html-methods 67/67
 unicorn/prefer-event-target 46/46
 unicorn/prefer-get-or-insert-computed 62/62
 unicorn/prefer-global-number-constants 22/22
@@ -353,6 +354,7 @@ unicorn/prefer-optional-catch-binding 25/25
 unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-simple-sort-comparator 66/66
 unicorn/prefer-single-array-predicate 32/32
+unicorn/prefer-string-match-all 68/68
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-structured-clone 47/47

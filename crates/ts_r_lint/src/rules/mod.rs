@@ -347,6 +347,7 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
@@ -362,6 +363,7 @@ mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
+mod unicorn_prefer_string_match_all;
 mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
@@ -747,6 +749,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_dom_node_html_methods::RULE,
     &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
@@ -764,6 +767,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
+    &unicorn_prefer_string_match_all::RULE,
     &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_structured_clone::RULE,

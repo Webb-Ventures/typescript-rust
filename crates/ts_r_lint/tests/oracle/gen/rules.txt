@@ -387,3 +387,5 @@ unicorn/no-accidental-bitwise-operator
 unicorn/prefer-math-constants
 unicorn/prefer-simple-sort-comparator
 unicorn/no-useless-collection-argument
+unicorn/prefer-dom-node-html-methods
+unicorn/prefer-string-match-all
