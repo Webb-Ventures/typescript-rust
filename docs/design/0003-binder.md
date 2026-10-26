@@ -257,7 +257,7 @@ Observed details that matter for TS7027:
 | 1114 | Duplicate label in a label chain |
 | 1117 / 1119 | Duplicate object literal property / property and accessor |
 | 2397 | Script-level declaration named `globalThis` (not inside `declare global`), or a script-level variable, function or namespace named `undefined` (program level) |
-| 2435 | `declare module "x"` directly in a namespace body, or nested in a module augmentation; nested in a script's ambient module it is accepted; in a block it is the checker's TS1234 |
+| 2435 | `declare module "x"` directly in a namespace body, or nested in a module augmentation; nested in a script's ambient module it is accepted; in a block it is the checker's TS1234. A script's reported one declares no ambient module: imports of `"x"` do not find it (probe: privacyGloImportParseErrors, TS2307) |
 | 2669 | `declare global` anywhere but the top level of a module or directly in an ambient module |
 | 2664 | Top-level module augmentation whose module cannot be found, in a non-declaration file (program level). Nested augmentations are not resolved |
 | 7027 / 7028 | Unreachable code / unused label, only when the option is `false` |

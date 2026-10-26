@@ -1027,6 +1027,18 @@ impl<'a> Checker<'a> {
                     return Some(id);
                 }
                 binder_resolved = false;
+            } else if meaning == ts_r_binder::meaning::VALUE
+                && self.alias_lacks_meaning(id, meaning)
+                && let Node::Ident { name } = *self.node(l)
+                && let Some(outer) =
+                    self.lookup_in_scope_chain(l, self.ast(l.file).atom(name), meaning)
+                && outer != id
+                && !self.sym_flags(outer).intersects(SymbolFlags::ALIAS)
+                && !self.member_out_of_scope(l, self.sym_flags(outer), meaning)
+            {
+                // An alias of a type read as a value: tsc's lookup goes on outwards
+                // (`import M = Z.I` inside `namespace A.M` leaves `M.bar()` to `A.M`).
+                return Some(outer);
             } else if meaning == ts_r_binder::meaning::NAMESPACE {
                 // The binder resolved the name for a wider meaning (`x` of an interface's
                 // `extends x.T` as namespace or value) to a value only: a namespace of the
@@ -1343,6 +1355,32 @@ impl<'a> Checker<'a> {
                     && !self.member_out_of_scope(l, self.sym_flags(id), meaning)
                 {
                     return Some(id);
+                }
+                // `namespace A.M { }` is `M` nested in `A`: `A`'s exports (`M` among them)
+                // are in scope inside it.
+                if sc.kind == ts_r_binder::ScopeKind::Module
+                    && let Some(decl) = parents.parent(node)
+                    && let Node::Module { name: mname, .. } = *ast.node(decl)
+                    && let Some(mut container) = sc.symbol
+                {
+                    let mut q = mname;
+                    while let Node::QualifiedName { left, .. } = *ast.node(q) {
+                        q = left;
+                        let Some(p) = b.symbol(container).parent else {
+                            break;
+                        };
+                        container = p;
+                        if let Some(s) = b.lookup(b.symbol(p).exports, n) {
+                            let id = self.sym(l.file, s);
+                            let f = self.sym_flags(id);
+                            if symbol_meaning(f) & meaning != 0
+                                && !self.alias_lacks_meaning(id, meaning)
+                                && !self.member_out_of_scope(l, f, meaning)
+                            {
+                                return Some(id);
+                            }
+                        }
+                    }
                 }
             }
             prev = node;

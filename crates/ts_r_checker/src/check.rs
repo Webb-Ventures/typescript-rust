@@ -1747,6 +1747,23 @@ impl<'c, 'a> Ck<'c, 'a> {
                         None => return,
                     }
                 }
+                // `const { 0n: f } = o`: a bigint key cannot index anything but `any`
+                // (observed: TS2538 naming `bigint`, bigintPropertyName).
+                Node::BigIntLit { .. } => {
+                    let parent = self.pattern_parent_type(obj_pat);
+                    let s = self.store();
+                    if parent != TypeId::UNRESOLVED
+                        && !s.is_error(parent)
+                        && !s.flags(parent).intersects(TypeFlags::ANY)
+                    {
+                        self.error(
+                            Loc::new(prop.file, key),
+                            dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538,
+                            &["bigint"],
+                        );
+                    }
+                    return;
+                }
                 _ => return,
             },
         };
@@ -8626,7 +8643,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             stmt = p;
         }
-        self.enclosing_namespace(file, stmt).is_some() || self.stmt_misplaced(file, stmt)
+        if self.stmt_misplaced(file, stmt) {
+            return true;
+        }
+        if self.enclosing_namespace(file, stmt).is_none() {
+            return false;
+        }
+        // `import x = require("m")` in a namespace is still resolved when `x` is used:
+        // resolving the alias looks the module up (TS2307 next to TS1147; tsc reaches it
+        // through the alias target, not the declaration check).
+        if req.kind == RequestKind::ImportEquals {
+            let b = self.c.bound(file);
+            if let Some(sym) = b.symbol_of_decl(stmt) {
+                return !b.refs.resolved.iter().any(|&(_, s)| s == sym);
+            }
+        }
+        true
     }
 
     /// An import or export statement directly in a namespace: TS1147 at the module specifier

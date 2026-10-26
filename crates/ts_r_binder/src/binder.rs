@@ -4165,11 +4165,11 @@ impl<'a> Binder<'a> {
                 // blocks/functions the checker reports TS1234 instead; inside a script's
                 // ambient module it is accepted. Only top-level augmentations are resolved.
                 let nested_ok = self.ctx.in_ambient_module && !self.is_module;
-                if !at_top
+                let nested = !at_top
                     && self.ctx.module_depth > 0
                     && self.ctx.scope == self.ctx.container_scope
-                    && !nested_ok
-                {
+                    && !nested_ok;
+                if nested {
                     let span = ast.span(name);
                     self.error(m::AMBIENT_MODULE_NESTED, span, &[]);
                 }
@@ -4183,8 +4183,13 @@ impl<'a> Binder<'a> {
                         self.error(m::PATTERN_TOO_MANY_ASTERISKS, ast.span(name), &[text]);
                     }
                 }
+                // A script's `declare module "x"` nested in a namespace (TS2435) is a member
+                // of that namespace, not a global ambient module: imports of "x" do not find
+                // it (tsc 7.0.2, privacyGloImportParseErrors).
                 let table = if self.is_module {
                     self.module_augmentations
+                } else if nested {
+                    self.new_table()
                 } else {
                     self.ambient_modules
                 };
