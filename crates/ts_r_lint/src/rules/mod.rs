@@ -424,6 +424,7 @@ mod unicorn_no_invalid_boolean_attribute_value;
 mod unicorn_no_invalid_character_comparison;
 mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
+mod unicorn_no_invalid_file_input_accept;
 mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_intl_options;
 mod unicorn_no_invalid_property_descriptor;
@@ -737,6 +738,7 @@ pub static ALL: &[&RuleDef] = &[
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
     &unicorn_iteration_fallback_style::RULE,
+    &unicorn_no_invalid_file_input_accept::RULE,
     &unicorn_no_manually_wrapped_comments::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_no_unsafe_dom_html::RULE,
