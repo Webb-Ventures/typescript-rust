@@ -42,29 +42,22 @@ every skip reason.
 
 ## Results
 
-91f3b08 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**2131 of 2513 compared tests pass (84.8%)**; 8247 of 8950 queries agree.
+c22bc8b (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2136 of 2513 compared tests pass (85.0%)**; 8254 of 8950 queries agree.
 3806 of the 6319 test files are skipped (3698 verify no compared feature, 160 get no answer
-from either server). Up from 2085 of 2516 at 682d76b: 46 tests fixed (references from
-statement, expression and type keywords; references to modules from specifiers, `declare
-module` names, `/// <reference path>` and `module.exports`; references through import-type
-qualifiers; rename through name-keeping import and export specifiers with `x as y` prefix
-and suffix text; completions after `break`/`continue` (labels), none in template text or
-after a regex or bigint, type parameters left out of their own constraints and defaults;
-hover on `this` parameters, the `this` type and `typeof this`), none lost. The compared
-count moves by three: completion tests where tsc answers nothing in template text, after
-a regex or after a bigint now get no answer from ts-r either and are skipped. tsc's
-timeouts move a few others in and out run to run (five were rerun with `--filter` and
-counted).
+from either server). Re-measured after checker round 8 with no ts-r-lsp change (2131 at
+91f3b08): the checker's changes fixed five tests. Two tests tsc timed out on
+(`completionForStringLiteralNonrelativeImport16`, `pathCompletionsTypesVersionsWildcard1`)
+were rerun with `--filter` and counted.
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 423 | 97 | 18 | 2351 / 2515 |
-| completion | 879 | 144 | 110 | 2567 / 2781 |
+| hover | 425 | 95 | 18 | 2355 / 2515 |
+| completion | 880 | 143 | 110 | 2568 / 2781 |
 | references | 273 | 72 | 12 | 1259 / 1443 |
 | rename | 161 | 15 | 13 | 504 / 543 |
 | definition | 140 | 26 | 26 | 489 / 526 |
-| signatureHelp | 136 | 14 | 26 | 637 / 656 |
+| signatureHelp | 138 | 12 | 26 | 639 / 656 |
 | highlights | 106 | 11 | 20 | 388 / 431 |
 | typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
@@ -137,3 +130,4 @@ Remaining failures by cause (example tests in parentheses):
 | 5628954 | 2026-10-27 | 1967 | 2516 | 78.2% | Go to definition at calls (the resolved signature), unnamed functions and classes by their assigned name, literal and binding keys through contextual and destructured types, ambient modules and import specifiers; completions read possible type arguments as types, offer namespaces in type positions only with a type below them, and list a module's exports in import and export clauses; type alias hovers print the aliased type (checker's InTypeAlias mode), JSDoc `@typedef`/`@callback` hovers and docs, setter write types, instantiated candidates at unresolved generic calls; names inside JSDoc tag types found for every feature; daemon test flakes fixed |
 | 682d76b | 2026-10-27 | 2085 | 2516 | 82.9% | JSDoc completions (tag names, `@param` names, types in tag braces, `@import` specifiers and attributes); completions in template holes, object literals of generic calls (the declared parameter type with undecided type parameters at their constraints), awaited promise members, `import` statement keywords and `import("x").` members; references, rename, definition and hover on names in `{@link}`, `@see` and `@throws` paths; references, rename and highlights of string literal types; JSX intrinsic tags and attributes in references, rename, definition and hover |
 | 91f3b08 | 2026-10-27 | 2131 | 2513 | 84.8% | References from keywords and to modules (specifiers, `declare module` names, `/// <reference path>`, `module.exports`), through import-type qualifiers; rename through name-keeping specifiers (`x as y`); completions for labels, none in template text or after a regex or bigint, type parameters out of their own constraints and defaults; hover on `this` parameters and `typeof this` |
+| c22bc8b | 2026-10-27 | 2136 | 2513 | 85.0% | Re-measured after checker round 8 (no ts-r-lsp change) |
