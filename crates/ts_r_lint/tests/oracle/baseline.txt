@@ -307,6 +307,7 @@ unicorn/no-array-method-this-argument 137/137
 unicorn/no-array-reduce 482/482
 unicorn/no-array-reverse 28/28
 unicorn/no-array-sort 76/76
+unicorn/no-array-sort-for-min-max 82/82
 unicorn/no-array-splice 95/95
 unicorn/no-asterisk-prefix-in-documentation-comments 56/56
 unicorn/no-async-promise-finally 39/39
@@ -331,6 +332,7 @@ unicorn/no-exports-in-scripts 22/22
 unicorn/no-for-each 431/431
 unicorn/no-for-loop 276/276
 unicorn/no-global-object-property-assignment 34/34
+unicorn/no-immediate-mutation 376/376
 unicorn/no-impossible-length-comparison 77/77
 unicorn/no-incorrect-template-string-interpolation 59/59
 unicorn/no-ineffective-csp-directives 40/40
@@ -345,7 +347,7 @@ unicorn/no-lonely-if 20/20
 unicorn/no-magic-array-flat-depth 27/27
 unicorn/no-misrefactored-assignment 79/79
 unicorn/no-named-default 66/66
-unicorn/no-negated-comparison 117/117
+unicorn/no-negated-array-predicate 73/73
 unicorn/no-negated-condition 134/134
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20

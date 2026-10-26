@@ -348,6 +348,7 @@ mod unicorn_no_array_method_this_argument;
 mod unicorn_no_array_reduce;
 mod unicorn_no_array_reverse;
 mod unicorn_no_array_sort;
+mod unicorn_no_array_sort_for_min_max;
 mod unicorn_no_array_splice;
 mod unicorn_no_asterisk_prefix_in_documentation_comments;
 mod unicorn_no_async_promise_finally;
@@ -374,6 +375,7 @@ mod unicorn_no_exports_in_scripts;
 mod unicorn_no_for_each;
 mod unicorn_no_for_loop;
 mod unicorn_no_global_object_property_assignment;
+mod unicorn_no_immediate_mutation;
 mod unicorn_no_impossible_length_comparison;
 mod unicorn_no_incomplete_accessor_override;
 mod unicorn_no_incorrect_template_string_interpolation;
@@ -394,7 +396,7 @@ mod unicorn_no_lonely_if;
 mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_misrefactored_assignment;
 mod unicorn_no_named_default;
-mod unicorn_no_negated_comparison;
+mod unicorn_no_negated_array_predicate;
 mod unicorn_no_negated_condition;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
@@ -947,6 +949,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_reduce::RULE,
     &unicorn_no_array_reverse::RULE,
     &unicorn_no_array_sort::RULE,
+    &unicorn_no_array_sort_for_min_max::RULE,
     &unicorn_no_asterisk_prefix_in_documentation_comments::RULE,
     &unicorn_no_array_splice::RULE,
     &unicorn_no_async_promise_finally::RULE,
@@ -971,6 +974,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_error_property_assignment::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
+    &unicorn_no_immediate_mutation::RULE,
     &unicorn_no_ineffective_csp_directives::RULE,
     &unicorn_no_empty_file::RULE,
     &unicorn_no_for_each::RULE,
@@ -988,7 +992,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_magic_array_flat_depth::RULE,
     &unicorn_no_misrefactored_assignment::RULE,
     &unicorn_no_named_default::RULE,
-    &unicorn_no_negated_comparison::RULE,
+    &unicorn_no_negated_array_predicate::RULE,
     &unicorn_no_negated_condition::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
