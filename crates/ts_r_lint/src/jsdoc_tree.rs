@@ -3,8 +3,10 @@
 //! `JsdocTypeLine` and `JsdocInlineTag` nodes.
 //!
 //! The shape follows `@es-joy/jsdoccomment` (`src/commentParserToESTree.js`, compact
-//! spacing; `src/parseInlineTags.js`). Types are not parsed: `parsedType` is always `null`,
-//! so selectors reaching into type nodes never match.
+//! spacing; `src/parseInlineTags.js`). Tag types are parsed only for a small subset of
+//! `jsdoc-type-pratt-parser`'s typescript mode ([`parse_type`]: names, numbers, strings,
+//! `null`, `undefined`, `*`, `?` and unions of those); any other type gets `parsedType: null`,
+//! as a type that fails to parse does.
 
 use std::borrow::Cow;
 
@@ -15,6 +17,7 @@ use crate::jsdoc::Block;
 enum A {
     Str(String),
     Num(f64),
+    Bool(bool),
     Null,
 }
 
@@ -26,6 +29,8 @@ struct JNode {
     attrs: Vec<(&'static str, A)>,
     /// Array fields in traversal order.
     lists: Vec<(&'static str, Vec<u32>)>,
+    /// Single-node fields (`parsedType`).
+    fields: Vec<(&'static str, u32)>,
     kids: Vec<u32>,
 }
 
@@ -479,8 +484,12 @@ impl JsdocTree {
             }
             n.s("description", &d.description);
             n.s("rawType", &d.raw_type);
-            n.set("parsedType", A::Null);
+            let ty = parse_type(&d.raw_type);
+            if ty.is_none() {
+                n.set("parsedType", A::Null);
+            }
             tree.nodes.push(n);
+            let parsed = ty.map(|t| tree.push_type(id, "parsedType", &t));
             let tl: Vec<u32> = d
                 .type_lines
                 .iter()
@@ -493,7 +502,14 @@ impl JsdocTree {
                 .collect();
             let il = tree.push_inline(id, &d.inline_source);
             let n = &mut tree.nodes[id as usize];
-            n.kids = tl.iter().chain(&dl).chain(&il).copied().collect();
+            n.kids = parsed
+                .iter()
+                .chain(&tl)
+                .chain(&dl)
+                .chain(&il)
+                .copied()
+                .collect();
+            n.fields = parsed.map(|p| ("parsedType", p)).into_iter().collect();
             n.lists = vec![
                 ("typeLines", tl),
                 ("descriptionLines", dl),
@@ -531,6 +547,106 @@ impl JsdocTree {
         self.nodes.len() as u32 - 1
     }
 
+    /// Adds a parsed type node (and its children) under `parent`'s field `key`, in the
+    /// type parser's visitor-key order.
+    fn push_type(&mut self, parent: u32, key: &'static str, t: &TypeNode) -> u32 {
+        let id = self.leaf(parent, key, t.ty());
+        let n = &mut self.nodes[id as usize];
+        match t {
+            TypeNode::Name(v) => n.s("value", v),
+            TypeNode::Number(v) => n.set("value", A::Num(*v)),
+            TypeNode::Str(v, quote) => {
+                n.s("value", v);
+                n.s("meta.quote", quote);
+            }
+            TypeNode::NamePath(..) => n.s("pathType", "property"),
+            TypeNode::Generic(_, _, brackets, dot) => {
+                n.s("meta.brackets", brackets);
+                n.set("meta.dot", A::Bool(*dot));
+            }
+            TypeNode::Object(_, sep) => n.s("meta.separator", sep),
+            TypeNode::Null
+            | TypeNode::Undefined
+            | TypeNode::Any
+            | TypeNode::Unknown
+            | TypeNode::Union(_)
+            | TypeNode::Paren(_) => {}
+        }
+        let mut fields = Vec::new();
+        let mut lists: Vec<(&'static str, Vec<u32>)> = Vec::new();
+        match t {
+            TypeNode::Union(elems) => {
+                let ids = elems
+                    .iter()
+                    .map(|e| self.push_type(id, "elements", e))
+                    .collect();
+                lists.push(("elements", ids));
+            }
+            TypeNode::NamePath(left, prop, quote) => {
+                fields.push(("left", self.push_type(id, "left", left)));
+                let r = self.leaf(id, "right", "JsdocTypeProperty");
+                let rn = &mut self.nodes[r as usize];
+                rn.s("value", prop);
+                if let Some(q) = quote {
+                    rn.s("meta.quote", q);
+                }
+                fields.push(("right", r));
+            }
+            TypeNode::Generic(left, elems, ..) => {
+                fields.push(("left", self.push_type(id, "left", left)));
+                let ids = elems
+                    .iter()
+                    .map(|e| self.push_type(id, "elements", e))
+                    .collect();
+                lists.push(("elements", ids));
+            }
+            TypeNode::Object(list, _) => {
+                let ids = list.iter().map(|f| self.push_field(id, f)).collect();
+                lists.push(("elements", ids));
+            }
+            TypeNode::Paren(inner) => {
+                fields.push(("element", self.push_type(id, "element", inner)));
+            }
+            _ => {}
+        }
+        let n = &mut self.nodes[id as usize];
+        n.kids = fields.iter().map(|&(_, c)| c).collect();
+        for (_, l) in &lists {
+            n.kids.extend_from_slice(l);
+        }
+        n.fields = fields;
+        n.lists = lists;
+        id
+    }
+
+    /// A `JsdocTypeObjectField` (its `key` is a plain string, not a node).
+    fn push_field(&mut self, parent: u32, f: &Field) -> u32 {
+        let id = self.leaf(parent, "elements", "JsdocTypeObjectField");
+        let n = &mut self.nodes[id as usize];
+        n.s("key", &f.key);
+        n.set("optional", A::Bool(f.optional));
+        n.set("readonly", A::Bool(f.readonly));
+        if let Some(q) = f.quote {
+            n.s("meta.quote", q);
+        }
+        if let Some(r) = &f.right {
+            let c = self.push_type(id, "right", r);
+            let n = &mut self.nodes[id as usize];
+            n.kids = vec![c];
+            n.fields = vec![("right", c)];
+        }
+        id
+    }
+
+    /// Pushes a childless node of type `ty` under `parent`'s field `key`.
+    fn leaf(&mut self, parent: u32, key: &'static str, ty: &'static str) -> u32 {
+        let mut n = JNode::new(ty);
+        n.parent = Some(parent);
+        n.key = key;
+        self.nodes.push(n);
+        self.nodes.len() as u32 - 1
+    }
+
     fn push_inline(&mut self, parent: u32, desc: &str) -> Vec<u32> {
         let mut out = Vec::new();
         for t in inline_tags(desc) {
@@ -554,6 +670,313 @@ impl JsdocTree {
             .iter()
             .find(|(k, _)| *k == node.key)
             .map(|(_, l)| l.as_slice())
+    }
+}
+
+/// A parsed tag type (the subset [`parse_type`] understands).
+#[derive(Debug, Clone, PartialEq)]
+enum TypeNode {
+    Name(String),
+    Number(f64),
+    /// Value and quote kind (`single` or `double`).
+    Str(String, &'static str),
+    Null,
+    Undefined,
+    Any,
+    Unknown,
+    Union(Vec<TypeNode>),
+    /// `left.prop` (a property path); the quote kind when the property is quoted.
+    NamePath(Box<TypeNode>, String, Option<&'static str>),
+    /// `left<elements>`, `left.<elements>` or `elements[]` (left `Array`): brackets and dot.
+    Generic(Box<TypeNode>, Vec<TypeNode>, &'static str, bool),
+    /// `{fields}` and the separator (`comma` unless they are split by `;`).
+    Object(Vec<Field>, &'static str),
+    /// `(element)`.
+    Paren(Box<TypeNode>),
+}
+
+/// One `JsdocTypeObjectField`.
+#[derive(Debug, Clone, PartialEq)]
+struct Field {
+    key: String,
+    quote: Option<&'static str>,
+    right: Option<TypeNode>,
+    optional: bool,
+    readonly: bool,
+}
+
+impl TypeNode {
+    fn ty(&self) -> &'static str {
+        match self {
+            TypeNode::Name(_) => "JsdocTypeName",
+            TypeNode::Number(_) => "JsdocTypeNumber",
+            TypeNode::Str(..) => "JsdocTypeStringValue",
+            TypeNode::Null => "JsdocTypeNull",
+            TypeNode::Undefined => "JsdocTypeUndefined",
+            TypeNode::Any => "JsdocTypeAny",
+            TypeNode::Unknown => "JsdocTypeUnknown",
+            TypeNode::Union(_) => "JsdocTypeUnion",
+            TypeNode::NamePath(..) => "JsdocTypeNamePath",
+            TypeNode::Generic(..) => "JsdocTypeGeneric",
+            TypeNode::Object(..) => "JsdocTypeObject",
+            TypeNode::Paren(_) => "JsdocTypeParenthesis",
+        }
+    }
+}
+
+/// Words the type grammar treats as keywords: a bare one is not a plain name.
+const TYPE_KEYWORDS: &[&str] = &[
+    "this", "typeof", "keyof", "import", "new", "function", "is", "asserts", "infer", "extends",
+    "readonly", "in", "module", "event", "external", "unique", "const", "out",
+];
+
+/// Nesting limit for [`parse_type`]; deeper types get `parsedType: null`.
+const MAX_TYPE_DEPTH: u32 = 64;
+
+/// Parses `raw` (a tag type without its braces) into the subset of `jsdoc-type-pratt-parser`'s
+/// typescript-mode shapes we model: names, numbers, quoted strings, `null`, `undefined`, `*`,
+/// `?`, property paths, generics (`A<B>`, `A.<B>`, `B[]`), object types and unions. `None`
+/// for anything else.
+fn parse_type(raw: &str) -> Option<TypeNode> {
+    let mut p = TypeParser { s: raw, pos: 0 };
+    let t = p.union(0)?;
+    p.ws();
+    (p.pos == raw.len()).then_some(t)
+}
+
+struct TypeParser<'s> {
+    s: &'s str,
+    pos: usize,
+}
+
+impl<'s> TypeParser<'s> {
+    fn rest(&self) -> &'s str {
+        &self.s[self.pos..]
+    }
+    fn ws(&mut self) {
+        let r = self.rest();
+        self.pos += r.len() - r.trim_start().len();
+    }
+    fn eat(&mut self, tok: &str) -> bool {
+        self.ws();
+        if self.rest().starts_with(tok) {
+            self.pos += tok.len();
+            true
+        } else {
+            false
+        }
+    }
+    fn peek(&mut self) -> Option<char> {
+        self.ws();
+        self.rest().chars().next()
+    }
+
+    fn union(&mut self, depth: u32) -> Option<TypeNode> {
+        if depth > MAX_TYPE_DEPTH {
+            return None;
+        }
+        let first = self.postfix(depth)?;
+        if self.peek() != Some('|') {
+            return Some(first);
+        }
+        let mut elems = vec![first];
+        while self.eat("|") {
+            elems.push(self.postfix(depth)?);
+        }
+        Some(TypeNode::Union(elems))
+    }
+
+    fn postfix(&mut self, depth: u32) -> Option<TypeNode> {
+        let mut t = self.primary(depth)?;
+        loop {
+            if self.eat("[]") {
+                let left = TypeNode::Name("Array".into());
+                t = TypeNode::Generic(Box::new(left), vec![t], "square", false);
+            } else if self.eat(".<") {
+                let args = self.args(depth)?;
+                t = TypeNode::Generic(Box::new(t), args, "angle", true);
+            } else if self.eat("<") {
+                let args = self.args(depth)?;
+                t = TypeNode::Generic(Box::new(t), args, "angle", false);
+            } else if self.eat(".") {
+                if !matches!(
+                    t,
+                    TypeNode::Name(_) | TypeNode::NamePath(..) | TypeNode::Generic(..)
+                ) {
+                    return None;
+                }
+                self.ws();
+                let (prop, quote) = match self.quoted() {
+                    Some((v, q)) => (v, Some(q)),
+                    None => (self.ident()?.to_owned(), None),
+                };
+                t = TypeNode::NamePath(Box::new(t), prop, quote);
+            } else {
+                return Some(t);
+            }
+        }
+    }
+
+    /// Generic arguments after `<`, through the closing `>`.
+    fn args(&mut self, depth: u32) -> Option<Vec<TypeNode>> {
+        let mut out = vec![self.union(depth + 1)?];
+        while self.eat(",") {
+            out.push(self.union(depth + 1)?);
+        }
+        self.eat(">").then_some(out)
+    }
+
+    fn ident(&mut self) -> Option<&'s str> {
+        let r = self.rest();
+        let first = r.chars().next()?;
+        if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
+            return None;
+        }
+        let len = r
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+            .unwrap_or(r.len());
+        self.pos += len;
+        Some(&r[..len])
+    }
+
+    /// A quoted string without escapes: its value and quote kind.
+    fn quoted(&mut self) -> Option<(String, &'static str)> {
+        let r = self.rest();
+        let q = r.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        let end = r[1..].find(q)? + 1;
+        let inner = &r[1..end];
+        if inner.contains('\\') {
+            return None;
+        }
+        self.pos += end + 1;
+        Some((inner.to_owned(), if q == '"' { "double" } else { "single" }))
+    }
+
+    fn primary(&mut self, depth: u32) -> Option<TypeNode> {
+        let c = self.peek()?;
+        match c {
+            '*' => {
+                self.pos += 1;
+                Some(TypeNode::Any)
+            }
+            '?' => {
+                self.pos += 1;
+                Some(TypeNode::Unknown)
+            }
+            '"' | '\'' => self.quoted().map(|(v, q)| TypeNode::Str(v, q)),
+            '{' => self.object(depth),
+            '(' => {
+                self.pos += 1;
+                let inner = self.union(depth + 1)?;
+                self.eat(")").then(|| TypeNode::Paren(Box::new(inner)))
+            }
+            '-' | '0'..='9' => self.number(),
+            _ => {
+                let id = self.ident()?;
+                Some(match id {
+                    "null" => TypeNode::Null,
+                    "undefined" => TypeNode::Undefined,
+                    _ if TYPE_KEYWORDS.contains(&id) => return None,
+                    _ => TypeNode::Name(id.to_owned()),
+                })
+            }
+        }
+    }
+
+    fn number(&mut self) -> Option<TypeNode> {
+        let r = self.rest();
+        let len = r
+            .char_indices()
+            .find(|&(i, c)| {
+                !(c.is_ascii_digit()
+                    || c == '.' && !r[i + 1..].starts_with('<')
+                    || matches!(c, 'e' | 'E')
+                    || matches!(c, '+' | '-') && (i == 0 || r[..i].ends_with(['e', 'E'])))
+            })
+            .map_or(r.len(), |(i, _)| i);
+        let s = &r[..len];
+        let digits = s.strip_prefix('-').unwrap_or(s);
+        let (mant, exp) = match digits.find(['e', 'E']) {
+            Some(i) => (&digits[..i], Some(&digits[i + 1..])),
+            None => (digits, None),
+        };
+        let mut halves = mant.splitn(2, '.');
+        let int = halves.next().unwrap_or("");
+        let frac = halves.next();
+        let all_digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+        let exp_ok = exp.is_none_or(|e| all_digits(e.strip_prefix(['+', '-']).unwrap_or(e)));
+        // A number running into a name (`0x10`, `1a`) is not a type.
+        let next = r[len..].chars().next();
+        if !(all_digits(int) && frac.is_none_or(all_digits) && exp_ok)
+            || next.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+        {
+            return None;
+        }
+        let v = s.parse::<f64>().ok()?;
+        self.pos += len;
+        Some(TypeNode::Number(v))
+    }
+
+    fn object(&mut self, depth: u32) -> Option<TypeNode> {
+        if depth > MAX_TYPE_DEPTH {
+            return None;
+        }
+        self.pos += 1; // `{`
+        let mut fields = Vec::new();
+        let mut sep: Option<&'static str> = None;
+        loop {
+            if self.eat("}") {
+                return Some(TypeNode::Object(fields, sep.unwrap_or("comma")));
+            }
+            if !fields.is_empty() {
+                let this = if self.eat(",") {
+                    "comma"
+                } else if self.eat(";") {
+                    "semicolon"
+                } else {
+                    return None;
+                };
+                if sep.is_some_and(|s| s != this) {
+                    return None;
+                }
+                sep = Some(this);
+                if self.eat("}") {
+                    return Some(TypeNode::Object(fields, this));
+                }
+            }
+            fields.push(self.field(depth)?);
+        }
+    }
+
+    fn field(&mut self, depth: u32) -> Option<Field> {
+        self.ws();
+        let save = self.pos;
+        let mut readonly = false;
+        if self.ident() == Some("readonly")
+            && !matches!(self.peek(), Some(':' | '?' | ',' | ';' | '}'))
+        {
+            readonly = true;
+        } else {
+            self.pos = save;
+        }
+        self.ws();
+        let (key, quote) = match self.quoted() {
+            Some((v, q)) => (v, Some(q)),
+            None => (self.ident()?.to_owned(), None),
+        };
+        let optional = self.eat("?");
+        let right = if self.eat(":") {
+            Some(self.union(depth + 1)?)
+        } else {
+            None
+        };
+        Some(Field {
+            key,
+            quote,
+            right,
+            optional,
+            readonly,
+        })
     }
 }
 
@@ -596,13 +1019,30 @@ impl Tree for JsdocTree {
                 },
             };
         }
-        let Some((_, v)) = node.attrs.iter().find(|(k, _)| *k == head) else {
+        if let Some(&(_, c)) = node.fields.iter().find(|(k, _)| *k == head) {
+            return self.attr(c, rest);
+        }
+        let found = if rest.is_empty() || rest == ["length"] {
+            node.attrs.iter().find(|(k, _)| *k == head)
+        } else {
+            // A nested plain object (`meta.quote`) is stored under its dotted path.
+            let dotted = path.join(".");
+            return match node.attrs.iter().find(|(k, _)| *k == dotted) {
+                Some((_, A::Str(s))) => Val::Str(Cow::Borrowed(s)),
+                Some((_, A::Num(x))) => Val::Num(*x),
+                Some((_, A::Bool(b))) => Val::Bool(*b),
+                Some((_, A::Null)) => Val::Null,
+                None => Val::Undef,
+            };
+        };
+        let Some((_, v)) = found else {
             return Val::Undef;
         };
         match (v, rest) {
             (A::Str(s), []) => Val::Str(Cow::Borrowed(s)),
             (A::Str(s), ["length"]) => Val::Num(s.encode_utf16().count() as f64),
             (A::Num(x), []) => Val::Num(*x),
+            (A::Bool(b), []) => Val::Bool(*b),
             (A::Null, []) => Val::Null,
             _ => Val::Undef,
         }
@@ -668,5 +1108,92 @@ mod tests {
         ] {
             let _ = JsdocTree::build(&Block::parse(c));
         }
+    }
+
+    /// Shapes observed from `jsdoc-type-pratt-parser` (typescript mode).
+    #[test]
+    fn tag_types() {
+        use TypeNode as T;
+        let name = |s: &str| T::Name(s.into());
+        assert_eq!(
+            parse_type("Bar | Foo"),
+            Some(T::Union(vec![name("Bar"), name("Foo")]))
+        );
+        assert_eq!(parse_type("-1e3"), Some(T::Number(-1000.0)));
+        assert_eq!(parse_type("'x'"), Some(T::Str("x".into(), "single")));
+        assert_eq!(
+            parse_type("string[]"),
+            Some(T::Generic(
+                Box::new(name("Array")),
+                vec![name("string")],
+                "square",
+                false
+            ))
+        );
+        assert_eq!(
+            parse_type("Array.<A>"),
+            Some(T::Generic(
+                Box::new(name("Array")),
+                vec![name("A")],
+                "angle",
+                true
+            ))
+        );
+        assert_eq!(
+            parse_type("a.\"b\""),
+            Some(T::NamePath(Box::new(name("a")), "b".into(), Some("double")))
+        );
+        let Some(T::Object(fields, sep)) = parse_type("{readonly a: x; b?}") else {
+            panic!("object type");
+        };
+        assert_eq!(sep, "semicolon");
+        assert!(fields[0].readonly && fields[0].right == Some(name("x")));
+        assert!(fields[1].optional && fields[1].right.is_none());
+        assert_eq!(parse_type("{}"), Some(T::Object(vec![], "comma")));
+        for bad in [
+            "",
+            "A<>",
+            "0x10",
+            "foo-bar",
+            "this",
+            "{a, b; c}",
+            "a.",
+            "(A",
+            "A |",
+        ] {
+            assert_eq!(parse_type(bad), None, "{bad}");
+        }
+        let deep = "A<".repeat(500) + &">".repeat(500);
+        assert_eq!(parse_type(&deep), None);
+    }
+
+    #[test]
+    fn type_selectors() {
+        let c = "/** @type {React.FunctionComponent<{ children: React.ReactNode }>} */";
+        assert!(matches(
+            c,
+            "JsdocBlock:has(JsdocTag[tag=\"type\"]:has([value=/FunctionComponent/]))"
+        ));
+        assert!(matches(
+            c,
+            "JsdocBlock:has(JsdocTag[parsedType.type=JsdocTypeGeneric][parsedType.meta.dot=false])"
+        ));
+        assert!(matches(
+            c,
+            "JsdocBlock:has(JsdocTypeObjectField[key=children] > JsdocTypeNamePath > JsdocTypeProperty)"
+        ));
+        let u = "/** @param {Bar|Foo} x */";
+        assert!(matches(
+            u,
+            "JsdocBlock:has(JsdocTypeUnion > JsdocTypeName[value=\"Foo\"]:nth-child(2))"
+        ));
+        assert!(matches(
+            "/** @type {a.b} */",
+            "JsdocBlock:has(JsdocTag[parsedType.right.value=b])"
+        ));
+        assert!(matches(
+            "/** @type {} */",
+            "JsdocBlock:has(JsdocTag[parsedType=null])"
+        ));
     }
 }

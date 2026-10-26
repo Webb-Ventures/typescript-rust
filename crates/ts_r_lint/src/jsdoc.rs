@@ -1156,10 +1156,12 @@ pub struct ContextEntry {
     pub selector: Option<Arc<Selector>>,
     /// The `comment` selector an object entry matches the JSDoc block against.
     pub comment: Option<Arc<Selector>>,
+    /// An object entry's `message` (the forbid rules report it).
+    pub message: Option<String>,
 }
 
 impl ContextEntry {
-    fn comment_raw(&self) -> Option<&str> {
+    pub fn comment_raw(&self) -> Option<&str> {
         self.comment.as_deref().map(|s| s.raw.as_str())
     }
 }
@@ -1168,6 +1170,8 @@ impl ContextEntry {
 pub struct Contexts {
     pub entries: Vec<ContextEntry>,
     pub all: bool,
+    /// A plain `"any"` entry: every block is checked once, whatever the `comment` filters.
+    pub plain_any: bool,
 }
 
 pub const DEFAULT_CONTEXTS: &[&str] = &[
@@ -1201,8 +1205,8 @@ impl Contexts {
         let mut all = false;
         let mut plain_any = false;
         for v in &list {
-            let (ty, is_object, force, comment) = match v {
-                Value::String(s) => (s.clone(), false, false, None),
+            let (ty, is_object, force, comment, message) = match v {
+                Value::String(s) => (s.clone(), false, false, None, None),
                 Value::Object(o) => {
                     let comment = match o.get("comment") {
                         Some(Value::String(c)) => Some(parse_selector(c)?),
@@ -1219,7 +1223,8 @@ impl Contexts {
                         .get("forceRequireReturn")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
-                    (ty, true, force, comment)
+                    let message = o.get("message").and_then(Value::as_str).map(str::to_owned);
+                    (ty, true, force, comment, message)
                 }
                 _ => return Err("jsdoc: invalid `contexts` entry".into()),
             };
@@ -1232,6 +1237,7 @@ impl Contexts {
                     force_require_return: force,
                     selector: None,
                     comment,
+                    message,
                 });
                 continue;
             }
@@ -1246,15 +1252,14 @@ impl Contexts {
                 force_require_return: force,
                 selector,
                 comment,
+                message,
             });
         }
-        // A plain `any` checks every block whatever the other entries say.
-        if plain_any {
-            for e in &mut entries {
-                e.comment = None;
-            }
-        }
-        Ok(Contexts { entries, all })
+        Ok(Contexts {
+            entries,
+            all,
+            plain_any,
+        })
     }
 
     /// `findContext`: the entry the block was found through ([`Doc::context`]).
@@ -1308,6 +1313,8 @@ pub struct Item {
     pub comment: usize,
     /// The entry `findContext` gives for the block.
     pub context: Option<usize>,
+    /// The `comment` selector the block was found through (`info.comment`).
+    pub info_comment: Option<String>,
 }
 
 /// Whether the block's ESTree view matches a `comment` selector (`commentHandler`).
@@ -1330,7 +1337,9 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
     let tree = tree.as_ref();
     // With object `any` entries, a block is checked through the first entry without a
     // `comment` or whose `comment` matches it; if none, it is skipped.
-    let filtered = contexts.all && contexts.entries.iter().any(|e| e.comment.is_some());
+    // A plain `any` checks every block whatever the other entries say.
+    let filtered =
+        contexts.all && !contexts.plain_any && contexts.entries.iter().any(|e| e.comment.is_some());
     let via = |c: usize| -> Result<Option<&str>, ()> {
         if !filtered {
             return Ok(None);
@@ -1367,6 +1376,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                             target: Some(t),
                             comment: c,
                             context: contexts.found(finder, tree, Some(t), comment),
+                            info_comment: comment.map(str::to_owned),
                         });
                     }
                 } else {
@@ -1378,6 +1388,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                             target: Some(t),
                             comment: c,
                             context: contexts.found(finder, tree, Some(t), None),
+                            info_comment: None,
                         });
                     }
                 }
@@ -1401,6 +1412,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                     target: None,
                     comment: i,
                     context: contexts.found(finder, tree, None, comment),
+                    info_comment: comment.map(str::to_owned),
                 });
             }
         }
@@ -1458,6 +1470,7 @@ fn collect_listeners(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                     target: Some(t),
                     comment: c,
                     context: contexts.found(finder, Some(&tree), Some(t), e.comment_raw()),
+                    info_comment: e.comment_raw().map(str::to_owned),
                 });
             }
         }
@@ -1519,6 +1532,8 @@ pub struct Doc {
     pub block: Block,
     /// The `contexts` entry the block was found through (`findContext`).
     pub context: Option<usize>,
+    /// The `comment` selector the block was found through (`info.comment`).
+    pub info_comment: Option<String>,
     /// 0-based line of the comment start.
     pub line: u32,
     /// Whitespace the comment's line starts with, repeated to the comment's column.
@@ -1542,6 +1557,7 @@ impl Doc {
             target: item.target,
             comment: c.span,
             context: item.context,
+            info_comment: item.info_comment.clone(),
             block: Block::parse(text),
             line,
             indent: std::iter::repeat_n(ch, col).collect(),

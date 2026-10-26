@@ -260,6 +260,15 @@ written but left out: each misses one case on a report position (below). What we
   top-level union mentions `undefined` or `void`, or it names a `@typedef` whose type does;
   those blocks don't need a matching return or yield. Type checks in reject-*-type and here
   use a light scanner of the type text, not a full jsdoc type parser.
+- **no-restricted-syntax** reports a block found through an entry of its own `contexts`
+  (`settings.jsdoc.contexts` is ignored; with no options it visits the four function types
+  and reports the missing option on each block). The block carries the `comment` selector it
+  was found through (`Doc::info_comment`: the entry's under listeners, the first matching
+  `comment` when iterating every block, none under a plain `any`). An entry applies when it is
+  a string whose selector matches the node, or an object whose `context` matches the node (or
+  is missing or `any`) and whose `comment` is that same selector; the first such entry gives
+  the message (`message`, or `Syntax is restricted: {{context}}` plus ` with {{comment}}`).
+  `jsdoc/no-missing-syntax` is not done: it reports at `1:2` on an empty first line.
 
 Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc.js`
 (iterateAllJsdocs, findContext), `src/jsdocUtils.js` (getContextObject),
@@ -269,7 +278,7 @@ Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc
 requirePropertyName,checkAccess,emptyTags,implementsOnClasses,noDefaults,noTypes,
 checkAlignment,noMultiAsterisks,noBlankBlocks,noBlankBlockDescriptions,
 requireHyphenBeforeParamDescription,multilineBlocks,requireThrows,requireYields,
-requireYieldsCheck,requireReturnsCheck,checkPropertyNames,tagLines}.js`,
+requireYieldsCheck,requireReturnsCheck,checkPropertyNames,tagLines,noRestrictedSyntax}.js`,
 `src/buildRejectOrPreferRuleDefinition.js`, `src/buildForbidRuleDefinition.js`,
 `src/getDefaultTagStructureForMode.js`, `src/index-cjs.js`; `@es-joy/jsdoccomment`
 `src/jsdoccomment.js` (getReducedASTNode, getTSFunctionComment), `src/parseComment.js`,
@@ -302,10 +311,19 @@ description}.ts`, `src/util.ts`, `src/stringifier/index.ts`.
 - **JsdocBlock view.** `JsdocTree` mirrors jsdoccomment's compact ESTree: one
   `JsdocDescriptionLine` per description line, `JsdocTag` with its `JsdocTypeLine`s, and
   `JsdocInlineTag`s (`{@link x}`, `{@link x|text}`, `{@link x text}`, `[text]{@link x}`).
-  Types are not parsed (`parsedType` is `null`).
+  Tag types are parsed for a subset of jsdoc-type-pratt-parser's typescript mode
+  (`parse_type`): names, numbers, quoted strings, `null`, `undefined`, `*`, `?`, property
+  paths (`JsdocTypeNamePath` with a `JsdocTypeProperty` right side), generics (`A<B>`,
+  `A.<B>`, and `B[]` as a `square` generic of `Array`), object types (`JsdocTypeObject` of
+  `JsdocTypeObjectField`s, whose `key` is a plain string), parentheses and unions. Anything
+  else gets `parsedType: null`, as a type that fails to parse does. Children follow the type
+  parser's visitor keys (`left`, `right`, `element`, `elements`); nested plain objects such
+  as `meta.quote` / `meta.brackets` / `meta.dot` / `meta.separator` are attributes.
 
 Read to understand (not ported): esquery `dist/esquery.esm.js`; ESLint
-`lib/linter/esquery.js`, `lib/linter/source-code-traverser.js`. The ESTree shape comes from
+`lib/linter/esquery.js`, `lib/linter/source-code-traverser.js`. The type shapes come from
+observed `jsdoc-type-pratt-parser` output (`parse(type, 'typescript')`) and its
+`visitorKeys`. The ESTree shape comes from
 typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visitor-keys`.
 
 ## Patterns

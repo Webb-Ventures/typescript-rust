@@ -190,3 +190,4 @@ jsdoc/reject-any-type
 jsdoc/reject-function-type
 jsdoc/check-property-names
 jsdoc/tag-lines
+jsdoc/no-restricted-syntax

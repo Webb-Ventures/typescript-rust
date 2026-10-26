@@ -21,6 +21,7 @@ mod jsdoc_no_blank_block_descriptions;
 mod jsdoc_no_blank_blocks;
 mod jsdoc_no_defaults;
 mod jsdoc_no_multi_asterisks;
+mod jsdoc_no_restricted_syntax;
 mod jsdoc_no_types;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
@@ -390,6 +391,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_no_blank_blocks::RULE,
     &jsdoc_no_defaults::RULE,
     &jsdoc_no_multi_asterisks::RULE,
+    &jsdoc_no_restricted_syntax::RULE,
     &jsdoc_no_types::RULE,
     &jsdoc_reject_any_type::RULE,
     &jsdoc_reject_function_type::RULE,

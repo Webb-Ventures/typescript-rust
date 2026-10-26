@@ -158,6 +158,7 @@ pub fn all_blocks() -> Contexts {
             ..Default::default()
         }],
         all: true,
+        plain_any: true,
     }
 }
 
