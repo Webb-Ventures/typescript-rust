@@ -9,7 +9,8 @@
 //! ```
 //!
 //! The fixture's absolute path is stored as `${FIXTURE}`. The mode comes from the conditions
-//! tsc printed. Regenerate with
+//! tsc printed (for a type reference, which prints none, from the `import`/`require`
+//! condition its `exports` lookup matched; `require` when neither matched). Regenerate with
 //! `cargo test -p ts_r_resolver --test oracle -- --ignored regenerate` (uses `$TS_R_TSC` or
 //! `npx -y -p typescript@7.0.2 tsc`); the version is in `tests/fixtures/TSC_VERSION.txt`.
 
@@ -120,6 +121,21 @@ fn parse_trace(output: &str) -> Vec<TraceLine> {
                     "require"
                 }
                 .into();
+            }
+            continue;
+        }
+        // A type reference prints no "Resolving in" line: the first `import`/`require`
+        // condition tsc matched in a package's `exports` gives the mode away (only the
+        // mode's own condition can match). With neither, the mode did not matter.
+        if let Some(cond) = line.strip_prefix("Matched 'exports' condition '") {
+            if let Some(top) = stack.last_mut()
+                && top.mode == "?"
+            {
+                if cond.starts_with("import'") {
+                    top.mode = "import".into();
+                } else if cond.starts_with("require'") {
+                    top.mode = "require".into();
+                }
             }
             continue;
         }
@@ -261,6 +277,22 @@ fn with_placeholder(lines: &[TraceLine], fixture: &str, to_placeholder: bool) ->
             ..l.clone()
         })
         .collect()
+}
+
+/// A type reference's trace has no conditions line; the matched `exports` condition decides
+/// (tRPC's `/// <reference types="vitest" />` under bundler matched `import`).
+#[test]
+fn type_reference_mode_from_matched_condition() {
+    let trace = "======== Resolving type reference directive 'v', containing file '/p/a.ts', root directory '/p/node_modules/@types'. ========\n\
+        Entering conditional exports.\n\
+        Matched 'exports' condition 'import'.\n\
+        Matched 'exports' condition 'types'.\n\
+        ======== Type reference directive 'v' was successfully resolved to '/p/node_modules/v/i.d.ts', primary: false. ========\n\
+        ======== Resolving type reference directive 'w', containing file '/p/a.ts', root directory '/p/node_modules/@types'. ========\n\
+        ======== Type reference directive 'w' was successfully resolved to '/p/node_modules/@types/w/index.d.ts', primary: true. ========\n";
+    let lines = parse_trace(trace);
+    let modes: Vec<&str> = lines.iter().map(|l| l.mode.as_str()).collect();
+    assert_eq!(modes, ["import", "require"]);
 }
 
 #[test]
