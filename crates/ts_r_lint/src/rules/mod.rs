@@ -424,6 +424,7 @@ mod unicorn_no_typeof_undefined;
 mod unicorn_no_uncalled_method;
 mod unicorn_no_undeclared_class_members;
 mod unicorn_no_unnecessary_array_flat_depth;
+mod unicorn_no_unnecessary_array_flat_map;
 mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
 mod unicorn_no_unnecessary_boolean_comparison;
@@ -526,6 +527,7 @@ mod unicorn_prefer_number_properties;
 mod unicorn_prefer_object_define_properties;
 mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_object_from_entries;
+mod unicorn_prefer_object_iterable_methods;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_private_class_fields;
 mod unicorn_prefer_promise_static_methods;
@@ -1030,6 +1032,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_undeclared_class_members::RULE,
     &unicorn_no_unnecessary_array_flat_depth::RULE,
+    &unicorn_no_unnecessary_array_flat_map::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
     &unicorn_no_unnecessary_boolean_comparison::RULE,
@@ -1109,6 +1112,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
+    &unicorn_prefer_object_iterable_methods::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_promise_static_methods::RULE,
     &unicorn_prefer_promise_try::RULE,
