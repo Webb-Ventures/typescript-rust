@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::{Ast, CommentKind, Modifiers, Node, NodeId};
 use ts_r_span::LineIndex;
 
@@ -222,20 +222,44 @@ fn import_of(cx: &ModCtx, re: &Reexport) -> Option<Arc<ExportMap>> {
     re.path.as_deref().and_then(|p| cx.map_for(p))
 }
 
+/// Maps (or map and name pairs) one lookup has already walked. Every recursive walk over
+/// `export *` and re-exports goes through one, so cycles (`a`, `b` and `c` each
+/// `export *` the others) end and shared targets are walked once: the work is linear in
+/// the maps reached, not exponential in the paths to them. The plugin itself recurses
+/// without a check (and overflows its stack on such cycles); on acyclic graphs the answers
+/// are the same, since a second walk of the same map and name gives the same answer.
+#[derive(Default)]
+struct Seen {
+    maps: FxHashSet<Arc<str>>,
+    names: FxHashSet<(Arc<str>, String)>,
+}
+
+impl Seen {
+    fn first_map(&mut self, m: &ExportMap) -> bool {
+        self.maps.insert(m.path.clone())
+    }
+    fn first_name(&mut self, m: &ExportMap, name: &str) -> bool {
+        self.names.insert((m.path.clone(), name.to_owned()))
+    }
+}
+
 /// `name` is exported by `m` (explicitly, or through `export *` for names other than
 /// `default`).
 pub(crate) fn has(cx: &ModCtx, m: &ExportMap, name: &str) -> bool {
-    has_at(cx, m, name, 0)
+    has_at(cx, m, name, 0, &mut Seen::default())
 }
 
-fn has_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize) -> bool {
+fn has_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize, seen: &mut Seen) -> bool {
+    if !seen.first_map(m) {
+        return false;
+    }
     if m.namespace_has(name) || m.re_index.contains_key(name) {
         return true;
     }
     if name != "default" && depth < MAX_DEPTH {
         for d in &m.dependencies {
             if let Some(inner) = cx.map_for(d)
-                && has_at(cx, &inner, name, depth + 1)
+                && has_at(cx, &inner, name, depth + 1, seen)
             {
                 return true;
             }
@@ -248,7 +272,7 @@ fn has_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize) -> bool {
 /// files followed.
 pub(crate) fn has_deep(cx: &ModCtx, m: &ExportMap, name: &str) -> (bool, Vec<Arc<str>>) {
     let mut chain = Vec::new();
-    let found = has_deep_at(cx, m, name, &mut chain, 0);
+    let found = has_deep_at(cx, m, name, &mut chain, 0, &mut Seen::default());
     (found, chain)
 }
 
@@ -258,8 +282,12 @@ fn has_deep_at(
     name: &str,
     chain: &mut Vec<Arc<str>>,
     depth: usize,
+    seen: &mut Seen,
 ) -> bool {
     chain.push(m.path.clone());
+    if !seen.first_name(m, name) {
+        return false;
+    }
     if m.namespace_has(name) {
         return true;
     }
@@ -274,7 +302,7 @@ fn has_deep_at(
             return true;
         }
         let local = re.local.clone();
-        return has_deep_at(cx, &imported, &local, chain, depth + 1);
+        return has_deep_at(cx, &imported, &local, chain, depth + 1, seen);
     }
     if name != "default" && depth < MAX_DEPTH {
         for d in &m.dependencies {
@@ -286,7 +314,7 @@ fn has_deep_at(
                 continue;
             }
             let mut sub = Vec::new();
-            if has_deep_at(cx, &inner, name, &mut sub, depth + 1) {
+            if has_deep_at(cx, &inner, name, &mut sub, depth + 1, seen) {
                 chain.extend(sub);
                 return true;
             }
@@ -297,10 +325,13 @@ fn has_deep_at(
 
 /// `ExportMap.get`.
 pub(crate) fn get(cx: &ModCtx, m: &ExportMap, name: &str) -> Lookup {
-    get_at(cx, m, name, 0)
+    get_at(cx, m, name, 0, &mut Seen::default())
 }
 
-fn get_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize) -> Lookup {
+fn get_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize, seen: &mut Seen) -> Lookup {
+    if !seen.first_name(m, name) {
+        return Lookup::Undefined;
+    }
     if let Some(meta) = m.namespace_get(name) {
         return Lookup::Found(meta.clone());
     }
@@ -312,7 +343,7 @@ fn get_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize) -> Lookup {
             return Lookup::Undefined;
         }
         let local = re.local.clone();
-        return get_at(cx, &imported, &local, depth + 1);
+        return get_at(cx, &imported, &local, depth + 1, seen);
     }
     if name != "default" && depth < MAX_DEPTH {
         for d in &m.dependencies {
@@ -322,7 +353,7 @@ fn get_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize) -> Lookup {
             if inner.path == m.path {
                 continue;
             }
-            match get_at(cx, &inner, name, depth + 1) {
+            match get_at(cx, &inner, name, depth + 1, seen) {
                 Lookup::Undefined => {}
                 v => return v,
             }
@@ -331,17 +362,21 @@ fn get_at(cx: &ModCtx, m: &ExportMap, name: &str, depth: usize) -> Lookup {
     Lookup::Undefined
 }
 
-/// `size`: explicit names plus every `export *` target's size.
+/// `size`: explicit names plus every `export *` target's size. Each map counts once (the
+/// rules only ask whether it is zero).
 pub(crate) fn size(cx: &ModCtx, m: &ExportMap) -> usize {
-    size_at(cx, m, 0)
+    size_at(cx, m, 0, &mut Seen::default())
 }
 
-fn size_at(cx: &ModCtx, m: &ExportMap, depth: usize) -> usize {
+fn size_at(cx: &ModCtx, m: &ExportMap, depth: usize, seen: &mut Seen) -> usize {
+    if !seen.first_map(m) {
+        return 0;
+    }
     let mut n = m.namespace.len() + m.reexports.len();
     if depth < MAX_DEPTH {
         for d in &m.dependencies {
             if let Some(inner) = cx.map_for(d) {
-                n += size_at(cx, &inner, depth + 1);
+                n += size_at(cx, &inner, depth + 1, seen);
             }
         }
     }
@@ -349,21 +384,25 @@ fn size_at(cx: &ModCtx, m: &ExportMap, depth: usize) -> usize {
 }
 
 /// Every exported name (`forEach`): explicit ones, then those of `export *` targets other
-/// than `default`, possibly repeated.
+/// than `default`. Each map is walked once, so a name reached twice is listed once (the
+/// `export` rule collects them in a set).
 pub(crate) fn names(cx: &ModCtx, m: &ExportMap) -> Vec<String> {
     let mut out = Vec::new();
-    names_at(cx, m, &mut out, 0);
+    names_at(cx, m, &mut out, 0, &mut Seen::default());
     out
 }
 
-fn names_at(cx: &ModCtx, m: &ExportMap, out: &mut Vec<String>, depth: usize) {
+fn names_at(cx: &ModCtx, m: &ExportMap, out: &mut Vec<String>, depth: usize, seen: &mut Seen) {
+    if !seen.first_map(m) {
+        return;
+    }
     out.extend(m.namespace.iter().map(|(n, _)| n.clone()));
     out.extend(m.reexports.iter().map(|(n, _)| n.clone()));
     if depth < MAX_DEPTH {
         for d in &m.dependencies {
             if let Some(inner) = cx.map_for(d) {
                 let mut sub = Vec::new();
-                names_at(cx, &inner, &mut sub, depth + 1);
+                names_at(cx, &inner, &mut sub, depth + 1, seen);
                 out.extend(sub.into_iter().filter(|n| n != "default"));
             }
         }

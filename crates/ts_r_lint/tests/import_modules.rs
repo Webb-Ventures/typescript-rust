@@ -327,3 +327,81 @@ fn polyfill_targets_come_from_browserslist_or_engines() {
     let h = host(&[]);
     assert!(messages(&h, rule, serde_json::json!([]), "a.js", code).is_empty());
 }
+
+/// Every export-map rule on `code` from `a.js`.
+fn all_export_rules(h: &Arc<ModuleHost>, code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for rule in [
+        "import/named",
+        "import/namespace",
+        "import/export",
+        "import/default",
+        "import/no-deprecated",
+        "import/no-named-as-default",
+        "import/no-named-as-default-member",
+        "import/no-cycle",
+    ] {
+        out.extend(messages(h, rule, serde_json::json!([]), "a.js", code));
+    }
+    out
+}
+
+#[test]
+fn export_star_cycles_end_quickly() {
+    // Each of x, y and z re-exports the other two: without a visited set every lookup
+    // branches twice per level until the depth limit (about 2^65 calls).
+    let h = host(&[
+        (
+            "/p/x.js",
+            "export * from './y';\nexport * from './z';\nexport const x = 1;\n".into(),
+        ),
+        (
+            "/p/y.js",
+            "export * from './x';\nexport * from './z';\n".into(),
+        ),
+        (
+            "/p/z.js",
+            "export * from './x';\nexport * from './y';\n".into(),
+        ),
+    ]);
+    let start = std::time::Instant::now();
+    let m = all_export_rules(
+        &h,
+        "import * as ns from './y';\nimport d, { x, nope } from './z';\nexport * from './x';\n\
+         ns.x;\nns.missing;\nexport { d };\n",
+    );
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+    assert!(m.contains(&"nope not found in './z'".to_owned()), "{m:?}");
+    assert!(
+        m.contains(&"'missing' not found in imported namespace 'ns'.".to_owned()),
+        "{m:?}"
+    );
+}
+
+#[test]
+fn export_star_diamonds_are_walked_once() {
+    // 30 layers of two modules, each re-exporting both modules of the next layer: 2^30
+    // paths to the last layer without memoization.
+    let mut files: Vec<(&str, String)> = Vec::new();
+    for layer in 0..30 {
+        for side in ["l", "r"] {
+            let path: &'static str = Box::leak(format!("/p/d{layer}{side}.js").into_boxed_str());
+            let next = layer + 1;
+            files.push((
+                path,
+                format!("export * from './d{next}l';\nexport * from './d{next}r';\n"),
+            ));
+        }
+    }
+    files.push(("/p/d30l.js", "export const leaf = 1;\n".into()));
+    files.push(("/p/d30r.js", "export const other = 1;\n".into()));
+    let h = host(&files);
+    let start = std::time::Instant::now();
+    let m = all_export_rules(
+        &h,
+        "import * as ns from './d0l';\nimport { leaf, nope } from './d0l';\nexport * from './d0r';\n\
+         ns.leaf;\nns.gone;\n",
+    );
+    assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
+    assert!(m.contains(&"nope not found in './d0l'".to_owned()), "{m:?}");
+}
