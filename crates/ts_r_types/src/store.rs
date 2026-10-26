@@ -521,6 +521,7 @@ enum Key {
     NamedError(StrId),
     Forward(SymId),
     ForwardNode((u32, u32)),
+    ForwardNodeArgs((u32, u32), ListId),
 }
 
 const SHARDS: usize = 64;
@@ -717,6 +718,9 @@ pub struct TypeStore {
     templates: ChunkVec<TemplateData>,
     /// Forward references: the alias (`None` for a type node's) and the linked target.
     forwards: ChunkVec<(Option<SymId>, OnceLock<TypeId>)>,
+    /// Forward references to a type node under type arguments: forward index -> (node,
+    /// arguments) (see [`TypeStore::forward_node_args`]).
+    forward_args: Sharded<u32, ((u32, u32), ListId)>,
     relations: [RelationCache; 5],
     /// Members of lower-level objects whose resolution involves this level's entities:
     /// object id (raw) -> index into `shadow_vals`.
@@ -759,6 +763,7 @@ impl TypeStore {
             file_starts,
             types: ChunkVec::new(),
             forwards: ChunkVec::new(),
+            forward_args: Sharded::new(),
             intern: Sharded::new(),
             strings: ChunkVec::new(),
             string_map: Sharded::new(),
@@ -1027,6 +1032,7 @@ impl TypeStore {
             Key::Restrictive(t) => Self::lt(t),
             Key::Forward(s) => level_of(s.0),
             Key::ForwardNode(decl) => self.decl_level(decl),
+            Key::ForwardNodeArgs(decl, l) => self.decl_level(decl).max(level_of(l.0)),
             Key::Index(t) => Self::lt(t),
             Key::IndexedAccess(a, b) | Key::Substitution(a, b) => Self::lt(a).max(Self::lt(b)),
             Key::StringMapping(s, t) => level_of(s.0).max(Self::lt(t)),
@@ -1107,6 +1113,53 @@ impl TypeStore {
     /// the alias it names is known (see [`TypeKind::Forward`]).
     pub fn forward_node(&self, node: (u32, u32)) -> TypeId {
         self.forward_of(Key::ForwardNode(node), None)
+    }
+
+    /// The forward reference to the type of the type node `node` with the outer type
+    /// parameters it references replaced by `args` (in their order): the union element of
+    /// `type R<T> = Array<T | R<T>>`, `R<string>`'s being `node`'s with `args = [string]`.
+    /// Also whether it was created by this call (the caller links it).
+    pub fn forward_node_args(&self, node: (u32, u32), args: ListId) -> (TypeId, bool) {
+        let key = Key::ForwardNodeArgs(node, args);
+        let l = self.key_level(&key);
+        let s = self.at(l);
+        if let Some(t) = s.intern.get(&key) {
+            return (t, false);
+        }
+        let mut created = false;
+        let t = self.intern(key, || {
+            created = true;
+            let i = s.forwards.push((None, OnceLock::new()));
+            s.forward_args.insert(i, (node, args));
+            let u = *self.get(TypeId::UNRESOLVED);
+            let items = self.list_items(args);
+            let traits = u.traits | self.combined_traits(items);
+            TypeData {
+                flags: u.flags,
+                traits,
+                kind: TypeKind::Forward(i),
+            }
+        });
+        (t, created)
+    }
+
+    /// The node and type arguments of a [`Self::forward_node_args`] forward reference `t`
+    /// (linked or not).
+    pub fn forward_node_args_of(&self, t: TypeId) -> Option<((u32, u32), ListId)> {
+        let s = self.at(level_of(t.0));
+        match s.types.get(index_of(t.0)).kind {
+            TypeKind::Forward(i) => s.forward_args.get(&i),
+            _ => None,
+        }
+    }
+
+    /// Whether the forward reference `t` is linked (`false` for other types).
+    pub fn is_linked_forward(&self, t: TypeId) -> bool {
+        let s = self.at(level_of(t.0));
+        match s.types.get(index_of(t.0)).kind {
+            TypeKind::Forward(i) => s.forwards.get(i).1.get().is_some(),
+            _ => false,
+        }
     }
 
     fn forward_of(&self, key: Key, sym: Option<SymId>) -> TypeId {

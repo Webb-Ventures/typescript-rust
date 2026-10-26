@@ -23,6 +23,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !s.traits(t).contains(TypeTraits::CONTAINS_TYPE_PARAMETER) {
             return t;
         }
+        // A forward reference under type arguments (`type R<T> = Array<T | R<T>>`) maps its
+        // arguments; its target would lead back to it.
+        if let Some((node, args)) = s.forward_node_args_of(t) {
+            return self.instantiate_arg_forward(t, node, args, m);
+        }
         if let Some(&r) = self.inst_cache.get(&(t, m)) {
             return r;
         }
@@ -213,6 +218,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 })
                                 .collect();
                             return self.create_tuple(&els, shape.readonly);
+                        }
+                        // A reference that is a generic alias's type keeps the alias
+                        // (`type A<T> = T[]`: `A<string>` prints as such).
+                        if od.alias != AliasId::NONE {
+                            let alias = self.instantiate_alias(od.alias, m);
+                            return self.store().reference_aliased(target, &mapped, alias);
                         }
                         s.reference(target, &mapped)
                     }

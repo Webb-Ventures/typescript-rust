@@ -1422,8 +1422,18 @@ Files, by layer:
   `type V = (string | V)[]`, `Array<string | V>`, `type Box2 = Box<Box2 | number>`),
   that uses no outer type parameter, is a forward to the node's type
   (`pending_node_forwards`), built and linked once the alias is published (before that
-  the union would need the alias and make it circular, silently `any`). Generic
-  aliases (`type R<T> = Array<T | R<T>>`) and class type arguments are not deferred.
+  the union would need the alias and make it circular, silently `any`). A node there that
+  names a generic alias being resolved with type arguments (`T | R<T>` in `type R<T> =
+  Array<T | R<T>>`), or uses outer type parameters, is a forward to the node's type under
+  arguments for the outer type parameters it references (`forward_node_args`, keyed by node
+  and arguments, `pending_arg_forwards`): instantiating one maps its arguments to another
+  such forward, linked at once (or once no alias is being resolved) to the node's type
+  instantiated with them, which meets the forward again and closes the cycle (`R<string>`
+  is `Array<string | R<string>>`). Arguments that keep growing (`type G<T> = Array<T |
+  G<T[]>>`) stop linking 16 levels deep (unlinked, `any`). Class type arguments are not
+  deferred. A reference that is a generic alias's whole type keeps the alias through
+  instantiation (`type A<T> = T[]`: `A<string>` prints `A<string>`; tsc defers such
+  references).
   Relations unforward both sides first (`[Traversable]` with `type Traversable = object`; `generic_constraint_args`).
   A union of an aliased union and members it already contains is that aliased union
   (`C | undefined` with `type C = undefined | ...` prints `C`; `union_origin_items`).

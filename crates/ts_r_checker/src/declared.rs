@@ -270,7 +270,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             _ => t,
         };
         // After publishing: a type node handed out as a forward reference names this alias.
-        if (!self.pending_forwards.is_empty() || !self.pending_node_forwards.is_empty())
+        if (!self.pending_forwards.is_empty()
+            || !self.pending_node_forwards.is_empty()
+            || !self.pending_arg_forwards.is_empty())
             && !self.in_alias_resolution()
         {
             self.resolve_pending_forwards();
@@ -638,7 +640,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Whether a type alias's declared type is being resolved.
-    fn in_alias_resolution(&self) -> bool {
+    pub(crate) fn in_alias_resolution(&self) -> bool {
         self.resolving.iter().any(|(r, _)| {
             matches!(*r, Resolving::DeclaredType(s)
                 if self.c.sym_flags(s).intersects(SymbolFlags::TYPE_ALIAS))
@@ -653,6 +655,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             if guard > 10_000 {
                 self.pending_forwards.clear();
                 self.pending_node_forwards.clear();
+                self.pending_arg_forwards.clear();
                 break;
             }
             if let Some(s) = self.pending_forwards.pop() {
@@ -668,10 +671,70 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if t != TypeId::UNRESOLVED {
                     self.store().link_forward(f, t);
                 }
+            } else if let Some(f) = self.pending_arg_forwards.pop() {
+                self.link_arg_forward(f);
             } else {
                 break;
             }
         }
+    }
+
+    /// Links a forward reference to a type node under type arguments
+    /// ([`ts_r_types::TypeStore::forward_node_args`]) to the node's type with the outer type
+    /// parameters it references replaced by the arguments. Instantiating the node's type
+    /// meets the forward reference again and reads it as is, closing the cycle
+    /// (`R<string>` is `Array<string | R<string>>`).
+    pub(crate) fn link_arg_forward(&mut self, f: TypeId) {
+        let Some((node, args)) = self.store().forward_node_args_of(f) else {
+            return;
+        };
+        if self.store().is_linked_forward(f) || self.arg_forward_depth > 16 {
+            return;
+        }
+        let Some(node_id) = ts_r_ast::NodeId::from_raw(node.1) else {
+            return;
+        };
+        let l = Loc::new(ts_r_diagnostics::FileId(node.0), node_id);
+        self.arg_forward_depth += 1;
+        let outer = self.referenced_outer_type_params(l);
+        let base = self.type_from_node(l);
+        let items = self.store().list_items(args).to_vec();
+        let t = if items == outer || items.len() != outer.len() {
+            base
+        } else {
+            let m = self.store().mapper(&outer, &items);
+            self.instantiate(base, m)
+        };
+        self.arg_forward_depth -= 1;
+        if t != TypeId::UNRESOLVED && self.store().unforward(t) != f {
+            self.store().link_forward(f, t);
+        }
+    }
+
+    /// The instantiation of the forward reference `f` to `node` under `args`: the forward
+    /// reference under the instantiated arguments, linked when new.
+    pub(crate) fn instantiate_arg_forward(
+        &mut self,
+        f: TypeId,
+        node: (u32, u32),
+        args: ts_r_types::ListId,
+        m: ts_r_types::MapperId,
+    ) -> TypeId {
+        let items = self.store().list_items(args).to_vec();
+        let mapped: Vec<TypeId> = items.iter().map(|&a| self.instantiate(a, m)).collect();
+        if mapped == items {
+            return f;
+        }
+        let list = self.store().list(&mapped);
+        let (g, created) = self.store().forward_node_args(node, list);
+        if created {
+            if self.in_alias_resolution() {
+                self.pending_arg_forwards.push(g);
+            } else {
+                self.link_arg_forward(g);
+            }
+        }
+        g
     }
 
     fn alias_declared_type(&mut self, s: SymId) -> TypeId {
@@ -1494,11 +1557,23 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.in_alias_resolution()
                 && !self.type_nodes.contains_key(&at)
                 && self.names_resolving_alias(at, 0)
-                && self.referenced_outer_type_params(at).is_empty()
             {
-                let f = self.store().forward_node((at.file.0, at.node.raw()));
-                if self.store().unforward(f) == f && !self.pending_node_forwards.contains(&at) {
-                    self.pending_node_forwards.push(at);
+                let outer = self.referenced_outer_type_params(at);
+                if outer.is_empty() {
+                    let f = self.store().forward_node((at.file.0, at.node.raw()));
+                    if self.store().unforward(f) == f && !self.pending_node_forwards.contains(&at) {
+                        self.pending_node_forwards.push(at);
+                    }
+                    return f;
+                }
+                // Under the outer type parameters it uses (`T | R<T>` inside `type R<T> =
+                // Array<T | R<T>>`): instantiations map the arguments.
+                let args = self.store().list(&outer);
+                let (f, _) = self
+                    .store()
+                    .forward_node_args((at.file.0, at.node.raw()), args);
+                if !self.store().is_linked_forward(f) && !self.pending_arg_forwards.contains(&f) {
+                    self.pending_arg_forwards.push(f);
                 }
                 return f;
             }
@@ -1526,18 +1601,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .into_iter()
                     .any(|m| self.names_resolving_alias(Loc::new(l.file, m), depth + 1))
             }
-            Node::TypeRef {
-                name,
-                type_args: None,
-            } if depth > 0 => {
+            Node::TypeRef { name, type_args } if depth > 0 || type_args.is_some() => {
                 let Some(sym) = self
                     .resolve_entity(Loc::new(l.file, name), meaning::TYPE)
                     .and_then(|s| self.c.resolve_alias(s))
                 else {
                     return false;
                 };
+                // A generic alias is named with its type arguments (`R<T>`).
                 self.c.sym_flags(sym).intersects(SymbolFlags::TYPE_ALIAS)
-                    && self.local_type_params(sym).is_empty()
+                    && self.local_type_params(sym).is_empty() == type_args.is_none()
                     && self.is_resolving(Resolving::DeclaredType(sym))
             }
             _ => false,
