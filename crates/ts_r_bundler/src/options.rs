@@ -220,7 +220,10 @@ pub struct BuildOptions {
 
 /// See [`BuildOptions::dynamic_import_url`]: resolved file path to URL, or `None` to bundle.
 #[derive(Clone)]
-pub struct DynamicImportUrl(pub std::sync::Arc<dyn Fn(&str) -> Option<String> + Send + Sync>);
+pub struct DynamicImportUrl(pub std::sync::Arc<UrlFn>);
+
+/// The function behind [`DynamicImportUrl`].
+pub type UrlFn = dyn Fn(&str) -> Option<String> + Send + Sync;
 
 impl std::fmt::Debug for DynamicImportUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -146,7 +146,8 @@ impl Compressor<'_> {
                     annotations: true,
                 };
                 let annotated = crate::purity::has_pure_comment(ast, self.src, e)
-                    || (matches!(ast.node(e), Node::Call { .. }) && p.no_side_effects_callee(callee));
+                    || (matches!(ast.node(e), Node::Call { .. })
+                        && p.no_side_effects_callee(callee));
                 // `f?.(x)` / `a?.b(x)`: the arguments run only when the chain doesn't stop.
                 let mut chain = e;
                 let optional = loop {
@@ -1519,7 +1520,10 @@ mod tests {
     #[test]
     fn unused_pure_calls_keep_only_argument_effects() {
         assert_eq!(
-            run_with("/* @__PURE__ */ foo(...args); /* @__PURE__ */ new foo(...args);", false),
+            run_with(
+                "/* @__PURE__ */ foo(...args); /* @__PURE__ */ new foo(...args);",
+                false
+            ),
             "[...args],[...args];"
         );
         assert_eq!(run_with("/* @__PURE__ */ foo(1, g(), x);", false), "g(),x;");
@@ -1531,17 +1535,29 @@ mod tests {
         );
         assert_eq!(run_with("/* @__PURE__ */ a?.b(g());", false), "a?.b(g());");
         assert_eq!(
-            run_with("/* @__NO_SIDE_EFFECTS__ */ function f(y) { s(y) } f('x'); f(k); x(f(1));", false),
+            run_with(
+                "/* @__NO_SIDE_EFFECTS__ */ function f(y) { s(y) } f('x'); f(k); x(f(1));",
+                false
+            ),
             "function f(y){s(y)}k,x(f(1));"
         );
         assert_eq!(
-            run_with("const f = /* @__NO_SIDE_EFFECTS__ */ function* (y) { s(y) }; f(1); f(k);", false),
+            run_with(
+                "const f = /* @__NO_SIDE_EFFECTS__ */ function* (y) { s(y) }; f(1); f(k);",
+                false
+            ),
             "const f=function*(y){s(y)};k;"
         );
         // Only function initializers, and only bindings that are never reassigned.
-        assert_eq!(run_with("/* @__NO_SIDE_EFFECTS__ */ const f = 1; f(1);", false), "const f=1;f(1);");
         assert_eq!(
-            run_with("/* @__NO_SIDE_EFFECTS__ */ function f() {} f = g; f(1);", false),
+            run_with("/* @__NO_SIDE_EFFECTS__ */ const f = 1; f(1);", false),
+            "const f=1;f(1);"
+        );
+        assert_eq!(
+            run_with(
+                "/* @__NO_SIDE_EFFECTS__ */ function f() {} f = g; f(1);",
+                false
+            ),
             "function f(){}f=g,f(1);"
         );
     }

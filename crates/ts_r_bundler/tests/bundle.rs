@@ -747,8 +747,14 @@ fn dynamic_import_of_top_level_await_waits_through_cycles() {
     // The wrappers of `main`, `a` and `b` become async because `dep` awaits; the cycle
     // between `a` and `b` must not deadlock (esbuild issue 4498).
     let fs = project(&[
-        ("src/entry.mjs", "await import('./main.mjs');\nconsole.log('done');\n"),
-        ("src/main.mjs", "import { a } from './a.mjs';\nconsole.log(a());\n"),
+        (
+            "src/entry.mjs",
+            "await import('./main.mjs');\nconsole.log('done');\n",
+        ),
+        (
+            "src/main.mjs",
+            "import { a } from './a.mjs';\nconsole.log(a());\n",
+        ),
         (
             "src/a.mjs",
             "import { b } from './b.mjs';\nimport { tla } from './dep.mjs';\nexport function a() { return b() + tla; }\n",
@@ -757,7 +763,10 @@ fn dynamic_import_of_top_level_await_waits_through_cycles() {
             "src/b.mjs",
             "import { a } from './a.mjs';\nexport function b() { return typeof a; }\n",
         ),
-        ("src/dep.mjs", "export const tla = await Promise.resolve('x');\n"),
+        (
+            "src/dep.mjs",
+            "export const tla = await Promise.resolve('x');\n",
+        ),
     ]);
     let r = run_build(&fs, opts(&["src/entry.mjs"]));
     let code = file(&r, "/proj/out/entry.js");
@@ -784,6 +793,68 @@ fn require_of_a_transitive_top_level_await_is_an_error() {
         "{:?}",
         r.messages
     );
+}
+
+#[test]
+fn imports_of_commonjs_run_in_order_between_inlined_modules() {
+    // `cjs.js` runs before `esm.js`, and `late.js` after it: the entry's `require_x()` calls
+    // go between the inlined modules, as an ES module evaluates its imports in order.
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import './cjs.js';\nimport './esm.js';\nimport './late.js';\nconsole.log('entry');\n",
+        ),
+        ("src/cjs.js", "console.log('cjs', typeof module);\n"),
+        ("src/esm.js", "export const x = 1;\nconsole.log('esm');\n"),
+        (
+            "src/late.js",
+            "console.log('late', this === module.exports);\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    let (cjs, esm, late) = (
+        code.find("require_cjs();").expect("cjs call"),
+        code.find("// src/esm.js").expect("esm code"),
+        code.find("require_late();").expect("late call"),
+    );
+    assert!(cjs < esm && esm < late, "{code}");
+    if have_node() {
+        assert_eq!(
+            run_node("import-order", &r, "entry.js"),
+            "cjs object\nesm\nlate true\nentry\n"
+        );
+    }
+}
+
+#[test]
+fn top_level_this_is_exports_unless_the_file_exports_or_uses_import_meta() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import './imports.js';\nimport './exports.js';\nimport './meta.js';\n",
+        ),
+        ("src/dummy.js", "export const d = 1;\n"),
+        (
+            "src/imports.js",
+            "import './dummy.js';\nconsole.log(typeof this);\n",
+        ),
+        (
+            "src/exports.js",
+            "export const e = 1;\nconsole.log(typeof this);\n",
+        ),
+        ("src/meta.js", "import.meta;\nconsole.log(typeof this);\n"),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    if have_node() {
+        assert_eq!(
+            run_node("this-es6", &r, "entry.js"),
+            "object\nundefined\nundefined\n"
+        );
+    } else {
+        let code = file(&r, "/proj/out/entry.js");
+        assert!(code.contains("require_imports"), "{code}");
+    }
 }
 
 #[test]

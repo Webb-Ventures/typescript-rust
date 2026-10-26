@@ -401,7 +401,10 @@ impl Linker<'_> {
             changed = false;
             rounds += 1;
             for i in 0..n {
-                if !is_async[i] && self.l.wrap[i] == Wrap::Esm && deps[i].iter().any(|&u| is_async[u]) {
+                if !is_async[i]
+                    && self.l.wrap[i] == Wrap::Esm
+                    && deps[i].iter().any(|&u| is_async[u])
+                {
                     is_async[i] = true;
                     changed = true;
                 }

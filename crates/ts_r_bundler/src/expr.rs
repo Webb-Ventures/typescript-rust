@@ -112,10 +112,7 @@ impl Expr {
             Expr::Undefined => build::undefined(ast, at),
             Expr::Await(e) => {
                 let arg = e.build(ast, at);
-                ast.add(
-                    ts_r_ast::Node::Await { arg },
-                    ts_r_ast::Span::new(at, at),
-                )
+                ast.add(ts_r_ast::Node::Await { arg }, ts_r_ast::Span::new(at, at))
             }
         }
     }

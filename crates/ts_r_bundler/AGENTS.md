@@ -54,6 +54,14 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   awaits gets an `async` `init_x()`, which callers `await` and `import()` waits for
   (`__tsrEsm` returns the body's promise; a cycle back into a running wrapper returns at
   once). A `require()` that reaches one is an error naming the file that awaits.
+- **Imports run in order** (`plan.rs` `module_order_with_boundaries`): an unwrapped ES
+  module's `require_x()` / `init_x()` calls for the imports before an unwrapped module it
+  imports are printed in front of that module's code (`Chunk::before`), so a CommonJS
+  import runs between the inlined modules as written. They stay in the importer when the
+  target is in another chunk or the called module is not yet defined there (a cycle).
+- **Top-level `this`** (`prepare.rs`): `undefined` in a file that exports something or uses
+  `import.meta`; when bundling, the `exports` object (a CommonJS file) otherwise, even in
+  a file with `import` statements, as esbuild does.
 - **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
   esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
 - **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:

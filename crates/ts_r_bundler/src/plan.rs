@@ -135,6 +135,9 @@ pub struct Chunk {
     pub star_reexports: Vec<String>,
     /// Start the file with `"use strict";` (an unwrapped strict CommonJS entry).
     pub use_strict: bool,
+    /// Statements to print before a module's code: an importer's `require_x()` / `init_x()`
+    /// calls that must run before the module (`(importer, statement)`, in order).
+    pub before: FxHashMap<ModuleId, Vec<(ModuleId, String)>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -268,6 +271,14 @@ struct Planner<'a> {
     helper_names: [String; 6],
     /// A CommonJS entry printed at the top level of a CommonJS chunk (see [`unwrapped_entry`]).
     unwrapped: Option<ModuleId>,
+    /// Global evaluation order, and each module's position in it.
+    order: Vec<ModuleId>,
+    position: Vec<usize>,
+    /// Per importer: `(record index, position)` where it first reached an unwrapped module
+    /// (see [`module_order_with_boundaries`]).
+    boundaries: Vec<Vec<(usize, usize)>>,
+    /// Import statements moved out of an importer, to print before a module of its chunk.
+    before: FxHashMap<ModuleId, Vec<(ModuleId, String)>>,
 }
 
 /// The CommonJS entry that can run directly at the top of a CommonJS output file, with
@@ -328,7 +339,20 @@ fn strict_file_ok(input: &PlanInput<'_>, e: ModuleId) -> bool {
 
 /// Global evaluation order: depth-first post-order from the entries over every record.
 pub fn module_order(g: &Graph, link: &Link, roots: &[ModuleId]) -> Vec<ModuleId> {
+    module_order_with_boundaries(g, link, roots).0
+}
+
+/// [`module_order`], plus where each module first reached an unwrapped module: `(importer,
+/// record index, position in the order)`, in visiting order. The code of that module's
+/// subtree starts at that position, so the importer's `require_x()` / `init_x()` calls for
+/// its earlier imports must run there (as an ES module evaluates its imports in order).
+fn module_order_with_boundaries(
+    g: &Graph,
+    link: &Link,
+    roots: &[ModuleId],
+) -> (Vec<ModuleId>, Vec<(ModuleId, usize, usize)>) {
     let n = g.modules.len();
+    let mut boundaries = Vec::new();
     let mut visited = vec![false; n];
     let mut order = Vec::new();
     for &r in roots {
@@ -347,6 +371,9 @@ pub fn module_order(g: &Graph, link: &Link, roots: &[ModuleId]) -> Vec<ModuleId>
                     && !visited[*u as usize]
                     && link.included[*u as usize]
                 {
+                    if link.wrap[*u as usize] == Wrap::None {
+                        boundaries.push((m, *i - 1, order.len()));
+                    }
                     visited[*u as usize] = true;
                     stack.push((*u, 0));
                 }
@@ -356,7 +383,7 @@ pub fn module_order(g: &Graph, link: &Link, roots: &[ModuleId]) -> Vec<ModuleId>
             }
         }
     }
-    order
+    (order, boundaries)
 }
 
 /// Builds the plan.
@@ -393,6 +420,10 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         owner: FxHashMap::default(),
         helper_names: Default::default(),
         unwrapped: unwrapped_entry(input, format),
+        order: Vec::new(),
+        position: vec![usize::MAX; n],
+        boundaries: vec![Vec::new(); n],
+        before: FxHashMap::default(),
     };
     for h in Helper::ALL {
         p.helper_names[h as usize] = p.names.alloc(h.name());
@@ -403,10 +434,17 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         .chain(input.dynamic_entries)
         .copied()
         .collect();
-    let order = module_order(g, l, &roots);
+    let (order, boundaries) = module_order_with_boundaries(g, l, &roots);
     for &m in &order {
         p.name_module(m);
     }
+    for (i, &m) in order.iter().enumerate() {
+        p.position[m as usize] = i;
+    }
+    for (m, ri, at) in boundaries {
+        p.boundaries[m as usize].push((ri, at));
+    }
+    p.order = order.clone();
     // Chunks.
     let chunks = p.make_chunks(input, &order);
     let mut module_chunk = vec![None; n];
@@ -456,6 +494,11 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                 preludes.push(prep.prelude.clone());
             }
             out.plans[m as usize] = Some(mp);
+        }
+        for &m in &mods {
+            if let Some(b) = p.before.remove(&m) {
+                out.chunks[ci].before.insert(m, b);
+            }
         }
         // Namespace objects of this chunk's modules.
         let mut ns_objects = Vec::new();
@@ -919,7 +962,7 @@ impl Planner<'_> {
     fn module_plan(
         &mut self,
         m: ModuleId,
-        _chunk: usize,
+        chunk: usize,
         out: &Plan,
         helpers: &mut Helpers,
         chunk_refs: &mut FxHashSet<String>,
@@ -1127,7 +1170,50 @@ impl Planner<'_> {
             refs.insert(v.clone());
             prologue.push(PrologueStmt::Var(v, Expr::call(&to_esm, args)));
         };
+        // An unwrapped ES module's imports run in order, between the unwrapped modules it
+        // imports: the calls for imports before one go in front of that module's code.
+        let mut hoist = l.kinds[mi] == Kind::Esm
+            && l.wrap[mi] == Wrap::None
+            && self.unwrapped != Some(m)
+            && !self.boundaries[mi].is_empty();
+        let bounds = std::mem::take(&mut self.boundaries[mi]);
+        let mut next_bound = 0;
+        let stub_start = prologue.len();
+        let mut stub_targets: Vec<ModuleId> = Vec::new();
+        let compact = self.o.minify_whitespace;
         for (ri, r) in meta.records.iter().enumerate() {
+            while hoist && next_bound < bounds.len() && bounds[next_bound].0 <= ri {
+                let at = bounds[next_bound].1;
+                next_bound += 1;
+                if prologue.len() == stub_start {
+                    continue;
+                }
+                let Some(&first) = self.order.get(at) else {
+                    hoist = false;
+                    break;
+                };
+                if first == m
+                    || out.module_chunk[first as usize] != Some(chunk)
+                    || stub_targets
+                        .iter()
+                        .any(|&t| self.position[t as usize] >= at)
+                {
+                    hoist = false;
+                    break;
+                }
+                let sp = if compact { "" } else { " " };
+                let moved = prologue.split_off(stub_start).into_iter().map(|st| {
+                    let text = match st {
+                        PrologueStmt::Expr(e) => format!("{};", e.to_text(compact)),
+                        PrologueStmt::Var(n, e) => {
+                            format!("var {n}{sp}={sp}{};", e.to_text(compact))
+                        }
+                    };
+                    (m, text)
+                });
+                self.before.entry(first).or_default().extend(moved);
+                stub_targets.clear();
+            }
             if !matches!(r.kind, RecordKind::Import | RecordKind::ReExport) {
                 continue;
             }
@@ -1137,6 +1223,9 @@ impl Planner<'_> {
             let ti = t as usize;
             if !l.included[ti] {
                 continue;
+            }
+            if l.wrap[ti] != Wrap::None {
+                stub_targets.push(t);
             }
             match l.wrap[ti] {
                 Wrap::Cjs => {

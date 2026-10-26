@@ -10,7 +10,8 @@ use std::sync::{Arc, RwLock};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::{
-    Ast, BinaryOp, Modifiers, Node, NodeId, NodeKind, SourceKind, Span, UnaryOp, VarKind,
+    Ast, BinaryOp, MetaPropKind, Modifiers, Node, NodeId, NodeKind, SourceKind, Span, UnaryOp,
+    VarKind,
 };
 use ts_r_config::jsonc::{self, Value, ValueKind};
 use ts_r_config::{JsxEmit, ScriptTarget};
@@ -975,13 +976,52 @@ pub fn prepare_with(
         ));
     }
     // Top-level `this` is `undefined` in an ES module, and `return` is an error there (a
-    // top-level `await` also makes the file a module for this, as in esbuild).
+    // top-level `await` also makes the file a module for this, as in esbuild). For `this`,
+    // esbuild counts a file as a module only when it exports something or uses
+    // `import.meta`: a file with nothing but imports and a top-level `this` is CommonJS.
+    let esm_this = build::program_stmts(&ast).iter().any(|&s| {
+        matches!(
+            ast.kind(s),
+            NodeKind::ExportNamed | NodeKind::ExportAll | NodeKind::ExportDefaultExpr
+        ) || ast.node(s).modifiers().contains(Modifiers::EXPORT)
+    }) || ast.nodes.iter().any(|n| {
+        matches!(
+            n,
+            Node::MetaProperty {
+                kind: MetaPropKind::ImportMeta
+            }
+        )
+    });
+    let has_this = ast.nodes.iter().any(|n| matches!(n, Node::This {}));
+    // Top-level `this` of a CommonJS file is its `exports` object: when bundling it becomes
+    // `exports`, so the file is wrapped as CommonJS (as esbuild does). Not for `.mjs`/`.mts`,
+    // files with a top-level `await` (modules), or a file that declares its own `exports`.
+    let mut this_is_exports = false;
+    if !esm_this
+        && has_this
+        && ctx.opts.bundle
+        && !path.ends_with(".mjs")
+        && !path.ends_with(".mts")
+    {
+        let (this, _, tla) = top_level_this_and_return(&ast);
+        let own_exports = || {
+            let scopes = Scopes::analyze(&ast, strict);
+            scopes
+                .module_symbols()
+                .iter()
+                .any(|&s| ast.atom(scopes.symbol(s).name) == "exports")
+        };
+        if !this.is_empty() && !tla && (!src.contains("exports") || !own_exports()) {
+            this_is_exports = true;
+            for id in this {
+                let at = ast.span(id).start;
+                let exports = build::ident(&mut ast, "exports", at);
+                build::replace(&mut ast, id, exports);
+            }
+        }
+    }
     let has_return = || ast.nodes.iter().any(|n| matches!(n, Node::Return { .. }));
-    if (strict
-        && ast
-            .nodes
-            .iter()
-            .any(|n| matches!(n, Node::This {} | Node::Return { .. })))
+    if ((strict || esm_this) && (has_this || has_return()))
         || (!strict
             && has_return()
             && ast
@@ -990,7 +1030,7 @@ pub fn prepare_with(
                 .any(|n| matches!(n, Node::Await { .. } | Node::ForOf { is_await: true, .. })))
     {
         let (this, returns, tla) = top_level_this_and_return(&ast);
-        if strict {
+        if (strict || esm_this) && !this_is_exports {
             for id in this {
                 let at = ast.span(id).start;
                 let undefined = build::undefined(&mut ast, at);
@@ -1005,31 +1045,6 @@ pub fn prepare_with(
                 ast.span(r).start,
                 "Top-level return cannot be used inside an ECMAScript module".into(),
             ));
-        }
-    }
-    // Top-level `this` of a CommonJS file is its `exports` object: when bundling it becomes
-    // `exports`, so the file is wrapped as CommonJS (as esbuild does). Not for `.mjs`/`.mts`,
-    // files with a top-level `await` (modules), or a file that declares its own `exports`.
-    if !strict
-        && ctx.opts.bundle
-        && !path.ends_with(".mjs")
-        && !path.ends_with(".mts")
-        && ast.nodes.iter().any(|n| matches!(n, Node::This {}))
-    {
-        let (this, _, tla) = top_level_this_and_return(&ast);
-        let own_exports = || {
-            let scopes = Scopes::analyze(&ast, strict);
-            scopes
-                .module_symbols()
-                .iter()
-                .any(|&s| ast.atom(scopes.symbol(s).name) == "exports")
-        };
-        if !this.is_empty() && !tla && (!src.contains("exports") || !own_exports()) {
-            for id in this {
-                let at = ast.span(id).start;
-                let exports = build::ident(&mut ast, "exports", at);
-                build::replace(&mut ast, id, exports);
-            }
         }
     }
     let mut scopes = Scopes::analyze(&ast, strict);
@@ -1159,7 +1174,9 @@ fn has_constant_test(ast: &Ast) -> bool {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::Coalesce,
             ..
         } => literal(left),
-        Node::Switch { disc, .. } => literal(disc) || matches!(*ast.node(disc), Node::StringLit { .. }),
+        Node::Switch { disc, .. } => {
+            literal(disc) || matches!(*ast.node(disc), Node::StringLit { .. })
+        }
         // `try {} catch { ... }`: the handler is dead code.
         Node::Try {
             block,

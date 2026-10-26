@@ -322,7 +322,10 @@ impl Purity<'_> {
             return false;
         };
         let sym = scopes.symbol(sym);
-        if sym.writes > 0 || sym.decls != 1 || !matches!(sym.kind, SymbolKind::Function | SymbolKind::Const) {
+        if sym.writes > 0
+            || sym.decls != 1
+            || !matches!(sym.kind, SymbolKind::Function | SymbolKind::Const)
+        {
             return false;
         }
         let Some(decl) = sym.decl else {
@@ -330,17 +333,25 @@ impl Purity<'_> {
         };
         let span = ast.span(decl);
         let comment_text = |c: &ts_r_ast::Comment| {
-            src.get(c.span.start as usize..c.span.end as usize).unwrap_or("")
+            src.get(c.span.start as usize..c.span.end as usize)
+                .unwrap_or("")
         };
         // Before the statement: `/* @__NO_SIDE_EFFECTS__ */ export default async function* f`.
         let idx = ast.comments.partition_point(|c| c.span.end <= span.start);
         if let Some(c) = idx.checked_sub(1).map(|i| &ast.comments[i])
             && is_no_side_effects(comment_text(c))
         {
-            let between = src.get(c.span.end as usize..span.start as usize).unwrap_or("x");
+            let between = src
+                .get(c.span.end as usize..span.start as usize)
+                .unwrap_or("x");
             let keywords_only = between
                 .split(|ch: char| ch.is_ascii_whitespace() || ch == '*')
-                .all(|w| matches!(w, "" | "export" | "default" | "async" | "function" | "const"));
+                .all(|w| {
+                    matches!(
+                        w,
+                        "" | "export" | "default" | "async" | "function" | "const"
+                    )
+                });
             let fn_init = || {
                 let rest = src.get(span.end as usize..).unwrap_or("").trim_start();
                 rest.strip_prefix('=').is_some_and(|r| {
@@ -361,7 +372,9 @@ impl Purity<'_> {
                 .is_some_and(|b| b.trim() == "=")
         {
             let after = src.get(c.span.end as usize..).unwrap_or("").trim_start();
-            return after.starts_with("function") || after.starts_with("async") || after.starts_with('(');
+            return after.starts_with("function")
+                || after.starts_with("async")
+                || after.starts_with('(');
         }
         false
     }

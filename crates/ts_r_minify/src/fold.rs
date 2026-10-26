@@ -689,7 +689,9 @@ mod tests {
         );
         // Fall-through keeps the next case; a non-constant case before the match is a target.
         assert_eq!(
-            run("switch ('b') { case 'a': a(); case 'b': b(); case 'c': c(); break; case 'd': d() }"),
+            run(
+                "switch ('b') { case 'a': a(); case 'b': b(); case 'c': c(); break; case 'd': d() }"
+            ),
             "switch('b'){case'a':case'b':b();case'c':c();break;case'd':}"
         );
         assert_eq!(
