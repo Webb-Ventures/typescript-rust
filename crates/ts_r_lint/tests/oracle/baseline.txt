@@ -294,6 +294,7 @@ unicorn/explicit-timer-delay 60/60
 unicorn/filename-case 279/279
 unicorn/import-style 191/191
 unicorn/max-nested-calls 26/26
+unicorn/name-replacements 377/377
 unicorn/new-for-builtins 366/366
 unicorn/no-abusive-eslint-disable 33/33
 unicorn/no-accidental-bitwise-operator 66/66

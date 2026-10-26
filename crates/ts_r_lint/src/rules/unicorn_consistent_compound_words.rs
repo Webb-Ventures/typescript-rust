@@ -89,13 +89,13 @@ const DEFAULTS: &[(&str, &str)] = &[
 
 /// `true`, `false` or `'internal'` for the import options.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum ImportCheck {
+pub(super) enum ImportCheck {
     Always,
     Never,
     Internal,
 }
 
-fn import_check(v: Option<&Value>) -> ImportCheck {
+pub(super) fn import_check(v: Option<&Value>) -> ImportCheck {
     match v {
         Some(Value::Bool(true)) => ImportCheck::Always,
         Some(Value::Bool(false)) => ImportCheck::Never,
@@ -251,7 +251,7 @@ impl ConsistentCompoundWords {
     }
 }
 
-fn is_identifier_name(s: &str) -> bool {
+pub(super) fn is_identifier_name(s: &str) -> bool {
     let mut chars = s.chars();
     chars
         .next()
@@ -310,80 +310,90 @@ fn import_source(cx: &Ctx<'_, '_>, decl_parent: NodeId) -> Option<String> {
     }
 }
 
-impl ConsistentCompoundWords {
-    fn check_import_rules(&self, cx: &Ctx<'_, '_>, sym: SymbolId) -> bool {
-        let sem = cx.semantic();
-        let ast = cx.ast();
-        let Some(def) = sem.symbol(sym).decls.first() else {
-            return false;
-        };
-        let def = *def;
-        let source_of = || match def.kind {
-            DeclKind::ImportDefault | DeclKind::ImportNamespace | DeclKind::ImportNamed => {
-                import_source(cx, def.parent)
-            }
-            _ => require_source(cx, def.node, def.name),
-        };
-        let allowed = |check: ImportCheck| match check {
-            ImportCheck::Always => true,
-            ImportCheck::Never => false,
-            ImportCheck::Internal => source_of().is_some_and(|s| is_internal(&s)),
-        };
-        let default_like = match def.kind {
-            DeclKind::ImportDefault | DeclKind::ImportNamespace => true,
-            DeclKind::ImportNamed => matches!(
-                *ast.node(def.node),
-                Node::ImportSpecifier { imported: Some(i), local, .. }
-                    if local == def.name && matches!(*ast.node(i), Node::Ident { name } if ast.atom(name) == "default")
-            ),
-            _ => require_source(cx, def.node, def.name).is_some(),
-        };
-        if default_like && !allowed(self.default_imports) {
-            return false;
+/// The binding of `sym` may be checked under the import and shorthand options: default,
+/// namespace and `require()` bindings by `default_imports`, shorthand import bindings by
+/// `shorthand_imports` (`Internal`: only for `./` and `/` sources), shorthand destructuring
+/// only with `shorthand_properties`.
+pub(super) fn import_rules_allow(
+    cx: &Ctx<'_, '_>,
+    sym: SymbolId,
+    default_imports: ImportCheck,
+    shorthand_imports: ImportCheck,
+    shorthand_properties: bool,
+) -> bool {
+    let sem = cx.semantic();
+    let ast = cx.ast();
+    let Some(def) = sem.symbol(sym).decls.first() else {
+        return false;
+    };
+    let def = *def;
+    let source_of = || match def.kind {
+        DeclKind::ImportDefault | DeclKind::ImportNamespace | DeclKind::ImportNamed => {
+            import_source(cx, def.parent)
         }
-        let shorthand_import = def.kind == DeclKind::ImportNamed
-            && matches!(*ast.node(def.node), Node::ImportSpecifier { imported: None, local, .. } if local == def.name);
-        if shorthand_import && !allowed(self.shorthand_imports) {
-            return false;
-        }
-        if !self.shorthand_properties
-            && cx.parent(def.name).is_some_and(|p| {
-                matches!(*ast.node(p), Node::BindingProperty { key, value: None, init: None } if key == def.name)
-            })
-        {
-            return false;
-        }
-        true
+        _ => require_source(cx, def.node, def.name),
+    };
+    let allowed = |check: ImportCheck| match check {
+        ImportCheck::Always => true,
+        ImportCheck::Never => false,
+        ImportCheck::Internal => source_of().is_some_and(|s| is_internal(&s)),
+    };
+    let default_like = match def.kind {
+        DeclKind::ImportDefault | DeclKind::ImportNamespace => true,
+        DeclKind::ImportNamed => matches!(
+            *ast.node(def.node),
+            Node::ImportSpecifier { imported: Some(i), local, .. }
+                if local == def.name && matches!(*ast.node(i), Node::Ident { name } if ast.atom(name) == "default")
+        ),
+        _ => require_source(cx, def.node, def.name).is_some(),
+    };
+    if default_like && !allowed(default_imports) {
+        return false;
     }
-
-    /// No identifier of the binding is an exported declaration name or a JSX tag.
-    fn can_rename(&self, cx: &Ctx<'_, '_>, sym: SymbolId) -> bool {
-        let sem = cx.semantic();
-        let ast = cx.ast();
-        let s = sem.symbol(sym);
-        if s.refs.iter().any(|&r| {
-            sem.reference(r)
-                .flags
-                .intersects(RefFlags::JSX | RefFlags::IMPLICIT)
-        }) {
-            return false;
-        }
-        !s.decls.iter().any(|d| {
-            let exported = |m: Modifiers| m.contains(Modifiers::EXPORT) && !m.contains(Modifiers::DEFAULT);
-            match *ast.node(d.node) {
-                Node::VarDeclarator { name, .. } if name == d.name => {
-                    matches!(*ast.node(d.parent), Node::VarDecl { modifiers, .. } if exported(modifiers))
-                }
-                Node::FunctionDecl { modifiers, .. }
-                | Node::ClassDecl { modifiers, .. }
-                | Node::TypeAlias { modifiers, .. }
-                | Node::Interface { modifiers, .. }
-                | Node::Enum { modifiers, .. } => exported(modifiers),
-                _ => false,
-            }
+    let shorthand_import = def.kind == DeclKind::ImportNamed
+        && matches!(*ast.node(def.node), Node::ImportSpecifier { imported: None, local, .. } if local == def.name);
+    if shorthand_import && !allowed(shorthand_imports) {
+        return false;
+    }
+    if !shorthand_properties
+        && cx.parent(def.name).is_some_and(|p| {
+            matches!(*ast.node(p), Node::BindingProperty { key, value: None, init: None } if key == def.name)
         })
+    {
+        return false;
     }
+    true
+}
 
+/// No identifier of the binding is an exported declaration name or a JSX tag.
+pub(super) fn can_rename(cx: &Ctx<'_, '_>, sym: SymbolId) -> bool {
+    let sem = cx.semantic();
+    let ast = cx.ast();
+    let s = sem.symbol(sym);
+    if s.refs.iter().any(|&r| {
+        sem.reference(r)
+            .flags
+            .intersects(RefFlags::JSX | RefFlags::IMPLICIT)
+    }) {
+        return false;
+    }
+    !s.decls.iter().any(|d| {
+        let exported = |m: Modifiers| m.contains(Modifiers::EXPORT) && !m.contains(Modifiers::DEFAULT);
+        match *ast.node(d.node) {
+            Node::VarDeclarator { name, .. } if name == d.name => {
+                matches!(*ast.node(d.parent), Node::VarDecl { modifiers, .. } if exported(modifiers))
+            }
+            Node::FunctionDecl { modifiers, .. }
+            | Node::ClassDecl { modifiers, .. }
+            | Node::TypeAlias { modifiers, .. }
+            | Node::Interface { modifiers, .. }
+            | Node::Enum { modifiers, .. } => exported(modifiers),
+            _ => false,
+        }
+    })
+}
+
+impl ConsistentCompoundWords {
     fn check_variables(&self, cx: &mut Ctx<'_, '_>) {
         let sem = cx.semantic();
         let mut order: Vec<(ScopeId, SymbolId)> = (0..sem.symbols().len())
@@ -406,7 +416,13 @@ impl ConsistentCompoundWords {
             let Some(replacement) = self.name_replacement(&name) else {
                 continue;
             };
-            if !self.check_import_rules(cx, sym) {
+            if !import_rules_allow(
+                cx,
+                sym,
+                self.default_imports,
+                self.shorthand_imports,
+                self.shorthand_properties,
+            ) {
                 continue;
             }
             let mut scopes: Vec<ScopeId> = s.refs.iter().map(|&r| sem.reference(r).scope).collect();
@@ -423,7 +439,7 @@ impl ConsistentCompoundWords {
             let ident = s.decls[0].name;
             let span = estree_ident_span(cx, ident);
             let shown = safe.clone().unwrap_or(replacement);
-            let rename = safe.filter(|_| self.can_rename(cx, sym));
+            let rename = safe.filter(|_| can_rename(cx, sym));
             let fix = rename.as_ref().map(|n| rename_symbol_fix(cx, sym, n));
             if let Some(n) = &rename {
                 generated.extend(scopes.iter().map(|&sc| (sc, n.clone())));

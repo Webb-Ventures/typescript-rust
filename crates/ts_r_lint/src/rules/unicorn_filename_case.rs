@@ -304,7 +304,7 @@ fn path_segments(path: &str, cwd: Option<&str>) -> Vec<String> {
 }
 
 /// `path.extname`: from the last `.` that is not the name's first character.
-fn extname(base: &str) -> &str {
+pub(super) fn extname(base: &str) -> &str {
     match base.rfind('.') {
         Some(i) if i > 0 && base[..i].bytes().any(|b| b != b'.') => &base[i..],
         _ => "",

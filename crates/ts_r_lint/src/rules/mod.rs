@@ -332,6 +332,7 @@ mod unicorn_import_style;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
+mod unicorn_name_replacements;
 mod unicorn_names;
 mod unicorn_new_for_builtins;
 mod unicorn_no_abusive_eslint_disable;
@@ -1125,6 +1126,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_non_function_verb_prefix::RULE,
     &unicorn_consistent_compound_words::RULE,
     &unicorn_prefer_single_replace::RULE,
+    &unicorn_name_replacements::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
