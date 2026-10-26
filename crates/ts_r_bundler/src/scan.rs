@@ -12,7 +12,7 @@ use crate::meta::*;
 use crate::prepare::Prepared;
 
 /// Scans a prepared module. `annotations` honours `/* @__PURE__ */` comments.
-pub fn scan(p: &Prepared, annotations: bool) -> ModuleMeta {
+pub fn scan(p: &Prepared, annotations: bool, pure_calls: &[String]) -> ModuleMeta {
     let ast = &p.ast;
     let scopes = &p.scopes;
     let mut m = ModuleMeta::default();
@@ -153,6 +153,7 @@ pub fn scan(p: &Prepared, annotations: bool) -> ModuleMeta {
         src: &p.src,
         scopes: Some(scopes),
         annotations,
+        pure_calls,
     };
     let mut exports: Vec<(String, ExportTarget)> = Vec::new();
     let mut walker = Walker {

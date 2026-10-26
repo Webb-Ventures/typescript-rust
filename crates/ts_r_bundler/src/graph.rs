@@ -585,8 +585,9 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             || lower.ends_with(".mts")
             || ((lower.ends_with(".js") || lower.ends_with(".ts"))
                 && pkg.as_ref().is_some_and(|k| k.is_module));
+        // `--ignore-annotations` ignores `sideEffects` too, as esbuild documents.
         (
-            pkg.as_ref().is_none_or(|k| k.has_side_effects(p)),
+            ctx.prep.opts.ignore_annotations || pkg.as_ref().is_none_or(|k| k.has_side_effects(p)),
             node_mode,
         )
     };
@@ -693,7 +694,7 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
     ctx.parsed
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prepared = prepare::prepare(ctx.prep, p, &pretty, Arc::clone(&source.js), loader);
-    let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations);
+    let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations, &opts.pure);
     if let Some(props) = &ctx.prep.props {
         meta.props = crate::props::collect(props, &prepared, true);
     }

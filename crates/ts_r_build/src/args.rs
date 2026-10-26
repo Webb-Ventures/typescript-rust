@@ -28,6 +28,7 @@ Simple options:
 
 Advanced options:
   --banner:js=...           Text at the start of every JS output
+  --charset=utf8            Do not escape non-ASCII characters in CSS output
   --chunk-names=...         Path template for shared chunks (default \"[name]-[hash]\")
   --conditions=...          Custom package.json exports conditions
   --entry-names=...         Path template for entry points (default \"[dir]/[name]\")
@@ -39,6 +40,7 @@ Advanced options:
   --jsx-factory=...         What to use for JSX instead of React.createElement
   --jsx-fragment=...        What to use for JSX instead of React.Fragment
   --jsx-import-source=...   Override the package name for the automatic runtime
+  --jsx-side-effects        Do not remove unused JSX expressions (ts-r-build never does)
   --log-level=...           verbose | debug | info | warning | error | silent
   --main-fields=...         Override the main file order in package.json
   --metafile=...            Write metadata about the build to a JSON file
@@ -52,6 +54,7 @@ Advanced options:
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
   --public-path=...         Prefix for file-loader URLs and chunk imports
+  --pure:N                  Mark the name N as a pure function for tree shaking
   --resolve-extensions=...  Comma-separated list of implicit extensions
   --sourcemap=...           linked | external | inline | both
   --sources-content=false   Omit sourcesContent in source maps
@@ -119,9 +122,12 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             if arg.starts_with('-') && arg.len() > 1 {
                 return Err(format!("invalid flag {arg:?}"));
             }
-            // `name=path` sets the output name.
+            // `name=path` sets the output name (`out/name=in/file.js` too, as in esbuild),
+            // unless the whole argument names an existing file.
             let (name, path) = match arg.split_once('=') {
-                Some((n, p)) if !n.contains('/') && !n.is_empty() => {
+                Some((n, p))
+                    if !n.is_empty() && !p.is_empty() && !std::path::Path::new(arg).exists() =>
+                {
                     (Some(n.to_owned()), p.to_owned())
                 }
                 _ => (None, arg.clone()),
@@ -175,6 +181,12 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
                     } else {
                         o.footer = Some(v);
                     }
+                }
+                "pure" => {
+                    if value.is_some() {
+                        return Err(format!("invalid flag {arg:?}"));
+                    }
+                    o.pure.push(key.to_owned());
                 }
                 "supported" => {
                     let f = Feature::parse(key).ok_or_else(|| {
@@ -288,8 +300,17 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
                     v => return Err(format!("unsupported --legal-comments value {v:?}")),
                 }
             }
+            // JSX is never treated as removable by ts-r-build, so there is nothing to turn off.
+            "jsx-side-effects" => {}
+            "charset" => {
+                o.charset_utf8 = match need()? {
+                    "utf8" => true,
+                    "ascii" => false,
+                    v => return Err(format!("invalid charset value {v:?} (valid: ascii, utf8)")),
+                }
+            }
             // Accepted for compatibility; they do not change our output.
-            "allow-overwrite" | "charset" | "color" | "preserve-symlinks" => {}
+            "allow-overwrite" | "color" | "preserve-symlinks" => {}
             _ => return Err(format!("invalid flag \"--{name}\"")),
         }
     }
@@ -297,6 +318,16 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
         o.minify_whitespace = true;
         o.minify_identifiers = true;
         o.minify_syntax = true;
+    }
+    // esbuild's CLI reads `NODE_PATH` (`:`-separated, `;` on Windows).
+    if let Some(np) = std::env::var_os("NODE_PATH") {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        o.node_paths = np
+            .to_string_lossy()
+            .split(sep)
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect();
     }
     let stdout = o.outfile.is_none() && o.outdir.is_none();
     if stdout {

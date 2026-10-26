@@ -144,6 +144,7 @@ impl Compressor<'_> {
                     src: self.src,
                     scopes: Some(self.scopes),
                     annotations: true,
+                    pure_calls: &[],
                 };
                 let annotated = crate::purity::has_pure_comment(ast, self.src, e)
                     || (matches!(ast.node(e), Node::Call { .. })
@@ -187,6 +188,7 @@ impl Compressor<'_> {
             src: self.src,
             scopes: Some(self.scopes),
             annotations: true,
+            pure_calls: &[],
         }
         .expr(id)
     }

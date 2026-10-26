@@ -240,6 +240,7 @@ pub fn truthiness(ast: &Ast, id: NodeId, scopes: Option<&Scopes>) -> Option<bool
                 src: "",
                 scopes,
                 annotations: false,
+                pure_calls: &[],
             };
             p.expr(id).then_some(true)
         }
@@ -325,6 +326,7 @@ impl Folder<'_> {
             src: self.src,
             scopes: Some(self.scopes),
             annotations: true,
+            pure_calls: &[],
         }
         .expr(id)
     }

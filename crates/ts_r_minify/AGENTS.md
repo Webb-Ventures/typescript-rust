@@ -29,7 +29,7 @@ ts_r_minify::minify_ast_keep_names(&mut ast, src, &opts, strict, Some("__name"))
 ```
 
 Files: `scope.rs` (scopes, symbols, references, hoisting, `eval`/`with` detection),
-`purity.rs` (side-effect analysis, `/*#__PURE__*/`), `fold.rs` (constant folding,
+`purity.rs` (side-effect analysis, `/*#__PURE__*/`, the caller's `pure_calls` names), `fold.rs` (constant folding,
 dead branches, the handler of an empty `try`), `compress.rs` (size rewrites), `rename.rs` (mangle/deconflict), `private.rs`
 (`#private` member names, per class; untouched when a direct `eval` exists), `names.rs`
 (short-name sequence, reserved words, sanitising), `build.rs` (synthesized node helpers),

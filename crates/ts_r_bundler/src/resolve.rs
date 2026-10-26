@@ -387,6 +387,8 @@ pub struct Resolver {
     extensions: Vec<String>,
     /// `extensions` for files inside `node_modules`: JavaScript before TypeScript.
     node_modules_extensions: Vec<String>,
+    /// [`BuildOptions::node_paths`], absolute.
+    node_paths: Vec<String>,
     external: Vec<String>,
     /// `--external:` paths (`./x`, `../x`, `/x`): absolute, matched after resolution.
     post_external: FxHashSet<String>,
@@ -460,6 +462,11 @@ impl Resolver {
             dual_package_rule: opts.main_fields.is_none(),
             extensions: opts.resolve_extensions.clone(),
             node_modules_extensions: javascript_first(&opts.resolve_extensions),
+            node_paths: opts
+                .node_paths
+                .iter()
+                .map(|p| path::resolve(&opts.working_dir, &path::normalize_slashes(p)))
+                .collect(),
             external: opts.external.clone(),
             post_external: opts
                 .external
@@ -1067,6 +1074,15 @@ impl Resolver {
             }
             let parent = path::directory_of(&d).to_owned();
             cur = (parent != d && !parent.is_empty()).then_some(parent);
+        }
+        // `NODE_PATH` directories, after every `node_modules` (as Node and esbuild do).
+        for np in &self.node_paths {
+            let pkg_dir = path::resolve(np, name);
+            if self.fs.directory_exists(&pkg_dir)
+                && let Some(r) = self.resolve_in_package(&pkg_dir, sub, kind)
+            {
+                return Some(r);
+            }
         }
         None
     }

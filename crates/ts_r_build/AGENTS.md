@@ -28,8 +28,11 @@
 ## Invariants
 
 - Flag names and meanings match esbuild 0.28.2; when we cannot honour a flag we reject it
-  rather than silently ignoring it (a few output-cosmetic flags such as `--charset` are
-  accepted and ignored).
+  rather than silently ignoring it (a few output-cosmetic flags such as `--color` are
+  accepted and ignored; `--charset=utf8` keeps non-ASCII in CSS output, JavaScript output
+  keeps it either way; `--jsx-side-effects` is accepted because JSX is never removed).
+  `NODE_PATH` is read like esbuild's CLI reads it. An entry `out/name=in/file.js` names its
+  output, unless the whole argument is an existing file.
 - No JavaScript config file, no plugins.
 - Exit code 1 on any error message, 0 otherwise.
 

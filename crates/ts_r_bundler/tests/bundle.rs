@@ -2427,6 +2427,156 @@ fn javascript_imports_css_modules_and_gets_their_names() {
 }
 
 #[test]
+fn minified_css_module_names_follow_use_counts_and_letter_frequency() {
+    // Observed in esbuild 0.28.2 (`--minify-identifiers`): the letters are ordered by how
+    // often the stylesheets use them outside comments, external URLs and the local names
+    // (`o`, `l`, `e`, `n`, ...), and the most used local names get the first ones.
+    let fs = project(&[
+        (
+            "entry.js",
+            "import s from './s.module.css';\nimport './g.css';\nconsole.log(JSON.stringify(s));\n",
+        ),
+        (
+            "s.module.css",
+            "/* zzzzzzzzzzzzzzzzzzzzzzzz */\n.a { color: red }\n.b .b .b { display: none }\n.c .b { color: blue }\n",
+        ),
+        ("g.css", ".o, .l { color: black }\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.minify_identifiers = true;
+    let r = run_build(&fs, o);
+    let css = file(&r, "/proj/out/entry.css");
+    // Letters: o (5), l (4), c and e (3 each), then d, r, ...; `o` and `l` are global, and
+    // `b` (used four times) comes first.
+    assert!(css.contains(".r {\n  color: red;"), "{css}");
+    assert!(css.contains(".c .c .c {"), "{css}");
+    assert!(css.contains(".e .c {"), "{css}");
+}
+
+#[test]
+fn css_output_escapes_non_ascii_unless_charset_is_utf8() {
+    let fs = project(&[
+        ("entry.js", "import './a.css';\n"),
+        ("a.css", ".caf\u{e9}1 { content: \"\u{1f44d}\" }\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let css = file(&r, "/proj/out/entry.css");
+    assert!(css.contains(".caf\\e9 1 {"), "{css}");
+    assert!(css.contains("content: \"\\1f44d\""), "{css}");
+    let mut o = opts(&["entry.js"]);
+    o.charset_utf8 = true;
+    let r = run_build(&fs, o);
+    let css = file(&r, "/proj/out/entry.css");
+    assert!(css.contains(".caf\u{e9}1 {"), "{css}");
+}
+
+#[test]
+fn pure_names_are_tree_shaken_and_ignore_annotations_keeps_side_effects_false_packages() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import './keep';\nlet a = pure(1);\nlet b = some.fn();\nlet c = other();\n",
+        ),
+        ("keep/index.js", "console.log('kept');\n"),
+        ("keep/package.json", "{ \"sideEffects\": false }\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.pure = vec!["pure".into(), "some.fn".into()];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(!js.contains("pure(") && !js.contains("some.fn"), "{js}");
+    assert!(js.contains("other()") && !js.contains("kept"), "{js}");
+    // `--ignore-annotations` ignores both `--pure` and `sideEffects`, as esbuild does.
+    let mut o = opts(&["entry.js"]);
+    o.pure = vec!["pure".into()];
+    o.ignore_annotations = true;
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(js.contains("pure(1)") && js.contains("kept"), "{js}");
+}
+
+#[test]
+fn node_paths_are_searched_after_node_modules() {
+    let fs = project(&[
+        ("src/entry.js", "import 'pkg1';\nimport 'pkg2';\n"),
+        ("lib/pkg1/package.json", "{ \"main\": \"./foo.js\" }\n"),
+        ("lib/pkg1/foo.js", "console.log('from node path');\n"),
+        ("lib/pkg2/index.js", "console.log('shadowed');\n"),
+        (
+            "node_modules/pkg2/index.js",
+            "console.log('from node_modules');\n",
+        ),
+    ]);
+    let mut o = opts(&["src/entry.js"]);
+    o.node_paths = vec!["lib".into()];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(
+        js.contains("from node path") && js.contains("from node_modules"),
+        "{js}"
+    );
+    assert!(!js.contains("shadowed"), "{js}");
+}
+
+#[test]
+fn css_imports_need_an_output_path_and_assert_json_needs_the_json_loader() {
+    let fs = project(&[
+        ("entry.js", "import './a.css';\n"),
+        ("a.css", "a { color: red }\n"),
+        (
+            "json.js",
+            "import foo from './foo.json' assert { type: 'json' };\nconsole.log(foo);\n",
+        ),
+        ("foo.json", "{}"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.outdir = None;
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter().any(|m| m.contains(
+            "Cannot import \"a.css\" into a JavaScript file without an output path configured"
+        )),
+        "{text:?}"
+    );
+    let mut o = opts(&["json.js"]);
+    o.loaders.insert(".json".into(), ts_r_bundler::Loader::Js);
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter()
+            .any(|m| m.contains("The file \"foo.json\" was loaded with the \"js\" loader")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn plain_css_keeps_local_and_global_and_modules_move_type_selectors() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import p from './p.css';\nimport m from './m.module.css';\nconsole.log(p, m);\n",
+        ),
+        ("p.css", ":local(.a) { color: red }\n"),
+        (
+            "m.module.css",
+            ".b:global(div) { color: red }\ndiv:global(span.c) { color: blue }\n:global { .d { color: green } }\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let css = file(&r, "/proj/out/entry.css");
+    // As esbuild 0.28.2 prints them.
+    assert!(css.contains(":local(.a) {"), "{css}");
+    assert!(css.contains("div.m_b {"), "{css}");
+    assert!(css.contains("div:is(span).c {"), "{css}");
+    assert!(css.contains("& {\n  .d {"), "{css}");
+}
+
+#[test]
 fn a_missing_css_module_name_is_an_error() {
     let fs = project(&[
         (

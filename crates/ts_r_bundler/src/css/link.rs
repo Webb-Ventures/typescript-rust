@@ -5,9 +5,17 @@
 //! Names (observed in esbuild 0.28.2): `<stem>_<name>`, the stem being the file name up to
 //! its first `.` made an identifier (`st-y.module.css` gives `st_y_foo`); a name already
 //! taken, by an earlier stylesheet in import order or by a global class or ID anywhere in
-//! the bundle, gets `2`, `3`, ... appended. With `--minify-identifiers` names are short
-//! (our sequence; esbuild's frequency-ordered choice is not reproduced). A class's value
-//! is its `composes` names (in order, recursively) followed by its own name.
+//! the bundle, gets `2`, `3`, ... appended. A class's value is its `composes` names (in
+//! order, recursively) followed by its own name.
+//!
+//! With `--minify-identifiers` names are short, chosen the way esbuild 0.28.2's output shows
+//! (observed on its CSS tests and on generated sheets of up to 3,500 names): the letters are
+//! ordered by how often they occur in the bundle's stylesheets outside comments, external
+//! `@import` / `url()` paths and the local names themselves (most frequent first, ties in
+//! `a-z`, `A-Z`, `0-9`, `_` order); a name is one of those letters (`$` and digits can't start
+//! one), then more letters or digits, counting like a number whose lowest digit comes first.
+//! The most used local name (over all of its sheet's occurrences) gets the first name that
+//! isn't a global name; ties go in module order, then in order of first appearance.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -39,10 +47,12 @@ pub fn assign(g: &Graph, l: &Link, minify: bool) -> CssNames {
             taken.extend(sheet.globals.iter().cloned());
         }
     }
-    let mut cursor = 0usize;
+    if minify {
+        minified_names(g, l, &mut taken, &mut names);
+    }
     for (i, m) in g.modules.iter().enumerate() {
         let Some(sheet) = &m.source.css else { continue };
-        if !l.included[i] || sheet.locals.is_empty() {
+        if minify || !l.included[i] || sheet.locals.is_empty() {
             continue;
         }
         let file = crate::graph::split_query(&m.path).0;
@@ -53,14 +63,6 @@ pub fn assign(g: &Graph, l: &Link, minify: bool) -> CssNames {
             .locals
             .iter()
             .map(|local| {
-                if minify {
-                    let n = ts_r_minify::rename::next_free_name(&mut cursor, &|c| {
-                        // `$` is not a CSS name character.
-                        taken.contains(c) || c.contains('$')
-                    });
-                    taken.insert(n.clone());
-                    return n;
-                }
                 let base = format!("{stem}_{local}");
                 let mut cand = base.clone();
                 let mut k = 2u32;
@@ -95,6 +97,84 @@ pub fn assign(g: &Graph, l: &Link, minify: bool) -> CssNames {
         out.values[i] = values;
     }
     out
+}
+
+/// `--minify-identifiers`: every included sheet's local names, most used first, get the
+/// short names of [`ShortNames`] that no global name (and no earlier local) has.
+fn minified_names(g: &Graph, l: &Link, taken: &mut FxHashSet<String>, names: &mut [Vec<String>]) {
+    let mut freq = vec![0i32; super::CHAR_FREQ_CHARS.len()];
+    let mut order: Vec<(u32, ModuleId, u32)> = Vec::new();
+    for (i, m) in g.modules.iter().enumerate() {
+        let Some(sheet) = &m.source.css else { continue };
+        if !l.included[i] {
+            continue;
+        }
+        for (f, c) in freq.iter_mut().zip(&sheet.char_freq) {
+            *f = f.saturating_add(*c);
+        }
+        // Paths that stay as written (external `@import`s and `url()`s) are not counted.
+        for (r, rec) in sheet.records.iter().enumerate() {
+            if !matches!(m.targets.get(r), Some(Target::Module(_))) {
+                super::char_freq(&mut freq, &rec.spec, -1);
+            }
+        }
+        names[i] = vec![String::new(); sheet.locals.len()];
+        for (k, &uses) in sheet.local_uses.iter().enumerate() {
+            order.push((uses, i as ModuleId, k as u32));
+        }
+    }
+    // Most used first; ties in module order, then first appearance.
+    order.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    let short = ShortNames::new(&freq);
+    let mut next = 0usize;
+    for (_, m, k) in order {
+        let name = loop {
+            let cand = short.name(next);
+            next += 1;
+            if !taken.contains(&cand) {
+                break cand;
+            }
+        };
+        taken.insert(name.clone());
+        names[m as usize][k as usize] = name;
+    }
+}
+
+/// Short CSS names: the first character from `head`, the rest from `tail`, both ordered by
+/// character frequency.
+struct ShortNames {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+}
+
+impl ShortNames {
+    fn new(freq: &[i32]) -> ShortNames {
+        let chars = super::CHAR_FREQ_CHARS;
+        let mut idx: Vec<usize> = (0..chars.len()).collect();
+        // Stable: equal counts keep the table's order.
+        idx.sort_by_key(|&i| std::cmp::Reverse(freq.get(i).copied().unwrap_or(0)));
+        let sorted = idx.iter().map(|&i| chars[i]);
+        let head = sorted
+            .clone()
+            .filter(|c| c.is_ascii_alphabetic() || *c == b'_')
+            .collect();
+        let tail = sorted.filter(|c| *c != b'$').collect();
+        ShortNames { head, tail }
+    }
+
+    /// The `i`-th name: `i` in base `head.len()` for the first character, then base
+    /// `tail.len()` for each further one, lowest digit first.
+    fn name(&self, mut i: usize) -> String {
+        let mut out = String::new();
+        out.push(self.head[i % self.head.len()] as char);
+        i /= self.head.len();
+        while i > 0 {
+            i -= 1;
+            out.push(self.tail[i % self.tail.len()] as char);
+            i /= self.tail.len();
+        }
+        out
+    }
 }
 
 /// Appends local `k` of `m`'s class list: what it composes, then itself.

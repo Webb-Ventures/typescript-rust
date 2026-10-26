@@ -214,6 +214,12 @@ pub struct Sheet {
     pub imports: Vec<ImportRule>,
     /// Local names in order of first appearance (decoded).
     pub locals: Vec<String>,
+    /// How often each local name appears in the sheet (declarations and references).
+    pub local_uses: Vec<u32>,
+    /// [`CHAR_FREQ_CHARS`] counts of the text outside comments, less each local name times
+    /// its uses: the letters minified local names are made of
+    /// ([`link::assign`]; empty for an empty sheet).
+    pub char_freq: Vec<i32>,
     /// Local names a selector defines as a class or ID.
     pub exported: Vec<u32>,
     /// Global class and ID names in selectors (local names avoid them).
@@ -240,6 +246,12 @@ pub enum NameMode {
 
 /// Parses `src`. `mode` is [`NameMode::Local`] for the `local-css` loader.
 pub fn parse(src: Arc<str>, mode: NameMode) -> Sheet {
+    parse_with(src, mode, true)
+}
+
+/// [`parse`]; `modules` is `false` for the `css` loader, which leaves `:local` and
+/// `:global` as written and has no local names (observed in esbuild 0.28.2).
+pub fn parse_with(src: Arc<str>, mode: NameMode, modules: bool) -> Sheet {
     let (toks, warnings) = lexer::tokenize(&src);
     let mut p = Parser {
         src: Arc::clone(&src),
@@ -254,6 +266,7 @@ pub fn parse(src: Arc<str>, mode: NameMode) -> Sheet {
         depth: 0,
         compose_target: None,
         too_deep: false,
+        modules,
     };
     for w in warnings {
         p.sheet.messages.push(CssMessage {
@@ -262,10 +275,43 @@ pub fn parse(src: Arc<str>, mode: NameMode) -> Sheet {
             text: w.text,
         });
     }
+    let mut freq = vec![0i32; CHAR_FREQ_CHARS.len()];
+    for t in &p.toks {
+        char_freq(&mut freq, t.text(&src), 1);
+    }
     let cvs = p.component_values(None);
     let rules = p.rules(cvs, true);
     p.sheet.rules = rules;
+    for (name, &uses) in p.sheet.locals.iter().zip(&p.sheet.local_uses) {
+        char_freq(&mut freq, name, -(uses.min(i32::MAX as u32) as i32));
+    }
+    if freq.iter().any(|&c| c != 0) {
+        p.sheet.char_freq = freq;
+    }
     p.sheet
+}
+
+/// The characters [`Sheet::char_freq`] counts, in the order that breaks ties.
+pub const CHAR_FREQ_CHARS: &[u8; 64] =
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$";
+
+/// Adds `delta` to `freq` for each counted character of `text`.
+pub fn char_freq(freq: &mut [i32], text: &str, delta: i32) {
+    if freq.len() < CHAR_FREQ_CHARS.len() {
+        return;
+    }
+    for &c in text.as_bytes() {
+        let i = match c {
+            b'a'..=b'z' => c - b'a',
+            b'A'..=b'Z' => c - b'A' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'_' => 62,
+            b'$' => 63,
+            _ => continue,
+        };
+        let f = &mut freq[i as usize];
+        *f = f.saturating_add(delta);
+    }
 }
 
 struct Parser {
@@ -280,6 +326,8 @@ struct Parser {
     compose_target: Option<u32>,
     depth: usize,
     too_deep: bool,
+    /// `:local` / `:global` switch the mode ([`parse_with`]).
+    modules: bool,
 }
 
 fn closer(t: T) -> Option<T> {
@@ -523,6 +571,14 @@ impl Parser {
                             // is its parent's (observed in esbuild).
                             if !top && trim(&prelude).is_empty() {
                                 out.extend(body);
+                            } else if trim(&prelude).is_empty() && !items.is_empty() {
+                                // At the top level it is `&` (`:global { ... }` prints
+                                // `&{...}`, as esbuild 0.28.2 does; lowering makes it
+                                // `:scope`).
+                                out.push(Node::Rule {
+                                    prelude: vec![Cv::Raw("&".into())],
+                                    body,
+                                });
                             } else {
                                 out.push(Node::Rule { prelude, body });
                             }
@@ -605,10 +661,12 @@ impl Parser {
 
     fn local(&mut self, name: &str) -> u32 {
         if let Some(&i) = self.local_ids.get(name) {
+            self.sheet.local_uses[i as usize] += 1;
             return i;
         }
         let i = self.sheet.locals.len() as u32;
         self.sheet.locals.push(name.to_owned());
+        self.sheet.local_uses.push(1);
         self.local_ids.insert(name.to_owned(), i);
         i
     }
@@ -650,7 +708,7 @@ impl Parser {
                     }
                     out.push(cv);
                 }
-                Cv::Tok(t) if t.t == T::Colon => {
+                Cv::Tok(t) if t.t == T::Colon && self.modules => {
                     // `:global`, `:local`, `:global(...)`, `:local(...)`
                     let next = items.get(i).and_then(|x| x.as_ref());
                     match next {
@@ -689,7 +747,9 @@ impl Parser {
                                 } else {
                                     NameMode::Local
                                 };
-                                self.selector_into(trim(&inner).to_vec(), &mut m, false, out);
+                                let mut v = Vec::new();
+                                self.selector_into(trim(&inner).to_vec(), &mut m, false, &mut v);
+                                self.join_compound(out, v);
                                 continue;
                             }
                             out.push(cv);
@@ -746,6 +806,36 @@ impl Parser {
                 other => out.push(other),
             }
         }
+    }
+
+    /// Appends `inner` (what `:global(...)` / `:local(...)` held) to the compound `out`
+    /// ends in. A type selector it starts with goes to the front of that compound, or
+    /// becomes `:is(type)` when the compound has one already (`.a:global(div)` is
+    /// `div.a`, `div:global(span.b)` is `div:is(span).b`, as esbuild 0.28.2 prints them).
+    fn join_compound(&self, out: &mut Vec<Cv>, mut inner: Vec<Cv>) {
+        let is_type = |cv: &Cv| match cv {
+            Cv::Tok(t) if t.t == T::Ident => true,
+            Cv::Tok(t) if t.t == T::Delim => self.text(t) == "*",
+            _ => false,
+        };
+        let boundary = |cv: &Cv| match cv {
+            Cv::Tok(t) if matches!(t.t, T::Ws | T::Comma) => true,
+            Cv::Tok(t) if t.t == T::Delim => matches!(self.text(t), ">" | "+" | "~"),
+            Cv::Space => true,
+            _ => false,
+        };
+        let start = out.iter().rposition(boundary).map_or(0, |i| i + 1);
+        if start < out.len() && inner.first().is_some_and(is_type) {
+            let ty = inner.remove(0);
+            if is_type(&out[start]) {
+                out.push(Cv::Raw(":is(".into()));
+                out.push(ty);
+                out.push(Cv::Raw(")".into()));
+            } else {
+                out.insert(start, ty);
+            }
+        }
+        out.extend(inner);
     }
 
     /// A declaration from its component values (`name`, `:`, value).

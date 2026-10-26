@@ -203,13 +203,27 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   nested rule left with no selector (`:global { ... }`) is its parent's body.
   `--minify-syntax` shortens colors in color properties and drops a rule or declaration an
   identical later one repeats. Parsing never fails: malformed CSS gives warnings, nesting deeper than
-  128 levels an error. Minified identifiers use our own name sequence, not esbuild's
-  frequency order.
+  128 levels an error. Minified local names (`css/link.rs`) follow esbuild's observed
+  choice: letters ordered by how often the bundle's stylesheets use them (outside comments,
+  external URLs and the local names), the most used local name first. The `css` loader
+  leaves `:local` / `:global` as written (only `local-css` and `global-css` read them); a
+  type selector from `:global(div)` moves to the front of its compound, or becomes
+  `:is(div)` after another one; a top-level rule left without a selector prints `&`.
+  CSS output escapes non-ASCII characters as `\hex` unless `--charset=utf8`
+  (`css::lexer::finish_output`; the dev server's adapter keeps them), and writes `</style`
+  as `<\/style` with `--supported:inline-style=false`.
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
   isn't a file is a glob (sorted, bounded, skipping directories the pattern cannot match).
   Reaching a traversal size or depth limit is an error, never a partial expansion. CSS
   entries are printed without `--bundle`; a missing `--tsconfig` is an error.
-- **Resolution**: a `package.json` `exports` target or import of `./x.js` that is missing
+- **`--pure:name`** (`BuildOptions::pure`, `ts_r_minify::purity::Purity::pure_calls`):
+  calls of those globals (`a.b` member chains too) are removable when unused, in tree
+  shaking only. `--ignore-annotations` ignores them and `sideEffects: false` too.
+- **Errors once targets are known** (`bundle.rs` `import_errors`): a stylesheet imported
+  from JavaScript with no output path (stdout), and `assert { type: 'json' }` on a file
+  another loader loads (`with` sets the loader instead).
+- **Resolution**: `NODE_PATH` directories (`BuildOptions::node_paths`) are searched after
+  every `node_modules`. A `package.json` `exports` target or import of `./x.js` that is missing
   falls back to `./x.ts`/`./x.tsx` (`.jsx` tries `.ts` first); esbuild's dual-package rule
   (require picks `main`) applies only with the default main fields.
 - **`--mangle-props`** (`props.rs`, `ts_r_minify::props`): a bundle gives each matching
@@ -234,8 +248,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   except `@media` and `@layer`, as esbuild does.
 - **CSS nesting** (`css/nesting.rs`) is lowered with `--supported:nesting=false` (no
   target table yet), as esbuild does: descendant or `&`-substituted selectors, `:is()` for a
-  parent list, `:scope` for a top-level rule a CSS module left without a selector; `&`
-  inside selector functions is replaced too. Lowering has a budget of 2^20 component values
+  parent list or for a parent with combinators that isn't the selector's leading compound,
+  a parent compound joined to the `&`'s compound (type selector first, a second one as
+  `:is(b)`), `:scope` for a top-level `&`; `&` inside selector functions is replaced too.
+  With `--supported:is-pseudo-class=false` parent lists are expanded instead (parent-major,
+  every combination for several `&`s), and a rule that still needs `:is()` gets one warning. Lowering has a budget of 2^20 component values
   plus 4 per input byte (`& &` doubles a selector per level): past it the sheet gets an
   error and lowering stops. Pretty
   output prints one selector of a list per line. `Cv::Raw` / `Cv::Space` are the only
