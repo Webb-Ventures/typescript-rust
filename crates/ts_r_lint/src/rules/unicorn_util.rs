@@ -24,6 +24,14 @@ pub(crate) fn global_path(cx: &Ctx<'_, '_>, expr: NodeId) -> Option<String> {
     out
 }
 
+/// True when `expr` is the global object (`globalThis`, `window`, ... or a variable
+/// initialised from one), as ESLint's reference tracker follows it.
+pub(crate) fn is_global_object(cx: &Ctx<'_, '_>, expr: NodeId) -> bool {
+    let mut out = false;
+    path_of(cx, expr, 0, &mut |p| out |= p.is_empty());
+    out
+}
+
 /// Calls `found` with each path `expr` can carry (empty for the global object).
 fn path_of(cx: &Ctx<'_, '_>, expr: NodeId, depth: u32, found: &mut dyn FnMut(&[String])) {
     if depth > 16 {
@@ -166,7 +174,7 @@ fn pattern_keys(cx: &Ctx<'_, '_>, name: NodeId, declarator: NodeId) -> Option<Ve
 }
 
 /// A global the file writes to (`Array = x`) doesn't count as the built-in.
-fn is_modified_global(cx: &Ctx<'_, '_>, name: &str) -> bool {
+pub(crate) fn is_modified_global(cx: &Ctx<'_, '_>, name: &str) -> bool {
     let sem = cx.semantic();
     let ast = cx.ast();
     sem.references().iter().any(|r| {

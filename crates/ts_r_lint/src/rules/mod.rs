@@ -279,6 +279,7 @@ mod unicorn_consistent_date_clone;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
+mod unicorn_error_message;
 mod unicorn_escape_case;
 mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
@@ -315,10 +316,9 @@ mod unicorn_prefer_event_target;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_node_protocol;
+mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
-mod unicorn_prefer_short_escape_sequences;
-mod unicorn_prefer_string_repeat;
-mod unicorn_prefer_structured_clone;
+mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_type_error;
 mod unicorn_static;
 mod unicorn_text_encoding_identifier_case;
@@ -629,6 +629,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
     &unicorn_empty_brace_spaces::RULE,
+    &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,
     &unicorn_max_nested_calls::RULE,
     &unicorn_new_for_builtins::RULE,
@@ -665,10 +666,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_node_protocol::RULE,
+    &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
-    &unicorn_prefer_short_escape_sequences::RULE,
-    &unicorn_prefer_string_repeat::RULE,
-    &unicorn_prefer_structured_clone::RULE,
+    &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,

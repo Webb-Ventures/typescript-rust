@@ -178,8 +178,6 @@ Files:
   the plugin's test helpers and records a case's own globals; cases for other languages,
   CSS/JSON/Markdown/Vue, are skipped). A data file's top-level `globals` (builtin, node and
   browser, as the plugin's tester sets them) are merged into every case by the harness.
-  `utils/is-number.js`-style type guessing is not modelled, so rules that depend on it
-  (`prefer-number-properties`, `prefer-string-trim-start-end`, `error-message`) are not in.
 - Project oracle (real code, ESLint vs ts-r-lint, per-rule match/miss/extra):
   `tests/oracle/project/` (`setup.py` copies a repo to a temp dir and stubs missing plugins,
   `all_rules_config.py` writes a config enabling every ts-r-lint rule, `eslint_packages.py`
@@ -556,78 +554,66 @@ typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visi
 - Fixes that rewrite import/export lists build a list of `(Span, String)` edits and fold them
   into one `Fix` (see `ts_consistent_type_imports.rs`); keep edits non-overlapping.
 
-## eslint-plugin-unicorn rules (round 5, lead)
+## eslint-plugin-unicorn type guessing (round 5)
 
-`prefer-blob-reading-methods`, `consistent-date-clone`, `no-invalid-remove-event-listener`,
-`prefer-structured-clone`, `prefer-event-target`, `no-useless-error-capture-stack-trace`,
-`no-negation-in-equality-check`, `no-exports-in-scripts`, `consistent-tuple-labels`,
-`no-leading-empty-lines`, `prefer-add-event-listener-options` (each at 100% of its oracle), `no-await-in-promise-methods`
-(110 of 111) and `no-unnecessary-await` (63 of 66): their last cases need the parser's
-module goal, see below. Shared call shapes are
-in `rules/unicorn_ast.rs`: `method_call` (a call of `obj.name` with an identifier property,
-parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_.cloneDeep`,
-`new.target.x`, `this.y`), `call_tokens` (a call's `(`, `)` and trailing `,`),
-`would_remove_comments` (a comment in the replaced range but outside every kept range) and
-`skip_spaces` (JavaScript's `\s`).
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:
+`type-helpers.js`, `type-check.js`, `jsdoc.js`, `jsdoc-type.js`, `parse-jsdoc-type.js`,
+`get-static-value.js`, `unwrap-typescript-expression.js`, `get-visitor-child-nodes.js`,
+`is-array.js`, `is-string.js`, `is-number.js`, `is-map.js`, `is-set.js`, `is-bigint.js`,
+`is-reg-exp.js`, `is-weak-map.js`, `is-weak-set.js`, `should-skip-known-non-array-receiver.js`,
+`global-reference-tracker.js`, `is-left-hand-side.js`, `shared/typed-array.js`; the rules
+`prefer-number-properties.js`, `prefer-string-trim-start-end.js`, `error-message.js`; and
+`@eslint-community/eslint-utils` (`getStaticValue`, `ReferenceTracker`).
 
-- **no-await-in-promise-methods** walks up from each `await` to an array that is the single
-  argument of `Promise.all/allSettled/any/race`, stopping at a function or an outer `await`;
-  only an `await` that is the element itself gets the "Remove `await`" suggestion. Open:
-  `Promise.all([\n await\n promise])` in a `.js` module is a parse error for us, because the
-  parser treats top-level `await` before a line break as a name unless the file has
-  `import`/`export`; ESLint (sourceType `module`) always reads the operator. Requested from
-  the parser owner (a forced module-goal parse option for `engine::parse_for_lint`).
-- **consistent-date-clone** reports `.getTime()` in `new Date(x.getTime())` from the method
-  name to the end of the call; the fix deletes from the end of the receiver's parentheses to
-  the end of the member, and from the end of the parenthesized callee to the end of the call.
-- **no-unnecessary-await** fixes only an `await` that is the last thing its function or
-  module evaluates (`is_last_evaluated`: the end of an arrow body, function body or
-  program, through `if` arms, declarations, `return`/`throw` and expression statements).
-  Open: 3 cases (`await +x`, `await\n[]` at the top level of a `.js` module) parse as
-  `await` the name for the same module-goal reason as above.
-- **no-negation-in-equality-check** and the fix helpers it shares with
-  `no-typeof-undefined` (`keyword_argument_parent`, `start_needs_parens`) and
-  `no-instanceof-builtins` (`starts_continued_statement`).
-- **no-useless-error-capture-stack-trace**: the nearest function or class around the call
-  must be the constructor of a class whose `extends` is a global built-in error;
-  `new.target`, `this.constructor` and the class's own single-declaration name count as
-  the class.
-- **prefer-event-target**: `EventEmitter` as superclass or `new` callee, unless declared by
-  an import of (or a `const` destructuring / `.EventEmitter` of `require`/`await import`
-  of) `@angular/core` or `eventemitter3`.
-- **no-exports-in-scripts** (a `#!` first line), **consistent-tuple-labels**,
-  **no-leading-empty-lines**, **prefer-add-event-listener-options**: see each file's header.
-- **A leading BOM** is stripped before linting, by the CLI (`project::lint_one`) and by the
-  oracle harness, which puts it back in front of fixed output; `gen-rule-oracle.mjs` applies
-  fix ranges to the BOM-less text the same way (ESLint's ranges index text without it).
-- **prefer-structured-clone**'s JSON suggestion deletes `JSON.stringify` with each
-  parenthesis around it, the inner call's `(`, `)` and trailing comma; the clone-function
-  form replaces the callee inside its parentheses.
-- **prefer-global-this**, **no-named-default**: see each file's header.
-- **prefer-string-repeat** skips literals the syntax needs (`unicorn_ast::is_string_literal_required`:
-  non-computed keys and any key of an abstract member or signature, module sources and
-  specifiers, import attributes, JSX attribute values, enum members, module names,
-  `require` references, any child of a type) and `expect(x).toMatchInlineSnapshot(lit)`.
-- **remove_argument** (`unicorn_ast.rs`) removes one call argument with its parentheses
-  and one comma, keeping comments in the removed range (no-unnecessary-array-flat-depth).
-- **no-magic-array-flat-depth** ignores a disable/enable directive in the argument list;
-  any other comment there explains the depth and silences it.
-- **no-unnecessary-array-flat-depth**, **consistent-template-literal-escape**,
-  **no-break-in-nested-loop**, **no-useless-re-export**, **prefer-global-number-constants**
-  (`is_left_hand_side` in `unicorn_ast.rs`), **max-nested-calls**,
-  **prefer-short-escape-sequences**: see each file's header.
+Many unicorn rules ask whether an expression is an array, string, number, `Map`, ... with
+no type checker. Two modules answer the way the plugin does, so the rules stay at 100% with
+`NoTypeInfo`:
 
-Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
-`no-await-in-promise-methods.js`, `consistent-date-clone.js`,
-`no-invalid-remove-event-listener.js`, `prefer-structured-clone.js`, `ast/is-method-call.js`,
-`ast/call-or-new-expression.js`, `utils/is-node-matches.js`, `utils/comments.js`,
-`fix/remove-method-call.js`, `fix/remove-spaces-after.js`, `no-unnecessary-await.js`,
-`no-negation-in-equality-check.js`, `no-useless-error-capture-stack-trace.js`,
-`prefer-event-target.js`, `no-exports-in-scripts.js`, `consistent-tuple-labels.js`,
-`no-leading-empty-lines.js`, `prefer-add-event-listener-options.js`, `utils/needs-semicolon.js`,
-`fix/add-parentheses-to-return-or-throw-expression.js`, `prefer-global-this.js`,
-`no-named-default.js`, `prefer-string-repeat.js`, `utils/is-string-literal-required.js`,
-`no-unnecessary-array-flat-depth.js`, `no-magic-array-flat-depth.js`, `fix/remove-argument.js`,
-`utils/comments.js`, `utils/eslint-directive.js`, `consistent-template-literal-escape.js`,
-`no-break-in-nested-loop.js`, `no-useless-re-export.js`, `prefer-global-number-constants.js`,
-`utils/is-left-hand-side.js`, `max-nested-calls.js`, `prefer-short-escape-sequences.js`.
+- **`unicorn_static.rs`: static values.** `static_value` is ESLint's `getStaticValue`
+  (literals, templates, operators, `const` bindings that are never mutated, a fixed list of
+  pure built-in calls and members). `static_value_no_side_effects` refuses expressions that
+  have side effects (calls, `new`, assignments, updates, `await`, `yield`, `delete`, also
+  inside the `const`s they read) or read a member that could have changed;
+  `Object.freeze`/`seal`/`preventExtensions` of a static value pass their argument through.
+  `static_value_control_flow` also needs every binding on an evaluated path to be a `const`
+  declared before the use. Evaluated children skip functions, classes, type nodes,
+  non-computed member names and plain property keys.
+- **`unicorn_types.rs`: the guessing engine.** A `Checker` lists the target type names, the
+  names known not to be it, aliases (`ReadonlyMap` is `Map`), target imports, constructor and
+  call names, and hooks for node shapes, annotations, JSDoc types and static values. It
+  answers `Target`, `NonTarget`, `Nullish` or `Unknown`, in this order: `satisfies` looks
+  through; an `as`/`<T>` annotation if it says something; otherwise a JSDoc type on the node
+  (which wins, unknown included); then the expression (a variable's annotation or `const`
+  initializer, a local function's annotated or documented return type, `=`, `this`/`super`/
+  `new` from class declarations when `class_syntax` is on, the last of a sequence,
+  `?:`/`||`/`&&`/`??` as unions); then a static value (not for identifiers, and unknown when
+  the expression reads a JSDoc-typed binding); then the node-shape hooks. Unions are the
+  target when every member is (any member with `mixed_union_target`), non-target when every
+  member is non-target (any with `mixed_union_non_target`); `null`/`undefined` count as
+  non-target unless `nullish_in_mixed_union` drops them. Intersections are unknown if any
+  member is, else the target if any member is. Type references resolve through local type
+  aliases, interfaces (`extends`), type parameters (their constraint), classes (`extends`,
+  when `class_heritage` is on, the default) and imports; `prefer_definitions` resolves a
+  local definition before trusting the name. Every walk keeps a visited list and a depth
+  limit.
+- **JSDoc.** Only `@param`/`@arg`/`@argument`, `@type` and `@return(s)` tags are read, and only
+  at line starts. The comment is the one directly before the first owner node that has a
+  comment (for a function: the function, its TS wrappers, then the declarator, the
+  single-declarator declaration, `x = fn` statement, property or method), and it must be a
+  `/**` block. Any `@typedef`, `@callback` or `@overload` means no tags. Exactly one tag must
+  match. The type reader understands names, primitives (with boxed aliases), unions,
+  intersections, `?T`, `T=`, `T[]`, tuples, records (non-primitive objects), functions
+  (`() => T`, `function(): T`) and literals; anything else is unknown.
+- **Checkers.** `is_array` / `is_known_non_array` (definitions first, no class heritage,
+  rest parameters, `Array.from`/`of`, `Object.keys`-style calls, array-returning methods on
+  arrays), `is_indexed_collection` (arrays and typed arrays), `is_string` (also `+` with a
+  string, string-returning methods on strings, `join` on indexed collections, `Date`
+  string methods, `RegExp` `.source`/`.flags`), `is_number` (also arithmetic, `Math.*`,
+  `.length` of strings/indexed collections/functions, `.size` of maps and sets, number
+  methods on strings/arrays/dates), `is_bigint`, `is_map`, `is_set`, `is_weak_map`,
+  `is_weak_set`, `is_regexp`, `is_date`. A literal of another type is not "known non-X":
+  only annotations, JSDoc and the node hooks say non-target.
+- **Global references.** `prefer-number-properties` reports what ESLint's reference
+  tracker yields: direct reads of an unmodified global, and properties of the global object
+  (`globalThis.parseInt`, through `const g = globalThis`). Reads through an alias of the
+  function itself (`const p = parseInt; p()`) are not reported.
