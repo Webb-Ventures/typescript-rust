@@ -134,12 +134,10 @@ fn literal_type(ck: &mut Ck<'_, '_>, lit: Loc) -> Option<TypeId> {
                 }
             }
             Node::Binary {
-                left, op, right, ..
-            } if matches!(
-                op,
-                BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq
-            ) =>
-            {
+                left,
+                op: BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::StrictEq | BinaryOp::StrictNotEq,
+                right,
+            } => {
                 let other = if left == lit.node { right } else { left };
                 return Some(ck.check_expr(Loc::new(lit.file, other)));
             }
@@ -196,11 +194,15 @@ pub(super) fn references(
     if t == Some(TypeId::STRING) {
         return Vec::new();
     }
+    // Text that needs no escape appears in the source as written wherever a literal holds
+    // it; other text may be written with escapes, so every file's literals are read.
+    let plain = text
+        .bytes()
+        .all(|b| (b' '..=b'~').contains(&b) && !matches!(b, b'\\' | b'"' | b'\'' | b'`' | b'$'));
     let mut out = Vec::new();
     for &f in files {
         let src = c.file(f).text.as_str();
-        // An escape-free text appears as written; otherwise check every literal.
-        if !text.contains('\\') && !src.contains(text.as_str()) {
+        if plain && !src.contains(text.as_str()) {
             continue;
         }
         let ast = c.ast(f);
@@ -210,11 +212,7 @@ pub(super) fn references(
             }
             let l = Loc::new(f, n);
             let ok = match t {
-                Some(t) => {
-                    is_property_name(c, l)
-                        || (l != lit && literal_type(ck, l) == Some(t))
-                        || l == lit
-                }
+                Some(t) => l == lit || is_property_name(c, l) || literal_type(ck, l) == Some(t),
                 None => {
                     let span = ast.span(n);
                     !matches!(ast.node(n), Node::TemplateLit { .. })

@@ -42,26 +42,27 @@ every skip reason.
 
 ## Results
 
-5628954 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**1967 of 2516 compared tests pass (78.2%)**; 7761 of 8968 queries agree.
-3803 of the 6319 test files are skipped (3698 verify no compared feature, 157 get no answer
-from either server). Up from 1864 of 2517 at aed0aea: 103 tests fixed (go to definition at
-calls, literals and ambient modules; possible type arguments, namespaces in type positions
-and import clause completions; type alias, JSDoc `@typedef` and setter hovers; names inside
-JSDoc tag types), none lost. Four tests leave the compared set because ts-r now answers
-nothing where tsc does (`goToDefinitionShorthandProperty02`, `completionAtDottedNamespace`,
-`completionsRecursiveNamespace`, `importTypeCompletions9`); tsc's timeouts move a few others
-in and out run to run (three this run, rerun with `--filter` and counted).
+682d76b (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2085 of 2516 compared tests pass (82.9%)**; 8023 of 8967 queries agree.
+3803 of the 6319 test files are skipped (3698 verify no compared feature, 156 get no answer
+from either server). Up from 1967 of 2516 at 5628954: 118 tests fixed (JSDoc completions;
+completions in template holes, generic-call object literals, awaited members, import
+statement keywords and import types; references, rename, definition and hover on names in
+`{@link}`, `@see` and `@throws` paths; references and rename of string literal types; JSX
+intrinsic tags and attributes), none lost. The compared count is unchanged: two rename tests
+where tsc answers nothing (`renameImport`, `jsObjectDefinePropertyRenameLocations`) now get
+no answer from ts-r either and are skipped, and tsc's timeouts move a few others in and out
+run to run (rerun with `--filter` and counted).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 415 | 105 | 18 | 2329 / 2515 |
-| completion | 816 | 211 | 106 | 2433 / 2794 |
-| references | 229 | 115 | 13 | 1094 / 1442 |
-| rename | 120 | 56 | 13 | 364 / 549 |
-| definition | 136 | 30 | 26 | 477 / 526 |
+| hover | 419 | 101 | 18 | 2338 / 2515 |
+| completion | 875 | 151 | 107 | 2553 / 2792 |
+| references | 254 | 91 | 12 | 1160 / 1443 |
+| rename | 144 | 32 | 13 | 414 / 549 |
+| definition | 139 | 27 | 26 | 482 / 526 |
 | signatureHelp | 136 | 14 | 26 | 637 / 656 |
-| highlights | 102 | 15 | 20 | 375 / 431 |
+| highlights | 105 | 12 | 20 | 387 / 431 |
 | typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
 Remaining failures by cause (example tests in parentheses):
@@ -75,24 +76,24 @@ Remaining failures by cause (example tests in parentheses):
   named through their import alias (`quickInfoExportAssignmentOfGenericInterface`), type
   predicates printed as `boolean` (`signatureHelpOnTypePredicates`), contextual parameters
   of generic signatures (`contextualTypingGenericFunction1`).
-- **Quick info (ts_r_lsp)**: `@property` names and `{@link}` targets inside JSDoc
-  (`quickInfoPropertyTag`, `quickInfoLink4`), hyphenated property names (`jsDocTagsWithHyphen`,
-  a JSDoc parser case), type-recovery corners of `@param {..}` (`quickInfoCommentsCommentParsing`), keywords and
+- **Quick info (ts_r_lsp)**: `@property` names inside JSDoc (`quickInfoPropertyTag`),
+  hyphenated property names (`jsDocTagsWithHyphen`), `{@link https://...}` names in `@property`
+  tags (`quickInfoForJSDocWithHttpLinks`), type-recovery corners of `@param {..}` (`quickInfoCommentsCommentParsing`), keywords and
   meta properties (`arguments`, `import.meta`, `new`, `super`, `as const`), enum members
   with odd names (`(typeof Foo)["\t"]`), discriminated contextual unions
   (`quickInfoUnion_discriminated`), `(alias)` on `export as namespace` and JavaScript
   `require` (`quickInfoForUMDModuleAlias`, `jsRequireQuickInfo`).
 - **Highlights (ts_r_lsp)**: members inherited across classes
   (`documentHighlightAtInheritedProperties5`), `export { x as y }` names
-  (`documentHighlightInExport1`), string literals and template strings
-  (`getOccurrencesStringLiterals`, `documentHighlightTemplateStrings`), JSDoc `@typedef`
+  (`documentHighlightInExport1`), JSDoc `@typedef`
   (`jsdocTypedefTagServices`), a few keyword sets (`getOccurrencesConst04`,
   `getOccurrencesTryCatchFinallyBroken`), JSX tag names.
 - **References and rename (ts_r_lsp)**: keywords (`referencesForStatementKeywords`,
-  `referencesForExpressionKeywords`), JSDoc `@link`, `@param` and `@import`, import types
-  (`findAllRefs_importType_named`), module specifiers, CommonJS `require`, dynamic
-  `import()`, JSX (`tsxFindAllReferences*`), string literal types
-  (`renameStringLiteralTypes2`, `findAllRefsForStringLiteral`), going back up from a
+  `referencesForExpressionKeywords`), JSDoc `@param`, `@template` and `@import`
+  (`findAllRefsJsDocImportTag*`), import types (`findAllRefs_importType_named`), module
+  specifiers, CommonJS `require` and `module.exports`, JSX runtime imports
+  (`jsxFindAllReferencesOnRuntimeImportWithPaths1`), quoted export names
+  (`arbitraryModuleNamespaceIdentifiers_*`), going back up from a
   re-export of a renamed default (`import boom from "./d"`), constructors reached through
   export specifiers (`findAllRefsOfConstructor_multipleFiles`).
 - **Definition (ts_r_lsp)**: decorator and JSX overloads (the checker records no resolved
@@ -103,11 +104,11 @@ Remaining failures by cause (example tests in parentheses):
 - **Completion (ts_r_lsp)**: JSX in tags the parser closes early
   (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers
   (`completionsThisPropertiesInPropertyDeclaration2`) and contextual `this`
-  (`memberListOnContextualThis`), `import |` statement and import-type completions
-  (`importStatementCompletions*`, `importTypeCompletions*`), object literals in overloaded
-  or generic calls (`completionListInObjectLiteral7`, `completionsWithOptionalProperties*`),
-  protected and private members after `.`, JSDoc tag names (`completionInJsDoc`), template
-  holes (`completionListInTemplateLiteralParts1`), shorthand properties in call arguments
+  (`memberListOnContextualThis`), import statement snippets (`importStatementCompletions4`),
+  object literals in overloaded calls and partial generic types
+  (`completionListInObjectLiteral7`, `completionsWithOptionalPropertiesGenericPartial2`),
+  protected and private members after `.`, `import("./x").` inside JSDoc braces
+  (`javascriptModulesTypeImport`), exhaustive `case` snippets, shorthand properties in call arguments
   (`completionPropertyShorthandForObjectLiteral*`), type parameters in their own defaults
   and constraints, keyword sets by position, auto-import details.
 - **Signature help (ts_r_lsp)**: JSX (`tsxSignatureHelp1`, `signatureHelpJSX`), `... N
@@ -131,3 +132,4 @@ Remaining failures by cause (example tests in parentheses):
 | 1960c24 | 2026-10-26 | 1706 | 2517 | 67.8% | Completions from expected types (type literals in type arguments offer the constraint's members, string, number and bigint literal entries), no list where a name is being declared, the scope of unclosed bodies, members of possibly undefined values and non-identifier members; signature help at type argument lists, `super(`, contextually typed parameter lists and tagged templates, the resolved or best candidate instantiated, rest tuples expanded; references on constructors |
 | aed0aea | 2026-10-27 | 1864 | 2517 | 74.1% | References, rename and highlights through inherited and overridden members, search meanings (value, type, namespace), renaming import and export aliases, default keywords, private names and computed keys; hover JSDoc parsed and rendered as tsc 7 does (tags, links, examples) from the declaration tsc documents, contextual object literal properties, module names, anonymous classes and functions, `prototype` owners |
 | 5628954 | 2026-10-27 | 1967 | 2516 | 78.2% | Go to definition at calls (the resolved signature), unnamed functions and classes by their assigned name, literal and binding keys through contextual and destructured types, ambient modules and import specifiers; completions read possible type arguments as types, offer namespaces in type positions only with a type below them, and list a module's exports in import and export clauses; type alias hovers print the aliased type (checker's InTypeAlias mode), JSDoc `@typedef`/`@callback` hovers and docs, setter write types, instantiated candidates at unresolved generic calls; names inside JSDoc tag types found for every feature; daemon test flakes fixed |
+| 682d76b | 2026-10-27 | 2085 | 2516 | 82.9% | JSDoc completions (tag names, `@param` names, types in tag braces, `@import` specifiers and attributes); completions in template holes, object literals of generic calls (the declared parameter type with undecided type parameters at their constraints), awaited promise members, `import` statement keywords and `import("x").` members; references, rename, definition and hover on names in `{@link}`, `@see` and `@throws` paths; references, rename and highlights of string literal types; JSX intrinsic tags and attributes in references, rename, definition and hover |
