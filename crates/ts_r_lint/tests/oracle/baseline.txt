@@ -310,6 +310,7 @@ unicorn/no-useless-boolean-cast 61/61
 unicorn/no-useless-compound-assignment 79/79
 unicorn/no-useless-continue 43/43
 unicorn/no-useless-error-capture-stack-trace 53/53
+unicorn/no-useless-override 84/84
 unicorn/no-useless-re-export 22/22
 unicorn/no-useless-recursion 29/29
 unicorn/no-xor-as-exponentiation 34/34

@@ -319,6 +319,7 @@ mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_compound_assignment;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_error_capture_stack_trace;
+mod unicorn_no_useless_override;
 mod unicorn_no_useless_re_export;
 mod unicorn_no_useless_recursion;
 mod unicorn_no_xor_as_exponentiation;
@@ -705,6 +706,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_compound_assignment::RULE,
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
+    &unicorn_no_useless_override::RULE,
     &unicorn_no_useless_re_export::RULE,
     &unicorn_no_useless_recursion::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
