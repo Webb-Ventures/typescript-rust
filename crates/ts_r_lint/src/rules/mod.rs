@@ -324,9 +324,10 @@ mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
-mod unicorn_no_useless_fallback_in_spread;
-mod unicorn_no_useless_length_check;
-mod unicorn_no_useless_promise_resolve_reject;
+mod unicorn_no_useless_boolean_cast;
+mod unicorn_no_useless_collection_argument;
+mod unicorn_no_useless_continue;
+mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_re_export;
 mod unicorn_no_useless_spread;
 mod unicorn_no_useless_switch_case;
@@ -359,6 +360,8 @@ mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_short_escape_sequences;
+mod unicorn_prefer_simple_sort_comparator;
+mod unicorn_prefer_single_array_predicate;
 mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
@@ -723,9 +726,10 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unreadable_iife::RULE,
-    &unicorn_no_useless_fallback_in_spread::RULE,
-    &unicorn_no_useless_length_check::RULE,
-    &unicorn_no_useless_promise_resolve_reject::RULE,
+    &unicorn_no_useless_boolean_cast::RULE,
+    &unicorn_no_useless_collection_argument::RULE,
+    &unicorn_no_useless_continue::RULE,
+    &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_re_export::RULE,
     &unicorn_no_useless_spread::RULE,
     &unicorn_no_useless_switch_case::RULE,
@@ -758,6 +762,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
+    &unicorn_prefer_simple_sort_comparator::RULE,
+    &unicorn_prefer_single_array_predicate::RULE,
     &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_structured_clone::RULE,
