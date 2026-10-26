@@ -106,7 +106,7 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 97.5% exact (all diagnostics and chains); 150 variants with a diagnostic tsc does not report, 5 of them in tests where tsc reports nothing |
+| tsc's conformance baselines, 12,750 compared test variants | 97.6% exact (all diagnostics and chains); 144 variants with a diagnostic tsc does not report, 5 of them in tests where tsc reports nothing |
 | Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | 4 of 6 match exactly; RxJS 0 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
 | Ecosystem check stage | 709 packages pass, 0 fail (100%) |
 
