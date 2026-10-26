@@ -372,7 +372,15 @@ function ecosystemMarkdown(problems) {
     const cells = row.split('|').slice(1, -1);
     return `|${cells.slice(0, 6).join('|')}|`;
   });
-  if (!stages.length || !causes.length) problems.push('ecosystem/STATUS.md: tables not found; update ecosystemMarkdown() in landing/lib/content/docs.mjs');
+  // With nothing failing, STATUS.md writes "None." under the causes heading instead of a table.
+  const causesStart = lines.findIndex(l => l.startsWith('## Top failure causes'));
+  const noCauses = causesStart >= 0 && lines.slice(causesStart + 1).find(l => l.trim() !== '') === 'None.';
+  if (!stages.length || (!causes.length && !noCauses)) problems.push('ecosystem/STATUS.md: tables not found; update ecosystemMarkdown() in landing/lib/content/docs.mjs');
+  const causesText = noCauses
+    ? 'No package fails any stage, so there are no failure causes.'
+    : `Top 10 failure causes (all ${'`'}extra${'`'} causes are diagnostics ts-r reports and tsc doesn't):
+
+${causes.join('\n')}`;
   return `Run on ${gen[1]} at commit ${published(gen[2]) ? `[\`${gen[2]}\`](${REPO}/commit/${gen[2]})` : `\`${gen[2]}\``} over the top ${gen[3]} npm packages (${gen[4]} s). Reference tools: ${tools[1]}. Pass rate = pass / (pass + fail + error); skips have nothing to compare.
 
 ${stages.join('\n')}
@@ -381,9 +389,7 @@ ${items.join('\n')}
 
 **Bundle size versus esbuild (minified):** ${size}
 
-Top 10 failure causes (all ${'`'}extra${'`'} causes are diagnostics ts-r reports and tsc doesn't):
-
-${causes.join('\n')}
+${causesText}
 
 The full list of failing packages and a repro for each top cause are in [ecosystem/STATUS.md](../../ecosystem/STATUS.md).`;
 }

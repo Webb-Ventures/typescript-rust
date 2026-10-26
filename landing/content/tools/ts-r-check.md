@@ -108,11 +108,9 @@ Against tsc 7.0.2:
 |---|---|
 | tsc's conformance baselines, 12,750 compared test variants | 97.0% exact (all diagnostics and chains); 186 variants with a diagnostic tsc does not report, 10 of them in tests where tsc reports nothing |
 | Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | 4 of 6 match exactly; RxJS 0 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
-| Ecosystem check stage | 708 packages pass, 1 fails (99.9%) |
+| Ecosystem check stage | 709 packages pass, 0 fail (100%) |
 
-The one ecosystem failure is @colors/colors: tsc reports a duplicate identifier `bold` inside its
-bundled `lib.es2015.core.d.ts` (the package adds a `bold` property to `String`), and ts-r-check
-does not. Some of the 220 conformance extras are runner artefacts, such as tests for module
+Some of the 220 conformance extras are runner artefacts, such as tests for module
 kinds tsc 7 removed, which have no baseline.
 
 Speed on four dedicated Linux cores (the review box's bench of pull request #42 on
