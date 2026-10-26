@@ -183,3 +183,11 @@ fn multiline_comments_keep_return_and_throw_operands_parenthesized() {
 fn es_decorated_statics() {
     check("es_decorated_statics");
 }
+
+/// A script's top-level unused `import x = A.B` stays as `var x = A.B;` when `A.B` is a value
+/// or does not resolve; one that names only types (or a namespace of types) is dropped, and an
+/// unused alias inside a namespace is still dropped.
+#[test]
+fn script_import_alias() {
+    check("script_import_alias");
+}

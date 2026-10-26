@@ -1748,7 +1748,19 @@ impl<'a> Tx<'a> {
         let kept_by_verbatim = (self.opts.verbatim_module_syntax
             || !self.ast.source_kind.is_typescript())
             && self.kind(module_ref) == NodeKind::ExternalModuleRef;
-        if type_only || !(exported || self.binding_used(name) || kept_by_verbatim) {
+        // A script's top-level alias is a global: tsc keeps it, unused, when its target is
+        // a value or unresolved (`import v = foo.v;` → `var v = foo.v;`).
+        let script_global = !type_only
+            && !exported
+            && !self.is_module
+            && self.ns_stack.is_empty()
+            && self.list_depth <= 1
+            && self.kind(module_ref) != NodeKind::ExternalModuleRef
+            && !self.binding_used(name)
+            && crate::namespace::entity_is_value(self, module_ref) != Some(false)
+            && self.value_alias(id);
+        if type_only || !(exported || self.binding_used(name) || kept_by_verbatim || script_global)
+        {
             self.erase(id);
             return;
         }

@@ -34,8 +34,6 @@ conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpre
 conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.2.ts	esDecorators-classExpression-namedEvaluation.2.js	differs: lowering: temporaries
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=false)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=true)	esDecorators-decoratorExpression.3.js	differs: classes
-conformance/externalModules/topLevelAwait.2.ts(module=es2022)	topLevelAwait.2.js	differs: missing code: other
-conformance/externalModules/topLevelAwait.2.ts(module=esnext)	topLevelAwait.2.js	differs: missing code: other
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=es2022)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=esnext)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/verbatimModuleSyntaxRestrictionsCJS.ts	main6.js	differs: missing code: CommonJS

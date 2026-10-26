@@ -654,3 +654,203 @@ pub(crate) fn is_instantiated_binding(tx: &Tx, b: BindingId) -> bool {
     }
     !found
 }
+
+/// Whether the entity name of `import x = A.B.C` (`entity`) names a value, as far as the
+/// file tells: `Some(false)` when it resolves through this file's namespaces to a type
+/// (an interface, a type alias, a namespace with no values, a const enum), `Some(true)`
+/// for a value, `None` when the file does not declare it. tsc keeps an unused top-level
+/// alias of a script whose target is a value or unresolved (observed with tsc 7.0.2:
+/// `import v = foo.v` stays as `var v = foo.v;`, `import t = foo.onlyTypes` goes).
+pub(crate) fn entity_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
+    let mut path = Vec::new();
+    let mut n = entity;
+    while let Node::QualifiedName { left, right } = tx.n(n) {
+        path.push(right);
+        n = left;
+    }
+    let Node::Ident { name: root } = tx.n(n) else {
+        return None;
+    };
+    path.reverse();
+    let Node::Program { stmts } = tx.n(tx.ast.root) else {
+        return None;
+    };
+    let top: Vec<NodeId> = tx.ast.list(stmts).to_vec();
+    member_is_value(tx, &top, root, &path, 0, false)
+}
+
+/// Whether `name` (then `rest`) declared among `stmts` is a value. `ambient`: the
+/// statements are a `declare namespace`'s body, where every member is exported.
+fn member_is_value(
+    tx: &Tx,
+    stmts: &[NodeId],
+    name: Atom,
+    rest: &[NodeId],
+    depth: u32,
+    ambient: bool,
+) -> Option<bool> {
+    if depth > 64 {
+        return None;
+    }
+    let mut namespaces = Vec::new();
+    let mut found_type = false;
+    for &s in stmts {
+        let n = tx.n(s);
+        let mods = n.modifiers();
+        let visible = depth == 0 || ambient || mods.contains(Modifiers::EXPORT);
+        if !visible {
+            continue;
+        }
+        let named = |id: Option<NodeId>| {
+            id.is_some_and(|id| matches!(tx.n(id), Node::Ident { name: a } if a == name))
+        };
+        match n {
+            Node::VarDecl { decls, .. } => {
+                let declares = tx.ast.list(decls).iter().any(
+                    |&d| matches!(tx.n(d), Node::VarDeclarator { name: p, .. } if named(Some(p))),
+                );
+                if declares {
+                    return rest.is_empty().then_some(true);
+                }
+            }
+            Node::FunctionDecl { name: nm, .. } | Node::ClassDecl { name: nm, .. } if named(nm) => {
+                return rest.is_empty().then_some(true);
+            }
+            Node::Enum {
+                modifiers,
+                name: nm,
+                ..
+            } if named(Some(nm)) => {
+                if !rest.is_empty() {
+                    return None;
+                }
+                if !modifiers.contains(Modifiers::CONST) || tx.opts.preserve_const_enums {
+                    return Some(true);
+                }
+                found_type = true;
+            }
+            Node::ImportEquals { name: nm, .. } if named(Some(nm)) => return None,
+            Node::Interface { name: nm, .. } | Node::TypeAlias { name: nm, .. }
+                if named(Some(nm)) =>
+            {
+                found_type = true;
+            }
+            Node::Module {
+                modifiers,
+                kind,
+                name: nm,
+                body,
+            } if kind != ModuleKind::Global && tx.kind(nm) != NodeKind::StringLit => {
+                let mut segs = Vec::new();
+                let mut first = nm;
+                while let Node::QualifiedName { left, right } = tx.n(first) {
+                    segs.push(right);
+                    first = left;
+                }
+                segs.push(first);
+                segs.reverse();
+                if !named(Some(segs[0])) {
+                    continue;
+                }
+                namespaces.push((
+                    s,
+                    segs,
+                    modifiers.contains(Modifiers::DECLARE) || ambient,
+                    body,
+                ));
+            }
+            _ => {}
+        }
+    }
+    if namespaces.is_empty() {
+        return if found_type { Some(false) } else { None };
+    }
+    // A namespace `name`: walk its segments (`namespace A.B {}` declares `A.B`) into the
+    // bodies, or answer for the namespace itself.
+    let mut any_unknown = false;
+    for (_, segs, amb, body) in &namespaces {
+        let mut i = 1;
+        while i < segs.len()
+            && rest.get(i - 1).is_some_and(|&r| {
+                ident_atom(tx, r).is_some() && ident_atom(tx, r) == ident_atom(tx, segs[i])
+            })
+        {
+            i += 1;
+        }
+        let Some(body) = body else { continue };
+        let Node::ModuleBlock { stmts } = tx.n(*body) else {
+            continue;
+        };
+        let inner: Vec<NodeId> = tx.ast.list(stmts).to_vec();
+        if i < segs.len() {
+            // `rest` ends inside the segments (`A.B` of `namespace A.B.C`): `A.B` holds
+            // namespace `C`, so it is a value when this body is.
+            if rest.len() < i {
+                if body_has_value(tx, &inner, depth) {
+                    return Some(true);
+                }
+                continue;
+            }
+            // The path leaves the segments: this declaration does not declare it.
+            continue;
+        }
+        let rest_here = &rest[i - 1..];
+        match rest_here.split_first() {
+            None => {
+                if body_has_value(tx, &inner, depth) {
+                    return Some(true);
+                }
+            }
+            Some((&next, more)) => {
+                let Some(next) = ident_atom(tx, next) else {
+                    any_unknown = true;
+                    continue;
+                };
+                match member_is_value(tx, &inner, next, more, depth + 1, *amb) {
+                    Some(true) => return Some(true),
+                    Some(false) => {}
+                    None => any_unknown = true,
+                }
+            }
+        }
+    }
+    if any_unknown { None } else { Some(false) }
+}
+
+/// Whether a namespace body declares a value (tsc's instantiated namespace; `declare`
+/// does not matter: an ambient namespace with a `const` is a value).
+fn body_has_value(tx: &Tx, stmts: &[NodeId], depth: u32) -> bool {
+    if depth > 64 {
+        return true;
+    }
+    stmts.iter().any(|&s| match tx.n(s) {
+        Node::Interface { .. } | Node::TypeAlias { .. } | Node::Empty {} => false,
+        Node::Enum { modifiers, .. } => {
+            !modifiers.contains(Modifiers::CONST) || tx.opts.preserve_const_enums
+        }
+        Node::Module {
+            kind, name, body, ..
+        } => {
+            if kind == ModuleKind::Global || tx.kind(name) == NodeKind::StringLit {
+                return false;
+            }
+            match body.map(|b| tx.n(b)) {
+                Some(Node::ModuleBlock { stmts }) => {
+                    let inner: Vec<NodeId> = tx.ast.list(stmts).to_vec();
+                    body_has_value(tx, &inner, depth + 1)
+                }
+                _ => false,
+            }
+        }
+        Node::ImportEquals { type_only, .. } => !type_only,
+        Node::ExportNamed { type_only, .. } => !type_only,
+        _ => true,
+    })
+}
+
+fn ident_atom(tx: &Tx, id: NodeId) -> Option<Atom> {
+    match tx.n(id) {
+        Node::Ident { name } => Some(name),
+        _ => None,
+    }
+}
