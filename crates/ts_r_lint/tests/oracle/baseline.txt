@@ -345,6 +345,7 @@ unicorn/no-negated-condition 134/134
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
+unicorn/no-non-function-verb-prefix 125/125
 unicorn/no-null 94/94
 unicorn/no-object-as-default-parameter 62/62
 unicorn/no-object-methods-with-collections 78/78

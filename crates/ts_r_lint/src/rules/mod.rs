@@ -389,6 +389,7 @@ mod unicorn_no_negated_condition;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
+mod unicorn_no_non_function_verb_prefix;
 mod unicorn_no_null;
 mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_object_methods_with_collections;
@@ -1121,6 +1122,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_unicode_code_point_escapes::RULE,
     &unicorn_prefer_literal_ascii::RULE,
     &unicorn_single_line_block_comment_style::RULE,
+    &unicorn_no_non_function_verb_prefix::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
