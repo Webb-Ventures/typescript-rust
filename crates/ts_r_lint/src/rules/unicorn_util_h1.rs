@@ -202,3 +202,46 @@ pub(crate) fn delete_all(spans: impl IntoIterator<Item = Span>) -> Option<Fix> {
     }
     Some(fix)
 }
+
+/// A JSX attribute string's value as ESLint's parser gives it: numeric character references
+/// (`&#49;`, `&#x31;`, at most 10 characters before the `;`) decoded. Named references are
+/// kept as written.
+pub(crate) fn decode_jsx_numeric_entities(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(at) = rest.find("&#") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        let (hex, digits) = match after.strip_prefix(['x', 'X']) {
+            Some(d) => (true, d),
+            None => (false, after),
+        };
+        let len = digits
+            .bytes()
+            .take(10)
+            .take_while(|b| {
+                if hex {
+                    b.is_ascii_hexdigit()
+                } else {
+                    b.is_ascii_digit()
+                }
+            })
+            .count();
+        let decoded = (len > 0 && digits[len..].starts_with(';'))
+            .then(|| u32::from_str_radix(&digits[..len], if hex { 16 } else { 10 }).ok())
+            .flatten()
+            .and_then(char::from_u32);
+        match decoded {
+            Some(c) => {
+                out.push(c);
+                rest = &digits[len + 1..];
+            }
+            None => {
+                out.push_str("&#");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}

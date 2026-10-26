@@ -379,3 +379,5 @@ unicorn/consistent-class-member-order
 unicorn/consistent-optional-chaining
 unicorn/no-invalid-well-known-symbol-methods
 unicorn/no-incorrect-template-string-interpolation
+unicorn/no-conflicting-constraints
+unicorn/prefer-iterator-to-array

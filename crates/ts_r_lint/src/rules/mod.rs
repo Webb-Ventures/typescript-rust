@@ -294,7 +294,9 @@ mod unicorn_no_array_reduce;
 mod unicorn_no_array_reverse;
 mod unicorn_no_array_sort;
 mod unicorn_no_async_promise_finally;
-mod unicorn_no_await_expression_member;
+mod unicorn_no_await_in_promise_methods;
+mod unicorn_no_break_in_nested_loop;
+mod unicorn_no_conflicting_constraints;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
@@ -344,8 +346,13 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
-mod unicorn_prefer_export_from;
-mod unicorn_prefer_module;
+mod unicorn_prefer_event_target;
+mod unicorn_prefer_global_number_constants;
+mod unicorn_prefer_global_this;
+mod unicorn_prefer_identifier_import_export_specifiers;
+mod unicorn_prefer_includes;
+mod unicorn_prefer_iterator_to_array;
+mod unicorn_prefer_location_assign;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
@@ -684,7 +691,10 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_reverse::RULE,
     &unicorn_no_array_sort::RULE,
     &unicorn_no_async_promise_finally::RULE,
-    &unicorn_no_await_expression_member::RULE,
+    &unicorn_no_array_from_fill::RULE,
+    &unicorn_no_await_in_promise_methods::RULE,
+    &unicorn_no_break_in_nested_loop::RULE,
+    &unicorn_no_conflicting_constraints::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
@@ -732,8 +742,13 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_date_now::RULE,
-    &unicorn_prefer_export_from::RULE,
-    &unicorn_prefer_module::RULE,
+    &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_global_number_constants::RULE,
+    &unicorn_prefer_global_this::RULE,
+    &unicorn_prefer_identifier_import_export_specifiers::RULE,
+    &unicorn_prefer_includes::RULE,
+    &unicorn_prefer_iterator_to_array::RULE,
+    &unicorn_prefer_location_assign::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,

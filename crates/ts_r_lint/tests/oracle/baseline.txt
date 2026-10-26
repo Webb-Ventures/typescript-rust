@@ -285,7 +285,9 @@ unicorn/no-array-reduce 482/482
 unicorn/no-array-reverse 28/28
 unicorn/no-array-sort 76/76
 unicorn/no-async-promise-finally 39/39
-unicorn/no-await-expression-member 71/72
+unicorn/no-await-in-promise-methods 110/111
+unicorn/no-break-in-nested-loop 24/24
+unicorn/no-conflicting-constraints 61/61
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
@@ -335,8 +337,13 @@ unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
-unicorn/prefer-export-from 158/158
-unicorn/prefer-module 152/152
+unicorn/prefer-event-target 46/46
+unicorn/prefer-global-number-constants 22/22
+unicorn/prefer-global-this 154/154
+unicorn/prefer-identifier-import-export-specifiers 56/56
+unicorn/prefer-includes 243/247
+unicorn/prefer-iterator-to-array 61/61
+unicorn/prefer-location-assign 54/54
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-object-from-entries 172/172
 unicorn/prefer-optional-catch-binding 25/25
