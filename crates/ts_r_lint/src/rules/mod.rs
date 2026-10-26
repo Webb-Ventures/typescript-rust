@@ -588,6 +588,7 @@ mod unicorn_prefer_https;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_import_meta_properties;
 mod unicorn_prefer_includes;
+mod unicorn_prefer_includes_over_repeated_comparisons;
 mod unicorn_prefer_iterable_in_constructor;
 mod unicorn_prefer_iterator_concat;
 mod unicorn_prefer_iterator_helpers;
@@ -1283,6 +1284,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_https::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
+    &unicorn_prefer_includes_over_repeated_comparisons::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,
     &unicorn_prefer_iterator_helpers::RULE,
     &unicorn_prefer_iterator_to_array::RULE,
