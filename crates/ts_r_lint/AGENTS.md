@@ -838,39 +838,134 @@ heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path
 - **no-thenable.** Under espree a shorthand `export {then}` is one identifier node playing
   both roles, so it is reported twice; typescript-eslint makes two nodes and reports once.
 
-Read to understand (not ported), all from eslint-plugin-unicorn 79.0.0 `rules/`: the rule
-files of the rules above, plus `utils/get-available-variable-name.js`,
-`fix/rename-variable.js`, `fix/replace-reference-identifier.js`,
-`utils/get-switch-case-head-location.js`, `utils/get-indent-string.js`,
-`utils/get-linebreak.js`, `utils/comments.js`,
-`fix/replace-node-or-token-and-spaces-before.js`, `utils/eslint-directive.js`,
-`utils/needs-semicolon.js`, `utils/get-unparenthesized-keyword-argument-parent.js`,
-`fix/add-parentheses-to-return-or-throw-expression.js`,
-`utils/should-add-parentheses-to-expression-statement-expression.js`,
-`utils/is-logical-expression.js`, `ast/is-method-call.js`,
-`ast/call-or-new-expression.js`, `ast/is-empty-node.js`, `ast/is-undefined.js`,
-`utils/unwrap-typescript-expression.js`, `fix/remove-spaces-after.js`,
-`fix/remove-parentheses.js`, `utils/escape-string.js`,
-`utils/is-in-unparenthesized-new-expression-callee.js`,
-`utils/get-enclosing-function.js`, `utils/is-known-non-iterable.js`,
-`fix/replace-member-expression-property.js`, `utils/numeric.js`,
-`utils/get-class-head-location.js`, `utils/get-call-argument-text.js`,
-`utils/get-concise-arrow-body-text.js`, `utils/get-expression-text.js`,
-`utils/get-precedence.js`, `utils/should-add-parentheses-to-await-expression-argument.js`,
-`utils/single-statement.js`, `utils/is-same-reference.js`,
-`utils/has-possible-side-effect.js`, `utils/is-side-effect-free-function.js`,
-`utils/reindent-text.js`, `utils/block-scope.js`, `utils/is-promise-type.js`,
-`utils/is-call-expression-value-discarded-with-void.js`, `fix/remove-specifier.js`,
-`utils/imports.js`, `utils/is-node-contains-lexical-this.js`, `utils/get-references.js`,
-`utils/comparison.js`, `utils/is-reference-context.js`, `utils/is-typescript-file.js`,
-`fix/remove-argument.js`, `fix/fix-space-around-keywords.js`,
-`utils/is-strong-precedence-node.js`, `utils/is-function-self-used-inside.js`,
-`ast/is-reference-identifier.js`, `utils/function-body.js`,
-`utils/is-node-value-not-function.js`, `utils/array-or-object-prototype-property.js`,
-`utils/has-optional-chain-element.js`, `utils/get-const-variable-initializer.js`,
-`utils/get-indent-unit.js`, `utils/get-line-indent.js`, `utils/get-sibling-node.js`,
-`utils/should-add-parentheses-to-conditional-expression-child.js`,
-`utils/is-same-tokens.js`, `shared/minimal-ternary.js`, `utils/singular.js`,
-`fix/remove-statement.js`, `utils/get-scopes.js`, `utils/is-reference-context.js`; and from
-`@eslint-community/eslint-utils`, `hasSideEffect`, `getFunctionHeadLocation` and
-`getFunctionNameWithKind`.
+## eslint-plugin-unicorn rules (round 5, h1)
+
+`no-useless-recursion`, `no-array-from-fill`, `no-duplicate-if-branches`,
+`switch-case-break-position`, `consistent-assert`, `no-top-level-assignment-in-function`,
+`prefer-single-array-predicate`, `no-global-object-property-assignment`,
+`require-module-attributes`, `consistent-empty-array-spread`, `prefer-promise-with-resolvers`,
+`prefer-type-literal-last`, `consistent-class-member-order`, `consistent-optional-chaining`
+(each at 100% of its oracle). Each file's header states the rule as we learned it; the
+points below are the ones that are easy to get wrong. More helpers live in
+`rules/unicorn_util_h1.rs`: `unwrap_ts` (parentheses and TS wrappers, as ESTree sees through
+them), `static_string`, `is_same_reference` (same static string, `this`, `super`, name, equal
+literals, or member accesses with the same object and the same static or same computed
+property; nesting capped at 200), `logical_operands` / `is_outermost_logical` (flatten an
+`&&`/`||` chain), `token_runs` (non-space runs of a span outside comments) and `delete_all`.
+
+- **no-useless-recursion**: `return f(...)` inside the named function `f` (a plain
+  identifier resolving to the function's own name) is a loop in disguise; generators, calls
+  inside a `try`, and calls after a `using` / `await using` (whose cleanup runs after the
+  call) are left alone.
+- **no-duplicate-if-branches** compares a branch with the previous one in the chain by
+  tokens and tree shape (literals by raw text), ignoring comments, layout, empty statements
+  and a trailing `;`.
+- **switch-case-break-position**: a `break`/`continue`/`return`/`throw` after a case's only
+  block belongs inside it; only `break` and `continue` are fixed, moved before the block's
+  `}` at the indentation of its last statement, and not when a comment sits in between, the
+  block is on one line, or the statement has a trailing comment. The oracle harness
+  (`tests/rule_oracle.rs`, `config_for`) sets `reportUnusedDisableDirectives: "warn"` when a
+  case's expected messages include ESLint's "Unused eslint-disable directive" report (null
+  `ruleId`), because that report's fix shapes ESLint's output there.
+- **no-top-level-assignment-in-function** runs once per file over the Program's global and
+  module scopes: a write (not a declaration's initialiser) to a top-level binding from inside
+  a function, arrow or method is reported; `/* global */` comments declare nothing, and
+  class field initialisers and static blocks are not functions.
+- **no-global-object-property-assignment**: writes include compound and logical assignment,
+  update, destructuring targets and `for-in`/`of` heads; `delete` is not a write.
+- **prefer-promise-with-resolvers**: `new Promise<T>(...)` in a `.js` file is a comparison
+  (`new Promise < T > (...)`), so it has no argument and is not reported. The fix needs the
+  promise in a plain (not exported) single-declarator `const` in a statement list, preceded
+  only by the `let`s it replaces; a named function expression executor whose name is the
+  target resolves the assignment to that name, so the outer `let` does not match and there
+  is no fix.
+- **prefer-type-literal-last**: `null`/`undefined` stay last and unions/intersections are
+  skipped when looking for "another type", but in the fix a union or intersection member is
+  an ordinary other type. A comment between the token before the union and the token after
+  it, outside every member, drops the fix.
+- **consistent-class-member-order**: only the first out-of-order member is reported. The
+  suggestion needs comment-free bodies with every member starting its line, and refuses to
+  move a static field past a static block (or back), since both run in order.
+- **consistent-optional-chaining** reports the right side only; with `&&` any `?.` on the
+  right is unnecessary, with `||` the right must match the left.
+
+Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursion.js`,
+`rules/no-array-from-fill.js`, `rules/no-duplicate-if-branches.js`,
+`rules/switch-case-break-position.js`, `rules/consistent-assert.js`,
+`rules/no-top-level-assignment-in-function.js`, `rules/prefer-single-array-predicate.js`,
+`rules/no-global-object-property-assignment.js`, `rules/require-module-attributes.js`,
+`rules/consistent-empty-array-spread.js`, `rules/prefer-promise-with-resolvers.js`,
+`rules/prefer-type-literal-last.js`, `rules/consistent-class-member-order.js`,
+`rules/consistent-optional-chaining.js`, and the utils `get-enclosing-function.js`,
+`is-same-statement.js`, `is-same-tokens.js`, `get-indent-string.js`, `comments.js`
+(getLastTrailingCommentOnSameLine, getCommentSafeProblem), `is-same-reference.js`,
+`is-logical-expression.js`, `unwrap-typescript-expression.js`, `is-global-identifier.js`,
+`type-arguments.js`, `member-expression.js` (getMemberAccessOperatorRange),
+`fix/remove-object-property.js`, `ast/literal.js`, `ast/function-types.js`,
+`ast/call-or-new-expression.js`, `ast/matches-name-constraint.js`.
+
+### Batch 3
+
+`no-invalid-well-known-symbol-methods`, `no-incorrect-template-string-interpolation`,
+`no-conflicting-constraints`, `prefer-iterator-to-array`, `no-shorthand-property-overrides`,
+`prefer-get-or-insert-computed`, `no-accidental-bitwise-operator`, `prefer-math-constants`,
+`prefer-simple-sort-comparator`, `no-useless-collection-argument`,
+`prefer-dom-node-html-methods`, `prefer-string-match-all`, `no-useless-concat` (each at 100%
+of its oracle) and `require-module-specifiers` (67 of 68: `declare export type {} from "m"`
+in a `.js` file is a parse error for ts-r, while typescript-eslint recovers). New helpers in
+`rules/unicorn_util_h1.rs`: `static_property_name`, `decode_jsx_numeric_entities` (`&#49;` /
+`&#x31;`; JSX attribute strings reach rules undecoded), `evaluates_node` (a `containsNode`
+that skips function bodies and non-static field values but still walks their computed keys;
+depth 64), `is_direct_eval_call` and `is_type_slot` (the child sits where a type goes: an
+`as` / `satisfies` / assertion type, a type alias body, a type annotation or return type, or
+inside a type node; literal types are plain literal nodes, so rules on literals need this).
+
+- **no-conflicting-constraints** and **no-shorthand-property-overrides** have CSS and HTML
+  parts upstream (other ESLint languages); only the JSX part is implemented. The shorthand
+  rule keeps its own table of CSS shorthands and the longhands each one resets, with the
+  extra resets added after nested shorthands are expanded.
+- **prefer-math-constants**: a decimal literal is a constant when the constant's shortest
+  text starts with it, or, when the literal is shorter, the constant rounded to the
+  literal's fraction digits equals it; `PI` needs 2 fraction digits, `E` 3, the rest 4.
+  Keys and literal types (`type T = 3.14`, `x as -3.14`) are skipped.
+- **prefer-simple-sort-comparator**: the comparator must be a tree of `<`/`>`/`<=`/`>=`
+  tests on one mirrored pair of parameter paths returning signed number literals, with both
+  signs present, a non-zero first true branch and every branch agreeing with the
+  subtraction; no suggestion when it holds a comment or the receiver is a bigint typed array.
+- **no-useless-collection-argument**: with `a ?? x` the fix removes `?? x` and the
+  parentheses around the `??` (not when its left side is a bare sequence); a comment in the
+  argument's removal range makes it a suggestion.
+- **prefer-dom-node-html-methods**: reading `.innerHTML` is fixed to `.getHTML()` unless the
+  member is itself called, constructed or a tag; writing is only checked with `checkSetHTML`
+  and only suggested for a plain `=` whose value is unused.
+- **prefer-string-match-all** only fires when the rewrite is provably the same loop: `let m;`
+  right before the `while`, `re` a single `let`/`const` in the same statement list built from
+  a static regex with `g` that cannot match the empty string (judged on the parsed pattern
+  with `crate::regex`: assertions, lookarounds, back references, modifier groups, `\q{}` and
+  parse errors all count as "might be empty"), used only in its initializer and the loop
+  test; `s` a `const` with a side-effect-free static string; `m` not used outside the loop,
+  not written in the body and not captured by a function or class member there.
+- **require-module-specifiers**: a bare `export {}` is kept in `.d.ts` / `.d.mts` / `.d.cts`
+  files and whenever it is the file's only module marker. typescript-eslint gives exported
+  interfaces, type aliases and `declare`d declarations the `type` export kind, so they don't
+  count as runtime exports.
+- **no-useless-concat** only folds literals on one line, keeps a split `${...}` placeholder
+  and `'use ' + 'strict'` in a directive prologue, and has no fix when folding would drop a
+  comment or the chain's parentheses, reorder a right template's side effects, or move a
+  legacy octal / `\8` / `\9` escape into a template. Its single-quoted output escapes `\`,
+  `'`, line terminators and control characters.
+
+Read to understand (not ported): eslint-plugin-unicorn `rules/no-invalid-well-known-symbol-methods.js`,
+`rules/no-incorrect-template-string-interpolation.js`, `rules/no-conflicting-constraints.js`,
+`rules/prefer-iterator-to-array.js`, `rules/no-shorthand-property-overrides.js`,
+`rules/shared/css-shorthand-properties.js`, `rules/prefer-get-or-insert-computed.js`,
+`rules/no-accidental-bitwise-operator.js`, `rules/prefer-math-constants.js`,
+`rules/prefer-simple-sort-comparator.js`, `rules/no-useless-collection-argument.js`,
+`rules/prefer-dom-node-html-methods.js`, `rules/prefer-string-match-all.js`,
+`rules/require-module-specifiers.js`, `rules/no-useless-concat.js`, and the utils
+`type-arguments.js`, `ast/literal.js`, `ast/is-direct-eval-call.js`, `ast/is-undefined.js`,
+`ast/is-in-directive-prologue.js`, `contains-node.js`, `get-concise-arrow-body-text.js`,
+`get-expression-text.js`, `get-static-value.js` (getStaticRegExp), `imports.js`,
+`needs-semicolon.js`, `escape-string.js`, `escape-template-element-raw.js`,
+`has-template-incompatible-escape.js`, `fix/replace-argument.js`, `fix/remove-argument.js`,
+`fix/remove-parentheses.js`, `shared/typed-array.js`.
