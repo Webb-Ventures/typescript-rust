@@ -172,8 +172,10 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     if let Some(n) = node
         && matches!(
             ast.node(n),
+            // A template's own node holds the cursor only in a `${}` hole (its text parts
+            // are `TemplateElement`s): that completes like any expression.
             Node::StringLit { .. }
-                | Node::TemplateLit { .. }
+                | Node::TemplateElement { .. }
                 | Node::RegexLit { .. }
                 | Node::Directive { .. }
         )
@@ -212,7 +214,9 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     while d > 0 && b[d - 1].is_ascii_whitespace() {
         d -= 1;
     }
-    if d > 0 && b[d - 1] == b'.' && !(d > 1 && b[d - 2] == b'.') {
+    // `1.5|` is a number being written, not a member.
+    let number = prefix.as_bytes().first().is_some_and(u8::is_ascii_digit);
+    if !number && d > 0 && b[d - 1] == b'.' && !(d > 1 && b[d - 2] == b'.') {
         let dot = (d - 1) as u32;
         let mut cur = node_at(ast, dot + 1);
         for _ in 0..4 {
@@ -1514,8 +1518,22 @@ fn object_items(
         at = p;
         ct = ck.contextual_type(Loc::new(file, p));
     }
-    let ct = ct?;
-    let props = object_props(ck, ct);
+    // A literal in a generic call also offers what the declared parameter allows beyond
+    // what was inferred from it (`generic_context.rs`).
+    let completions = super::generic_context::completions_type(ck, Loc::new(file, obj))
+        .filter(|&t| Some(t) != ct);
+    if ct.is_none() && completions.is_none() {
+        return None;
+    }
+    let mut props = ct.map(|t| object_props(ck, t)).unwrap_or_default();
+    if let Some(t) = completions {
+        for (n, s) in object_props(ck, t) {
+            match props.iter_mut().find(|(m, _)| *m == n) {
+                Some(e) => e.1 = s,
+                None => props.push((n, s)),
+            }
+        }
+    }
     if props.is_empty() {
         return None;
     }
@@ -1541,10 +1559,8 @@ fn object_items(
         }
     }
     let mut out = Vec::new();
+    let mut foreign = false;
     for (name, s) in props {
-        if name.starts_with("__@") || name.starts_with('#') || written.contains(&name) {
-            continue;
-        }
         // A member only this literal declares (`f<T>(x: T)` called with `{ abc| }`) is the
         // literal's own, not one to offer.
         let decls = c.decls(s);
@@ -1555,12 +1571,20 @@ fn object_items(
         {
             continue;
         }
+        foreign = true;
+        if name.starts_with("__@") || name.starts_with('#') || written.contains(&name) {
+            continue;
+        }
         let label = if is_identifier_name(&name) {
             name
         } else {
             serde_json::to_string(&name).unwrap_or(name)
         };
         out.push((label, s));
+    }
+    // A context with only the literal's own members (inferred from it) offers the scope.
+    if !foreign {
+        return None;
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Some(out)

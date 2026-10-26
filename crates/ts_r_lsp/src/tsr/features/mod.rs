@@ -10,6 +10,7 @@ mod constructor_refs;
 mod definitions;
 mod doc_source;
 mod expected;
+mod generic_context;
 mod hover;
 mod inherit;
 mod jsdoc;

@@ -1633,6 +1633,48 @@ fn completion_in_jsdoc_comments() {
     c.shutdown();
 }
 
+/// An object literal in a generic call offers what the declared parameter allows beyond
+/// what was inferred from it (`T` replaced by its constraint), also in nested literals; a
+/// context made only of the literal's own members offers the names in scope.
+#[test]
+fn completion_in_object_literals_of_generic_calls() {
+    if !libs_present() {
+        return;
+    }
+    let text = "interface Opts { hello?: boolean; world?: boolean; deep?: { another?: boolean } }\n\
+                declare function bar<T extends Opts>(o?: Partial<T>): void;\n\
+                bar({ hello: true,  });\n\
+                bar({ deep: {  } });\n\
+                declare function f7<T>(o: T): void;\n\
+                const local = 1;\n\
+                f7({ l });\n";
+    let env = Env::new(
+        "complete-generic-literal",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i["sortText"].as_str().unwrap_or("") < "15")
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 18)));
+    assert_eq!(l, ["deep?", "world?"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 14)));
+    assert_eq!(l, ["another?"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 6)));
+    assert!(l.iter().any(|x| x == "local"), "{l:?}");
+    c.shutdown();
+}
+
 /// Review fixes for import clauses and type positions: a `}` in a comment does not close the
 /// clause, an unterminated quoted name before the cursor does not panic, and modules that
 /// re-export each other as namespaces are searched once each for a type.
