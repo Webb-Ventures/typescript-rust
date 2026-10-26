@@ -22,11 +22,10 @@ use super::unicorn_no_array_reduce::{is_array_prototype_property, return_express
 use super::unicorn_prefer_spread::is_buffer_reference;
 use super::unicorn_static::static_string_literal;
 use super::unicorn_text::paren_span;
+use super::unicorn_text::{member_object_text, needs_semicolon, would_remove_comments};
 use super::unicorn_types::{Checker, Guess, TYPED_ARRAYS, is_string};
+use super::unicorn_util::method_call_of;
 use super::unicorn_util::{skip_wrappers, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    member_object_text, method_call_of, needs_semicolon, would_remove_comments,
-};
 use ts_r_ast::{Ast, UnaryOp};
 
 pub static RULE: RuleDef = RuleDef {

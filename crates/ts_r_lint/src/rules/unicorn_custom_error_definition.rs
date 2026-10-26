@@ -7,11 +7,11 @@
 //! under the class name. Checked on class declarations and classes assigned anywhere.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
 use super::unicorn_conditions::{comment_after, join_fixes};
 use super::unicorn_no_error_property_assignment::BUILTIN_ERRORS;
 use super::unicorn_text::{is_parenthesized, needs_semicolon, paren_text, static_string_value};
-use super::unicorn_util_h2::{indent_unit, line_indent};
-use super::unicorn_util_h4::linebreak;
+use super::unicorn_util::{indent_unit, line_indent};
 use ts_r_ast::visit::{Visitor, Walk, walk};
 use ts_r_ast::{Ast, HeritageKind, MethodKind};
 

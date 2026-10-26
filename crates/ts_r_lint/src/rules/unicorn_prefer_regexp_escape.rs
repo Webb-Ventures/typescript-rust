@@ -18,7 +18,7 @@ use super::unicorn_static::{
 };
 use super::unicorn_text::{has_comment_in, paren_text};
 use super::unicorn_types::is_known_non_string;
-use super::unicorn_util_h5::method_call_of;
+use super::unicorn_util::method_call_of;
 use crate::semantic::Decl;
 use ts_r_ast::Ast;
 

@@ -8,8 +8,8 @@ use super::prelude::*;
 use super::unicorn_abort::is_type_only_decl;
 use super::unicorn_static::static_string_literal;
 use super::unicorn_text::{call_argument_text, would_remove_comments};
+use super::unicorn_util::method_call_of;
 use super::unicorn_util::{space_around_keyword, with_edits};
-use super::unicorn_util_h5::method_call_of;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

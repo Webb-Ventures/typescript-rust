@@ -139,16 +139,26 @@ Files:
   variable (`LintEnv::is_builtin_global`). Core `no-undef` reports unresolved type
   references too.
 
-## Status (v1 lint round 5, `wip/v1-lint5`)
+## Status (v1 lint round 6, `wip/v1-lint6`)
 
-- 473 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 196
-  eslint-plugin-unicorn), 51 of them type-aware. Rule oracle: 43,855 / 43,874 cases. The
-  non-type-aware cases are 36,953 / 36,954 and the type-aware cases 6,902 / 6,920
-  (2026-10-27); the 18 type-aware failures are a subset of the 46 listed in design record
-  0006, and the one other is unicorn/require-module-specifiers (`declare export type {} from
-  "foo"` in a `.js` file, a parser gap). `tests/oracle/baseline.txt` has the per-rule counts.
+- 650 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 352
+  eslint-plugin-unicorn, 21 eslint-plugin-import), 51 of them type-aware. Rule oracle:
+  73,072 / 73,093 cases. The non-type-aware cases are 66,170 / 66,173 and the type-aware
+  cases 6,902 / 6,920 (2026-10-27); the 18 type-aware failures are a subset of the 46 listed
+  in design record 0006. The 3 others are on rules added this round:
+  import/no-import-module-exports 13/14 (its entry-point exemption reads a `package.json`
+  the oracle doesn't mount), unicorn/prefer-await 109/110 (`promise.then(await => await)` in
+  a `.ts` file is a parser error in ts_r_parser) and unicorn/require-proxy-trap-boolean-return
+  166/167 (a `case process.exit(1):` test after `default`). unicorn/require-module-specifiers
+  is 68/68 since emit6's parser fix. `tests/oracle/baseline.txt` has the per-rule counts.
   Every rule of ESLint's, typescript-eslint's and eslint-plugin-jsdoc's recommended presets
-  is implemented; unicorn's `recommended` has 196 of 338.
+  is implemented; unicorn's `recommended` has 335 of 338 (missing:
+  no-multiple-promise-resolver-calls, no-unnecessary-polyfills, which needs core-js-compat
+  and browserslist data, and prefer-includes-over-repeated-comparisons, whose `.ts` cases need
+  typed oracle data), plus 17 of its opt-in rules (352 of its 376 live rules).
+  eslint-plugin-import has 21 of 46: the ones that need no module resolution (the oracle has
+  no fixture file tree, so default, export, named, namespace, no-cycle, no-unresolved,
+  order, ... are not implemented).
 - private-app against ESLint with every configured rule (round 3 run): all 23 projects
   pass the parity gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
@@ -600,9 +610,10 @@ header). What we learned, in our words:
   and comments kept), skipping names the first import already has.
 - **Not done here.** The plugin skips its package's entry point in
   `no-import-module-exports`, and keys `no-duplicates` by the resolved path; both need a
-  resolver, so specifiers are compared as written (the oracle's 26 `no-duplicates` misses
-  are all resolver cases, most of them a "Resolve error" the generator recorded for the
-  webpack and TypeScript resolvers it did not have). Of the plugin's `recommended` eight
+  resolver, so specifiers are compared as written. The generator skips the 203 cases where
+  ESLint only reported "Resolve error: unable to load resolver" (the webpack and TypeScript
+  resolvers it did not have) and 4 whose output names an absolute path of the machine it
+  ran on ("machine-specific path"); on the rest `no-duplicates` is 45/45. Of the plugin's `recommended` eight
   only no-duplicates is here; no-unresolved, named, namespace, default, export,
   no-named-as-default and no-named-as-default-member need resolution and export maps, and
   so do extensions, order, no-cycle, no-deprecated, no-internal-modules,
@@ -2118,3 +2129,148 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/global-reference-tracker.js`, `fix/remove-method-call.js`, `prefer-regexp-escape.js`,
 `shared/regexp-escape.js`, `prefer-error-is-error.js`,
 `utils/comments.js`, `utils/get-call-argument-text.js`, `utils/imports.js`.
+
+## eslint-plugin-unicorn rules (round 6, h2)
+
+`no-array-callback-reference`, `prefer-array-find`, `prefer-set-has`,
+`no-array-fill-with-reference-type`, `prefer-single-call`, `no-immediate-mutation`,
+`no-array-sort-for-min-max`, `no-negated-array-predicate`, `prefer-iterator-to-array-at-end`,
+`prefer-iterable-in-constructor`, `no-duplicate-loops`, `prefer-map-from-entries`,
+`prefer-array-from-map`, `no-mismatched-map-key`, `prefer-array-iterable-methods`,
+`prefer-iterator-zip`, `no-unreadable-for-of-expression`, `no-unused-iterator-helper`,
+`prefer-direct-iteration`, `no-confusing-array-splice`, `no-useless-iterator-to-array`,
+`prefer-array-from-async`, `prefer-iterator-helpers`, `no-async-iterator-callback`,
+`prefer-object-iterable-methods`, `no-unnecessary-array-flat-map`, `prefer-group-by`,
+`no-boolean-sort-comparator`, `no-return-array-push`, `no-loop-iterable-mutation`,
+`prefer-has-check`, `no-useless-set-construction`, `prefer-minimal-ternary`,
+`no-invalid-temporal-arithmetic`, `no-invalid-intl-options` (each at 100% of its oracle).
+Each rule file's `//!` comment states the rule as implemented; the points that are not
+obvious from the plugin's docs:
+
+- `rules/unicorn_iter.rs` holds what the iterator rules share: the `ITERATOR` checker (an
+  `Iterator.from/concat/zip/zipKeyed` call on the global, an argument-less
+  `entries/keys/values()` or `matchAll()`, a lazy helper on an iterator, a sync generator
+  call, or a plain `const` of one), `is_known_non_iterator` (literals, functions, classes,
+  `new LocalClass()`, `const`s of those or of `toArray/slice/concat/split`), and the
+  "fill a collection in a `for…of`" pieces (single loop binding, `[a, b]` pair patterns,
+  `references_symbol`, `referenced_by_nested_function`, `contains_suspension_point`,
+  `global_name_available`, `next_statement`).
+- The oracle is untyped, so the plugin's type-checker branches are not implemented in
+  `prefer-array-from-async`, `no-async-iterator-callback`, `no-boolean-sort-comparator`,
+  `no-unnecessary-array-flat-map`, `prefer-has-check` and `prefer-minimal-ternary` (which
+  also reports through const enums, as the untyped plugin does).
+- `no-loop-iterable-mutation` runs over every `for…of` in the file, inner loops first, and
+  reports each call once; "the delete of the current entry may have run" uses a structural
+  `always_exits` instead of code-path analysis. `no-mismatched-map-key` walks the file in
+  preorder itself. `prefer-iterator-zip` works on exit from the `for`.
+- `prefer-minimal-ternary` compares branches token by token (comments and whitespace
+  dropped, literal text kept verbatim, a trailing comma of a directly compared object
+  ignored). In TypeScript (extension or parser) objects whose shared values are not literals
+  get a suggestion instead of a fix.
+- `no-invalid-temporal-arithmetic`: Temporal receivers are `unicorn_types` checkers on
+  `Temporal.<Type>` (one target-node function per type); durations come from
+  `new Temporal.Duration(..)`, `Temporal.Duration.from(x)`, plain object literals (later keys
+  win), `const` bindings that are not object literals (those may be mutated), and the ISO
+  subset `±PnYnMnWnDTnHnMn(.f)S` (parsed by hand: no components, or a `T` without time
+  components, is not a duration; the fraction splits into ms/µs/ns). A field is known only
+  as a safe integer. Well-known symbols (`Symbol.iterator`) are primitives: they become
+  `NaN` increments and fail string conversion.
+- `no-invalid-intl-options`: the `Intl` constructors are followed with
+  `unicorn_util::global_path`; options must be an object literal of plain, distinct,
+  statically named properties. Problems are kept per option name, first one wins, reported at
+  the key (the expression inside `[...]` for a computed key) or the object. Fraction and
+  significant digit options are validated only when that rounding is in use, recomputed after
+  each group; the rename suggestion needs exactly one known name one edit away
+  (case-insensitive, adjacent transposition counting as one edit).
+
+Shared changes: `unicorn_text::static_member_name` (added; it reads a sequence index by its
+last expression), and `binding`/`same_binding` in `unicorn_no_mismatched_map_key.rs` and
+`can_observe_array_argument` in `unicorn_prefer_iterator_to_array_at_end.rs` are
+`pub(crate)`.
+
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0: `rules/{no-array-callback-reference,
+prefer-array-find, prefer-set-has, no-array-fill-with-reference-type, prefer-single-call,
+no-immediate-mutation, no-array-sort-for-min-max, no-negated-array-predicate,
+prefer-iterator-to-array-at-end, prefer-iterable-in-constructor, no-duplicate-loops,
+prefer-map-from-entries, prefer-array-from-map, no-mismatched-map-key,
+prefer-array-iterable-methods, prefer-iterator-zip, no-unreadable-for-of-expression,
+no-unused-iterator-helper, prefer-direct-iteration, no-confusing-array-splice,
+no-useless-iterator-to-array, prefer-array-from-async, prefer-iterator-helpers,
+no-async-iterator-callback, prefer-object-iterable-methods, no-unnecessary-array-flat-map,
+prefer-group-by, no-boolean-sort-comparator, no-return-array-push, no-loop-iterable-mutation,
+prefer-has-check, no-useless-set-construction, prefer-minimal-ternary,
+no-invalid-temporal-arithmetic, no-invalid-intl-options}.js`;
+`rules/shared/{iterator-helpers, for-of-collection-loop, typed-array, minimal-ternary}.js`;
+`rules/utils/{track-branch-exits, comparison, is-same-binding, type-helpers,
+builtin-collection-type, comments, is-const-enum-reference, type-arguments, is-same-tokens,
+should-add-parentheses-to-conditional-expression-child,
+should-add-parentheses-to-await-expression-argument, get-const-variable-initializer,
+is-string, global-reference-tracker}.js`; `rules/ast/{is-method-call, is-member-expression,
+call-or-new-expression, matches-name-constraint}.js`.
+
+## eslint-plugin-unicorn rules (round 6, lead)
+
+Rules the track lead wrote this round, all `NO_PRESET` (unicorn presets are counted, not
+tagged), each at 100% of its oracle cases except require-proxy-trap-boolean-return.
+
+- `no-anonymous-default-export`, `default-export-style`, `consistent-export-decorator-position`
+  (the parser keeps only one decorator group when decorators sit on both sides of `export`,
+  `@a export @b class X {}`; the rule works from the source text there).
+- `no-accessor-recursion`, `no-incomplete-accessor-override`, `no-uncalled-method`,
+  `class-reference-in-static-methods`, `prefer-private-class-fields`.
+- `no-unreadable-object-destructuring`, `prefer-single-object-destructuring`,
+  `consistent-conditional-object-spread`, `prefer-object-define-properties` (a run of
+  `Object.defineProperty` on one target; the fix is dropped when merging could reorder keys
+  or let a later key or descriptor see the target early).
+- `no-invalid-property-descriptor`, `require-proxy-trap-boolean-return` (166/167: a
+  `case process.exit(1):` test after `default` is not treated as an exit).
+- `no-unsafe-promise-all-settled-values`: reads of `.value` on `Promise.allSettled` results
+  only after a `status === "fulfilled"` check on every path. It uses the CFG in exits mode
+  (below) so `process.exit()`, `throw` and literal-false tests end paths as upstream's
+  branch-exit tracking does.
+- `no-invalid-dom-token`, `no-invalid-response-options`, `no-invalid-boolean-attribute-value`
+  (receiver element types from `createElement`/`createElementNS`/`querySelector` on the
+  global `document`, annotations, assertions and type aliases naming native `HTML*Element`
+  interfaces, and variables; no checker types).
+- `no-invalid-argument-count`: the built-in table is the plugin's ~870 API arities, generated
+  as data (facts about the APIs) into a Rust array, not translated code; user patterns with
+  `*`, spreads, and too many arguments to never-reassigned same-file functions.
+- Opt-in: `no-array-front-mutation`, `no-barrel-files`, `no-unreadable-new-expression`,
+  `try-complexity` (complexity counted per `try` block outside nested functions and instance
+  field values), `prefer-short-arrow-method`.
+
+**CFG exits mode** (`cfg.rs`). `Cfg::function_with_exits(ast, f, exits)` and
+`Cfg::statements_with_exits(ast, stmts, exits, safe_reads)` build the graph with the given
+call nodes (`process.exit()` and the like) as path ends. Only in this mode literal tests in
+`if`, `?:`, `&&`, `||` and `??` are folded (the branch that can't run gets no edge), and
+identifiers in `safe_reads` are not treated as throwing; the default builders are unchanged.
+
+**Shared helpers after the helper merges.** `unicorn_util::is_same_reference` is the one
+copy: a computed key compares by its full static value (a sequence's last expression, TS
+wrappers, evaluable calls). `unicorn_text::needs_parens_at_expression_start` treats a
+replaced statement as a statement start. `unicorn_util` keeps `remove_statement`,
+`remove_method_call_into` and `starts_like_declaration` for rules written against the old
+helper copies.
+
+**Oracle data.** `tests/oracle/gen/rules.txt` now also lists 29 opt-in unicorn rules
+(2,925 cases). comma-spacing, indent, key-name-casing, no-empty-link-text,
+no-javascript-url, no-loss-of-precision and require-frontmatter-fields only test other
+languages, and comment-content and string-content tests don't load in the generator.
+
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0: `rules/{no-anonymous-default-export,
+default-export-style,consistent-export-decorator-position,no-accessor-recursion,
+no-incomplete-accessor-override,no-uncalled-method,class-reference-in-static-methods,
+prefer-private-class-fields,no-unreadable-object-destructuring,
+prefer-single-object-destructuring,consistent-conditional-object-spread,
+prefer-object-define-properties,no-invalid-property-descriptor,
+require-proxy-trap-boolean-return,no-unsafe-promise-all-settled-values,no-invalid-dom-token,
+no-invalid-response-options,no-invalid-boolean-attribute-value,no-invalid-argument-count,
+no-array-front-mutation,no-barrel-files,no-unreadable-new-expression,try-complexity,
+prefer-short-arrow-method}.js`; `rules/shared/nullish-check.js`,
+`rules/utils/should-add-parentheses-to-*.js`, `rules/utils/get-sibling-node.js`,
+`rules/utils/get-indent-string.js`, `rules/utils/is-branch-exit.js`,
+`rules/utils/track-branch-exits.js`, `rules/utils/function-body.js`,
+`rules/utils/member-expression.js`, `rules/utils/get-const-variable-initializer.js`,
+`rules/ast/is-undefined.js`, `rules/utils/get-function-from-identifier.js`,
+`rules/utils/has-unsafe-arrow-conversion-reference.js`,
+`rules/utils/get-concise-arrow-body-text.js`, `rules/utils/comments.js`.

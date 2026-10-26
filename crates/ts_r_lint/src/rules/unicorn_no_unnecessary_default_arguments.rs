@@ -16,7 +16,7 @@ use super::prelude::*;
 use super::this_binding::is_strict;
 use super::unicorn_conditions::unwrap_ts_and_parens;
 use super::unicorn_text::{paren_span, would_remove_comments};
-use super::unicorn_util_h1::is_direct_eval_call;
+use super::unicorn_util::is_direct_eval_call;
 use crate::semantic::DeclKind;
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};

@@ -22,11 +22,12 @@ use super::unicorn_prefer_uint8array_hex::{
 };
 use super::unicorn_static::{Static, static_string_literal};
 use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::{Checker, Guess, is_string};
+use super::unicorn_util::method_call_of;
+use super::unicorn_util::remove_method_call_into;
+use super::unicorn_util::static_property_name;
 use super::unicorn_util::{global_path, skip_wrappers, space_around_keyword, with_edits};
-use super::unicorn_util_h1::static_property_name;
-use super::unicorn_util_h2::remove_method_call;
-use super::unicorn_util_h5::{method_call_of, would_remove_comments};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
