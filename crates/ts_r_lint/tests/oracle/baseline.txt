@@ -199,6 +199,8 @@ jsdoc/require-returns 158/158
 jsdoc/require-returns-check 111/111
 jsdoc/require-returns-description 16/16
 jsdoc/require-returns-type 11/11
+jsdoc/require-tags 6/6
+jsdoc/require-template-description 3/3
 jsdoc/require-throws 31/31
 jsdoc/require-throws-description 2/2
 jsdoc/require-throws-type 2/2
@@ -207,7 +209,10 @@ jsdoc/require-yields-check 53/53
 jsdoc/require-yields-description 3/3
 jsdoc/require-yields-type 3/3
 jsdoc/tag-lines 60/60
+jsdoc/ts-method-signature-style 14/14
 jsdoc/ts-no-empty-object-type 6/6
+jsdoc/ts-no-unnecessary-template-expression 15/15
+jsdoc/ts-prefer-function-type 7/7
 jsdoc/valid-types 137/137
 max-depth 28/28
 max-nested-callbacks 32/32
@@ -692,6 +697,7 @@ unicorn/require-post-message-target-origin 43/43
 unicorn/require-proxy-trap-boolean-return 167/167
 unicorn/require-text-decoder-streaming 159/159
 unicorn/single-line-block-comment-style 173/173
+unicorn/string-content 70/70
 unicorn/switch-case-braces 56/56
 unicorn/switch-case-break-position 30/30
 unicorn/template-indent 79/79

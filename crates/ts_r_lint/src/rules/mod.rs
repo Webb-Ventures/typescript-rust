@@ -113,6 +113,8 @@ mod jsdoc_require_returns;
 mod jsdoc_require_returns_check;
 mod jsdoc_require_returns_description;
 mod jsdoc_require_returns_type;
+mod jsdoc_require_tags;
+mod jsdoc_require_template_description;
 mod jsdoc_require_throws;
 mod jsdoc_require_throws_description;
 mod jsdoc_require_throws_type;
@@ -121,7 +123,10 @@ mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
 mod jsdoc_tag_lines;
+mod jsdoc_ts_method_signature_style;
 mod jsdoc_ts_no_empty_object_type;
+mod jsdoc_ts_no_unnecessary_template_expression;
+mod jsdoc_ts_prefer_function_type;
 mod jsdoc_valid_types;
 mod max_depth;
 mod max_nested_callbacks;
@@ -713,6 +718,7 @@ mod unicorn_require_text_decoder_streaming;
 mod unicorn_single_line_block_comment_style;
 mod unicorn_splice;
 mod unicorn_static;
+mod unicorn_string_content;
 mod unicorn_switch_case_braces;
 mod unicorn_switch_case_break_position;
 mod unicorn_template_indent;
@@ -1100,6 +1106,8 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_returns_check::RULE,
     &jsdoc_require_returns_description::RULE,
     &jsdoc_require_returns_type::RULE,
+    &jsdoc_require_tags::RULE,
+    &jsdoc_require_template_description::RULE,
     &jsdoc_require_throws::RULE,
     &jsdoc_require_throws_description::RULE,
     &jsdoc_require_throws_type::RULE,
@@ -1108,7 +1116,10 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
+    &jsdoc_ts_method_signature_style::RULE,
     &jsdoc_ts_no_empty_object_type::RULE,
+    &jsdoc_ts_no_unnecessary_template_expression::RULE,
+    &jsdoc_ts_prefer_function_type::RULE,
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
@@ -1430,6 +1441,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_switch::RULE,
     &unicorn_prefer_ternary::RULE,
     &unicorn_prefer_top_level_await::RULE,
+    &unicorn_string_content::RULE,
     &unicorn_switch_case_braces::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
