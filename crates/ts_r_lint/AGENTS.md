@@ -149,24 +149,24 @@ Files:
   file. Never `std::fs` in a rule. Cached data holds no timestamps; cache keys include a
   hash of the file's `import/*` settings.
 
-## Status (v1 lint round 7, `wip/v1-lint7`)
+## Status (v1 lint round 8, `wip/v1-lint8`)
 
-- 680 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 367
-  eslint-plugin-unicorn, 36 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  75,282 / 75,305 cases. The non-type-aware cases are 68,288 / 68,293 and the type-aware
-  cases 6,994 / 7,012 (2026-10-27); the 18 type-aware failures are a subset of the 46 listed
-  in design record 0006. The 5 others: import/no-unresolved 77/80 (3 cases need the
+- 716 rules (134 core ESLint, 95 typescript-eslint, 73 eslint-plugin-jsdoc, 368
+  eslint-plugin-unicorn, 46 eslint-plugin-import), 51 of them type-aware. Rule oracle:
+  76,923 / 76,963 cases. The non-type-aware cases are 69,927 / 69,951 and the type-aware
+  cases 6,996 / 7,012 (2026-10-27); the 16 type-aware failures are a subset of the 46 listed
+  in design record 0006. The 24 others: import/no-unresolved 77/80 (3 cases need the
   uppercase absolute path of the machine that recorded them), import/default 22/23 (its
-  `FooES7` case needs espree's ecmaVersion parse error) and unicorn/no-repeated-call-wrappers
-  107/108 (`this?.#x()` is a parse error in ts_r_parser). unicorn/prefer-await is 110/110
-  since emit7's parser fix. `tests/oracle/baseline.txt` has the per-rule counts.
+  `FooES7` case needs espree's ecmaVersion parse error) and import/no-unused-modules 111/131
+  (the 20 cases depend on state upstream's tests leave behind from earlier cases; linting
+  each file alone with ESLint gives our answers). `tests/oracle/baseline.txt` has the
+  per-rule counts.
   Every rule of ESLint's, typescript-eslint's, eslint-plugin-jsdoc's and
-  eslint-plugin-unicorn's recommended presets is implemented (unicorn: 338 of 338, plus 29
-  of its opt-in rules: 367 of its 376 live rules). eslint-plugin-import has 36 of 46,
-  `import/recommended` included; import/order (82 oracle cases) is the one with oracle data
-  still missing, and no-extraneous-dependencies, no-unused-modules,
-  no-relative-parent-imports, enforce-node-protocol-usage, group-exports, no-default-export,
-  no-named-export, imports-first and unambiguous have none yet.
+  eslint-plugin-unicorn's recommended presets is implemented (unicorn: 338 of 338, plus 30
+  of its opt-in rules: 368 of its 376 live rules; comment-content is missing and 7 have only
+  JSON, CSS, Markdown, YAML or TOML tests). Every eslint-plugin-import rule is implemented
+  (45 live rules plus the deprecated imports-first). jsdoc/check-examples,
+  jsdoc/type-formatting and unicorn/comment-content have oracle data but no implementation.
 - private-app against ESLint with every configured rule (round 3 run): all 23 projects
   pass the parity gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
@@ -2713,10 +2713,8 @@ no-invalid-file-input-accept,no-missing-local-resource}.js`;
 default, namespace, export, no-named-as-default, no-named-as-default-member (with
 no-duplicates, all of `import/recommended`), no-deprecated, no-self-import,
 no-relative-packages, no-useless-path-segments, no-cycle, extensions, no-internal-modules
-and no-restricted-paths; 36 of the 46 rules in all. Left: order (82 oracle cases),
-no-extraneous-dependencies, no-unused-modules, no-relative-parent-imports,
-enforce-node-protocol-usage, group-exports, no-default-export, no-named-export,
-imports-first and unambiguous (the last eight have no oracle data yet).
+and no-restricted-paths; 36 of the 46 rules in all. Round 8 added the other ten (see
+"eslint-plugin-import rules (round 8)").
 
 **The module host** (`src/modules/`):
 

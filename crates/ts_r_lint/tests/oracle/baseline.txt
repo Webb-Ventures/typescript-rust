@@ -477,7 +477,7 @@ unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-prevent-default-in-passive-listener 111/111
 unicorn/no-process-exit 58/58
 unicorn/no-redundant-comparison 87/87
-unicorn/no-repeated-call-wrappers 107/108
+unicorn/no-repeated-call-wrappers 108/108
 unicorn/no-return-array-push 187/187
 unicorn/no-selector-as-dom-name 149/149
 unicorn/no-shorthand-property-overrides 62/62
