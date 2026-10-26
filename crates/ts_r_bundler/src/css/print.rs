@@ -90,8 +90,14 @@ impl Printer<'_> {
                 if !self.minify && !value.is_empty() {
                     out.push(' ');
                 }
-                if self.syntax && super::color::takes_color(self.sheet.text(name)) {
-                    self.values_in(value, true, out);
+                if self.syntax {
+                    let colors = super::color::takes_color(self.sheet.text(name));
+                    let ctx = Ctx {
+                        colors,
+                        numbers: true,
+                        calc: false,
+                    };
+                    self.values_in(value, ctx, out);
                 } else {
                     self.values(value, out);
                 }
@@ -129,17 +135,25 @@ impl Printer<'_> {
             }
             Node::At {
                 name,
+                raw,
                 prelude,
                 body,
             } => {
                 self.pad(indent, out);
                 out.push('@');
-                out.push_str(name);
+                out.push_str(if matches!(name.as_str(), "media" | "layer") {
+                    name
+                } else {
+                    raw
+                });
                 if !prelude.is_empty() {
                     out.push(' ');
                     self.values(prelude, out);
                 }
                 match body {
+                    Some(b) if self.syntax && name.ends_with("keyframes") => {
+                        self.keyframes(b, indent, out);
+                    }
                     Some(b) => self.block(b, indent, in_style, out),
                     None => {
                         out.push(';');
@@ -194,6 +208,41 @@ impl Printer<'_> {
         self.nl(out);
     }
 
+    /// A `@keyframes` body with `--minify-syntax`: `from` is `0%` and `100%` is `to`.
+    fn keyframes(&self, body: &[Node], indent: usize, out: &mut String) {
+        out.push_str(if self.minify { "{" } else { " {\n" });
+        let printed: Vec<String> = body
+            .iter()
+            .map(|n| {
+                let mut s = String::new();
+                match n {
+                    Node::Rule { prelude, body } => {
+                        self.pad(indent + 1, &mut s);
+                        let text = self.values_text(prelude);
+                        let sel: Vec<&str> = text
+                            .split(',')
+                            .map(|k| match k.trim() {
+                                k if k.eq_ignore_ascii_case("from") => "0%",
+                                "100%" => "to",
+                                k => k,
+                            })
+                            .collect();
+                        s.push_str(&sel.join(if self.minify { "," } else { ", " }));
+                        self.block(body, indent + 1, true, &mut s);
+                    }
+                    other => self.node_in(other, indent + 1, false, &mut s),
+                }
+                s
+            })
+            .collect();
+        for text in dedupe(body, printed) {
+            out.push_str(&text);
+        }
+        self.pad(indent, out);
+        out.push('}');
+        self.nl(out);
+    }
+
     pub fn values_text(&self, v: &[Cv]) -> String {
         let mut s = String::new();
         self.values(v, &mut s);
@@ -201,11 +250,18 @@ impl Printer<'_> {
     }
 
     pub fn values(&self, v: &[Cv], out: &mut String) {
-        self.values_in(v, false, out);
+        self.values_in(v, Ctx::default(), out);
     }
 
-    /// `colors`: print colors in their shortest form (`--minify-syntax`, see `color`).
-    fn values_in(&self, v: &[Cv], colors: bool, out: &mut String) {
+    fn values_in(&self, v: &[Cv], ctx: Ctx, out: &mut String) {
+        let Ctx {
+            colors, numbers, ..
+        } = ctx;
+        let tight = |cv: &Cv| {
+            is_tight(cv, self.sheet)
+                || ctx.calc
+                    && matches!(cv, Cv::Tok(t) if t.t == T::Delim && matches!(self.sheet.text(t), "*" | "/"))
+        };
         let n = v.len();
         for (i, cv) in v.iter().enumerate() {
             match cv {
@@ -213,9 +269,7 @@ impl Printer<'_> {
                     if i == 0 || i + 1 == n {
                         continue;
                     }
-                    if self.minify
-                        && (is_tight(&v[i - 1], self.sheet) || is_tight(&v[i + 1], self.sheet))
-                    {
+                    if self.minify && (tight(&v[i - 1]) || tight(&v[i + 1])) {
                         continue;
                     }
                     out.push(' ');
@@ -224,6 +278,11 @@ impl Printer<'_> {
                     let short = (colors && matches!(t.t, T::Ident | T::Hash | T::IdHash))
                         .then(|| super::color::shorten_token(self.sheet.text(t)))
                         .flatten();
+                    let short = short.or_else(|| {
+                        (numbers && matches!(t.t, T::Number | T::Percentage | T::Dimension))
+                            .then(|| super::calc::short_number(self.sheet.text(t)))
+                            .flatten()
+                    });
                     match short {
                         Some(c) => out.push_str(&c),
                         None => self.token(t, out),
@@ -235,13 +294,32 @@ impl Printer<'_> {
                         continue;
                     }
                     let fname = self.sheet.text(name);
+                    let mut tree = ctx.calc;
+                    if numbers && fname.eq_ignore_ascii_case("calc(") {
+                        match super::calc::fold(self.sheet, items) {
+                            Ok(folded) => {
+                                out.push_str(&folded);
+                                continue;
+                            }
+                            Err(why) => tree = why == super::calc::Unfolded::Tree,
+                        }
+                    }
                     out.push_str(fname);
-                    self.values_in(items, colors && !fname.eq_ignore_ascii_case("var("), out);
+                    let inner = Ctx {
+                        colors: colors && !fname.eq_ignore_ascii_case("var("),
+                        numbers,
+                        calc: tree,
+                    };
+                    self.values_in(items, inner, out);
                     out.push(')');
                 }
                 Cv::Block { open, items } => {
                     out.push(*open as char);
-                    self.values(items, out);
+                    let inner = Ctx {
+                        colors: false,
+                        ..ctx
+                    };
+                    self.values_in(items, inner, out);
                     out.push(match open {
                         b'(' => ')',
                         b'[' => ']',
@@ -298,6 +376,17 @@ impl Printer<'_> {
     }
 }
 
+/// How declaration values print with `--minify-syntax`.
+#[derive(Clone, Copy, Debug, Default)]
+struct Ctx {
+    /// Colors in their shortest form (`color`).
+    colors: bool,
+    /// Short numbers and folded `calc()` (`calc`).
+    numbers: bool,
+    /// Inside a `calc()` that didn't fold for its structure (`calc::Unfolded::Tree`).
+    calc: bool,
+}
+
 /// Whether a node may be dropped for an identical later one.
 pub fn droppable(n: &Node) -> bool {
     match n {
@@ -344,14 +433,18 @@ mod tests {
     use std::sync::Arc;
 
     fn print(src: &str, minify: bool) -> String {
-        let s = parse(Arc::from(src), NameMode::Local);
+        print_with(src, minify, false, NameMode::Local)
+    }
+
+    fn print_with(src: &str, minify: bool, syntax: bool, mode: NameMode) -> String {
+        let s = parse(Arc::from(src), mode);
         let mut out = String::new();
         let url = |r: u32| format!("u{r}");
         let local = |n: u32| format!("f_{}", s.locals[n as usize]);
         Printer {
             sheet: &s,
             minify,
-            syntax: false,
+            syntax,
             url: &url,
             local: &local,
         }
@@ -369,5 +462,37 @@ mod tests {
             print("@media screen { .a { x: y !important } }", true),
             "@media screen{.f_a{x:y!important}}"
         );
+    }
+
+    /// `--minify-syntax`, as esbuild prints it: numbers, `calc()`, keyframe selectors and
+    /// at-rule names as written (but `@media` and `@layer`).
+    #[test]
+    fn minify_syntax_values() {
+        let min = |src: &str| print_with(src, true, true, NameMode::Global);
+        assert_eq!(
+            min("a { a: CaLc(20Px + 30pX); b: calc(2em - 3px + 1px); c: calc((1px + 2px) * 2) }"),
+            "a{a:50Px;b:calc(2em - 2px);c:6px}"
+        );
+        assert_eq!(
+            min(
+                "a { a: calc(.1px + .2px); b: calc(10px / 3 * 3); c: calc(1px / 0); d: calc(2 * (1px + 1em)) }"
+            ),
+            "a{a:calc(.1px + .2px);b:10px;c:calc(1px / 0);d:calc(2*(1px + 1em))}"
+        );
+        assert_eq!(
+            min(
+                "a { a: 0.50px; b: -0.0px; c: 1e3px; d: calc(1px+2px); e: max(calc(1px + 1px), 1em) }"
+            ),
+            "a{a:.5px;b:-0px;c:1e3px;d:calc(1px+2px);e:max(2px,1em)}"
+        );
+        assert_eq!(
+            min(
+                "@KeyFrames k { froM { a: 0 } 100% { a: 1 } 50.0% { a: 2 } } @MEDIA x { b { c: d } }"
+            ),
+            "@KeyFrames k{0%{a:0}to{a:1}50.0%{a:2}}@media x{b{c:d}}"
+        );
+        // Deep nesting stays as written instead of recursing without bound.
+        let deep = format!("a {{ b: calc({}1px{}) }}", "(".repeat(100), ")".repeat(100));
+        assert!(min(&deep).starts_with("a{b:calc(("), "{}", min(&deep));
     }
 }

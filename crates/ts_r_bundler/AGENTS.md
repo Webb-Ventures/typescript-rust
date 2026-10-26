@@ -228,6 +228,12 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   the injected files (`BuildOptions::bundle_only_injected`, tree shaking off, ESM by
   default); every other import stays as written. The injected files and their exports are
   part of each file's preparation cache key.
+- **CSS `--minify-syntax`** (`css/calc.rs`, `css/print.rs`): declaration values get short
+  numbers (`0.50px` is `.5px`) and folded `calc()` (only results exact to 5 decimal places);
+  `@keyframes` selectors `from` / `100%` become `0%` / `to`. At-rule names print as written
+  except `@media` and `@layer`, as esbuild does.
+- A define also applies inside TypeScript enum initializers before the enum transform, so
+  its value can name a member of that enum (`prepare::enum_initializers`).
 - Never panic on user input; every problem is a `Message` (esbuild-style text).
 - At most `TS_R_THREADS` worker threads (default: cores, capped at 8). While a fresh graph
   loads, one more thread reads module files ahead of the workers (`CachedFs::read_ahead`)

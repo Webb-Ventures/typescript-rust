@@ -558,14 +558,80 @@ fn build_json(ast: &mut Ast, v: &Value, at: u32, depth: u32) -> NodeId {
 }
 
 /// Replaces `define` keys in read positions. Returns true when anything changed.
-fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
-    // Unresolved identifier references.
-    let global_refs: FxHashSet<u32> = scopes
-        .refs
-        .iter()
-        .filter(|r| r.symbol.is_none())
-        .map(|r| r.node.raw())
-        .collect();
+/// Every node inside an enum member's initializer, except names of that enum's own
+/// members (which the transform resolves; the scope pass skips enums).
+fn enum_initializers(ast: &Ast) -> FxHashSet<u32> {
+    let mut out = FxHashSet::default();
+    let mut stack: Vec<NodeId> = Vec::new();
+    for n in &ast.nodes {
+        let Node::Enum { members, .. } = *n else {
+            continue;
+        };
+        let mut own = FxHashSet::default();
+        for &m in ast.list(members) {
+            if let Node::EnumMember { name, init } = *ast.node(m) {
+                if let Node::Ident { name } | Node::StringLit { value: name } = *ast.node(name) {
+                    own.insert(name);
+                }
+                stack.extend(init);
+            }
+        }
+        // Each node is visited once: the walk is bounded by the tree.
+        while let Some(id) = stack.pop() {
+            if matches!(*ast.node(id), Node::Ident { name } if own.contains(&name)) {
+                continue;
+            }
+            if out.insert(id.raw()) {
+                ast.for_each_child(id, |c| stack.push(c));
+            }
+        }
+    }
+    out
+}
+
+/// `only`: replace only these nodes (an enum's initializers, before the TypeScript
+/// transform).
+fn apply_defines(
+    ast: &mut Ast,
+    scopes: &Scopes,
+    defines: &Defines,
+    only: Option<&FxHashSet<u32>>,
+) -> bool {
+    // Unresolved identifier references. The scope pass skips enums, so in their
+    // initializers (`only`, without the enum's own member names) a name is free when
+    // nothing in the file declares it.
+    let global_refs: FxHashSet<u32> = match only {
+        None => scopes
+            .refs
+            .iter()
+            .filter(|r| r.symbol.is_none())
+            .map(|r| r.node.raw())
+            .collect(),
+        Some(only) => {
+            let props: FxHashSet<u32> = ast
+                .nodes
+                .iter()
+                .filter_map(|n| match *n {
+                    Node::Member { prop, .. } => Some(prop.raw()),
+                    _ => None,
+                })
+                .collect();
+            only.iter()
+                .copied()
+                .filter(|&raw| {
+                    let Some(id) = NodeId::from_raw(raw) else {
+                        return false;
+                    };
+                    match *ast.node(id) {
+                        Node::Ident { name } => {
+                            !props.contains(&raw) && !scopes.declares_name(name)
+                        }
+                        _ => false,
+                    }
+                })
+                .collect()
+        }
+    };
     if global_refs.is_empty() && !defines.roots.contains("import") {
         return false;
     }
@@ -592,6 +658,9 @@ fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
     let count = ast.nodes.len() as u32;
     // Parents have larger ids than their children: visit them first so the longest key wins.
     for raw in (1..count).rev() {
+        if only.is_some_and(|o| !o.contains(&raw)) {
+            continue;
+        }
         let Some(id) = NodeId::from_raw(raw) else {
             continue;
         };
@@ -1013,6 +1082,19 @@ pub fn prepare_with(
             ));
         }
     }
+    // An enum initializer can name a member of its own enum, which the transform resolves:
+    // a define there applies first (`enum a { b = 1, c = d }` with `d` defined as `b`).
+    if kind.is_typescript()
+        && !ctx.defines.is_empty()
+        && messages.is_empty()
+        && ast.nodes.iter().any(|n| matches!(n, Node::Enum { .. }))
+    {
+        let inside = enum_initializers(&ast);
+        if !inside.is_empty() {
+            let scopes = Scopes::analyze(&ast, true);
+            apply_defines(&mut ast, &scopes, &ctx.defines, Some(&inside));
+        }
+    }
     // JavaScript files go through the transform when the target needs lowering.
     let lower_js = !kind.is_typescript()
         && crate::lowering::js_needs_lowering(&ast, lowering_target(unsupported));
@@ -1179,7 +1261,7 @@ pub fn prepare_with(
         // The JSX transform writes factory names (`React.createElement`) that the source
         // may not contain.
         && (first_jsx.is_some() || ctx.defines.roots.iter().any(|r| src.contains(r.as_str())))
-        && apply_defines(&mut ast, &scopes, &ctx.defines)
+        && apply_defines(&mut ast, &scopes, &ctx.defines, None)
     {
         scopes = Scopes::analyze(&ast, strict);
         dirty = true;

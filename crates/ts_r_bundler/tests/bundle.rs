@@ -2664,3 +2664,21 @@ fn external_require_order() {
     );
     assert!(b < ext && ext < c, "{text}");
 }
+
+/// A define inside an enum initializer applies before the enum transform, so the value can
+/// name a member of the enum (esbuild's TSEnumDefine). A member of the define's name wins.
+#[test]
+fn define_in_enum_initializer() {
+    let fs = project(&[(
+        "a.ts",
+        "enum A { b = 123, c = d }\nenum B { d = 5, e = d }\nconsole.log(A.c, B.e, d)\n",
+    )]);
+    let mut o = opts(&["a.ts"]);
+    o.define = vec![("d".into(), "b".into())];
+    o.external = vec!["b".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(text.contains("\"c\"] = 123"), "{text}");
+    assert!(text.contains("\"e\"] = 5"), "{text}");
+    assert!(text.contains(", b)"), "{text}");
+}

@@ -7,6 +7,7 @@
 //! decoded: reference targets, local names, `@import` conditions. Behaviour follows
 //! esbuild's documented and observed output (its `bundler_css_test.go` cases as data).
 
+pub mod calc;
 pub mod color;
 pub mod lexer;
 pub mod link;
@@ -62,6 +63,8 @@ pub enum Node {
     At {
         /// Lower-case name without `@`.
         name: String,
+        /// The name as written (esbuild prints it so, except `@media` and `@layer`).
+        raw: Box<str>,
         prelude: Vec<Cv>,
         body: Option<Vec<Node>>,
     },
@@ -347,7 +350,8 @@ impl Parser {
                     },
                 ) => {
                     let tok = *tok;
-                    let name = self.text(&tok)[1..].to_ascii_lowercase();
+                    let raw: Box<str> = self.text(&tok)[1..].into();
+                    let name = raw.to_ascii_lowercase();
                     let mut prelude = Vec::new();
                     let mut body = None;
                     for cv in it.by_ref() {
@@ -369,6 +373,7 @@ impl Parser {
                             self.warn(tok.start, "All \"@import\" rules must come first");
                             out.push(Node::At {
                                 name,
+                                raw,
                                 prelude,
                                 body: None,
                             });
@@ -391,7 +396,7 @@ impl Parser {
                     if !(name == "charset" || name == "layer" && body.is_none() && !seen_import) {
                         seen_rule = true;
                     }
-                    out.push(self.at_rule(name, prelude, body));
+                    out.push(self.at_rule(name, raw, prelude, body));
                 }
                 _ => {
                     // A declaration (`name: value`) unless a `{}` block comes before the
@@ -474,7 +479,13 @@ impl Parser {
         out
     }
 
-    fn at_rule(&mut self, name: String, prelude: Vec<Cv>, body: Option<Vec<Cv>>) -> Node {
+    fn at_rule(
+        &mut self,
+        name: String,
+        raw: Box<str>,
+        prelude: Vec<Cv>,
+        body: Option<Vec<Cv>>,
+    ) -> Node {
         let prelude = match name.as_str() {
             "keyframes" | "-webkit-keyframes" | "-moz-keyframes" | "-o-keyframes"
             | "counter-style" => self.localize_name_prelude(prelude),
@@ -492,6 +503,7 @@ impl Parser {
         });
         Node::At {
             name,
+            raw,
             prelude,
             body,
         }
@@ -999,6 +1011,7 @@ pub fn declared_layers(sheet: &Sheet, nodes: &[Node], prefix: &str, out: &mut Ve
             name,
             prelude,
             body,
+            ..
         } = n
             && name == "layer"
         {
