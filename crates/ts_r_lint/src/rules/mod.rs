@@ -489,6 +489,7 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_boolean_return;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
+mod unicorn_prefer_combined_guards;
 mod unicorn_prefer_continue;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_default_parameters;
@@ -504,8 +505,7 @@ mod unicorn_prefer_flat_math_min_max;
 mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
-mod unicorn_prefer_group_by;
-mod unicorn_prefer_has_check;
+mod unicorn_prefer_hoisting_branch_code;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
@@ -552,7 +552,7 @@ mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_condition_first;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
-mod unicorn_prefer_single_call;
+mod unicorn_prefer_smaller_scope;
 mod unicorn_prefer_split_limit;
 mod unicorn_prefer_spread;
 mod unicorn_prefer_string_match_all;
@@ -1092,6 +1092,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_boolean_return::RULE,
     &unicorn_prefer_class_fields::RULE,
+    &unicorn_prefer_combined_guards::RULE,
     &unicorn_prefer_continue::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_direct_iteration::RULE,
@@ -1103,8 +1104,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
-    &unicorn_prefer_group_by::RULE,
-    &unicorn_prefer_has_check::RULE,
+    &unicorn_prefer_hoisting_branch_code::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,
@@ -1136,7 +1136,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_simple_condition_first::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
-    &unicorn_prefer_single_call::RULE,
+    &unicorn_prefer_smaller_scope::RULE,
     &unicorn_prefer_string_match_all::RULE,
     &unicorn_prefer_split_limit::RULE,
     &unicorn_prefer_string_repeat::RULE,
