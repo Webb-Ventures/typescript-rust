@@ -4,7 +4,7 @@
 // Real-world or generated input: abort instead of exhausting the machine's memory.
 ts_r_testing::cap_memory!();
 
-use ts_r_ast::{Modifiers, NodeKind, SourceKind};
+use ts_r_ast::{Modifiers, Node, NodeKind, SourceKind};
 
 use crate::parse;
 use ts_r_diagnostics::Diagnostic;
@@ -651,6 +651,12 @@ fn invalid_syntax_reported_like_tsc() {
         ("const x = a > b as T >> c;", SourceKind::Ts, &[(1005, 21)]),
         ("for (async of x) {}", SourceKind::Ts, &[(1106, 5)]),
         ("for (\\u0061sync of x) {}", SourceKind::Js, &[(1106, 5)]),
+        // Not where `await` is an operator (tsc 7.0.2).
+        (
+            "async function f() { for (async of x); }",
+            SourceKind::Ts,
+            &[],
+        ),
         ("new a?.b();", SourceKind::Ts, &[(1209, 5)]),
         ("new a.b?.c;", SourceKind::Ts, &[(1209, 7)]),
         ("@a?.b class C {}", SourceKind::Ts, &[(1497, 1)]),
@@ -3261,6 +3267,51 @@ fn module_option_forces_top_level_await() {
         .filter(|&id| r.ast.kind(id) == NodeKind::Await)
         .count();
     assert_eq!(awaits, 1);
+}
+
+/// `@a export @b class X {}` keeps both decorator groups, in source order (tsc's checker
+/// reports TS8038 at `@b`).
+#[test]
+fn decorators_on_both_sides_of_export_are_kept() {
+    for src in ["@a export @b class X {}", "@a export default @b class {}"] {
+        let r = parse(src, SourceKind::Ts);
+        let Node::Program { stmts } = *r.ast.node(r.ast.root) else {
+            panic!("no program");
+        };
+        let Node::ClassDecl { decorators, .. } = *r.ast.node(r.ast.list(stmts)[0]) else {
+            panic!("{src}: not a class");
+        };
+        let names: Vec<&str> = r
+            .ast
+            .list(decorators)
+            .iter()
+            .map(|&d| &src[r.ast.span(d).start as usize..r.ast.span(d).end as usize])
+            .collect();
+        assert_eq!(names, ["@a", "@b"], "{src}");
+    }
+}
+
+/// `ParseOptions::module` (typescript-estree): `await` as a simple arrow's parameter at the
+/// top level is a name, as TypeScript 5 parses it (unicorn/prefer-await's test); tsc 7's
+/// own module reparse keeps TS1109.
+#[test]
+fn module_option_reads_await_arrow_parameter_as_a_name() {
+    let src = "promise.then(await => await);";
+    let opts = crate::ParseOptions {
+        module: true,
+        ..Default::default()
+    };
+    for kind in [SourceKind::Ts, SourceKind::Js] {
+        let r = crate::parse_with(src, kind, opts);
+        assert!(r.diagnostics.is_empty(), "{kind:?}: {:?}", r.diagnostics);
+        assert!(r.ast.dump().contains("Arrow"));
+    }
+    let r = parse("export {};\npromise.then(await => await);", SourceKind::Ts);
+    let codes: Vec<u32> = r.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(codes, vec![1109, 1109]);
+    // A top-level `await` operand is still the operator.
+    let r = crate::parse_with("await x;", SourceKind::Ts, opts);
+    assert!(r.diagnostics.is_empty() && r.ast.dump().contains("Await"));
 }
 
 /// TS1228 (a type predicate outside a return type) is tsc's checker's, reported while

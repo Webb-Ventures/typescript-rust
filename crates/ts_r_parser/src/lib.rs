@@ -181,6 +181,7 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
     let js_ts = !kind.is_typescript() && opts.ts_in_js != TsInJs::Reject;
     let start = |module_await: bool| {
         let mut p = Parser::new(src, kind);
+        p.forced_module = opts.module;
         if js_ts {
             p.ts = true;
             p.jsx = true;
@@ -196,14 +197,18 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
         p.parse_program();
         p
     };
+    let mut p = start(false);
     if opts.module && !kind.is_declaration() {
-        let mut p = start(true);
+        // The module goal: parsed again with `await` an operator at the top level when an
+        // `await` outside functions was read as a name.
+        if p.await_newline_seen || p.await_name_seen {
+            p = start(true);
+        }
         if js_ts && opts.ts_in_js == TsInJs::Report {
             p.report_ts_in_js();
         }
         return p.finish();
     }
-    let mut p = start(false);
     // In a module, `await` at the top level is an operator even before a line break or
     // where only a name may appear: the file is parsed again when that changes anything
     // (rare: `await` then a newline, or `await` read as a name outside functions).
@@ -420,6 +425,10 @@ pub(crate) struct Parser<'a> {
     await_name_seen: bool,
     /// Reparsing a module: such an `await` is an operator (as in tsc, topLevelAwait.1).
     module_await: bool,
+    /// Parsing with `ParseOptions::module` (lint): an `await` that is a simple arrow's
+    /// parameter (`await => x`) does not make the file be parsed again, as TypeScript 5
+    /// counts only `await`s outside functions (typescript-estree).
+    forced_module: bool,
     /// While a function's parameter list is parsed: whether `await` was an operator
     /// outside the function. Parameter decorators are read in that outer context, as in
     /// tsc (`method(@await x) {}` at a module's top level is TS1109).
@@ -504,6 +513,7 @@ impl<'a> Parser<'a> {
             jsdoc_import: false,
             await_newline_seen: false,
             await_name_seen: false,
+            forced_module: false,
             module_await: false,
             param_decorator_await: None,
             stack_base: stack_addr(),
@@ -666,6 +676,7 @@ impl<'a> Parser<'a> {
             && !self
                 .ctx
                 .has(Ctx::AWAIT | Ctx::IN_FUNCTION | Ctx::AMBIENT | Ctx::TYPE)
+            && !(self.forced_module && self.peek().kind == TokenKind::Arrow)
         {
             self.await_name_seen = true;
         }
