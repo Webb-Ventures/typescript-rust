@@ -432,11 +432,12 @@ mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
+mod unicorn_no_unreadable_for_of_expression;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_unsafe_json_serialization;
 mod unicorn_no_unsafe_property_key;
 mod unicorn_no_unsafe_string_replacement;
-mod unicorn_no_unused_builtin_method_return;
+mod unicorn_no_unused_iterator_helper;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
 mod unicorn_no_useless_collection_argument;
@@ -500,6 +501,7 @@ mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_iterator_to_array_at_end;
+mod unicorn_prefer_iterator_zip;
 mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_literal_ascii;
 mod unicorn_prefer_location_assign;
@@ -1031,8 +1033,10 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unnecessary_splice::RULE,
     &unicorn_no_unnecessary_string_trim::RULE,
+    &unicorn_no_unreadable_for_of_expression::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
+    &unicorn_no_unused_iterator_helper::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_coercion::RULE,
     &unicorn_no_useless_compound_assignment::RULE,
@@ -1085,6 +1089,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_iterable_in_constructor::RULE,
     &unicorn_prefer_iterator_to_array::RULE,
     &unicorn_prefer_iterator_to_array_at_end::RULE,
+    &unicorn_prefer_iterator_zip::RULE,
     &unicorn_prefer_location_assign::RULE,
     &unicorn_prefer_map_from_entries::RULE,
     &unicorn_prefer_math_abs::RULE,

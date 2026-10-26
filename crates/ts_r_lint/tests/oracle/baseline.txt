@@ -380,8 +380,10 @@ unicorn/no-unnecessary-slice-end 39/39
 unicorn/no-unnecessary-splice 97/97
 unicorn/no-unnecessary-string-trim 95/95
 unicorn/no-unreadable-array-destructuring 104/104
+unicorn/no-unreadable-for-of-expression 108/108
 unicorn/no-unreadable-iife 14/14
 unicorn/no-unsafe-string-replacement 78/78
+unicorn/no-unused-iterator-helper 115/115
 unicorn/no-useless-boolean-cast 61/61
 unicorn/no-useless-coercion 638/638
 unicorn/no-useless-collection-argument 67/67
@@ -442,6 +444,7 @@ unicorn/prefer-includes 247/247
 unicorn/prefer-iterable-in-constructor 76/76
 unicorn/prefer-iterator-to-array 61/61
 unicorn/prefer-iterator-to-array-at-end 74/74
+unicorn/prefer-iterator-zip 107/107
 unicorn/prefer-keyboard-event-key 116/116
 unicorn/prefer-literal-ascii 110/110
 unicorn/prefer-location-assign 54/54
