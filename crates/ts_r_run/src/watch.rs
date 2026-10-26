@@ -96,6 +96,7 @@ pub fn run(cli: &Cli, entry: &str, dir: &Path, hooks: &Path) -> i32 {
                         entry,
                         preload: hooks.join("hooks.mjs"),
                         manifest: Some(m),
+                        eval: None,
                     };
                     let mut cmd = launch.command();
                     cmd.env("TS_R_RUN_WATCH_PARENT", std::process::id().to_string());

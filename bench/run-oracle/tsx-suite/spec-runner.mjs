@@ -38,7 +38,6 @@ const SOURCE_SKIPS = [
 ];
 const NAME_SKIPS = [
   [/^CLI > (argv > )?(version|help)\b/, "tsx-only: tsx's --version / --help text"],
-  [/^CLI > eval & print\b/, 'not in ts-r-run: --eval / --print (ts-r-run runs a file)'],
   [/\bwatch\b/i, "tsx-only: `tsx watch` (ts-r-run's --watch is a different CLI)"],
 ];
 

@@ -188,7 +188,8 @@ function matching(text, i) {
   return -1;
 }
 
-const EVAL_FLAGS = new Set(['--eval', '-e', '--print', '-p', '--input-type', '--test', '--check', '-c']);
+// `--check` (a syntax check only) is not a ts-r-run mode.
+const EVAL_FLAGS = new Set(['--check', '-c']);
 
 async function runNodeSource() {
   const copy = path.join(work, 'node-fixtures');
@@ -230,7 +231,7 @@ async function runNodeSource() {
         continue;
       }
       if (argv.some((a) => EVAL_FLAGS.has(String(a)))) {
-        Object.assign(c, { status: 'skip', reason: 'not in ts-r-run: --eval / --print / stdin input (ts-r-run runs a file)' });
+        Object.assign(c, { status: 'skip', reason: 'not in ts-r-run: --check' });
         cases.push(c);
         continue;
       }
@@ -242,8 +243,10 @@ async function runNodeSource() {
       todo.push({ c, argv: argv.map(String), cwd: options.cwd ?? copy });
     }
   }
+  // Node's test runner prints timings; they are not part of the result.
   const norm = (s) => s.split(copy).join('<fixtures>')
     .split(pathToFileURL(copy).href).join('file://<fixtures>')
+    .replace(/\(\d+(?:\.\d+)?ms\)/g, '(<ms>)').replace(/^(ℹ duration_ms) [\d.]+$/gm, '$1 <ms>')
     .replace(/[ \t]+$/gm, '').trimEnd();
   const runOne = async ({ c, argv, cwd }) => {
     const [node, tsx, ours] = await Promise.all([
