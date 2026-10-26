@@ -1484,6 +1484,43 @@ fn completion_in_possible_type_arguments() {
     c.shutdown();
 }
 
+/// Where a type goes, a namespace is offered only when a type is somewhere below it, and
+/// `m.|` in a type lists the types and such namespaces, not values.
+#[test]
+fn completion_of_namespaces_in_type_positions() {
+    if !libs_present() {
+        return;
+    }
+    let text = "namespace Vals { export const v = 1; }\n\
+                namespace Outer { export namespace Inner { export interface I {} } export const w = 1; }\n\
+                let a: ;\nlet b: Outer.;\nlet c = ;\n";
+    let env = Env::new(
+        "complete-ns-types",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 7)));
+    assert!(l.iter().any(|x| x == "Outer"), "{l:?}");
+    assert!(!l.iter().any(|x| x == "Vals"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 13)));
+    assert_eq!(l, vec!["Inner".to_string()]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 8)));
+    assert!(l.iter().any(|x| x == "Vals"), "{l:?}");
+    c.shutdown();
+}
+
 /// Class bodies: the inherited members not written yet (and member keywords) where a member
 /// name goes, `this` members among the names in a method, and private or protected members
 /// only where they may be read.

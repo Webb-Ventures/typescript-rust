@@ -338,7 +338,10 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   the names in scope plus `JSX.IntrinsicElements`'s tags. Text between tags offers nothing.
 - Positions (`position.rs`): the token before an offset and the node covering it, and
   whether an offset sits in a type (annotation, type arguments, `extends`/`implements`,
-  `as`/`satisfies`), which switches the scope list to types and namespaces.
+  `as`/`satisfies`), which switches the scope list to types and namespaces. A namespace
+  is offered there (and among `a.b.|` members in a type, not after `typeof` or in
+  `import x = a.b`) only when a type is somewhere below it, through aliases and nested
+  namespaces (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter).
 - Possible type arguments (`tsc: tsc/internal/ls/utilities.go`, the backward scan for a
   `<` that might open type arguments): reading tokens back from the offset over balanced
   `<>`, `()`, `[]`, `{}` and the tokens a type may hold, to an identifier right before an

@@ -588,7 +588,11 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 }
                 d >= 2 && b[d - 2] == b'?'
             };
+            let in_type = qualified && qualified_in_type(c, Loc::new(cx.file, obj));
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
+                if in_type && !type_referable(c, s, 0) {
+                    continue;
+                }
                 let plain = is_identifier_name(&name) || is_private_name(&name);
                 if !plain && (qualified || name.is_empty()) {
                     continue;
@@ -715,6 +719,9 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             let later = later_params(c, Loc::new(cx.file, token_node(c, cx.file, offset, anchor)));
             for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
                 if !has_meaning_through_alias(c, s, want) || later.contains(&name) {
+                    continue;
+                }
+                if types_only && !type_referable(c, s, 0) {
                     continue;
                 }
                 if !seen.insert(name.clone()) || own.as_deref() == Some(name.as_str()) {
@@ -877,6 +884,41 @@ fn possibly_type_argument(ck: &mut Ck<'_, '_>, file: FileId, pos: u32, depth: u3
 
 /// Whether `s` has a meaning in `want`; an alias by what it resolves to (an alias that
 /// resolves to nothing keeps every meaning).
+/// Whether `s` may be named in a type: a type, or a namespace with such a member somewhere
+/// below it (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter; a
+/// namespace of values only is not offered where a type goes).
+fn type_referable(c: &Checker<'_>, s: SymId, depth: u32) -> bool {
+    let s = c.resolve_alias(s).unwrap_or(s);
+    if c.has_meaning(s, meaning::TYPE) {
+        return true;
+    }
+    if depth > 16
+        || !c
+            .sym_flags(s)
+            .intersects(SymbolFlags::VALUE_MODULE | SymbolFlags::NAMESPACE_MODULE)
+    {
+        return false;
+    }
+    c.exports_of(s)
+        .into_iter()
+        .any(|(_, x)| x != s && type_referable(c, x, depth + 1))
+}
+
+/// Whether the qualified name whose left side is `left` (`a.b.|`) is a type reference, not
+/// the entity of `typeof a.b` or `import x = a.b`.
+fn qualified_in_type(c: &Checker<'_>, left: Loc) -> bool {
+    let mut n = left;
+    for _ in 0..64 {
+        let Some(p) = c.parent(n) else { return true };
+        match c.node(p) {
+            Node::QualifiedName { .. } => n = p,
+            Node::TypeQuery { .. } | Node::ImportEquals { .. } => return false,
+            _ => return true,
+        }
+    }
+    true
+}
+
 fn has_meaning_through_alias(c: &Checker<'_>, s: SymId, want: u8) -> bool {
     let f = c.sym_flags(s);
     if !f.intersects(SymbolFlags::ALIAS) {
