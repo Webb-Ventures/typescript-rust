@@ -18,7 +18,7 @@ use super::prelude::*;
 use super::unicorn_ast::{is_left_hand_side, method_call};
 use super::unicorn_text::has_comment_in;
 use super::unicorn_types::is_known_non_indexed_collection;
-use super::unicorn_util_h4::{available_name, scope_within, singular};
+use super::unicorn_util::{available_name, scope_within, singular};
 use crate::semantic::{RefFlags, Resolution, ScopeId, SymbolId};
 use ts_r_ast::Ast;
 

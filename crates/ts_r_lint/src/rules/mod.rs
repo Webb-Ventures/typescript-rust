@@ -305,16 +305,18 @@ mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_abort;
-mod unicorn_argument_counts;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_better_dom_traversing;
 mod unicorn_catch_error_name;
+mod unicorn_class_reference_in_static_methods;
+mod unicorn_conditions;
 mod unicorn_consistent_arrow_return_style;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_boolean_name;
 mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_compound_words;
+mod unicorn_consistent_conditional_object_spread;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_destructuring;
 mod unicorn_consistent_empty_array_spread;
@@ -337,6 +339,7 @@ mod unicorn_expiring_todo_comments;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
 mod unicorn_filename_case;
+mod unicorn_html;
 mod unicorn_id_match;
 mod unicorn_import_style;
 mod unicorn_isolated_functions;
@@ -348,7 +351,9 @@ mod unicorn_name_replacements;
 mod unicorn_names;
 mod unicorn_new_for_builtins;
 mod unicorn_no_abusive_eslint_disable;
+mod unicorn_no_accessor_recursion;
 mod unicorn_no_accidental_bitwise_operator;
+mod unicorn_no_anonymous_default_export;
 mod unicorn_no_array_callback_reference;
 mod unicorn_no_array_concat_in_loop;
 mod unicorn_no_array_fill_with_reference_type;
@@ -393,11 +398,15 @@ mod unicorn_no_for_loop;
 mod unicorn_no_global_object_property_assignment;
 mod unicorn_no_immediate_mutation;
 mod unicorn_no_impossible_length_comparison;
+mod unicorn_no_incomplete_accessor_override;
 mod unicorn_no_incorrect_query_selector;
 mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_argument_count;
+mod unicorn_no_invalid_boolean_attribute_value;
+mod unicorn_no_invalid_character_comparison;
+mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_intl_options;
@@ -433,6 +442,8 @@ mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_prevent_default_in_passive_listener;
 mod unicorn_no_process_exit;
+mod unicorn_no_redundant_comparison;
+mod unicorn_no_return_array_push;
 mod unicorn_no_selector_as_dom_name;
 mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_single_promise_in_promise_methods;
@@ -502,10 +513,12 @@ mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
+mod unicorn_operator_assignment;
 mod unicorn_prefer_abort_signal_any;
 mod unicorn_prefer_abort_signal_timeout;
 mod unicorn_prefer_add_event_listener;
 mod unicorn_prefer_add_event_listener_options;
+mod unicorn_prefer_aggregate_error;
 mod unicorn_prefer_array_find;
 mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
@@ -518,6 +531,7 @@ mod unicorn_prefer_array_last_methods;
 mod unicorn_prefer_array_slice;
 mod unicorn_prefer_array_some;
 mod unicorn_prefer_at;
+mod unicorn_prefer_await;
 mod unicorn_prefer_bigint_literals;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_block_statement_over_iife;
@@ -545,6 +559,9 @@ mod unicorn_prefer_flat_math_min_max;
 mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
+mod unicorn_prefer_group_by;
+mod unicorn_prefer_has_check;
+mod unicorn_prefer_hoisting_branch_code;
 mod unicorn_prefer_https;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
@@ -1046,9 +1063,12 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_expression_member::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
+    &unicorn_no_boolean_sort_comparator::RULE,
     &unicorn_no_blob_to_file::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
+    &unicorn_no_chained_comparison::RULE,
+    &unicorn_no_computed_property_existence_check::RULE,
     &unicorn_no_confusing_array_splice::RULE,
     &unicorn_no_confusing_array_with::RULE,
     &unicorn_no_array_method_this_argument::RULE,
@@ -1066,6 +1086,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_error_property_assignment::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
+    &unicorn_no_immediate_mutation::RULE,
     &unicorn_no_incorrect_query_selector::RULE,
     &unicorn_no_ineffective_csp_directives::RULE,
     &unicorn_no_empty_file::RULE,
@@ -1074,10 +1095,12 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_incorrect_template_string_interpolation::RULE,
     &unicorn_no_impossible_length_comparison::RULE,
     &unicorn_no_instanceof_builtins::RULE,
-    &unicorn_no_invalid_argument_count::RULE,
+    &unicorn_no_invalid_character_comparison::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
+    &unicorn_no_invalid_integrity::RULE,
     &unicorn_no_invalid_intl_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
+    &unicorn_no_invalid_temporal_arithmetic::RULE,
     &unicorn_no_invalid_style_set_property::RULE,
     &unicorn_no_invalid_url_protocol_comparison::RULE,
     &unicorn_no_late_current_target_access::RULE,
@@ -1090,6 +1113,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_mismatched_map_key::RULE,
     &unicorn_no_misrefactored_assignment::RULE,
     &unicorn_no_named_default::RULE,
+    &unicorn_no_negated_comparison::RULE,
     &unicorn_no_negated_array_predicate::RULE,
     &unicorn_no_negated_condition::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
@@ -1102,6 +1126,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_prevent_default_in_passive_listener::RULE,
     &unicorn_no_process_exit::RULE,
+    &unicorn_no_redundant_comparison::RULE,
+    &unicorn_no_single_promise_in_promise_methods::RULE,
+    &unicorn_no_return_array_push::RULE,
     &unicorn_no_selector_as_dom_name::RULE,
     &unicorn_no_static_only_class::RULE,
     &unicorn_no_subtraction_comparison::RULE,
@@ -1119,6 +1146,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
     &unicorn_no_unnecessary_boolean_comparison::RULE,
+    &unicorn_no_unnecessary_fetch_options::RULE,
     &unicorn_no_unnecessary_default_arguments::RULE,
     &unicorn_no_unnecessary_global_this::RULE,
     &unicorn_no_unnecessary_nested_ternary::RULE,
@@ -1131,6 +1159,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unsafe_buffer_conversion::RULE,
     &unicorn_no_unsafe_sqlite_interpolation::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
+    &unicorn_no_unused_iterator_helper::RULE,
+    &unicorn_no_url_in_search_params::RULE,
     &unicorn_no_unused_properties::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_coercion::RULE,
@@ -1141,6 +1171,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_delete_check::RULE,
     &unicorn_no_useless_else::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
+    &unicorn_no_useless_logical_operand::RULE,
     &unicorn_no_useless_iterator_to_array::RULE,
     &unicorn_no_useless_override::RULE,
     &unicorn_no_useless_re_export::RULE,
@@ -1157,9 +1188,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
+    &unicorn_operator_assignment::RULE,
     &unicorn_prefer_abort_signal_any::RULE,
     &unicorn_prefer_abort_signal_timeout::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
+    &unicorn_prefer_aggregate_error::RULE,
     &unicorn_prefer_array_find::RULE,
     &unicorn_prefer_array_from_async::RULE,
     &unicorn_prefer_array_from_map::RULE,
@@ -1173,10 +1206,14 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_boolean_return::RULE,
     &unicorn_prefer_class_fields::RULE,
+    &unicorn_prefer_combined_guards::RULE,
+    &unicorn_prefer_continue::RULE,
     &unicorn_prefer_classlist_toggle::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_direct_iteration::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
+    &unicorn_prefer_early_return::RULE,
+    &unicorn_prefer_else_if::RULE,
     &unicorn_prefer_dom_node_replace_children::RULE,
     &unicorn_prefer_error_is_error::RULE,
     &unicorn_prefer_event_target::RULE,
@@ -1185,6 +1222,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
+    &unicorn_prefer_group_by::RULE,
+    &unicorn_prefer_has_check::RULE,
+    &unicorn_prefer_hoisting_branch_code::RULE,
     &unicorn_prefer_https::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
@@ -1194,9 +1234,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_iterator_to_array_at_end::RULE,
     &unicorn_prefer_iterator_zip::RULE,
     &unicorn_prefer_location_assign::RULE,
+    &unicorn_prefer_map_from_entries::RULE,
     &unicorn_prefer_logical_operator_over_ternary::RULE,
     &unicorn_prefer_math_abs::RULE,
     &unicorn_prefer_math_min_max::RULE,
+    &unicorn_prefer_minimal_ternary::RULE,
     &unicorn_prefer_modern_math_apis::RULE,
     &unicorn_prefer_module::RULE,
     &unicorn_prefer_math_constants::RULE,
@@ -1205,6 +1247,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_is_safe_integer::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
+    &unicorn_prefer_object_iterable_methods::RULE,
     &unicorn_prefer_observer_apis::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_path2d::RULE,
@@ -1213,6 +1256,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_queue_microtask::RULE,
     &unicorn_prefer_regexp_escape::RULE,
     &unicorn_prefer_response_static_json::RULE,
+    &unicorn_prefer_set_has::RULE,
     &unicorn_prefer_scoped_selector::RULE,
     &unicorn_prefer_set_methods::RULE,
     &unicorn_prefer_promise_with_resolvers::RULE,
@@ -1221,6 +1265,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_simplified_conditions::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
+    &unicorn_prefer_single_call::RULE,
     &unicorn_prefer_smaller_scope::RULE,
     &unicorn_prefer_string_match_all::RULE,
     &unicorn_prefer_split_limit::RULE,
@@ -1240,6 +1285,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_uint8array_base64::RULE,
     &unicorn_prefer_uint8array_hex::RULE,
     &unicorn_prefer_unary_minus::RULE,
+    &unicorn_prefer_while_loop_condition::RULE,
     &unicorn_prefer_url_can_parse::RULE,
     &unicorn_prefer_url_href::RULE,
     &unicorn_prefer_url_search_parameters::RULE,

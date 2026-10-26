@@ -902,7 +902,7 @@ impl PreferGroupBy {
                     concise_arrow_body_text(cx, key)
                 ),
             );
-            for e in remove_statement(cx, loop_node).edits {
+            for e in remove_statements(cx, loop_node, loop_node, false).edits {
                 fix = fix.and(e.span, e.text);
             }
             fix

@@ -22,7 +22,7 @@ use super::unicorn_consistent_compound_words::{
 };
 use super::unicorn_filename_case::extname;
 use super::unicorn_names::{RegexOpt, regex_list};
-use super::unicorn_util_h4::{available_name, estree_ident_span, rename_symbol_fix};
+use super::unicorn_util::{available_name, estree_ident_span, rename_symbol_fix};
 use crate::ast_util::{skip_trivia_backward, skip_trivia_forward};
 use crate::diagnostic::Loc;
 use crate::semantic::{DeclKind, ScopeId, SymbolFlags, SymbolId};

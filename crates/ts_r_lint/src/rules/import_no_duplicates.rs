@@ -71,6 +71,22 @@ fn tokens(src: &str, span: Span) -> Vec<Span> {
     out
 }
 
+/// The text between the braces `open` and `close`, cut at its `,` tokens: like ESLint's
+/// `split(',')` on that text, except that a comma inside a quoted name (`"a,b" as ab`) or a
+/// comment does not cut it, so the merged list stays valid.
+fn split_at_commas(src: &str, open: Span, close: Span) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut from = open.end;
+    for t in tokens(src, Span::new(open.end, close.start)) {
+        if t.text(src) == "," {
+            out.push(src.get(from as usize..t.start as usize).unwrap_or(""));
+            from = t.end;
+        }
+    }
+    out.push(src.get(from as usize..close.start as usize).unwrap_or(""));
+    out
+}
+
 fn has_specifiers(ast: &Ast, node: NodeId) -> bool {
     specifiers(ast, node)
         .iter()
@@ -202,8 +218,8 @@ impl NoDuplicates {
                 let (open, close) = info.braces(n)?;
                 Some(Spec {
                     node: n,
-                    identifiers: src[open.end as usize..close.start as usize]
-                        .split(',')
+                    identifiers: split_at_commas(src, open, close)
+                        .into_iter()
                         .map(str::to_owned)
                         .collect(),
                     is_empty: !has_specifiers(ast, n),
@@ -236,8 +252,8 @@ impl NoDuplicates {
         });
         let first_empty = !has_specifiers(ast, first);
         let mut existing: Vec<String> = match braces {
-            Some((open, close)) if !first_empty => src[open.end as usize..close.start as usize]
-                .split(',')
+            Some((open, close)) if !first_empty => split_at_commas(src, open, close)
+                .into_iter()
                 .map(|x| x.trim().to_owned())
                 .collect(),
             _ => Vec::new(),

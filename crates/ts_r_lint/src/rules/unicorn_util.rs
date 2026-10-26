@@ -1081,7 +1081,15 @@ fn source_lines(src: &str) -> Vec<(usize, &str)> {
 /// `detect-indent`): the most common change of indentation between consecutive non-empty
 /// lines, spaces or tabs, with continuation lines of multi-line tokens ignored. A tab when
 /// the file indents with tabs or not at all.
+/// Computed once per file and kept in the [`FileCtx`](crate::rule::FileCtx).
 pub(crate) fn indent_unit(cx: &Ctx<'_, '_>) -> String {
+    cx.file
+        .indent_unit
+        .get_or_init(|| detect_indent_unit(cx))
+        .clone()
+}
+
+fn detect_indent_unit(cx: &Ctx<'_, '_>) -> String {
     let ast = cx.ast();
     let src = cx.src();
     let lines = source_lines(src);
@@ -2417,6 +2425,43 @@ pub(crate) fn remove_method_call(cx: &Ctx<'_, '_>, call: NodeId) -> Option<Fix> 
         Fix::delete(Span::new(obj_end, cx.span(member).end))
             .and(Span::new(member_end, cx.span(call).end), ""),
     )
+}
+
+/// unicorn's `removeStatement` for one statement.
+pub(crate) fn remove_statement(cx: &Ctx<'_, '_>, stmt: NodeId) -> Fix {
+    super::unicorn_ast::remove_statements(cx, stmt, stmt, false)
+}
+
+/// The span of `id` with all the parentheses around it.
+pub(crate) use super::unicorn_text::paren_span as parenthesized_span;
+
+/// [`remove_method_call`]'s edits added to `fix` (`fix` unchanged when `call` is not a
+/// method call).
+pub(crate) fn remove_method_call_into(cx: &Ctx<'_, '_>, call: NodeId, fix: Fix) -> Fix {
+    match remove_method_call(cx, call) {
+        Some(r) => r.edits.into_iter().fold(fix, |f, e| f.and(e.span, e.text)),
+        None => fix,
+    }
+}
+
+/// True when the source at `start` begins with a token that would make a statement a block
+/// or a declaration: `{`, `class`, `function`, `async function`, `let [`.
+pub(crate) fn starts_like_declaration(src: &str, start: u32) -> bool {
+    let rest = src.get(start as usize..).unwrap_or("");
+    let word = |r: &'_ str, w: &str| -> Option<usize> {
+        r.strip_prefix(w)
+            .filter(|t| !t.starts_with(is_ident_char))
+            .map(|_| w.len())
+    };
+    let after = |len: usize| {
+        let p = skip_trivia_forward(rest, len);
+        &rest[p..]
+    };
+    rest.starts_with('{')
+        || word(rest, "class").is_some()
+        || word(rest, "function").is_some()
+        || word(rest, "async").is_some_and(|l| word(after(l), "function").is_some())
+        || word(rest, "let").is_some_and(|l| after(l).starts_with('['))
 }
 
 /// The call's explicit type arguments (`foo<T>()`).

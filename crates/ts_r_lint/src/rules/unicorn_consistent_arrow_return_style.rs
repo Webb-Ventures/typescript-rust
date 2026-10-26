@@ -12,7 +12,7 @@ use super::prelude::*;
 use super::unicorn_ast::linebreak;
 use super::unicorn_no_useless_boolean_cast::concise_arrow_body_text;
 use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h2::{indent_unit, line_indent};
+use super::unicorn_util::{indent_unit, line_indent};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

@@ -21,8 +21,8 @@ use super::unicorn_conditions::{
 use super::unicorn_prefer_spread::is_ts_file;
 use super::unicorn_static::static_value;
 use super::unicorn_text::{paren_span, paren_text};
-use super::unicorn_util_h2::indent_unit;
-use super::unicorn_util_h4::indent_before;
+use super::unicorn_util::indent_before;
+use super::unicorn_util::indent_unit;
 use crate::env::SourceType;
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};

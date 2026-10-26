@@ -24,9 +24,10 @@
 use super::prelude::*;
 use super::unicorn_iter::{for_of_declaration_pattern, unwrap_expression};
 use super::unicorn_static::has_side_effect;
-use super::unicorn_text::{has_comment_in, is_same_reference, is_written};
+use super::unicorn_text::{has_comment_in, is_written};
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h4::{available_name, scope_within};
+use super::unicorn_util::{available_name, scope_within};
 use crate::semantic::{RefFlags, Resolution, ScopeId, SymbolId};
 use ts_r_ast::Ast;
 

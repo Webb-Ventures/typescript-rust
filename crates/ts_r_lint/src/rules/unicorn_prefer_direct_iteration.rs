@@ -17,7 +17,7 @@
 use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_text::has_comment_in;
-use super::unicorn_util_h2::remove_method_call;
+use super::unicorn_util::remove_method_call_into;
 use crate::semantic::{Resolution, SymbolId};
 use crate::types::{Ty, TypeFlags};
 use ts_r_ast::{Ast, TypeOperatorKind};

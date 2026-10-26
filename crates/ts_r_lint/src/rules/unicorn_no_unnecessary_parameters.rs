@@ -28,7 +28,7 @@ use super::prelude::*;
 use super::unicorn_ast::{linebreak, remove_argument};
 use super::unicorn_text::needs_semicolon;
 use super::unicorn_util::with_edits;
-use super::unicorn_util_h2::{indent_unit, line_indent};
+use super::unicorn_util::{indent_unit, line_indent};
 use crate::env::{GlobalAccess, SourceType};
 use crate::semantic::Decl;
 use ts_r_ast::Ast;
@@ -548,8 +548,11 @@ impl An<'_, '_, '_> {
         let ast = self.ast();
         let has_use_strict = |stmts: &[NodeId]| {
             stmts.iter().any(|&s| {
-                matches!(*ast.node(s), Node::Directive { .. })
-                    && matches!(&cx.text(s)[1..cx.text(s).len().min(11)], "use strict")
+                matches!(*ast.node(s), Node::Directive { .. }) && {
+                    // The raw text, so an escaped `"use\x20strict"` doesn't count.
+                    let t = cx.text(s);
+                    t.starts_with("'use strict'") || t.starts_with("\"use strict\"")
+                }
             })
         };
         let mut cur = Some(node);

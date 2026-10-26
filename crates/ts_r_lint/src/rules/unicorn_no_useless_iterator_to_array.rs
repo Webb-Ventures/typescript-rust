@@ -20,7 +20,7 @@ use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_iter::{is_known_non_iterator, unwrap_expression};
 use super::unicorn_text::{paren_span, would_remove_comments};
-use super::unicorn_util_h2::remove_method_call;
+use super::unicorn_util::remove_method_call_into;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -134,7 +134,7 @@ fn report(
         return;
     };
     let fix = (!would_remove_comments(cx, cx.span(call), &[paren_span(cx, obj)]))
-        .then(|| remove_method_call(cx, call, Fix::default()));
+        .then(|| remove_method_call_into(cx, call, Fix::default()));
     let r = cx.report(cx.span(prop), message).id(id);
     if let Some(f) = fix {
         match remedy {

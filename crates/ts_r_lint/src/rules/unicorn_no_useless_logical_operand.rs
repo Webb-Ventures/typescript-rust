@@ -20,9 +20,9 @@ use super::unicorn_text::{
     would_remove_comments,
 };
 use super::unicorn_types::is_boolean;
+use super::unicorn_util::is_boolean_context;
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h1::{is_outermost_logical, logical_operands};
-use super::unicorn_util_h5::is_boolean_context;
+use super::unicorn_util::{is_outermost_logical, logical_operands};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

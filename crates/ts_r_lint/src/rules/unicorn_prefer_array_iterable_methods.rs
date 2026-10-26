@@ -16,7 +16,7 @@ use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_text::{paren_span, would_remove_comments};
 use super::unicorn_types::is_array;
-use super::unicorn_util_h2::remove_method_call;
+use super::unicorn_util::remove_method_call_into;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -139,7 +139,7 @@ impl Rule for PreferArrayIterableMethods {
             .then(|| {
                 let replaced =
                     Fix::replace(pattern_span, pattern_text(cx, pattern, cx.text(value)));
-                remove_method_call(cx, call_id, replaced)
+                remove_method_call_into(cx, call_id, replaced)
             });
             let r = cx
                 .report(

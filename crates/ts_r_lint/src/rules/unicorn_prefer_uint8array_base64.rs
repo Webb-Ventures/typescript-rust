@@ -363,7 +363,7 @@ fn check_options(cx: &mut Ctx<'_, '_>, node: NodeId) -> bool {
         let close = cx.span(node).end - 1;
         let mut fix = Fix::insert(close, format!("{{{}}}", options.join(", ")));
         for &call in &calls {
-            fix = remove_method_call(cx, call, fix);
+            fix = remove_method_call_into(cx, call, fix);
         }
         fix
     });

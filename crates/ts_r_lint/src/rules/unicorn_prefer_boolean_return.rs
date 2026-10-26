@@ -9,9 +9,9 @@
 use super::prelude::*;
 use super::unicorn_conditions::{global_value_available, negated_expression_text};
 use super::unicorn_text::{call_argument_text, paren_span, paren_text, would_remove_comments};
-use super::unicorn_util_h1::unwrap_ts;
-use super::unicorn_util_h4::trailing_comment_same_line;
-use super::unicorn_util_h5::is_global_boolean_call;
+use super::unicorn_util::is_global_boolean_call;
+use super::unicorn_util::skip_wrappers as unwrap_ts;
+use super::unicorn_util::trailing_comment_same_line;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

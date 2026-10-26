@@ -14,7 +14,7 @@
 use super::prelude::*;
 use super::unicorn_text::{is_parenthesized, needs_parens_at_expression_start, needs_semicolon};
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h4::{keyword_argument_parent, parenthesize_keyword_argument};
+use super::unicorn_util::{keyword_argument_parent, parenthesize_keyword_argument};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

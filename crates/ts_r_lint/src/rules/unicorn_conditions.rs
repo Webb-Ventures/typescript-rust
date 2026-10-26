@@ -343,7 +343,7 @@ pub(crate) fn branch_statements(ast: &Ast, id: NodeId) -> Vec<NodeId> {
 
 /// ESLint's `getLineIndent` of a node or position.
 pub(crate) fn line_indent_at<'a>(cx: &Ctx<'a, '_>, pos: u32) -> &'a str {
-    super::unicorn_util_h2::line_indent(cx.src(), pos as usize)
+    super::unicorn_util::line_indent(cx.src(), pos as usize)
 }
 
 /// `getUnwrappedBranchText`: an `if` branch without its braces, reindented to the `if`
@@ -360,7 +360,7 @@ pub(crate) fn unwrapped_branch_text(cx: &Ctx<'_, '_>, if_stmt: NodeId, branch: N
     let body_indent = if first >= close {
         ""
     } else {
-        super::unicorn_util_h2::line_indent(src, first)
+        super::unicorn_util::line_indent(src, first)
     };
     let text = reindent_text(&src[open..close], body_indent, indent);
     let text = text.trim();
@@ -472,7 +472,7 @@ fn contains_direct_eval(ast: &Ast, root: NodeId) -> bool {
     }
     impl Visitor for Find {
         fn enter(&mut self, ast: &Ast, id: NodeId) -> Walk {
-            if super::unicorn_util_h1::is_direct_eval_call(ast, id) {
+            if super::unicorn_util::is_direct_eval_call(ast, id) {
                 self.found = true;
                 return Walk::Stop;
             }
@@ -604,7 +604,7 @@ pub(crate) fn early_exit_text(
         return String::new();
     };
     let indent = line_indent_at(cx, cx.span(if_stmt).start);
-    let unit = super::unicorn_util_h2::indent_unit(cx);
+    let unit = super::unicorn_util::indent_unit(cx);
     let lb = super::unicorn_ast::linebreak(cx.src());
     let body = unwrapped_branch_text(cx, if_stmt, cons);
     format!("if ({condition}) {{{lb}{indent}{unit}{keyword};{lb}{indent}}}{lb}{lb}{body}")
@@ -777,7 +777,7 @@ fn short_body_fix(
             return None;
         }
         let indent = line_indent_at(cx, cx.span(guard).start);
-        let body_indent = format!("{indent}{}", super::unicorn_util_h2::indent_unit(cx));
+        let body_indent = format!("{indent}{}", super::unicorn_util::indent_unit(cx));
         let first = cx.span(statements[0]).start;
         let end = cx.span(*statements.last()?).end;
         let body = reindent_text(

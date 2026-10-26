@@ -20,7 +20,6 @@ use super::unicorn_util::has_side_effect_with as has_side_effect;
 use super::unicorn_util::{
     is_outermost_logical, is_same_reference, logical_operands, skip_wrappers as unwrap_ts,
 };
-use super::unicorn_util_h4::has_side_effect;
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};
 

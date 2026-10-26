@@ -23,7 +23,7 @@ use super::unicorn_text::{
     would_remove_comments,
 };
 use super::unicorn_types::should_skip_known_non_array_receiver;
-use super::unicorn_util::space_around_keyword;
+use super::unicorn_util::{is_same_reference, space_around_keyword};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

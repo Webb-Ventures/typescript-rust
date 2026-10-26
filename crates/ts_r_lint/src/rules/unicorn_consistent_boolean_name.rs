@@ -29,7 +29,7 @@ use super::unicorn_names::{RegexOpt, regex_list};
 use super::unicorn_static::{
     Static, evaluated_children, is_global_ident, static_value_no_side_effects,
 };
-use super::unicorn_util_h4::{available_name, estree_ident_span, rename_symbol_fix};
+use super::unicorn_util::{available_name, estree_ident_span, rename_symbol_fix};
 use crate::semantic::Decl;
 use ts_r_ast::CommentKind;
 

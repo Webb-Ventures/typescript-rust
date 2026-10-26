@@ -23,7 +23,7 @@ use super::unicorn_static::{
 };
 use super::unicorn_text::{has_unparenthesized_optional_chain, needs_semicolon};
 use super::unicorn_types::binding_annotation;
-use super::unicorn_util_h1::{is_same_reference, unwrap_ts};
+use super::unicorn_util::{is_same_reference, skip_wrappers as unwrap_ts};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

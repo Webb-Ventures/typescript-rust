@@ -13,8 +13,8 @@ use super::prelude::*;
 use super::unicorn_conditions::{has_optional_chain_element, unwrap_ts_and_parens};
 use super::unicorn_text::{call_argument_text, paren_span, would_remove_comments};
 use super::unicorn_types::{is_boolean, is_map, is_set, is_string, is_weak_map, is_weak_set};
+use super::unicorn_util::is_boolean_context;
 use super::unicorn_util::space_around_keyword;
-use super::unicorn_util_h5::is_boolean_context;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

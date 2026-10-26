@@ -17,7 +17,7 @@
 
 use super::prelude::*;
 use super::unicorn_static::static_string_literal;
-use super::unicorn_util_h4::{available_name, estree_ident_span, rename_symbol_fix};
+use super::unicorn_util::{available_name, estree_ident_span, rename_symbol_fix};
 use crate::semantic::{DeclKind, RefFlags, ScopeId, SymbolFlags, SymbolId};
 use ts_r_ast::Modifiers;
 

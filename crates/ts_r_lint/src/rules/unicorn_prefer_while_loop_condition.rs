@@ -12,7 +12,7 @@ use super::unicorn_conditions::{
     has_unlabeled_break, idents_in, join_fixes, negated_expression_text,
 };
 use super::unicorn_text::would_remove_comments;
-use super::unicorn_util_h4::trailing_comment_same_line;
+use super::unicorn_util::trailing_comment_same_line;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
