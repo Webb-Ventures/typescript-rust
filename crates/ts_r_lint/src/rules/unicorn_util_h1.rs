@@ -245,3 +245,63 @@ pub(crate) fn decode_jsx_numeric_entities(raw: &str) -> String {
     out.push_str(rest);
     out
 }
+
+/// `containsNode` over what evaluating `root` runs: some node satisfies `pred`, not looking
+/// inside functions (other than the function node itself) or the values of non-static class
+/// fields, whose computed keys still count.
+pub(crate) fn evaluates_node(ast: &Ast, root: NodeId, pred: &dyn Fn(&Ast, NodeId) -> bool) -> bool {
+    struct Find<'p> {
+        pred: &'p dyn Fn(&Ast, NodeId) -> bool,
+        found: bool,
+        /// Nesting of instance-field keys walked from inside the walk.
+        depth: u32,
+    }
+    impl ts_r_ast::visit::Visitor for Find<'_> {
+        fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
+            use ts_r_ast::visit::Walk;
+            if (self.pred)(ast, id) {
+                self.found = true;
+                return Walk::Stop;
+            }
+            match *ast.node(id) {
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } | Node::Arrow { .. } => {
+                    Walk::SkipChildren
+                }
+                Node::PropertyDef { modifiers, key, .. }
+                    if !modifiers.contains(Modifiers::STATIC) =>
+                {
+                    if matches!(ast.node(key), Node::ComputedKey { .. }) && self.depth < 64 {
+                        self.depth += 1;
+                        ts_r_ast::visit::walk(ast, key, self);
+                        self.depth -= 1;
+                        if self.found {
+                            return Walk::Stop;
+                        }
+                    }
+                    Walk::SkipChildren
+                }
+                _ => Walk::Continue,
+            }
+        }
+    }
+    let mut f = Find {
+        pred,
+        found: false,
+        depth: 0,
+    };
+    ts_r_ast::visit::walk(ast, root, &mut f);
+    f.found
+}
+
+/// A direct `eval(...)` call (not `eval?.()`; parentheses and TS wrappers around the callee
+/// allowed), which sees the calling scope.
+pub(crate) fn is_direct_eval_call(ast: &Ast, id: NodeId) -> bool {
+    match *ast.node(id) {
+        Node::Call {
+            callee,
+            optional: false,
+            ..
+        } => ident_name(ast, unwrap_ts(ast, callee)) == Some("eval"),
+        _ => false,
+    }
+}

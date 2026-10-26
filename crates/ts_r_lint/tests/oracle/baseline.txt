@@ -305,10 +305,8 @@ unicorn/no-negated-condition 134/134
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
 unicorn/no-null 94/94
-unicorn/no-object-as-default-parameter 62/62
-unicorn/no-process-exit 58/58
-unicorn/no-static-only-class 91/91
-unicorn/no-thenable 178/178
+unicorn/no-optional-chaining-on-undeclared-variable 38/38
+unicorn/no-shorthand-property-overrides 62/62
 unicorn/no-this-assignment 23/23
 unicorn/no-this-outside-of-class 48/48
 unicorn/no-transition-all 41/41
@@ -338,6 +336,7 @@ unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46
+unicorn/prefer-get-or-insert-computed 62/62
 unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
 unicorn/prefer-identifier-import-export-specifiers 56/56

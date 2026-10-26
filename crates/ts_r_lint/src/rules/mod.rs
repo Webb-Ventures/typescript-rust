@@ -314,10 +314,8 @@ mod unicorn_no_negated_condition;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
-mod unicorn_no_object_as_default_parameter;
-mod unicorn_no_process_exit;
-mod unicorn_no_static_only_class;
-mod unicorn_no_thenable;
+mod unicorn_no_optional_chaining_on_undeclared_variable;
+mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
 mod unicorn_no_transition_all;
@@ -347,6 +345,7 @@ mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
+mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_identifier_import_export_specifiers;
@@ -712,10 +711,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,
-    &unicorn_no_object_as_default_parameter::RULE,
-    &unicorn_no_process_exit::RULE,
-    &unicorn_no_static_only_class::RULE,
-    &unicorn_no_thenable::RULE,
+    &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
+    &unicorn_no_shorthand_property_overrides::RULE,
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_this_outside_of_class::RULE,
     &unicorn_no_transition_all::RULE,
@@ -743,6 +740,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,

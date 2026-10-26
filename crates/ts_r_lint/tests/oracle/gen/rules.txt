@@ -381,3 +381,5 @@ unicorn/no-invalid-well-known-symbol-methods
 unicorn/no-incorrect-template-string-interpolation
 unicorn/no-conflicting-constraints
 unicorn/prefer-iterator-to-array
+unicorn/no-shorthand-property-overrides
+unicorn/prefer-get-or-insert-computed
