@@ -14,7 +14,8 @@
 //     [--tsr target/release/ts-r-lsp] [--tsc PATH] [--tests DIR] [--out FILE] [--show N] [--keep]
 //   --tsr defaults to $CARGO_TARGET_DIR/release/ts-r-lsp when CARGO_TARGET_DIR is set; --tsc
 //   to tsc 7's native binary in bench/node_modules (darwin-arm64); --tests to the fourslash
-//   directory; --out to target/lsp-oracle/results.json.
+//   directory; --out to target/lsp-oracle/results.json. --dump FILE appends both raw answers
+//   of every compared query to FILE (JSON lines), for debugging one test.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -38,6 +39,8 @@ const testsDir = path.resolve(root, opt('tests', 'target/upstream/typescript/tes
 const outFile = path.resolve(root, opt('out', 'target/lsp-oracle/results.json'));
 const show = Number(opt('show', '0'));
 const keep = args.includes('--keep');
+// --dump FILE: append both raw answers of every compared query (JSON lines) for debugging.
+const dump = opt('dump', '');
 const REQUEST_MS = 20000;
 const RESTART_EVERY = 60;
 
@@ -536,6 +539,7 @@ async function runCase(pair, c, test) {
       if (a == null && b == null) continue;
       compared++;
       const d = compare(feature, a, b);
+      if (dump) fs.appendFileSync(dump, `${JSON.stringify({ test: c.name, feature, marker: p.name, file: p.file.name, tsc: ra.result ?? null, tsr: rb.result ?? null })}\n`);
       if (d === null) agree++;
       else diffs.push(`${p.file.name} /*${p.name}*/: ${d.length > 600 ? `${d.slice(0, 600)}...` : d}`);
       if (broken) break;

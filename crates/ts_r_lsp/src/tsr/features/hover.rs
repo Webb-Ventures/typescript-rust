@@ -34,6 +34,7 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
                 {
                     let t = ck.check_expr(p);
                     let ts = ck.type_to_string(t);
+                    let ts = super::multiline::multiline_objects(&ts);
                     let value = format!("```typescript\n{ts}\n```");
                     return json!({
                         "contents": {"kind": "markdown", "value": value},
@@ -42,12 +43,37 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
                 }
                 return Value::Null;
             };
-            let display = describe(ck, s, Some(l));
+            let display =
+                super::quick_info::quick_info(ck, s, l, m.is_decl || in_module_name(ck, l));
             let target = c.resolve_alias(s).unwrap_or(s);
             (display, docs_of(ck, target))
         }
+        // A keyword of a declaration (`export default class {}`, `function`): what it declares.
+        Node::ClassDecl { .. }
+        | Node::ClassExpr { .. }
+        | Node::FunctionDecl { .. }
+        | Node::Interface { .. }
+        | Node::Enum { .. }
+            if on_decl_keyword(text, offset) =>
+        {
+            let Some(s) = c.sym_of_decl(l) else {
+                return Value::Null;
+            };
+            let display = super::quick_info::quick_info(ck, s, l, true);
+            (display, docs_of(ck, s))
+        }
+        // A literal member name (`"a"() {}`, `1: x`) or element access key (`o["a"]`).
+        Node::StringLit { .. } | Node::NumberLit { .. } => {
+            let Some((s, is_decl)) = literal_name_symbol(ck, l) else {
+                return Value::Null;
+            };
+            let display = super::quick_info::quick_info(ck, s, l, is_decl);
+            (display, docs_of(ck, s))
+        }
         _ => return Value::Null,
     };
+    let display = super::quick_info::drop_optional_undefined(&display);
+    let display = super::multiline::multiline_objects(&display);
     let mut value = format!("```typescript\n{display}\n```");
     if !doc.is_empty() {
         value.push('\n');
@@ -57,6 +83,69 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         "contents": {"kind": "markdown", "value": value},
         "range": lines.range(text, span.start, span.end),
     })
+}
+
+/// Whether `offset` is on a declaration keyword that tsc's quick info answers for
+/// (`default`, `class`, `function`, `interface`, `enum`; not `export`).
+fn on_decl_keyword(text: &str, offset: u32) -> bool {
+    let b = text.as_bytes();
+    let o = (offset as usize).min(b.len());
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$';
+    let mut start = o;
+    while start > 0 && word(b[start - 1]) {
+        start -= 1;
+    }
+    let mut end = o;
+    while end < b.len() && word(b[end]) {
+        end += 1;
+    }
+    matches!(
+        &text[start..end],
+        "default" | "class" | "function" | "interface" | "enum"
+    )
+}
+
+/// Whether `l` is part of a dotted namespace declaration name (`namespace a.b {}`).
+fn in_module_name(ck: &Ck<'_, '_>, l: Loc) -> bool {
+    let c = ck.c;
+    let mut cur = l;
+    for _ in 0..64 {
+        let Some(p) = c.parent(cur) else {
+            return false;
+        };
+        match *c.node(p) {
+            Node::QualifiedName { .. } => cur = p,
+            Node::Module { name, .. } => return name == cur.node && cur != l,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// The member a string or number literal names: as a declaration name, or as the key of
+/// an element access (`this["m"]`, `C[1]`).
+fn literal_name_symbol(ck: &mut Ck<'_, '_>, l: Loc) -> Option<(SymId, bool)> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    let p = c.parent(l)?;
+    if ts_r_binder::decl_name_node(ast, p.node) == Some(l.node)
+        && let Some(s) = c.sym_of_decl(p)
+    {
+        return Some((s, true));
+    }
+    let Node::Index { obj, index, .. } = *ast.node(p.node) else {
+        return None;
+    };
+    if index != l.node {
+        return None;
+    }
+    let key = match *ast.node(l.node) {
+        Node::StringLit { value } => ast.atom(value).to_string(),
+        Node::NumberLit { value } => ts_r_binder::js_number_to_string(value.get()),
+        _ => return None,
+    };
+    let t = ck.check_expr(Loc::new(l.file, obj));
+    super::locate::accessed_property(ck, t, &key).map(|s| (s, false))
 }
 
 /// `text` with the first whole-word `from` of its first line replaced by `to`.
@@ -331,7 +420,7 @@ fn type_alias_text(ck: &mut Ck<'_, '_>, s: SymId, name: &str) -> String {
     format!("type {name}")
 }
 
-fn collapse_ws(s: &str) -> String {
+pub(super) fn collapse_ws(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut space = false;
     for ch in s.chars() {

@@ -1195,6 +1195,124 @@ fn completion_function_members_and_arguments() {
     c.shutdown();
 }
 
+/// Class bodies: the inherited members not written yet (and member keywords) where a member
+/// name goes, `this` members among the names in a method, and private or protected members
+/// only where they may be read.
+#[test]
+fn completion_class_members() {
+    if !libs_present() {
+        return;
+    }
+    let text = "class B { m() {} protected p = 1; private q = 2; static s() {} }\n\
+                class C extends B {\n  \n  foo() { this.p; }\n}\nnew B().;\n\
+                export class E { static g(x: E) {} }\n";
+    let env = Env::new(
+        "complete-class",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let items = |r: &Value| -> Vec<(String, String)> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| {
+                        let label = i["label"].as_str().unwrap_or_default().to_string();
+                        (
+                            label,
+                            i["sortText"].as_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let has = |l: &[(String, String)], n: &str| l.iter().any(|(x, _)| x == n);
+    // A member name in `C`'s body: `B`'s public and protected members and the keywords, no
+    // names in scope.
+    let l = items(&result(&mut c, "textDocument/completion", at(&uc, 2, 2)));
+    for want in ["m", "p", "constructor", "static"] {
+        assert!(has(&l, want), "{want} missing: {l:?}");
+    }
+    for not in ["q", "s", "B", "foo"] {
+        assert!(!has(&l, not), "{not} offered: {l:?}");
+    }
+    // `this.` inside the derived class sees the protected member, not the private one.
+    let l = items(&result(&mut c, "textDocument/completion", at(&uc, 3, 15)));
+    assert!(has(&l, "p") && has(&l, "m") && has(&l, "foo"), "{l:?}");
+    assert!(!has(&l, "q"), "{l:?}");
+    // Statements in a method offer the `this` members (sorted after locals).
+    let l = items(&result(&mut c, "textDocument/completion", at(&uc, 3, 10)));
+    assert!(l.iter().any(|(x, s)| x == "foo" && s == "14"), "{l:?}");
+    // Outside the classes only public members.
+    let l = items(&result(&mut c, "textDocument/completion", at(&uc, 5, 8)));
+    assert!(has(&l, "m") && !has(&l, "p") && !has(&l, "q"), "{l:?}");
+    // An exported class is a type in scope inside itself.
+    let l = items(&result(&mut c, "textDocument/completion", at(&uc, 6, 30)));
+    assert!(has(&l, "E"), "{l:?}");
+    c.shutdown();
+}
+
+/// JSX: attribute names of the tag's props (optional ones as `name?`), the tag to close after
+/// `</`, intrinsic element names for a tag name, and no list in JSX text.
+#[test]
+fn completion_in_jsx() {
+    if !libs_present() {
+        return;
+    }
+    let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
+    let text = "declare namespace JSX {\n  interface Element {}\n  interface IntrinsicElements { div: { id?: string; hidden: boolean } }\n}\n\
+                function Foo(props: { size: number; label?: string }) { return null; }\n\
+                const a = <div ></div>;\n\
+                const b = <Foo size={1} ></Foo>;\n\
+                const c = <div>text </;\n\
+                const d = <d />;\n\
+                const e = <div> some text </div>;\n";
+    let env = Env::new(
+        "complete-jsx",
+        &[("tsconfig.json", tsconfig), ("src/c.tsx", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.tsx");
+    let uc = env.uri("src/c.tsx");
+    let labels = |r: &Value| -> Vec<(String, String)> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| {
+                        let label = i["label"].as_str().unwrap_or_default().to_string();
+                        (
+                            label,
+                            i["sortText"].as_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let names = |l: &[(String, String)]| l.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+    // Attribute names of an intrinsic element.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 5, 15)));
+    assert_eq!(names(&l), ["hidden", "id?"], "{l:?}");
+    // A component's props, minus the attributes already written.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 24)));
+    assert_eq!(names(&l), ["label?"], "{l:?}");
+    // The tag to close.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 7, 22)));
+    assert_eq!(names(&l), ["div>"], "{l:?}");
+    // A tag name: intrinsic elements first, then the names in scope.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 8, 12)));
+    assert!(l.iter().any(|(n, s)| n == "div" && s == "11"), "{l:?}");
+    assert!(l.iter().any(|(n, _)| n == "Foo"), "{l:?}");
+    // JSX text: no list.
+    let r = result(&mut c, "textDocument/completion", at(&uc, 9, 20));
+    assert!(labels(&r).is_empty(), "{r:?}");
+    c.shutdown();
+}
+
 /// Inside a string literal the list comes from what the string can be: the literal union a
 /// parameter takes, the keys of an indexed object, and files for a module specifier.
 #[test]
@@ -1479,6 +1597,141 @@ fn hover_alias_uses_local_name() {
     let h = hover_text(&mut c, &ub, 3, 6);
     assert!(h.contains("(alias) namespace ns"), "{h}");
     assert!(!h.contains("import "), "{h}");
+    c.shutdown();
+}
+
+/// The (line, character) of the `k`th byte of the first `needle` in `src` (ASCII sources).
+fn pos_of(src: &str, needle: &str, k: usize) -> (u32, u32) {
+    let at = src.find(needle).expect("needle in source") + k;
+    let before = &src[..at];
+    let line = before.matches('\n').count() as u32;
+    let col = before.len() - before.rfind('\n').map_or(0, |i| i + 1);
+    (line, col as u32)
+}
+
+/// Quick info in tsc 7's shape: one line per meaning or overload, resolved signatures at
+/// calls, owners with their type parameters or arguments, `(accessor)`, constructors.
+#[test]
+fn hover_quick_info_lines() {
+    if !libs_present() {
+        return;
+    }
+    let src = "namespace N {\n    export function f(x: number): void;\n    export function f(x: string): void;\n    export function f(x: any) {}\n}\nclass G<T> {\n    accessor a = 1;\n    m<U>(u: U, t: T): U { return u; }\n    constructor(x?: number) {}\n    \"lit\"() {}\n}\nconst v = new G<string>();\nv.m(1, \"a\");\nN.f(1);\nN.f;\nv[\"lit\"]();\nfunction opt(c?: () => string) {}\nexport default class {}\n";
+    let env = Env::new(
+        "hover-quick-info",
+        &[("tsconfig.json", TSCONFIG), ("src/q.ts", src)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/q.ts");
+    let u = env.uri("src/q.ts");
+    let mut h = |needle: &str, k: usize| {
+        let (l, ch) = pos_of(src, needle, k);
+        let v = hover_text(&mut c, &u, l, ch);
+        let v = v.strip_prefix("```typescript\n").unwrap_or(&v);
+        v.split("\n```").next().unwrap_or("").to_string()
+    };
+    assert_eq!(h("N.f(1)", 2), "function N.f(x: number): void");
+    assert_eq!(
+        h("N.f;", 2),
+        "function N.f(x: number): void\nfunction N.f(x: string): void"
+    );
+    assert_eq!(h("v.m(1", 2), "(method) G<string>.m<1>(u: 1, t: string): 1");
+    assert_eq!(h("accessor a", 9), "(accessor) G<T>.a: number");
+    assert_eq!(
+        h("m<U>", 2),
+        "(type parameter) U in G<T>.m<U>(u: U, t: T): U"
+    );
+    assert_eq!(h("constructor(", 3), "constructor G<T>(x?: number): G<T>");
+    assert_eq!(
+        h("new G<string>", 4),
+        "constructor G<string>(x?: number): G<string>"
+    );
+    assert_eq!(h("v[\"lit\"]", 3), "(method) G<string>[\"lit\"](): void");
+    assert_eq!(
+        h("function opt", 10),
+        "function opt(c?: () => string): void"
+    );
+    assert_eq!(h("default class", 2), "class default");
+    c.shutdown();
+}
+
+#[test]
+fn hover_quick_info_through_aliases() {
+    if !libs_present() {
+        return;
+    }
+    // A one-member enum, a class exported with `export =`, an ambient module's `export =`
+    // and a narrowed alias.
+    let a = "export enum K {\n    Only\n}\nexport declare const env: string | undefined;\n";
+    let d = "declare class C<T> {\n    m(): void;\n}\nexport = C;\n";
+    let amb = "declare module \"amb\" {\n    const inner: number;\n    export = inner;\n}\n";
+    let b = "/// <reference path=\"./amb.d.ts\" />\nimport { K, env } from \"./a\";\nimport C = require(\"./d\");\nimport outer = require(\"amb\");\nlet k = K.Only;\ndeclare var x: C<number>;\nx.m;\nconst o = outer;\nif (typeof env === \"string\") {\n    env.length;\n}\n";
+    let env = Env::new(
+        "hover-quick-info-alias",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", a),
+            ("src/d.d.ts", d),
+            ("src/amb.d.ts", amb),
+            ("src/b.ts", b),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/b.ts");
+    let u = env.uri("src/b.ts");
+    let mut h = |needle: &str, k: usize| {
+        let (l, ch) = pos_of(b, needle, k);
+        let v = hover_text(&mut c, &u, l, ch);
+        let v = v.strip_prefix("```typescript\n").unwrap_or(&v);
+        v.split("\n```").next().unwrap_or("").to_string()
+    };
+    assert_eq!(h("Only;", 1), "(enum member) K.Only = 0");
+    assert_eq!(h("x.m;", 2), "(method) C<number>.m(): void");
+    assert!(h("= outer;", 3).starts_with("(alias) const outer: number"));
+    assert!(h("env.length", 1).starts_with("(alias) const env: string | undefined"));
+    c.shutdown();
+}
+
+/// `o?.next` reads `next` through the object's non-nullable part; destructuring
+/// `{ next: { next } }` of an optional `next` does not (tsc finds no property there).
+#[test]
+fn references_through_optional_objects() {
+    if !libs_present() {
+        return;
+    }
+    let src = "interface R {\n    next?: R;\n}\ndeclare const o: R;\no.next?.next;\nfunction f({ next: { next: x } }: R) {}\n";
+    let env = Env::new(
+        "refs-optional",
+        &[("tsconfig.json", TSCONFIG), ("src/r.ts", src)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/r.ts");
+    let u = env.uri("src/r.ts");
+    let mut refs = |line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            &mut c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        let mut v: Vec<(u64, u64)> = r
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|l| {
+                        (
+                            l["range"]["start"]["line"].as_u64().unwrap(),
+                            l["range"]["start"]["character"].as_u64().unwrap(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort();
+        v
+    };
+    // The declaration, both accesses and the outer destructuring key; not the inner key.
+    assert_eq!(refs(1, 5), vec![(1, 4), (4, 2), (4, 8), (5, 13)]);
     c.shutdown();
 }
 

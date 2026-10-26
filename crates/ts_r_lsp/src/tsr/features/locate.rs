@@ -112,7 +112,7 @@ pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
     match *ast.node(p) {
         Node::Member { obj, prop, .. } if prop == l.node => {
             let t = ck.check_expr(Loc::new(l.file, obj));
-            return one(property_of(ck, t, name));
+            return one(accessed_property(ck, t, name));
         }
         Node::QualifiedName { left, right } if right == l.node => {
             let Some(ls) = entity_symbol(ck, Loc::new(l.file, left)) else {
@@ -208,6 +208,20 @@ fn heritage_meaning(ck: &Ck<'_, '_>, ewta: Loc) -> u8 {
 pub fn property_of(ck: &mut Ck<'_, '_>, t: TypeId, name: &str) -> Option<SymId> {
     let a = ck.apparent_type(t);
     ck.property_of_type(a, name)
+}
+
+/// The property an access `o.name` reads: through `o`'s non-nullable part when the object
+/// may be `undefined` (`a?.b`, an optional member). Destructuring does not look through
+/// `undefined` (tsc finds no property there).
+pub fn accessed_property(ck: &mut Ck<'_, '_>, t: TypeId, name: &str) -> Option<SymId> {
+    if let Some(p) = property_of(ck, t, name) {
+        return Some(p);
+    }
+    let nn = ck.non_nullable(t);
+    if nn == t {
+        return None;
+    }
+    property_of(ck, nn, name)
 }
 
 /// The property a destructuring key reads: `const { a } = o`, `function f({ a }: T)`.

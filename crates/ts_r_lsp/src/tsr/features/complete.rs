@@ -3,7 +3,7 @@
 //! and documentation.
 
 use super::hover::{describe, docs_of};
-use super::locate::{is_expression_name, meaning_at, node_at};
+use super::locate::{meaning_at, node_at};
 use super::{Ctx, LspLines};
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -21,6 +21,8 @@ use ts_r_types::{SymId, TypeFlags, TypeId};
 const SORT_LOCAL: &str = "11";
 const SORT_MEMBER: &str = "11";
 const SORT_OPTIONAL: &str = "12";
+const SORT_SPREAD_MEMBER: &str = "13";
+const SORT_THIS_MEMBER: &str = "14";
 const SORT_GLOBAL: &str = "15";
 const SORT_AUTO_IMPORT: &str = "16";
 const SORT_KEYWORD: &str = "15";
@@ -100,12 +102,23 @@ const KEYWORDS: &[&str] = &[
 enum Context {
     /// After `obj.` (or `A.` in a type).
     Member { obj: NodeId, qualified: bool },
-    /// A name in scope; `types_only` in a type reference, `values_only` in an expression.
+    /// A name in scope; `types_only` in a type reference, `values_only` in an expression;
+    /// `jsx_tag` for a JSX tag name (intrinsic element names first).
     Scope {
         anchor: NodeId,
         types_only: bool,
         values_only: bool,
+        jsx_tag: bool,
     },
+    /// A member name in a class, interface or type literal body: the inherited members not
+    /// written yet, with the member keywords.
+    ClassMember {
+        slot: super::class_items::MemberSlot,
+    },
+    /// An attribute name in a JSX opening tag.
+    JsxAttrs { opening: NodeId },
+    /// In a JSX closing tag: the tag it closes.
+    JsxClosing { label: String },
     /// Inside a string literal: the literals, property names or module paths it may hold.
     String { lit: NodeId },
     /// Inside a comment: only `/// <reference path="|"` offers anything.
@@ -154,6 +167,27 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     {
         return (Context::None, prefix);
     }
+    // JSX: attribute names, the closing tag, nothing in text.
+    let anchor0 = node.unwrap_or(ast.root);
+    let word_node0 = if ws < offset {
+        super::position::node_covering(ast, ws).unwrap_or(anchor0)
+    } else {
+        anchor0
+    };
+    let mut jsx_tag = false;
+    if c.file(file).path.ends_with("x") {
+        match super::jsx_items::jsx_spot(c, file, word_node0, ws) {
+            Some(super::jsx_items::JsxSpot::Attrs { opening }) => {
+                return (Context::JsxAttrs { opening }, prefix);
+            }
+            Some(super::jsx_items::JsxSpot::Closing { label }) => {
+                return (Context::JsxClosing { label }, prefix);
+            }
+            Some(super::jsx_items::JsxSpot::Text) => return (Context::None, prefix),
+            Some(super::jsx_items::JsxSpot::Tag) => jsx_tag = true,
+            None => {}
+        }
+    }
     // `obj.|` / `obj.pre|`
     let b = text.as_bytes();
     let mut d = ws as usize;
@@ -167,6 +201,15 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
             let Some(n) = cur else { break };
             match *ast.node(n) {
                 Node::Member { obj, .. } if ast.span(obj).end <= dot => {
+                    return (
+                        Context::Member {
+                            obj,
+                            qualified: false,
+                        },
+                        prefix,
+                    );
+                }
+                Node::JsxMemberExpr { obj, .. } if ast.span(obj).end <= dot => {
                     return (
                         Context::Member {
                             obj,
@@ -191,6 +234,20 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
         return (Context::None, prefix);
     }
     let anchor = node.unwrap_or(ast.root);
+    // The word being typed decides where it is (the cursor may touch the next node too, as
+    // in `b|() {}`).
+    let word_node = if ws < offset {
+        super::position::node_covering(ast, ws).unwrap_or(anchor)
+    } else {
+        anchor
+    };
+    if let Some(slot) = super::class_items::member_slot(c, file, word_node, ws) {
+        return (Context::ClassMember { slot }, prefix);
+    }
+    // Elsewhere in a class or interface body, outside members (`a |`): nothing.
+    if super::class_items::in_body(c, file, word_node, ws) {
+        return (Context::None, prefix);
+    }
     let parent = c.file(file).parents().parent(anchor);
     // A name being declared (`var a|`, `function f|`, `catch (e|`) gets no list.
     if let Some(p) = parent
@@ -199,15 +256,20 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     {
         return (Context::None, prefix);
     }
-    let types_only = matches!(ast.node(anchor), Node::Ident { .. })
-        && parent.is_some_and(|p| matches!(ast.node(p), Node::TypeRef { .. }));
-    let values_only = matches!(ast.node(anchor), Node::Ident { .. })
-        && is_expression_name(ck, Loc::new(file, anchor));
+    let types_only = super::position::is_type_location(c, file, anchor, ws);
+    // `export { | }` names locals of any meaning.
+    let in_export = [Some(anchor), parent].into_iter().flatten().any(|n| {
+        matches!(
+            ast.node(n),
+            Node::ExportNamed { .. } | Node::ExportSpecifier { .. }
+        )
+    });
     (
         Context::Scope {
             anchor,
             types_only,
-            values_only,
+            values_only: !types_only && !in_export,
+            jsx_tag,
         },
         prefix,
     )
@@ -276,6 +338,11 @@ fn kind_of_flags(f: SymbolFlags) -> u32 {
     }
 }
 
+/// A `#name` private name with an identifier after the `#`.
+fn is_private_name(s: &str) -> bool {
+    s.strip_prefix('#').is_some_and(is_identifier_name)
+}
+
 pub(crate) fn is_identifier_name(s: &str) -> bool {
     let mut it = s.chars();
     it.next()
@@ -319,9 +386,33 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
             }
         }
+        Context::ClassMember { slot } => {
+            for (name, s) in super::class_items::inherited_items(ck, cx.file, &slot, offset) {
+                if !is_identifier_name(&name) {
+                    continue;
+                }
+                let mut item = json!({
+                    "label": name,
+                    "kind": item_kind(c, s),
+                    "sortText": SORT_LOCAL,
+                });
+                if is_optional(c, s) {
+                    mark_optional(&mut item, &name);
+                }
+                items.push(item);
+            }
+            let keywords = if slot.is_class {
+                super::class_items::CLASS_ELEMENT_KEYWORDS
+            } else {
+                super::class_items::TYPE_ELEMENT_KEYWORDS
+            };
+            for k in keywords {
+                items.push(json!({"label": k, "kind": 14, "sortText": SORT_KEYWORD}));
+            }
+        }
         Context::Member { obj, qualified } => {
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
-                if !is_identifier_name(&name) {
+                if !is_identifier_name(&name) && !is_private_name(&name) {
                     continue;
                 }
                 let mut item = json!({
@@ -336,11 +427,45 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 items.push(item);
             }
         }
+        Context::JsxAttrs { opening } => {
+            for (name, s, by_spread) in super::jsx_items::attr_items(ck, cx.file, opening, offset) {
+                let optional = is_optional(c, s);
+                let sort = if by_spread {
+                    SORT_SPREAD_MEMBER
+                } else if optional {
+                    SORT_OPTIONAL
+                } else {
+                    SORT_MEMBER
+                };
+                let mut item = json!({
+                    "label": name,
+                    "kind": item_kind(c, s),
+                    "sortText": sort,
+                });
+                if optional {
+                    mark_optional(&mut item, &name);
+                }
+                items.push(item);
+            }
+        }
+        Context::JsxClosing { label } => {
+            items.push(json!({"label": label, "kind": 7, "sortText": SORT_LOCAL}));
+        }
         Context::Scope {
             anchor,
             types_only,
             values_only,
+            jsx_tag,
         } => {
+            if jsx_tag {
+                for (name, s) in super::jsx_items::intrinsic_tags(ck, Loc::new(cx.file, anchor)) {
+                    items.push(json!({
+                        "label": name,
+                        "kind": item_kind(c, s),
+                        "sortText": SORT_LOCAL,
+                    }));
+                }
+            }
             if let Some(found) = object_items(ck, cx.file, anchor, offset)
                 .or_else(|| pattern_items(ck, cx.file, anchor, offset))
             {
@@ -358,18 +483,20 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 }
                 return json!({"isIncomplete": false, "items": items});
             }
+            // A value position offers values only (an interface, type alias or namespace
+            // without values is not one); a type position types and the namespaces that may
+            // hold them (`tsc: tsc/internal/ls/completions.go`, the global symbol filter).
             let want = if types_only {
                 meaning::TYPE | meaning::NAMESPACE
             } else if values_only {
-                meaning::VALUE | meaning::NAMESPACE
+                meaning::VALUE
             } else {
                 meaning::ALL
             };
             let mut seen: HashSet<String> = HashSet::new();
             let own = own_initializer(c, Loc::new(cx.file, anchor), offset, !prefix.is_empty());
             for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
-                if !c.has_meaning(c.resolve_alias(s).unwrap_or(s), want) && !c.has_meaning(s, want)
-                {
+                if !has_meaning_through_alias(c, s, want) {
                     continue;
                 }
                 if !seen.insert(name.clone()) || own.as_deref() == Some(name.as_str()) {
@@ -381,6 +508,24 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                     "sortText": SORT_LOCAL,
                     "data": data("s", &name),
                 }));
+            }
+            if !types_only {
+                for (name, s) in super::class_items::this_items(ck, Loc::new(cx.file, anchor)) {
+                    if seen.contains(&name) {
+                        continue;
+                    }
+                    let insert = if is_identifier_name(&name) {
+                        format!("this.{name}")
+                    } else {
+                        format!("this[{}]", serde_json::Value::String(name.clone()))
+                    };
+                    items.push(json!({
+                        "label": name,
+                        "kind": item_kind(c, s),
+                        "sortText": SORT_THIS_MEMBER,
+                        "insertText": insert,
+                    }));
+                }
             }
             if !types_only
                 && has_arguments(c, Loc::new(cx.file, anchor))
@@ -436,6 +581,26 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         }
     }
     json!({"isIncomplete": incomplete, "items": items})
+}
+
+/// Whether `s` has a meaning in `want`; an alias by what it resolves to (an alias that
+/// resolves to nothing keeps every meaning).
+fn has_meaning_through_alias(c: &Checker<'_>, s: SymId, want: u8) -> bool {
+    let f = c.sym_flags(s);
+    if !f.intersects(SymbolFlags::ALIAS) {
+        return c.has_meaning(s, want);
+    }
+    // A name both imported and declared here (`import type { A }` and `const A`) has the
+    // declaration's meanings too.
+    let mut own = f;
+    own.remove(SymbolFlags::ALIAS);
+    if flags_meaning(own) & want != 0 {
+        return true;
+    }
+    match c.resolve_alias(s) {
+        Some(t) if t != s => c.has_meaning(t, want),
+        _ => true,
+    }
 }
 
 fn flags_meaning(f: SymbolFlags) -> u8 {
@@ -531,10 +696,16 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
         }
     }
     let store = ck.store();
-    let mut out: Vec<(String, SymId)> = props
+    let named: Vec<(String, SymId)> = props
         .into_iter()
         .map(|(n, s)| (store.str(n).to_string(), s))
-        .filter(|(n, _)| !n.starts_with("__@") && !n.starts_with('#'))
+        .filter(|(n, _)| !n.starts_with("__@"))
+        .collect();
+    // Private and protected members only where they may be read
+    // (`tsc: tsc/internal/ls/completions.go`, the property-access validity filter).
+    let mut out: Vec<(String, SymId)> = named
+        .into_iter()
+        .filter(|(n, s)| super::class_items::member_visible(ck, *s, n, obj))
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
@@ -612,6 +783,37 @@ fn object_container(c: &Checker<'_>, file: FileId, anchor: NodeId, offset: u32) 
 /// that no other member already writes. `None` when the literal has no contextual type (or
 /// the type has no properties): the names in scope are offered instead.
 /// (Rule from `tsc: tsc/internal/ls/completions.go`, the object-like completion symbols.)
+/// The properties an object of contextual type `ct` may take: for a union, every property of
+/// its object members (not of primitives, arrays or callable members).
+pub(super) fn object_props(ck: &mut Ck<'_, '_>, ct: TypeId) -> Vec<(String, SymId)> {
+    let c = ck.c;
+    let mut props: Vec<(String, SymId)> = Vec::new();
+    let members = ck.union_members(ct);
+    let union = members.len() > 1;
+    for m in members {
+        let flags = ck.store().flags(m);
+        if union
+            && (flags.intersects(TypeFlags::PRIMITIVE)
+                || c.is_array_like_type(m)
+                || !ck.signatures_of(m, SigKind::Call).is_empty()
+                || !ck.signatures_of(m, SigKind::Construct).is_empty())
+        {
+            continue;
+        }
+        if flags.intersects(TypeFlags::ANY_OR_UNKNOWN) {
+            continue;
+        }
+        let a = ck.apparent_type(m);
+        for (n, s) in ck.properties_of(a) {
+            let name = ck.store().str(n).to_string();
+            if !props.iter().any(|(x, _)| *x == name) {
+                props.push((name, s));
+            }
+        }
+    }
+    props
+}
+
 fn object_items(
     ck: &mut Ck<'_, '_>,
     file: FileId,
@@ -637,35 +839,12 @@ fn object_items(
         ct = ck.contextual_type(Loc::new(file, p));
     }
     let ct = ct?;
-    // A union offers every property of its object members (not of primitives, arrays or
-    // callable members).
-    let mut props: Vec<(String, SymId)> = Vec::new();
-    let members = ck.union_members(ct);
-    let union = members.len() > 1;
-    for m in members {
-        let flags = ck.store().flags(m);
-        if union
-            && (flags.intersects(TypeFlags::PRIMITIVE)
-                || c.is_array_like_type(m)
-                || !ck.signatures_of(m, SigKind::Call).is_empty()
-                || !ck.signatures_of(m, SigKind::Construct).is_empty())
-        {
-            continue;
-        }
-        if flags.intersects(TypeFlags::ANY_OR_UNKNOWN) {
-            continue;
-        }
-        let a = ck.apparent_type(m);
-        for (n, s) in ck.properties_of(a) {
-            let name = ck.store().str(n).to_string();
-            if !props.iter().any(|(x, _)| *x == name) {
-                props.push((name, s));
-            }
-        }
-    }
+    let props = object_props(ck, ct);
     if props.is_empty() {
         return None;
     }
+    let ast = c.ast(file);
+    let parents = c.file(file).parents();
     // Names other members already write (not the one being typed, not spreads).
     let Node::ObjectLit { props: list } = *ast.node(obj) else {
         return None;
@@ -975,6 +1154,35 @@ fn scope_names(c: &Checker<'_>, l: Loc) -> Vec<(String, SymId)> {
                 continue;
             }
             out.push((text.to_string(), c.sym(l.file, sym)));
+        }
+        // A file, namespace or enum also has its exports in scope (not re-exports, not names
+        // in `declare global`, which are globals).
+        if matches!(
+            sc.kind,
+            ts_r_binder::ScopeKind::File
+                | ts_r_binder::ScopeKind::Module
+                | ts_r_binder::ScopeKind::Enum
+        ) && let Some(container) = sc.symbol
+        {
+            let exports = b.symbol(container).exports;
+            if exports != b.global_augmentations {
+                for &(name, sym) in b.table(exports) {
+                    let text = b.name_text(ast, name);
+                    if !is_identifier_name(text) || text == "default" {
+                        continue;
+                    }
+                    // `export import a = N.b` is not offered (as tsc 7 does not).
+                    let bs = b.symbol(sym);
+                    if bs
+                        .facts
+                        .intersects(SymbolFacts::EXPORT_SPECIFIER | SymbolFacts::DETACHED)
+                        || bs.flags.intersects(SymbolFlags::ALIAS)
+                    {
+                        continue;
+                    }
+                    out.push((text.to_string(), c.sym(l.file, sym)));
+                }
+            }
         }
         scope = sc.parent;
     }

@@ -148,9 +148,11 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   on the worker that checked the file (so node types are cached): `locate` (offset to node,
   name to symbols: bindings, references, members via the object's type, qualified names,
   import/export specifiers, shorthands, destructuring keys, component JSX attributes),
-  `hover` (tsserver-style display string, narrowed type at expressions, JSDoc as markdown;
-  an import alias shows its target as tsc 7 does: `(alias) function name(...)` under the
-  local name, no `import` line),
+  `hover` (tsc 7's quick info, built in `quick_info.rs`: one line per meaning or overload,
+  the resolved signature at a call, owners with type parameters or arguments, object types
+  one member per line (`multiline.rs`), narrowed type at expressions, JSDoc as markdown;
+  an import alias shows its target as tsc 7 does: `(alias) function name(...)`, no
+  `import` line; see "Quick info" below),
   `complete` (members after `.` from the object's apparent type, or a namespace's exports;
   scope locals innermost first, globals, keywords; with a typed prefix, auto-imports of the
   project's own modules' exports with the import edit in the file's style: quotes,
@@ -313,10 +315,66 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
 - Optional properties (`?`, a mapped type's or a union's optional result) are labelled
   `name?` with `insertText`/`filterText` `name`, in member, object, pattern and string
   (`"|" in o`, `o["|"]`) lists; object and pattern lists sort them after required ones.
+- Class, interface and type literal bodies (`class_items.rs`): at a member-name slot
+  (after the body's `{`, after a member's `;`/`}`/`,` or on a later line, or after member
+  modifiers) the list is the member keywords (`public`, `static`, `get`, `readonly`, ...;
+  interfaces and type literals only `readonly`) plus, in a class, the base class's and
+  implemented interfaces' members not yet written (not `private`/`#private`; `static`
+  lists the base constructor's statics; `override` only the base class's; after `private`
+  no list). Inside methods, accessors, constructors, property initializers and static
+  blocks (arrows see through, other functions end the search), the class's `this` members
+  are offered among the names in scope as `this.name` (statics in static code); a
+  function's declared `this` parameter type gives its members the same way.
+- JSX (`jsx_items.rs`): after a tag name (`<Foo |`, `<Foo a="" |`, an opening tag still
+  without its `>`) the list is the props type's members minus attributes already written
+  (members a spread provides are still offered); a tag the checker could not resolve reads
+  its own signatures (first call parameter, or the `props` of what a construct signature
+  returns, through constraints). After `</` the list is the open element's name; at `<|`
+  the names in scope plus `JSX.IntrinsicElements`'s tags. Text between tags offers nothing.
+- Positions (`position.rs`): the token before an offset and the node covering it, and
+  whether an offset sits in a type (annotation, type arguments, `extends`/`implements`,
+  `as`/`satisfies`), which switches the scope list to types and namespaces.
 - Scope: a variable is not offered inside its own initializer (`const x = |`), except when
   the cursor is past the initializer's end with nothing typed, or inside a JSX tag; blocks,
   arrows and patterns end the search. A CommonJS JavaScript file (one that refers to
   `require`, `module` or `exports` freely) has `module` and `exports` as locals.
+
+## Quick info (`tsr/features/quick_info.rs`)
+
+Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checker.go`
+(`instantiateSymbol`), v7.0.2, in our words; the fourslash tests are the oracle.
+
+- The location's meaning (value, type or namespace position; a declaration name is all
+  three) picks which of a merged symbol's meanings get a line; when none match, all are
+  shown. Each meaning is its own line: `(local) var`, `(property)`, `(accessor)` (also
+  `accessor` fields), `(method)`, `function`, `constructor`, `class`/`(local class)`/
+  `abstract class`, `interface`, `enum`/`const enum`, `(enum member) E.m = 0`,
+  `namespace`/`module`, `(type parameter) T in C<T>`/`in f<T>(x: T): void`/
+  `in type A<T>`, `type A<T> = <body as written>`.
+- Functions show every overload (`function f(x: number): void` per line; from five on, the
+  first three then `// +N more overloads`); on a declaration's own name, that
+  declaration's signature; at a call of an overloaded or generic function, the signature
+  the call resolved to (`f<string>(x: string)`). A callee variable shows the
+  resolved signature as its type. `new C(..)`/`C(..)` of a class with one construct
+  signature shows `constructor C<args>(..): C<args>`.
+- Member names are `Owner<params or args>.name`, `Owner["lit"]` or `Owner[1]`. A member
+  read through an instantiated type shows the owner's type arguments when its symbol was
+  instantiated: always for methods (their function type may mention the owner's type
+  parameters), for other members only when instantiation changed the printed type
+  (`Array<T>.length`); otherwise the declared parameters with constraints and defaults.
+- Names gain their enclosing namespaces unless the location is a declaration or inside
+  that namespace's body. Through an import alias each line is prefixed `(alias) `, the
+  target's declared type is shown (no narrowing), and a target that cannot be named at
+  the location (declared in another module or an ambient `declare module "m"`) is shown
+  under the alias's name; a module target is `(alias) module m` (`import = require`) or
+  `(alias) namespace m`.
+- Optional members and parameters lose the `| undefined` that optionality adds
+  (`c?: () => string`), and an optional chain's link (`a?.b`) shows the property's own type.
+  This is text post-processing of the checker's printed types (`drop_optional_undefined`)
+  until the printer has a quick-info mode.
+- Hovering the `class`, `function`, `interface`, `enum` or `default` keyword of a
+  declaration describes the declaration; a string or number literal that names a member
+  (`o["a"]`, `{ 1: x }`) describes that member.
 
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
@@ -724,11 +782,12 @@ features stay on ts-r (hover p50 0.12 ms).
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
 - Features (the fourslash oracle lists the rest by cause: bench/lsp-oracle/README.md): hover
-  at a call shows the declared signature, not the resolved one (tsserver shows
-  `f<string>(x: string)`); JSX intrinsic attributes (`<form onSubmit>`) have no symbol
-  (the checker does not type JSX yet); references do not follow renaming imports
-  (`import { a as b }`: uses of `b`) or contextually typed object literal properties.
-  Completions: no JSX attribute lists, no bracket-notation members (`o["a-b"]`), no
+  prints names in signatures unqualified (`Iterator<T>` where tsc writes
+  `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
+  (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
+  have no symbol (the checker does not type JSX yet); references do not follow renaming
+  imports (`import { a as b }`: uses of `b`) or contextually typed object literal properties.
+  Completions: no bracket-notation members (`o["a-b"]`), no
   accessibility filtering after `.` (private members are listed), auto-imports only from
   the project's own (non-`node_modules`) modules and never `default` exports.
 - Input watching is per directory and add-only (directories stay watched after their files
