@@ -2,13 +2,14 @@
 
 use super::keywords::{self, Doc, Special};
 use super::locate::{
-    Meaning, ident_at, literal_accesses_in, meaning_at, name_text, names_in, node_at, property_of,
+    Meaning, ident_at, key_text, literal_key, literal_key_span, literal_keys_in, meaning_at,
+    name_text, names_in, node_at,
 };
 use super::{Ctx, LinesCache, LspLines, decl_span};
 use crate::jsonrpc::codes;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
-use ts_r_ast::{MethodKind, Node};
+use ts_r_ast::{MethodKind, Node, NodeId};
 use ts_r_binder::SymbolFlags;
 use ts_r_checker::{Ck, Loc};
 use ts_r_diagnostics::FileId;
@@ -467,7 +468,7 @@ struct Target {
 impl Target {
     fn at(ck: &mut Ck<'_, '_>, l: Loc) -> Option<Target> {
         let c = ck.c;
-        let name = name_text(c.ast(l.file), l.node)?.to_string();
+        let name = key_text(ck, l)?;
         let m = meaning_at(ck, l);
         // On a shorthand, references are those of the variable (what tsserver does).
         let s = match (m.primary, m.shorthand) {
@@ -502,6 +503,30 @@ impl Target {
     }
 }
 
+/// Whether a numeric literal indexing an element access (`o[0]`) starts at `offset`.
+fn is_numeric_index(c: &ts_r_checker::Checker, f: FileId, offset: u32) -> bool {
+    let ast = c.ast(f);
+    node_at(ast, offset).is_some_and(|n| {
+        matches!(ast.node(n), Node::NumberLit { .. })
+            && c.file(f)
+                .parents()
+                .parent(n)
+                .is_some_and(|p| matches!(ast.node(p), Node::Index { index, .. } if *index == n))
+    })
+}
+
+/// The string or numeric literal key at `offset` (`"a": 1`, `o["a"]`, `o[0]`).
+fn literal_key_at(cx: &Ctx<'_, '_>, offset: u32) -> Option<NodeId> {
+    let c = cx.checker;
+    let ast = c.ast(cx.file);
+    let parents = c.file(cx.file).parents();
+    [Some(offset), offset.checked_sub(1)]
+        .into_iter()
+        .flatten()
+        .filter_map(|o| node_at(ast, o))
+        .find(|&n| literal_key(ast, parents, n).is_some())
+}
+
 /// References to the symbol at `offset`, in `scope`, in file order then source order.
 pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Scope) -> Vec<Ref> {
     let c = cx.checker;
@@ -513,7 +538,10 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
     let keyword_name = (scope == Scope::Project)
         .then(|| keywords::keyword_name(&Doc::new(c, cx.file), offset))
         .flatten();
-    let Some(n) = keyword_name.or_else(|| ident_at(c.ast(cx.file), offset)) else {
+    let Some(n) = keyword_name
+        .or_else(|| ident_at(c.ast(cx.file), offset))
+        .or_else(|| literal_key_at(cx, offset))
+    else {
         return Vec::new();
     };
     let Some(target) = Target::at(ck, Loc::new(cx.file, n)) else {
@@ -571,33 +599,33 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
                 shorthand: side,
             });
         }
-        // `o["name"]` reads the same property as `o.name`.
+        // Literal keys: `"name": 1`, `get 42()`, `o["name"]`, `o[0]`.
         let text = c.file(f).text.as_str();
-        for (access, lit) in literal_accesses_in(ast) {
-            let (Node::Index { obj, .. }, Node::StringLit { value }) =
-                (*ast.node(access), *ast.node(lit))
-            else {
+        for id in literal_keys_in(ast, c.file(f).parents()) {
+            let l = Loc::new(f, id);
+            if key_text(ck, l).as_deref() != Some(target.name.as_str()) {
+                continue;
+            }
+            let Some((start, end)) = literal_key_span(ast, text, id, &target.name) else {
                 continue;
             };
-            if ast.atom(value) != target.name {
+            let m = meaning_at(ck, l);
+            let p = m.primary.is_some_and(|s| target.matches(ck, s))
+                || m.contextual.is_some_and(|s| target.matches(ck, s));
+            if !p {
                 continue;
             }
-            // The name between the quotes, spelled without escapes, is what gets edited.
-            let span = ast.span(lit);
-            let (start, end) = (span.start + 1, span.end.saturating_sub(1));
-            if text.get(start as usize..end as usize) != Some(target.name.as_str()) {
-                continue;
-            }
-            let t = ck.check_expr(Loc::new(f, obj));
-            if !property_of(ck, t, &target.name).is_some_and(|s| target.matches(ck, s)) {
-                continue;
-            }
+            let access = c.parent(l).unwrap_or(l);
             out.push(Ref {
                 file: f,
                 start,
                 end,
-                is_decl: false,
-                is_write: is_write(ck, Loc::new(f, access)),
+                is_decl: m.is_decl,
+                is_write: if m.is_decl {
+                    decl_is_write(ck, access)
+                } else {
+                    is_write(ck, access)
+                },
                 shorthand: None,
             });
         }
@@ -795,7 +823,7 @@ pub fn prepare_rename(
     let c = cx.checker;
     let ast = c.ast(cx.file);
     let text = c.file(cx.file).text.as_str();
-    let Some(n) = ident_at(ast, offset) else {
+    let Some(n) = ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) else {
         return Ok(Value::Null);
     };
     if !is_label(cx, offset) {
@@ -822,7 +850,7 @@ pub fn rename(
 ) -> Result<Value, (i64, String)> {
     let c = cx.checker;
     let ast = c.ast(cx.file);
-    let Some(n) = ident_at(ast, offset) else {
+    let Some(n) = ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) else {
         return Ok(Value::Null);
     };
     if !is_label(cx, offset) {
@@ -849,6 +877,13 @@ pub fn rename(
             // `{ x }` -> `{ x: y }` when the variable is renamed, `{ y: x }` for the property.
             Some(ShorthandSide::Variable) => format!("{old}: {new_name}"),
             Some(ShorthandSide::Property) => format!("{new_name}: {old}"),
+            // A numeric index (`o[0]`) becomes a string one; a numeric key stays bare.
+            None if old.starts_with(|ch: char| ch.is_ascii_digit())
+                && !new_name.starts_with(|ch: char| ch.is_ascii_digit())
+                && is_numeric_index(c, r.file, r.start) =>
+            {
+                format!("\"{new_name}\"")
+            }
             None => new_name.to_string(),
         };
         changes

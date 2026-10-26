@@ -416,6 +416,12 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   `for (const { a } of xs)` (the iterated type). A member of a contextually typed object
   literal also means the contextual type's property (`Meaning::contextual`): references and
   rename treat the two as one; an untyped literal stands alone.
+- **Literal keys** (`literal_key`): a string or numeric literal that names a member
+  (`"a": 1`, `get "42"()`, `{ "a": T }`) or indexes one (`o["a"]`, `o[0]`) is a reference
+  like a name, spelled by its cooked text (numbers in JS spelling). The reference covers
+  the text between the quotes (only when written without escapes) or the whole number.
+  Renaming a numeric index quotes the new name (`o["z"]`); a numeric key stays bare.
+  References on `get`/`set` are those of the accessor's key.
 - **Type definition** follows tsc's symbol-of-type rule: the declarations of each union
   member's symbol (not the alias: `Pick<T, K>` goes to its mapped type), the first type
   argument of a well-known global generic first (`Array`, `Promise`, `Map`, `Pick`, ... the

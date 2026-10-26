@@ -967,6 +967,79 @@ fn references_through_destructuring_and_contextual_literals() {
     c.shutdown();
 }
 
+const NAV_LITERAL_KEYS: &str = "class K { \"s\": number = 1; get \"42\"() { return 0 } }
+declare const k: K;
+k.s; k[\"s\"]; k[42];
+const lit = { 0: true };
+lit[0];
+";
+
+#[test]
+fn references_and_rename_at_literal_keys() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navlk",
+        &[("tsconfig.json", TSCONFIG), ("src/l.ts", NAV_LITERAL_KEYS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/l.ts");
+    let u = env.uri("src/l.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        r.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    // A quoted member name, its dotted use and its quoted index are one property, from
+    // any of them.
+    let s = vec![(0, 11), (2, 2), (2, 8)];
+    assert_eq!(refs(&mut c, 2, 2), s);
+    assert_eq!(refs(&mut c, 0, 11), s);
+    assert_eq!(refs(&mut c, 2, 8), s);
+    // A numeric key, from the accessor's `get` keyword and from the index.
+    assert_eq!(refs(&mut c, 0, 28), vec![(0, 32), (2, 15)]);
+    assert_eq!(refs(&mut c, 2, 15), vec![(0, 32), (2, 15)]);
+    // Renaming a numeric key quotes the index but not the key.
+    let e = result(
+        &mut c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": u}, "position": {"line": 4, "character": 4}, "newName": "z"}),
+    );
+    let edits: Vec<(u64, String)> = e["changes"][u.as_str()]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| {
+            (
+                t["range"]["start"]["line"].as_u64().unwrap(),
+                t["newText"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        edits,
+        vec![(3, "z".to_string()), (4, "\"z\"".to_string())],
+        "{e}"
+    );
+    c.shutdown();
+}
+
 #[test]
 fn definition_type_definition_references_rename() {
     if !libs_present() {

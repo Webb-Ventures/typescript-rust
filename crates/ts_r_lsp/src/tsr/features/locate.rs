@@ -86,9 +86,99 @@ impl Meaning {
 
 /// The symbols the name at `l` means (no alias resolution).
 pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
-    let mut m = own_meaning(ck, l);
+    let mut m = if is_name(ck.c.ast(l.file), l.node) {
+        own_meaning(ck, l)
+    } else {
+        literal_key_meaning(ck, l)
+    };
     m.contextual = contextual_property(ck, l);
     m
+}
+
+/// The property name a string or numeric literal stands for where it names a member
+/// (`"a": 1`, `get 42()`, `{ "a": string }`) or indexes one (`o["a"]`, `o[0]`).
+pub fn literal_key(ast: &Ast, parents: &ts_r_ast::ParentMap, n: NodeId) -> Option<String> {
+    let text = match *ast.node(n) {
+        Node::StringLit { value } => ast.atom(value).to_string(),
+        Node::NumberLit { value } => ts_r_binder::js_number_to_string(value.get()),
+        _ => return None,
+    };
+    let p = parents.parent(n)?;
+    let keyed = match *ast.node(p) {
+        Node::PropertyDef { key, .. }
+        | Node::MethodDef { key, .. }
+        | Node::PropertySignature { key, .. }
+        | Node::MethodSignature { key, .. }
+        | Node::Property { key, .. } => key == n,
+        Node::Index { index, .. } => index == n,
+        _ => false,
+    };
+    keyed.then_some(text)
+}
+
+/// The text a name or a literal key ([`literal_key`]) spells.
+pub fn key_text(ck: &Ck<'_, '_>, l: Loc) -> Option<String> {
+    let ast = ck.c.ast(l.file);
+    match name_text(ast, l.node) {
+        Some(t) => Some(t.to_string()),
+        None => literal_key(ast, ck.c.file(l.file).parents(), l.node),
+    }
+}
+
+/// The span a reference at a literal key covers: the text between the quotes when it is
+/// spelled without escapes, the whole number for a numeric key.
+pub fn literal_key_span(ast: &Ast, text: &str, n: NodeId, key: &str) -> Option<(u32, u32)> {
+    let sp = ast.span(n);
+    match ast.node(n) {
+        Node::StringLit { .. } => {
+            let (start, end) = (sp.start + 1, sp.end.saturating_sub(1));
+            (text.get(start as usize..end as usize) == Some(key)).then_some((start, end))
+        }
+        _ => Some((sp.start, sp.end)),
+    }
+}
+
+/// Every string or numeric literal in a file that names or indexes a member, in source order.
+pub fn literal_keys_in(ast: &Ast, parents: &ts_r_ast::ParentMap) -> Vec<NodeId> {
+    struct V<'p>(Vec<NodeId>, &'p ts_r_ast::ParentMap);
+    impl ts_r_ast::visit::Visitor for V<'_> {
+        fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
+            if matches!(
+                ast.node(id),
+                Node::StringLit { .. } | Node::NumberLit { .. }
+            ) && literal_key(ast, self.1, id).is_some()
+            {
+                self.0.push(id);
+            }
+            ts_r_ast::visit::Walk::Continue
+        }
+    }
+    let mut v = V(Vec::new(), parents);
+    ts_r_ast::visit::walk(ast, ast.root, &mut v);
+    v.0
+}
+
+/// [`meaning_at`] for a literal key: the member it declares, or the property it indexes.
+fn literal_key_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
+    let c = ck.c;
+    let Some(key) = key_text(ck, l) else {
+        return Meaning::default();
+    };
+    let Some(p) = c.parent(l) else {
+        return Meaning::default();
+    };
+    if let Node::Index { obj, .. } = *c.node(p) {
+        let t = ck.check_expr(Loc::new(l.file, obj));
+        return Meaning {
+            primary: accessed_property(ck, t, &key),
+            ..Meaning::default()
+        };
+    }
+    Meaning {
+        primary: c.sym_of_decl(p),
+        is_decl: true,
+        ..Meaning::default()
+    }
 }
 
 /// The property of the contextual type that an object literal member named at `l`
@@ -109,7 +199,7 @@ fn contextual_property(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
     if literal_target_source(ck, lit, 0).is_some() {
         return None;
     }
-    let name = name_text(c.ast(l.file), l.node)?.to_string();
+    let name = key_text(ck, l)?;
     let t = ck.contextual_type(lit)?;
     property_of(ck, t, &name)
 }
@@ -479,25 +569,6 @@ pub fn is_expression_name(ck: &Ck<'_, '_>, l: Loc) -> bool {
         Node::AssignPattern { right, .. } => right == n,
         _ => false,
     }
-}
-
-/// Every element access with a string-literal key (`o["x"]`) in a file, in source order:
-/// `(access, literal)`.
-pub fn literal_accesses_in(ast: &Ast) -> Vec<(NodeId, NodeId)> {
-    struct V(Vec<(NodeId, NodeId)>);
-    impl ts_r_ast::visit::Visitor for V {
-        fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
-            if let Node::Index { index, .. } = *ast.node(id)
-                && matches!(ast.node(index), Node::StringLit { .. })
-            {
-                self.0.push((id, index));
-            }
-            ts_r_ast::visit::Walk::Continue
-        }
-    }
-    let mut v = V(Vec::new());
-    ts_r_ast::visit::walk(ast, ast.root, &mut v);
-    v.0
 }
 
 /// Every name node in a file, in source order.

@@ -1023,10 +1023,33 @@ pub fn keyword_definition(d: &Doc<'_>, offset: u32) -> Option<KeywordTarget> {
 /// The declared name a keyword before it stands for (a modifier, `function`, `class`,
 /// `const`, ...), as references and type definition read it.
 pub fn keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
-    match keyword_definition(d, offset)? {
-        KeywordTarget::Name(n) | KeywordTarget::Override { name: n, .. } => Some(n),
-        _ => None,
+    match keyword_definition(d, offset) {
+        Some(KeywordTarget::Name(n) | KeywordTarget::Override { name: n, .. }) => Some(n),
+        Some(_) => None,
+        None => accessor_keyword_name(d, offset),
     }
+}
+
+/// The key of the accessor whose `get` or `set` keyword is at `offset`.
+fn accessor_keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
+    let w = d.word_at(offset)?;
+    let kind = match d.word(w) {
+        "get" => MethodKind::Get,
+        "set" => MethodKind::Set,
+        _ => return None,
+    };
+    let mut n = node_around(d, w)?;
+    for _ in 0..3 {
+        if let Node::MethodDef { kind: k, key, .. } = d.node(n)
+            && k == kind
+            && d.span(key).start >= w.1
+            && d.span(n).start <= w.0
+        {
+            return Some(key);
+        }
+        n = d.parent(n)?;
+    }
+    None
 }
 
 /// The name a declaration is shown at (the first variable of `export const a = 1, b`).
