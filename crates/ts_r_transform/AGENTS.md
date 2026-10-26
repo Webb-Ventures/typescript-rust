@@ -41,6 +41,15 @@ fails on them, while `diagnostics` keeps everything tsc reports. `sloppy_only_sy
 `compilerOptions` object (tests, tools). `ModuleFormat::{Esm { node_require }, CommonJs,
 Preserve}` is per file. `hmr::TsTransform` (feature `hmr`) implements `ts_r_hmr::Transform`.
 
+`TsTransform::for_root(root)` resolves options per file the way Vite does (tsconfck 3.1.6,
+`src/find.js`, `src/util.js`): the nearest `tsconfig.json` up from the file's directory, with
+no `include` check; only when that config has `references` and doesn't include the file, the
+first referenced config that does (`files`, else `include` (default `**/*`), minus `exclude`).
+Browser adjustments (ESM, at least ES2022, automatic JSX for `preserve`) are applied after.
+`map_options` changes every file's options and keeps the lookup; `TsTransform::new` uses
+one fixed set. `deps()` lists the config chain, so editing a tsconfig invalidates the cache.
+Parsed configs are cached and re-read when the config or one it extends changes.
+
 ## Module layout
 
 | File | What |
