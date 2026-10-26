@@ -858,7 +858,14 @@ impl<'a> Parser<'a> {
         let modifiers = modifiers | self.parse_modifiers(ModCtx::Statement);
         let ambient = modifiers.contains(Modifiers::DECLARE);
         let add = if ambient { Ctx::AMBIENT } else { 0 };
-        self.with_ctx(add, 0, |p| {
+        // tsc does not reparse an ambient statement for top-level `await`: there `await` is
+        // still a name (`declare class C extends await {}`, topLevelAwait.3).
+        let remove = if ambient && self.module_await && !self.ctx.has(Ctx::IN_FUNCTION) {
+            Ctx::AWAIT
+        } else {
+            0
+        };
+        self.with_ctx(add, remove, |p| {
             p.parse_declaration_after_modifiers(start, decorators, modifiers)
         })
     }
@@ -1261,7 +1268,20 @@ impl<'a> Parser<'a> {
                 };
             let n = self.finish_node(s, Node::ExprWithTypeArgs { expr, type_args });
             self.scratch.push(n);
-            if self.aborting() || self.tok().start == before {
+            if self.aborting() {
+                break;
+            }
+            if self.tok().start == before {
+                // `extends await<T>` where `await` is an operator (a module's top level):
+                // as in tsc the element is missing (TS1109, reported), `await` is skipped
+                // and the list goes on at the next token that can start a left-hand side
+                // (topLevelAwaitErrors.1).
+                if self.at(T::Await) && self.ctx.has(Ctx::AWAIT) {
+                    self.bump();
+                    if self.heritage_skip_to_element(true) {
+                        continue;
+                    }
+                }
                 break;
             }
             let comma = self.tok().span();
@@ -1297,7 +1317,27 @@ impl<'a> Parser<'a> {
             return false;
         }
         self.error_expected(",");
+        self.heritage_skip_to_element(false)
+    }
+
+    /// Skips tokens that cannot start a heritage element (TS1109 at each) up to one that
+    /// can (returns true) or a terminator (false). With `lhs_only`, also `<` and the unary
+    /// operators, which cannot start a left-hand-side expression.
+    fn heritage_skip_to_element(&mut self, lhs_only: bool) -> bool {
         loop {
+            let unary = matches!(
+                self.kind(),
+                T::Lt
+                    | T::Plus
+                    | T::Minus
+                    | T::Tilde
+                    | T::Bang
+                    | T::Delete
+                    | T::TypeOf
+                    | T::Void
+                    | T::PlusPlus
+                    | T::MinusMinus
+            );
             match self.kind() {
                 T::LBrace
                 | T::Extends
@@ -1306,7 +1346,7 @@ impl<'a> Parser<'a> {
                 | T::RParen
                 | T::RBracket
                 | T::Eof => return false,
-                _ if self.at_expression_start() => return true,
+                _ if self.at_expression_start() && !(lhs_only && unary) => return true,
                 _ if self.aborting() => return false,
                 _ => {
                     self.error(messages::EXPRESSION_EXPECTED);
@@ -2131,9 +2171,12 @@ impl<'a> Parser<'a> {
         } else {
             remove |= Ctx::YIELD
         }
+        let outer_await = self.ctx.has(Ctx::AWAIT);
         self.with_ctx(add, remove, |p| {
             let type_params = p.parse_type_params_opt();
+            let saved = p.param_decorator_await.replace(outer_await);
             let params = p.parse_params();
+            p.param_decorator_await = saved;
             let return_type = p.parse_return_type_opt(T::Colon);
             // Without a body: `'{' expected` where one is needed (nothing is consumed: an
             // object literal goes on at the token), else `;` or TS1144 `'{' or ';'

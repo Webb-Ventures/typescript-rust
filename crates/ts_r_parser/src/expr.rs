@@ -812,7 +812,10 @@ impl<'a> Parser<'a> {
                     let span = self.tok().span();
                     self.kept_grammar_error_at(messages::AWAIT_IN_STATIC_BLOCK, span, &[]);
                 }
+                // An operator, not a name (`await_name_seen`).
+                let seen = self.await_name_seen;
                 self.bump();
+                self.await_name_seen = seen;
                 if self.lists & List::Parameters.bit() != 0
                     && matches!(self.kind(), T::RParen | T::Comma)
                 {
@@ -1945,13 +1948,18 @@ impl<'a> Parser<'a> {
                 // `await`/`yield` in a context where they are operators. `await` is TS1359
                 // and stays a name, as in tsc (`async (await): T => {}` is still an arrow);
                 // tsc reports it from the checker, so it does not stop semantic checking.
+                // At a module's top level (the reparse) the checker reports a declaration
+                // named `await` as TS1262 instead (topLevelAwaitErrors.12).
+                let module_top = self.module_await && !self.ctx.has(Ctx::IN_FUNCTION);
                 if self.at(T::Await) {
-                    let span = self.tok().span();
-                    self.deferred_grammar_error_at(
-                        messages::RESERVED_WORD_CANNOT_BE_USED_HERE,
-                        span,
-                        &["await"],
-                    );
+                    if !module_top {
+                        let span = self.tok().span();
+                        self.deferred_grammar_error_at(
+                            messages::RESERVED_WORD_CANNOT_BE_USED_HERE,
+                            span,
+                            &["await"],
+                        );
+                    }
                 } else if !self.at(T::Yield) {
                     self.error(messages::IDENTIFIER_EXPECTED);
                 }

@@ -178,13 +178,22 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
             p.js_ts = true;
         }
         p.module_await = module_await;
+        if module_await {
+            // As tsc reparses a module's statements that hold an `await` name: `await` is
+            // an operator at the top level (`@await class C {}` is TS1109).
+            p.ctx.0 |= Ctx::AWAIT;
+        }
         p.parse_program();
         p
     };
     let mut p = start(false);
-    // In a module, `await` at the top level is an operator even before a line break: the
-    // file is parsed again when that changes anything (rare: `await` then a newline).
-    if p.await_newline_seen && p.program_is_module() {
+    // In a module, `await` at the top level is an operator even before a line break or
+    // where only a name may appear: the file is parsed again when that changes anything
+    // (rare: `await` then a newline, or `await` read as a name outside functions).
+    if (p.await_newline_seen || p.await_name_seen)
+        && !kind.is_declaration()
+        && p.program_is_module()
+    {
         p = start(true);
     }
     if js_ts && opts.ts_in_js == TsInJs::Report {
@@ -385,8 +394,17 @@ pub(crate) struct Parser<'a> {
     jsdoc_import: bool,
     /// A top-level `await` had its operand on the next line, so it was read as a name.
     await_newline_seen: bool,
+    /// `await` was read as a name (not an operator) outside any function, type or ambient
+    /// declaration: in a module the file is parsed again with `await` an operator at the
+    /// top level, as tsc reparses the statements that hold such a name
+    /// (topLevelAwaitErrors.1).
+    await_name_seen: bool,
     /// Reparsing a module: such an `await` is an operator (as in tsc, topLevelAwait.1).
     module_await: bool,
+    /// While a function's parameter list is parsed: whether `await` was an operator
+    /// outside the function. Parameter decorators are read in that outer context, as in
+    /// tsc (`method(@await x) {}` at a module's top level is TS1109).
+    param_decorator_await: Option<bool>,
     /// Stack address when parsing started.
     stack_base: usize,
     /// The nesting limit was hit; the rest of the file was skipped.
@@ -465,7 +483,9 @@ impl<'a> Parser<'a> {
             unary_operand_start: u32::MAX,
             jsdoc_import: false,
             await_newline_seen: false,
+            await_name_seen: false,
             module_await: false,
+            param_decorator_await: None,
             stack_base: stack_addr(),
             halted: false,
             grammar_diags: 0,
@@ -621,6 +641,13 @@ impl<'a> Parser<'a> {
         let tok = self.lx.token();
         if tok.flags.has(TokenFlags::ESCAPED_KEYWORD) && tok.start != self.name_tok {
             self.escaped_keyword_error(tok);
+        }
+        if tok.kind == TokenKind::Await
+            && !self
+                .ctx
+                .has(Ctx::AWAIT | Ctx::IN_FUNCTION | Ctx::AMBIENT | Ctx::TYPE)
+        {
+            self.await_name_seen = true;
         }
         self.prev_end = tok.end;
         self.lx.next_token();

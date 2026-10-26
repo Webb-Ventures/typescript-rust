@@ -313,7 +313,16 @@ Files:
   At the top level, `await` is an operator when an operand follows on its line. When one
   follows on the next line (`await` + newline + `1`), the file is parsed again with
   `module_await` if it has `import`/`export` syntax: in a module that `await` is an
-  operator too (topLevelAwait.1). The second parse only happens in that case.
+  operator too (topLevelAwait.1). Likewise when `await` was read as a name outside any
+  function, type or `declare` statement (`@await class C {}`, `extends await<T>`; not in
+  `.d.ts`; tsc does not reparse ambient statements, so `await` stays a name in them,
+  topLevelAwait.3): the reparse sets `Ctx::AWAIT` at the top level, as tsc reparses such
+  statements, so these are TS1109 (topLevelAwaitErrors.1). There, `@await` skips the `await` and keeps the member chain on a
+  missing name; `extends await<T>` skips it and goes on as tsc's list does (TS1109 at `<`,
+  `',' expected` at `>`). A declaration named `await` gets no TS1359 there: the checker
+  reports TS1262 (topLevelAwaitErrors.12). Parameter decorators are read in the await
+  context outside the function (`param_decorator_await`), as in tsc. The second parse only
+  happens in these cases.
 - **Class static blocks** are parsed with `Ctx::AWAIT | Ctx::STATIC_BLOCK`: `await` is an
   operator (`await;` is TS1109) and each await expression is TS18037; `return` is a
   deferred TS18041. Functions, arrows, field initializers and module blocks clear

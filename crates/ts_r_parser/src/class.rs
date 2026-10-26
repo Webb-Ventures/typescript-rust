@@ -666,7 +666,15 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_param(&mut self) -> NodeId {
         let start = self.start();
         let decorators = if self.at(T::At) {
-            self.parse_decorators()
+            let outer = self
+                .param_decorator_await
+                .unwrap_or(self.ctx.has(Ctx::AWAIT));
+            let (add, remove) = if outer {
+                (Ctx::AWAIT, 0)
+            } else {
+                (0, Ctx::AWAIT)
+            };
+            self.with_ctx(add, remove, |p| p.parse_decorators())
         } else {
             NodeList::EMPTY
         };
@@ -803,7 +811,20 @@ impl<'a> Parser<'a> {
         while self.at(T::At) && !self.aborting() {
             let start = self.start();
             self.bump();
-            let expr = self.with_ctx(Ctx::DECORATOR, Ctx::IN_CONDITIONAL_TRUE, |p| p.parse_lhs());
+            let expr = self.with_ctx(Ctx::DECORATOR, Ctx::IN_CONDITIONAL_TRUE, |p| {
+                if p.at(T::Await) && p.ctx.has(Ctx::AWAIT) {
+                    // `@await(x)` where `await` is an operator: TS1109 at `await`, which is
+                    // skipped, then the rest of the chain on a missing name (as tsc does,
+                    // so the class still parses: topLevelAwaitErrors.1).
+                    let start = p.start();
+                    p.error(messages::EXPRESSION_EXPECTED);
+                    p.bump();
+                    let name = p.missing();
+                    p.parse_member_tail(start, name, true)
+                } else {
+                    p.parse_lhs()
+                }
+            });
             if !self.is_valid_decorator_expression(expr) {
                 let span = self.ast.span(expr);
                 self.grammar_error_at(messages::DECORATOR_NEEDS_PARENTHESES, span, &[]);
@@ -831,7 +852,7 @@ impl<'a> Parser<'a> {
         let mut id = chain;
         loop {
             match *self.ast.node(id) {
-                Node::Ident { .. } => return true,
+                Node::Ident { .. } | Node::Missing {} => return true,
                 Node::Member {
                     obj,
                     optional: false,

@@ -3104,3 +3104,43 @@ fn embedded_variable_statement_is_reported_next_to_syntax_errors() {
     assert_eq!(codes(&r.diagnostics), vec![1156, 1344, 1156, 1156]);
     assert_eq!(r.grammar, r.diagnostics);
 }
+
+/// In a module `await` is an operator at the top level even where only a name fits, as
+/// tsc reparses such statements (topLevelAwaitErrors.1): `@await` decorators (also on
+/// parameters, which are read in the context outside the function) and `extends await<T>`
+/// are TS1109. A declaration named `await` is left to the checker (TS1262,
+/// topLevelAwaitErrors.12). In a script nothing changes.
+#[test]
+fn top_level_await_is_an_operator_in_a_module() {
+    let codes_at = |r: &crate::ParseResult, src: &str| {
+        let lines = ts_r_span::LineIndex::new(src);
+        r.diagnostics
+            .iter()
+            .map(|d| {
+                let at = lines.line_col(d.span.start);
+                (d.code, at.line + 1, at.col + 1)
+            })
+            .collect::<Vec<_>>()
+    };
+    let body = "@await\nclass C1 {}\n@(await)\nclass C2 {}\nclass C3 extends await<string> {}\nclass C4 {\n  m(@await(1) [x]) {}\n}\nfunction f(@await [x]) {}\n";
+    let src = format!("export {{}};\n{body}");
+    let r = parse(&src, SourceKind::Ts);
+    assert_eq!(
+        codes_at(&r, &src),
+        vec![
+            (1109, 2, 2),
+            (1109, 4, 8),
+            (1109, 6, 18),
+            (1109, 6, 23),
+            (1005, 6, 30),
+            (1109, 8, 6),
+            (1109, 10, 13),
+        ]
+    );
+    let src =
+        "export {};\nimport await = foo.await;\ndeclare namespace foo { const await: any; }\ndeclare class C extends await {}\nlet t: await;\n";
+    assert!(parse(src, SourceKind::Ts).diagnostics.is_empty());
+    // A script: `await` is a name.
+    let r = parse(body, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+}
