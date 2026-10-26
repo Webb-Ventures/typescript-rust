@@ -617,3 +617,12 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   tracker yields: direct reads of an unmodified global, and properties of the global object
   (`globalThis.parseInt`, through `const g = globalThis`). Reads through an alias of the
   function itself (`const p = parseInt; p()`) are not reported.
+- **Fix text** (`unicorn_text.rs`). Parentheses as ESTree sees them (a node's own `Paren`
+  parents), comments a replacement would drop, `getMemberExpressionObjectText`,
+  `shouldAddParenthesesToUnaryExpressionReplacement`, `needsSemicolon` (read from the token
+  before the replaced node and the deepest node ending there), `isSameReference`,
+  `hasPossibleSideEffect`.
+- **Known parser gap.** `unicorn/prefer-includes` is 243/247: the 4 failing cases are
+  `x < 0 as any ** 2` and `x < 0 satisfies boolean as any ** 2`. tsc and typescript-estree
+  keep parsing tighter binary operators after `as T` / `satisfies T`, but ts_r_parser stops
+  there and reports "';' expected". The fix belongs in the parser, not in the rule.

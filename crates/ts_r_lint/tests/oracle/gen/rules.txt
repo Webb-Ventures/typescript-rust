@@ -295,3 +295,4 @@ unicorn/prefer-type-error
 unicorn/prefer-string-trim-start-end
 unicorn/prefer-number-properties
 unicorn/error-message
+unicorn/prefer-includes

@@ -312,15 +312,14 @@ mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
-mod unicorn_prefer_event_target;
-mod unicorn_prefer_global_number_constants;
-mod unicorn_prefer_global_this;
+mod unicorn_prefer_includes;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_type_error;
 mod unicorn_static;
+mod unicorn_text;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
@@ -662,9 +661,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
-    &unicorn_prefer_event_target::RULE,
-    &unicorn_prefer_global_number_constants::RULE,
-    &unicorn_prefer_global_this::RULE,
+    &unicorn_prefer_includes::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,

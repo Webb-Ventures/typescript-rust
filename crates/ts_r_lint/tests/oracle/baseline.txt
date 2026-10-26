@@ -302,9 +302,7 @@ unicorn/numeric-separators-style 128/128
 unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-date-now 61/61
-unicorn/prefer-event-target 46/46
-unicorn/prefer-global-number-constants 22/22
-unicorn/prefer-global-this 154/154
+unicorn/prefer-includes 243/247
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
