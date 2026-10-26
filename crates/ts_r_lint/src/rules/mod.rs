@@ -340,6 +340,7 @@ mod unicorn_prefer_array_index_of;
 mod unicorn_prefer_array_some;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_default_parameters;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_remove;
 mod unicorn_prefer_dom_node_text_content;
@@ -733,6 +734,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_array_some::RULE,
     &unicorn_prefer_code_point::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_default_parameters::RULE,
     &unicorn_prefer_dom_node_append::RULE,
     &unicorn_prefer_dom_node_remove::RULE,
     &unicorn_prefer_dom_node_text_content::RULE,

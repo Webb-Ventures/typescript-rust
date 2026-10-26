@@ -329,6 +329,7 @@ unicorn/prefer-array-index-of 158/158
 unicorn/prefer-array-some 373/377
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
+unicorn/prefer-default-parameters 538/538
 unicorn/prefer-dom-node-append 69/69
 unicorn/prefer-dom-node-remove 118/118
 unicorn/prefer-dom-node-text-content 31/31
