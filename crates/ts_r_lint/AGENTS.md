@@ -635,6 +635,9 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
   **no-duplicate-logical-operands**: see the file's header.
 - **prefer-block-statement-over-iife** treats `script` and `commonjs` alike for block-level
   function declarations. **prefer-number-coercion** finds calls with `global_path`.
+- **prefer-unary-minus** is 67/71 and **prefer-promise-try** reuses
+  `concise_arrow_body_text` (`unicorn_no_useless_boolean_cast.rs`). The 4 prefer-unary-minus
+  failures are the `x * -1 as any ** 2` parser gap described under prefer-includes.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -669,7 +672,9 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `prefer-array-slice.js`, `prefer-promise-static-methods.js`, `no-useless-boolean-cast.js`,
 `utils/boolean.js`, `utils/function-body.js`, `utils/get-concise-arrow-body-text.js`,
 `no-duplicate-logical-operands.js`, `utils/comparison.js`, `utils/is-reference-context.js`,
-`prefer-block-statement-over-iife.js`, `ast/is-direct-eval-call.js`, `prefer-number-coercion.js`.
+`prefer-block-statement-over-iife.js`, `ast/is-direct-eval-call.js`, `prefer-number-coercion.js`,
+`prefer-unary-minus.js`, `ast/is-negative-one.js`, `utils/should-add-parentheses-to-unary-expression.js`,
+`prefer-promise-try.js`.
 
 ## eslint-plugin-unicorn type guessing (round 5)
 

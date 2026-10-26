@@ -336,3 +336,5 @@ unicorn/consistent-class-member-order
 unicorn/consistent-optional-chaining
 unicorn/prefer-block-statement-over-iife
 unicorn/prefer-number-coercion
+unicorn/prefer-unary-minus
+unicorn/prefer-promise-try

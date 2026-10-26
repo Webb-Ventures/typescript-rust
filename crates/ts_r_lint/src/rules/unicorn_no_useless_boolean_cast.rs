@@ -109,6 +109,26 @@ fn in_optional_chain(ast: &Ast, mut id: NodeId) -> bool {
     false
 }
 
+/// `getConciseArrowBodyText`: `id`'s text as a concise arrow body, wrapped when it would
+/// start with `{`, is a sequence or an assignment, or holds `in` inside a `for` initializer.
+pub(crate) fn concise_arrow_body_text(cx: &Ctx<'_, '_>, id: NodeId) -> String {
+    let ast = cx.ast();
+    let id = skip_parens(ast, id);
+    let needs = cx.text(id).starts_with('{')
+        || matches!(ast.node(id), Node::Seq { .. } | Node::Assign { .. })
+        || (in_for_init(cx, id)
+            && contains_node(ast, id, |n| {
+                matches!(
+                    n,
+                    Node::Binary {
+                        op: BinaryOp::In,
+                        ..
+                    }
+                )
+            }));
+    expression_text(cx, id, needs)
+}
+
 fn in_for_init(cx: &Ctx<'_, '_>, mut id: NodeId) -> bool {
     for _ in 0..100_000 {
         let Some(p) = cx.parent(id) else {
@@ -224,19 +244,7 @@ impl Rule for NoUselessBooleanCast {
         let span = cx.span(boolean_call);
         let fix = (!would_remove_comments(cx, span, &[])).then(|| {
             let text = if concise {
-                let needs = cx.text(arg_inner).starts_with('{')
-                    || matches!(ast.node(arg_inner), Node::Seq { .. } | Node::Assign { .. })
-                    || (in_for_init(cx, arg_inner)
-                        && contains_node(ast, arg_inner, |n| {
-                            matches!(
-                                n,
-                                Node::Binary {
-                                    op: BinaryOp::In,
-                                    ..
-                                }
-                            )
-                        }));
-                expression_text(cx, arg_inner, needs)
+                concise_arrow_body_text(cx, arg_inner)
             } else {
                 cx.text(arg_inner).to_owned()
             };
