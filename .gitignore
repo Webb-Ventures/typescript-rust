@@ -1,5 +1,7 @@
 /target
 node_modules/
+# `node_modules/` matches directories only; a symlinked node_modules is a file.
+/bench/node_modules
 *.profraw
 .DS_Store
 
