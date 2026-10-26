@@ -290,7 +290,7 @@ unicorn/no-array-splice 95/95
 unicorn/no-async-promise-finally 39/39
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
-unicorn/no-conflicting-constraints 61/61
+unicorn/no-collection-bracket-access 129/129
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
@@ -357,7 +357,8 @@ unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 243/247
 unicorn/prefer-iterator-to-array 61/61
 unicorn/prefer-location-assign 54/54
-unicorn/prefer-math-constants 66/66
+unicorn/prefer-math-abs 122/122
+unicorn/prefer-math-min-max 140/140
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-object-from-entries 172/172
 unicorn/prefer-optional-catch-binding 25/25

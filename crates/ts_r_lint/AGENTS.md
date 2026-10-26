@@ -980,3 +980,14 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   `let`/`var` local with a fresh-array initializer whose other references are member
   accesses, spreads or `for-of` sources only. Without type information its
   tuple/type-parameter check never fires, so only the annotation test remains.
+- **Absolute values** (`prefer-math-abs`, from `unicorn: rules/prefer-math-abs.js`).
+  An operand may be a BigInt by a literal, `BigInt(x)`, unary minus of one, an
+  `as`/`satisfies`/`<T>` bigint type, `BIGINT_MIXED_UNION` guessing (JSDoc included), or a
+  parameter/variable whose annotation, default or initializer is one; any of these on
+  either side of a comparison drops the report.
+- **Collection bracket access** (`no-collection-bracket-access`, from `unicorn:
+  rules/no-collection-bracket-access.js`). A key that names a real member is allowed: the
+  collection's own prototype names (Set's ES2025 methods included, as Node 24 has them),
+  `Object.prototype` names, and `Symbol.iterator`/`Symbol.toStringTag` (static values give
+  `Builtin("Symbol.x")`). Conditional, logical and sequence keys with a call, write or
+  member read (eslint-utils' `considerGetters`) skip the rule altogether.

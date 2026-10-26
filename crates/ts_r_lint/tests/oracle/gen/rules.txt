@@ -401,3 +401,5 @@ unicorn/no-unnecessary-global-this
 unicorn/no-unnecessary-string-trim
 unicorn/no-array-splice
 unicorn/no-unnecessary-splice
+unicorn/prefer-math-abs
+unicorn/no-collection-bracket-access
