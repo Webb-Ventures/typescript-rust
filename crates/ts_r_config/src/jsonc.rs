@@ -351,6 +351,8 @@ struct Parser<'a> {
     nl_before: bool,
     depth: u32,
     template_depth: u32,
+    /// Characters regex rescans may still visit (they can resume inside one another).
+    regex_budget: usize,
     ctx: Vec<Ctx>,
 }
 
@@ -389,6 +391,7 @@ pub fn parse(src: &str, file: &str) -> ParsedJson {
         nl_before: false,
         depth: 0,
         template_depth: 0,
+        regex_budget: 8 * src.len() + 4096,
         ctx: Vec::new(),
     };
     if src.starts_with('\u{feff}') {
@@ -748,9 +751,10 @@ impl<'a> Parser<'a> {
         let (mut in_class, mut escape) = (false, false);
         let mut terminated = false;
         while let Some(c) = self.char_at(p) {
-            if is_line_break(c) {
+            if is_line_break(c) || self.regex_budget == 0 {
                 break;
             }
+            self.regex_budget -= 1;
             if escape {
                 escape = false;
             } else if c == '/' && !in_class {
@@ -1903,6 +1907,16 @@ mod tests {
             (vec![1328, 1328], vec![1328])
         );
         assert_eq!(codes(r#"{ "a": 1n "b": 2 }"#).1, vec![1005]);
+    }
+
+    #[test]
+    fn unterminated_regexes_on_one_line_are_linear() {
+        // Each `/[` scans to the end of the line, then recovery resumes inside it.
+        let src = r#"{"a": /[ }}"#.repeat(100_000);
+        let t = std::time::Instant::now();
+        let p = parse(&src, "tsconfig.json");
+        assert!(p.diagnostics.len() <= 2 * src.len() + 2);
+        assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
     }
 
     #[test]
