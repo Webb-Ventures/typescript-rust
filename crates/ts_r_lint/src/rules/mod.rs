@@ -307,7 +307,7 @@ mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_catch_error_name;
-mod unicorn_class_reference_in_static_methods;
+mod unicorn_conditions;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_date_clone;
@@ -385,6 +385,7 @@ mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_process_exit;
 mod unicorn_no_shorthand_property_overrides;
+mod unicorn_no_single_promise_in_promise_methods;
 mod unicorn_no_static_only_class;
 mod unicorn_no_thenable;
 mod unicorn_no_this_assignment;
@@ -439,6 +440,7 @@ mod unicorn_prefer_array_some;
 mod unicorn_prefer_at;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_block_statement_over_iife;
+mod unicorn_prefer_boolean_return;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
@@ -506,6 +508,7 @@ mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
 mod unicorn_prefer_unary_minus;
+mod unicorn_prefer_while_loop_condition;
 mod unicorn_require_array_join_separator;
 mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
@@ -933,6 +936,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_process_exit::RULE,
+    &unicorn_no_single_promise_in_promise_methods::RULE,
     &unicorn_no_static_only_class::RULE,
     &unicorn_no_thenable::RULE,
     &unicorn_no_shorthand_property_overrides::RULE,
@@ -981,6 +985,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_block_statement_over_iife::RULE,
     &unicorn_prefer_at::RULE,
+    &unicorn_prefer_boolean_return::RULE,
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
@@ -1026,6 +1031,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,
+    &unicorn_prefer_while_loop_condition::RULE,
     &unicorn_require_array_sort_compare::RULE,
     &unicorn_require_css_escape::RULE,
     &unicorn_prefer_type_literal_last::RULE,

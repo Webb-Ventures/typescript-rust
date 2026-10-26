@@ -344,6 +344,7 @@ unicorn/no-object-methods-with-collections 78/78
 unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-process-exit 58/58
 unicorn/no-shorthand-property-overrides 62/62
+unicorn/no-single-promise-in-promise-methods 137/137
 unicorn/no-static-only-class 91/91
 unicorn/no-thenable 178/178
 unicorn/no-this-assignment 23/23
@@ -396,6 +397,7 @@ unicorn/prefer-array-some 377/377
 unicorn/prefer-at 482/482
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-block-statement-over-iife 38/38
+unicorn/prefer-boolean-return 71/71
 unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
@@ -461,6 +463,7 @@ unicorn/prefer-top-level-await 228/228
 unicorn/prefer-type-error 112/112
 unicorn/prefer-type-literal-last 37/37
 unicorn/prefer-unary-minus 71/71
+unicorn/prefer-while-loop-condition 56/56
 unicorn/require-array-join-separator 80/80
 unicorn/require-array-sort-compare 64/64
 unicorn/require-css-escape 54/54

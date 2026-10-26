@@ -54,7 +54,10 @@ fn operator_assignment_core_forms() {
     let r = "unicorn/operator-assignment";
     let none = serde_json::json!([]);
     assert_eq!(fixed(r, none.clone(), "a = a * b;"), "a *= b;");
-    assert_eq!(fixed(r, none.clone(), "this.x = this.x - 1;"), "this.x -= 1;");
+    assert_eq!(
+        fixed(r, none.clone(), "this.x = this.x - 1;"),
+        "this.x -= 1;"
+    );
     // Commutative, operand on the right: reported, not fixed.
     assert_eq!(fixed(r, none.clone(), "a = b * a;"), "a = b * a;");
     assert_eq!(report(r, none.clone(), "a = b * a;").len(), 1);
@@ -92,7 +95,11 @@ fn logical_assignment_core_forms() {
     let ifs = serde_json::json!(["always", { "enforceForIfStatements": true }]);
     assert_eq!(fixed(r, ifs.clone(), "if (a == null) a = b;"), "a ??= b;");
     assert_eq!(
-        fixed(r, ifs.clone(), "if (a === undefined || a === null) { a = b }"),
+        fixed(
+            r,
+            ifs.clone(),
+            "if (a === undefined || a === null) { a = b }"
+        ),
         "a ??= b;"
     );
     // A property behind a logical test is only suggested.
@@ -110,7 +117,13 @@ fn logical_assignment_core_forms() {
     assert!(report(r, ifs.clone(), "if (a) a = b; else c();").is_empty());
     assert!(report(r, ifs, "if (a) { a = b; c(); }").is_empty());
     let never = serde_json::json!(["never"]);
-    assert_eq!(fixed(r, never.clone(), "a ??= b || c;"), "a = a ?? (b || c);");
-    assert_eq!(fixed(r, never.clone(), "a &&= b || c;"), "a = a && (b || c);");
+    assert_eq!(
+        fixed(r, never.clone(), "a ??= b || c;"),
+        "a = a ?? (b || c);"
+    );
+    assert_eq!(
+        fixed(r, never.clone(), "a &&= b || c;"),
+        "a = a && (b || c);"
+    );
     assert_eq!(fixed(r, never, "a ||= b && c;"), "a = a || b && c;");
 }
