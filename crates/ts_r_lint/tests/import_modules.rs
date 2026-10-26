@@ -482,3 +482,15 @@ fn each_cli_run_reads_the_files_again() {
     dir.write("b.js", "export const y = 1;\n");
     assert_eq!(messages(&opts), ["x not found in './b'"]);
 }
+
+#[test]
+fn namespace_jsx_members_respect_shadowing() {
+    let h = host(&[("/p/named.js", "export const a = 1;\n".into())]);
+    let code = "import * as Names from './named';\n\
+                export const A = () => <Names.a/>;\n\
+                export const B = () => <Names.e/>;\n\
+                export function F(Names) { return <Names.e/>; }\n\
+                export function G() { const Names = {}; return <Names.e/>; }\n";
+    let m = messages(&h, "import/namespace", serde_json::json!([]), "a.jsx", code);
+    assert_eq!(m, ["'e' not found in imported namespace 'Names'."]);
+}

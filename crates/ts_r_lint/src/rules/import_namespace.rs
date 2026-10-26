@@ -259,6 +259,11 @@ impl Rule for Namespace {
                     let Some(p) = jsx_name(ast, prop) else {
                         continue;
                     };
+                    // The plugin checks JSX by spelling alone; a parameter or local that
+                    // shadows the namespace is not it.
+                    if declared_scope(cx, name, obj) != Some(ScopeKind::Module) {
+                        continue;
+                    }
                     if !has(cx.file.modules(), ns, p) {
                         let span = cx.span(prop);
                         cx.report(span, message(p, &[name.to_owned()]));
