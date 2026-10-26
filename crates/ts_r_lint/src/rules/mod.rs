@@ -281,8 +281,10 @@ mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_consistent_assert;
+mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_empty_array_spread;
+mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
@@ -664,8 +666,10 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_ts_no_empty_object_type::RULE,
     // eslint-plugin-unicorn
     &unicorn_consistent_assert::RULE,
+    &unicorn_consistent_class_member_order::RULE,
     &unicorn_consistent_date_clone::RULE,
     &unicorn_consistent_empty_array_spread::RULE,
+    &unicorn_consistent_optional_chaining::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
     &unicorn_empty_brace_spaces::RULE,

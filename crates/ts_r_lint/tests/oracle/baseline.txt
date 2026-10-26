@@ -270,8 +270,10 @@ radix 91/91
 require-yield 15/15
 symbol-description 8/8
 unicorn/consistent-assert 31/31
+unicorn/consistent-class-member-order 38/38
 unicorn/consistent-date-clone 26/26
 unicorn/consistent-empty-array-spread 36/36
+unicorn/consistent-optional-chaining 38/38
 unicorn/consistent-template-literal-escape 20/20
 unicorn/consistent-tuple-labels 30/30
 unicorn/empty-brace-spaces 213/213
