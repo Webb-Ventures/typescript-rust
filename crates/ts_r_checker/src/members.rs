@@ -2776,8 +2776,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return match self.mapped_apparent_type(t) {
                 Some(a) if a != t => self.apparent_type(a),
-                // Its members come from the lower bound of its key type.
-                _ if self.mapped_lower_bound_keys(t).is_some() => t,
+                // Its members come from the lower bound of its key type, or from the
+                // properties of a generic intersection it maps (`Required<O & X>`).
+                _ if self.mapped_lower_bound_keys(t).is_some()
+                    || self.mapped_generic_intersection_modifiers(t).is_some() =>
+                {
+                    t
+                }
                 _ => TypeId::UNRESOLVED,
             };
         }

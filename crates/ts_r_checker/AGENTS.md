@@ -808,6 +808,12 @@ Files, by layer:
   is never the empty object type (`{ ...rest, b }` keeps its `Omit`), and `typeof x ===
   "function"` does not narrow it to `Function` (a generic mapped target relates only to a
   generic mapped source; tsc: `relater.go`).
+  A homomorphic mapped type (`keyof X`, no `as` clause) whose `X` is an intersection with
+  a generic member (`O & Omit<D, keyof O>`) is also its own apparent type, keyed by the
+  properties of `X`'s members (`mapped_generic_intersection_modifiers`; tsc:
+  `resolveMappedTypeMembers` in `checker.go` iterates the modifiers type's properties
+  when the constraint is `keyof` of it). So `Required<O & Omit<D, keyof O>>` has the
+  members `D` gives, and assigning a literal with them is no TS2739 (@eslint/core).
 - **Intersections emptied by a discriminant** (`reduced_type`; tsc:
   `isDiscriminantWithNeverType` in `checker.go`). A property two object members declare,
   literal in at least one of them and `never` in none, whose types intersect to `never`
@@ -1298,6 +1304,12 @@ Files, by layer:
   type meaning of its own is TS2709 when it imports a whole module (`import * as M`,
   `import M = require`, without `export =`) or resolves to a namespace declaration
   (`import n = N`, `import { N }`).
+- A type reference whose name resolves to an import with no type or namespace meaning,
+  and whose target is a plain value (not an alias, not `export =`), keeps looking in the
+  globals: `import { Blob } from "./x"` of a `const Blob` still lets `let b: Blob` name the
+  global `Blob` type (`global_type_past_value_alias`; tsc: `getSymbol` in `checker.go`
+  checks a found alias's target flags against the meaning and skips it on a miss). With
+  no global of that name it is still TS2749 (node-fetch, fetch-blob).
 - **Type libraries.** `types: ["*"]` is every non-`.` package directory of the type roots
   (one without declarations is skipped, where tsc reports TS2688 "implicit type library");
   a missing explicit entry is a global TS2688 with tsc's "The file is in the program
