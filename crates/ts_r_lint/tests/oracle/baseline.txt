@@ -319,6 +319,7 @@ unicorn/no-chained-comparison 126/126
 unicorn/no-collection-bracket-access 129/129
 unicorn/no-computed-property-existence-check 137/137
 unicorn/no-conflicting-constraints 61/61
+unicorn/no-confusing-array-splice 124/124
 unicorn/no-confusing-array-with 49/49
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
@@ -393,6 +394,7 @@ unicorn/no-useless-continue 43/43
 unicorn/no-useless-delete-check 125/125
 unicorn/no-useless-error-capture-stack-trace 53/53
 unicorn/no-useless-fallback-in-spread 61/61
+unicorn/no-useless-iterator-to-array 131/131
 unicorn/no-useless-length-check 165/165
 unicorn/no-useless-override 84/84
 unicorn/no-useless-promise-resolve-reject 121/121
@@ -428,6 +430,7 @@ unicorn/prefer-class-fields 71/71
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
 unicorn/prefer-default-parameters 538/538
+unicorn/prefer-direct-iteration 119/119
 unicorn/prefer-dom-node-append 69/69
 unicorn/prefer-dom-node-html-methods 67/67
 unicorn/prefer-dom-node-remove 118/118

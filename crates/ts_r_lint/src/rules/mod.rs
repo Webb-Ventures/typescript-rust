@@ -359,6 +359,7 @@ mod unicorn_no_chained_comparison;
 mod unicorn_no_collection_bracket_access;
 mod unicorn_no_computed_property_existence_check;
 mod unicorn_no_conflicting_constraints;
+mod unicorn_no_confusing_array_splice;
 mod unicorn_no_confusing_array_with;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
@@ -447,6 +448,7 @@ mod unicorn_no_useless_continue;
 mod unicorn_no_useless_delete_check;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_fallback_in_spread;
+mod unicorn_no_useless_iterator_to_array;
 mod unicorn_no_useless_length_check;
 mod unicorn_no_useless_logical_operand;
 mod unicorn_no_useless_override;
@@ -485,6 +487,7 @@ mod unicorn_prefer_code_point;
 mod unicorn_prefer_continue;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_default_parameters;
+mod unicorn_prefer_direct_iteration;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
@@ -965,8 +968,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
-    &unicorn_no_chained_comparison::RULE,
-    &unicorn_no_computed_property_existence_check::RULE,
+    &unicorn_no_confusing_array_splice::RULE,
     &unicorn_no_confusing_array_with::RULE,
     &unicorn_no_array_method_this_argument::RULE,
     &unicorn_no_conflicting_constraints::RULE,
@@ -1045,7 +1047,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_delete_check::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
-    &unicorn_no_useless_logical_operand::RULE,
+    &unicorn_no_useless_iterator_to_array::RULE,
     &unicorn_no_useless_override::RULE,
     &unicorn_no_useless_re_export::RULE,
     &unicorn_no_useless_recursion::RULE,
@@ -1076,6 +1078,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_continue::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_direct_iteration::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
     &unicorn_prefer_early_return::RULE,
     &unicorn_prefer_event_target::RULE,
