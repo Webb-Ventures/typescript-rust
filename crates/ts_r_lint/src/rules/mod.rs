@@ -353,7 +353,7 @@ mod unicorn_no_async_iterator_callback;
 mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_expression_member;
 mod unicorn_no_await_in_promise_methods;
-mod unicorn_no_barrel_files;
+mod unicorn_no_boolean_sort_comparator;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_canvas_to_image;
 mod unicorn_no_chained_comparison;
@@ -410,7 +410,7 @@ mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_process_exit;
-mod unicorn_no_redundant_comparison;
+mod unicorn_no_return_array_push;
 mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_single_promise_in_promise_methods;
 mod unicorn_no_static_only_class;
@@ -973,6 +973,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_expression_member::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
+    &unicorn_no_boolean_sort_comparator::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
     &unicorn_no_confusing_array_splice::RULE,
@@ -1020,8 +1021,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_process_exit::RULE,
-    &unicorn_no_redundant_comparison::RULE,
-    &unicorn_no_single_promise_in_promise_methods::RULE,
+    &unicorn_no_return_array_push::RULE,
     &unicorn_no_static_only_class::RULE,
     &unicorn_no_subtraction_comparison::RULE,
     &unicorn_no_thenable::RULE,

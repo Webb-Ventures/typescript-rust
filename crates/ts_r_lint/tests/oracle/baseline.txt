@@ -314,6 +314,7 @@ unicorn/no-async-iterator-callback 144/144
 unicorn/no-async-promise-finally 39/39
 unicorn/no-await-expression-member 72/72
 unicorn/no-await-in-promise-methods 111/111
+unicorn/no-boolean-sort-comparator 183/183
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-canvas-to-image 41/41
 unicorn/no-chained-comparison 126/126
@@ -362,7 +363,7 @@ unicorn/no-object-as-default-parameter 62/62
 unicorn/no-object-methods-with-collections 78/78
 unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-process-exit 58/58
-unicorn/no-redundant-comparison 87/87
+unicorn/no-return-array-push 187/187
 unicorn/no-shorthand-property-overrides 62/62
 unicorn/no-single-promise-in-promise-methods 137/137
 unicorn/no-static-only-class 91/91
