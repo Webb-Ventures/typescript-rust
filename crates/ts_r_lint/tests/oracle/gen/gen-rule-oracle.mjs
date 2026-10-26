@@ -76,7 +76,25 @@ const RULE_TESTER = stub(
    exports.noFormat = (raw, ...keys) => String.raw({ raw }, ...keys);
    module.exports = Object.assign(RuleTester, exports);`,
 );
-const RULE = stub('rule', `module.exports = { meta: {}, create() { return {}; } };`);
+const RULE = stub(
+  'rule',
+  `module.exports = { meta: {}, create() { return {}; } };
+   // Names some tests import from the rule module for expected data (never read here).
+   module.exports.phrases = new Proxy({}, { get: () => '' });`,
+);
+// Test-suite helpers that only validate option schemas.
+const OPTIONS_VALID = stub('options-valid', `exports.areOptionsValid = () => true;`);
+// @typescript-eslint/utils with its enums as plain named exports, so ESM tests can import
+// them from the CommonJS build.
+const TS_UTILS = stub(
+  'ts-utils',
+  `const real = require(${JSON.stringify(toolsRequire.resolve('@typescript-eslint/utils'))});
+   module.exports = real;
+   exports.AST_NODE_TYPES = real.AST_NODE_TYPES;
+   exports.AST_TOKEN_TYPES = real.AST_TOKEN_TYPES;
+   exports.TSESLint = real.TSESLint;
+   exports.ESLintUtils = real.ESLintUtils;`,
+);
 const UTILS = stub(
   'utils',
   `function unIndent(strings, ...values) {
@@ -126,6 +144,8 @@ registerHooks({
     if (s === '@babel/eslint-parser' || s.startsWith('@es-joy/jsdoc-eslint-parser')) return r(OTHER_PARSER);
     if (/(^|\/)RuleTester(\.ts)?$/.test(s)) return r(TS_HELPER);
     if (s === 'vitest') return r(VITEST);
+    if (/(^|\/)areOptionsValid(\.ts)?$/.test(s)) return r(OPTIONS_VALID);
+    if (s === '@typescript-eslint/utils') return r(TS_UTILS);
     if (s === 'globals' || s === 'eslint-scope' || s === 'espree' || s.startsWith('@typescript-eslint/') || s === 'eslint' || s.startsWith('eslint/')) {
       try {
         return { url: pathToFileURL(toolsRequire.resolve(s)).href, shortCircuit: true };
@@ -144,7 +164,13 @@ const each = (run) => {
   return f;
 };
 globalThis.describe = each((fn) => fn());
-globalThis.it = globalThis.test = each((fn) => fn());
+// A test body that runs its own Linter (array-type's multi-pass fix checks) has nothing to
+// record; let it fail without losing the file's RuleTester cases.
+globalThis.it = globalThis.test = each((fn) => {
+  try {
+    fn();
+  } catch {}
+});
 
 // ---- helpers -----------------------------------------------------------------------------
 const parserKind = (p) => (p == null ? undefined : p.__parser || 'other');
