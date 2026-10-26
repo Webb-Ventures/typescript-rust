@@ -209,7 +209,7 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-24, parity/binder-emit): 1,673 match, 61 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  Last run (2026-10-26, v1/emit): 1,678 match, 50 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
   syntax errors are skipped); `--filter esDecorators`: 119 match, 21 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
