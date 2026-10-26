@@ -15,6 +15,68 @@ pub fn root() -> PathBuf {
     manifest.parent().unwrap_or(manifest).to_path_buf()
 }
 
+/// Cargo's target directory for builds started from the repo root, where xtask looks for the
+/// binaries cargo built: `CARGO_TARGET_DIR` when it is set and not empty (a relative value
+/// resolves against the repo root, as cargo does for a build run there), else the
+/// `target_directory` `cargo metadata` reports (which also covers `build.target-dir` in a
+/// cargo config), else `<root>/target`. Worked out once per process.
+pub fn target_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let root = root();
+        target_dir_in(&root, std::env::var_os("CARGO_TARGET_DIR"), || {
+            metadata_target_dir(&root)
+        })
+    })
+    .clone()
+}
+
+/// [`target_dir`] with its inputs passed in (for tests).
+pub fn target_dir_in(
+    root: &Path,
+    env: Option<std::ffi::OsString>,
+    metadata: impl FnOnce() -> Option<PathBuf>,
+) -> PathBuf {
+    if let Some(v) = env.filter(|v| !v.is_empty()) {
+        let p = PathBuf::from(v);
+        return if p.is_absolute() { p } else { root.join(p) };
+    }
+    metadata().unwrap_or_else(|| root.join("target"))
+}
+
+/// `target_directory` from `cargo metadata --no-deps`, run in `root`.
+fn metadata_target_dir(root: &Path) -> Option<PathBuf> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let out = Command::new(cargo)
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--offline",
+        ])
+        .current_dir(root)
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    v.get("target_directory")?.as_str().map(PathBuf::from)
+}
+
+/// The directory cargo puts a profile's binaries in: `<target>/debug` for `dev`,
+/// `<target>/<profile>` otherwise.
+pub fn profile_dir(profile: &str) -> PathBuf {
+    target_dir().join(if profile == "dev" { "debug" } else { profile })
+}
+
+/// `<target>/release`, where `cargo build --release` puts the binaries.
+pub fn release_dir() -> PathBuf {
+    profile_dir("release")
+}
+
 /// Path relative to the workspace root, with `/` separators, for messages and reports.
 pub fn rel(path: &Path) -> String {
     let root = root();
@@ -286,6 +348,51 @@ pub fn walk_files(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_dir_follows_cargo_target_dir_then_metadata() {
+        let root = Path::new("/repo");
+        let none = || None;
+        assert_eq!(target_dir_in(root, None, none), Path::new("/repo/target"));
+        assert_eq!(
+            target_dir_in(root, Some("".into()), none),
+            Path::new("/repo/target")
+        );
+        assert_eq!(
+            target_dir_in(root, Some("build/out".into()), none),
+            Path::new("/repo/build/out")
+        );
+        let abs = std::env::temp_dir().join("ts-r-target");
+        assert_eq!(target_dir_in(root, Some(abs.clone().into()), none), abs);
+        // No environment variable: cargo's reported directory wins over `<root>/target`.
+        let reported = std::env::temp_dir().join("ts-r-cargo-config-target");
+        assert_eq!(
+            target_dir_in(root, None, || Some(reported.clone())),
+            reported
+        );
+        // The variable wins over what cargo reports.
+        assert_eq!(
+            target_dir_in(root, Some("t".into()), || Some(reported.clone())),
+            Path::new("/repo/t")
+        );
+    }
+
+    #[test]
+    fn release_dir_is_inside_the_reported_target_dir() {
+        // This test runs under cargo, so the reported directory is the one it was built in.
+        let real = |p: PathBuf| std::fs::canonicalize(&p).unwrap_or(p);
+        let exe = real(std::env::current_exe().unwrap());
+        let target = target_dir();
+        let real_target = real(target.clone());
+        assert!(
+            exe.starts_with(&real_target),
+            "{} not in {}",
+            exe.display(),
+            real_target.display()
+        );
+        assert_eq!(profile_dir("dev"), target.join("debug"));
+        assert_eq!(release_dir(), target.join("release"));
+    }
 
     #[test]
     #[cfg(unix)]

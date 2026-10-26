@@ -91,8 +91,7 @@ pub fn run(mut args: Args) -> Result<ExitCode> {
                 cmd.args(["-p", pkg]);
             }
             run_status(cmd.arg("--bins"))?;
-            root.join("target")
-                .join(if profile == "dev" { "debug" } else { &profile })
+            crate::util::profile_dir(&profile)
         }
     };
 

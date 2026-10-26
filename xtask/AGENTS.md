@@ -30,6 +30,13 @@ Exit codes: 0 ok, 1 check failed / bump available / regression, 2 usage or runti
 
 ## Invariants
 
+- **Built binaries are found in cargo's target directory, never a hard-coded `target/`.**
+  `util::target_dir()` is `CARGO_TARGET_DIR` (relative to the repo root), else the
+  `target_directory` of `cargo metadata` (a `build.target-dir` config), else `<root>/target`;
+  `util::release_dir()` / `profile_dir(p)` are its `release` / `<p>` (`dev` = `debug`)
+  sub-directories. `bench --bin-dir`, `emit-repos --bin`, `npm-pack --bin-dir` and the
+  ecosystem worker default to them. Data directories (`target/upstream`, `target/bench-repos`,
+  `target/pgo`, ...) stay under the repo's own `target/`.
 - **Data only from upstream.** `upstream sync` refuses any sparse pattern outside tests,
   baselines, `src/lib`, `tests/lib`, diagnostic catalogs and license files (`is_data_path` in
   `src/upstream.rs`). Never widen that list to compiler source. The synced tree lives in the
@@ -69,9 +76,8 @@ Exit codes: 0 ok, 1 check failed / bump available / regression, 2 usage or runti
   coverage check) and re-run.
 - **The ecosystem harness reports, it never fixes**: failures become causes in STATUS.md and
   repros in `ecosystem/repros/<stage>/` for the owning crate. Workers always run as a release
-  build (`<target>/release/xtask`, built by the driver, where `<target>` is `CARGO_TARGET_DIR`
-  or `target/`; the ts-r binaries default to the same directory), since debug parsing would
-  hit the limits.
+  build (`<target>/release/xtask`, built by the driver; the ts-r binaries default to the same
+  directory), since debug parsing would hit the limits.
 
 ## Release builds (M7)
 

@@ -2,7 +2,7 @@
 //! `bench/results/` and print a comparison table (optionally against a baseline run).
 //!
 //! Placeholders in commands: `{bin}` (our release binaries, `--bin-dir`, default
-//! `target/release`), `{node_bin}` (`bench/node_modules/.bin`, pinned reference tools) and
+//! `<target>/release`, `<target>` being `CARGO_TARGET_DIR` or cargo's target directory), `{node_bin}` (`bench/node_modules/.bin`, pinned reference tools) and
 //! `{input}` (the scenario's input file). Commands run from the workspace root.
 
 use std::fmt::Write as _;
@@ -204,7 +204,7 @@ pub fn run(mut args: Args) -> Result<ExitCode> {
     let markdown = args.opt("markdown")?;
     let bin_dir = args
         .opt("bin-dir")?
-        .unwrap_or_else(|| "target/release".into());
+        .unwrap_or_else(|| rel(&crate::util::release_dir()));
     let filters = args.rest();
     args.finish()?;
 
