@@ -101,19 +101,43 @@ pub fn literal_key(ast: &Ast, parents: &ts_r_ast::ParentMap, n: NodeId) -> Optio
     let text = match *ast.node(n) {
         Node::StringLit { value } => ast.atom(value).to_string(),
         Node::NumberLit { value } => ts_r_binder::js_number_to_string(value.get()),
+        Node::TemplateLit { parts } => match ast.list(parts) {
+            [only] => match *ast.node(*only) {
+                Node::TemplateElement { cooked, .. } => ast.atom(cooked).to_string(),
+                _ => return None,
+            },
+            _ => return None,
+        },
         _ => return None,
     };
-    let p = parents.parent(n)?;
+    let mut key = n;
+    let mut p = parents.parent(n)?;
+    // `["a"]: 1`, `` [`a`]() {} ``: a computed key spelled as a literal.
+    if matches!(*ast.node(p), Node::ComputedKey { expr } if expr == n) {
+        key = p;
+        p = parents.parent(p)?;
+    }
     let keyed = match *ast.node(p) {
-        Node::PropertyDef { key, .. }
-        | Node::MethodDef { key, .. }
-        | Node::PropertySignature { key, .. }
-        | Node::MethodSignature { key, .. }
-        | Node::Property { key, .. } => key == n,
+        Node::PropertyDef { key: k, .. }
+        | Node::MethodDef { key: k, .. }
+        | Node::PropertySignature { key: k, .. }
+        | Node::MethodSignature { key: k, .. }
+        | Node::Property { key: k, .. } => k == key,
         Node::Index { index, .. } => index == n,
+        Node::EnumMember { name, .. } => name == n,
         _ => false,
     };
     keyed.then_some(text)
+}
+
+/// The member a literal key belongs to (through a computed key), for [`literal_key`] nodes.
+pub fn literal_key_owner(ck: &Ck<'_, '_>, l: Loc) -> Option<Loc> {
+    let c = ck.c;
+    let p = c.parent(l)?;
+    if matches!(*c.node(p), Node::ComputedKey { .. }) {
+        return c.parent(p);
+    }
+    Some(p)
 }
 
 /// The text a name or a literal key ([`literal_key`]) spells.
@@ -130,7 +154,7 @@ pub fn key_text(ck: &Ck<'_, '_>, l: Loc) -> Option<String> {
 pub fn literal_key_span(ast: &Ast, text: &str, n: NodeId, key: &str) -> Option<(u32, u32)> {
     let sp = ast.span(n);
     match ast.node(n) {
-        Node::StringLit { .. } => {
+        Node::StringLit { .. } | Node::TemplateLit { .. } => {
             let (start, end) = (sp.start + 1, sp.end.saturating_sub(1));
             (text.get(start as usize..end as usize) == Some(key)).then_some((start, end))
         }
@@ -145,7 +169,7 @@ pub fn literal_keys_in(ast: &Ast, parents: &ts_r_ast::ParentMap) -> Vec<NodeId> 
         fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
             if matches!(
                 ast.node(id),
-                Node::StringLit { .. } | Node::NumberLit { .. }
+                Node::StringLit { .. } | Node::NumberLit { .. } | Node::TemplateLit { .. }
             ) && literal_key(ast, self.1, id).is_some()
             {
                 self.0.push(id);
@@ -164,7 +188,7 @@ fn literal_key_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
     let Some(key) = key_text(ck, l) else {
         return Meaning::default();
     };
-    let Some(p) = c.parent(l) else {
+    let Some(p) = literal_key_owner(ck, l) else {
         return Meaning::default();
     };
     if let Node::Index { obj, .. } = *c.node(p) {
@@ -185,11 +209,16 @@ fn literal_key_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
 /// implements, when the literal is not a destructuring target.
 fn contextual_property(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
     let c = ck.c;
-    let member = c.parent(l)?;
+    let mut key = l.node;
+    let mut member = c.parent(l)?;
+    if matches!(*c.node(member), Node::ComputedKey { .. }) && !is_name(c.ast(l.file), l.node) {
+        key = member.node;
+        member = c.parent(member)?;
+    }
     let named = match *c.node(member) {
-        Node::Property { key, .. } => key == l.node,
-        Node::ShorthandProp { name, .. } => name == l.node,
-        Node::MethodDef { key, .. } => key == l.node,
+        Node::Property { key: k, .. } => k == key,
+        Node::ShorthandProp { name, .. } => name == key,
+        Node::MethodDef { key: k, .. } => k == key,
         _ => false,
     };
     let lit = c.parent(member)?;
@@ -240,6 +269,12 @@ fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
         is_decl: false,
         contextual: None,
     };
+    // `this.#x`, `#x in o`: the member of the innermost class declaring `#x`.
+    if matches!(ast.node(l.node), Node::PrivateName { .. })
+        && decl_name_node(ast, p) != Some(l.node)
+    {
+        return one(private_member(ck, l, name));
+    }
     match *ast.node(p) {
         Node::Member { obj, prop, .. } if prop == l.node => {
             let t = ck.check_expr(Loc::new(l.file, obj));
@@ -311,6 +346,34 @@ fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
     one(c
         .resolve_ident(l, want)
         .or_else(|| c.resolve_ident(l, meaning::ALL)))
+}
+
+/// The member `#name` of the innermost class around `l` that declares it (private names
+/// are scoped lexically, not by the object's type).
+fn private_member(ck: &Ck<'_, '_>, l: Loc, name: &str) -> Option<SymId> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    let mut cur = l;
+    for _ in 0..256 {
+        cur = c.parent(cur)?;
+        let (Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. }) =
+            *ast.node(cur.node)
+        else {
+            continue;
+        };
+        for &m in ast.list(members) {
+            let key = match *ast.node(m) {
+                Node::PropertyDef { key, .. } | Node::MethodDef { key, .. } => key,
+                _ => continue,
+            };
+            if matches!(ast.node(key), Node::PrivateName { .. })
+                && name_text(ast, key) == Some(name)
+            {
+                return c.sym_of_decl(Loc::new(l.file, m));
+            }
+        }
+    }
+    None
 }
 
 /// The symbol of an entity name (`A` or `A.B`), for qualified names.

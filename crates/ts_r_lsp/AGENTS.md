@@ -453,6 +453,31 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   the name.
 - `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
   (`a|()`), as tsserver's touching-name lookup does.
+- **Inherited members** (`inherit.rs`, from `tsc: tsc/internal/ls/findallreferences.go`,
+  `forEachRelatedSymbol`): a non-static class or interface member is one with the
+  same-named members its container inherits (base class, `implements`, interface
+  `extends`, any depth). Two members are related when the declaration sets reached upward
+  from each share one (an override, its base, a sibling override, an implementation). A
+  class in its own base chain has no base; interfaces keep theirs.
+- **Search meaning** (`ref_meaning.rs`, from `tsc: tsc/internal/ls/utilities.go`): a
+  search covers the meanings of the location it starts from (value, type, namespace),
+  widened by every declaration sharing one; each candidate must be used in one of them, so
+  an interface merged with a namespace and a function is searched as a type only from a
+  type position. Rename searches every meaning.
+- **Aliases** (`aliases.rs`): a search starts at the cursor's symbol followed through
+  transparent aliases (`import { a }`, `export { a }`, a default import except in a
+  rename) and stops at the first alias that renames (`{ a as b }`, `import * as ns`,
+  `import x = require(..)`, `export default expr`) or at the declared symbol. A name
+  matches when the search symbol is on its alias chain (`Checker::link.alias_chain`), and
+  the names aliases give the symbol are scanned too (not for a rename, nor through entity
+  `import x = N.y`). The imported side of a renaming specifier and the entity of `export
+  default a` / `export = a` stand for the specifier's immediate target. From the `default`
+  keyword: the keyword, the export's imports and their uses; an anonymous default export's
+  keyword is its declaration.
+- **Shorthands and private names**: references (not rename) from `{ x }` or `const { x } =
+  o` cover the variable and the property; `#x` resolves lexically to the innermost class
+  declaring it; computed literal keys (`["a"]`, `` [`a`] ``) and string enum member names
+  are literal keys.
 - **Constructor references** (`constructor_refs.rs`): find-all-references on a
   `constructor` keyword (or a modifier before it) lists the class's constructor keywords as
   declarations, then the callee name of each `new` of a class the constructor builds (its
@@ -894,8 +919,9 @@ features stay on ts-r (hover p50 0.12 ms).
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
-  have no symbol (the checker does not type JSX yet); references do not follow renaming
-  imports (`import { a as b }`: uses of `b`) or members inherited across classes.
+  have no symbol (the checker does not type JSX yet); references do not go back up from a
+  re-export to the declaration the way tsc does from some imports (`import boom from
+  "./d"` where `d` re-exports a renamed default), nor through JSDoc, `require` or `import()`.
   Completions: no accessibility filtering after `.` (private members are listed),
   auto-imports only from the project's own (non-`node_modules`) modules and never
   `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no

@@ -3,12 +3,14 @@
 //! range goes back out through [`LspLines`].
 
 pub mod actions;
+mod aliases;
 mod class_items;
 mod complete;
 mod constructor_refs;
 mod definitions;
 mod expected;
 mod hover;
+mod inherit;
 mod jsx_items;
 mod keywords;
 pub mod locate;
@@ -17,6 +19,7 @@ mod nav;
 mod outline;
 mod position;
 mod quick_info;
+mod ref_meaning;
 mod signature;
 mod signature_site;
 mod strings;

@@ -2417,3 +2417,125 @@ fn folder_rename_across_projects() {
     assert_eq!(e["changes"].as_object().unwrap().len(), 2, "{e}");
     c.shutdown();
 }
+
+/// (file, line, character) of each location in a references answer, sorted.
+fn ref_spots(env: &Env, r: &Value) -> Vec<(String, u64, u64)> {
+    let mut out: Vec<(String, u64, u64)> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            let uri = l["uri"].as_str().unwrap();
+            let file = ["src/a.ts", "src/b.ts", "src/c.ts"]
+                .into_iter()
+                .find(|f| env.uri(f) == uri)
+                .unwrap_or("?")
+                .to_string();
+            let s = &l["range"]["start"];
+            (
+                file,
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+const REFS_A: &str = "class Base { ¦m() {} static ¦s() {} }\nclass D extends Base { m() {} static s() {} #p = 1; f() { return this.¦#p; } }\ninterface ¦Foo {}\nnamespace Foo { export const x = 1; }\nlet t: Foo;\nFoo.x;\ninterface I { [\"¦k\"]: number }\nclass K implements I { [\"k\"] = 1; }\nexport function ¦foo() {}\nexport default function () {}\n";
+const REFS_B: &str = "import { foo as ¦bar } from \"./a.js\";\nexport { bar as baz };\nbar();\n";
+const REFS_C: &str = "import { baz } from \"./b.js\";\nimport d from \"./a.js\";\nbaz(); d();\n";
+
+/// References follow inherited members, private names, computed literal keys, the meaning
+/// of the location (an interface merged with a namespace), and aliases that rename.
+#[test]
+fn references_through_inheritance_meanings_and_aliases() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(REFS_A);
+    let (b, mb) = marked(REFS_B);
+    let (cc, _) = marked(REFS_C);
+    let env = Env::new(
+        "navrefs",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", &a),
+            ("src/b.ts", &b),
+            ("src/c.ts", &cc),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/a.ts", "src/b.ts", "src/c.ts"] {
+        env.open(&mut c, f);
+    }
+    let ua = env.uri("src/a.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let mut refs = |uri: &str, (line, ch): (u32, u32)| {
+        let r = result(
+            &mut c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        ref_spots(&env, &r)
+    };
+    let s = |v: &[(&str, u64, u64)]| -> Vec<(String, u64, u64)> {
+        v.iter().map(|&(f, l, c)| (f.to_string(), l, c)).collect()
+    };
+    // An override is one with the member it overrides; statics are not inherited.
+    assert_eq!(
+        refs(&ua, m[0]),
+        s(&[("src/a.ts", 0, 13), ("src/a.ts", 1, 23)])
+    );
+    assert_eq!(refs(&ua, m[1]), s(&[("src/a.ts", 0, 27)]));
+    // `this.#p` is the class's own `#p`.
+    assert_eq!(
+        refs(&ua, m[2]),
+        s(&[("src/a.ts", 1, 44), ("src/a.ts", 1, 70)])
+    );
+    // From the interface: its type uses, not the namespace's.
+    assert_eq!(
+        refs(&ua, m[3]),
+        s(&[("src/a.ts", 2, 10), ("src/a.ts", 4, 7)])
+    );
+    // `["k"]` in an interface and in the class implementing it.
+    assert_eq!(
+        refs(&ua, m[4]),
+        s(&[("src/a.ts", 6, 16), ("src/a.ts", 7, 25)])
+    );
+    // From the declaration: every alias under another name and its uses.
+    assert_eq!(
+        refs(&ua, m[5]),
+        s(&[
+            ("src/a.ts", 8, 16),
+            ("src/b.ts", 0, 9),
+            ("src/b.ts", 0, 16),
+            ("src/b.ts", 1, 9),
+            ("src/b.ts", 1, 16),
+            ("src/b.ts", 2, 0),
+            ("src/c.ts", 0, 9),
+            ("src/c.ts", 2, 0),
+        ])
+    );
+    // From a renaming alias: only what goes through it.
+    assert_eq!(
+        refs(&ub, mb[0]),
+        s(&[
+            ("src/b.ts", 0, 16),
+            ("src/b.ts", 1, 9),
+            ("src/b.ts", 1, 16),
+            ("src/b.ts", 2, 0),
+            ("src/c.ts", 0, 9),
+            ("src/c.ts", 2, 0),
+        ])
+    );
+    // The `default` keyword of an anonymous default export: it and its imports.
+    assert_eq!(
+        refs(&ua, (9, 8)),
+        s(&[("src/a.ts", 9, 7), ("src/c.ts", 1, 7), ("src/c.ts", 2, 7)])
+    );
+    c.shutdown();
+}
