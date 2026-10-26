@@ -265,11 +265,16 @@ preserve-caught-error 81/81
 radix 91/91
 require-yield 15/15
 symbol-description 8/8
+unicorn/empty-brace-spaces 213/213
 unicorn/escape-case 198/198
 unicorn/no-console-spaces 86/86
+unicorn/no-document-cookie 21/21
 unicorn/no-lonely-if 20/20
 unicorn/no-nested-ternary 20/20
 unicorn/no-null 94/94
+unicorn/no-this-assignment 23/23
+unicorn/no-unreadable-iife 14/14
+unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-optional-catch-binding 25/25

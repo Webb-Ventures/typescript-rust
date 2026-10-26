@@ -278,3 +278,8 @@ no-empty-function
 unicorn/no-nested-ternary
 unicorn/no-lonely-if
 unicorn/no-null
+unicorn/no-document-cookie
+unicorn/no-this-assignment
+unicorn/no-unreadable-iife
+unicorn/no-zero-fractions
+unicorn/empty-brace-spaces

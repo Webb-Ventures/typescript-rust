@@ -274,11 +274,16 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_empty_brace_spaces;
 mod unicorn_escape_case;
 mod unicorn_no_console_spaces;
+mod unicorn_no_document_cookie;
 mod unicorn_no_lonely_if;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_null;
+mod unicorn_no_this_assignment;
+mod unicorn_no_unreadable_iife;
+mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_optional_catch_binding;
@@ -583,11 +588,16 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
     // eslint-plugin-unicorn
+    &unicorn_empty_brace_spaces::RULE,
     &unicorn_escape_case::RULE,
     &unicorn_no_console_spaces::RULE,
+    &unicorn_no_document_cookie::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_null::RULE,
+    &unicorn_no_this_assignment::RULE,
+    &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
