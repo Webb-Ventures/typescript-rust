@@ -89,7 +89,7 @@ struct Predicate {
     node: NodeId,
 }
 
-fn is_reference(ast: &Ast, id: NodeId) -> bool {
+pub(crate) fn is_reference(ast: &Ast, id: NodeId) -> bool {
     matches!(
         ast.node(unwrap_ts(ast, id)),
         Node::Ident { .. }
@@ -100,7 +100,7 @@ fn is_reference(ast: &Ast, id: NodeId) -> bool {
     )
 }
 
-fn contains_optional_chain(ast: &Ast, id: NodeId) -> bool {
+pub(crate) fn contains_optional_chain(ast: &Ast, id: NodeId) -> bool {
     struct Find {
         found: bool,
     }

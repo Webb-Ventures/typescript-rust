@@ -393,6 +393,7 @@ mod unicorn_no_redundant_comparison;
 mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_single_promise_in_promise_methods;
 mod unicorn_no_static_only_class;
+mod unicorn_no_subtraction_comparison;
 mod unicorn_no_thenable;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
@@ -438,6 +439,7 @@ mod unicorn_numeric_separators_style;
 mod unicorn_operator_assignment;
 mod unicorn_prefer_add_event_listener;
 mod unicorn_prefer_add_event_listener_options;
+mod unicorn_prefer_aggregate_error;
 mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
 mod unicorn_prefer_array_from_range;
@@ -496,6 +498,7 @@ mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_set_methods;
 mod unicorn_prefer_set_size;
 mod unicorn_prefer_short_escape_sequences;
+mod unicorn_prefer_simple_condition_first;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
 mod unicorn_prefer_single_object_destructuring;
@@ -953,6 +956,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_redundant_comparison::RULE,
     &unicorn_no_single_promise_in_promise_methods::RULE,
     &unicorn_no_static_only_class::RULE,
+    &unicorn_no_subtraction_comparison::RULE,
     &unicorn_no_thenable::RULE,
     &unicorn_no_shorthand_property_overrides::RULE,
     &unicorn_no_this_assignment::RULE,
@@ -996,6 +1000,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_numeric_separators_style::RULE,
     &unicorn_operator_assignment::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
+    &unicorn_prefer_aggregate_error::RULE,
     &unicorn_prefer_array_from_range::RULE,
     &unicorn_prefer_array_slice::RULE,
     &unicorn_prefer_array_last_methods::RULE,
@@ -1033,6 +1038,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_set_methods::RULE,
     &unicorn_prefer_promise_with_resolvers::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
+    &unicorn_prefer_simple_condition_first::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
     &unicorn_prefer_string_match_all::RULE,

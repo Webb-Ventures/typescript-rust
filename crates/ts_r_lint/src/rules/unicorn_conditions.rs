@@ -5,7 +5,7 @@
 #![allow(dead_code)] // A shared toolkit: each rule uses part of it.
 
 use super::prelude::*;
-use super::unicorn_text::expression_text;
+use super::unicorn_text::{expression_text, is_parenthesized, paren_text};
 use ts_r_ast::Ast;
 use ts_r_ast::visit::{Visitor, Walk, walk};
 
@@ -202,4 +202,70 @@ pub(crate) fn indent_if_line_start(src: &str, pos: usize) -> Option<&str> {
         .map_or(0, |(i, c)| i + c.len_utf8());
     let before = &src[start..pos];
     before.trim().is_empty().then_some(before)
+}
+
+/// A TS expression wrapper: `as`, `satisfies`, `!`, `<T>x`, `f<T>`.
+pub(crate) fn is_ts_wrapper(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::As { .. }
+            | Node::Satisfies { .. }
+            | Node::NonNull { .. }
+            | Node::TypeAssertion { .. }
+            | Node::Instantiation { .. }
+    )
+}
+
+/// `getOutermostTypeScriptExpression`: the outermost TS wrapper (through parentheses)
+/// around `id`, or `id`.
+pub(crate) fn outermost_ts_wrapper(cx: &Ctx<'_, '_>, id: NodeId) -> NodeId {
+    let mut cur = id;
+    for _ in 0..100_000 {
+        match parent_skip_parens(cx.ast(), cx.file.parents, cur) {
+            Some(p) if is_ts_wrapper(cx.node(p)) => cur = p,
+            _ => break,
+        }
+    }
+    cur
+}
+
+/// `getLogicalExpressionChildText`: `id` with its parentheses, wrapped in new ones when it
+/// would bind looser than an operand of `op` (any binary or a different logical operator,
+/// `await`, `?:`, assignments, arrows, `yield`, sequences).
+pub(crate) fn logical_child_text(cx: &Ctx<'_, '_>, id: NodeId, op: BinaryOp) -> String {
+    let text = paren_text(cx, id);
+    let needs = !is_parenthesized(cx, id)
+        && match *cx.node(id) {
+            Node::Binary { op: o, .. } => o != op,
+            Node::Await { .. }
+            | Node::Conditional { .. }
+            | Node::Assign { .. }
+            | Node::Arrow { .. }
+            | Node::Yield { .. }
+            | Node::Seq { .. } => true,
+            _ => false,
+        };
+    if needs {
+        format!("({text})")
+    } else {
+        text.to_owned()
+    }
+}
+
+/// A comment is the token right before `start` or right after `end`.
+pub(crate) fn comment_next_to(cx: &Ctx<'_, '_>, start: u32, end: u32) -> bool {
+    let ast = cx.ast();
+    let src = cx.src();
+    let len = src.len() as u32;
+    let before = ast
+        .comments_in(Span::new(0, start))
+        .last()
+        .is_some_and(|c| {
+            c.span.end <= start && src[c.span.end as usize..start as usize].trim().is_empty()
+        });
+    before
+        || ast
+            .comments_in(Span::new(end, len))
+            .first()
+            .is_some_and(|c| src[end as usize..c.span.start as usize].trim().is_empty())
 }

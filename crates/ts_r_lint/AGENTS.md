@@ -1784,18 +1784,41 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   references, `typeof` queries and type-only member keys aren't uses; a name bound only
   as a type alias, interface or type parameter isn't a value. Files without a `using`
   declaration are skipped before the walk.
+- **prefer-aggregate-error**: an `if` whose only statement throws `new Error(..)` (the
+  global, at most two plain arguments) and whose `&&` operands hold exactly one positive
+  length check on an `*errors`/`*ErrorList`-style array name. The evidence is the binding's
+  annotation only (no type information): arrays, tuples, `Array<>`/`ReadonlyArray<>` of
+  builtin errors not declared in the file, through `readonly`, union (all) and
+  intersection (any), and type aliases resolved in the scope that declares them, with a
+  cycle guard. A local `AggregateError` value blocks the report.
+- **no-subtraction-comparison**: `a - b <op> 0` and `0 <op> a - b` become `a <op> b`
+  (ordering mirrored when `0` is on the left). A fix for `<`/`>` when both operands are
+  numbers, for the other operators when both are finite static numbers; a suggestion
+  otherwise; nothing when a comment sits outside the operands.
+- **prefer-simple-condition-first**: in an outermost `&&`/`||` condition chain (looked at
+  from its outermost TS wrapper), a simple operand after a complex one, unless a
+  `typeof x` undefined-guard earlier in the chain protects that name. The fix moves every
+  simple operand first when the complex operands it passes are themselves `?:` of simple
+  parts; otherwise the `/unsafe` message without a fix.
+- Not done: **prefer-includes-over-repeated-comparisons**. Its `.ts` cases were recorded
+  with a TypeScript program (loose `==` needs both sides typed string or number, a union
+  receiver is skipped) but the rule oracle lints them without type information, so they
+  can't match.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
   don't shadow a global value), optional-chain and TS-wrapper unwrapping,
-  `reindent_text` (`reindentText`) and `indent_if_line_start`.
+  `reindent_text` (`reindentText`), `indent_if_line_start`, `outermost_ts_wrapper`,
+  `logical_child_text` (`getLogicalExpressionChildText`) and `comment_next_to`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
 `prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`,
 `no-negated-comparison.js`, `no-chained-comparison.js`, `no-invalid-character-comparison.js`,
 `no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`, `no-error-property-assignment.js`,
-`no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`;
+`no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`,
+`no-subtraction-comparison.js`, `prefer-simple-condition-first.js`,
+`prefer-includes-over-repeated-comparisons.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
@@ -1805,7 +1828,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `is-same-reference.js`, `is-promise-type.js`, `is-call-expression-value-discarded-with-void.js`,
 `contains-suspension-point.js`, `get-references.js`, `get-indent-string.js`, `get-indent-unit.js`,
 `get-line-indent.js`, `reindent-text.js`, `get-assignment-targets.js`, `member-expression.js`,
-`is-branch-exit.js`, `track-branch-exits.js`; `rules/fix/remove-statement.js`,
+`is-branch-exit.js`, `track-branch-exits.js`, `is-array.js`, `is-global-identifier.js`,
+`type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`; `rules/fix/remove-statement.js`,
 `add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
 `rules/shared/nullish-check.js`, `builtin-errors.js`. ESLint docs for `operator-assignment` and
 `logical-assignment-operators`.

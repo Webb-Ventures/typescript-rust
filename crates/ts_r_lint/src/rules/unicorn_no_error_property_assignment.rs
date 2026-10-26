@@ -34,7 +34,7 @@ pub static RULE: RuleDef = RuleDef {
 #[derive(Debug, Default)]
 struct NoErrorPropertyAssignment;
 
-const BUILTIN_ERRORS: &[&str] = &[
+pub(crate) const BUILTIN_ERRORS: &[&str] = &[
     "Error",
     "EvalError",
     "RangeError",
