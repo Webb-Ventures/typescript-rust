@@ -134,6 +134,8 @@ pub(crate) fn run(
     let sc = analyze(
         ast,
         opts.experimental_decorators && opts.emit_decorator_metadata,
+        opts.strict_null_checks,
+        Some((resolver, file)),
     );
     let is_module = !ast.source_kind.is_declaration()
         && (opts.force_module

@@ -17,7 +17,6 @@ conformance/classes/members/instanceAndStaticMembers/typeOfThisInStaticMembers12
 conformance/classes/propertyMemberDeclarations/autoAccessor10.ts	autoAccessor10.js	differs: other
 conformance/classes/propertyMemberDeclarations/autoAccessor5.ts(target=es2022)	autoAccessor5.js	differs: lowering: temporaries
 conformance/classes/propertyMemberDeclarations/autoAccessorDisallowedModifiers.ts(target=esnext)	autoAccessorDisallowedModifiers.js	differs: other
-conformance/decorators/decoratorInAmbientContext.ts	decoratorInAmbientContext.js	differs: decorators
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_module.ts(module=es6)	arbitraryModuleNamespaceIdentifiers_module.js	differs: lowering: temporaries
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-no-as.js	differs: import/export

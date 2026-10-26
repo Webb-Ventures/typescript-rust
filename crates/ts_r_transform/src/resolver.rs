@@ -30,12 +30,26 @@ pub enum ConstValue {
     String(String),
 }
 
-/// How `emitDecoratorMetadata` serializes a type annotation.
+/// How `emitDecoratorMetadata` serializes a type reference (`design:type` and friends).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum MetadataType {
-    /// The transform's own syntactic serialization (today's behaviour).
+    /// The transform's own syntactic serialization (no checker).
     #[default]
     Syntactic,
+    /// The type name names a value with construct signatures (a class): the name itself,
+    /// written as an expression (`Foo`, `ns.Foo`, `foo_1.Foo` under CommonJS).
+    Value,
+    /// The name cannot be resolved to a type: a `typeof X === "function" ? X : Object`
+    /// guard that reads the name at run time.
+    Unknown,
+    /// `void 0`: void, `undefined`, `null` and `never`.
+    Void,
+    /// A global constructor: `Object`, `Function`, `Boolean`, `Number`, `BigInt`,
+    /// `String`, `Array`, `Symbol` or `Promise`.
+    Global(&'static str),
+    /// Like [`MetadataType::Global`], for a name reached through a type-only import or
+    /// export: the name is not a run-time reference, so it keeps no import alive.
+    TypeOnly(&'static str),
 }
 
 /// Cross-file facts for emit. Node ids are those of the file's original tree: the emitter
@@ -57,7 +71,7 @@ pub trait EmitResolver: Sync {
         None
     }
 
-    /// How decorator metadata serializes the type node `ty`.
+    /// How decorator metadata serializes the type reference `ty` (a `TypeRef` node).
     fn metadata_type(&self, file: FileId, ty: NodeId) -> MetadataType {
         let _ = (file, ty);
         MetadataType::Syntactic

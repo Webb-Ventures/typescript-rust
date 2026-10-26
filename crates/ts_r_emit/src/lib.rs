@@ -32,7 +32,7 @@ use ts_r_codegen::{
 use ts_r_config::{CompilerOptions, ConfigDiagnostic, NewLine, ParsedConfig, path};
 use ts_r_diagnostics::{Category, Diagnostic, FileId, SOUND_CODE_BASE};
 use ts_r_span::Span;
-use ts_r_transform::{Answer, ConstValue, EmitResolver, TransformOptions};
+use ts_r_transform::{Answer, ConstValue, EmitResolver, MetadataType, TransformOptions};
 
 pub use maps::MapRules;
 pub use paths::PathRules;
@@ -544,6 +544,146 @@ impl std::fmt::Debug for CheckerResolver<'_, '_> {
     }
 }
 
+/// How decorator metadata serializes the type reference `ty` of `file`, from what its name
+/// resolves to as a value and as a type (design record 0012; the rule is written up in
+/// `crates/ts_r_emit/AGENTS.md`, "Decorator metadata").
+fn metadata_type(c: &Checker<'_>, file: FileId, ty: NodeId) -> MetadataType {
+    use ts_r_ast::Node;
+    use ts_r_binder::meaning;
+    use ts_r_checker::members::SigKind;
+    use ts_r_types::{TypeFlags, TypeId};
+    if file.0 as usize >= c.files.len() {
+        return MetadataType::Syntactic;
+    }
+    let ast = c.ast(file);
+    if ty.index() >= ast.nodes.len() {
+        return MetadataType::Syntactic;
+    }
+    let Node::TypeRef { name, .. } = *ast.node(ty) else {
+        return MetadataType::Syntactic;
+    };
+    let mut ck = ts_r_checker::Ck::new(c, file);
+    ck.no_report += 1;
+    let at = Loc::new(file, name);
+    // A dotted name whose first part is declared only by type-only imports or exports.
+    let mut type_only = false;
+    if matches!(ast.node(name), Node::QualifiedName { .. }) {
+        let mut root = name;
+        let mut depth = 0;
+        while let Node::QualifiedName { left, .. } = *ast.node(root)
+            && depth < 1024
+        {
+            root = left;
+            depth += 1;
+        }
+        if let Some(r) = ck.resolve_entity(Loc::new(file, root), meaning::VALUE) {
+            let mut parts = c.parts(r).peekable();
+            type_only = parts.peek().is_some()
+                && parts.all(|p| {
+                    c.file(p.file)
+                        .bound
+                        .symbol(p.symbol)
+                        .facts
+                        .intersects(ts_r_binder::SymbolFacts::TYPE_ONLY)
+                });
+        }
+    }
+    let value = ck.resolve_entity(at, meaning::VALUE);
+    let typ = ck.resolve_entity(at, meaning::TYPE);
+    type_only |= value.is_some_and(|v| type_only_chain(c, v));
+    type_only |= typ.is_some_and(|v| type_only_chain(c, v));
+    let value = value
+        .and_then(|v| c.resolve_alias(v))
+        .filter(|&v| c.has_meaning(v, meaning::VALUE));
+    let typ = typ
+        .and_then(|v| c.resolve_alias(v))
+        .filter(|&v| c.has_meaning(v, meaning::TYPE));
+    let global = |g: &'static str| {
+        if type_only {
+            MetadataType::TypeOnly(g)
+        } else {
+            MetadataType::Global(g)
+        }
+    };
+    if let Some(v) = value
+        && Some(v) == typ
+    {
+        let promise = c
+            .global_symbol("Promise", meaning::VALUE)
+            .and_then(|p| c.resolve_alias(p));
+        if promise == Some(v) {
+            return global("Promise");
+        }
+        let ctor = ck.type_of_symbol(v);
+        if !ck.signatures_of(ctor, SigKind::Construct).is_empty() {
+            return if type_only {
+                MetadataType::TypeOnly("Function")
+            } else {
+                MetadataType::Value
+            };
+        }
+    }
+    let unresolved = if type_only {
+        MetadataType::TypeOnly("Object")
+    } else {
+        MetadataType::Unknown
+    };
+    let Some(typ) = typ else {
+        return unresolved;
+    };
+    let t = ck.declared_type_of_symbol(typ);
+    if ck.store().is_error(t) || t == TypeId::UNRESOLVED {
+        return unresolved;
+    }
+    let flags = ck.store().flags(t);
+    // Whether `t` has one of the `kind` flags or is assignable to one of `targets`.
+    let is_kind = |ck: &mut ts_r_checker::Ck<'_, '_>, kind: TypeFlags, targets: &[TypeId]| {
+        flags.intersects(kind) || targets.iter().any(|&x| ck.is_assignable(t, x))
+    };
+    if flags.intersects(TypeFlags::ANY_OR_UNKNOWN) {
+        global("Object")
+    } else if is_kind(
+        &mut ck,
+        TypeFlags::VOID | TypeFlags::NULLABLE | TypeFlags::NEVER,
+        &[TypeId::VOID, TypeId::UNDEFINED, TypeId::NULL, TypeId::NEVER],
+    ) {
+        MetadataType::Void
+    } else if is_kind(&mut ck, TypeFlags::BOOLEAN_LIKE, &[TypeId::BOOLEAN]) {
+        global("Boolean")
+    } else if is_kind(&mut ck, TypeFlags::NUMBER_LIKE, &[TypeId::NUMBER]) {
+        global("Number")
+    } else if is_kind(&mut ck, TypeFlags::BIGINT_LIKE, &[TypeId::BIGINT]) {
+        global("BigInt")
+    } else if is_kind(&mut ck, TypeFlags::STRING_LIKE, &[TypeId::STRING]) {
+        global("String")
+    } else if c.is_tuple_type(t) {
+        global("Array")
+    } else if is_kind(&mut ck, TypeFlags::ES_SYMBOL_LIKE, &[TypeId::SYMBOL]) {
+        global("Symbol")
+    } else if flags.intersects(TypeFlags::OBJECT) && !ck.signatures_of(t, SigKind::Call).is_empty()
+    {
+        global("Function")
+    } else if c.is_array_type(t) {
+        global("Array")
+    } else {
+        global("Object")
+    }
+}
+
+/// Whether a link of the alias chain of `s` is a type-only import or export.
+fn type_only_chain(c: &Checker<'_>, s: ts_r_types::SymId) -> bool {
+    let Some(r) = c.parts(s).next() else {
+        return false;
+    };
+    c.link.alias_chain(r).into_iter().any(|a| {
+        c.file(a.file)
+            .bound
+            .symbol(a.symbol)
+            .facts
+            .intersects(ts_r_binder::SymbolFacts::TYPE_ONLY)
+    })
+}
+
 /// Per file of the checker: whether the automatic JSX runtime it imports implicitly
 /// (`react/jsx-runtime`) resolves to a module, ambient or a program file, as the checker
 /// resolves it to type the file's JSX.
@@ -588,6 +728,10 @@ impl EmitResolver for CheckerResolver<'_, '_> {
             Some(false) => Answer::No,
             None => Answer::Unknown,
         }
+    }
+
+    fn metadata_type(&self, file: FileId, ty: NodeId) -> MetadataType {
+        metadata_type(self.checker, file, ty)
     }
 
     fn const_enum_value(&self, file: FileId, access: NodeId) -> Option<ConstValue> {

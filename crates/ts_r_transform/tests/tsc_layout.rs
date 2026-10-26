@@ -251,3 +251,11 @@ fn triple_slash_elided_import() {
 fn triple_slash_erased_interface() {
     check("triple_slash_erased_interface");
 }
+
+/// Decorator metadata without a checker: `BigInt` guarded below ES2020, an accessor's type
+/// from its setter, a rest parameter's element type, a union that keeps no import, and the
+/// temps tsc declares for a union's discarded guards.
+#[test]
+fn decorator_metadata_rules() {
+    check("decorator_metadata_rules");
+}

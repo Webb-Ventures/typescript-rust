@@ -207,6 +207,24 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - **Static blocks the TypeScript transform synthesizes** for a static initializer or a key
   capture are listed in `Tx::inline_static`: below ES2022 they become a statement after the
   class (`C.x = 1;`, `_a = k`), source static blocks an IIFE. Push every such block there.
+- **Decorator metadata** (`decorators.rs`, `scope.rs`): a type reference asks
+  `EmitResolver::metadata_type` (the program emitter answers from the checker, see
+  `../ts_r_emit/AGENTS.md`; per-file transpile answers `Syntactic`: what the file shows).
+  Unions, intersections and a conditional type's two branches serialize to their members'
+  common value or `Object`; `never` is dropped (an intersection with it is `void 0`),
+  `null`/`undefined` only without `strictNullChecks`. Each guarded member builds its guard
+  before the comparison, so its temp is declared even when the union ends as `Object`. An
+  accessor's type is its setter's parameter type when there is a setter, else the getter's
+  return type. `BigInt` below ES2020 is `typeof BigInt === "function" ? BigInt : Object`.
+  Which imports stay alive is a separate rule (tsc: tsc/internal/checker/checker.go,
+  marking decorator metadata references): a decorated class keeps its constructor's
+  parameter types, a method its parameter and return types, a parameter decorator its
+  whole signature's, a field its type, an accessor its own annotation or else its pair's;
+  a rest parameter keeps its element type (`...a: T[]`, `...a: X<T>`); a union keeps an
+  entity only when every member (skipping `never`, and `null`/`undefined` without
+  `strictNullChecks`) is a reference to the same plain name; a plain name reached only
+  through `import type` keeps nothing. Decorated `declare` fields are decorated.
+  (tsc: tsc/internal/transformers/tstransforms/typeserializer.go for the serialization.)
 - **Helpers**: `Helper::ALL` order, then `Helper::REQUEST_ORDER` ones (`__await`,
   `__asyncGenerator`, `__asyncValues`, `__asyncDelegator`, `__classPrivateField*`) in the
   order first requested. A class with an `accessor` storage asks for `__classPrivateFieldGet`

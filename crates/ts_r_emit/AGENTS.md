@@ -184,6 +184,20 @@ transpile) `SyntacticResolver` keeps today's isolatedModules behaviour. ts-r-che
 second `Checker` for emit (the check's checker is internal to `check_program`); alias
 resolution is lazy, so this costs the link step only.
 
+`metadata_type` answers decorator metadata for a type reference in a decorated signature
+(`emitDecoratorMetadata`), in our words after reading tsc's rule
+(tsc: tsc/internal/checker/emitresolver.go, the type reference serialization kind):
+the name is resolved as a value and as a type. A value that is the same symbol as the type
+(a class, or a constructor-typed value such as global `Promise`) is `Value`, printed as an
+entity (`a_1.Foo` under CommonJS); reached only through `import type`/`export type` it is
+`TypeOnly("Function")` and keeps no import. A name that resolves to nothing is `Unknown`
+(guarded: `typeof (_a = typeof X !== "undefined" && X) === "function" ? _a : Object`). Any
+other type maps by its resolved type: `any`/`unknown` and object types `Object`, `void`,
+`undefined`, `null` and `never` `void 0`, then `Boolean`, `Number`, `BigInt`, `String`,
+tuples and arrays `Array`, `Symbol`, callables `Function`. Answers reached through a
+type-only alias are `TypeOnly(..)`, which the transform's scope pass uses to drop the
+import reference.
+
 ## Measurements
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946

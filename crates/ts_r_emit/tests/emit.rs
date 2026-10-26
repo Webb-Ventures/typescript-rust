@@ -638,3 +638,75 @@ fn jsx_runtime_found_elides_unused_react_import() {
         .unwrap();
     assert!(a.text.contains("import React from \"react\""), "{}", a.text);
 }
+
+/// Decorator metadata from the checker (tsc 7.0.2's output for the same project): an imported
+/// class reads through its module variable, an interface is `Object`, an alias of `string`
+/// is `String`, a class exported with `export type` is `Function` and keeps no import, an
+/// unresolved name is guarded, and a decorated `declare` field is still decorated.
+#[test]
+fn decorator_metadata_from_the_checker() {
+    let r = emit(&[
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions":{"target":"es2022","module":"commonjs","rootDir":"src","outDir":"out","types":[],"experimentalDecorators":true,"emitDecoratorMetadata":true,"strict":true,"noEmitHelpers":true}}"#,
+        ),
+        (
+            "src/a.ts",
+            "export class Foo {}\nexport interface I {}\nexport type Alias = string;\nclass Hidden {}\nexport type { Hidden };\n",
+        ),
+        (
+            "src/b.ts",
+            r#"import { Foo, I, Alias, Hidden } from "./a";
+declare function dec(...a: any[]): any;
+export class C {
+    @dec f!: Foo;
+    @dec i!: I;
+    @dec s!: Alias;
+    @dec h!: Hidden;
+    @dec u!: Missing;
+    @dec declare d: Foo;
+}
+"#,
+        ),
+    ]);
+    let b = r.outputs.iter().find(|o| o.path == "/p/out/b.js").unwrap();
+    let want = r#""use strict";
+var _a;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.C = void 0;
+const a_1 = require("./a");
+class C {
+    f;
+    i;
+    s;
+    h;
+    u;
+}
+exports.C = C;
+__decorate([
+    dec,
+    __metadata("design:type", a_1.Foo)
+], C.prototype, "f", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", Object)
+], C.prototype, "i", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", String)
+], C.prototype, "s", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", Function)
+], C.prototype, "h", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", typeof (_a = typeof Missing !== "undefined" && Missing) === "function" ? _a : Object)
+], C.prototype, "u", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", a_1.Foo)
+], C.prototype, "d", void 0);
+"#;
+    assert_eq!(b.text, want);
+}
