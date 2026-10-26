@@ -3289,3 +3289,52 @@ fn references_and_rename_of_string_literal_types() {
     assert!(rename(&mut c, 3, 9).is_null());
     c.shutdown();
 }
+
+const JSX_REFS: &str = "declare namespace JSX {
+    interface Element { }
+    interface IntrinsicElements { div: { name?: string } }
+}
+const x = <div name=\"a\" wrong />;
+";
+
+#[test]
+fn references_of_intrinsic_tags_and_jsx_attributes() {
+    if !libs_present() {
+        return;
+    }
+    let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
+    let env = Env::new(
+        "navjsx",
+        &[("tsconfig.json", tsconfig), ("src/x.tsx", JSX_REFS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/x.tsx");
+    let u = env.uri("src/x.tsx");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        r.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    // The tag is `JSX.IntrinsicElements`'s property; the attribute is its props' property.
+    assert_eq!(refs(&mut c, 4, 11), vec![(2, 34), (4, 11)]);
+    assert_eq!(refs(&mut c, 2, 34), vec![(2, 34), (4, 11)]);
+    assert_eq!(refs(&mut c, 4, 15), vec![(2, 41), (4, 15)]);
+    // An attribute that sets no prop is found alone.
+    assert_eq!(refs(&mut c, 4, 24), vec![(4, 24)]);
+    c.shutdown();
+}

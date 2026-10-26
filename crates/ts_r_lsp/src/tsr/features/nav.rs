@@ -1097,6 +1097,18 @@ fn references_with(
         }
     }
     let Some(mut target) = Target::at(ck, Loc::new(cx.file, n), rename) else {
+        // A JSX attribute that sets no prop is a reference to itself alone.
+        if is_jsx_attr_name(c, Loc::new(cx.file, n)) {
+            let span = c.ast(cx.file).span(n);
+            return vec![Ref {
+                file: cx.file,
+                start: span.start,
+                end: span.end,
+                is_decl: false,
+                is_write: false,
+                shorthand: None,
+            }];
+        }
         // A string literal key that names no symbol: the literals of its type.
         return string_literal_references(cx, ck, offset, scope).unwrap_or_default();
     };
@@ -1292,6 +1304,12 @@ fn link_refs(ck: &mut Ck<'_, '_>, f: FileId, target: &mut Target, out: &mut Vec<
             }
         }
     }
+}
+
+/// Whether `l` is the name of a JSX attribute.
+fn is_jsx_attr_name(c: &Checker<'_>, l: Loc) -> bool {
+    c.parent(l)
+        .is_some_and(|p| matches!(*c.node(p), Node::JsxAttr { name, .. } if name == l.node))
 }
 
 /// The string literal (or substitution-free template) at `offset`.
@@ -1619,7 +1637,7 @@ pub fn rename(
     let ast = c.ast(cx.file);
     let on_this = match ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) {
         Some(n) => {
-            if !is_label(cx, offset) {
+            if !is_label(cx, offset) && !is_jsx_attr_name(c, Loc::new(cx.file, n)) {
                 let m = meaning_at(ck, Loc::new(cx.file, n));
                 let Some(s) = m.primary.or(m.shorthand) else {
                     return Ok(Value::Null);

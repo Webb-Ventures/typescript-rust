@@ -337,6 +337,12 @@ fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
         Node::JsxAttr { name: n, .. } if n == l.node => {
             return one(jsx_attribute(ck, pl, name));
         }
+        // An intrinsic tag (`<div>`) is the property of `JSX.IntrinsicElements`.
+        Node::JsxOpening { name: n, .. } | Node::JsxClosing { name: n }
+            if n == l.node && name.starts_with(|ch: char| ch.is_ascii_lowercase()) =>
+        {
+            return one(intrinsic_element(ck, l, name));
+        }
         _ => {}
     }
     if decl_name_node(ast, p) == Some(l.node)
@@ -568,7 +574,13 @@ fn jsx_attribute(ck: &mut Ck<'_, '_>, attr: Loc, name: &str) -> Option<SymId> {
     let Node::JsxOpening { name: tag, .. } = *c.node(opening) else {
         return None;
     };
-    // Intrinsic elements (`div`) have no symbol here; components do.
+    // The props type the checker checks the attributes against (intrinsic elements, class
+    // and function components).
+    if let Some(props) = ck.quietly(|ck| ck.jsx_props_type(opening))
+        && let Some(p) = property_of(ck, props, name)
+    {
+        return Some(p);
+    }
     let tag_l = Loc::new(attr.file, tag);
     if !matches!(
         c.node(tag_l),
@@ -588,6 +600,15 @@ fn jsx_attribute(ck: &mut Ck<'_, '_>, attr: Loc, name: &str) -> Option<SymId> {
     let sig = *sigs.first()?;
     let props = ck.store().sig(sig).params.first()?.ty;
     property_of(ck, props, name)
+}
+
+/// The property of `JSX.IntrinsicElements` an intrinsic tag name `name` at `tag` names.
+fn intrinsic_element(ck: &mut Ck<'_, '_>, tag: Loc, name: &str) -> Option<SymId> {
+    let c = ck.c;
+    let ns = c.jsx_namespace(tag)?;
+    let ie = c.export_of(ns, "IntrinsicElements")?;
+    let t = ck.declared_type_of_symbol(ie);
+    property_of(ck, t, name)
 }
 
 /// Whether the name at `l` is evaluated as an expression (so `check_expr` gives its
