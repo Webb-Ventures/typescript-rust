@@ -317,3 +317,5 @@ unicorn/explicit-timer-delay
 unicorn/require-array-sort-compare
 unicorn/prefer-array-slice
 unicorn/prefer-promise-static-methods
+unicorn/no-useless-boolean-cast
+unicorn/no-duplicate-logical-operands

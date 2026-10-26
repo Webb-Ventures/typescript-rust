@@ -630,6 +630,9 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
 - **prefer-promise-static-methods** withholds its fix when the executor has typed
   parameters, a return type or type parameters, when `new Promise<T>` would hand its type
   arguments to `reject`, or when a comment would be lost.
+- **no-useless-boolean-cast** treats parentheses as the end of an optional chain
+  (`(a?.b).c` is not an optional-chain result), as ESTree's `ChainExpression` does.
+  **no-duplicate-logical-operands**: see the file's header.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -661,7 +664,9 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `utils/should-add-parentheses-to-conditional-expression-child.js`, `require-css-escape.js`,
 `utils/is-node-value-not-dom-node.js`, `explicit-timer-delay.js`,
 `require-array-sort-compare.js`, `fix/append-argument.js`, `fix/replace-argument.js`,
-`prefer-array-slice.js`, `prefer-promise-static-methods.js`.
+`prefer-array-slice.js`, `prefer-promise-static-methods.js`, `no-useless-boolean-cast.js`,
+`utils/boolean.js`, `utils/function-body.js`, `utils/get-concise-arrow-body-text.js`,
+`no-duplicate-logical-operands.js`, `utils/comparison.js`, `utils/is-reference-context.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:
