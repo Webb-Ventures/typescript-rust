@@ -1587,6 +1587,52 @@ fn completion_in_import_and_export_clauses() {
     c.shutdown();
 }
 
+/// In a JSDoc comment: tag names after `@`, `@tag`s where a tag may start, the documented
+/// function's parameters not yet documented at a `@param` name, and types (or a namespace's
+/// types) inside a tag's braces; nothing in plain comment text.
+#[test]
+fn completion_in_jsdoc_comments() {
+    if !libs_present() {
+        return;
+    }
+    let text = "/**\n * @par\n * \n * @param b\n * @param \n * @returns {Sh}\n * @type {NS.}\n * some text \n */\n\
+                function f(a: number, b: string, c: Shape) {}\n\
+                interface Shape {}\n\
+                namespace NS { export interface Inner {} export const v = 1; }\n";
+    let env = Env::new(
+        "complete-jsdoc",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i["sortText"].as_str().unwrap_or("") < "15")
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 1, 7)));
+    assert!(l.iter().any(|x| x == "param") && l.len() == 84, "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 3)));
+    assert!(l.iter().any(|x| x == "@returns"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 10)));
+    assert_eq!(l, ["a", "c"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 5, 15)));
+    assert!(l.iter().any(|x| x == "Shape"), "{l:?}");
+    assert!(!l.iter().any(|x| x == "f" || x == "a"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 13)));
+    assert_eq!(l, ["Inner"]);
+    let r = result(&mut c, "textDocument/completion", at(&uc, 7, 13));
+    assert!(r.is_null(), "{r}");
+    c.shutdown();
+}
+
 /// Review fixes for import clauses and type positions: a `}` in a comment does not close the
 /// clause, an unterminated quoted name before the cursor does not panic, and modules that
 /// re-export each other as namespaces are searched once each for a type.

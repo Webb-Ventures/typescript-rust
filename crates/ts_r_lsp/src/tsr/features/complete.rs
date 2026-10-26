@@ -123,6 +123,8 @@ enum Context {
     String { lit: NodeId },
     /// Inside a comment: only `/// <reference path="|"` offers anything.
     Reference,
+    /// Inside a JSDoc comment (`jsdoc_items.rs`).
+    JsDoc(super::jsdoc_items::Spot),
     /// A name being declared that may start with a keyword (a constructor parameter).
     Keywords(&'static [&'static str]),
     /// A name in `import { | } from "m"` / `export { | } from "m"`: the module's exports
@@ -158,6 +160,9 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     let (ws, prefix) = word_before(text, offset);
     let prefix = prefix.to_string();
     if in_comment(ast, offset) {
+        if let Some(spot) = super::jsdoc_items::spot(c, file, offset) {
+            return (Context::JsDoc(spot), prefix);
+        }
         return (Context::Reference, prefix);
     }
     if let Some(lit) = super::strings::literal_at(ck, file, offset) {
@@ -592,6 +597,53 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
             }
         }
+        Context::JsDoc(spot) => {
+            use super::jsdoc_items::{Spot, TAG_NAMES};
+            match spot {
+                Spot::Nothing => return Value::Null,
+                Spot::TagName | Spot::TagStart => {
+                    let at = matches!(spot, Spot::TagStart);
+                    for t in TAG_NAMES {
+                        let label = if at {
+                            format!("@{t}")
+                        } else {
+                            (*t).to_string()
+                        };
+                        items.push(json!({"label": label, "kind": 14, "sortText": SORT_LOCAL}));
+                    }
+                }
+                Spot::ParamName(names) => {
+                    for n in names {
+                        items.push(json!({"label": n, "kind": 6, "sortText": SORT_LOCAL}));
+                    }
+                }
+                Spot::ImportModule(fragment) => {
+                    let found =
+                        super::strings::static_module_items(cx, ck, &fragment).unwrap_or_default();
+                    if found.is_empty() {
+                        return Value::Null;
+                    }
+                    for (label, kind) in found {
+                        items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
+                    }
+                }
+                Spot::ImportAttribute(key) => {
+                    let found = super::strings::import_attribute_items(ck, &key);
+                    if found.is_empty() {
+                        return Value::Null;
+                    }
+                    for (label, kind) in found {
+                        items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
+                    }
+                }
+                Spot::TypeMember => {
+                    items.push(json!({"label": "readonly", "kind": 14, "sortText": SORT_KEYWORD}));
+                }
+                Spot::Type { host, qualifier } => {
+                    jsdoc_type_items(ck, cx.file, host, &qualifier, &mut items);
+                }
+            }
+        }
         Context::ClassMember { slot } => {
             // A type literal in a type argument: what the argument is expected to have.
             if !slot.is_class
@@ -864,6 +916,88 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         }
     }
     json!({"isIncomplete": incomplete, "items": items})
+}
+
+/// Type keywords offered where a type is written.
+const TYPE_KEYWORDS: &[&str] = &[
+    "any",
+    "bigint",
+    "boolean",
+    "never",
+    "null",
+    "number",
+    "object",
+    "string",
+    "symbol",
+    "undefined",
+    "unknown",
+    "void",
+];
+
+/// The types a JSDoc tag's `{...}` may name at the documented node `host`: types and
+/// namespaces in scope (then globals and type keywords), or, after `A.B.`, what that
+/// namespace exports that leads to a type.
+fn jsdoc_type_items(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    host: NodeId,
+    qualifier: &[String],
+    items: &mut Vec<Value>,
+) {
+    let c = ck.c;
+    let at = Loc::new(file, host);
+    let want = meaning::TYPE | meaning::NAMESPACE;
+    if let Some((first, rest)) = qualifier.split_first() {
+        let Some(mut s) = ck
+            .resolve_name_at(at, first, meaning::NAMESPACE)
+            .or_else(|| ck.resolve_name_at(at, first, meaning::ALL))
+        else {
+            return;
+        };
+        s = c.resolve_alias(s).unwrap_or(s);
+        for name in rest {
+            let Some((_, x)) = c.exports_of(s).into_iter().find(|(n, _)| n == name) else {
+                return;
+            };
+            s = c.resolve_alias(x).unwrap_or(x);
+        }
+        let mut out = c.exports_of(s);
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, x) in out {
+            if !is_identifier_name(&name) || !type_referable(c, x) {
+                continue;
+            }
+            items.push(json!({"label": name, "kind": item_kind(c, x), "sortText": SORT_MEMBER}));
+        }
+        return;
+    }
+    let mut seen: HashSet<String> = HashSet::new();
+    for (name, s) in scope_names(c, at) {
+        if !has_meaning_through_alias(c, s, want) || !type_referable(c, s) {
+            continue;
+        }
+        if seen.insert(name.clone()) {
+            items.push(json!({"label": name, "kind": item_kind(c, s), "sortText": SORT_LOCAL}));
+        }
+    }
+    for (name, merged) in &c.link.globals {
+        let name: &str = name;
+        if !is_identifier_name(name) || flags_meaning(merged.flags) & want == 0 {
+            continue;
+        }
+        if seen.insert(name.to_string()) {
+            items.push(json!({
+                "label": name,
+                "kind": kind_of_flags(merged.flags),
+                "sortText": SORT_GLOBAL,
+            }));
+        }
+    }
+    for k in TYPE_KEYWORDS {
+        if seen.insert((*k).to_string()) {
+            items.push(json!({"label": k, "kind": 14, "sortText": SORT_KEYWORD}));
+        }
+    }
 }
 
 /// Whether the word at `pos` may be a type argument of an unclosed `f<...`: the identifier

@@ -13,6 +13,7 @@ mod expected;
 mod hover;
 mod inherit;
 mod jsdoc;
+mod jsdoc_items;
 mod jsx_items;
 mod keywords;
 pub mod locate;
