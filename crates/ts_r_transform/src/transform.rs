@@ -77,6 +77,17 @@ pub(crate) struct Tx<'a> {
     /// Generated `accessor` storage names (`_a`, `_b`, ...) when private names are lowered:
     /// counted across the file, apart from temporaries (observed).
     pub storage_count: u32,
+    /// `_c = () => { ... }` capturing the computed keys of the class being transformed
+    /// that use `this`/`super` (`class::class_body` places it), and statements for a class
+    /// declaration to go before it.
+    pub class_key_capture: Option<(NodeId, NodeId)>,
+    pub class_pre_stmts: Vec<NodeId>,
+    /// The same names from ES2022, counted per class (`class::class_body` saves it).
+    pub class_storage_count: u32,
+    /// Private names written in the source (`#x`), for unique `accessor` storage names;
+    /// collected on first use from the nodes the parser made (`source_nodes`).
+    pub source_private_names: Option<rustc_hash::FxHashSet<Atom>>,
+    pub source_nodes: usize,
     /// Expressions that were instantiation expressions (`f<T>`): the lowering captures them
     /// in a temporary even when they are now an identifier (observed).
     pub instantiated: rustc_hash::FxHashSet<NodeId>,
@@ -93,6 +104,8 @@ pub(crate) struct Tx<'a> {
     /// The binding name an anonymous class expression is assigned to (`x = class {}`), for
     /// the TC39 decorator transform's `__setFunctionName`. Taken by the next class expression.
     pub class_name_hint: Option<Atom>,
+    /// `class_name_hint` is a variable holding the name (`_a` of `[_a = __propKey(k)]`).
+    pub class_name_hint_var: bool,
     /// The expression being visited as the object of a non-optional member access, or the
     /// callee/tag of a call, `new` or tagged template: a parenthesized optional chain there
     /// keeps its parentheses (`(a?.b as T).c` → `(a?.b).c`), elsewhere it loses them.
@@ -143,6 +156,7 @@ pub(crate) fn run(
             || (!opts.legacy_module_detection
                 && sc.has_jsx
                 && matches!(opts.jsx, JsxMode::Automatic | JsxMode::AutomaticDev)));
+    let source_nodes = ast.node_count();
     let mut tx = Tx {
         ast,
         src,
@@ -171,12 +185,18 @@ pub(crate) fn run(
         using_names: Vec::new(),
         decorator_storages: Vec::new(),
         storage_count: 0,
+        class_storage_count: 0,
+        class_key_capture: None,
+        class_pre_stmts: Vec::new(),
+        source_private_names: None,
+        source_nodes,
         instantiated: rustc_hash::FxHashSet::default(),
         inline_static: Vec::new(),
         key_exprs: Vec::new(),
         decl_like: Vec::new(),
         enum_params: FxHashMap::default(),
         class_name_hint: None,
+        class_name_hint_var: false,
         chain_target: None,
         resolver,
         file,
@@ -262,7 +282,8 @@ fn drop_marker_for_helper_import(tx: &mut Tx) {
     let Some(marker) = tx.marker else {
         return;
     };
-    if !tx.opts.import_helpers || tx.opts.is_cjs() || tx.helpers.render(tx.opts).is_empty() {
+    if !tx.opts.import_helpers || tx.opts.require_helpers() || tx.helpers.render(tx.opts).is_empty()
+    {
         return;
     }
     let root = tx.ast.root;
@@ -506,7 +527,7 @@ impl<'a> Tx<'a> {
 
     /// Helpers come from a `tslib` module variable (CommonJS modules with importHelpers).
     pub fn tslib_module(&self) -> bool {
-        self.opts.import_helpers && self.opts.is_cjs() && self.is_module
+        self.opts.require_helpers() && self.is_module
     }
 
     // ---- program ----
@@ -655,6 +676,13 @@ impl<'a> Tx<'a> {
                 replace(self.ast, id, e);
             }
             _ => {
+                // The block replaces the statement's slot: a statement kept in it moves to
+                // a fresh slot first (the block can't contain itself).
+                for s in out.iter_mut() {
+                    if *s == id {
+                        *s = crate::builder::clone_node(self.ast, id);
+                    }
+                }
                 let at = self.at(id);
                 let b = self.block(&out, at);
                 replace(self.ast, id, b);
@@ -696,6 +724,16 @@ impl<'a> Tx<'a> {
                     self.erase(id);
                 } else if self.opts.is_cjs() {
                     crate::cjs::export_all(self, id, out);
+                } else if let Node::ExportAll {
+                    exported: Some(e),
+                    attributes,
+                    ..
+                } = n
+                    && self.opts.es2015_module
+                    && matches!(self.opts.module, ModuleFormat::Esm { .. })
+                {
+                    self.rewrite_specifier(source);
+                    self.export_star_as_es2015(id, e, source, attributes, out);
                 } else {
                     self.rewrite_specifier(source);
                     out.push(id);
@@ -704,7 +742,10 @@ impl<'a> Tx<'a> {
             Node::ExportDefaultExpr { expr } => {
                 // `export default Iface` where Iface is a type: erased. So is an imported
                 // name that stands for no value (`import I from "./i"` of an interface).
-                if let Node::Ident { name } = self.n(expr) {
+                // verbatimModuleSyntax keeps it (an error; observed).
+                if let Node::Ident { name } = self.n(expr)
+                    && !self.opts.verbatim_module_syntax
+                {
                     let erase = match self.sc.binding_of_ref(expr) {
                         None => self.sc.type_names.contains(&name),
                         Some(b) => self.type_alias_imports.contains(&b),
@@ -783,6 +824,9 @@ impl<'a> Tx<'a> {
                     crate::cjs::exported_var(self, id, out);
                 } else {
                     out.push(id);
+                    if self.opts.is_cjs() && self.ns_stack.is_empty() {
+                        out.extend(crate::cjs::nested_var_exports(self, id));
+                    }
                 }
             }
             Node::Block { stmts } => {
@@ -813,8 +857,28 @@ impl<'a> Tx<'a> {
                 update,
                 body,
             } => {
+                let mut init = init;
                 if let Some(i) = init {
                     self.for_init(i);
+                    // `for (var h = x;;)` exporting `h` from CommonJS: the declaration and
+                    // its `exports.h = h;` move before the loop (observed).
+                    if self.opts.is_cjs() && self.ns_stack.is_empty() {
+                        let exports = crate::cjs::nested_var_exports(self, i);
+                        if !exports.is_empty() {
+                            out.push(i);
+                            out.extend(exports);
+                            init = None;
+                            self.set(
+                                id,
+                                Node::For {
+                                    init,
+                                    test,
+                                    update,
+                                    body,
+                                },
+                            );
+                        }
+                    }
                 }
                 if let Some(t) = test {
                     self.expr(t);
@@ -832,6 +896,14 @@ impl<'a> Tx<'a> {
                 self.for_init(left);
                 self.expr(right);
                 self.sub_stmt(body);
+                // `for (var n in o)` exporting `n` from CommonJS: the body starts with
+                // `exports.n = n;` (observed).
+                if self.opts.is_cjs() && self.ns_stack.is_empty() {
+                    let exports = crate::cjs::nested_var_exports(self, left);
+                    if !exports.is_empty() {
+                        self.prepend_to_body(body, &exports);
+                    }
+                }
                 out.push(id);
             }
             Node::While { test, body } | Node::DoWhile { body, test } => {
@@ -907,6 +979,85 @@ impl<'a> Tx<'a> {
         }
     }
 
+    /// `export * as ns from "m"` under `module: es2015`, which has no such syntax:
+    /// `import * as ns_1 from "m"; export { ns_1 as ns };` (a string name gets a temporary,
+    /// `default` an `export default default_1;`; observed).
+    fn export_star_as_es2015(
+        &mut self,
+        id: NodeId,
+        exported: NodeId,
+        source: NodeId,
+        attributes: Option<NodeId>,
+        out: &mut Vec<NodeId>,
+    ) {
+        let at = self.at(id);
+        let local = match self.n(exported) {
+            Node::Ident { name } => {
+                let base = self.ast.atom(name).to_owned();
+                self.fresh(&base, true)
+            }
+            _ => self.temp_name(),
+        };
+        let l = self.ident_atom(local, at);
+        let spec = self.mk(Node::ImportNamespaceSpecifier { local: l }, at);
+        let specifiers = self.new_list(&[spec]);
+        let import = self.mk(
+            Node::ImportDecl {
+                type_only: false,
+                phase: ts_r_ast::ImportPhase::Evaluation,
+                has_clause: true,
+                specifiers,
+                source,
+                attributes,
+            },
+            at,
+        );
+        out.push(import);
+        let r = self.ident_atom(local, at);
+        let export = if matches!(self.n(exported), Node::Ident { name } if self.ast.atom(name) == "default")
+        {
+            self.mk(Node::ExportDefaultExpr { expr: r }, at)
+        } else {
+            let spec = self.mk(
+                Node::ExportSpecifier {
+                    type_only: false,
+                    local: r,
+                    exported: Some(exported),
+                },
+                at,
+            );
+            let specifiers = self.new_list(&[spec]);
+            self.mk(
+                Node::ExportNamed {
+                    type_only: false,
+                    specifiers,
+                    source: None,
+                    attributes: None,
+                },
+                at,
+            )
+        };
+        out.push(export);
+    }
+
+    /// Puts `stmts` first in a loop body, making a block of a single statement.
+    fn prepend_to_body(&mut self, body: NodeId, stmts: &[NodeId]) {
+        let mut all = stmts.to_vec();
+        if let Node::Block { stmts: l } = self.n(body) {
+            all.extend(self.items(l));
+            let l = self.new_list(&all);
+            self.set(body, Node::Block { stmts: l });
+        } else {
+            let at = self.at(body);
+            if !matches!(self.n(body), Node::Empty {}) {
+                let inner = crate::builder::clone_node(self.ast, body);
+                all.push(inner);
+            }
+            let b = self.block(&all, at);
+            replace(self.ast, body, b);
+        }
+    }
+
     fn for_init(&mut self, id: NodeId) {
         if self.kind(id) == NodeKind::VarDecl {
             self.var_decl(id);
@@ -969,6 +1120,40 @@ impl<'a> Tx<'a> {
         self.class_name_hint = hint;
         self.expr(value);
         self.class_name_hint = None;
+    }
+
+    /// [`Tx::expr_named`] for the value of property `key` (whose computed expression was
+    /// transformed). A computed key that is not a literal names an anonymous TC39-decorated
+    /// class at run time: `[_a = __propKey(f())]` and `__setFunctionName(_classThis, _a)`
+    /// (observed, tsc 7.0.2 `esDecorators-classExpression-namedEvaluation.10`).
+    pub(crate) fn key_named(&mut self, key: NodeId, value: NodeId, hint: Option<Atom>) {
+        if hint.is_none()
+            && self.opts.lower_es_decorators()
+            && self.is_anonymous_class(value)
+            && let Node::ComputedKey { expr } = self.n(key)
+            && !crate::class::is_literal(self, expr)
+        {
+            let mut c = value;
+            while let Node::Paren { expr } = self.n(c) {
+                c = expr;
+            }
+            if crate::es_decorators::has_es_decorators(self, c) {
+                let at = self.at(expr);
+                let t = self.temp();
+                let f = self.helper_ref(Helper::PropKey, at);
+                let call = self.call(f, &[expr], at);
+                let target = self.ident_atom(t, at);
+                let a = self.assign(target, call, at);
+                self.set(key, Node::ComputedKey { expr: a });
+                self.class_name_hint = Some(t);
+                self.class_name_hint_var = true;
+                self.expr(value);
+                self.class_name_hint = None;
+                self.class_name_hint_var = false;
+                return;
+            }
+        }
+        self.expr_named(value, hint);
     }
 
     pub fn var_decl(&mut self, id: NodeId) {
@@ -1473,7 +1658,7 @@ impl<'a> Tx<'a> {
                 if let Node::ComputedKey { expr } = self.n(key) {
                     self.expr(expr);
                 }
-                self.expr_named(value, hint);
+                self.key_named(key, value, hint);
             }
             Node::ShorthandProp {
                 modifiers,

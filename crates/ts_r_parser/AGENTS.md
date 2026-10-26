@@ -465,6 +465,12 @@ Files:
     keyword or literal follows on the same line (tsc's recovery; the checker reports
     TS1308, which the editor's "Add async modifier" fix needs). `await (x)` and `await`
     before a line break stay an identifier there.
+  - `a + b as T * c` stops before the `*` (tsc 7, microsoft/TypeScript#63527): after an
+    `as`/`satisfies` whose operand is the last binary expression built at that level, an
+    operator that binds tighter than that binary's ends the expression, since erasing the
+    `as` would change its meaning (`',' expected` follows in a declaration). Equal or looser
+    operators continue (`1 + 1 as number === 2`); a non-binary operand never stops
+    (tsc: tsc/internal/parser/parser.go, parseBinaryExpressionRest).
   - Import attributes (`with { ... }`, and the `{ with: { ... } }` of an `import()` type)
     are a delimited list (`List::ImportAttributes`, TS1478 for a bad entry). An `import()`
     type whose second argument is not an object with `with`/`assert` gets empty

@@ -40,6 +40,7 @@ const REJECTED_GRAMMAR: &[u32] = &[
     1358,  // tagged template in an optional chain
     1359,  // `await` as a name where it is an operator
     1492,  // `using {a} = x`
+    5076,  // `a && b ?? c`: `??` mixed with `&&` / `||` without parentheses (a JS syntax error)
     1189,  // `for (x = 1 in o)`: accepted for a sloppy-mode `var x` (`for_in_var_heads`)
     18016, // private name outside a class
 ];
@@ -271,6 +272,9 @@ mod tests {
             ("class C<> {}", SourceKind::Ts),
             ("for (var x, y in o);", SourceKind::Js),
             ("let x = 1 +;", SourceKind::Js),
+            ("f((undefined && foo ?? {}));", SourceKind::Ts),
+            ("a ?? b || c;", SourceKind::Js),
+            ("a || b ?? c;", SourceKind::Js),
         ] {
             assert!(fails(src, kind), "{src}");
         }

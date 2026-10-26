@@ -641,6 +641,8 @@ impl U<'_, '_> {
         let cjs = self.tx.opts.is_cjs();
         let mut cjs_specs: Vec<String> = Vec::new();
         let mut cjs_lets: Vec<String> = Vec::new();
+        // `module.exports = _default;` after the `try`.
+        let mut tail: Vec<NodeId> = Vec::new();
         let rest = &items[first..];
         let mut j = 0;
         while j < rest.len() {
@@ -844,6 +846,22 @@ impl U<'_, '_> {
                     }
                     body.push(s);
                 }
+                Node::ExprStmt { expr } if cjs && self.tx.cjs.export_assignments.contains(&s) => {
+                    // `export = x` → `_default = x;` in the `try`, then
+                    // `module.exports = _default;` after it (observed).
+                    self.collect(expr, &mut body_fns);
+                    if let Node::Assign { op, left, right } = self.n(expr) {
+                        let sat = self.tx.at(s);
+                        let dn = self.tx.fresh("_default", false);
+                        vars.push(dn);
+                        let t = self.ident_atom(dn, sat);
+                        self.tx.set(expr, Node::Assign { op, left: t, right });
+                        let v = self.ident_atom(dn, sat);
+                        let e = self.assign(left, v, sat);
+                        tail.push(self.expr_stmt(e, sat));
+                    }
+                    body.push(s);
+                }
                 _ => {
                     self.stmt(s, &mut body_fns);
                     body.push(s);
@@ -889,6 +907,7 @@ impl U<'_, '_> {
         }
         out.push(self.env_decl(env, at));
         out.push(self.try_stmt(env, &body, is_await, at));
+        out.extend(tail);
         out.extend(empty_export);
         self.new_list(&out)
     }

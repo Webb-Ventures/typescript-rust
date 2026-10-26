@@ -63,7 +63,8 @@ pub(crate) struct State {
     /// The name of an anonymous `export default function/class`.
     default_name: Option<Atom>,
     export_assignment: bool,
-    /// `module.exports = x;` statements for `export =`, written at the end of the file.
+    /// `module.exports = x;` statements for `export =`, written at the end of the file (kept:
+    /// the `using` lowering moves them).
     pub export_assignments: Vec<NodeId>,
     /// `tslib_1` once a helper is referenced under importHelpers.
     pub tslib: Option<Atom>,
@@ -322,7 +323,7 @@ pub(crate) fn finish(tx: &mut Tx, out: Vec<NodeId>, runtime: Vec<NodeId>) -> Vec
     }
     pre.extend(runtime);
     pre.extend(out);
-    pre.append(&mut tx.cjs.export_assignments);
+    pre.extend(tx.cjs.export_assignments.iter().copied());
     pre
 }
 
@@ -946,7 +947,14 @@ fn local_exports(tx: &mut Tx, names: &[NodeId], out: &mut Vec<NodeId>) {
         ) {
             continue;
         }
-        let Some(aliases) = tx.cjs.local_exports.remove(&b) else {
+        // A `var` declared again (or in a nested block) is exported after each
+        // declaration, so its aliases are kept.
+        let aliases = if tx.sc.binding(b).kind == BindingKind::Var {
+            tx.cjs.local_exports.get(&b).cloned()
+        } else {
+            tx.cjs.local_exports.remove(&b)
+        };
+        let Some(aliases) = aliases else {
             continue;
         };
         let local = tx.name(n).to_owned();
@@ -1001,6 +1009,26 @@ pub(crate) fn after_decl(tx: &mut Tx, original_names: &[NodeId], out: &mut Vec<N
 /// Names declared by a top-level statement (before it is transformed).
 pub(crate) fn declared_names(tx: &Tx, id: NodeId) -> Vec<NodeId> {
     decl_names(tx, id)
+}
+
+/// `exports.x = x;` for each name of a `var` statement nested in a top-level block, loop,
+/// `try` or label (module scope) that an `export { }` list exports: tsc writes them right
+/// after the statement (observed, tsc 7.0.2 `topLevelVarHoistingCommonJS`).
+pub(crate) fn nested_var_exports(tx: &mut Tx, decl: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    if !matches!(
+        tx.n(decl),
+        Node::VarDecl {
+            kind: VarKind::Var,
+            ..
+        }
+    ) || tx.cjs.local_exports.is_empty()
+    {
+        return out;
+    }
+    let names = decl_names(tx, decl);
+    local_exports(tx, &names, &mut out);
+    out
 }
 
 /// Top-level variable statements: `export const a = 1` → `exports.a = 1;`.

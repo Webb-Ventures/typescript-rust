@@ -52,6 +52,24 @@ fn binary_op(k: T) -> Option<(u8, BinaryOp)> {
     })
 }
 
+/// The precedence `binary_op` gives the operator.
+fn op_prec(op: BinaryOp) -> u8 {
+    use BinaryOp as B;
+    match op {
+        B::Coalesce | B::LogicalOr => 2,
+        B::LogicalAnd => 3,
+        B::BitOr => 4,
+        B::BitXor => 5,
+        B::BitAnd => 6,
+        B::Eq | B::NotEq | B::StrictEq | B::StrictNotEq => 7,
+        B::Lt | B::Gt | B::LtEq | B::GtEq | B::InstanceOf | B::In => PREC_RELATIONAL,
+        B::Shl | B::Shr | B::UShr => 9,
+        B::Add | B::Sub => 10,
+        B::Mul | B::Div | B::Mod => 11,
+        B::Exp => 12,
+    }
+}
+
 fn assign_op(k: T) -> Option<AssignOp> {
     use AssignOp as A;
     Some(match k {
@@ -652,6 +670,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_binary_rest(&mut self, start: u32, mut left: NodeId, min_prec: u8) -> NodeId {
+        // The last binary expression built at this level (or the first operand).
+        let mut last = left;
         loop {
             if self.aborting() {
                 return left;
@@ -687,6 +707,22 @@ impl<'a> Parser<'a> {
                     Node::Satisfies { expr: left, ty }
                 };
                 left = self.finish_node(start, node);
+                // `a + b as T * c`: taking `* c` would make `(a + b as T) * c`, whose meaning
+                // changes once `as T` is erased (`a + b * c`), so the expression stops before
+                // an operator that binds tighter than the one under the `as` (tsc 7,
+                // microsoft/TypeScript#63527; `',' expected` follows in a declaration).
+                if let Node::Binary { op: under, .. } = *self.ast.node(last) {
+                    if self.at(T::Gt) {
+                        self.lx.rescan_greater();
+                    }
+                    let next = match self.kind() {
+                        T::As | T::Satisfies => PREC_RELATIONAL,
+                        k => binary_op(k).map_or(0, |(p, _)| p),
+                    };
+                    if next > op_prec(under) {
+                        break;
+                    }
+                }
                 continue;
             }
             let Some((prec, op)) = binary_op(k) else {
@@ -708,6 +744,7 @@ impl<'a> Parser<'a> {
             let right = self.parse_binary_rest(rstart, right, next_min);
             self.check_mixed_coalesce(op, left, right);
             left = self.finish_node(start, Node::Binary { left, op, right });
+            last = left;
         }
         left
     }

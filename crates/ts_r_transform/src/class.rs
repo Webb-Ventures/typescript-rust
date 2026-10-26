@@ -27,6 +27,7 @@ pub(crate) fn class_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
     if decorated && tx.opts.experimental_decorators {
         let info = crate::decorators::collect(tx, id);
         class_body(tx, id);
+        out.append(&mut tx.class_pre_stmts);
         crate::decorators::emit_decl(tx, id, info, out);
         return;
     }
@@ -35,6 +36,7 @@ pub(crate) fn class_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         return;
     }
     class_body(tx, id);
+    out.append(&mut tx.class_pre_stmts);
     export_decl(tx, id, modifiers, name, out);
 }
 
@@ -58,9 +60,10 @@ pub(crate) fn export_decl(
 
 pub(crate) fn class_expr(tx: &mut Tx, id: NodeId) {
     let name_hint = tx.class_name_hint.take();
+    let hint_var = std::mem::take(&mut tx.class_name_hint_var);
     let decorated = has_decorators(tx, id);
     if decorated && tx.opts.lower_es_decorators() {
-        crate::es_decorators::class_expr(tx, id, name_hint);
+        crate::es_decorators::class_expr(tx, id, name_hint, hint_var);
         return;
     }
     class_body(tx, id);
@@ -303,6 +306,66 @@ pub(crate) fn set_parts(tx: &mut Tx, id: NodeId, p: ClassParts) {
 /// Strips types and lowers fields of a class in place. Decorator lists are kept (their
 /// expressions transformed) for the decorator transforms.
 pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
+    // Generated storage names for computed `accessor` keys are numbered per class.
+    let saved = std::mem::take(&mut tx.class_storage_count);
+    let saved_capture = tx.class_key_capture.take();
+    class_body_inner(tx, id);
+    tx.class_storage_count = saved;
+    let capture = std::mem::replace(&mut tx.class_key_capture, saved_capture);
+    if let Some((c, capture)) = capture
+        && c == id
+    {
+        if tx.kind(id) == NodeKind::ClassExpr {
+            // `(_c = () => { ... }, class { ... })`
+            let at = tx.at(id);
+            let class = crate::builder::clone_node(tx.ast, id);
+            let seq = tx.seq(&[capture, class], at);
+            let paren = tx.paren(seq, at);
+            crate::builder::replace(tx.ast, id, paren);
+        } else {
+            // `_c = () => { ... };` before the declaration (`class_decl`).
+            let at = tx.at(id);
+            let s = tx.expr_stmt(capture, at);
+            tx.class_pre_stmts.push(s);
+        }
+    }
+}
+
+/// `v` of a synthesized `__runInitializers(this, _x_initializers, v)`.
+fn run_initializers_value(tx: &Tx, e: NodeId) -> Option<NodeId> {
+    let Node::Call { callee, args, .. } = tx.n(e) else {
+        return None;
+    };
+    let name = match tx.n(callee) {
+        Node::Ident { name } => name,
+        Node::Member { prop, .. } => tx.atom_of(prop)?,
+        _ => return None,
+    };
+    let args = tx.ast.list(args);
+    (tx.ast.atom(name) == "__runInitializers"
+        && args.len() == 3
+        && tx.kind(args[0]) == NodeKind::This)
+        .then(|| args[2])
+}
+
+/// True if `root` uses `this` or `super` outside nested functions and classes.
+fn uses_this_or_super(tx: &Tx, root: NodeId) -> bool {
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        match tx.n(n) {
+            Node::This {} | Node::Super {} => return true,
+            Node::FunctionExpr { .. }
+            | Node::FunctionDecl { .. }
+            | Node::ClassDecl { .. }
+            | Node::ClassExpr { .. }
+            | Node::MethodDef { .. } => {}
+            _ => tx.ast.for_each_child(n, |c| stack.push(c)),
+        }
+    }
+    false
+}
+
+fn class_body_inner(tx: &mut Tx, id: NodeId) {
     let (type_params, mut p) = match tx.n(id) {
         Node::ClassDecl { type_params, .. } | Node::ClassExpr { type_params, .. } => {
             (type_params, parts(tx, id).expect("class"))
@@ -489,7 +552,11 @@ pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
                     continue;
                 }
                 tx.erase_opt(type_ann);
-                let hint = value.and_then(|v| tx.key_class_hint(key, v, false));
+                // A decorated field's value is already `__runInitializers(this, _x, v)`
+                // (es_decorators.rs): `v` is still named after the key.
+                let hint = value
+                    .map(|v| run_initializers_value(tx, v).unwrap_or(v))
+                    .and_then(|v| tx.key_class_hint(key, v, false));
                 member_key(tx, key);
                 for d in tx.items(decorators) {
                     if let Node::Decorator { expr } = tx.n(d) {
@@ -497,7 +564,7 @@ pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
                     }
                 }
                 if let Some(v) = value {
-                    tx.expr_named(v, hint);
+                    tx.key_named(key, v, hint);
                 }
                 let is_static = modifiers.contains(Modifiers::STATIC);
                 let mut mm = Modifiers::NONE;
@@ -790,6 +857,23 @@ pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
         if key_blocks.len() > 1 || tx.kind(expr) != NodeKind::Seq {
             tx.key_exprs.push(expr);
         }
+        // Keys that use `this` or `super` mean the enclosing code's, not the class's:
+        // from ES2022 (where the static block stays) they run in an arrow made before the
+        // class, `(_c = () => { _a = this.k; }, class { static { _c(); } })` (observed, tsc
+        // 7.0.2 `typeOfThisInStaticMembers12`).
+        let mut expr = expr;
+        if tx.opts.target >= ts_r_config::ScriptTarget::ES2022 && uses_this_or_super(tx, expr) {
+            let f = tx.temp();
+            let s = tx.expr_stmt(expr, at);
+            let body = tx.block(&[s], at);
+            let arrow = tx.arrow_expr(&[], body, at);
+            tx.mark_single_line(body);
+            let t = tx.ident_atom(f, at);
+            let capture = tx.assign(t, arrow, at);
+            tx.class_key_capture = Some((id, capture));
+            let callee = tx.ident_atom(f, at);
+            expr = tx.call(callee, &[], at);
+        }
         let s = tx.expr_stmt(expr, at);
         let body = tx.new_list(&[s]);
         let block = tx.mk(Node::StaticBlock { body }, at);
@@ -919,12 +1003,34 @@ pub(crate) fn is_literal(tx: &Tx, id: NodeId) -> bool {
     ) || matches!(tx.n(id), Node::TemplateLit { parts } if tx.ast.list(parts).len() == 1)
 }
 
-/// The private storage name of an `accessor` field: `x_accessor_storage` for `x`/`#x`,
-/// `_a_accessor_storage` (a fresh temporary name) otherwise.
-fn accessor_storage(tx: &mut Tx, key: NodeId, key_temp: Option<ts_r_ast::Atom>) -> ts_r_ast::Atom {
+/// The private storage name of an `accessor` field: `x_accessor_storage` for `x`/`#x`
+/// (`x_1_accessor_storage` when the source already has that private name), `_a_...`,
+/// `_b_...` (numbered per class from ES2022, across the file below it) otherwise
+/// (observed, tsc 7.0.2 `autoAccessor5`, `autoAccessor10`).
+fn accessor_storage(tx: &mut Tx, key: NodeId, _key_temp: Option<ts_r_ast::Atom>) -> ts_r_ast::Atom {
     let base = match tx.n(key) {
-        Node::Ident { name } | Node::PrivateName { name } => tx.ast.atom(name).to_owned(),
-        _ if tx.opts.target < ts_r_config::ScriptTarget::ES2022 => {
+        Node::Ident { name } | Node::PrivateName { name } => {
+            let n = tx.ast.atom(name).to_owned();
+            let taken = source_private_names(tx);
+            let mut cand = n.clone();
+            let mut i = 0;
+            while taken.contains(&tx.ast.intern(&format!("{cand}_accessor_storage"))) {
+                i += 1;
+                cand = format!("{n}_{i}");
+            }
+            tx.source_private_names = Some(taken);
+            cand
+        }
+        _ if tx.opts.target >= ts_r_config::ScriptTarget::ES2022 => {
+            let i = tx.class_storage_count;
+            tx.class_storage_count += 1;
+            if i < 26 {
+                format!("_{}", (b'a' + i as u8) as char)
+            } else {
+                format!("_{}", i - 26)
+            }
+        }
+        _ => {
             // The storage becomes a `WeakMap` named after it; the generated names are
             // counted across the file and take no temporary (observed).
             let i = tx.storage_count;
@@ -935,13 +1041,24 @@ fn accessor_storage(tx: &mut Tx, key: NodeId, key_temp: Option<ts_r_ast::Atom>) 
                 format!("_{}", i - 26)
             }
         }
-        _ if key_temp.is_some() => tx.ast.atom(key_temp.unwrap_or_default()).to_owned(),
-        _ => {
-            let t = tx.temp_name();
-            tx.ast.atom(t).to_owned()
-        }
     };
     tx.ast.intern(&format!("{base}_accessor_storage"))
+}
+
+/// The private names the parser made (taken out of `tx`; the caller puts it back).
+fn source_private_names(tx: &mut Tx) -> rustc_hash::FxHashSet<ts_r_ast::Atom> {
+    if let Some(s) = tx.source_private_names.take() {
+        return s;
+    }
+    let mut set = rustc_hash::FxHashSet::default();
+    for i in 1..=tx.source_nodes {
+        if let Some(id) = NodeId::from_raw(i as u32)
+            && let Node::PrivateName { name } = tx.n(id)
+        {
+            set.insert(name);
+        }
+    }
+    set
 }
 
 /// `get key() { return this.#storage; }` and `set key(value) { this.#storage = value; }`.
