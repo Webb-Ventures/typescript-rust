@@ -64,15 +64,21 @@ mod import_unambiguous;
 pub(crate) mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
+mod jsdoc_check_indentation;
 mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
+mod jsdoc_check_syntax;
 mod jsdoc_check_tag_names;
+mod jsdoc_check_template_names;
 mod jsdoc_check_types;
 mod jsdoc_check_values;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
 mod jsdoc_implements_on_classes;
+mod jsdoc_lines_before_block;
+mod jsdoc_match_name;
 mod jsdoc_multiline_blocks;
+mod jsdoc_no_bad_blocks;
 mod jsdoc_no_blank_block_descriptions;
 mod jsdoc_no_blank_blocks;
 mod jsdoc_no_defaults;
@@ -84,6 +90,7 @@ mod jsdoc_no_undefined_types;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
+mod jsdoc_require_description;
 mod jsdoc_require_hyphen_before_param_description;
 mod jsdoc_require_jsdoc;
 mod jsdoc_require_next_description;
@@ -1100,6 +1107,15 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
+    // jsdoc, round 8 (h1)
+    &jsdoc_check_indentation::RULE,
+    &jsdoc_check_syntax::RULE,
+    &jsdoc_check_template_names::RULE,
+    &jsdoc_lines_before_block::RULE,
+    &jsdoc_match_name::RULE,
+    &jsdoc_no_bad_blocks::RULE,
+    &jsdoc_require_description::RULE,
+    // end jsdoc, round 8 (h1)
     // eslint-plugin-unicorn
     &unicorn_better_dom_traversing::RULE,
     &unicorn_consistent_assert::RULE,

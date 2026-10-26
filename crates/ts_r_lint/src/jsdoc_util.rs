@@ -1572,3 +1572,84 @@ pub fn regex_string_matches(re: &str, text: &str) -> bool {
     crate::regex::parse(pattern, crate::regex::Flags::new(flags))
         .is_ok_and(|r| r.is_match(text, flags.contains('i')))
 }
+
+// ---------------------------------------------------------------------------------------------
+// Round 8 (h1) helpers.
+
+/// JavaScript's `String.prototype.trim` whitespace (Unicode `White_Space` plus the BOM).
+pub fn is_js_ws(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
+/// `String.prototype.trim`.
+pub fn js_trim(s: &str) -> &str {
+    s.trim_matches(is_js_ws)
+}
+
+/// The kind of the method a target documents: the target itself or the function value of
+/// a method (`node.kind` / `node.parent.kind` in the plugin).
+fn own_or_parent_method_kind(
+    f: &Finder<'_>,
+    t: Option<Target>,
+) -> (Option<MethodKind>, Option<MethodKind>) {
+    let Some(Target::Node(id)) = t else {
+        return (None, None);
+    };
+    let own = match *f.ast.node(id) {
+        Node::MethodDef { kind, .. } => Some(kind),
+        _ => None,
+    };
+    let parent = f.parents.parent(id).and_then(|p| match *f.ast.node(p) {
+        Node::MethodDef { kind, value, .. } if value == id => Some(kind),
+        _ => None,
+    });
+    (own, parent)
+}
+
+/// The special-method options of `avoidDocs` (`checkConstructors`, `checkGetters`,
+/// `checkSetters`), each with the rule's default.
+#[derive(Debug, Clone, Copy)]
+pub struct SpecialMethods {
+    pub constructors: bool,
+    pub getters: bool,
+    pub setters: bool,
+}
+
+impl SpecialMethods {
+    pub fn from_options(o: &Map<String, Value>, defaults: SpecialMethods) -> SpecialMethods {
+        let flag = |k: &str, d: bool| o.get(k).and_then(Value::as_bool).unwrap_or(d);
+        SpecialMethods {
+            constructors: flag("checkConstructors", defaults.constructors),
+            getters: flag("checkGetters", defaults.getters),
+            setters: flag("checkSetters", defaults.setters),
+        }
+    }
+}
+
+/// `avoidDocs`: a replacing tag on the block or its class, a special method the options
+/// leave out (`special`; `None` skips that test), or an `exemptedBy` tag.
+pub fn avoid_docs(
+    f: &Finder<'_>,
+    doc: &Doc,
+    opts: &Map<String, Value>,
+    special: Option<SpecialMethods>,
+) -> bool {
+    if replaced_docs(f, doc) {
+        return true;
+    }
+    if let Some(s) = special {
+        let (own, parent) = own_or_parent_method_kind(f, doc.target);
+        let ctor = own == Some(MethodKind::Constructor) || parent == Some(MethodKind::Constructor);
+        if !s.constructors && (ctor || doc.block.has_any_tag(&["class", "constructor"])) {
+            return true;
+        }
+        if parent == Some(MethodKind::Get) && !s.getters {
+            return true;
+        }
+        if parent == Some(MethodKind::Set) && !s.setters {
+            return true;
+        }
+    }
+    let exempted = exempted_by(opts, f.settings.mode == "closure");
+    has_exempting_tag(&doc.block, &exempted)
+}
