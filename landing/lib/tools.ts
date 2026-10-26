@@ -187,8 +187,9 @@ Usage: ts-r-dev [root] [options]
       'Enums, namespaces, parameter properties and TC39 decorators',
       'tsconfig paths and JSX settings; stack traces mapped back to TypeScript',
       '--watch, which restarts Node when a file in the graph changes',
+      '-e/--eval, -p/--print and code piped to stdin, as with tsx',
       'A warm start that only checks file sizes and times before handing over to Node',
-      '100 of 100 compared tests of tsx’s own suite pass, and 36 of 36 of Node’s type-stripping tests',
+      '103 of 103 compared tests of tsx’s own suite pass, and 51 of 51 of Node’s type-stripping tests',
     ],
     notYet: [
       'The cache check doesn’t notice a new file that would change a resolution',

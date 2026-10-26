@@ -21,8 +21,9 @@ and `ts-node` for scripts, servers and tests. Like them, it doesn't check types;
 - `--watch`, which restarts Node when a file of the module graph changes, recovers after a
   syntax error and leaves no processes behind.
 - A warm start that only checks file sizes and times before handing over to Node.
-- tsx's own test suite with ts-r-run in place of tsx: 100 of 100 compared cases pass. Node's
-  TypeScript (type stripping) tests: 36 of 36 compared cases pass.
+- `-e`/`--eval`, `-p`/`--print` and code piped to stdin, as with tsx.
+- tsx's own test suite with ts-r-run in place of tsx: 103 of 103 compared cases pass. Node's
+  TypeScript (type stripping) tests: 51 of 51 compared cases pass.
 
 ## How a run works
 
@@ -59,6 +60,8 @@ Node, so `exports` and runtime conditions behave exactly as they do without ts-r
 ts-r-run: run a TypeScript file with Node
 
 Usage: ts-r-run [options] [node options] <file> [args...]
+       ts-r-run [options] [node options] -e|-p <code> [args...]
+       <command> | ts-r-run [options] [node options] [-] [args...]
        ts-r-run [options] --test [node options]   (Node's test runner, default files)
 
 Options:
@@ -69,6 +72,9 @@ Options:
   --strategy <s>        prebuild (default): compile the graph, then start Node
                         hook: compile on demand from Node's module.register hooks
   --node <path>         Node binary (default: node on PATH)
+  -e, --eval <code>     Run TypeScript code (CommonJS unless --input-type=module
+                        or top-level await); with no file, code is read from stdin
+  -p, --print <code>    The same, printing the value of the last expression
   -h, --help            Show this help
   -V, --version         Show the version
 
@@ -79,6 +85,10 @@ Environment: TS_R_RUN_THREADS (compile threads), TS_R_CACHE_DIR (cache root).
 Needs Node 22.15+ (module.registerHooks).
 ```
 
+- `ts-r-run -e "<code>"` runs TypeScript code as `node -e` runs JavaScript, and `-p` prints
+  its value. It is CommonJS unless you pass `--input-type=module` or it uses top-level
+  `await`; imports are resolved from the working directory. With no file and input on stdin,
+  `ts-r-run` runs that input.
 - Arguments after `<file>` go to your script. Unknown options before it go to Node, for
   example `ts-r-run --inspect --env-file .env server.ts`.
 - `--no-source-maps` makes large graphs start faster, at the cost of stack traces that point

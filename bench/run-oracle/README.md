@@ -37,25 +37,26 @@ test's fixture to `<dir>/<n>` before it runs, to reproduce a failure by hand (wi
 
 Tests are skipped when they fail with tsx itself in this setup, or when they test something
 `ts-r-run` does not offer by design: the Node API (`tsx/esm/api`, `register()`), the REPL,
-watch mode, `--eval`/`--print`/stdin, the pty shell, `--version`/`--help` text, and
+watch mode, the pty shell, `--version`/`--help` text, and
 assertions on tsx's own transform output, cache or error text. `process-interact.ts` tests
 the suite's own helper and never runs tsx. In the node source, cases are skipped when Node
-and tsx disagree (type stripping only, versus a full transform), or when the arguments are
-not literal.
+and tsx disagree (type stripping only, versus a full transform), when the arguments are
+not literal, or when they use `--check`. Node's test-runner timings (`(1.2ms)`,
+`duration_ms`) are normalised before outputs are compared.
 `results.json` lists every skip reason.
 
 ## Results
 
-30863e8 (2026-10-26, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
+3f0f988 (2026-10-27, macOS arm64, Node 24.21.0, tsx 4.23.15, `--jobs 4`):
 
-- tsx: **100 of 100 compared cases pass (100%)**; 35 skipped.
-- node: **36 of 36 compared cases pass (100%)**; 53 skipped.
+- tsx: **103 of 103 compared cases pass (100%)**; 32 skipped.
+- node: **51 of 51 compared cases pass (100%)**; 38 skipped.
 
 | tsx spec | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
 | smoke | 13 | 0 | 0 |
 | tsconfig | 19 | 0 | 0 |
-| cli | 13 | 0 | 10 |
+| cli | 16 | 0 | 7 |
 | commonjs-mode-contracts | 8 | 0 | 0 |
 | resolution-priority | 9 | 0 | 0 |
 | version-sensitive | 36 | 0 | 15 |
@@ -64,20 +65,22 @@ not literal.
 
 | Node test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| test-typescript.mjs | 18 | 0 | 13 |
-| test-typescript-commonjs.mjs | 4 | 0 | 10 |
-| test-typescript-eval.mjs | 0 | 0 | 24 |
+| test-typescript.mjs | 20 | 0 | 11 |
+| test-typescript-commonjs.mjs | 5 | 0 | 9 |
+| test-typescript-eval.mjs | 12 | 0 | 12 |
 | test-typescript-module.mjs | 7 | 0 | 3 |
 | test-typescript-transform.mjs | 7 | 0 | 3 |
 
-In the node source, 29 skips are `--eval`, `--print` or stdin cases and 24 are cases where Node
-and tsx disagree. In 20 of those 24 `ts-r-run` matches tsx and in 4 it matches Node.
+All 38 node skips are cases where Node and tsx disagree. In 33 of them `ts-r-run` matches
+tsx and in 3 it matches Node; in the other 2 (`test-typescript-eval.mjs` lines 227 and 237,
+`await` in a function that isn't `async`) Node and tsx refuse the code before running and
+`ts-r-run` lets Node throw a `SyntaxError` when it loads (a gap in the parser and transform
+crates, listed in the crate's AGENTS.md).
 
-No tsx case fails. The 35 skips were reviewed again: they test tsx's API, its REPL, `tsx
-watch`, its `--eval`/`--print`, `--version` and `--help` text, an interactive pty, or tsx's own
-source, and one ("require(esm) support controls extensionless .mjs resolution") fails with tsx
-itself here. The 53 node skips are `--eval`/`--print`/stdin input or cases where Node and tsx
-disagree. None of them can be compared with the same command.
+No tsx case fails. The 32 skips were reviewed again: they test tsx's API, its REPL, `tsx
+watch`, its `--version` and `--help` text, an interactive pty, or tsx's own source, and one
+("require(esm) support controls extensionless .mjs resolution") fails with tsx itself here.
+None of them can be compared with the same command.
 
 | Run | tsx compared | tsx pass | tsx skip | tsx rate | node compared | node pass | node skip |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -87,3 +90,4 @@ disagree. None of them can be compared with the same command.
 | format detection (only top-level `await` forces ESM), `import.meta` and a hidden `__esModule` marker in CommonJS output, `?query` instances, `import()` default unwrap, syntax errors behind `import()` deferred to load time, `TransformError` for `require` of top-level `await`, JSON named exports, no type stripping of preload output in `node_modules` | 86 | 84 | 49 | 97.7% | 36 | 36 | 53 |
 | the loader-flag cases (`--import tsx`, `--require tsx/cjs`) and `tsx --test` brought in; `ts-r-run --test` without a file, `require('..')` to a package's TypeScript index | 100 | 98 | 35 | 98.0% | 36 | 36 | 53 |
 | `require()` of ES modules compiled to CommonJS (sorted exports, `default` first in `__importStar`), one instance for a file both required and imported, native `import()` in CommonJS output, `?query` after a plain import in CommonJS, `require` through an `imports` map | 100 | 100 | 35 | 100% | 36 | 36 | 53 |
+| `-e`/`--eval`, `-p`/`--print` and stdin code; the oracle compares those cases and `--test` over a file, and normalises test-runner timings | 103 | 103 | 32 | 100% | 51 | 51 | 38 |
