@@ -3138,8 +3138,7 @@ fn top_level_await_is_an_operator_in_a_module() {
             (1109, 10, 13),
         ]
     );
-    let src =
-        "export {};\nimport await = foo.await;\ndeclare namespace foo { const await: any; }\ndeclare class C extends await {}\nlet t: await;\n";
+    let src = "export {};\nimport await = foo.await;\ndeclare namespace foo { const await: any; }\ndeclare class C extends await {}\nlet t: await;\n";
     assert!(parse(src, SourceKind::Ts).diagnostics.is_empty());
     // A script: `await` is a name.
     let r = parse(body, SourceKind::Ts);
@@ -3151,8 +3150,34 @@ fn top_level_await_is_an_operator_in_a_module() {
 /// (instantiationExpressionErrors).
 #[test]
 fn instantiation_before_optional_call_is_not_a_property_access() {
-    for src in ["f<number>?.();", "f<number>?.<number>();", "f<number>?.[0];"] {
+    for src in [
+        "f<number>?.();",
+        "f<number>?.<number>();",
+        "f<number>?.[0];",
+    ] {
         let r = parse(src, SourceKind::Ts);
         assert!(r.diagnostics.is_empty(), "{src}: {:?}", r.diagnostics);
     }
+}
+
+/// An import type takes no `,` after its attributes' `}` (tsc 7): the comma is `')'
+/// expected` and is left for the statement list (importAttributes10).
+#[test]
+fn import_type_has_no_comma_after_attributes() {
+    let at = |src: &str| {
+        parse(src, SourceKind::Ts)
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        at("type A = typeof import(\"a\", { with: {} },);"),
+        [(1005, 40), (1128, 41)]
+    );
+    assert_eq!(
+        at("type A = typeof import(\"a\", { with: {} ,,\n});"),
+        [(1005, 40), (1128, 42), (1128, 43)]
+    );
+    assert!(at("type A = typeof import(\"a\", { with: {}, });").is_empty());
 }
