@@ -326,6 +326,7 @@ unicorn/no-document-cookie 21/21
 unicorn/no-double-comparison 83/83
 unicorn/no-duplicate-if-branches 30/30
 unicorn/no-duplicate-logical-operands 61/61
+unicorn/no-duplicate-loops 58/58
 unicorn/no-duplicate-set-values 40/40
 unicorn/no-empty-file 58/58
 unicorn/no-exports-in-scripts 22/22
@@ -435,10 +436,13 @@ unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
 unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 247/247
+unicorn/prefer-iterable-in-constructor 76/76
 unicorn/prefer-iterator-to-array 61/61
+unicorn/prefer-iterator-to-array-at-end 74/74
 unicorn/prefer-keyboard-event-key 116/116
 unicorn/prefer-literal-ascii 110/110
 unicorn/prefer-location-assign 54/54
+unicorn/prefer-map-from-entries 98/98
 unicorn/prefer-math-abs 122/122
 unicorn/prefer-math-constants 66/66
 unicorn/prefer-math-min-max 140/140

@@ -328,9 +328,7 @@ mod unicorn_escape_case;
 mod unicorn_expiring_todo_comments;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
-mod unicorn_filename_case;
-mod unicorn_import_style;
-mod unicorn_isolated_functions;
+mod unicorn_iter;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
@@ -368,6 +366,7 @@ mod unicorn_no_document_cookie;
 mod unicorn_no_double_comparison;
 mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_duplicate_logical_operands;
+mod unicorn_no_duplicate_loops;
 mod unicorn_no_duplicate_set_values;
 mod unicorn_no_empty_file;
 mod unicorn_no_error_property_assignment;
@@ -495,10 +494,13 @@ mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
+mod unicorn_prefer_iterable_in_constructor;
 mod unicorn_prefer_iterator_to_array;
+mod unicorn_prefer_iterator_to_array_at_end;
 mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_literal_ascii;
 mod unicorn_prefer_location_assign;
+mod unicorn_prefer_map_from_entries;
 mod unicorn_prefer_math_abs;
 mod unicorn_prefer_math_constants;
 mod unicorn_prefer_math_min_max;
@@ -969,6 +971,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_double_comparison::RULE,
     &unicorn_no_duplicate_logical_operands::RULE,
+    &unicorn_no_duplicate_loops::RULE,
     &unicorn_no_duplicate_set_values::RULE,
     &unicorn_no_duplicate_if_branches::RULE,
     &unicorn_no_error_property_assignment::RULE,
@@ -1073,8 +1076,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
+    &unicorn_prefer_iterable_in_constructor::RULE,
     &unicorn_prefer_iterator_to_array::RULE,
+    &unicorn_prefer_iterator_to_array_at_end::RULE,
     &unicorn_prefer_location_assign::RULE,
+    &unicorn_prefer_map_from_entries::RULE,
     &unicorn_prefer_math_abs::RULE,
     &unicorn_prefer_math_min_max::RULE,
     &unicorn_prefer_module::RULE,
