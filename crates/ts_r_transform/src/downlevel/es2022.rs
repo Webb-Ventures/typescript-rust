@@ -528,6 +528,9 @@ impl Lower<'_, '_> {
             let this = self.this(at);
             let c = self.call(add, &[this], at);
             let st = self.expr_stmt(c, at);
+            // It stands for no source statement: it takes no comments.
+            let none = ts_r_codegen::NO_MAP;
+            self.tx.map_range(st, ts_r_ast::Span::new(none, none));
             self.ctor_prepend(&mut kept, st, derived, at);
         }
         p.members = self.new_list(&kept);

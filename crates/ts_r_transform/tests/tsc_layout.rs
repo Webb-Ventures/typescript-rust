@@ -275,3 +275,11 @@ fn moved_comments() {
 fn statement_comments() {
     check("statement_comments");
 }
+
+/// A class's empty `;` members are kept in source order among its original members, also
+/// after members a transform removed (a lowered private method) and in an otherwise empty
+/// class.
+#[test]
+fn class_semicolons() {
+    check("class_semicolons");
+}

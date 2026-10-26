@@ -1751,7 +1751,21 @@ impl Printer<'_> {
                 self.drop_same_line_comments(p + 1);
             }
         }
-        if ms.is_empty() {
+        // The class's empty `;` members, printed in source order among its original members
+        // (tsc keeps them, also after members a transform removed).
+        let semis: Vec<u32> = if self.tsc && !self.is_synthetic(id) {
+            let all = &self.ast.class_semicolons;
+            let from = all.partition_point(|&(_, p)| p < span.start);
+            all[from..]
+                .iter()
+                .take_while(|&&(_, p)| p < span.end)
+                .filter(|&&(end, _)| end == span.end)
+                .map(|&(_, p)| p)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if ms.is_empty() && semis.is_empty() {
             if self.tsc {
                 // tsc always prints a class body on its own lines: `class C {\n}`.
                 self.newline();
@@ -1766,10 +1780,16 @@ impl Printer<'_> {
         // Members are outside any `for` head: `in` needs no parentheses there.
         let saved = self.no_in;
         self.no_in = false;
-        let class_orig = self.tsc && !self.is_synthetic(id);
-        for (i, &m) in ms.iter().enumerate() {
+        let mut semis = semis.into_iter().peekable();
+        for &m in &ms {
             if !self.is_synthetic(m) {
-                self.leading_comments(self.span(m).start);
+                let start = self.span(m).start;
+                while let Some(p) = semis.next_if(|&p| p < start) {
+                    self.newline();
+                    self.map_token(";", Some(p));
+                    self.trailing_comments(p + 1);
+                }
+                self.leading_comments(start);
             }
             if !(self.tsc && self.after_inline_comment()) {
                 self.newline();
@@ -1783,17 +1803,12 @@ impl Printer<'_> {
             self.stmt_end = saved;
             if !self.is_synthetic(m) {
                 self.trailing_comments(self.span(m).end);
-                // tsc keeps the empty `;` members after it (`get x() { };`).
-                if class_orig {
-                    let to = ms
-                        .get(i + 1)
-                        .map_or(span.end.saturating_sub(1), |&n| self.span(n).start);
-                    for p in self.semicolons_between(self.span(m).end, to) {
-                        self.newline();
-                        self.map_token(";", Some(p));
-                    }
-                }
             }
+        }
+        for p in semis {
+            self.newline();
+            self.map_token(";", Some(p));
+            self.trailing_comments(p + 1);
         }
         self.no_in = saved;
         if !self.is_synthetic(id) {
@@ -1805,35 +1820,6 @@ impl Printer<'_> {
         if !self.is_synthetic(id) {
             self.skip_comments_to(span.end);
         }
-    }
-
-    /// The positions of the `;` tokens between `from` and `to` when only whitespace, comments
-    /// and erased code separate them (none otherwise).
-    fn semicolons_between(&self, from: u32, to: u32) -> Vec<u32> {
-        let b = self.src.as_bytes();
-        let to = (to as usize).min(b.len());
-        let mut p = from as usize;
-        let mut n = Vec::new();
-        let comments = &self.ast.comments;
-        while p < to {
-            if b[p].is_ascii_whitespace() {
-                p += 1;
-            } else if b[p] == b';' {
-                n.push(p as u32);
-                p += 1;
-            } else if let Some(e) = self.erased_end(p as u32) {
-                p = (e as usize).max(p + 1);
-            } else {
-                let i = comments.partition_point(|c| (c.span.start as usize) < p);
-                match comments.get(i) {
-                    Some(c) if c.span.start as usize == p && c.span.end as usize > p => {
-                        p = c.span.end as usize;
-                    }
-                    _ => return Vec::new(),
-                }
-            }
-        }
-        n
     }
 
     fn entity_or_expr(&mut self, id: NodeId) {

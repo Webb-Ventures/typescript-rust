@@ -3397,3 +3397,27 @@ fn assertion_continues_takes_tighter_operators() {
     let ok = parse("x satisfies boolean as any ** 2;", SourceKind::Ts);
     assert!(ok.diagnostics.is_empty(), "{:?}", ok.diagnostics);
 }
+
+/// A class body's empty `;` members are recorded as `(class end, position)`, a nested
+/// class's under its own end, in position order; speculative parses that roll back leave
+/// none behind.
+#[test]
+fn class_semicolons_are_recorded() {
+    let src = "class A { ; m() {}; x = class { ; }; }\nconst f = (a = class { ; }) => 0;";
+    let r = parse(src, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+    let a_end = src.find('\n').unwrap() as u32;
+    let inner_end = src.find("; }; }").unwrap() as u32 + 3;
+    let arrow_class_end = src.rfind(") =>").unwrap() as u32;
+    let pos = |pat: &str, from: usize| (src[from..].find(pat).unwrap() + from) as u32;
+    assert_eq!(
+        r.ast.class_semicolons,
+        vec![
+            (a_end, pos(";", 0)),
+            (a_end, pos("{};", 0) + 2),
+            // The `;` after `x = class { ; }` ends the property: no member.
+            (inner_end, pos("{ ; }", 20) + 2),
+            (arrow_class_end, pos("{ ; }) =>", 0) + 2),
+        ]
+    );
+}

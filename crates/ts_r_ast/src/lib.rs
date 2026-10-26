@@ -169,6 +169,7 @@ pub struct Checkpoint {
     comments: u32,
     modifier_tokens: u32,
     jsdoc_syntax: u32,
+    class_semicolons: u32,
 }
 
 /// A parsed file. See the module docs.
@@ -187,6 +188,10 @@ pub struct Ast {
     /// Comments attached by transforms, sorted by `node` (insertion order among equal ids).
     /// Empty after parsing; see [`Ast::add_synthetic_comment`].
     pub synthetic_comments: Vec<SyntheticComment>,
+    /// The empty `;` members of class bodies (tsc's semicolon class elements, which have no
+    /// node here): `(end of the class, position of the ;)`, sorted by position. The class's
+    /// end is its node's `span.end`, so a printer finds a class's own semicolons by it.
+    pub class_semicolons: Vec<(u32, u32)>,
     /// The `Program` node. Equal to the dummy id until the parser finishes.
     pub root: NodeId,
     pub source_kind: SourceKind,
@@ -302,6 +307,7 @@ impl Ast {
             comments: Vec::new(),
             modifier_tokens: Vec::new(),
             synthetic_comments: Vec::new(),
+            class_semicolons: Vec::new(),
             root: NodeId(NonZeroU32::MIN),
             source_kind,
             jsdoc_start: u32::MAX,
@@ -475,6 +481,7 @@ impl Ast {
             comments: self.comments.len() as u32,
             modifier_tokens: self.modifier_tokens.len() as u32,
             jsdoc_syntax: self.jsdoc_syntax.len() as u32,
+            class_semicolons: self.class_semicolons.len() as u32,
         }
     }
 
@@ -487,6 +494,7 @@ impl Ast {
         self.comments.truncate(cp.comments as usize);
         self.modifier_tokens.truncate(cp.modifier_tokens as usize);
         self.jsdoc_syntax.truncate(cp.jsdoc_syntax as usize);
+        self.class_semicolons.truncate(cp.class_semicolons as usize);
     }
 
     /// Modifier keywords whose start lies inside `span`.
