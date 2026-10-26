@@ -139,15 +139,15 @@ Files:
   variable (`LintEnv::is_builtin_global`). Core `no-undef` reports unresolved type
   references too.
 
-## Status (v1 lint round 3, `wip/v1-lint3`)
+## Status (v1 lint round 4, `wip/v1-lint4`)
 
-- 248 rules (130 core ESLint, 82 typescript-eslint, 36 eslint-plugin-jsdoc), 51 of them
-  type-aware. Rule oracle: 18,892 / 18,912 cases. The non-type-aware cases are
-  11,992 / 11,992 and the type-aware cases 6,900 / 6,920 (2026-10-26); the 20
-  type-aware failures are a subset of the 46 listed in design record 0006
-  (`tests/oracle/baseline.txt` has the current per-rule counts).
-- private-app against ESLint with every configured rule: all 23 projects pass the parity
-  gate. The result is 26,578 match, 0 miss, 0 extra.
+- 292 rules (134 core ESLint, 95 typescript-eslint, 40 eslint-plugin-jsdoc, 23
+  eslint-plugin-unicorn), 51 of them type-aware. Rule oracle: 25,040 / 25,060 cases. The
+  non-type-aware cases are 18,140 / 18,140 and the type-aware cases 6,900 / 6,920
+  (2026-10-26); the 20 type-aware failures are a subset of the 46 listed in design record
+  0006 (`tests/oracle/baseline.txt` has the current per-rule counts).
+- private-app against ESLint with every configured rule (round 3 run): all 23 projects
+  pass the parity gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
 
 ## Testing
@@ -167,8 +167,15 @@ Files:
   header of `tests/oracle/gen/gen-rule-oracle.mjs`. Run it under `scripts/limit.sh`. The
   generator records tester-level `sourceType` and the parser options that change scope
   analysis (`jsxPragma`, `jsxFragmentName`, decorator metadata, `lib`); the harness passes
-  them on. Testers load as ESM: put `{"type":"module"}` in a `package.json` next to the
-  typescript-eslint test files.
+  them on (also `isolatedDeclarations`, which `consistent-generic-constructors` reads from
+  `LintEnv::isolated_declarations`). Testers load as ESM: put `{"type":"module"}` in a
+  `package.json` next to the typescript-eslint test files.
+- eslint-plugin-unicorn data comes from `--unicorn-tests <plugin>/test` (the generator stubs
+  the plugin's test helpers and records a case's own globals; cases for other languages,
+  CSS/JSON/Markdown/Vue, are skipped). A data file's top-level `globals` (builtin, node and
+  browser, as the plugin's tester sets them) are merged into every case by the harness.
+  `utils/is-number.js`-style type guessing is not modelled, so rules that depend on it
+  (`prefer-number-properties`, `prefer-string-trim-start-end`, `error-message`) are not in.
 - Project oracle (real code, ESLint vs ts-r-lint, per-rule match/miss/extra):
   `tests/oracle/project/` (`setup.py` copies a repo to a temp dir and stubs missing plugins,
   `all_rules_config.py` writes a config enabling every ts-r-lint rule, `eslint_packages.py`
@@ -210,14 +217,157 @@ Round 3 adds 57 core rules, each at 100% of its oracle (`no-return-assign` throu
   could merge statements; the fix's range is the enclosing function (or the file), so one
   applies per function per pass.
 - `function_name_with_kind` shows private members bare (`private getter #x`), as ESLint.
+- **no-empty-function** (and the typescript-eslint version) picks the `allow` name from the
+  function's kind (arrow, function, method, getter, setter, constructor, with `async`/
+  `generator` prefixes); an empty body without comments is reported at the body, with a
+  ` /* empty */ ` suggestion. The TS version also allows `private`/`protected`
+  constructors, constructors with parameter properties, and (by option) decorated and
+  `override` methods. The message names a function only by its own name or key.
 
 Read to understand (not ported), ESLint `lib/rules/`: `no-eval.js`, `no-lonely-if.js`,
 `no-alert.js`, `eqeqeq.js`, `no-throw-literal.js`, `radix.js`, `no-extra-bind.js`,
 `no-lone-blocks.js`, `prefer-numeric-literals.js`, `no-promise-executor-return.js`,
-`grouped-accessor-pairs.js`, `no-else-return.js` (and `utils/fix-tracker.js`), `no-extend-native.js`,
+`grouped-accessor-pairs.js`, `no-else-return.js` (and `utils/fix-tracker.js`), `no-empty-function.js`, `no-extend-native.js`,
 `prefer-object-has-own.js`, `no-useless-computed-key.js`, `no-restricted-properties.js`,
 `no-restricted-globals.js`, `yoda.js`, `no-useless-rename.js`, and `utils/ast-utils.js`
 (the default-`this` test, when braces are needed, same-reference and static property names).
+
+## typescript-eslint rules (round 4)
+
+Round 4 adds 13 typescript-eslint rules, each at 100% of its oracle; all use `NO_PRESET`
+(upstream puts them in the plain `stylistic` set, which has no `Preset` here yet).
+
+- **array-type**: `array`, `generic` or `array-simple` (`T[]` only for simple element
+  types: names, keywords, `this`, arrays, references without type arguments), with a
+  separate `readonly` style; `readonly T[]` pairs with `ReadonlyArray<T>` and
+  `Readonly<T[]>`. A local declaration named `Array`/`ReadonlyArray`/`Readonly` turns the
+  generic check off. The fix parenthesizes union, function, intersection, operator, infer,
+  constructor and conditional element types.
+- **consistent-indexed-object-style**: `record` (default) reports interfaces and type
+  literals with exactly one index signature, and mapped types whose key isn't used and whose
+  constraint isn't a bare `keyof`; circular types (followed through aliases and members
+  with a visited set) are skipped. The fix becomes a suggestion when comments would be
+  lost; no fix for an interface with `extends` or under `export default`.
+  `index-signature` reports two-argument `Record<K, V>`.
+- **prefer-function-type**: an interface (no `extends`, or only `Function`) or type literal
+  whose single member is a call or construct signature with a return type; a `this` type in
+  the interface is reported instead, without a fix. The fix moves comments next to the
+  member and parenthesizes inside union, intersection and array types.
+- **consistent-generic-constructors**: declarators, class fields and defaulted parameters of
+  functions with a body; the callee must be a plain identifier matching the annotation's
+  name; global typed arrays are skipped. `constructor` mode is off under
+  `isolatedDeclarations`.
+- **consistent-type-assertions**: style `as` / `angle-bracket` / `never` (`as const` still
+  allowed), object/array literal checks only on assertions in the chosen style, skipping
+  `any`, `unknown` and `const`; `allow-as-parameter` positions are call/`new` parts,
+  `throw`, defaults, JSX expressions and tagged-template parts. Only `<T>x` -> `x as T` is
+  auto-fixed; "annotation" and "satisfies" suggestions follow upstream's precedence quirks
+  (`==` ranks with assignment, `satisfies` and instantiations have none).
+- **no-inferrable-types**: per type, the values that make it obvious (`number`: number
+  literals, `Infinity`, `NaN`, `Number()`, after `+`/`-`; `bigint`; `boolean`: `!x`,
+  literals, `Boolean()`; `string`; `symbol`; `null`; `undefined`/`void x`; `RegExp`);
+  parameters only on functions with a body; optional, `readonly` and `abstract` properties
+  skipped. The fix deletes from `:` (and a `?` or `!`) to the end of the type.
+- **prefer-for-of**: `for (let i = 0; i < x.length; i++ | ++i | i += 1 | i = i + 1)` whose
+  body uses `i` only as `x[i]` (same object text, not `this`) and never writes `x[i]`
+  (assignment targets, `delete`, `++`/`--`, destructuring elements, and properties of an
+  assigned object literal, through TS wrappers).
+- **adjacent-overload-signatures**: member lists of programs, blocks, namespaces, classes,
+  interfaces and type literals; a member is keyed by name, name kind (plain, private,
+  quoted, computed text), `static` and call-signature-ness; any other member resets.
+  Helpers: `member_key_name`, `NameKind`, `requires_quoting`.
+- **class-literal-property-style**: `fields` reports class getters returning a literal
+  (unless a setter of the same static name exists); `getters` reports readonly literal
+  fields not assigned in the constructor (assignment, `delete`, `++`/`--`, array or rest
+  destructuring, through TS wrappers; the nearest class wins).
+- **consistent-type-definitions**: `interface` turns `type T = { ... }` (through
+  parentheses) into an interface; `type` turns interfaces into aliases, appending
+  ` & Base` per `extends`; no fix inside `declare global`.
+- **ban-tslint-comment**: `tslint:enable`/`tslint:disable` with optional `-line` /
+  `-next-line`; the fix removes the comment with one character on each side (the one before
+  only when the comment doesn't start a line).
+- **no-confusing-non-null-assertion**: `=`, `==`, `===`, `in`, `instanceof` with a left side
+  ending in an unparenthesized `!`; suggestions remove the `!` (when the left side is the
+  assertion) or wrap the left side.
+
+Read to understand (not ported), typescript-eslint `packages/eslint-plugin/src/rules/`:
+`array-type.ts`, `consistent-indexed-object-style.ts`, `prefer-function-type.ts`,
+`consistent-generic-constructors.ts`, `consistent-type-assertions.ts`,
+`no-inferrable-types.ts`, `prefer-for-of.ts`, `adjacent-overload-signatures.ts`,
+`no-empty-function.ts`, `class-literal-property-style.ts`,
+`consistent-type-definitions.ts`, `ban-tslint-comment.ts`,
+`no-confusing-non-null-assertion.ts`, and `src/util/` (`misc.ts`, `isAssignee.ts`,
+`scopeUtils.ts`, `getOperatorPrecedence.ts`, `getWrappedCode.ts`,
+`getTextWithParentheses.ts`).
+
+## eslint-plugin-unicorn rules
+
+23 rules from eslint-plugin-unicorn 79.0.0, each at 100% of its oracle, all `NO_PRESET`.
+Rule files are `rules/unicorn_*.rs`; shared helpers are in `rules/unicorn_util.rs`. Configs
+name them `unicorn/<rule>`, in ESLint and oxlint configs alike (oxlint's `jsdoc/` names map
+the same way). What we learned, in our words:
+
+- **Shared helpers** (`unicorn_util.rs`). `global_path` names the global an expression
+  refers to (`Intl.Collator`): an unshadowed global (never written in the file), or a member
+  of `globalThis`/`global`/`self`/`window`, followed through `?:`, `||`/`&&`/`??`,
+  sequences, parentheses, TS wrappers, local variable inits and plain assignments, and
+  object-pattern keys. `call_to_new` / `new_to_call` switch `Foo()` and `new Foo()`, adding
+  parentheses (`new (a().b)()`, a `new` callee, a `return`/`throw`/`yield` argument on a
+  later line), keyword spacing and a leading `;` where the statement would join the previous
+  one. `is_error_name` is `(Upper[alnum]*)*Error`.
+- **Positions.** A `TemplateElement` is reported with its delimiters
+  (`ast_util::template_element_span`); a `Directive`'s literal is
+  `ast_util::string_literal_span` (its span also covers the `;`). A keyword glued to a
+  rewritten literal (`return.5`, `return+new Date`) gets a space.
+- **prefer-node-protocol**: specifiers of imports, re-exports, `import()`, `import("x")`
+  types, `require(x)` and `process.getBuiltinModule(x)` that are builtins both bare and with
+  `node:` (the plugin's static `builtin-modules` list).
+- **escape-case**, **number-literal-case**, **numeric-separators-style**,
+  **no-zero-fractions**, **text-encoding-identifier-case**: work on the literal's raw text
+  (an escape counts after an odd run of backslashes; `utf8`/`utf-8` is fixed only as the
+  second argument of `x.readFile[Sync]()`, else suggested; `<meta charset>`, `<form
+  accept-charset>` and `new TextDecoder()` always take `utf-8`; separators group from the
+  right, fractions from the left only with `fractionGroupLength`).
+- **prefer-optional-catch-binding**: a binding with a default counts as used (the
+  initialising write is a reference); computed pattern keys keep it.
+- **no-console-spaces**, **no-nested-ternary**, **no-lonely-if**, **no-null**,
+  **no-this-assignment**, **no-unreadable-iife**, **no-document-cookie**,
+  **empty-brace-spaces**, **no-xor-as-exponentiation**: see each file's header. no-lonely-if
+  rebuilds the merged `if` as one replacement, moving comments and adding `;` against ASI;
+  no-document-cookie follows `document` aliases through variable inits.
+- **prefer-date-now**: `new Date()` (with or without `()`) under `.getTime()`/`.valueOf()`,
+  `Number()`, `BigInt()`, unary `+`/`-`, arithmetic operators and their compound
+  assignments; no fix when a comment is inside the replaced node.
+- **no-instanceof-builtins**: `x instanceof Array` (and `Error` with `useErrorIsError`)
+  becomes `Array.isArray(x)`; `Function` becomes `typeof x === 'function'`; primitive
+  wrappers get that as a suggestion; other builtins only under `strategy: "strict"` or
+  `include`. The `typeof` form is parenthesized where the parent binds tighter than `===`.
+- **no-typeof-undefined**: `typeof x === "undefined"` (any equality, string or plain
+  template), skipping ambient names and, unless `checkGlobalVariables`, globals (then a
+  suggestion); the fix keeps comments and parenthesizes operands that would start a
+  statement, arrow body, `export default` or `for` init.
+- **new-for-builtins**: which builtins need `new` and which must not have it; `Date()`
+  becomes `String(new Date())`; `Object(x) ===` comparisons and optional chains are allowed.
+- **throw-new-error**: error-named calls (plain or member property) not used as a callee,
+  tag or decorator, not optional, not `Data.TaggedError()`; no oracle case needs types, so
+  the plugin's type-information check is left out.
+- **no-new-array**: `new Array(x)` is fixed to `[x]` only when `x` is statically known and
+  not a number (literals, known templates/operators/sequences/literals, `const` bindings
+  declared before); a spread gets a `[...x]` suggestion.
+- **prefer-type-error**: `throw new Error()` as the whole consequent of an `if` whose test
+  is a type check (`typeof` other than existence checks, `instanceof` a non-error,
+  lodash/underscore `is*` calls with arguments, `isNaN`/`isFinite`, `!` of one, a binary
+  with one on either side, a logical with one on both sides).
+
+Read to understand (not ported), eslint-plugin-unicorn `rules/`: the 23 rule files, and
+`fix/{switch-call-expression-to-new-expression,switch-new-expression-to-call-expression,
+fix-space-around-keywords,add-parentheses-to-return-or-throw-expression,
+replace-node-or-token-and-spaces-before}.js`, `utils/{global-reference-tracker,
+needs-semicolon,get-unparenthesized-keyword-argument-parent,
+is-in-unparenthesized-new-expression-callee,get-static-value,builtins,numeric,
+should-add-parentheses-to-comparison,should-add-parentheses-to-unary-expression,
+should-add-parentheses-to-expression-statement-expression,comments}.js`, `ast/` helpers;
+`@eslint-community/eslint-utils` (ReferenceTracker); `is-builtin-module`.
 
 ## jsdoc rules
 
