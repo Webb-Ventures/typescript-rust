@@ -117,6 +117,11 @@ Files, by layer:
   (`Resolution::redirected_from` keeps the original for TS2306's name), and neither it nor
   what only it imports is in the program (tsc: `collectFiles` in
   `tsc/internal/compiler/filesparser.go`).
+  Under `libReplacement`, each lib file (`lib.dom.iterable.d.ts`) is first looked up as its
+  `@typescript/lib-*` package (`@typescript/lib-dom/iterable`, `lib_replacement_specifier`)
+  from `__lib_node_modules_lookup_<lib>__.ts` in the config (or working) directory, in
+  CommonJS mode; a file that resolves replaces the bundled lib (loaded as a lib file, its
+  `/// <reference lib>` followed). `ts_r_check`'s trace skips replaced libs' lookups.
 - Expressions: `expr.rs`, `func.rs` (function expressions, contextual typing), `call.rs`
   (calls, `new`, overload resolution, arity and TS2769 reporting), `infer.rs`, JSX:
   `jsx_check.rs` (the `JSX` namespace of an element: global, factory-scoped or from the

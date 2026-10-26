@@ -789,19 +789,26 @@ fn includable(ext: Extension, allow_js: bool) -> bool {
 
 /// Lib file names for the options, with their `/// <reference lib>` closure, in dependency
 /// order (referenced libs first).
+/// A lib file's replacement under `libReplacement` (the `@typescript/lib-*` package that
+/// [`lib_replacement_specifier`] names, when one resolves).
+type LibReplace<'r> = &'r dyn Fn(&str) -> Option<Arc<SourceFile>>;
+
 fn lib_closure(
     libs: &LibStore,
     options: &CompilerOptions,
     opts: &BindOptions,
     referenced: &[String],
+    replace: Option<LibReplace<'_>>,
 ) -> (Vec<Arc<SourceFile>>, Vec<String>) {
     let mut out = Vec::new();
     let mut seen = FxHashSet::default();
     let mut missing = Vec::new();
+    #[allow(clippy::too_many_arguments)]
     fn visit(
         name: &str,
         libs: &LibStore,
         opts: &BindOptions,
+        replace: Option<LibReplace<'_>>,
         seen: &mut FxHashSet<String>,
         out: &mut Vec<Arc<SourceFile>>,
         missing: &mut Vec<String>,
@@ -810,7 +817,8 @@ fn lib_closure(
         if depth > 64 || !seen.insert(name.to_owned()) {
             return;
         }
-        let Some(f) = libs.get(name, opts) else {
+        let replaced = replace.and_then(|r| r(name));
+        let Some(f) = replaced.or_else(|| libs.get(name, opts)) else {
             missing.push(name.to_owned());
             return;
         };
@@ -818,13 +826,22 @@ fn lib_closure(
             if *kind == "lib"
                 && let Some(file) = ts_r_config::lib_file_name(v)
             {
-                visit(file, libs, opts, seen, out, missing, depth + 1);
+                visit(file, libs, opts, replace, seen, out, missing, depth + 1);
             }
         }
         out.push(f);
     }
     for name in options.effective().lib_files() {
-        visit(name, libs, opts, &mut seen, &mut out, &mut missing, 0);
+        visit(
+            name,
+            libs,
+            opts,
+            replace,
+            &mut seen,
+            &mut out,
+            &mut missing,
+            0,
+        );
     }
     // `/// <reference lib="..." />` in program files (for example `esnext.disposable` in
     // @types/node) adds that lib too; an unknown name adds nothing. `noLib` disables it.
@@ -836,10 +853,38 @@ fn lib_closure(
     };
     for v in referenced {
         if let Some(file) = ts_r_config::lib_file_name(v) {
-            visit(file, libs, opts, &mut seen, &mut out, &mut ignored, 0);
+            visit(
+                file,
+                libs,
+                opts,
+                replace,
+                &mut seen,
+                &mut out,
+                &mut ignored,
+                0,
+            );
         }
     }
     (out, missing)
+}
+
+/// The package a lib file is replaced by under `libReplacement`: `lib.dom.d.ts` →
+/// `@typescript/lib-dom`, `lib.es2015.symbol.wellknown.d.ts` →
+/// `@typescript/lib-es2015/symbol-wellknown` (observed in tsc 7's traces).
+pub fn lib_replacement_specifier(file_name: &str) -> Option<String> {
+    let name = file_name.strip_prefix("lib.")?.strip_suffix(".d.ts")?;
+    Some(match name.split_once('.') {
+        Some((head, rest)) => format!("@typescript/lib-{head}/{}", rest.replace('.', "-")),
+        None => format!("@typescript/lib-{name}"),
+    })
+}
+
+/// The pseudo file a lib's replacement package is resolved from: in the config directory
+/// (or the working directory), always in CommonJS mode (tsc:
+/// `getInferredLibraryNameResolveFrom` in tsc/internal/compiler/program.go).
+pub fn lib_replacement_lookup_file(base: &str, lib_file_name: &str) -> String {
+    let base = base.trim_end_matches('/');
+    format!("{base}/__lib_node_modules_lookup_{lib_file_name}__.ts")
 }
 
 struct Pending {
@@ -1060,7 +1105,7 @@ fn load<F: FileSystem>(
         // program files reference are added after the last wave).
         let warm_libs = || {
             if let Some(l) = libs {
-                let _ = lib_closure(l, options, &lib_bind, &[]);
+                let _ = lib_closure(l, options, &lib_bind, &[], None);
             }
         };
         let side: Option<&(dyn Fn() + Sync)> = if guard == 1 { Some(&warm_libs) } else { None };
@@ -1189,8 +1234,27 @@ fn load<F: FileSystem>(
             }
         }
     }
+    // `libReplacement`: a lib whose `@typescript/lib-*` package resolves is that file.
+    let lib_base = resolver
+        .options()
+        .config_dir
+        .clone()
+        .unwrap_or_else(|| fs.cwd());
+    let replace_lib = |name: &str| -> Option<Arc<SourceFile>> {
+        let spec = lib_replacement_specifier(name)?;
+        let from = lib_replacement_lookup_file(&lib_base, name);
+        let r = resolver.resolve_module(&spec, &from, ResolutionMode::Require)?;
+        let path = r.resolved_file_name.clone();
+        let text = fs.read_file(&path)?;
+        Some(Arc::new(SourceFile::new(path, text, true, &lib_bind)))
+    };
+    let replace: Option<LibReplace<'_>> = if options.lib_replacement() == Some(true) {
+        Some(&replace_lib)
+    } else {
+        None
+    };
     let (lib_files, missing_libs) = match libs {
-        Some(l) => lib_closure(l, options, &lib_bind, &referenced),
+        Some(l) => lib_closure(l, options, &lib_bind, &referenced, replace),
         None => (Vec::new(), Vec::new()),
     };
     // Package deduplication: a file whose package identity an earlier file already has
