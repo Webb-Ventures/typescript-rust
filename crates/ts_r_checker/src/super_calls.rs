@@ -277,11 +277,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     return (!self.has_extends(Loc::new(e.file, owner))).then_some(not_derived);
                 }
-                // Heritage clauses, computed names and decorators are left alone.
-                Node::ClassDecl { .. }
-                | Node::ClassExpr { .. }
-                | Node::ComputedKey { .. }
-                | Node::Decorator { .. } => {
+                // A decorator runs in the scope around the class it decorates (a member's
+                // or a parameter's included): the search goes on past that class
+                // (`@(super.m) method() {}` in a namespace is TS2660; observed tsc 7).
+                Node::Decorator { .. } => {
+                    let class = self.class_of_decorator(Loc::new(e.file, n))?;
+                    through_arrow = false;
+                    in_params = false;
+                    cur = parents.parent(class);
+                    continue;
+                }
+                // Heritage clauses and computed names are left alone.
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } | Node::ComputedKey { .. } => {
                     return None;
                 }
                 _ => {}
@@ -289,6 +296,37 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = parents.parent(n);
         }
         None
+    }
+
+    /// The class decorator `d` belongs to: the class it decorates, or the class of the
+    /// member (or member parameter) it decorates. `None` for a decorator elsewhere.
+    fn class_of_decorator(&self, d: Loc) -> Option<NodeId> {
+        let ast = self.ast(d.file);
+        let parents = self.c.file(d.file).parents();
+        let mut n = parents.parent(d.node)?;
+        if matches!(ast.node(n), Node::Param { .. }) {
+            // A parameter of a method (or constructor): its function, then its method.
+            let f = parents.parent(n)?;
+            if !matches!(ast.node(f), Node::FunctionExpr { .. }) {
+                return None;
+            }
+            n = parents.parent(f)?;
+        }
+        if matches!(ast.node(n), Node::ClassDecl { .. } | Node::ClassExpr { .. }) {
+            return Some(n);
+        }
+        if !matches!(
+            ast.node(n),
+            Node::MethodDef { .. } | Node::PropertyDef { .. }
+        ) {
+            return None;
+        }
+        let class = parents.parent(n)?;
+        matches!(
+            ast.node(class),
+            Node::ClassDecl { .. } | Node::ClassExpr { .. }
+        )
+        .then_some(class)
     }
 
     /// Whether `class` has an `extends` clause.

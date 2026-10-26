@@ -2297,6 +2297,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 match self.c.resolve_ident(l, meaning::VALUE) {
                     Some(s) => {
                         let t = self.type_of_symbol(s);
+                        // The root of `typeof pet.p` narrows through `pet`'s union
+                        // constraint, as the object of a property access does.
+                        let t = if self.c.sym_flags(s).intersects(SymbolFlags::VARIABLE) {
+                            self.narrowable_type_for_reference(l, t)
+                        } else {
+                            t
+                        };
                         self.flow_type_of_reference_quiet(l, s, t)
                     }
                     None if ast.atom(name) == "globalThis" => self.global_this_type(),
@@ -2338,7 +2345,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let t = self.type_of_symbol(p);
                         self.quietly(|ck| ck.flow_type_of_reference(l, t, t))
                     }
-                    None => TypeId::UNRESOLVED,
+                    None => self.missing_type_query_property(l, left, right, lt, name),
                 }
             }
             Node::ImportType { .. } => self.type_from_node(l),
@@ -2346,6 +2353,42 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::This {} => self.check_this(l),
             _ => TypeId::UNRESOLVED,
         }
+    }
+
+    /// `typeof a.name` where `a`'s type `lt` has no property `name`: an index signature's
+    /// value, else what the property access `a.name` reports (TS7017 for a missing global
+    /// through `globalThis`, TS2339 otherwise; observed tsc 7).
+    fn missing_type_query_property(
+        &mut self,
+        l: Loc,
+        left: NodeId,
+        right: NodeId,
+        lt: TypeId,
+        name: &str,
+    ) -> TypeId {
+        let key = if crate::expr::is_numeric_name(name) {
+            TypeId::NUMBER
+        } else {
+            TypeId::STRING
+        };
+        if let Some(i) = self.index_info_of(lt, key) {
+            return i.value;
+        }
+        let name = name.to_owned();
+        let rl = Loc::new(l.file, right);
+        if self.is_missing_global_through_global_this(lt, Loc::new(l.file, left), &name) {
+            if self.c.opts.no_implicit_any {
+                let ts = self.type_to_string(lt);
+                self.error(
+                    rl,
+                    crate::diag::dg::ELEMENT_IMPLICITLY_HAS_AN_ANY_TYPE_BECAUSE_TYPE_0_HAS_NO_INDEX_SIGNATURE_7017,
+                    &[&ts],
+                );
+            }
+            return TypeId::ANY;
+        }
+        self.report_missing_property(rl, &name, lt);
+        TypeId::UNRESOLVED
     }
 
     /// The polymorphic `this` type at a location (enclosing class or interface), if the

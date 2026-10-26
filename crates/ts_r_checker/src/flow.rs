@@ -778,6 +778,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             Node::Call { callee, .. } | Node::New { callee, .. } => callee == e.node,
+            // The root of a type query's property path (`typeof pet.saysWoof`).
+            Node::QualifiedName { left, .. } => left == e.node,
             _ => false,
         };
         // Also a reference whose contextual type has no generic types (an argument for a
