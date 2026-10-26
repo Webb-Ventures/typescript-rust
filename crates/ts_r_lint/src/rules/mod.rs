@@ -428,9 +428,7 @@ mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
-mod unicorn_no_unreadable_new_expression;
-mod unicorn_no_unreadable_object_destructuring;
-mod unicorn_no_unsafe_promise_all_settled_values;
+mod unicorn_no_unsafe_property_key;
 mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
@@ -1151,6 +1149,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_name_replacements::RULE,
     &unicorn_consistent_boolean_name::RULE,
     &unicorn_isolated_functions::RULE,
+    &unicorn_no_unsafe_property_key::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
