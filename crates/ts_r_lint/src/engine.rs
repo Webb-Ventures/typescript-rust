@@ -419,6 +419,7 @@ pub fn lint_parsed(
             rule: d.rule,
             pos: d.span.start,
             line: lines.line_of(d.span.start),
+            before_line: d.loc.is_some_and(|l| l.column == 0),
         })
         .collect();
     let skipped = &cfg.skipped_rules;

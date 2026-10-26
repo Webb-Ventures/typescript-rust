@@ -289,9 +289,10 @@ unicorn/error-message 106/106
 unicorn/escape-case 198/198
 unicorn/explicit-length-check 224/224
 unicorn/explicit-timer-delay 60/60
-unicorn/logical-assignment-operators 19/19
+unicorn/filename-case 279/279
 unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
+unicorn/no-abusive-eslint-disable 33/33
 unicorn/no-accidental-bitwise-operator 66/66
 unicorn/no-array-concat-in-loop 33/33
 unicorn/no-array-from-fill 30/30

@@ -48,6 +48,7 @@ pub struct LintOptions {
 
 impl LintOptions {
     pub fn new(cwd: PathBuf) -> LintOptions {
+        let cwd_str: std::sync::Arc<str> = cwd.to_string_lossy().into();
         LintOptions {
             paths: Vec::new(),
             cwd,
@@ -56,7 +57,10 @@ impl LintOptions {
             threads: default_threads(),
             gitignore: true,
             warn_ignored: true,
-            resolve: ResolveOptions::new(),
+            resolve: ResolveOptions {
+                cwd: Some(cwd_str),
+                ..ResolveOptions::new()
+            },
             node: NodeOptions::default(),
         }
     }
