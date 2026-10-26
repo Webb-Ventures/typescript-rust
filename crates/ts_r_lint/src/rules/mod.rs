@@ -350,6 +350,8 @@ mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_remove;
+mod unicorn_prefer_dom_node_text_content;
+mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_math_trunc;
 mod unicorn_prefer_modern_dom_apis;
 mod unicorn_prefer_native_coercion_functions;
@@ -748,6 +750,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_dom_node_append::RULE,
     &unicorn_prefer_dom_node_remove::RULE,
+    &unicorn_prefer_dom_node_text_content::RULE,
+    &unicorn_prefer_keyboard_event_key::RULE,
     &unicorn_prefer_math_trunc::RULE,
     &unicorn_prefer_modern_dom_apis::RULE,
     &unicorn_prefer_native_coercion_functions::RULE,

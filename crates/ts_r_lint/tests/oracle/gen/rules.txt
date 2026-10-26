@@ -315,3 +315,5 @@ unicorn/no-unreadable-array-destructuring
 unicorn/prefer-dom-node-remove
 unicorn/prefer-modern-dom-apis
 unicorn/prefer-query-selector
+unicorn/prefer-dom-node-text-content
+unicorn/prefer-keyboard-event-key
