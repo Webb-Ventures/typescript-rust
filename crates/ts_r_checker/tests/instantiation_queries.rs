@@ -404,3 +404,47 @@ fn setter_write_type() {
         "string | Promise<string>"
     );
 }
+
+/// `PrintMode::quick_info_alias` expands the outermost alias only (tsc 7.0.2 quick info
+/// `type B = "a" | "b"` for `type B = A`, `type Less = "_1"`, `type L = { x: A; }`).
+#[test]
+fn quick_info_alias_expands_outermost_alias() {
+    let Some(program) = editor_program(&[(
+        "a.ts",
+        "type A = \"a\" | \"b\";\ntype B = A;\ntype Less = Exclude<\"_0\" | \"_1\", \"_0\">;\ntype L = { x: A };\n",
+    )]) else {
+        return;
+    };
+    let a = program.file_index("/p/a.ts").unwrap();
+    let file = FileId(a as u32);
+    let ast = &program.files[a].ast;
+    let checker = Checker::new(&program);
+    let mut aliases = Vec::new();
+    for i in 0..ast.node_count() {
+        let Some(id) = ts_r_ast::NodeId::from_raw(i as u32) else {
+            continue;
+        };
+        if let Node::TypeAlias { name, .. } = *ast.node(id)
+            && let Some(s) = checker
+                .sym_of_decl(Loc::new(file, id))
+                .or_else(|| checker.sym_of_decl(Loc::new(file, name)))
+        {
+            aliases.push((id, s));
+        }
+    }
+    aliases.sort_by_key(|&(id, _)| ast.span(id).start);
+    let mut ck = Ck::new(&checker, file);
+    let mut got = Vec::new();
+    for &(decl, s) in &aliases {
+        let t = ck.declared_type_of_symbol(s);
+        let mode = ts_r_checker::PrintMode::quick_info_alias(Loc::new(file, decl));
+        got.push(ck.type_to_string_with(t, mode));
+    }
+    assert_eq!(
+        got,
+        ["\"a\" | \"b\"", "\"a\" | \"b\"", "\"_1\"", "{ x: A; }"]
+    );
+    // The mode is spent on the outermost type: the next print names the alias again.
+    let t = ck.declared_type_of_symbol(aliases[1].1);
+    assert_eq!(ck.type_to_string(t), "A");
+}

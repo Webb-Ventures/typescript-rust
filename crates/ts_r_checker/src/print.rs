@@ -33,6 +33,11 @@ pub struct PrintMode {
     /// quick info reuses those nodes: `callback: (x: 'hi') => number`, `p: 'a' | number`,
     /// `f: { (x: number): number; }`), when every name in it means the same at `scope`.
     pub reuse_annotations: bool,
+    /// The outermost type prints structurally even when it carries an alias, its own or
+    /// another (`type B = A` shows `"a" | "b"`, `type Less = Exclude<..>` shows `"_1"`), as
+    /// tsc's quick info prints a type alias's declared type (TypeFormatFlags.InTypeAlias).
+    /// Nested types still print through their aliases.
+    pub in_type_alias: bool,
 }
 
 impl PrintMode {
@@ -52,6 +57,16 @@ impl PrintMode {
             omit_optional_undefined: true,
             via_aliases: true,
             reuse_annotations: true,
+            in_type_alias: false,
+        }
+    }
+
+    /// [`Self::quick_info`] for a type alias's declared type: the outermost alias is
+    /// expanded.
+    pub fn quick_info_alias(scope: Loc) -> Self {
+        PrintMode {
+            in_type_alias: true,
+            ..PrintMode::quick_info(scope)
         }
     }
 }
@@ -232,7 +247,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.print_omit_optional_undefined,
             self.print_via_aliases,
             self.print_reuse,
+            self.print_skip_alias,
         );
+        self.print_skip_alias = mode.in_type_alias;
         if let Some(scope) = mode.scope {
             self.print_qualified = true;
             self.print_scope = Some(scope);
@@ -247,6 +264,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.print_omit_optional_undefined,
             self.print_via_aliases,
             self.print_reuse,
+            self.print_skip_alias,
         ) = saved;
         r
     }
@@ -372,8 +390,10 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     fn print_type(&mut self, t: TypeId, depth: u32, stack: &mut Vec<TypeId>) -> String {
+        let mut skip_alias = false;
         if depth == 0 && stack.is_empty() {
             self.print_nodes = 0;
+            skip_alias = std::mem::take(&mut self.print_skip_alias);
         }
         self.print_nodes += 1;
         if self.print_nodes > MAX_PRINT_NODES {
@@ -402,12 +422,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             return name.to_owned();
         }
         // A forward reference prints as its alias (`type T = [number, T[]]`).
-        if let Some(sym) = s.forward_alias(t) {
+        if let Some(sym) = s.forward_alias(t).filter(|_| !skip_alias) {
             let name = self.c.sym_name(sym).to_owned();
             return self.qualified_name(sym, name);
         }
         // Aliases print by name.
-        if let Some(info) = s.alias_of(t) {
+        if let Some(info) = s.alias_of(t).filter(|_| !skip_alias) {
             let name = self.c.sym_name(info.sym).to_owned();
             let args = s.list_items(info.args).to_vec();
             if args.is_empty() {

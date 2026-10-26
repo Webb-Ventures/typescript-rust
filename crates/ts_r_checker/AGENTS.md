@@ -31,7 +31,9 @@ result.diagnostics; result.error_count();
 // the added `| undefined`, names through import aliases, annotations reused as written:
 // `(x: 'hi') => number`, `f: { (x: number): number; }`; a name that means something else
 // at the scope is qualified further: `typeof M.C`), ck.jsx_props_type(opening),
-// ck.pattern_parent_type(pattern), ck.write_type_of_symbol(p) (a setter's parameter type)
+// ck.pattern_parent_type(pattern), ck.write_type_of_symbol(p) (a setter's parameter type),
+// PrintMode::quick_info_alias(scope) (a type alias's declared type: the outermost alias
+// expands, `type B = "a" | "b"` for `type B = A`; nested ones stay named)
 ```
 
 Files, by layer:
@@ -1102,7 +1104,9 @@ Files, by layer:
   scope by its own name is named through an import alias in scope that resolves to it or
   to one of its namespaces, the nearest first: `a<a<string>>` for `import a =
   require("./a")` of `export = Foo`, `d.C<number>` for `import d = M.N`; tsc:
-  checker.go getAccessibleSymbolChain). Tests: `tests/instantiation_queries.rs`.
+  checker.go getAccessibleSymbolChain), and `in_type_alias` (`Ck::print_skip_alias`, spent
+  by the outermost `print_type`: that type prints structurally even when it carries an
+  alias, as tsc's TypeFormatFlags.InTypeAlias). Tests: `tests/instantiation_queries.rs`.
 - **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
   declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
   the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
