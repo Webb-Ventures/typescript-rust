@@ -126,14 +126,109 @@ fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
 
 /// A stylesheet as a self-accepting JS module that injects a `<style>` tag. A plain
 /// stylesheet exports nothing, like Vite's (the text is `?inline`'s default export). A CSS
-/// module (`x.module.css`) exports an empty class map as its default, so a page importing
-/// one still links: its class names aren't scoped or mapped yet.
+/// module (`x.module.css`) served this way (a dependency's) exports an empty class map as
+/// its default, so a page importing one still links; app CSS modules go through
+/// [`css_module_with_exports`].
 pub fn css_module(url: &str, css: &str) -> String {
     css_module_at(CLIENT_URL, url, css)
 }
 
 /// [`css_module`] with the client at `client` (under a base).
 pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
+    let exports = match is_css_module(url) {
+        true => "export default {};\n".to_owned(),
+        false => String::new(),
+    };
+    style_module(client, url, css, &exports)
+}
+
+/// A CSS module (scoped by [`crate::css_modules`]) as a JS module: the style, the class map
+/// as the default export and each name that is a JS identifier as a named export, as Vite's
+/// `dataToEsm` with named exports does.
+pub fn css_module_with_exports(
+    client: &str,
+    url: &str,
+    css: &str,
+    exports: &[(String, String)],
+) -> String {
+    let mut code = String::new();
+    let mut map = String::from("export default {");
+    for (i, (k, v)) in exports.iter().enumerate() {
+        if i > 0 {
+            map.push(',');
+        }
+        map.push_str(&format!("\n  {}: {}", js_string(k), js_string(v)));
+        if is_export_name(k) {
+            code.push_str(&format!("export const {k} = {};\n", js_string(v)));
+        }
+    }
+    map.push_str(if exports.is_empty() { "};\n" } else { "\n};\n" });
+    code.push_str(&map);
+    style_module(client, url, css, &code)
+}
+
+/// Whether a CSS module name can be a named export (`const <name>`).
+fn is_export_name(k: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "arguments",
+        "await",
+        "break",
+        "case",
+        "catch",
+        "class",
+        "const",
+        "continue",
+        "debugger",
+        "default",
+        "delete",
+        "do",
+        "else",
+        "enum",
+        "eval",
+        "export",
+        "extends",
+        "false",
+        "finally",
+        "for",
+        "function",
+        "if",
+        "implements",
+        "import",
+        "in",
+        "instanceof",
+        "interface",
+        "let",
+        "new",
+        "null",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "static",
+        "super",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "var",
+        "void",
+        "while",
+        "with",
+        "yield",
+    ];
+    let mut chars = k.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+        && !RESERVED.contains(&k)
+        && !k.starts_with("__ts_r_")
+}
+
+fn style_module(client: &str, url: &str, css: &str, exports: &str) -> String {
     let id = js_string(url);
     let client = js_string(client);
     format!(
@@ -143,13 +238,8 @@ pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
          const __ts_r_css = {};\n\
          __ts_r_update_style(__ts_r_id, __ts_r_css);\n\
          import.meta.hot.accept();\n\
-         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n{}",
+         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n{exports}",
         js_string(css),
-        if is_css_module(url) {
-            "export default {};\n"
-        } else {
-            ""
-        }
     )
 }
 

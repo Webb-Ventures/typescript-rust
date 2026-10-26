@@ -131,6 +131,8 @@ pub struct DevConfig {
     /// `experimental.hmrPartialAccept`: an update of a module that accepts some of its
     /// exports (`import.meta.hot.acceptExports`) skips the importers that only use those.
     pub hmr_partial_accept: bool,
+    /// `css.transformer`: the shape of CSS modules' scoped class names.
+    pub css_module_naming: crate::css_modules::Naming,
     /// `server.headers`, added to every response that isn't proxied.
     pub headers: Vec<(String, String)>,
     pub cors: Cors,
@@ -211,6 +213,7 @@ impl DevConfig {
             assets_include: crate::glob::PathFilter::default(),
             assets_inline_limit: crate::assets::SVG_INLINE_LIMIT as u64,
             hmr_partial_accept: false,
+            css_module_naming: crate::css_modules::Naming::default(),
             headers: Vec::new(),
             cors: Cors::default(),
             proxy: Vec::new(),
@@ -306,6 +309,7 @@ pub(crate) struct Shared {
     pub assets_include: crate::glob::PathFilter,
     pub assets_inline_limit: u64,
     pub hmr_partial_accept: bool,
+    pub css_module_naming: crate::css_modules::Naming,
     pub base: String,
     pub env_options: EnvOptions,
     /// Reloaded when an env file changes.
@@ -604,6 +608,7 @@ impl DevServer {
             assets_include: config.assets_include.clone(),
             assets_inline_limit: config.assets_inline_limit,
             hmr_partial_accept: config.hmr_partial_accept,
+            css_module_naming: config.css_module_naming,
             base,
             env_options,
             env: RwLock::new(Arc::new(env)),
@@ -1585,6 +1590,23 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
     }
     let as_script =
         req.has_query("import") || req.header("sec-fetch-dest").is_some_and(|d| d == "script");
+    // A CSS module's `?inline`: its scoped text.
+    if ext == "css"
+        && req.has_query("inline")
+        && !req.has_query("raw")
+        && render::is_css_module(&url)
+    {
+        let Ok(source) = fs::read_to_string(file) else {
+            return Response::text(404, "Not found");
+        };
+        ensure_asset(shared, file, &url);
+        let mut host = app_css::AppCss::new(shared);
+        let css = host.transform(file, &source);
+        let mut deps = host.into_deps();
+        let scoped = scope_css_module(shared, file, &url, &css, 0, &mut deps);
+        add_watch_deps(shared, file, &url, deps);
+        return js_response(req, crate::assets::default_export(&scoped.css));
+    }
     // `?raw`, and CSS `?inline`: the text.
     if req.has_query("raw") || (ext == "css" && req.has_query("inline")) {
         return match fs::read(file) {
@@ -1784,7 +1806,66 @@ fn serve_css_module(shared: &Shared, req: &Request, file: &Path, url: &str) -> R
     let Some(css) = app_stylesheet(shared, file, url, true) else {
         return Response::text(404, "Not found");
     };
-    js_response(req, render::css_module_at(&shared.client_url(), url, &css))
+    if !render::is_css_module(url) {
+        return js_response(req, render::css_module_at(&shared.client_url(), url, &css));
+    }
+    let mut deps = Vec::new();
+    let scoped = scope_css_module(shared, file, url, &css, 0, &mut deps);
+    add_watch_deps(shared, file, url, deps);
+    js_response(
+        req,
+        render::css_module_with_exports(&shared.client_url(), url, &scoped.css, &scoped.exports),
+    )
+}
+
+/// `composes: ... from` chains deeper than this stop (a cycle, or a very long chain).
+const MAX_COMPOSE_DEPTH: u32 = 8;
+
+/// A CSS module's text (`@import`s already inlined) with its names scoped; the files its
+/// `composes: ... from` reads go to `deps`.
+fn scope_css_module(
+    shared: &Shared,
+    file: &Path,
+    url: &str,
+    css: &str,
+    depth: u32,
+    deps: &mut Vec<PathBuf>,
+) -> crate::css_modules::Scoped {
+    let key = url.split(['?', '#']).next().unwrap_or(url);
+    crate::css_modules::scope(css, key, shared.css_module_naming, &mut |spec| {
+        if depth >= MAX_COMPOSE_DEPTH {
+            return None;
+        }
+        let path = spec.split(['?', '#']).next().unwrap_or(spec);
+        let target = app_css::resolve_ref(shared, path, file, false)?;
+        let source = fs::read_to_string(&target).ok()?;
+        let mut host = app_css::AppCss::new(shared);
+        let text = host.transform(&target, &source);
+        deps.push(target.clone());
+        deps.extend(host.into_deps());
+        let target_url = url_for_file(&shared.root, &target);
+        Some(scope_css_module(
+            shared,
+            &target,
+            &target_url,
+            &text,
+            depth + 1,
+            deps,
+        ))
+    })
+}
+
+/// Adds files to a module's watched dependencies (a change to one updates it).
+fn add_watch_deps(shared: &Shared, file: &Path, url: &str, mut deps: Vec<PathBuf>) {
+    if deps.is_empty() {
+        return;
+    }
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    let id = g.ensure(file, url, ModuleKind::Css);
+    deps.extend(g.node(id).watch_deps.iter().cloned());
+    deps.sort();
+    deps.dedup();
+    g.set_watch_deps(id, deps);
 }
 
 /// A stylesheet of the app with its `@import`s inlined and references rewritten

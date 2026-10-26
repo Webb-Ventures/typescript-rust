@@ -22,6 +22,7 @@ pub mod assets;
 pub mod cache;
 pub mod cors;
 pub mod css;
+pub mod css_modules;
 pub mod css_refs;
 pub mod deps;
 pub mod env;

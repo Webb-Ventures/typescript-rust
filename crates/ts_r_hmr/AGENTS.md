@@ -132,9 +132,16 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `error`, `custom`). We add only `tsrId` on `update` (clients ignore unknown fields). The
   overlay element is `<vite-error-overlay>`; CSS `<style>` tags carry `data-vite-dev-id`.
   A stylesheet imported from JS exports nothing (Vite dropped its default export; the text
-  is `?inline`'s default export). A CSS module (`x.module.css`) exports an empty class map
-  as its default, so `import classes from './x.module.css'` still links and the rest of the
-  page runs: a missing export would stop every module on the page.
+  is `?inline`'s default export). An app CSS module (`x.module.css`) is scoped by
+  `css_modules` (local classes and keyframes, `:global`/`:local`, `composes` local, global
+  and `from` a file; rules in that module's docs, from Vite's `plugins/css.ts` and
+  postcss-modules' default naming): it exports the class map as its default and each name
+  that is a JS identifier as a named export, and `?inline` gives the scoped text. Scoped
+  names hash only the URL and the name (`_<name>_<hash5>`, or `<hash6>_<name>` with
+  `css.transformer: 'lightningcss'`, `DevConfig::css_module_naming`), so editing a rule keeps
+  the page's class names: the module still self-accepts, where Vite updates its importers
+  (a class added by an edit appears after a reload). A dependency's CSS module still
+  exports an empty map, so its importer links.
   Client → server: `custom` events (`vite:invalidate`, `ts-r:applied`, user events). A
   client connecting or disconnecting is passed to the plugin host as Vite's
   `vite:client:connect`/`vite:client:disconnect` events (only when a plugin listens).
@@ -499,8 +506,8 @@ wrapper ~0.6, browser ~2.4).
   fail; Vite's `import.meta.glob` expansion of `` `./${x}.js` `` isn't done, the browser
   resolves it relative to the module); an HTML
   change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app
-  (source) CSS, CSS modules (`.module.css`) and preprocessor `@import`s (`.scss`, ...) aren't
-  handled. Dependency CSS isn't watched (only linked packages).
+  (source) CSS, preprocessor `@import`s (`.scss`, ...) aren't handled, and CSS modules ignore
+  `css.modules` options (`generateScopedName`, `localsConvention`, ...). Dependency CSS isn't watched (only linked packages).
 - `new URL(`./${name}.png`, import.meta.url)` (a template with expressions) isn't turned into
   a glob as Vite does; only string literals are resolved. `import.meta.glob` needs literal
   arguments (as in Vite).

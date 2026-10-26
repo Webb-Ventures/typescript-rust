@@ -190,6 +190,9 @@ pub fn apply_dev_options(
     if let Some(on) = dev["hmrPartialAccept"].as_bool() {
         config.hmr_partial_accept = on;
     }
+    if dev["cssTransformer"].as_str() == Some("lightningcss") {
+        config.css_module_naming = ts_r_hmr::css_modules::Naming::Lightningcss;
+    }
     for p in dev["assetsInclude"].as_array().into_iter().flatten() {
         let added = match (p["glob"].as_str(), p["regex"].as_str()) {
             (Some(g), _) => config.assets_include.add_glob(g, &config.root),

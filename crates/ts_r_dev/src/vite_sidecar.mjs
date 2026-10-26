@@ -549,6 +549,7 @@ function devOptions() {
     assetsInclude: assetsIncludePatterns(config.assetsInclude),
     assetsInlineLimit: typeof config.build?.assetsInlineLimit === 'number' ? config.build.assetsInlineLimit : null,
     hmrPartialAccept: config.experimental?.hmrPartialAccept === true,
+    cssTransformer: config.css?.transformer === 'lightningcss' ? 'lightningcss' : 'postcss',
     server: {
       host,
       port: typeof s.port === 'number' ? s.port : null,

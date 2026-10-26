@@ -385,6 +385,49 @@ fn static_import_attributes_are_removed_dynamic_ones_kept() {
 }
 
 #[test]
+fn css_modules_scope_class_names_and_export_them() {
+    let f = start();
+    f.app
+        .write("src/base.module.css", ".shared { color: blue }\n");
+    f.app.write(
+        "src/card.module.css",
+        ".card { composes: shared from './base.module.css'; color: red }\n:global(.page) .title { animation: pop 1s }\n@keyframes pop { from { opacity: 0 } }\n",
+    );
+    let scoped = |key: &str, name: &str| {
+        ts_r_hmr::css_modules::scoped_name(ts_r_hmr::css_modules::Naming::Postcss, key, name)
+    };
+    let (card, title, pop) = (
+        scoped("/src/card.module.css", "card"),
+        scoped("/src/card.module.css", "title"),
+        scoped("/src/card.module.css", "pop"),
+    );
+    let shared = scoped("/src/base.module.css", "shared");
+    let (status, _, body) = f.get("/src/card.module.css?import");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains(&format!("export const card = \"{card} {shared}\";")),
+        "{body}"
+    );
+    assert!(body.contains(&format!("\"title\": \"{title}\"")), "{body}");
+    assert!(body.contains(&format!("\"pop\": \"{pop}\"")), "{body}");
+    // The composed file's rules come first; `composes` and `:global` are gone.
+    let css = format!(
+        ".{shared} {{ color: blue }}\\n.{card} {{ color: red }}\\n.page .{title} {{ animation: {pop} 1s }}\\n@keyframes {pop} {{"
+    );
+    assert!(body.contains(&css), "{body}");
+    // `?inline`: the scoped text.
+    let (status, _, body) = f.get("/src/card.module.css?inline");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains(&format!(".{card} {{ color: red }}")),
+        "{body}"
+    );
+    // A plain stylesheet still exports nothing.
+    let (_, _, body) = f.get("/src/style.css?import");
+    assert!(!body.contains("export"), "{body}");
+}
+
+#[test]
 fn a_pruned_module_imported_again_is_fetched_fresh() {
     let f = start();
     f.app.write("src/child.js", "export const v = 1;\n");
