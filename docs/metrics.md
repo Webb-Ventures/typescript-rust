@@ -1,8 +1,9 @@
 # ts-r metrics
 
 Status as of 16 Oct 2026; the correctness rows for the checker, lint and the bundler were
-measured again on 24 Oct 2026 at `087afc9`, and the ecosystem, public-project, round-trip,
-tsconfig, resolution, sound-mode and incremental rows on 24 Oct 2026 at `ea41eac`.
+measured again on 24 Oct 2026 at `087afc9`, the public-project, round-trip, tsconfig,
+resolution, sound-mode and incremental rows on 24 Oct 2026 at `ea41eac`, and the ecosystem rows
+on 26 Oct 2026 at `f883d3f`.
 Alpha: releases are on npm under the `next` dist-tag.
 
 Speed and memory are measured on pinned public repos ([bench/repos.toml](../bench/repos.toml)):
@@ -128,8 +129,8 @@ private app before the switch to public repos and are not re-measured yet.
 | Parse | 100% (989 / 989) |
 | TS transform | 100% (48 / 48) |
 | Bundle and run, vs esbuild | 100% (915 / 915) |
-| Type check, vs tsc 7 | 92.0% (652 / 709) |
-| Package's own test suite through ts-r | 2 / 4 (chalk and commander fail only on an extra TS2661 from ts-r-check, and pass with it ignored) |
+| Type check, vs tsc 7 | 99.9% (708 / 709) |
+| Package's own test suite through ts-r | 3 / 4 (commander fails only on an extra TS2314 from ts-r-check, and passes with it ignored) |
 
 ## Sources
 

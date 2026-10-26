@@ -562,7 +562,7 @@
       "id": "ecosystem",
       "nav": "Top 1,000 npm packages",
       "title": "Ecosystem: the top 1,000 npm packages",
-      "intro": "cargo xtask ecosystem runs each stage that applies to a package and compares it with the reference tool. Pass rate is pass / (pass + fail + error); skipped packages have nothing to compare. The check stage imports each package with skipLibCheck off and passes it when ts-r-check prints the same diagnostics (file, line, column, code) as tsc 7; in the 57 packages that fail, 121 of the 1,460 compared diagnostics differ (119 that only ts-r-check reports, 2 that only tsc reports). The parse stage fails 30 packages on grammar errors that ts-r's parser reports in JavaScript files Node and tsc accept, most often TS1313 (an empty statement as the body of an if). Two of the four selected packages' own test suites pass with ts-r swapped in; the other two (chalk and commander) fail only on an extra TS2661 from ts-r-check, and pass with its errors ignored.",
+      "intro": "cargo xtask ecosystem runs each stage that applies to a package and compares it with the reference tool. Pass rate is pass / (pass + fail + error); skipped packages have nothing to compare. The check stage imports each package with skipLibCheck off and passes it when ts-r-check prints the same diagnostics (file, line, column, code) as tsc 7; in the one package that fails (@colors/colors), 1 of the 1,384 compared diagnostics differs: a duplicate identifier tsc reports inside its bundled lib.es2015.core.d.ts and ts-r-check does not. Three of the four selected packages' own test suites pass with ts-r swapped in; the fourth (commander) fails only on an extra TS2314 from ts-r-check, and passes with its errors ignored.",
       "charts": [
         {
           "id": "stages",
@@ -575,8 +575,8 @@
             { "label": "Bundle and run (vs esbuild)", "value": 100, "kind": "ours", "extra": ["915 / 915"] },
             { "label": "Transform TypeScript (vs tsc)", "value": 100, "kind": "ours", "extra": ["48 / 48"] },
             { "label": "Parse every file", "value": 100, "kind": "ours", "extra": ["989 / 989"] },
-            { "label": "Check an import of it (vs tsc 7)", "value": 92.0, "kind": "ours", "extra": ["652 / 709"] },
-            { "label": "Own test suite", "value": 50, "kind": "ours", "extra": ["2 / 4"] }
+            { "label": "Check an import of it (vs tsc 7)", "value": 99.9, "kind": "ours", "extra": ["708 / 709"] },
+            { "label": "Own test suite", "value": 75, "kind": "ours", "extra": ["3 / 4"] }
           ],
           "valueLabel": "Pass rate"
         }
@@ -584,22 +584,22 @@
       "table": {
         "columns": ["Stage", "Items compared", "Items failing"],
         "rows": [
-          ["parse (files)", "39,101", "56"],
+          ["parse (files)", "39,101", "0"],
           ["transform (files)", "1,156", "0"],
           ["bundle (entries)", "1,217", "0"],
-          ["check (diagnostics, ours and tsc's)", "1,460", "121"],
-          ["tests (suites)", "4", "2"],
-          ["Bundle size, 914 packages, minified", "ts-r-build 98,048.1 KiB", "esbuild 101,020.8 KiB (ts-r −2.9%)"]
+          ["check (diagnostics, ours and tsc's)", "1,384", "1"],
+          ["tests (suites)", "4", "1"],
+          ["Bundle size, 914 packages, minified", "ts-r-build 98,041.1 KiB", "esbuild 101,020.8 KiB (ts-r −2.9%)"]
         ]
       },
       "tableTitle": "Items inside the packages, and bundle size",
       "method": {
         "measured": "Pass, fail, error or skip per package per stage, compared against the reference tool's output",
         "machine": "laptop",
-        "software": "ts-r at commit ea41eac; esbuild 0.28.2, Node 24.21.0, tsc 7.0.2",
-        "input": "The top 1,000 packages of ecosystem/packages.toml (list of 2026-10-14); one run of 776 s on 2026-10-24",
-        "command": "cargo xtask ecosystem --top 1000 --stages parse,transform,bundle,check --tests --jobs 3 (3 packages at a time; see ecosystem/README.md)",
-        "commit": "8b5f8ea",
+        "software": "ts-r at commit f883d3f; esbuild 0.28.2, Node 24.21.0, tsc 7.0.2",
+        "input": "The top 1,000 packages of ecosystem/packages.toml (list of 2026-10-14); one run of 599 s on 2026-10-26",
+        "command": "cargo xtask ecosystem --top 1000 --stages parse,transform,bundle,check --tests --jobs 3 --budget-s 2700 (3 packages at a time; see ecosystem/README.md)",
+        "commit": "c2cfed0",
         "sources": ["ecosystem/STATUS.md", "ecosystem/README.md"]
       }
     },
