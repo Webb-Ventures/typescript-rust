@@ -581,6 +581,7 @@ mod unicorn_prefer_has_check;
 mod unicorn_prefer_hoisting_branch_code;
 mod unicorn_prefer_https;
 mod unicorn_prefer_identifier_import_export_specifiers;
+mod unicorn_prefer_import_meta_properties;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
 mod unicorn_prefer_iterator_concat;
@@ -588,6 +589,7 @@ mod unicorn_prefer_iterator_helpers;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_iterator_to_array_at_end;
 mod unicorn_prefer_iterator_zip;
+mod unicorn_prefer_json_import;
 mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_literal_ascii;
 mod unicorn_prefer_location_assign;
@@ -732,7 +734,9 @@ pub static ALL: &[&RuleDef] = &[
     &guard_for_in::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_no_unsafe_dom_html::RULE,
+    &unicorn_prefer_import_meta_properties::RULE,
     &unicorn_prefer_iterator_concat::RULE,
+    &unicorn_prefer_json_import::RULE,
     &unicorn_prefer_short_arrow_method::RULE,
     &unicorn_require_post_message_target_origin::RULE,
     &unicorn_try_complexity::RULE,
