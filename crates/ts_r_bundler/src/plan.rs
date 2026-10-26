@@ -1086,6 +1086,12 @@ impl Planner<'_> {
                     *require_shim = true;
                     None
                 }
+                // `BuildOptions::dynamic_import_url` turned the file into a URL.
+                (RecordKind::Dynamic, Target::External(x))
+                    if self.o.dynamic_import_url.is_some() && *x != r.spec =>
+                {
+                    Some(Expr::Import(x.clone()))
+                }
                 _ => None,
             };
             records.push(e);

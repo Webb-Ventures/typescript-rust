@@ -396,3 +396,52 @@ fn batch_shares_modules_between_entries() {
     assert_eq!(run_node(&out, "app.mjs"), "2 1 2\n");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Vite playground `dynamic-import`, "css in package": a `"type": "module"` package whose
+/// entry only does `import('./pkg.css')` stays an ES module (no CommonJS facade), and the
+/// stylesheet stays a request for the original file instead of a chunk that is never written.
+#[test]
+fn esm_package_with_only_a_dynamic_css_import() {
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dep-dynamic-css");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let project = tmp.join("project");
+    write(
+        &project,
+        "node_modules/@vitejs/test-pkg/package.json",
+        r#"{ "name": "@vitejs/test-pkg", "type": "module", "main": "index.js" }"#,
+    );
+    write(
+        &project,
+        "node_modules/@vitejs/test-pkg/index.js",
+        "import('./pkg.css');\n",
+    );
+    write(
+        &project,
+        "node_modules/@vitejs/test-pkg/pkg.css",
+        ".pkg { color: red }\n",
+    );
+    let project = std::fs::canonicalize(&project).expect("canonical project");
+    let entry = project.join("node_modules/@vitejs/test-pkg/index.js");
+    let request = DepRequest {
+        specifier: "@vitejs/test-pkg",
+        package: "@vitejs/test-pkg",
+        file: &entry,
+    };
+    let bundler = DepBundle::new().serve_root(&project);
+    let want = "import(\"/node_modules/@vitejs/test-pkg/pkg.css\")";
+    let batch = bundler.batch(&[request]).expect("batch");
+    assert_eq!(batch.entries, ["@vitejs_test-pkg.js"]);
+    let (_, js) = &batch.files[0];
+    assert!(!js.code.contains("__tsrCjs"), "{}", js.code);
+    assert!(js.code.contains(want), "{}", js.code);
+    assert!(
+        batch.files.iter().all(|(n, _)| !n.starts_with("chunk-")),
+        "{:?}",
+        batch.files.iter().map(|(n, _)| n).collect::<Vec<_>>()
+    );
+    let source = std::fs::read_to_string(&entry).expect("read entry");
+    let one = bundler.bundle(&request, &source).expect("bundle");
+    assert!(!one.code.contains("__tsrCjs"), "{}", one.code);
+    assert!(one.code.contains(want), "{}", one.code);
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -428,7 +428,13 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
                     }
                 }
             }
-            Resolution::File(f) => RawTarget::Path(f),
+            Resolution::File(f) => match &ctx.prep.opts.dynamic_import_url {
+                Some(hook) if r.kind == RecordKind::Dynamic => match (hook.0)(&f) {
+                    Some(url) => RawTarget::External(url),
+                    None => RawTarget::Path(f),
+                },
+                _ => RawTarget::Path(f),
+            },
             Resolution::External(e) => match r.kind {
                 RecordKind::Import | RecordKind::ReExport => {
                     RawTarget::External(external_key(&e, r.phase, &r.attrs))
