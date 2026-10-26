@@ -103,10 +103,18 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   out and its `diags` carry them, so they are reported only for checked files, as
   `check_program` does (`incremental::syntax_only`, `Ck::check_source_file`). Octal escapes
   in strings (`SourceFile::lenient`) are in `grammar` but are syntax errors to tsc:
-  `syntax_only` keeps them, through `ts_r_parser::tsc_syntax_errors`, like the driver.
-  Path-reference diagnostics are stored separately from syntax and semantic diagnostics;
+  `syntax_only` keeps them, through `ts_r_parser::tsc_syntax_errors`, like the driver, and
+  adds TS1084 for a malformed `/// <reference />` (`invalid_reference_diagnostics`: a
+  syntax error to tsc, so it blocks).
+  Reference diagnostics are stored separately from syntax and semantic diagnostics:
   full checks and lazy replay use the checker's `reference_diagnostics` against the full
-  program's paths, refreshing them when the source or its resolutions change.
+  program's paths, plus TS2688 for a `/// <reference types>` that resolves nowhere
+  (`type_reference_diagnostics`: the full path takes the names from
+  `ProgramFiles::missing_type_references`, the fast path from the saved references without
+  a target), refreshing them when the source or its resolutions change.
+  Link diagnostics go through `driver::link_diagnostic_reported`, as in `check_program`:
+  a checked file's, unless `@ts-ignore` / `@ts-expect-error` governs the line
+  (@colors/colors). Lib-side ones stay out (ts-r-check prints lib diagnostics without a path).
 - **Deep hashes are path-form independent**: `History::path_key` (set by `persist`) makes
   deep hashes write paths as saved (relative, `lib:<name>`, `?<spec>` for unresolved
   specifiers), so the full path (absolute paths) and the fast path (saved paths) compute the

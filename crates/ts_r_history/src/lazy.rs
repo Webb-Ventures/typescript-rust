@@ -27,14 +27,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::SourceKind;
 use ts_r_binder::{BindOptions, RequestKind};
 use ts_r_cache::{Cache, Key};
-use ts_r_checker::driver::CHECKER_GRAMMAR_CODES;
+use ts_r_checker::driver::{CHECKER_GRAMMAR_CODES, link_diagnostic_reported};
 use ts_r_checker::program::{
     Resolution, bind_options_for, expand_wildcard_types, reference_target, resolve_request,
     resolve_request_in,
 };
-use ts_r_checker::{
-    CheckRun, Checker, LibStore, ProgramFiles, SourceFile, check_files, should_check,
-};
+use ts_r_checker::{CheckRun, Checker, LibStore, ProgramFiles, SourceFile, check_files};
 use ts_r_config::{CompilerOptions, FileSystem, ParsedConfig, StrictFlag};
 use ts_r_diagnostics::{Diagnostic, FileId};
 use ts_r_resolver::{ResolutionMode, Resolver, ResolverOptions};
@@ -1194,9 +1192,11 @@ impl<'a, F: FileSystem> Run<'a, F> {
         let parsed_count = lib_files.len() + parsed.iter().filter(|p| p.is_some()).count();
         if !targets.is_empty() || !relink.is_empty() {
             let checker = Checker::new(&sub);
+            // As `check_program`: a checked file's, unless `@ts-ignore` or
+            // `@ts-expect-error` governs its line.
             for d in &checker.link.diagnostics {
-                let f = d.file.0 as usize;
-                if f < sub.files.len() && should_check(&sub, f) && relink_rels.contains(sub_rels[f])
+                if link_diagnostic_reported(&sub, d)
+                    && relink_rels.contains(sub_rels[d.file.0 as usize])
                 {
                     new_link.push(to_path(d));
                 }
@@ -1277,8 +1277,26 @@ impl<'a, F: FileSystem> Run<'a, F> {
             };
             let references = match (&parsed[i], fresh_set.contains(&i)) {
                 (Some(f), true) => {
+                    // `/// <reference types>` the loader would not find: no saved target.
+                    let current: &[SavedReference] = match sks[order[i]].src {
+                        Src::Saved(s) => scanned[s]
+                            .references
+                            .as_deref()
+                            .unwrap_or(&m.files[s].references),
+                        Src::New(j) => &news[j].references,
+                    };
+                    let missing: Vec<&str> = if options.no_resolve() == Some(true) {
+                        Vec::new()
+                    } else {
+                        current
+                            .iter()
+                            .filter(|(k, _, t)| k.starts_with("types") && t.is_none())
+                            .map(|(_, v, _)| v.as_str())
+                            .collect()
+                    };
                     ts_r_checker::reference_diagnostics(f, options, &reference_paths)
                         .into_iter()
+                        .chain(ts_r_checker::type_reference_diagnostics(f, &missing))
                         .map(|diag| PathDiag {
                             diag,
                             file: Some(rels[i].to_owned()),

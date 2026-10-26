@@ -177,9 +177,10 @@ pub fn check_and_lint(project: &LoadedProject, lint: &[TypedFile], threads: usiz
         }
     });
     let mut checked = diags.into_inner().unwrap_or_default();
+    // As `check_program`: a checked file's, unless `@ts-ignore` or `@ts-expect-error`
+    // governs its line.
     for d in &checker.link.diagnostics {
-        let f = d.file.0 as usize;
-        if f < program.files.len() && should_check(program, f) {
+        if ts_r_checker::driver::link_diagnostic_reported(program, d) {
             checked.push(d.clone());
         }
     }
@@ -374,4 +375,43 @@ pub(crate) fn lint_rules_for_test(code: &str, rules: &str) -> Option<FileResult>
         1,
     );
     run.results.into_iter().next()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A link diagnostic under `@ts-ignore` is not in the parity keys, as with tsc 7.0.2
+    /// (@colors/colors: the ignored `bold` member merged into the global `String`).
+    #[test]
+    fn ts_ignore_hides_link_diagnostics() {
+        let Some(libs) = LibStore::locate() else {
+            eprintln!("skipped: lib files missing (cargo xtask upstream sync --minimal)");
+            return;
+        };
+        let keys = |ignore: &str| {
+            let mut fs = ts_r_config::MemoryFs::new();
+            fs.set_cwd("/p");
+            fs.add_file(
+                "/p/tsconfig.json",
+                r#"{"compilerOptions": {"strict": true, "noEmit": true, "types": []}, "files": ["a.ts"]}"#,
+            );
+            fs.add_file(
+                "/p/a.ts",
+                &format!(
+                    "export {{}};\ndeclare global {{\n  interface String {{\n{ignore}    bold: string;\n  }}\n}}\nconst n: number = \"s\";\n"
+                ),
+            );
+            let project = load_project(&fs, "/p/tsconfig.json", &libs, 1);
+            check_and_lint(&project, &[], 1).keys
+        };
+        let ignored = keys("    // @ts-ignore\n");
+        assert!(ignored.keys().any(|k| k.contains("TS2322")), "{ignored:?}");
+        assert!(!ignored.keys().any(|k| k.contains("TS2300")), "{ignored:?}");
+        let reported = keys("");
+        assert!(
+            reported.keys().any(|k| k.contains("TS2300")),
+            "{reported:?}"
+        );
+    }
 }
