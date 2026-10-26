@@ -276,6 +276,9 @@ mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_escape_case;
 mod unicorn_no_console_spaces;
+mod unicorn_no_lonely_if;
+mod unicorn_no_nested_ternary;
+mod unicorn_no_null;
 mod unicorn_number_literal_case;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_optional_catch_binding;
@@ -582,6 +585,9 @@ pub static ALL: &[&RuleDef] = &[
     // eslint-plugin-unicorn
     &unicorn_escape_case::RULE,
     &unicorn_no_console_spaces::RULE,
+    &unicorn_no_lonely_if::RULE,
+    &unicorn_no_nested_ternary::RULE,
+    &unicorn_no_null::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
