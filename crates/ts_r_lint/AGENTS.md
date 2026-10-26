@@ -561,6 +561,66 @@ typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visi
 - Fixes that rewrite import/export lists build a list of `(Span, String)` edits and fold them
   into one `Fix` (see `ts_consistent_type_imports.rs`); keep edits non-overlapping.
 
+## eslint-plugin-import rules (round 6)
+
+21 of eslint-plugin-import 2.32.0's 46 rules, the ones that need no module resolution or
+export maps, all `NO_PRESET`: consistent-type-specifier-style, dynamic-import-chunkname,
+exports-last, first, max-dependencies, newline-after-import, no-absolute-path, no-amd,
+no-anonymous-default-export, no-commonjs, no-duplicates, no-dynamic-require,
+no-empty-named-blocks, no-import-module-exports, no-mutable-exports, no-named-default,
+no-namespace, no-nodejs-modules, no-unassigned-import, no-webpack-loader-syntax and
+prefer-default-export. Rule files are `rules/import_*.rs`; `rules/import_util.rs` holds the
+module visitor. Configs name them `import/<rule>` (ESLint and oxlint configs alike). The
+oracle data comes from the plugin's own tests (`gen-rule-oracle.mjs --import-tests`, see its
+header). What we learned, in our words:
+
+- **Module visitor** (`import_util::module_refs`). The specifiers a file names: the source
+  of `import` declarations, `export ... from` and `export * from`, and `import("x")` with a
+  string literal (ES modules, on unless `esmodule: false`); `require("x")` with exactly one
+  string-literal argument (with `commonjs`; the importer is the call); and for AMD (`amd`)
+  each string element of the array of a two-argument `require([...], f)` / `define([...],
+  f)` other than the magic `require` and `exports` (the importer is the element).
+  `import x = require("y")` is not visited. Parentheses don't count (ESTree drops them).
+- **Scopes.** `no-amd` only reports where the call's innermost scope is the module scope
+  (so never in scripts or functions). `no-commonjs` reports `require` only when the
+  `var` scope is the module scope, and lets a `require` under an `if`, `try`, `?:` or a
+  logical expression through unless `allowConditionalRequire: false`; `exports.x` is
+  reported unless the innermost scope itself declares `exports`. `no-mutable-exports` looks
+  up the names of `export { a }` and `export default a` in the export statement's scope
+  only. `no-import-module-exports` looks at the last scope (in creation order) that declares
+  `module`/`exports`: anything but the module scope, or an import binding, means it is not
+  CommonJS.
+- **Positions and fixes.** `newline-after-import` reports a point at the import's last line,
+  at its start column when it fits one line and column 1 otherwise, and counts lines to the
+  next statement (a decorated class from its first decorator) or, with
+  `considerComments`, to a comment starting within `count + 1` lines (top-level only).
+  `first` moves misplaced imports in one edit on the last import that no earlier code
+  references; the ones before it get an empty fix, the later ones none.
+  `no-duplicates` merges named specifiers by splitting the brace text on `,` (whitespace
+  and comments kept), skipping names the first import already has.
+- **Not done here.** The plugin skips its package's entry point in
+  `no-import-module-exports`, and keys `no-duplicates` by the resolved path; both need a
+  resolver, so specifiers are compared as written (the oracle's 26 `no-duplicates` misses
+  are all resolver cases, most of them a "Resolve error" the generator recorded for the
+  webpack and TypeScript resolvers it did not have). Of the plugin's `recommended` eight
+  only no-duplicates is here; no-unresolved, named, namespace, default, export,
+  no-named-as-default and no-named-as-default-member need resolution and export maps, and
+  so do extensions, order, no-cycle, no-deprecated, no-internal-modules,
+  no-relative-packages, no-relative-parent-imports, no-restricted-paths, no-self-import,
+  no-useless-path-segments, no-extraneous-dependencies and no-unused-modules.
+  enforce-node-protocol-usage, group-exports, no-default-export, no-named-export,
+  unambiguous and imports-first (a deprecated alias of first) have no oracle data yet: their
+  tests did not load or throw under ESLint 10 (`context.parserOptions`).
+
+Read to understand (not ported): `eslint-module-utils/moduleVisitor.js`;
+`src/rules/{no-amd,no-commonjs,no-dynamic-require,max-dependencies,exports-last,
+no-mutable-exports,no-absolute-path,first,newline-after-import,no-duplicates,
+no-empty-named-blocks,no-namespace,no-named-default,no-nodejs-modules,no-unassigned-import,
+no-webpack-loader-syntax,no-anonymous-default-export,consistent-type-specifier-style,
+prefer-default-export,no-import-module-exports,dynamic-import-chunkname}.js` and
+`src/core/{importType,staticRequire}.js` of eslint-plugin-import 2.32.0; its
+`tests/src/utils.js` and `tests/src/rule-tester.js` for the generator.
+
 ## eslint-plugin-unicorn rules (round 5, lead)
 
 `prefer-blob-reading-methods`, `consistent-date-clone`, `no-invalid-remove-event-listener`,

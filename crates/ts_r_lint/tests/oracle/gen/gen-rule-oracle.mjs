@@ -11,6 +11,7 @@
 //        [--fixtures <copy of ts-eslint/packages/eslint-plugin/tests/fixtures>]
 //        [--jsdoc-tests <eslint-plugin-jsdoc>/test/rules/assertions]
 //        [--unicorn-tests <eslint-plugin-unicorn>/test]
+//        [--import-tests <eslint-plugin-import>/tests/src/rules]
 //        --out <crates/ts_r_lint/tests/oracle/rules> [rule ...]
 // Pinned: eslint 10.12.0, typescript-eslint 8.71.1, typescript 6.0.3 (private-app's).
 //
@@ -26,9 +27,16 @@
 // `unicorn/no-null` (eslint-plugin-unicorn 79.0.0, from the tools dir with `outdent`: its
 // `test/utils/test.js` tester is replaced by a recorder; cases run with its default
 // globals, builtin + node + browser, which are written once per file as `globals` and left
-// out of each case's own; Vue, HTML, Svelte and non-JavaScript language cases are skipped).
+// out of each case's own; Vue, HTML, Svelte and non-JavaScript language cases are skipped),
+// or `import/no-amd` (eslint-plugin-import 2.32.0 from its source tarball, the plugin itself
+// in the tools dir: `tests/src/utils` and its RuleTester are replaced by a recorder, the
+// test files are loaded as ES modules with `require`/`__dirname` shims, the plugin's
+// eslintrc-style cases become flat config, the generator runs from the plugin root, and each
+// case's `filename` is kept relative to `tests/files`; Babel and Flow parser cases are
+// skipped, and cases whose expected messages include "Resolve error" record the missing
+// webpack and TypeScript resolvers).
 
-import { registerHooks, createRequire } from 'node:module';
+import { registerHooks, createRequire, isBuiltin } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,6 +58,11 @@ const fixturesOpt = opt('--fixtures');
 const jsdocTests = opt('--jsdoc-tests');
 const unicornTestsOpt = opt('--unicorn-tests');
 const unicornTests = unicornTestsOpt ? fs.realpathSync(path.resolve(unicornTestsOpt)) : undefined;
+const importTestsOpt = opt('--import-tests');
+const importTests = importTestsOpt ? fs.realpathSync(path.resolve(importTestsOpt)) : undefined;
+// The plugin's checkout root: its tests name fixture files under `tests/files` from the cwd.
+const importRoot = importTests ? path.resolve(importTests, '../../..') : undefined;
+const importFiles = importRoot ? path.join(importRoot, 'tests/files') : undefined;
 const fixturesDir = fixturesOpt ? fs.realpathSync(path.resolve(fixturesOpt)) : undefined;
 const rules = args.flatMap((a) =>
   a.startsWith('@') && !a.startsWith('@typescript-eslint/')
@@ -63,6 +76,7 @@ const tsParser = toolsRequire('@typescript-eslint/parser');
 const tsPlugin = toolsRequire('@typescript-eslint/eslint-plugin');
 const jsdocPlugin = jsdocTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-jsdoc')).href)).default : undefined;
 const unicornPlugin = unicornTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-unicorn')).href)).default : undefined;
+const importPlugin = importTests ? toolsRequire('eslint-plugin-import') : undefined;
 const unicornGlobals = unicornTests
   ? (() => {
       const g = toolsRequire('globals');
@@ -179,7 +193,52 @@ const VITEST = stub(
    exports.expect = () => new Proxy({}, { get: () => () => {} }); exports.vi = {};`,
 );
 
+// eslint-plugin-import's test helpers (`tests/src/utils.js`, `tests/src/rule-tester.js`):
+// eslintrc-style cases (`parser` paths, `parserOptions`) recorded through
+// `globalThis.__importTester`, which turns them into flat cases. Parsers are markers.
+const IMPORT_UTILS = stub(
+  'import-utils',
+  `const path = require('path');
+   const files = ${JSON.stringify(importFiles ?? stubDir)};
+   const parsers = { ESPREE: 'tsr:espree', TS_OLD: false, TS_NEW: 'tsr:ts', BABEL_OLD: 'tsr:babel' };
+   const testFilePath = (rel) => path.join(files, rel);
+   const FILENAME = testFilePath('foo.js');
+   const test = (t) => ({ filename: FILENAME, ...t, parserOptions: { sourceType: 'module', ecmaVersion: 9, ...t.parserOptions } });
+   const yes = () => true;
+   exports.parsers = parsers; exports.testFilePath = testFilePath; exports.FILENAME = FILENAME; exports.test = test;
+   exports.testVersion = (_s, t) => test(t());
+   exports.tsVersionSatisfies = yes; exports.typescriptEslintParserSatisfies = yes; exports.eslintVersionSatisfies = yes;
+   exports.getTSParsers = () => [parsers.TS_NEW];
+   exports.getNonDefaultParsers = () => [parsers.TS_NEW, parsers.BABEL_OLD];
+   exports.testContext = (settings) => ({ getFilename: () => FILENAME, settings: settings || {} });
+   exports.getFilename = (f) => path.join(files, f || 'foo.js');
+   exports.SYNTAX_CASES = [];`,
+);
+const IMPORT_TESTER = stub(
+  'import-tester',
+  `class RuleTester {
+     constructor(config) { this.config = config || { parserOptions: { sourceType: 'script' } }; }
+     run(name, _rule, tests) { globalThis.__importTester(name, this.config, tests); }
+   }
+   exports.RuleTester = RuleTester;
+   exports.usingFlatConfig = true;
+   exports.withoutAutofixOutput = (t) => t;`,
+);
+const EMPTY = stub('empty', `exports.version = '0.0.0';`);
+
 registerHooks({
+  load(url, context, next) {
+    // eslint-plugin-import's tests are ES modules that also use `require` and `__dirname`.
+    if (importTests && url.startsWith(pathToFileURL(importTests).href)) {
+      const file = new URL(url).pathname;
+      const prelude =
+        `import { createRequire as __tsrRequire } from 'node:module';` +
+        `const require = __tsrRequire(import.meta.url);` +
+        `const __filename = ${JSON.stringify(file)}; const __dirname = ${JSON.stringify(path.dirname(file))};`;
+      return { format: 'module', source: prelude + fs.readFileSync(file, 'utf8'), shortCircuit: true };
+    }
+    return next(url, context);
+  },
   resolve(specifier, context, next) {
     const s = specifier;
     const r = (url) => ({ url, shortCircuit: true, format: 'commonjs' });
@@ -196,6 +255,25 @@ registerHooks({
     if (/(^|\/)areOptionsValid(\.ts)?$/.test(s)) return r(OPTIONS_VALID);
     if (s === '@typescript-eslint/utils') return r(TS_UTILS);
     const parent = context.parentURL ?? '';
+    if (importTests && parent.startsWith(pathToFileURL(importTests).href)) {
+      if (s === '../utils') return r(IMPORT_UTILS);
+      if (s === '../rule-tester') return r(IMPORT_TESTER);
+      if (/^rules\//.test(s)) return r(RULE);
+      if (/(^|\/)package\.json$/.test(s) && !s.startsWith('eslint/')) return r(EMPTY);
+      if (['chai', 'babel-preset-flow', 'babel-eslint'].includes(s)) return r(EMPTY);
+      if (s.startsWith('.') && !path.extname(s)) {
+        const f = path.resolve(path.dirname(new URL(parent).pathname), s + '.js');
+        if (fs.existsSync(f)) return { url: pathToFileURL(f).href, shortCircuit: true };
+      }
+      if (!s.startsWith('.') && !isBuiltin(s)) {
+        try {
+          return { url: pathToFileURL(toolsRequire.resolve(s)).href, shortCircuit: true };
+        } catch {
+          // A parser or package the cases need that isn't installed: its cases are skipped.
+          return r(OTHER_PARSER);
+        }
+      }
+    }
     if (unicornTests && parent.startsWith(pathToFileURL(unicornTests).href)) {
       if (/(^|\/)utils\/test\.js$/.test(s)) return r(UNICORN_TEST);
       if (/scripts\/parsers\.js$/.test(s)) return r(UNICORN_PARSERS);
@@ -227,6 +305,8 @@ const each = (run) => {
   return f;
 };
 globalThis.describe = each((fn) => fn());
+// mocha's alias (eslint-plugin-import's tests).
+globalThis.context = globalThis.describe;
 // A test body that runs its own Linter (array-type's multi-pass fix checks) has nothing to
 // record; let it fail without losing the file's RuleTester cases.
 globalThis.it = globalThis.test = each((fn) => {
@@ -254,6 +334,38 @@ globalThis.__unicornTester = (importMeta, ruleId) => {
   for (const p of ['vue', 'html', 'svelte']) test[p] = (tests) => record(tests, { __parser: 'other' });
   return { ruleId: id, rule: unicornPlugin?.rules?.[id] ?? {}, test };
 };
+
+// eslint-plugin-import's eslintrc-style cases as flat ones (as its own FlatCompatRuleTester
+// does): `parser` (a marker or module path), `parserOptions.ecmaVersion/sourceType` move to
+// `languageOptions`.
+const importParser = (p) => {
+  if (p == null) return undefined;
+  if (typeof p !== 'string') return p;
+  if (p === 'tsr:espree' || /espree/.test(p)) return undefined;
+  if (p === 'tsr:ts' || /typescript-eslint|ts-parser/.test(p)) return { __parser: 'ts' };
+  return { __parser: 'other' };
+};
+const importFlat = (t) => {
+  if (typeof t === 'string') t = { code: t };
+  const { parser, parserOptions = {}, languageOptions = {}, ...rest } = t;
+  const { ecmaVersion, sourceType, ...po } = parserOptions;
+  const lo = { ...languageOptions };
+  if (ecmaVersion !== undefined) lo.ecmaVersion = ecmaVersion;
+  if (sourceType !== undefined) lo.sourceType = sourceType;
+  if (Object.keys(po).length) lo.parserOptions = { ...(lo.parserOptions || {}), ...po };
+  const pk = importParser(parser);
+  if (pk) lo.parser = pk;
+  return { ...rest, languageOptions: lo };
+};
+globalThis.__importTester = (name, config, tests) => {
+  globalThis.__recorded.push({
+    name: 'import/' + name,
+    config: { languageOptions: importFlat(config).languageOptions },
+    tests: { valid: (tests.valid || []).map(importFlat), invalid: (tests.invalid || []).map(importFlat) },
+    defined: [],
+  });
+};
+if (importRoot) process.chdir(importRoot);
 
 // ---- helpers -----------------------------------------------------------------------------
 const parserKind = (p) => (p == null ? undefined : p.__parser || 'other');
@@ -334,12 +446,17 @@ function observe(ruleId, isTs, testerConfig, c) {
   if (merged === 'fixture' || merged === 'other') return { skipped: 'unsupported case' };
   const useTs = isTs || merged === 'ts';
   const jsx = !!lo.parserOptions?.ecmaFeatures?.jsx;
-  let filename = c.filename
+  // eslint-plugin-import's cases name files in its fixture tree (`tests/files`), which its
+  // rules read; the recorded name is relative to that tree.
+  const importFile = ruleId.startsWith('import/') && c.filename && importFiles && path.isAbsolute(c.filename);
+  let filename = importFile
+    ? path.relative(importFiles, c.filename).split(path.sep).join('/')
+    : c.filename
     ? path.basename(c.filename)
     : isTs
       ? jsx ? 'react.tsx' : 'file.ts'
       : 'file.js';
-  let verifyName = filename;
+  let verifyName = importFile ? c.filename : filename;
   let typedInfo;
   if (typed) {
     const root = path.resolve(fixturesDir, po.tsconfigRootDir ?? fixturesDir);
@@ -365,6 +482,7 @@ function observe(ruleId, isTs, testerConfig, c) {
         '@typescript-eslint': tsPlugin,
         ...(jsdocPlugin ? { jsdoc: jsdocPlugin } : {}),
         ...(unicornPlugin ? { unicorn: unicornPlugin } : {}),
+        ...(importPlugin ? { import: importPlugin } : {}),
       },
       languageOptions,
       linterOptions: { reportUnusedDisableDirectives: 'off' },
@@ -421,6 +539,10 @@ function testFileFor(rule) {
   if (rule.startsWith('unicorn/')) {
     const f = unicornTests ? path.join(unicornTests, rule.slice('unicorn/'.length) + '.js') : '';
     return { files: fs.existsSync(f) ? [f] : [], isTs: false, source: 'eslint-plugin-unicorn' };
+  }
+  if (rule.startsWith('import/')) {
+    const f = importTests ? path.join(importTests, rule.slice('import/'.length) + '.js') : '';
+    return { files: fs.existsSync(f) ? [f] : [], isTs: false, source: 'eslint-plugin-import' };
   }
   if (rule.startsWith('jsdoc/')) {
     const camel = rule.slice('jsdoc/'.length).replace(/-([a-z])/g, (_m, c) => c.toUpperCase());
@@ -491,7 +613,7 @@ for (const rule of rules) {
   }
   const out = { rule, source: source ?? (isTs ? 'typescript-eslint' : 'eslint'), skipped, cases };
   if (rule.startsWith('unicorn/')) out.globals = unicornGlobals;
-  const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-').replace('unicorn/', 'unicorn-') + '.json';
+  const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-').replace('unicorn/', 'unicorn-').replace('import/', 'import-') + '.json';
   fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, regexToJson, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
   console.error(`${rule}: ${cases.length} cases, skipped ${JSON.stringify(skipped)}`);
 }

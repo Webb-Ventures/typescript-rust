@@ -16,6 +16,28 @@ mod for_direction;
 mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
+mod import_consistent_type_specifier_style;
+mod import_dynamic_import_chunkname;
+mod import_exports_last;
+mod import_first;
+mod import_max_dependencies;
+mod import_newline_after_import;
+mod import_no_absolute_path;
+mod import_no_amd;
+mod import_no_anonymous_default_export;
+mod import_no_commonjs;
+mod import_no_duplicates;
+mod import_no_dynamic_require;
+mod import_no_empty_named_blocks;
+mod import_no_import_module_exports;
+mod import_no_mutable_exports;
+mod import_no_named_default;
+mod import_no_namespace;
+mod import_no_nodejs_modules;
+mod import_no_unassigned_import;
+mod import_no_webpack_loader_syntax;
+mod import_prefer_default_export;
+mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_param_names;
@@ -525,6 +547,27 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &import_no_duplicates::RULE,
+    &import_dynamic_import_chunkname::RULE,
+    &import_no_nodejs_modules::RULE,
+    &import_no_unassigned_import::RULE,
+    &import_no_namespace::RULE,
+    &import_no_import_module_exports::RULE,
+    &import_prefer_default_export::RULE,
+    &import_consistent_type_specifier_style::RULE,
+    &import_no_absolute_path::RULE,
+    &import_no_anonymous_default_export::RULE,
+    &import_newline_after_import::RULE,
+    &import_first::RULE,
+    &import_no_empty_named_blocks::RULE,
+    &import_no_commonjs::RULE,
+    &import_no_mutable_exports::RULE,
+    &import_exports_last::RULE,
+    &import_max_dependencies::RULE,
+    &import_no_dynamic_require::RULE,
+    &import_no_webpack_loader_syntax::RULE,
+    &import_no_named_default::RULE,
+    &import_no_amd::RULE,
     &max_depth::RULE,
     &max_nested_callbacks::RULE,
     &max_params::RULE,

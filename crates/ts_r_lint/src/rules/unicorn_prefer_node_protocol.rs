@@ -23,7 +23,7 @@ pub static RULE: RuleDef = RuleDef {
 
 /// Builtins that Node also accepts without the `node:` prefix (the `builtin-modules` list
 /// eslint-plugin-unicorn checks against).
-const BARE_BUILTINS: &[&str] = &[
+pub(crate) const BARE_BUILTINS: &[&str] = &[
     "assert",
     "assert/strict",
     "async_hooks",
