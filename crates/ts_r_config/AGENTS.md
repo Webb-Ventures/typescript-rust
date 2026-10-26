@@ -18,7 +18,8 @@ inheritance and before file discovery, default exclusions and empty-input diagno
 line (`tsc a.ts`, `--ignoreConfig`): defaults plus overrides, the names as `files` and roots,
 `command_line` set and `config_path` `<cwd>/tsconfig.json`, which is never read. A
 `SpecList` keeps its non-string entries in `invalid` (TS5024 each): `files: [1]` is not
-empty (no TS18002), and TS18003 shows them as written (`'[1]'`). Empty inputs: TS18002 for
+empty (no TS18002), and TS18003 shows them as written (`'[1]'`). TS18003 quotes `include`
+and `exclude` as written, `${configDir}` unexpanded (the default `outDir` exclude is absolute). Empty inputs: TS18002 for
 an empty `files` list unless references are listed; TS18003 unless the config has a
 `references` key at all (`declares_references`, an empty list too: a container project).
 `CompilerOptions::get(OptionId)` / typed accessors (`o.strict()`) give explicit values;
@@ -52,6 +53,8 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   node20/nodenext and bundler. Removed options/values (`baseUrl`, `outFile`,
   `downlevelIteration`, ES5, AMD/UMD/System, node10/classic, `esModuleInterop: false`, ...) are
   reported (TS5102/TS5108/TS5095) and treated as their TS 7 replacements (`node10` → bundler).
+  TS5102's hint for `baseUrl` is `paths` `*` relative to the leaf config's directory, `./`-
+  prefixed unless it starts with `../` (`..` gives `./../*`).
 - **Paths are absolute, normalised, `/`-separated strings.** Path-valued options are stored
   absolute; `paths` substitutions stay as written with `CompilerOptions::paths_base_path`.
 - **Positions are UTF-8 byte offsets** (`(u32, u32)` spans). UTF-16 columns only when rendering.

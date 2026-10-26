@@ -67,3 +67,51 @@ fn config_dir_template_is_a_relative_path_from_the_leaf_config() {
     };
     assert_eq!(paths.0[0].1, ["/p/lib/*"]);
 }
+
+/// TS18003 quotes `include` and `exclude` as written: `${configDir}` specs stay
+/// unsubstituted, while the default `outDir` exclude is absolute (observed with tsc 7.0.2,
+/// and on date-fns `pkgs/dev/config/tsconfig.json`).
+#[test]
+fn no_inputs_quotes_config_dir_specs_as_written() {
+    let message = |base: &str, leaf: &str| {
+        let mut fs = MemoryFs::new();
+        fs.add_file("/p/shared/base.json", base);
+        fs.add_file("/p/src/tsconfig.json", leaf);
+        let parsed = load_tsconfig(&fs, "/p/src/tsconfig.json");
+        let d: Vec<_> = parsed
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == 18003)
+            .collect();
+        assert_eq!(d.len(), 1, "{:?}", parsed.diagnostics);
+        d[0].message.clone()
+    };
+    let head = "No inputs were found in config file '/p/src/tsconfig.json'.";
+    let base = r#"{ "include": ["${configDir}/*.ts", "${configDir}/lib/**/*"],
+                    "exclude": ["${configDir}/out"] }"#;
+    assert_eq!(
+        message(base, r#"{ "extends": "../shared/base.json" }"#),
+        format!(
+            r#"{head} Specified 'include' paths were '["${{configDir}}/*.ts","${{configDir}}/lib/**/*"]' and 'exclude' paths were '["${{configDir}}/out"]'."#
+        )
+    );
+    assert_eq!(
+        message(
+            base,
+            r#"{ "extends": "../shared/base.json", "include": ["${configDir}/x/*.ts", "y"],
+                 "compilerOptions": { "outDir": "${configDir}/o" } }"#
+        ),
+        format!(
+            r#"{head} Specified 'include' paths were '["${{configDir}}/x/*.ts","y"]' and 'exclude' paths were '["${{configDir}}/out"]'."#
+        )
+    );
+    assert_eq!(
+        message(
+            r#"{ "include": ["${configDir}/*.ts"], "compilerOptions": { "outDir": "${configDir}/o" } }"#,
+            r#"{ "extends": "../shared/base.json" }"#
+        ),
+        format!(
+            r#"{head} Specified 'include' paths were '["${{configDir}}/*.ts"]' and 'exclude' paths were '["/p/src/o"]'."#
+        )
+    );
+}
