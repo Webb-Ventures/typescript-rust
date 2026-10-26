@@ -1764,6 +1764,17 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   (side effects with implicit conversions, objects, classes, templates with
   substitutions, tagged templates, the global `Symbol`) are skipped; `declare` and
   type-only bindings of `URL`/`Symbol` count as the global.
+- **require-passive-events**: `addEventListener` for touch/wheel events with an inline
+  listener that can't call `preventDefault()` (every use of its event parameter is a
+  member chain without a `preventDefault` link, a write or a dynamic call; no `arguments`)
+  gets `passive: true` (fixed; `undefined`/`null` options only reported).
+- **prefer-toggle-attribute**: like prefer-classlist-toggle, for `setAttribute(n, v)` /
+  `removeAttribute(n)`; a matching `hasAttribute(n)` test makes a plain
+  `toggleAttribute(n)`. Fixed only for an empty value without a `force`; a non-static value
+  or a `force` after `?.` is reported without a fix.
+- **no-prevent-default-in-passive-listener**: `event.preventDefault()` directly in an inline
+  listener registered with `{passive: true}` (last `passive` key; plain properties only),
+  before any suspension (shares the suspension helpers above); suggests `passive: false`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1777,4 +1788,6 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
 `prefer-abort-signal-timeout.js`, `shared/abort-controller.js`,
 `utils/is-global-identifier.js`, `utils/function-body.js`, `prefer-url-search-parameters.js`,
-`ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`.
+`ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`,
+`require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
+`no-prevent-default-in-passive-listener.js`.

@@ -412,6 +412,7 @@ mod unicorn_no_null;
 mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
+mod unicorn_no_prevent_default_in_passive_listener;
 mod unicorn_no_process_exit;
 mod unicorn_no_return_array_push;
 mod unicorn_no_shorthand_property_overrides;
@@ -575,6 +576,7 @@ mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_switch;
 mod unicorn_prefer_ternary;
 mod unicorn_prefer_then_catch;
+mod unicorn_prefer_toggle_attribute;
 mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
@@ -588,7 +590,7 @@ mod unicorn_require_css_escape;
 mod unicorn_require_module_attributes;
 mod unicorn_require_module_specifiers;
 mod unicorn_require_number_to_fixed_digits_argument;
-mod unicorn_single_line_block_comment_style;
+mod unicorn_require_passive_events;
 mod unicorn_splice;
 mod unicorn_static;
 mod unicorn_switch_case_braces;
@@ -1040,6 +1042,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_object_methods_with_collections::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_object_as_default_parameter::RULE,
+    &unicorn_no_prevent_default_in_passive_listener::RULE,
     &unicorn_no_process_exit::RULE,
     &unicorn_no_return_array_push::RULE,
     &unicorn_no_static_only_class::RULE,
@@ -1168,6 +1171,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_starts_ends_with::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_then_catch::RULE,
+    &unicorn_prefer_toggle_attribute::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,
     &unicorn_prefer_url_can_parse::RULE,
@@ -1178,6 +1182,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_type_literal_last::RULE,
     &unicorn_require_module_attributes::RULE,
     &unicorn_require_module_specifiers::RULE,
+    &unicorn_require_passive_events::RULE,
     &unicorn_switch_case_break_position::RULE,
     &unicorn_prefer_add_event_listener::RULE,
     &unicorn_prefer_array_flat::RULE,

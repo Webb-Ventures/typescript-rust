@@ -65,7 +65,7 @@ impl FromOptions for DomNodeDataset {
 }
 
 /// unicorn's `isKnownNonDomNode`.
-static DOM_NODE: Checker = Checker {
+pub(crate) static DOM_NODE: Checker = Checker {
     target_names: &[
         "CharacterData",
         "Document",
