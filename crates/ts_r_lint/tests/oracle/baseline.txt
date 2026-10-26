@@ -151,6 +151,7 @@ import/unambiguous 11/11
 jsdoc/check-access 18/18
 jsdoc/check-alignment 20/20
 jsdoc/check-indentation 29/29
+jsdoc/check-line-alignment 97/97
 jsdoc/check-param-names 105/105
 jsdoc/check-property-names 27/27
 jsdoc/check-syntax 4/4
@@ -158,6 +159,7 @@ jsdoc/check-tag-names 76/76
 jsdoc/check-template-names 49/49
 jsdoc/check-types 125/125
 jsdoc/check-values 41/41
+jsdoc/convert-to-jsdoc-comments 29/29
 jsdoc/empty-tags 18/18
 jsdoc/escape-inline-tags 38/38
 jsdoc/implements-on-classes 17/17

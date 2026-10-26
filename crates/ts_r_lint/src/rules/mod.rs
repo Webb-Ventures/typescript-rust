@@ -65,6 +65,7 @@ pub(crate) mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_indentation;
+mod jsdoc_check_line_alignment;
 mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
 mod jsdoc_check_syntax;
@@ -72,6 +73,7 @@ mod jsdoc_check_tag_names;
 mod jsdoc_check_template_names;
 mod jsdoc_check_types;
 mod jsdoc_check_values;
+mod jsdoc_convert_to_jsdoc_comments;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
 mod jsdoc_implements_on_classes;
@@ -1111,8 +1113,10 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_check_values::RULE,
     // jsdoc, round 8 (h1)
     &jsdoc_check_indentation::RULE,
+    &jsdoc_check_line_alignment::RULE,
     &jsdoc_check_syntax::RULE,
     &jsdoc_check_template_names::RULE,
+    &jsdoc_convert_to_jsdoc_comments::RULE,
     &jsdoc_informative_docs::RULE,
     &jsdoc_lines_before_block::RULE,
     &jsdoc_match_description::RULE,
