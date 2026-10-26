@@ -170,6 +170,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         truncate(s)
     }
 
+    /// The printed form of a type as seen from `scope` (for editor hovers): names carry the
+    /// namespaces around them (`m1.m2.c`, `N.D2<number>`, `typeof M.C`), except those whose
+    /// body encloses `scope`.
+    pub fn type_to_string_at(&mut self, t: TypeId, scope: Loc) -> String {
+        let saved = (self.print_qualified, self.print_scope);
+        self.print_qualified = true;
+        self.print_scope = Some(scope);
+        let s = self.type_to_string(t);
+        (self.print_qualified, self.print_scope) = saved;
+        s
+    }
+
     /// Prints `t` before a postfix (`[]`, `?`, `[K]`): like [`Self::print_wrapped`], and a
     /// readonly array or tuple is parenthesized too (`(readonly [...T])[]`).
     fn print_postfix_operand(&mut self, t: TypeId, depth: u32, stack: &mut Vec<TypeId>) -> String {

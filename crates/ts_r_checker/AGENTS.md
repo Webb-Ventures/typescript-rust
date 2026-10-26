@@ -24,6 +24,8 @@ let result = check_program(&program, CheckRun { threads: 4 }); // sorted, dedupl
 result.diagnostics; result.error_count();
 // lower level: let checker = Checker::new(&program); let mut ck = Ck::new(&checker, file);
 // ck.check_source_file(file); ck.check_expr(loc); ck.is_assignable(s, t); ck.type_to_string(t)
+// editor queries (ts_r_lsp): ck.type_to_string_at(t, scope) (`m1.m2.c`, qualified from
+// scope), ck.jsx_props_type(opening), ck.pattern_parent_type(pattern)
 ```
 
 Files, by layer:
@@ -1019,7 +1021,8 @@ Files, by layer:
   set: relation messages whose source and target would print alike, union members or tuple
   elements that would print alike, and an enum type widened from one of its members.
   Under `print_qualified`, `Ck::print_scope` (set only by declaration checks) still drops
-  the namespaces that enclose the error location.
+  the namespaces that enclose the error location. `Ck::type_to_string_at` sets both for
+  editor hovers, where tsc qualifies names from the hovered location (`m1.m2.c`).
 - **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
   declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
   the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
