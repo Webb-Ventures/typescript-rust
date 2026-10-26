@@ -20,6 +20,7 @@ pub mod plan;
 pub mod pool;
 pub mod prepare;
 pub mod print;
+pub mod props;
 pub mod resolve;
 pub mod runtime;
 pub mod scan;

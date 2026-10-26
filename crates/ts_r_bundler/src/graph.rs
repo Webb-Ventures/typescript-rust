@@ -680,6 +680,9 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prepared = prepare::prepare(ctx.prep, p, &pretty, Arc::clone(&source.js), loader);
     let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations);
+    if let Some(props) = &ctx.prep.props {
+        meta.props = crate::props::collect(props, &prepared, true);
+    }
     messages.extend(prepared.messages.iter().cloned());
     if let Some(sheet) = &source.css {
         css_records(sheet, &mut meta, &pretty, &mut messages);

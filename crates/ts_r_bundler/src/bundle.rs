@@ -81,7 +81,7 @@ impl BuildResult {
 }
 
 /// Persistent-cache format version (bump when meta, fragments or plans change shape).
-const CACHE_VERSION: u32 = 8;
+const CACHE_VERSION: u32 = 9;
 
 /// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
 pub struct BuildContext {
@@ -147,6 +147,8 @@ impl BuildContext {
 
     pub fn new(opts: BuildOptions, fs: Arc<dyn FileSystem>) -> Result<BuildContext, Vec<Message>> {
         let defines = Defines::from_options(&opts)
+            .map_err(|e| vec![Message::new(Severity::Error, None, e)])?;
+        crate::props::PropMatcher::from_options(&opts)
             .map_err(|e| vec![Message::new(Severity::Error, None, e)])?;
         let mut opts = opts;
         // Symlinked working directories (macOS `/var` -> `/private/var`) would otherwise give
@@ -918,6 +920,21 @@ impl BuildContext {
                 None => self.entry_file_name(&e, &outbase, names[i].as_deref()),
             };
             let mut ast = prepared.ast.clone();
+            // `--mangle-props` without bundling: each file is its own unit, as esbuild links
+            // each entry point on its own.
+            if let Some(pm) = &self.prep.props {
+                let names = crate::props::collect(pm, &prepared, false);
+                let map = ts_r_minify::props::assign([&names]);
+                pm.with_options(false, |o| {
+                    ts_r_minify::props::apply(
+                        &mut ast,
+                        &prepared.src,
+                        Some(&prepared.scopes),
+                        o,
+                        &map,
+                    )
+                });
+            }
             let unsupported = opts.unsupported();
             if unsupported.has(crate::features::Feature::ImportMeta) {
                 let kind = if unsupported.has(crate::features::Feature::ConstAndLet) {

@@ -658,6 +658,8 @@ pub struct PrepareContext {
     pub opts: Arc<BuildOptions>,
     pub defines: Defines,
     pub resolver: Arc<Resolver>,
+    /// `--mangle-props` (checked by `BuildContext::new`).
+    pub props: Option<crate::props::PropMatcher>,
     /// tsconfig path (or "") -> base transform options and their [`Self::cache_key`].
     ts: RwLock<FxHashMap<String, OptionsEntry>>,
 }
@@ -665,6 +667,9 @@ pub struct PrepareContext {
 impl PrepareContext {
     pub fn new(opts: Arc<BuildOptions>, defines: Defines, resolver: Arc<Resolver>) -> Self {
         PrepareContext {
+            props: crate::props::PropMatcher::from_options(&opts)
+                .ok()
+                .flatten(),
             opts,
             defines,
             resolver,
@@ -695,13 +700,14 @@ impl PrepareContext {
         }
         let t = Arc::new(self.compute_options(config.as_deref()));
         let cache_key: Arc<str> = Arc::from(format!(
-            "{}|{}|{}|{}|{:?}|{}",
+            "{}|{}|{}|{}|{:?}|{}|{}",
             t.cache_key(),
             self.defines.cache_key(),
             self.opts.drop_labels.join(","),
             self.opts.ignore_annotations,
             self.opts.effective_format(),
-            self.opts.unsupported().key()
+            self.opts.unsupported().key(),
+            self.props.as_ref().map_or("", |p| p.key.as_str())
         ));
         let entry = (t, cache_key);
         self.ts

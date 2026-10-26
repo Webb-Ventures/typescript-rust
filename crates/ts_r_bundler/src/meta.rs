@@ -162,6 +162,8 @@ pub struct ModuleMeta {
     /// Bytes the free `module` / `exports` references would cost over one-letter names:
     /// what running the module unwrapped (no mangled parameters) adds.
     pub cjs_ref_bytes: u32,
+    /// `--mangle-props`: the module's property names (`ts_r_minify::props::collect`).
+    pub props: ts_r_minify::props::PropNames,
 }
 
 impl ModuleMeta {
@@ -272,6 +274,15 @@ impl ModuleMeta {
         w.u8((self.use_strict as u8) | (self.needs_function as u8) << 1);
         w.u32(self.cjs_ref_bytes);
         w.u32(self.default_sym.unwrap_or(0));
+        w.u32(self.props.mangled.len() as u32);
+        for (n, c) in &self.props.mangled {
+            w.str(n);
+            w.u32(*c);
+        }
+        w.u32(self.props.kept.len() as u32);
+        for n in &self.props.kept {
+            w.str(n);
+        }
         w.0
     }
 
@@ -379,6 +390,12 @@ impl ModuleMeta {
         m.cjs_ref_bytes = r.u32()?;
         let d = r.u32()?;
         m.default_sym = (flags & 32 != 0).then_some(d);
+        for _ in 0..r.count()? {
+            m.props.mangled.push((r.str()?, r.u32()?));
+        }
+        for _ in 0..r.count()? {
+            m.props.kept.push(r.str()?);
+        }
         (r.pos == data.len()).then_some(m)
     }
 }

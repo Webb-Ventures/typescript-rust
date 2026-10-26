@@ -533,6 +533,7 @@ name = "ts_r_bundler"
 version = "0.1.0-alpha.4"
 dependencies = [
  "blake3",
+ "regex-lite",
  "rustc-hash",
  "ts_r_ast",
  "ts_r_bundler",

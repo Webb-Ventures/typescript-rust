@@ -2533,3 +2533,49 @@ fn keep_names_survives_renaming() {
         }
     }
 }
+
+/// `--mangle-props`: one short name per property name across every module of a bundle
+/// (most used first), quoted names kept unless `--mangle-quoted`, `--reserve-props` honoured,
+/// and lowered class fields and rest patterns renamed with their uses.
+#[test]
+fn mangle_props_across_modules() {
+    let main = "import { make } from './b.js'\nconst o = make()\no.count_ += o.count_\nconst { count_, ...rest } = o\nclass P { field_ = 1; static s_ = 2; keep_me_ = 3 }\nconsole.log(count_, Object.keys(rest).length, new P().field_, P.s_, o['label_'], new P().keep_me_)\n";
+    let other =
+        "export function make() { return { count_: 1, label_: 'x', 'label_': 'q', other: 2 } }\n";
+    for (case, target) in [("esnext", None), ("es2020", Some(2020))] {
+        let fs = project(&[("a.js", main), ("b.js", other)]);
+        let mut o = opts(&["a.js"]);
+        o.mangle_props = Some("_$".into());
+        o.reserve_props = Some("^keep".into());
+        o.target = target;
+        let r = run_build(&fs, o);
+        let text = file(&r, "/proj/out/a.js");
+        assert!(
+            !text.contains("count_:") && !text.contains(".count_"),
+            "{case}: {text}"
+        );
+        assert!(
+            text.contains("'label_'") && text.contains(".keep_me_"),
+            "{case}: {text}"
+        );
+        if have_node() {
+            assert_eq!(
+                run_node(&format!("mangle-props-{case}"), &r, "a.js"),
+                "2 3 1 2 q 3\n",
+                "{case}: {text}"
+            );
+        }
+    }
+    let fs = project(&[("a.js", "x.a_; x['b_']; x[/* @__KEY__ */ 'c_']\n")]);
+    let mut o = opts(&["a.js"]);
+    o.bundle = false;
+    o.format = None;
+    o.mangle_props = Some("_$".into());
+    o.mangle_quoted = true;
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(!text.contains('_'), "{text}");
+    let mut bad = opts(&["a.js"]);
+    bad.mangle_props = Some("(".into());
+    assert!(ts_r_bundler::BuildContext::new(bad, std::sync::Arc::new(fs)).is_err());
+}

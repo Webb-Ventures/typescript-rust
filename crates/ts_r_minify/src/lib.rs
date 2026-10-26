@@ -23,6 +23,7 @@ pub mod fold;
 pub mod keep_names;
 pub mod names;
 pub mod private;
+pub mod props;
 pub mod purity;
 pub mod rename;
 pub mod scope;

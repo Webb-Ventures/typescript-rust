@@ -22,6 +22,9 @@ compress::compress(&mut ast, src, &scopes, &CompressOptions::default());
 let names = rename::compute(&ast, &scopes, &RenameOptions { mode, fixed, include_module_scope, reserved, module_reserved });
 rename::apply(&mut ast, &scopes, &names);
 keep_names::apply(&mut ast, &scopes, "__name", KeepNamesOptions { program, top_classes }); // --keep-names
+let names = props::collect(&ast, src, Some(&scopes), &PropOptions { mangles, quoted, .. }); // --mangle-props
+let map = props::assign([&names /* every file of the output unit */]);
+props::apply(&mut ast, src, Some(&scopes), &opts, &map);
 ts_r_minify::minify_ast_keep_names(&mut ast, src, &opts, strict, Some("__name")); // all of it
 ```
 
@@ -34,7 +37,11 @@ dead branches, the handler of an empty `try`), `compress.rs` (size rewrites), `r
 a function or class whose binding was renamed gets `helper(f, "f")` after its declaration, and
 a named or binding-named function, arrow or class expression is wrapped as
 `helper(expr, "name")`; a class with a static `name` member is left alone; the caller defines
-the helper and reserves its name).
+the helper and reserves its name), `props.rs` (esbuild's `--mangle-props`, from its docs
+and observed output: property names the caller's predicate accepts get one short name per
+output unit, most used first, never a name a property keeps; the module docs list what counts
+as a property name on the transformed tree, including the strings the transform writes for
+lowered fields, `__decorate` and `__rest`).
 
 ## Invariants
 
@@ -52,6 +59,11 @@ the helper and reserves its name).
 - Synthesized nodes have empty spans; `build::replace` copies the replaced node's span so
   source maps keep pointing at the original code.
 - No panics on any tree the parser can build.
+- **Property mangling never mutates a shared node**: `props::apply` points the parent at a
+  fresh `Ident`/`StringLit` (the transform may put one node in two places, as `this.x = x`
+  does), walks only the tree reachable from the root (replaced nodes stay in the arena and
+  must not count as uses), and counts first use as written before generated nodes, so names
+  follow esbuild's order where counts tie.
 
 ## Testing
 
@@ -66,5 +78,5 @@ hash maps keyed by symbol and node ids; never iterated for output order). Dev: `
 
 ## Gaps
 
-- No property mangling, no function inlining, no cross-statement constant propagation.
+- No function inlining, no cross-statement constant propagation.
 - Compression is conservative: no `if`-return merging across nested blocks, no loop rewrites.

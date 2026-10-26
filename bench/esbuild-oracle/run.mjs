@@ -292,6 +292,14 @@ function flagsFor(c) {
       case 'MinifyIdentifiers': if (v === true) flags.push('--minify-identifiers'); break;
       case 'MinifyWhitespace': if (v === true) flags.push('--minify-whitespace'); break;
       case 'KeepNames': if (v === true) flags.push('--keep-names'); break;
+      // `regexp.MustCompile("_$")`: Go's pattern syntax, which both CLIs take as written.
+      case 'MangleProps':
+      case 'ReserveProps': {
+        if (v?.call !== 'regexp.MustCompile' || v.args.length !== 1 || v.args[0].t !== 'str') { why.push(k); break; }
+        flags.push(`--${k === 'MangleProps' ? 'mangle' : 'reserve'}-props=${v.args[0].v}`);
+        break;
+      }
+      case 'MangleQuoted': flags.push(`--mangle-quoted=${v === true}`); break;
       case 'TreeShaking': flags.push(`--tree-shaking=${v === true}`); break;
       case 'IgnoreDCEAnnotations': if (v === true) flags.push('--ignore-annotations'); break;
       case 'ExternalPackages': if (v === true) flags.push('--packages=external'); break;
@@ -440,6 +448,35 @@ function errorLine(stderr, dirs) {
     .trim();
 }
 
+// `--mangle-props`: the property names matching the pattern that an output still has (after
+// `.`, before `:`, quoted, or a class or object member: `name(`, `name =`, `name;` after `{`,
+// `}`, `,`, `;` or `static`/`get`/`set`/`async`), less the variables it declares. Output with
+// no run-time behaviour would otherwise compare equal however much was mangled. Skipped when
+// the pattern matches the short names the mangler produces (`.`, `x`).
+function mangleRegex(flags) {
+  const f = flags.find((x) => x.startsWith('--mangle-props='));
+  if (!f) return null;
+  let re;
+  try { re = new RegExp(f.slice('--mangle-props='.length)); } catch { return null; }
+  return [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'].some((ch) => re.test(ch)) ? null : re;
+}
+function unmangled(code, re) {
+  const set = new Set();
+  const text = code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  const id = '[A-Za-z_$][\\w$]*';
+  const sites = new RegExp([
+    `\\.\\s*(${id})`,
+    `(${id})(?=\\s*:)`,
+    `(["'\`])([^"'\`\\n]*)\\3`,
+    `(?:[{},;]|\\b(?:static|get|set|async)\\b|\\*)\\s*(${id})(?=\\s*[(=;])`,
+  ].join('|'), 'g');
+  for (const m of text.matchAll(sites)) {
+    for (const w of (m[1] ?? m[2] ?? m[4] ?? m[5] ?? '').match(/[A-Za-z_$][\w$]*/g) ?? []) if (re.test(w)) set.add(w);
+  }
+  for (const m of text.matchAll(/\b(?:var|let|const|function|class)\s+([A-Za-z_$][\w$]*)|,\s*([A-Za-z_$][\w$]*)\s*=(?!=)/g)) set.delete(m[1] ?? m[2]);
+  return [...set].sort().join(',');
+}
+
 async function buildAndRun(tool, bin, c, plan, caseDir) {
   const inRoot = path.join(caseDir, 'in');
   const outRoot = path.join(caseDir, tool);
@@ -466,12 +503,14 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
     if (plan.out.file && fs.existsSync(path.join(outRoot, plan.out.file))) outputs = [path.join(outRoot, plan.out.file)];
   }
   const runs = [];
+  const mangled = mangleRegex(plan.flags);
   for (const o of outputs) {
     const r = await run(process.execPath, [o], path.dirname(o), 10000);
     runs.push({
       file: path.relative(outRoot, o),
       stdout: normalizeHashes(r.stdout.split(outRoot).join('<out>').split(inRoot).join('<in>')),
       error: r.code === 0 ? '' : errorLine(r.stderr, [outRoot, inRoot]) || `exit ${r.code}${r.signal ? ` ${r.signal}` : ''}`,
+      ...(mangled ? { unmangled: unmangled(fs.readFileSync(o, 'utf8'), mangled) } : {}),
     });
   }
   for (const o of css) {
@@ -511,7 +550,7 @@ async function runCase(c, tmp) {
     status = 'fail';
     detail = `ts-r-build failed:\n${ours.log}`;
   } else {
-    const key = (r) => (r.file.endsWith('.css') ? [normalizeHashes(r.file), r.stdout] : [r.stdout, r.error]);
+    const key = (r) => (r.file.endsWith('.css') ? [normalizeHashes(r.file), r.stdout] : [r.stdout, r.error, ...(r.unmangled !== undefined ? [r.unmangled] : [])]);
     const a = JSON.stringify(ref.runs.map(key));
     const b = JSON.stringify(ours.runs.map(key));
     status = a === b ? 'pass' : 'fail';

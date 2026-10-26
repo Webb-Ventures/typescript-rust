@@ -187,6 +187,16 @@ pub struct BuildOptions {
     pub minify_syntax: bool,
     /// `--keep-names`: functions and classes keep their `name` when renamed.
     pub keep_names: bool,
+    /// `--mangle-props=RE`: property names matching the pattern get short names, the same
+    /// in every file of an output unit (`ts_r_minify::props`).
+    pub mangle_props: Option<String>,
+    /// `--reserve-props=RE`: names matching it are never mangled.
+    pub reserve_props: Option<String>,
+    /// `--mangle-quoted`: written strings in property positions are mangled too.
+    pub mangle_quoted: bool,
+    /// `--inject:file`: files whose exports replace the matching free names of every module
+    /// and which run before the entry points.
+    pub inject: Vec<String>,
     pub sourcemap: SourceMapMode,
     pub sources_content: bool,
     pub splitting: bool,
@@ -283,6 +293,10 @@ impl Default for BuildOptions {
             define: Vec::new(),
             drop_labels: Vec::new(),
             keep_names: false,
+            mangle_props: None,
+            reserve_props: None,
+            mangle_quoted: false,
+            inject: Vec::new(),
             alias: Vec::new(),
             metafile: false,
             loaders: FxHashMap::default(),
@@ -447,6 +461,9 @@ impl BuildOptions {
         }
         if self.splitting && self.outdir.is_none() && self.write {
             return Err("splitting requires \"outdir\"".into());
+        }
+        if !self.inject.is_empty() {
+            return Err("\"inject\" is not supported yet".into());
         }
         if self.entry_points.len() > 1 && self.outfile.is_some() {
             return Err("must use \"outdir\" when there are multiple input files".into());

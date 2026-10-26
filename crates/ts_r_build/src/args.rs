@@ -11,6 +11,7 @@ Simple options:
   --bundle                  Bundle all dependencies into the output files
   --define:K=V              Substitute K with V while parsing
   --external:M              Exclude module M from the bundle (can use * wildcards)
+  --inject:F                Import the file F into all input files
   --format=...              Output format (iife | cjs | esm)
   --loader:X=L              Use loader L for .X files (js, jsx, ts, tsx, json, text,
                             file, css, empty, base64, dataurl, binary)
@@ -44,6 +45,9 @@ Advanced options:
   --minify-whitespace       Remove whitespace
   --minify-identifiers      Shorten identifiers
   --keep-names              Keep function and class names when identifiers are renamed
+  --mangle-props=...        Rename all properties matching a regular expression
+  --mangle-quoted=...       Mangle quoted properties too (true | false)
+  --reserve-props=...       Do not mangle these properties
   --minify-syntax           Use equivalent but shorter syntax
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
@@ -135,6 +139,7 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             };
             match name {
                 "external" => o.external.push(rest.to_owned()),
+                "inject" => o.inject.push(rest.to_owned()),
                 "alias" => {
                     let v = value.ok_or_else(|| format!("Missing \"=\" in {arg:?}"))?;
                     if key.is_empty() || key.starts_with('.') || key.starts_with('/') {
@@ -212,6 +217,9 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             "minify-identifiers" => o.minify_identifiers = bool_value(name, value)?,
             "minify-syntax" => o.minify_syntax = bool_value(name, value)?,
             "keep-names" => o.keep_names = bool_value(name, value)?,
+            "mangle-props" => o.mangle_props = Some(need()?.to_owned()),
+            "reserve-props" => o.reserve_props = Some(need()?.to_owned()),
+            "mangle-quoted" => o.mangle_quoted = bool_value(name, value)?,
             "sourcemap" => {
                 o.sourcemap = match value {
                     None | Some("true") | Some("linked") => SourceMapMode::Linked,

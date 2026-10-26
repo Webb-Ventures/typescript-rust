@@ -79,6 +79,25 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
     }
     let scopes = prep.scopes.clone();
     let src: &str = &prep.src;
+    // 0. `--mangle-props`, on the module as written (before imports become other names).
+    if !plan.props.is_empty() {
+        let mangles = |n: &str| {
+            plan.props
+                .binary_search_by(|(k, _)| k.as_str().cmp(n))
+                .is_ok()
+        };
+        ts_r_minify::props::apply(
+            &mut ast,
+            src,
+            Some(&scopes),
+            &ts_r_minify::props::PropOptions {
+                mangles: &mangles,
+                quoted: plan.props_quoted,
+                skip_namespace_members: true,
+            },
+            &plan.props,
+        );
+    }
     let count = ast.nodes.len() as u32;
 
     let rewrites: FxHashMap<u32, &Rewrite> = plan.rewrites.iter().map(|(s, r)| (*s, r)).collect();

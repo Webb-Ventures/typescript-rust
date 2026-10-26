@@ -88,6 +88,10 @@ pub struct ModulePlan {
     /// output, or `import-meta` unsupported); empty = keep `import.meta`.
     pub import_meta: String,
     pub mangle: bool,
+    /// `--mangle-props`: new names for the module's property names (sorted by name), and
+    /// whether written strings in property positions are names (`--mangle-quoted`).
+    pub props: Vec<(String, String)>,
+    pub props_quoted: bool,
     pub minify_syntax: bool,
     pub compact: bool,
     pub comments: bool,
@@ -284,6 +288,9 @@ struct Planner<'a> {
     boundaries: Vec<Vec<(usize, usize)>>,
     /// Import statements moved out of an importer, to print before a module of its chunk.
     before: FxHashMap<ModuleId, Vec<(ModuleId, String)>>,
+    /// `--mangle-props`: one short name per property name over every included module,
+    /// sorted by name.
+    props: Vec<(String, String)>,
 }
 
 /// The CommonJS entries that can run directly at the top of their CommonJS output file, with
@@ -438,6 +445,7 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         position: vec![usize::MAX; n],
         boundaries: vec![Vec::new(); n],
         before: FxHashMap::default(),
+        props: Vec::new(),
     };
     for h in Helper::ALL {
         p.helper_names[h as usize] = p.names.alloc(h.name());
@@ -459,6 +467,10 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         p.boundaries[m as usize].push((ri, at));
     }
     p.order = order.clone();
+    if o.mangle_props.is_some() {
+        p.props =
+            ts_r_minify::props::assign(order.iter().map(|&m| &g.modules[m as usize].meta.props));
+    }
     // Chunks.
     let chunks = p.make_chunks(input, &order);
     let mut module_chunk = vec![None; n];
@@ -1420,6 +1432,23 @@ impl Planner<'_> {
             top_reserved: Vec::new(),
             import_meta: self.import_meta[mi].clone(),
             mangle: self.o.minify_identifiers,
+            props: {
+                let mut v: Vec<(String, String)> = meta
+                    .props
+                    .mangled
+                    .iter()
+                    .filter_map(|(n, _)| {
+                        let i = self
+                            .props
+                            .binary_search_by(|(k, _)| k.as_str().cmp(n))
+                            .ok()?;
+                        Some(self.props[i].clone())
+                    })
+                    .collect();
+                v.sort();
+                v
+            },
+            props_quoted: self.o.mangle_quoted,
             minify_syntax: self.o.minify_syntax,
             compact: self.o.minify_whitespace,
             comments: !self.o.minify_whitespace,
