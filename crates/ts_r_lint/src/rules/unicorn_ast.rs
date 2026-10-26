@@ -535,6 +535,100 @@ pub(crate) fn remove_statements(
     Fix::replace(Span::new(start, end), "")
 }
 
+/// The subtree under `root` uses the enclosing function's `this`, `super` or `new.target`
+/// (not counting non-arrow functions, which rebind them, nor class bodies apart from
+/// `extends` clauses and computed keys).
+pub(crate) fn contains_lexical_this(ast: &Ast, root: NodeId) -> bool {
+    use ts_r_ast::visit::{Visitor, Walk, walk};
+    struct Find {
+        found: bool,
+    }
+    impl Visitor for Find {
+        fn enter(&mut self, ast: &Ast, id: NodeId) -> Walk {
+            match *ast.node(id) {
+                Node::This {}
+                | Node::Super {}
+                | Node::MetaProperty {
+                    kind: ts_r_ast::MetaPropKind::NewTarget,
+                } => {
+                    self.found = true;
+                    Walk::Stop
+                }
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => Walk::SkipChildren,
+                Node::ClassDecl {
+                    heritage, members, ..
+                }
+                | Node::ClassExpr {
+                    heritage, members, ..
+                } => {
+                    let mut parts: Vec<NodeId> = Vec::new();
+                    for &h in ast.list(heritage) {
+                        if matches!(
+                            *ast.node(h),
+                            Node::HeritageClause {
+                                kind: ts_r_ast::HeritageKind::Extends,
+                                ..
+                            }
+                        ) {
+                            parts.push(h);
+                        }
+                    }
+                    for &m in ast.list(members) {
+                        let key = match *ast.node(m) {
+                            Node::PropertyDef { key, .. } | Node::MethodDef { key, .. } => key,
+                            _ => continue,
+                        };
+                        if matches!(ast.node(key), Node::ComputedKey { .. }) {
+                            parts.push(key);
+                        }
+                    }
+                    for part in parts {
+                        if !walk(ast, part, self) {
+                            return Walk::Stop;
+                        }
+                    }
+                    Walk::SkipChildren
+                }
+                _ => Walk::Continue,
+            }
+        }
+    }
+    let mut f = Find { found: false };
+    walk(ast, root, &mut f);
+    f.found
+}
+
+/// `isValueNotUsable`: the value of `node` is thrown away (an expression statement, or a
+/// sequence element whose value is not passed on).
+pub(crate) fn is_value_not_usable(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut cur = node;
+    for _ in 0..100_000 {
+        let mut p = match cx.parent(cur) {
+            Some(p) => p,
+            None => return false,
+        };
+        while matches!(ast.node(p), Node::Paren { .. }) {
+            cur = p;
+            p = match cx.parent(p) {
+                Some(q) => q,
+                None => return false,
+            };
+        }
+        match *ast.node(p) {
+            Node::ExprStmt { .. } => return true,
+            Node::Seq { exprs } => {
+                if ast.list(exprs).last() != Some(&cur) {
+                    return true;
+                }
+                cur = p;
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

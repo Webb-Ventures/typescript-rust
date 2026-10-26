@@ -280,6 +280,7 @@ unicorn/no-async-promise-finally 39/39
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
+unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
 unicorn/no-duplicate-set-values 40/40
 unicorn/no-exports-in-scripts 22/22
@@ -311,10 +312,16 @@ unicorn/numeric-separators-style 128/128
 unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-date-now 61/61
+unicorn/prefer-event-target 46/46
+unicorn/prefer-global-number-constants 22/22
+unicorn/prefer-global-this 154/154
+unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 243/247
+unicorn/prefer-location-assign 54/54
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
+unicorn/prefer-queue-microtask 55/55
 unicorn/prefer-response-static-json 39/39
 unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-string-repeat 79/79

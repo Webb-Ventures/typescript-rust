@@ -30,7 +30,7 @@ impl ArrayMutate {
 
 /// `isNodeValueNotFunction`: an argument that can't (or most likely doesn't) hold a
 /// function.
-fn is_value_not_function(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_value_not_function(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let ast = cx.ast();
     match *ast.node(id) {
         Node::Binary { op, .. } => !matches!(

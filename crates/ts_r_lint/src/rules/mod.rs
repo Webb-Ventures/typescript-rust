@@ -292,6 +292,7 @@ mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_console_spaces;
+mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
 mod unicorn_no_duplicate_set_values;
 mod unicorn_no_exports_in_scripts;
@@ -323,10 +324,16 @@ mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_event_target;
+mod unicorn_prefer_global_number_constants;
+mod unicorn_prefer_global_this;
+mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
+mod unicorn_prefer_location_assign;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_queue_microtask;
 mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_string_repeat;
@@ -654,6 +661,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_console_spaces::RULE,
+    &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_duplicate_set_values::RULE,
     &unicorn_no_exports_in_scripts::RULE,
@@ -685,10 +693,16 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_global_number_constants::RULE,
+    &unicorn_prefer_global_this::RULE,
+    &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
+    &unicorn_prefer_location_assign::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_queue_microtask::RULE,
     &unicorn_prefer_response_static_json::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_string_repeat::RULE,

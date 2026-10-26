@@ -306,3 +306,7 @@ unicorn/no-array-concat-in-loop
 unicorn/no-duplicate-set-values
 unicorn/no-optional-chaining-on-undeclared-variable
 unicorn/prefer-response-static-json
+unicorn/prefer-queue-microtask
+unicorn/prefer-location-assign
+unicorn/no-constant-zero-expression
+unicorn/prefer-identifier-import-export-specifiers

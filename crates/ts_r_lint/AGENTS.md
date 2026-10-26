@@ -649,7 +649,10 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `no-useless-continue.js`, `fix/remove-statement.js`, `utils/needs-semicolon.js`,
 `no-array-concat-in-loop.js`, `shared/array-concat-in-loop.js`, `no-duplicate-set-values.js`,
 `utils/get-duplicate-array-elements.js`, `no-optional-chaining-on-undeclared-variable.js`,
-`utils/imports.js`, `prefer-response-static-json.js`.
+`utils/imports.js`, `prefer-response-static-json.js`, `prefer-queue-microtask.js`,
+`utils/is-node-contains-lexical-this.js`, `utils/is-value-not-usable.js`,
+`prefer-location-assign.js`, `no-constant-zero-expression.js`,
+`prefer-identifier-import-export-specifiers.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:
