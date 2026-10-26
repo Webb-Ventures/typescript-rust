@@ -380,6 +380,271 @@ pub(crate) fn remove_method_call(cx: &Ctx<'_, '_>, call: NodeId, fix: Fix) -> Fi
         .and(Span::new(callee_end, cx.span(call).end), "")
 }
 
+/// eslint-utils' `hasSideEffect` with `considerGetters` and `considerImplicitTypeConversion`:
+/// calls, `new`, assignments, updates, `await`, `yield`, `import()`, `delete` and every
+/// member access are side effects, and so are the converting operators (`+x`, `a + b`,
+/// `a < b`, `k in o`, ...) unless their operands are literals, and computed keys that are
+/// not literals. Function bodies are not looked into (a function declaration's is).
+pub(crate) fn has_side_effect_strict(ast: &Ast, id: NodeId) -> bool {
+    strict_effect(ast, id, 0)
+}
+
+fn is_literal(ast: &Ast, id: NodeId) -> bool {
+    matches!(
+        ast.node(skip_parens(ast, id)),
+        Node::StringLit { .. }
+            | Node::NumberLit { .. }
+            | Node::BigIntLit { .. }
+            | Node::BoolLit { .. }
+            | Node::NullLit {}
+            | Node::RegexLit { .. }
+    )
+}
+
+fn computed_non_literal(ast: &Ast, key: NodeId) -> bool {
+    matches!(*ast.node(key), Node::ComputedKey { expr } if !is_literal(ast, expr))
+}
+
+fn strict_effect(ast: &Ast, id: NodeId, depth: u32) -> bool {
+    if depth > 200 {
+        return true;
+    }
+    match *ast.node(id) {
+        Node::Call { .. }
+        | Node::New { .. }
+        | Node::Assign { .. }
+        | Node::Update { .. }
+        | Node::Await { .. }
+        | Node::Yield { .. }
+        | Node::ImportCall { .. }
+        | Node::Member { .. }
+        | Node::Index { .. } => return true,
+        Node::FunctionExpr { .. } | Node::Arrow { .. } => return false,
+        Node::Unary { op, arg } => {
+            if op == UnaryOp::Delete
+                || (matches!(
+                    op,
+                    UnaryOp::Minus | UnaryOp::Plus | UnaryOp::Not | UnaryOp::BitNot
+                ) && !is_literal(ast, arg))
+            {
+                return true;
+            }
+        }
+        Node::Binary { left, op, right } => {
+            let converts = !matches!(
+                op,
+                BinaryOp::StrictEq
+                    | BinaryOp::StrictNotEq
+                    | BinaryOp::Exp
+                    | BinaryOp::InstanceOf
+                    | BinaryOp::LogicalAnd
+                    | BinaryOp::LogicalOr
+                    | BinaryOp::Coalesce
+            );
+            if converts && !(is_literal(ast, left) && is_literal(ast, right)) {
+                return true;
+            }
+        }
+        Node::Property { key, .. }
+        | Node::MethodDef { key, .. }
+        | Node::PropertyDef { key, .. }
+            if computed_non_literal(ast, key) =>
+        {
+            return true;
+        }
+        _ => {}
+    }
+    let mut found = false;
+    ast.for_each_child(id, |c| {
+        if !found && !is_type_node(ast, c) && strict_effect(ast, c, depth + 1) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// Type annotations and arguments are never evaluated.
+fn is_type_node(ast: &Ast, id: NodeId) -> bool {
+    matches!(
+        ast.node(id),
+        Node::KeywordType { .. }
+            | Node::TypeRef { .. }
+            | Node::TypeArgs { .. }
+            | Node::TypeParams { .. }
+            | Node::UnionType { .. }
+            | Node::IntersectionType { .. }
+            | Node::TypeLiteral { .. }
+            | Node::ArrayType { .. }
+            | Node::TupleType { .. }
+            | Node::FunctionType { .. }
+            | Node::TypeQuery { .. }
+            | Node::TypeOperator { .. }
+            | Node::ParenType { .. }
+            | Node::IndexedAccessType { .. }
+            | Node::ConditionalType { .. }
+            | Node::MappedType { .. }
+            | Node::ImportType { .. }
+            | Node::TemplateLitType { .. }
+    )
+}
+
+/// The static name of a non-computed property key (`a`, `"a"`, `0`), as `getPropertyName`
+/// gives it.
+pub(crate) fn plain_key_name(ast: &Ast, key: NodeId) -> Option<String> {
+    match *ast.node(key) {
+        Node::Ident { name } | Node::StringLit { value: name } => Some(ast.atom(name).to_owned()),
+        Node::NumberLit { value } => Some(number_to_string(value.get())),
+        Node::BigIntLit { value } => Some(ast.atom(value).to_owned()),
+        _ => None,
+    }
+}
+
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
+/// The offset where the line holding `pos` starts.
+pub(crate) fn line_start(src: &str, pos: usize) -> usize {
+    src[..pos]
+        .char_indices()
+        .rev()
+        .find(|&(_, c)| is_line_break(c))
+        .map_or(0, |(i, c)| i + c.len_utf8())
+}
+
+/// The spaces and tabs a line starts with (ESLint's `getLineIndent`).
+pub(crate) fn line_indent(src: &str, pos: usize) -> &str {
+    let start = line_start(src, pos);
+    let rest = &src[start..];
+    &rest[..rest.len() - rest.trim_start_matches([' ', '\t']).len()]
+}
+
+/// The file's lines as ESLint splits them (`\r\n`, `\n`, `\r`, U+2028, U+2029), with their
+/// start offsets.
+fn source_lines(src: &str) -> Vec<(usize, &str)> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut chars = src.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if is_line_break(c) {
+            out.push((start, &src[start..i]));
+            let mut next = i + c.len_utf8();
+            if c == '\r' && chars.peek().is_some_and(|&(_, n)| n == '\n') {
+                chars.next();
+                next += 1;
+            }
+            start = next;
+        }
+    }
+    out.push((start, &src[start..]));
+    out
+}
+
+/// One level of indentation in the file (the plugin's `getIndentUnit`, built on
+/// `detect-indent`): the most common change of indentation between consecutive non-empty
+/// lines, spaces or tabs, with continuation lines of multi-line tokens ignored. A tab when
+/// the file indents with tabs or not at all.
+pub(crate) fn indent_unit(cx: &Ctx<'_, '_>) -> String {
+    let ast = cx.ast();
+    let src = cx.src();
+    let lines = source_lines(src);
+    let line_of = |pos: usize| lines.partition_point(|&(s, _)| s <= pos).saturating_sub(1);
+    let mut blank = vec![false; lines.len()];
+    let mut mark = |span: Span| {
+        let (a, b) = (line_of(span.start as usize), line_of(span.end as usize));
+        for flag in blank.iter_mut().take(b + 1).skip(a + 1) {
+            *flag = true;
+        }
+    };
+    for c in &ast.comments {
+        mark(c.span);
+    }
+    let mut stack = vec![ast.root];
+    while let Some(id) = stack.pop() {
+        if matches!(
+            ast.node(id),
+            Node::StringLit { .. } | Node::TemplateElement { .. } | Node::JsxText {}
+        ) {
+            mark(cx.span(id));
+        }
+        ast.for_each_child(id, |c| stack.push(c));
+    }
+    let text: Vec<&str> = lines
+        .iter()
+        .zip(&blank)
+        .map(|(&(_, l), &b)| if b { "" } else { l })
+        .collect();
+    let mut best = indent_stats(&text, true);
+    if best.is_empty() {
+        best = indent_stats(&text, false);
+    }
+    let mut result: Option<((bool, usize), (u32, u32))> = None;
+    for &(key, (used, weight)) in &best {
+        if result.is_none_or(|(_, (u, w))| used > u || (used == u && weight > w)) {
+            result = Some((key, (used, weight)));
+        }
+    }
+    match result {
+        Some(((true, n), _)) => " ".repeat(n),
+        _ => "\t".to_owned(),
+    }
+}
+
+/// `(is_space, size)` keys with `(uses, weight)`, in first-seen order.
+fn indent_stats(lines: &[&str], ignore_single_spaces: bool) -> Vec<((bool, usize), (u32, u32))> {
+    let mut stats: Vec<((bool, usize), (u32, u32))> = Vec::new();
+    let mut previous = 0usize;
+    let mut previous_type: Option<bool> = None;
+    let mut key: Option<(bool, usize)> = None;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let spaces = line.len() - line.trim_start_matches(' ').len();
+        let tabs = line.len() - line.trim_start_matches('\t').len();
+        if spaces == 0 && tabs == 0 {
+            previous = 0;
+            previous_type = None;
+            continue;
+        }
+        let (is_space, indent) = if spaces > 0 {
+            (true, spaces)
+        } else {
+            (false, tabs)
+        };
+        if ignore_single_spaces && is_space && indent == 1 {
+            continue;
+        }
+        if previous_type != Some(is_space) {
+            previous = 0;
+        }
+        previous_type = Some(is_space);
+        let diff = indent as isize - previous as isize;
+        previous = indent;
+        let (used, weight) = if diff == 0 {
+            (0, 1)
+        } else {
+            let abs = diff.unsigned_abs();
+            if ignore_single_spaces && is_space && abs == 1 {
+                continue;
+            }
+            key = Some((is_space, abs));
+            (1, 0)
+        };
+        let Some(k) = key else {
+            continue;
+        };
+        match stats.iter_mut().find(|(sk, _)| *sk == k) {
+            Some((_, (u, w))) => {
+                *u += used;
+                *w += weight;
+            }
+            None => stats.push((k, (1, 0))),
+        }
+    }
+    stats
+}
+
 #[cfg(test)]
 mod tests {
     use super::{HTML_ENTITIES, decode_jsx_entities};

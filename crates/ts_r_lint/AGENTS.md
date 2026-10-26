@@ -651,15 +651,23 @@ their output, not translated.
 ## eslint-plugin-unicorn rules (round 5, h2)
 
 `no-asterisk-prefix-in-documentation-comments`, `no-canvas-to-image`, `no-transition-all`,
-`no-ineffective-csp-directives`, `prefer-array-last-methods`, `prefer-then-catch` (each at
-100% of its oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
+`no-ineffective-csp-directives`, `prefer-array-last-methods`, `prefer-then-catch`,
+`prefer-object-destructuring-defaults`, `no-undeclared-class-members` (each at 100% of its
+oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
 the initialiser of the plain `const` it names when that is declared once before the use and
 read only there; the declaration's initialising write is one of its two references) and
 `decode_jsx_entities` (JSX attribute strings with `&#45;`, `&#x2D;` and the HTML 4 names
 plus `&apos;` decoded, as ESTree parsers give their value; our AST keeps the raw text) and
 `remove_method_call` (the edits turning `obj.name(...)` into `obj`: from the end of the
 parenthesized object to the end of the member, and from the end of the parenthesized callee
-to the end of the call).
+to the end of the call), `has_side_effect_strict` (eslint-utils' `hasSideEffect` with
+`considerGetters` and `considerImplicitTypeConversion`: every member access, converting
+unary/binary operators unless all operands are literals, non-literal computed keys; tagged
+templates are not side effects there, and function bodies are not entered), `plain_key_name`,
+`line_start`/`line_indent`, and `indent_unit` (the plugin's `getIndentUnit` over
+`detect-indent`: the most used indentation change between consecutive non-empty lines, single
+spaces ignored unless nothing else is found, continuation lines of comments, strings,
+template chunks and JSX text blanked; a tab when the winner is not spaces or there is none).
 
 - **no-asterisk-prefix-in-documentation-comments** looks at `/**` (not `/***`) block comments
   that span lines and start a line (only spaces and tabs before them). Every line after the
@@ -697,10 +705,33 @@ to the end of the call).
   needs an identifier or function handler: it removes the comma before it (and a trailing
   comma) and appends `.catch(<handler with its parentheses>)` after the call; a comment
   outside the handler in the removed range, or right after the handler or its comma, drops it.
+- **prefer-object-destructuring-defaults** reports a declarator `{a, b: c} = {a: 1, b: 2,
+  ...rest}` (no type annotation; init an object literal through parentheses): every pattern
+  property a non-computed key with a plain identifier binding and no default, no
+  `Object.prototype` name; every object property but the last a non-computed `key: value` or
+  shorthand with a strictly side-effect-free value, names unique; the last a side-effect-free
+  spread; one default per pattern property, none referring to a binding name. The suggestion
+  (`{a = 1, b: c = 2} = {...rest}`, defaults with their parentheses) is dropped when the
+  declarator holds a comment.
+- **no-undeclared-class-members** runs once per file. A `this.x` belongs to the class whose
+  member list contains it on the way up, unless a function that is not a class method's value
+  (object-literal methods count as functions) comes first; heritage and class decorators pass
+  through to the outer class. Classes with `extends` are skipped. Declared: `constructor`,
+  non-static methods/accessors/fields by static key name (identifier, string, expression-free
+  template, also computed), parameter properties, and `this.x =` in the constructor body
+  outside nested functions and classes. Not reported in static members or blocks, keys and
+  decorators. The suggestion (first plain `=` target per name, not in the constructor) inserts
+  `<indent>x;` at the start of the line of the first member or the comment just before it,
+  unless that is the `{` line; the indent is the whitespace before the first member, or the
+  class line's indent plus `indent_unit`.
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/`:
 `no-asterisk-prefix-in-documentation-comments.js`, `no-canvas-to-image.js`,
 `no-transition-all.js`, `no-ineffective-csp-directives.js`, `prefer-array-last-methods.js`,
 `prefer-then-catch.js`, `fix/remove-method-call.js`, `fix/replace-member-expression-property.js`,
-`fix/remove-argument.js`, `utils/get-line-start.js`, `utils/reindent-text.js`, `utils/types.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's
+`fix/remove-argument.js`, `prefer-object-destructuring-defaults.js`,
+`no-undeclared-class-members.js`, `shared/class-this.js`, `utils/get-line-start.js`,
+`utils/reindent-text.js`, `utils/types.js`, `utils/comments.js`, `utils/get-references.js`,
+`utils/get-indent-string.js`, `utils/get-indent-unit.js`, `utils/get-line-indent.js`;
+@eslint-community/eslint-utils 4.10.1 `hasSideEffect`; detect-indent 7.0.2 `index.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's
 JSX parser decodes); only numeric references appear in the oracle.

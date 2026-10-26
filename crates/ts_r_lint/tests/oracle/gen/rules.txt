@@ -306,3 +306,5 @@ unicorn/no-transition-all
 unicorn/no-ineffective-csp-directives
 unicorn/prefer-array-last-methods
 unicorn/prefer-then-catch
+unicorn/prefer-object-destructuring-defaults
+unicorn/no-undeclared-class-members

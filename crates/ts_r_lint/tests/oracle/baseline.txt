@@ -314,6 +314,7 @@ unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-this-assignment 23/23
 unicorn/no-transition-all 41/41
 unicorn/no-typeof-undefined 100/100
+unicorn/no-undeclared-class-members 46/46
 unicorn/no-unnecessary-array-flat-depth 20/20
 unicorn/no-unnecessary-array-splice-count 78/78
 unicorn/no-unnecessary-await 63/66
@@ -344,6 +345,7 @@ unicorn/prefer-math-min-max 140/140
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-coercion 60/60
 unicorn/prefer-number-properties 474/474
+unicorn/prefer-object-destructuring-defaults 44/44
 unicorn/prefer-optional-catch-binding 25/25
 unicorn/prefer-regexp-test 273/273
 unicorn/prefer-spread 625/626

@@ -325,6 +325,7 @@ mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_this_assignment;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
+mod unicorn_no_undeclared_class_members;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
@@ -355,6 +356,7 @@ mod unicorn_prefer_math_min_max;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
+mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_spread;
@@ -729,6 +731,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
+    &unicorn_no_undeclared_class_members::RULE,
     &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
@@ -761,6 +764,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
+    &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_regexp_test::RULE,
     &unicorn_prefer_spread::RULE,
