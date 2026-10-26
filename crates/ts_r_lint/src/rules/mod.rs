@@ -487,6 +487,7 @@ mod unicorn_prefer_negative_index;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
+mod unicorn_prefer_object_define_properties;
 mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
@@ -581,6 +582,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_prefer_object_define_properties::RULE,
     &unicorn_consistent_conditional_object_spread::RULE,
     &unicorn_default_export_style::RULE,
     &unicorn_prefer_private_class_fields::RULE,
