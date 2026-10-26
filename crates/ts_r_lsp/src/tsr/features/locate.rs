@@ -1,6 +1,6 @@
 //! From a byte offset to a node, and from a name to the symbols it means.
 
-use ts_r_ast::{Ast, HeritageKind, Node, NodeId};
+use ts_r_ast::{AssignOp, Ast, HeritageKind, Node, NodeId};
 use ts_r_binder::{decl_name_node, meaning};
 use ts_r_checker::{Ck, Loc};
 use ts_r_types::{SymId, TypeId};
@@ -72,6 +72,10 @@ pub struct Meaning {
     pub shorthand: Option<SymId>,
     /// The name declares `primary` (it is not a reference).
     pub is_decl: bool,
+    /// For a property of a contextually typed object literal (`const a: I = { x: 1 }`),
+    /// the property of the contextual type it implements; references and rename treat the
+    /// two as one.
+    pub contextual: Option<SymId>,
 }
 
 impl Meaning {
@@ -82,6 +86,36 @@ impl Meaning {
 
 /// The symbols the name at `l` means (no alias resolution).
 pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
+    let mut m = own_meaning(ck, l);
+    m.contextual = contextual_property(ck, l);
+    m
+}
+
+/// The property of the contextual type that an object literal member named at `l`
+/// implements, when the literal is not a destructuring target.
+fn contextual_property(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
+    let c = ck.c;
+    let member = c.parent(l)?;
+    let named = match *c.node(member) {
+        Node::Property { key, .. } => key == l.node,
+        Node::ShorthandProp { name, .. } => name == l.node,
+        Node::MethodDef { key, .. } => key == l.node,
+        _ => false,
+    };
+    let lit = c.parent(member)?;
+    if !named || !matches!(c.node(lit), Node::ObjectLit { .. }) {
+        return None;
+    }
+    if literal_target_source(ck, lit, 0).is_some() {
+        return None;
+    }
+    let name = name_text(c.ast(l.file), l.node)?.to_string();
+    let t = ck.contextual_type(lit)?;
+    property_of(ck, t, &name)
+}
+
+/// [`meaning_at`] without the contextual property.
+fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
     let c = ck.c;
     let ast = c.ast(l.file);
     let Some(name) = name_text(ast, l.node) else {
@@ -94,6 +128,7 @@ pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
             primary: Some(s),
             shorthand: None,
             is_decl: true,
+            contextual: None,
         };
         if let Some(p) = parent
             && let Node::BindingProperty {
@@ -113,6 +148,7 @@ pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
         primary: s,
         shorthand: None,
         is_decl: false,
+        contextual: None,
     };
     match *ast.node(p) {
         Node::Member { obj, prop, .. } if prop == l.node => {
@@ -139,11 +175,23 @@ pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
             // `export { a as b }`: `a` is what `b` stands for.
             return one(c.sym_of_decl(pl).and_then(|s| c.resolve_alias(s)));
         }
+        Node::Property { key, .. } if key == l.node => {
+            // `({ a: x } = o)`: the key reads `o.a`.
+            if let Some(t) = target_source(ck, pl) {
+                return one(property_of(ck, t, name));
+            }
+        }
         Node::ShorthandProp { name: n, .. } if n == l.node => {
+            // `({ a } = o)` reads `o.a` into the variable `a`.
+            let primary = match target_source(ck, pl) {
+                Some(t) => property_of(ck, t, name),
+                None => c.sym_of_decl(pl),
+            };
             return Meaning {
-                primary: c.sym_of_decl(pl),
+                primary,
                 shorthand: c.resolve_ident(l, meaning::VALUE),
                 is_decl: true,
+                contextual: None,
             };
         }
         Node::BindingProperty { key, .. } if key == l.node => {
@@ -161,6 +209,7 @@ pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
             primary: Some(s),
             shorthand: None,
             is_decl: true,
+            contextual: None,
         };
     }
     let want = match *ast.node(p) {
@@ -251,7 +300,24 @@ fn pattern_source_type(ck: &mut Ck<'_, '_>, pattern: Loc) -> Option<TypeId> {
             if let Some(t) = type_ann {
                 return Some(ck.type_from_node(Loc::new(pattern.file, t)));
             }
-            init.map(|i| ck.check_expr(Loc::new(pattern.file, i)))
+            if let Some(i) = init {
+                return Some(ck.check_expr(Loc::new(pattern.file, i)));
+            }
+            // `for (const { a } of xs)`: each element of `xs`.
+            let list = c.parent(holder)?;
+            let stmt = c.parent(list)?;
+            match *c.node(stmt) {
+                Node::ForOf {
+                    is_await,
+                    left,
+                    right,
+                    ..
+                } if left == list.node => {
+                    let t = ck.check_expr(Loc::new(pattern.file, right));
+                    ck.iterated_type(t, is_await)
+                }
+                _ => None,
+            }
         }
         Node::Param { pattern: p, .. } if p == pattern.node => Some(ck.param_type(holder)),
         Node::BindingProperty { value: Some(v), .. } if v == pattern.node => {
@@ -265,6 +331,66 @@ fn pattern_source_type(ck: &mut Ck<'_, '_>, pattern: Loc) -> Option<TypeId> {
             let t = pattern_source_type(ck, outer)?;
             let p = property_of(ck, t, &name)?;
             Some(ck.type_of_symbol(p))
+        }
+        _ => None,
+    }
+}
+
+/// The type the object literal holding the property `prop` takes apart when that literal is
+/// a destructuring assignment target: `({ a } = o)`, `for ({ a } of xs)`, `[{ a }] = xs`
+/// and nested targets.
+fn target_source(ck: &mut Ck<'_, '_>, prop: Loc) -> Option<TypeId> {
+    let lit = ck.c.parent(prop)?;
+    if !matches!(ck.c.node(lit), Node::ObjectLit { .. }) {
+        return None;
+    }
+    literal_target_source(ck, lit, 0)
+}
+
+/// [`target_source`] for an object or array literal `lit`.
+fn literal_target_source(ck: &mut Ck<'_, '_>, lit: Loc, depth: u32) -> Option<TypeId> {
+    const MAX_DEPTH: u32 = 32;
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    let c = ck.c;
+    let holder = c.parent(lit)?;
+    match *c.node(holder) {
+        Node::Assign {
+            left,
+            op: AssignOp::Assign,
+            right,
+        } if left == lit.node => Some(ck.check_expr(Loc::new(lit.file, right))),
+        Node::ForOf {
+            is_await,
+            left,
+            right,
+            ..
+        } if left == lit.node => {
+            let t = ck.check_expr(Loc::new(lit.file, right));
+            ck.iterated_type(t, is_await)
+        }
+        Node::Property { key, value, .. } if value == lit.node => {
+            let outer = c.parent(holder)?;
+            if !matches!(c.node(outer), Node::ObjectLit { .. }) {
+                return None;
+            }
+            let name = name_text(c.ast(lit.file), key)?.to_string();
+            let t = literal_target_source(ck, outer, depth + 1)?;
+            let p = property_of(ck, t, &name)?;
+            Some(ck.type_of_symbol(p))
+        }
+        Node::ArrayLit { elements } => {
+            let i = c
+                .ast(lit.file)
+                .list(elements)
+                .iter()
+                .position(|&e| e == lit.node)?;
+            let t = literal_target_source(ck, holder, depth + 1)?;
+            match property_of(ck, t, &i.to_string()) {
+                Some(p) => Some(ck.type_of_symbol(p)),
+                None => ck.element_type_of_array_like(t),
+            }
         }
         _ => None,
     }

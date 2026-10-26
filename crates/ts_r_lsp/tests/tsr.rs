@@ -915,6 +915,58 @@ fn keyword_definitions_and_type_definitions() {
     c.shutdown();
 }
 
+const NAV_DESTRUCTURE: &str = "interface I { p: number; q: string }
+declare const o: I, xs: I[];
+let p: number, z: number;
+({ p: z } = o);
+for ({ p } of xs) {}
+for (const { p: w } of xs) {}
+const a: I = { p: 1, q: '' };
+const u = { p: 2 };
+";
+
+#[test]
+fn references_through_destructuring_and_contextual_literals() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navds",
+        &[("tsconfig.json", TSCONFIG), ("src/d.ts", NAV_DESTRUCTURE)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/d.ts");
+    let u = env.uri("src/d.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        r.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    // `I.p`: the assignment-target keys, the for-of keys and the contextually typed
+    // literal, but not the untyped literal or the variable `p`.
+    let want = vec![(0, 14), (3, 3), (4, 7), (5, 13), (6, 15)];
+    assert_eq!(refs(&mut c, 0, 14), want);
+    // From an assignment-target key and from the typed literal: the same set.
+    assert_eq!(refs(&mut c, 3, 3), want);
+    assert_eq!(refs(&mut c, 6, 15), want);
+    c.shutdown();
+}
+
 #[test]
 fn definition_type_definition_references_rename() {
     if !libs_present() {

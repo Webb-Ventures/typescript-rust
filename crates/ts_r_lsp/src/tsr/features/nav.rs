@@ -480,12 +480,16 @@ impl Target {
             (None, None) => return None,
         };
         let s = c.resolve_alias(s).unwrap_or(s);
-        let decls: HashSet<Loc> = c.decls(s).into_iter().collect();
-        Some(Target {
-            name,
-            syms: vec![s],
-            decls,
-        })
+        let mut decls: HashSet<Loc> = c.decls(s).into_iter().collect();
+        let mut syms = vec![s];
+        // A contextually typed literal's property is one with the property it implements.
+        if let Some(p) = m.contextual
+            && p != s
+        {
+            decls.extend(c.decls(p));
+            syms.push(p);
+        }
+        Some(Target { name, syms, decls })
     }
 
     fn matches(&self, ck: &Ck<'_, '_>, s: SymId) -> bool {
@@ -539,8 +543,10 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
                 primary,
                 shorthand,
                 is_decl,
+                contextual,
             } = m;
-            let p = primary.is_some_and(|s| target.matches(ck, s));
+            let p = primary.is_some_and(|s| target.matches(ck, s))
+                || contextual.is_some_and(|s| target.matches(ck, s));
             let v = shorthand.is_some_and(|s| target.matches(ck, s));
             if !p && !v {
                 continue;
