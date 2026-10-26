@@ -513,3 +513,408 @@ pub(crate) fn is_same_reference(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId) -> bool 
     }
     same(cx, a, b, 0)
 }
+
+/// The text of `id` with all its parentheses (unicorn's `getParenthesizedText`).
+pub(crate) fn parenthesized_text<'a>(cx: &Ctx<'_, 'a>, id: NodeId) -> &'a str {
+    let s = parenthesized_span(cx, id);
+    &cx.src()[s.start as usize..s.end as usize]
+}
+
+/// True when the source at `start` begins with a token that would make a statement a block
+/// or a declaration: `{`, `class`, `function`, `async function`, `let [`.
+pub(crate) fn starts_like_declaration(src: &str, start: u32) -> bool {
+    let rest = src.get(start as usize..).unwrap_or("");
+    let word = |r: &'_ str, w: &str| -> Option<usize> {
+        r.strip_prefix(w)
+            .filter(|t| !t.starts_with(is_ident_char))
+            .map(|_| w.len())
+    };
+    let after = |len: usize| {
+        let p = skip_trivia_forward(rest, len);
+        &rest[p..]
+    };
+    rest.starts_with('{')
+        || word(rest, "class").is_some()
+        || word(rest, "function").is_some()
+        || word(rest, "async").is_some_and(|l| word(after(l), "function").is_some())
+        || word(rest, "let").is_some_and(|l| after(l).starts_with('['))
+}
+
+/// The node whose text starts at `id`'s first token, through the left-hand sides.
+fn first_token_node(ast: &ts_r_ast::Ast, id: NodeId) -> NodeId {
+    let mut id = id;
+    for _ in 0..10_000 {
+        let next = match *ast.node(id) {
+            Node::Paren { .. } => return id,
+            _ => leading_child(ast, id),
+        };
+        match next {
+            Some(n) if ast.span(n).start == ast.span(id).start => id = n,
+            _ => return id,
+        }
+    }
+    id
+}
+
+/// unicorn's `shouldAddParenthesesToExpressionStart`: `expr`, written where `replacement`
+/// is, would begin a statement (or arrow body, `export default`, `for` initializer) with a
+/// token that changes how it parses (a declaration-like start, or a regex starting a
+/// statement is fine).
+pub(crate) fn expression_start_needs_parens(
+    cx: &Ctx<'_, '_>,
+    expr: NodeId,
+    replacement: NodeId,
+) -> bool {
+    let ast = cx.ast();
+    let src = cx.src();
+    let start = cx.span(expr).start;
+    let regex = matches!(ast.node(first_token_node(ast, expr)), Node::RegexLit { .. });
+    if !regex && !starts_like_declaration(src, start) {
+        return false;
+    }
+    let first_is = |w: &str| {
+        src[start as usize..].starts_with(w)
+            && !src[start as usize + w.len()..].starts_with(is_ident_char)
+    };
+    let mut node = replacement;
+    for _ in 0..10_000 {
+        let Some(parent) = cx.parent(node) else {
+            return false;
+        };
+        match *cx.node(parent) {
+            Node::Paren { .. } => return false,
+            Node::Arrow { body, .. } if body == node => {
+                return src[start as usize..].starts_with('{');
+            }
+            Node::ExportDefaultExpr { .. } => {
+                return !regex && !src[start as usize..].starts_with('{') && !first_is("let");
+            }
+            Node::For {
+                init: Some(init), ..
+            } if init == node => return first_is("let"),
+            Node::ExprStmt { .. } => return !regex,
+            _ => {}
+        }
+        if cx.span(parent).start != cx.span(node).start {
+            return false;
+        }
+        node = parent;
+    }
+    false
+}
+
+/// `new Foo` without its own argument parentheses.
+fn is_new_without_parens(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let Node::New {
+        callee,
+        has_args,
+        args,
+        ..
+    } = *cx.node(id)
+    else {
+        return false;
+    };
+    if has_args && !cx.ast().list(args).is_empty() {
+        return false;
+    }
+    !(has_args && cx.text(id).trim_end().ends_with(')') && cx.span(callee).end < cx.span(id).end)
+}
+
+/// unicorn's `shouldAddParenthesesToMemberExpressionObject`: `id` (not parenthesized) needs
+/// parentheses as the object of a member access written where `replacement` is.
+pub(crate) fn member_object_needs_parens(
+    cx: &Ctx<'_, '_>,
+    id: NodeId,
+    replacement: NodeId,
+) -> bool {
+    if expression_start_needs_parens(cx, id, replacement) {
+        return true;
+    }
+    match *cx.node(id) {
+        Node::Ident { .. }
+        | Node::Member { .. }
+        | Node::Index { .. }
+        | Node::Call { .. }
+        | Node::TemplateLit { .. }
+        | Node::This {}
+        | Node::Super {}
+        | Node::ArrayLit { .. }
+        | Node::MetaProperty { .. }
+        | Node::ImportCall { .. }
+        | Node::TaggedTemplate { .. }
+        | Node::NonNull { .. } => false,
+        Node::New { .. } => is_new_without_parens(cx, id),
+        Node::NumberLit { .. } => cx.text(id).bytes().all(|b| b.is_ascii_digit()),
+        Node::StringLit { .. }
+        | Node::BoolLit { .. }
+        | Node::NullLit {}
+        | Node::RegexLit { .. }
+        | Node::BigIntLit { .. } => false,
+        _ => true,
+    }
+}
+
+/// unicorn's `getMemberExpressionObjectText`: `id` with its parentheses, wrapped in new ones
+/// when it needs them as a member object written where `replacement` is.
+pub(crate) fn member_object_text(cx: &Ctx<'_, '_>, id: NodeId, replacement: NodeId) -> String {
+    let text = parenthesized_text(cx, id);
+    if !is_parenthesized(cx, id) && member_object_needs_parens(cx, id, replacement) {
+        format!("({text})")
+    } else {
+        text.to_owned()
+    }
+}
+
+/// unicorn's `isInUnparenthesizedNewExpressionCallee`: `id` is (through member objects,
+/// tags and TS wrappers, none parenthesized) the callee of a `new`.
+pub(crate) fn in_unparenthesized_new_callee(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let mut node = id;
+    for _ in 0..10_000 {
+        let Some(parent) = cx.parent(node) else {
+            return false;
+        };
+        match *cx.node(parent) {
+            Node::New { callee, .. } => return callee == node,
+            Node::Member { obj, .. } | Node::Index { obj, .. } if obj == node => {}
+            Node::TaggedTemplate { tag, .. } if tag == node => {}
+            Node::As { expr, .. }
+            | Node::Satisfies { expr, .. }
+            | Node::NonNull { expr }
+            | Node::TypeAssertion { expr, .. }
+            | Node::Instantiation { expr, .. }
+                if expr == node => {}
+            _ => return false,
+        }
+        node = parent;
+    }
+    false
+}
+
+/// unicorn's `shouldAddParenthesesToNewExpressionCallee` for a member access on `object`:
+/// the object chain (member objects, tags, TS wrappers; stopping at parentheses) ends in a
+/// call, which `new` would take as its arguments.
+pub(crate) fn member_on_needs_new_parens(cx: &Ctx<'_, '_>, object: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut node = object;
+    if is_parenthesized(cx, node) {
+        return false;
+    }
+    for _ in 0..10_000 {
+        node = match *ast.node(node) {
+            Node::Paren { .. } => return false,
+            Node::As { expr, .. }
+            | Node::Satisfies { expr, .. }
+            | Node::NonNull { expr }
+            | Node::TypeAssertion { expr, .. }
+            | Node::Instantiation { expr, .. } => expr,
+            Node::Member { obj, .. } | Node::Index { obj, .. } => obj,
+            Node::TaggedTemplate { tag, .. } => tag,
+            Node::Call { .. } => return true,
+            _ => return false,
+        };
+    }
+    false
+}
+
+/// The deepest node whose span contains byte `pos`.
+fn deepest_node_at(ast: &ts_r_ast::Ast, pos: u32) -> Option<NodeId> {
+    let mut node = ast.root;
+    let s = ast.span(node);
+    if !(s.start <= pos && pos < s.end) {
+        return None;
+    }
+    for _ in 0..100_000 {
+        let mut next = None;
+        ast.for_each_child(node, |c| {
+            let s = ast.span(c);
+            if next.is_none() && s.start <= pos && pos < s.end {
+                next = Some(c);
+            }
+        });
+        match next {
+            Some(n) => node = n,
+            None => return Some(node),
+        }
+    }
+    Some(node)
+}
+
+/// unicorn's `needsSemicolon`: writing `code` at `pos` needs a `;` before it so it can't
+/// continue the token before it (`foo\n[a]`), judged from that token and the node it ends.
+pub(crate) fn needs_semicolon(cx: &Ctx<'_, '_>, pos: u32, code: &str) -> bool {
+    if !code.starts_with(['[', '(', '/', '`', '+', '-', '*', ',', '.', '<']) {
+        return false;
+    }
+    let ast = cx.ast();
+    let src = cx.src();
+    let end = skip_trivia_backward(ast, src, pos as usize) as u32;
+    if end == 0 {
+        return false;
+    }
+    let last = src[..end as usize].chars().next_back().unwrap_or(' ');
+    if last == ';' {
+        return false;
+    }
+    // The token's first byte: identifiers and numbers run back over word characters.
+    let token_start = if is_ident_char(last) {
+        let word = src[..end as usize]
+            .char_indices()
+            .rev()
+            .take_while(|&(_, c)| is_ident_char(c) || c == '.')
+            .last()
+            .map_or(0, |(i, _)| i);
+        word as u32
+    } else {
+        end - last.len_utf8() as u32
+    };
+    let Some(deepest) = deepest_node_at(ast, token_start) else {
+        return false;
+    };
+    let mut node = Some(deepest);
+    while let Some(n) = node {
+        if cx.span(n).end != end {
+            break;
+        }
+        if matches!(
+            cx.node(n),
+            Node::ExprStmt { .. }
+                | Node::VarDecl { .. }
+                | Node::Return { .. }
+                | Node::Throw { .. }
+                | Node::ExportDefaultExpr { .. }
+        ) {
+            return true;
+        }
+        node = cx.parent(n);
+    }
+    let parent_kind = cx.parent(deepest).map(|p| cx.node(p));
+    match last {
+        ']' => return true,
+        '}' => {
+            if matches!(cx.node(deepest), Node::Block { .. })
+                && matches!(parent_kind, Some(Node::FunctionExpr { .. }))
+                || matches!(cx.node(deepest), Node::ClassExpr { .. })
+            {
+                return true;
+            }
+        }
+        ')' => {
+            let body = match *cx.node(deepest) {
+                Node::If { cons, .. } => Some(cons),
+                Node::For { body, .. }
+                | Node::ForIn { body, .. }
+                | Node::ForOf { body, .. }
+                | Node::While { body, .. }
+                | Node::With { body, .. } => Some(body),
+                Node::DoWhile { .. } => None,
+                _ => None,
+            };
+            if let Some(body) = body
+                && skip_trivia_backward(ast, src, cx.span(body).start as usize) as u32 == end
+            {
+                return false;
+            }
+            return true;
+        }
+        _ => {}
+    }
+    match cx.node(deepest) {
+        Node::StringLit { .. }
+        | Node::NullLit {}
+        | Node::BoolLit { .. }
+        | Node::NumberLit { .. }
+        | Node::BigIntLit { .. }
+        | Node::RegexLit { .. }
+        | Node::ObjectLit { .. } => return true,
+        Node::TemplateLit { .. } | Node::TaggedTemplate { .. } if last == '`' => return true,
+        Node::NonNull { .. } if last == '!' => return true,
+        Node::TypeArgs { .. } if matches!(parent_kind, Some(Node::Instantiation { .. })) => {
+            return true;
+        }
+        _ => {}
+    }
+    if is_ident_char(last) {
+        let word = &src[token_start as usize..end as usize];
+        if is_reserved_word(word) {
+            return false;
+        }
+        if word == "of" && matches!(cx.node(deepest), Node::ForOf { .. }) {
+            return false;
+        }
+        return !(word == "await" && matches!(cx.node(deepest), Node::Await { .. }));
+    }
+    false
+}
+
+/// Words espree tokenizes as keywords rather than identifiers.
+fn is_reserved_word(w: &str) -> bool {
+    matches!(
+        w,
+        "break"
+            | "case"
+            | "catch"
+            | "class"
+            | "const"
+            | "continue"
+            | "debugger"
+            | "default"
+            | "delete"
+            | "do"
+            | "else"
+            | "export"
+            | "extends"
+            | "finally"
+            | "for"
+            | "function"
+            | "if"
+            | "import"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "return"
+            | "super"
+            | "switch"
+            | "this"
+            | "throw"
+            | "try"
+            | "typeof"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+            | "true"
+            | "false"
+            | "null"
+    )
+}
+
+/// unicorn's `isLeftHandSide`: `id` (with its parentheses and TS wrappers) is written to:
+/// an assignment or update target, a destructuring element, a `for-in/of` head, or a
+/// `delete` operand.
+pub(crate) fn is_left_hand_side(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let ast = cx.ast();
+    let mut node = id;
+    for _ in 0..10_000 {
+        let Some(parent) = cx.parent(node) else {
+            return false;
+        };
+        match *cx.node(parent) {
+            Node::Paren { .. }
+            | Node::As { .. }
+            | Node::Satisfies { .. }
+            | Node::NonNull { .. }
+            | Node::TypeAssertion { .. }
+            | Node::Instantiation { .. } => node = parent,
+            Node::Update { .. } => return true,
+            Node::Unary {
+                op: UnaryOp::Delete,
+                ..
+            } => return true,
+            Node::AssignPattern { left, .. } => return left == node,
+            Node::Rest { .. } | Node::ArrayPattern { .. } => return true,
+            _ => return is_assignment_target(ast, cx.file.parents, node),
+        }
+    }
+    false
+}

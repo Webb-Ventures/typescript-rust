@@ -21,7 +21,7 @@
 use super::prelude::*;
 use super::unicorn_util::{parenthesized_span, skip_wrappers, space_around_keyword, with_edits};
 use super::unicorn_util_h5::{
-    is_parenthesized, is_same_reference, static_string, would_remove_comments,
+    is_parenthesized, is_same_reference, member_object_text, static_string, would_remove_comments,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -348,7 +348,7 @@ fn check(cx: &mut Ctx<'_, '_>, node: NodeId, assigns: &[NodeId]) {
         }
         let text = format!(
             "{}.addEventListener('{event}', {handler})",
-            object_text(cx, obj, node)
+            member_object_text(cx, obj, node)
         );
         fix = Some(with_edits(
             Fix::replace(cx.span(node), text),
@@ -449,61 +449,4 @@ fn is_value_not_function(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
         }
         _ => ident_name(ast, id) == Some("undefined"),
     }
-}
-
-/// The receiver's text for `<obj>.addEventListener(...)` written in place of `assign`: its
-/// parentheses kept, and new ones when it would start a statement with `{`, `class`,
-/// `function`, `async function` or `let [`, or is an expression a member access can't
-/// follow unparenthesized.
-fn object_text(cx: &Ctx<'_, '_>, obj: NodeId, assign: NodeId) -> String {
-    let ast = cx.ast();
-    let outer = parenthesized_span(cx, obj);
-    let text = &cx.src()[outer.start as usize..outer.end as usize];
-    if is_parenthesized(cx, obj) {
-        return text.to_owned();
-    }
-    let needs = match *ast.node(obj) {
-        Node::Ident { .. }
-        | Node::Member { .. }
-        | Node::Index { .. }
-        | Node::Call { .. }
-        | Node::TemplateLit { .. }
-        | Node::TaggedTemplate { .. }
-        | Node::This {}
-        | Node::Super {}
-        | Node::ArrayLit { .. }
-        | Node::MetaProperty { .. }
-        | Node::ImportCall { .. }
-        | Node::NonNull { .. } => false,
-        Node::New { has_args, .. } => !has_args,
-        _ => true,
-    };
-    if needs
-        || (!is_parenthesized(cx, assign) && starts_like_declaration(cx.src(), cx.span(obj).start))
-    {
-        format!("({text})")
-    } else {
-        text.to_owned()
-    }
-}
-
-fn starts_like_declaration(src: &str, start: u32) -> bool {
-    let rest = &src[start as usize..];
-    let word_then = |w: &str| {
-        rest.strip_prefix(w)
-            .filter(|r| !r.starts_with(is_ident_char))
-    };
-    let next = |r: &str| {
-        let p = skip_trivia_forward(r, 0);
-        r[p..].to_owned()
-    };
-    rest.starts_with('{')
-        || word_then("class").is_some()
-        || word_then("function").is_some()
-        || word_then("async").is_some_and(|r| {
-            let n = next(r);
-            n.strip_prefix("function")
-                .is_some_and(|t| !t.starts_with(is_ident_char))
-        })
-        || word_then("let").is_some_and(|r| next(r).starts_with('['))
 }

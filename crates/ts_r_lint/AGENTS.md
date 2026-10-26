@@ -623,10 +623,24 @@ member reads don't count). What we learned, in our words:
   statement with `{`/`class`/`function`/`let [`. A `require`/`import` of an excluded package
   (`koa`, `sax` by default) turns it off for assignments that end after it, so the rule runs
   as a `run_file` scan in source order.
+- **prefer-set-size**: `[...x].length` (one spread) and `Array.from(x).length` (one
+  argument, nothing optional) with `x` a `Set` per `unicorn_types::is_set`; not when the
+  `.length` is written (`is_left_hand_side`: assignment/update targets, destructuring,
+  `for` heads, `delete`). The fix renames to `size` and writes `x` as a member object
+  (`member_object_text`; extra parentheses inside an unparenthesized `new` callee when the
+  chain ends in a call; a `;` from `needs_semicolon`), unless the array has more comments.
+- Shared parenthesization helpers in `unicorn_util_h5.rs`: `expression_start_needs_parens`
+  (a `{`/`class`/`function`/`async function`/`let [` start moved to a statement, arrow
+  body, `export default` or `for` init), `member_object_needs_parens` /
+  `member_object_text`, `in_unparenthesized_new_callee`, `member_on_needs_new_parens`, and
+  `needs_semicolon` (from the token before the insertion point: the statement it ends,
+  `]`, `)` except a control statement's head, a function/class expression's `}`, literals,
+  object literals, template ends, `!`, identifiers other than `for-of`'s `of` and
+  `await`).
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).

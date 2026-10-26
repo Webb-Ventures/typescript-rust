@@ -305,3 +305,4 @@ unicorn/prefer-native-coercion-functions
 unicorn/prefer-dom-node-append
 unicorn/prefer-negative-index
 unicorn/prefer-add-event-listener
+unicorn/prefer-set-size
