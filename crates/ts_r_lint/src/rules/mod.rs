@@ -346,17 +346,9 @@ mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
-mod unicorn_prefer_add_event_listener_options;
-mod unicorn_prefer_array_last_methods;
-mod unicorn_prefer_blob_reading_methods;
+mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
-mod unicorn_prefer_event_target;
-mod unicorn_prefer_flat_math_min_max;
-mod unicorn_prefer_global_number_constants;
-mod unicorn_prefer_global_this;
-mod unicorn_prefer_identifier_import_export_specifiers;
-mod unicorn_prefer_includes;
-mod unicorn_prefer_math_min_max;
+mod unicorn_prefer_math_trunc;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
@@ -371,18 +363,12 @@ mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_then_catch;
 mod unicorn_prefer_type_error;
-mod unicorn_prefer_type_literal_last;
-mod unicorn_prefer_unary_minus;
-mod unicorn_require_array_sort_compare;
-mod unicorn_require_css_escape;
-mod unicorn_require_module_attributes;
-mod unicorn_static;
-mod unicorn_switch_case_break_position;
+mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
 mod unicorn_util;
-mod unicorn_util_h2;
+mod unicorn_util_h5;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -756,19 +742,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
-    &unicorn_prefer_add_event_listener_options::RULE,
-    &unicorn_prefer_array_last_methods::RULE,
-    &unicorn_prefer_blob_reading_methods::RULE,
-    &unicorn_prefer_block_statement_over_iife::RULE,
-    &unicorn_prefer_at::RULE,
+    &unicorn_prefer_code_point::RULE,
     &unicorn_prefer_date_now::RULE,
-    &unicorn_prefer_event_target::RULE,
-    &unicorn_prefer_flat_math_min_max::RULE,
-    &unicorn_prefer_global_number_constants::RULE,
-    &unicorn_prefer_global_this::RULE,
-    &unicorn_prefer_identifier_import_export_specifiers::RULE,
-    &unicorn_prefer_includes::RULE,
-    &unicorn_prefer_math_min_max::RULE,
+    &unicorn_prefer_math_trunc::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
@@ -782,12 +758,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
-    &unicorn_prefer_unary_minus::RULE,
-    &unicorn_require_array_sort_compare::RULE,
-    &unicorn_require_css_escape::RULE,
-    &unicorn_prefer_type_literal_last::RULE,
-    &unicorn_require_module_attributes::RULE,
-    &unicorn_switch_case_break_position::RULE,
+    &unicorn_require_number_to_fixed_digits_argument::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
 ];
