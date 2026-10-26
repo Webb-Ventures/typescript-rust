@@ -109,7 +109,9 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   the rule's fix, its suggestions, "Fix all <rule> problems", "Disable <rule> for this line",
   "Disable <rule> for the entire file", and `source.fixAll.ts-r` (one non-overlapping pass, as
   one `--fix` pass). On a line that starts in JSX children the line comment is
-  `{/* eslint-disable-next-line rule */}` (a `//` comment there would be rendered text). LSP backends' own code actions are kept and lint's appended.
+  `{/* eslint-disable-next-line rule */}` (a `//` comment there would be rendered text); the
+  JSX text is found by parsing with the options `ts_r_lint::parse_for_lint` used
+  (`lint::parse_options`: module goal, operators after `as T`), so both see one tree. LSP backends' own code actions are kept and lint's appended.
 
 ## ts-r backend (L3)
 

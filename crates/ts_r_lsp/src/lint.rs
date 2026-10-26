@@ -114,8 +114,9 @@ pub struct Linted {
     pub bom: u32,
     /// The grammar the text was linted with (whether it can contain JSX).
     pub kind: SourceKind,
-    /// Whether that grammar took TypeScript syntax in a JavaScript file.
-    pub ts_in_js: TsInJs,
+    /// The parser options ts-r-lint used (`ts_r_lint::parse_for_lint`: TypeScript syntax in
+    /// JavaScript, the module goal, operators after `as T`), so a re-parse sees the same tree.
+    pub parse: ParseOptions,
 }
 
 impl Linted {
@@ -127,8 +128,21 @@ impl Linted {
             lsp: Vec::new(),
             bom: 0,
             kind: SourceKind::Ts,
-            ts_in_js: TsInJs::Reject,
+            parse: ParseOptions::default(),
         }
+    }
+}
+
+/// The parser options `ts_r_lint::parse_for_lint` uses for a file linted in `env`.
+pub fn parse_options(env: &ts_r_lint::env::LintEnv) -> ParseOptions {
+    ParseOptions {
+        ts_in_js: if env.typescript {
+            TsInJs::Allow
+        } else {
+            TsInJs::Reject
+        },
+        module: env.source_type == ts_r_lint::env::SourceType::Module,
+        assertion_continues: true,
     }
 }
 
@@ -419,11 +433,7 @@ impl Engine {
             lsp,
             bom,
             kind: SourceKind::from_path(key),
-            ts_in_js: if fc.env.typescript {
-                TsInJs::Allow
-            } else {
-                TsInJs::Reject
-            },
+            parse: parse_options(&fc.env),
             text: doc,
         };
         (Outcome::Linted(linted), name, note)
@@ -617,20 +627,12 @@ fn newline(doc: &TextDoc) -> &'static str {
 
 /// Byte spans of the JSX text in `src` (which a disable comment must not be inserted
 /// into), if it has any.
-fn jsx_text_spans(src: &str, kind: SourceKind, ts_in_js: TsInJs) -> Vec<(u32, u32)> {
+fn jsx_text_spans(src: &str, kind: SourceKind, opts: ParseOptions) -> Vec<(u32, u32)> {
     // Every JSX element or fragment ends with `</` or `/>`.
     if !kind.is_jsx() || !(src.contains("</") || src.contains("/>")) {
         return Vec::new();
     }
-    let ast = ts_r_parser::parse_with(
-        src,
-        kind,
-        ParseOptions {
-            ts_in_js,
-            ..Default::default()
-        },
-    )
-    .ast;
+    let ast = ts_r_parser::parse_with(src, kind, opts).ast;
     (1..ast.nodes.len() as u32)
         .filter_map(NodeId::from_raw)
         .filter(|&n| ast.kind(n) == NodeKind::JsxText)
@@ -778,7 +780,7 @@ pub fn code_actions(l: &Linted, uri: &str, start: Pos, end: Pos, only: &[String]
             if !disabled_line.contains(&(line, rule)) {
                 disabled_line.push((line, rule));
                 let jsx = jsx_text.get_or_insert_with(|| {
-                    jsx_text_spans(src, l.kind, l.ts_in_js)
+                    jsx_text_spans(src, l.kind, l.parse)
                         .into_iter()
                         .map(|(a, b)| (a + l.bom, b + l.bom))
                         .collect()
@@ -892,7 +894,7 @@ mod tests {
             lsp,
             bom,
             kind: SourceKind::Tsx,
-            ts_in_js: TsInJs::Reject,
+            parse: ParseOptions::default(),
         }
     }
 
@@ -1050,7 +1052,7 @@ mod tests {
             "    {/* eslint-disable-next-line no-console */}\n"
         );
         // An existing JSX disable comment gets the rule added before its ` */}`.
-        let jsx = jsx_text_spans(text, SourceKind::Tsx, TsInJs::Reject);
+        let jsx = jsx_text_spans(text, SourceKind::Tsx, ParseOptions::default());
         let e = disable_line_edit(&l.text, 4, "c", &jsx);
         assert_eq!(e["range"]["start"], json!({"line": 3, "character": 34}));
         assert_eq!(e["newText"], ", c");
@@ -1058,7 +1060,26 @@ mod tests {
         let e = disable_line_edit(&l.text, 1, "c", &jsx);
         assert_eq!(e["newText"], "  // eslint-disable-next-line c\n");
         // Without JSX in the file, nothing is parsed.
-        assert!(jsx_text_spans("a < b;\n", SourceKind::Tsx, TsInJs::Reject).is_empty());
+        assert!(jsx_text_spans("a < b;\n", SourceKind::Tsx, ParseOptions::default()).is_empty());
+    }
+
+    /// The JSX text is found in the tree ts-r-lint linted: with the module goal (ESLint's
+    /// `sourceType: "module"`) a top-level `await` before a line break and `<div>` awaits an
+    /// element even in a file without `import` or `export`; a script reads `await < div`.
+    #[test]
+    fn jsx_text_is_found_with_the_lint_parse_options() {
+        let text = "const v = await\n<div>\n  {f()}\n</div>;\n";
+        let module = ParseOptions {
+            module: true,
+            assertion_continues: true,
+            ..Default::default()
+        };
+        let spans = jsx_text_spans(text, SourceKind::Tsx, module);
+        assert_eq!(spans.first(), Some(&(21, 24)), "{spans:?}");
+        assert_ne!(
+            jsx_text_spans(text, SourceKind::Tsx, ParseOptions::default()),
+            spans
+        );
     }
 
     #[test]
