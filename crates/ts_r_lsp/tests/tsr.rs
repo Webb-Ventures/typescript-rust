@@ -3222,3 +3222,70 @@ fn references_rename_hover_and_definition_in_doc_comment_links() {
     assert_eq!(lines, vec![1, 2, 2, 2], "{e}");
     c.shutdown();
 }
+
+const STRING_REFS: &str = "type Options = \"one\" | \"two\";
+let o: Options = \"one\";
+const d: \"one\" = \"one\";
+var x = \"plain\";
+";
+
+#[test]
+fn references_and_rename_of_string_literal_types() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navstrings",
+        &[("tsconfig.json", TSCONFIG), ("src/s.ts", STRING_REFS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/s.ts");
+    let u = env.uri("src/s.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let starts = |v: &Value| -> Vec<(u64, u64)> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        starts(&r)
+    };
+    // Literals of the same union type, not the `"one"` of another type.
+    assert_eq!(refs(&mut c, 0, 16), vec![(0, 16), (1, 18)]);
+    assert_eq!(refs(&mut c, 2, 18), vec![(2, 10), (2, 18)]);
+    // A literal without a contextual type is found alone.
+    assert_eq!(refs(&mut c, 3, 9), vec![(3, 9)]);
+    let rename = |c: &mut ScriptedClient, line: u32, ch: u32| -> Value {
+        result(
+            c,
+            "textDocument/rename",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch}, "newName": "uno"}),
+        )
+    };
+    let e = rename(&mut c, 1, 18);
+    let mut lines: Vec<u64> = e["changes"][u.as_str()]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    lines.sort();
+    assert_eq!(lines, vec![0, 1], "{e}");
+    // A plain string is no literal type: nothing to rename.
+    assert!(rename(&mut c, 3, 9).is_null());
+    c.shutdown();
+}

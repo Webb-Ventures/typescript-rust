@@ -1085,7 +1085,10 @@ fn references_with(
     else {
         // A name in a doc comment's `{@link}`, `@see` or `@throws` path stands for its
         // declaration.
-        return link_references(cx, ck, offset, scope, rename).unwrap_or_default();
+        if let Some(refs) = link_references(cx, ck, offset, scope, rename) {
+            return refs;
+        }
+        return string_literal_references(cx, ck, offset, scope).unwrap_or_default();
     };
     if scope == Scope::Project {
         let files: Vec<FileId> = project_files(cx).collect();
@@ -1094,7 +1097,8 @@ fn references_with(
         }
     }
     let Some(mut target) = Target::at(ck, Loc::new(cx.file, n), rename) else {
-        return Vec::new();
+        // A string literal key that names no symbol: the literals of its type.
+        return string_literal_references(cx, ck, offset, scope).unwrap_or_default();
     };
     collect_alias_names(cx, &mut target, scope, rename);
     let mut out = scan_target(cx, ck, &mut target, scope);
@@ -1288,6 +1292,47 @@ fn link_refs(ck: &mut Ck<'_, '_>, f: FileId, target: &mut Target, out: &mut Vec<
             }
         }
     }
+}
+
+/// The string literal (or substitution-free template) at `offset`.
+fn string_literal_at(cx: &Ctx<'_, '_>, offset: u32) -> Option<NodeId> {
+    let ast = cx.checker.ast(cx.file);
+    let n = node_at(ast, offset)?;
+    let n = match ast.node(n) {
+        Node::TemplateElement { .. } => cx.checker.file(cx.file).parents().parent(n)?,
+        _ => n,
+    };
+    super::string_refs::literal_text(ast, n).map(|_| n)
+}
+
+/// References from a string literal that names no symbol ([`super::string_refs`]).
+fn string_literal_references(
+    cx: &Ctx<'_, '_>,
+    ck: &mut Ck<'_, '_>,
+    offset: u32,
+    scope: Scope,
+) -> Option<Vec<Ref>> {
+    let n = string_literal_at(cx, offset)?;
+    let files: Vec<FileId> = match scope {
+        Scope::File => vec![cx.file],
+        Scope::Project => (0..cx.checker.files.len())
+            .map(|i| FileId(i as u32))
+            .collect(),
+    };
+    let spans = super::string_refs::references(ck, Loc::new(cx.file, n), &files);
+    Some(
+        spans
+            .into_iter()
+            .map(|(file, start, end)| Ref {
+                file,
+                start,
+                end,
+                is_decl: false,
+                is_write: false,
+                shorthand: None,
+            })
+            .collect(),
+    )
 }
 
 /// References from a name in a doc comment path at `offset`: those of the declaration it
@@ -1525,6 +1570,17 @@ pub fn prepare_rename(
     let ast = c.ast(cx.file);
     let text = c.file(cx.file).text.as_str();
     let Some(n) = ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) else {
+        // A string literal that names no symbol renames the literals of its type.
+        if let Some(lit) = string_literal_at(cx, offset) {
+            if !super::string_refs::renamable(ck, Loc::new(cx.file, lit)) {
+                return Ok(Value::Null);
+            }
+            let (start, end) = super::string_refs::inner_span(ast, lit);
+            return Ok(json!({
+                "range": lines.range(text, start, end),
+                "placeholder": text.get(start as usize..end as usize).unwrap_or(""),
+            }));
+        }
         // A name in a doc comment path renames its declaration.
         let Some((start, end, s)) = super::doc_links::at(ck, cx.file, offset) else {
             return Ok(Value::Null);
@@ -1574,15 +1630,23 @@ pub fn rename(
             }
             ast.span(n).text(c.file(cx.file).text.as_str()) == "this"
         }
-        // A name in a doc comment path renames its declaration.
+        // A string literal that names no symbol.
         None => {
-            let Some((_, _, s)) = super::doc_links::at(ck, cx.file, offset) else {
-                return Ok(Value::Null);
-            };
-            if let Some(why) = rename_blocker(ck, s) {
-                return Err((codes::REQUEST_FAILED, why.to_string()));
+            if let Some(lit) = string_literal_at(cx, offset) {
+                if !super::string_refs::renamable(ck, Loc::new(cx.file, lit)) {
+                    return Ok(Value::Null);
+                }
+                false
+            } else {
+                // A name in a doc comment path renames its declaration.
+                let Some((_, _, s)) = super::doc_links::at(ck, cx.file, offset) else {
+                    return Ok(Value::Null);
+                };
+                if let Some(why) = rename_blocker(ck, s) {
+                    return Err((codes::REQUEST_FAILED, why.to_string()));
+                }
+                false
             }
-            false
         }
     };
     let refs = references_with(cx, ck, offset, Scope::Project, true);

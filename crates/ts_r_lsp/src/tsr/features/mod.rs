@@ -27,6 +27,7 @@ mod quick_info;
 mod ref_meaning;
 mod signature;
 mod signature_site;
+mod string_refs;
 mod strings;
 mod type_args;
 
