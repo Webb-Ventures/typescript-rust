@@ -365,6 +365,15 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `const` of that name (not a `declare var`) or an earlier namespace or enum declared it:
   `class C {} enum C { A }` is `class C {} (function (C) {...})(C || (C = {}));`
   (`namespace::first_declaration`).
+- An exported destructuring declaration in a namespace is flattened, one assignment per
+  name: `N.a = o.a, _a = o.b, N.b = _a === void 0 ? 1 : _a, _b = k, N.c = o[_b]`. A value
+  read more than once is captured in a temporary unless it is an identifier; a non-literal
+  computed key is always captured; a defaulted value feeding a nested pattern gets a second
+  temporary; array rests are `v.slice(i)`, object rests `__rest(v, ["a", "0"])`
+  (`namespace::flatten`; tsc: tsc/internal/transformers/destructuring.go). Computed keys
+  before an object rest and empty object patterns keep the destructuring assignment.
+- Temporaries skip `_i` and `_n` (`Tx::temp_name`), and each namespace IIFE names its own
+  from `_a` again: a namespace frame's temporaries are released when it closes.
 
 ## Dependencies
 
@@ -396,7 +405,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   with `export =` or `import x = require()` drop it). Program emit sets
   `TransformOptions::preserve_module_marker = false` and matches tsc (record 0012, E6).
 - Cross-file const enums: the bundler does not pass imported enum values in yet.
-- Exported destructuring inside namespaces is not flattened (fixture `namespace/basic.ts`).
+- An object rest in an exported namespace destructuring at ES2018 and later: tsc 7.0.2
+  calls `__rest` without defining it (a ReferenceError); we define the helper.
 - Const enums of another file are inlined only through a program resolver
   (`EmitResolver::const_enum_value`, answered by the checker in `ts_r_emit`). Two gaps
   remain: with `preserveConstEnums` an import used only by inlined accesses is kept, and a

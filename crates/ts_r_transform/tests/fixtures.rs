@@ -12,10 +12,7 @@ mod support;
 ts_r_testing::cap_memory!();
 
 /// Fixtures tsc emits differently, with the reason. Keep this list short.
-const KNOWN_GAPS: &[(&str, &str)] = &[(
-    "namespace/basic.ts",
-    "exported destructuring inside a namespace is not flattened into temporaries",
-)];
+const KNOWN_GAPS: &[(&str, &str)] = &[];
 
 fn walk(p: &Path, out: &mut Vec<PathBuf>) {
     if p.is_dir() {

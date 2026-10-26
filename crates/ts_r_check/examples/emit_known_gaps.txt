@@ -5,49 +5,30 @@ compiler/bigintArbirtraryIdentifier.ts	badImport2.js	differs: import/export
 compiler/computedEnumMemberSyntacticallyString2.ts(isolatedmodules=false)	foo.js	differs: other
 compiler/computedEnumMemberSyntacticallyString2.ts(isolatedmodules=true)	foo.js	differs: other
 compiler/importElisionExportNonExportAndDefault.ts	main.js	differs: import/export
-compiler/isolatedDeclarationErrorsEnums.ts	isolatedDeclarationErrorsEnums.js	differs: other
-compiler/modulePreserveImportHelpers.ts	b.cjs	differs: CommonJS
 compiler/pathMappingBasedModuleResolution1_node.ts	f1.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file3.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file1.js	missing: not emitted
 compiler/reachabilityChecksNoCrash1.ts	reachabilityChecksNoCrash1.js	differs: lowering: async functions
-compiler/staticInitializersAndLegacyClassDecorators.ts	staticInitializersAndLegacyClassDecorators.js	differs: classes
-conformance/classes/members/instanceAndStaticMembers/typeOfThisInStaticMembers12.ts(target=es2022)	typeOfThisInStaticMembers12.js	differs: lowering: temporaries
-conformance/classes/members/instanceAndStaticMembers/typeOfThisInStaticMembers12.ts(target=esnext)	typeOfThisInStaticMembers12.js	differs: lowering: temporaries
-conformance/classes/propertyMemberDeclarations/autoAccessor10.ts	autoAccessor10.js	differs: other
-conformance/classes/propertyMemberDeclarations/autoAccessor5.ts(target=es2022)	autoAccessor5.js	differs: lowering: temporaries
 conformance/classes/propertyMemberDeclarations/autoAccessorDisallowedModifiers.ts(target=esnext)	autoAccessorDisallowedModifiers.js	differs: other
-conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_module.ts(module=es6)	arbitraryModuleNamespaceIdentifiers_module.js	differs: lowering: temporaries
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-no-as.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-type-as.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-type-as-as.js	differs: import/export
-conformance/es6/moduleExportsSystem/topLevelVarHoistingCommonJS.ts	topLevelVarHoistingCommonJS.js	differs: CommonJS
 conformance/es6/templates/taggedTemplatesWithTypeArguments2.ts	taggedTemplatesWithTypeArguments2.js	differs: other
 conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.3.ts	esDecorators-classDeclaration-classSuper.3.js	differs: lowering: temporaries
 conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.5.ts	esDecorators-classDeclaration-classSuper.5.js	differs: arrow functions
 conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.3.ts	esDecorators-classExpression-classSuper.3.js	differs: lowering: temporaries
 conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.5.ts	esDecorators-classExpression-classSuper.5.js	differs: arrow functions
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.10.ts	esDecorators-classExpression-namedEvaluation.10.js	differs: lowering: temporaries
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.2.ts	esDecorators-classExpression-namedEvaluation.2.js	differs: lowering: temporaries
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=false)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=true)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=es2022)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=esnext)	topLevelAwaitErrors.1.js	differs: classes
-conformance/externalModules/verbatimModuleSyntaxRestrictionsCJS.ts	main6.js	differs: missing code: CommonJS
 conformance/jsdoc/jsdocTypeTag.ts	a.js	missing: TS5055: would overwrite an input
 conformance/parser/ecmascript6/Iterators/parserForOfStatement22.ts	parserForOfStatement22.js	differs: other
 conformance/salsa/plainJSGrammarErrors.ts	plainJSGrammarErrors.js	missing: TSR2002: resolver answered Unknown
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsTopLevelOfModule.2.ts(module=commonjs)	usingDeclarationsTopLevelOfModule.2.js	differs: other
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsTopLevelOfModule.3.ts(module=commonjs)	usingDeclarationsTopLevelOfModule.3.js	differs: CommonJS
-conformance/types/uniqueSymbol/uniqueSymbolsPropertyNames.ts	uniqueSymbolsPropertyNames.js	differs: other
 tsc7/compiler/anonymousClassDecoratorEs2022.ts	anonymousClassDecoratorEs2022.js	differs: arrow functions
 tsc7/compiler/constEnumOnlyModuleImportAliasEmit.ts	sensmap.js	differs: const enum inlining
-tsc7/compiler/disallowUnerasableAssertion.ts	disallowUnerasableAssertion.js	differs: import/export
-tsc7/compiler/importDeferCallCommonJS.ts	main.js	differs: CommonJS
 tsc7/compiler/jsxNestedIndentation.js	jsxNestedIndentation.js	missing: TS5055: would overwrite an input
-tsc7/compiler/legacyDecoratorsEnumAccessSameNameAsClass.ts	legacyDecoratorsEnumAccessSameNameAsClass.js	differs: classes
-tsc7/compiler/namespaceExportDestructuringReferences.ts	namespaceExportDestructuringReferences.js	differs: lowering: temporaries
 tsc7/compiler/panicForInEmptyDeclarationList.ts	panicForInEmptyDeclarationList.js	differs: other
 tsc7/compiler/typeOnlyExportImportAliasElidesNamespaceImport.ts	b.js	differs: import/export

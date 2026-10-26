@@ -456,8 +456,14 @@ impl<'a> Tx<'a> {
     pub fn temp_name(&mut self) -> Atom {
         let mut i = 0usize;
         loop {
+            // tsc's temporaries skip `_i` and `_n` (observed: `_h, _j, ..., _m, _o`).
             let cand = if i < 26 {
-                format!("_{}", (b'a' + i as u8) as char)
+                let c = (b'a' + i as u8) as char;
+                if c == 'i' || c == 'n' {
+                    i += 1;
+                    continue;
+                }
+                format!("_{c}")
             } else {
                 format!("_{}", i - 26)
             };
