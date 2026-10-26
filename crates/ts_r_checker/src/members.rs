@@ -2289,7 +2289,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                             };
                             let mut flags = SymbolFlags::PROPERTY;
                             if let Some(i) = init {
-                                ty = self.binding_default_type(Loc::new(l.file, i));
+                                ty = self.pattern_default_type(l, i);
                                 ty = self.add_optionality(ty);
                                 flags |= SymbolFlags::OPTIONAL;
                             }
@@ -2330,7 +2330,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         },
                         Node::AssignPattern { right, .. } => crate::declared::TupleEl {
                             ty: {
-                                let t = self.binding_default_type(Loc::new(l.file, right));
+                                let t = self.pattern_default_type(l, right);
                                 self.add_optionality(t)
                             },
                             kind: TupleElement::OPTIONAL,
@@ -2460,6 +2460,78 @@ impl<'c, 'a> Ck<'c, 'a> {
             ResolvedMembers::new(props, Vec::new(), Vec::new(), index),
             TypeTraits::NONE,
         )
+    }
+
+    /// The type the default `init` of an element of `pattern` gives it in the pattern's
+    /// implied type: `any` when the default names a binding of the same pattern outside
+    /// the functions in it (`{ fn1 = (x: number) => 0, fn2 = fn1 }`), since that binding's
+    /// type needs the pattern's (a cycle in tsc: getTypeFromBindingElement reads the
+    /// sibling's type, which is still being resolved; intraBindingPatternReferences).
+    fn pattern_default_type(&mut self, pattern: Loc, init: NodeId) -> TypeId {
+        if self.names_own_pattern(pattern, init) {
+            return TypeId::ANY;
+        }
+        self.binding_default_type(Loc::new(pattern.file, init))
+    }
+
+    /// `init` names, outside its functions and classes, a binding declared in the
+    /// outermost binding pattern around `pattern`.
+    fn names_own_pattern(&self, pattern: Loc, init: NodeId) -> bool {
+        let file = pattern.file;
+        let ast = self.ast(file);
+        let parents = self.c.file(file).parents();
+        let mut root = pattern.node;
+        for _ in 0..256 {
+            let Some(p) = parents.parent(root) else {
+                break;
+            };
+            if !matches!(
+                ast.node(p),
+                Node::ObjectPattern { .. }
+                    | Node::ArrayPattern { .. }
+                    | Node::BindingProperty { .. }
+                    | Node::AssignPattern { .. }
+                    | Node::Rest { .. }
+            ) {
+                break;
+            }
+            root = p;
+        }
+        let span = ast.span(root);
+        let mut stack = vec![init];
+        let mut seen = 0u32;
+        while let Some(c) = stack.pop() {
+            seen += 1;
+            if seen > 10_000 {
+                return false;
+            }
+            match *ast.node(c) {
+                Node::FunctionExpr { .. }
+                | Node::Arrow { .. }
+                | Node::MethodDef { .. }
+                | Node::ClassExpr { .. } => {}
+                Node::Ident { .. } => {
+                    if let Some(s) = self.c.resolve_ident(Loc::new(file, c), meaning::VALUE)
+                        && let Some(d) = self.c.first_decl(s)
+                        && d.file == file
+                    {
+                        let ds = ast.span(d.node);
+                        if ds.start >= span.start && ds.end <= span.end {
+                            return true;
+                        }
+                    }
+                }
+                Node::Member { obj, .. } => stack.push(obj),
+                Node::Property { key, value, .. } => {
+                    stack.push(value);
+                    if matches!(ast.node(key), Node::ComputedKey { .. }) {
+                        stack.push(key);
+                    }
+                }
+                _ => ast.for_each_child(c, |x| stack.push(x)),
+            }
+        }
+        false
     }
 
     /// The type a binding element's default gives it in an implied pattern type.

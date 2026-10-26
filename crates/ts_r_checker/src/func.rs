@@ -87,6 +87,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     {
                         return Some(self.type_from_binding_pattern(Loc::new(f, name)));
                     }
+                    // An object pattern with defaults types an object literal initializer
+                    // (`const { f = (x: number) => 0 } = { f: x => x }` gives `x` `number`).
+                    if let Node::ObjectPattern { props } = *ast.node(name)
+                        && matches!(
+                            ast.node(crate::nodes::skip_parens(ast, i)),
+                            Node::ObjectLit { .. }
+                        )
+                        && ast.list(props).iter().any(|&p| {
+                            matches!(ast.node(p), Node::BindingProperty { init: Some(_), .. })
+                        })
+                    {
+                        return Some(self.type_from_binding_pattern(Loc::new(f, name)));
+                    }
                     None
                 }
             },
