@@ -353,7 +353,7 @@ mod unicorn_no_async_iterator_callback;
 mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_expression_member;
 mod unicorn_no_await_in_promise_methods;
-mod unicorn_no_boolean_sort_comparator;
+mod unicorn_no_blob_to_file;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_canvas_to_image;
 mod unicorn_no_chained_comparison;
@@ -490,6 +490,7 @@ mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_boolean_return;
 mod unicorn_prefer_class_fields;
+mod unicorn_prefer_classlist_toggle;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_combined_guards;
 mod unicorn_prefer_continue;
@@ -983,7 +984,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_expression_member::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
-    &unicorn_no_boolean_sort_comparator::RULE,
+    &unicorn_no_blob_to_file::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
     &unicorn_no_confusing_array_splice::RULE,
@@ -1102,8 +1103,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_boolean_return::RULE,
     &unicorn_prefer_class_fields::RULE,
-    &unicorn_prefer_combined_guards::RULE,
-    &unicorn_prefer_continue::RULE,
+    &unicorn_prefer_classlist_toggle::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_direct_iteration::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,

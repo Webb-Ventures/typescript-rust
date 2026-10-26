@@ -1728,8 +1728,23 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
 - **prefer-modern-math-apis**: `Math.log(x) * Math.LOG10E`-style products and quotients and
   `Math.sqrt` of a `+` tree of squares. Fixed only when the result provably can't change
   (the value is unused, or the static operands make both forms exact), else suggested.
+- **prefer-classlist-toggle**: an `if`/`else` or `?:` choosing between `classList.add(n)`
+  and `classList.remove(n)` on the same reference, and `classList[c ? "add" : "remove"](n)`.
+  The condition is negated when the true branch removes and dropped when it is a matching
+  `classList.contains(n)`; a fix for statements, a suggestion inside expressions, nothing
+  when a comment would be lost.
+- **no-blob-to-file**: a single-use `const file = new File([blob], "name")` that only
+  reaches `URL.createObjectURL(file)` or a `new FormData()` constant's `append`/`set`. The
+  suggestion removes the declaration and passes the blob (plus the name for a two-argument
+  `append`); it is withheld when a comment sits in, on, or on the line above the
+  declaration.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
 `utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
-`fix/replace-node-or-token-and-spaces-before.js`, `fix/remove-parentheses.js`.
+`fix/replace-node-or-token-and-spaces-before.js`, `fix/remove-parentheses.js`,
+`prefer-classlist-toggle.js`, `utils/get-negated-expression-text.js`,
+`utils/should-add-parentheses-to-unary-expression.js`, `utils/single-statement.js`,
+`fix/replace-member-expression-property.js`, `ast/is-expression-statement.js`,
+`ast/literal.js`, `no-blob-to-file.js`, `utils/comments.js`, `fix/append-argument.js`,
+`fix/remove-statement.js`.

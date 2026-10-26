@@ -314,7 +314,7 @@ unicorn/no-async-iterator-callback 144/144
 unicorn/no-async-promise-finally 39/39
 unicorn/no-await-expression-member 72/72
 unicorn/no-await-in-promise-methods 111/111
-unicorn/no-boolean-sort-comparator 183/183
+unicorn/no-blob-to-file 74/74
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-canvas-to-image 41/41
 unicorn/no-chained-comparison 126/126
@@ -433,6 +433,7 @@ unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-boolean-return 71/71
 unicorn/prefer-class-fields 71/71
+unicorn/prefer-classlist-toggle 122/122
 unicorn/prefer-code-point 58/58
 unicorn/prefer-date-now 61/61
 unicorn/prefer-default-parameters 538/538
