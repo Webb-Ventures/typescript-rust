@@ -477,6 +477,20 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             targets.push(RawTarget::External(r.spec.clone()));
             continue;
         }
+        // `--inject` without `--bundle`: only the injected files are bundled (the imports
+        // `inject.rs` adds name them by absolute path); every other import stays as written.
+        if ctx.prep.opts.bundle_only_injected
+            && !r.kind.is_css()
+            && !ctx.prep.inject().is_injected(&r.spec)
+        {
+            targets.push(RawTarget::External(match r.kind {
+                RecordKind::Import | RecordKind::ReExport => {
+                    external_key(&r.spec, r.phase, &r.attrs)
+                }
+                _ => r.spec.clone(),
+            }));
+            continue;
+        }
         let res = if p.starts_with(DISABLED_PREFIX) {
             Resolution::NotFound(String::new())
         } else if is_data && is_relative(&r.spec) {

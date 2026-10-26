@@ -2579,3 +2579,88 @@ fn mangle_props_across_modules() {
     bad.mangle_props = Some("(".into());
     assert!(ts_r_bundler::BuildContext::new(bad, std::sync::Arc::new(fs)).is_err());
 }
+
+/// `--inject`: free names (and dotted keys) become imports of the injected file, which runs
+/// first; a CommonJS file using one stays CommonJS; writes are errors; a missing file is an
+/// error; without bundling only the injected files are inlined.
+#[test]
+fn inject_files() {
+    let shim = "export let obj = { v: 1 }\nconsole.log('shim')\nlet p = 'proc'\nexport { p as process, p as 'a.b' }\n";
+    let main = "import './side.js'\nconsole.log(obj.v, a.b, require('./cjs.js').x)\n";
+    let fs = project(&[
+        ("a.js", main),
+        ("side.js", "console.log('side')\n"),
+        ("cjs.js", "'use strict'\nexports.x = process\n"),
+        ("shim.js", shim),
+    ]);
+    let mut o = opts(&["a.js"]);
+    o.inject = vec!["shim.js".into()];
+    let r = run_build(&fs, o.clone());
+    let text = file(&r, "/proj/out/a.js");
+    assert!(
+        text.contains("require_cjs") && !text.contains("= process"),
+        "{text}"
+    );
+    if have_node() {
+        assert_eq!(
+            run_node("inject", &r, "a.js"),
+            "shim\nside\n1 proc proc\n",
+            "{text}"
+        );
+    }
+    let fs2 = project(&[("a.js", "obj = 2\n"), ("shim.js", shim)]);
+    let ctx = ts_r_bundler::BuildContext::new(o.clone(), Arc::new(fs2)).expect("options");
+    let msgs: Vec<String> = ctx.build().messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        msgs.iter().any(|m| m.contains("Cannot assign to \"obj\"")),
+        "{msgs:?}"
+    );
+    let mut missing = o.clone();
+    missing.inject = vec!["nope.js".into()];
+    let ctx = ts_r_bundler::BuildContext::new(missing, Arc::new(fs.clone())).expect("options");
+    let msgs: Vec<String> = ctx.build().messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Could not resolve \"nope.js\"")),
+        "{msgs:?}"
+    );
+    let fs3 = project(&[
+        ("a.js", "import x from 'pkg'\nconsole.log(obj.v, x)\n"),
+        ("shim.js", shim),
+    ]);
+    let mut nb = o;
+    nb.bundle = false;
+    nb.format = None;
+    let r = run_build(&fs3, nb);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(
+        text.contains("from \"pkg\"") || text.contains("from 'pkg'"),
+        "{text}"
+    );
+    assert!(
+        text.contains("console.log('shim')") || text.contains("console.log(\"shim\")"),
+        "{text}"
+    );
+}
+
+/// CommonJS output requires an external where its import runs: after the modules before
+/// it, before the dependencies the importer loads next.
+#[test]
+fn external_require_order() {
+    let fs = project(&[
+        ("a.js", "import './b.js'\nimport 'ext'\nimport './c.js'\n"),
+        ("b.js", "console.log('b')\n"),
+        ("c.js", "console.log('c')\n"),
+    ]);
+    let mut o = opts(&["a.js"]);
+    o.format = Some(Format::Cjs);
+    o.external = vec!["ext".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    let (b, ext, c) = (
+        text.find("'b'").expect("b"),
+        text.find("require(\"ext\")").expect("ext"),
+        text.find("'c'").expect("c"),
+    );
+    assert!(b < ext && ext < c, "{text}");
+}

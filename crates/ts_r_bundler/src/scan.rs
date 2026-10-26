@@ -179,7 +179,7 @@ pub fn scan(p: &Prepared, annotations: bool) -> ModuleMeta {
         match node {
             Node::ImportDecl { type_only, .. } => {
                 part.kind = PartKind::Import;
-                if !type_only {
+                if !type_only && !p.injected.contains(&s) {
                     m.has_esm_syntax = true;
                 }
                 if let Some(&r) = stmt_records.get(&s.raw()) {

@@ -11,6 +11,7 @@ pub mod fscache;
 pub mod graph;
 #[cfg(feature = "hmr")]
 pub mod hmr;
+pub mod inject;
 pub mod link;
 pub mod lowering;
 pub mod meta;

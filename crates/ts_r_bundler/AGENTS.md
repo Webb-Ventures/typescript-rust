@@ -43,7 +43,8 @@ read already bundled by `ts_r_hmr::css`, so `BuildOptions::css_prebundled` keeps
 `order.rs` (`@import` expansion, duplicates, layers, one stylesheet per chunk) and
 `link.rs` (final local names, `composes` class lists, reference errors);
 `props.rs` compiles `--mangle-props` / `--reserve-props` (the names themselves are found and
-rewritten by `ts_r_minify::props`); `data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
+rewritten by `ts_r_minify::props`); `inject.rs` is `--inject` (exports of the injected files
+replace free names, before preparation's scope pass); `data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
 expression builder for generated code; `pool.rs` is the std-thread pool.
 
 ## Invariants
@@ -124,7 +125,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   own module (key `path\0with:type`, loader from the attribute; `bytes` is `Loader::Bytes`).
   Binary loaders use `FileSystem::read_bytes`, preserving invalid UTF-8 and UTF-16 BOMs.
   External imports are keyed `path\0phase\0attrs` (`import defer`/`import source` and
-  attributes are kept), and keep source evaluation order (`plan::external_order`).
+  attributes are kept), and keep source evaluation order (`plan::external_order`). In CommonJS
+  and IIFE output an external first loaded by an unwrapped module is required where that
+  import runs (before the code of the next module to finish in evaluation order), as esbuild
+  does; the rest are required at the top of the chunk.
 - **Module kinds** (`link::compute_kinds`): a JS file with no ESM syntax that something
   imports a binding from is CommonJS. Resolving a missing export never includes its file.
   A re-export cycle is an error (`Detected cycle while resolving import "x"`). Top-level
@@ -215,6 +219,15 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   as esbuild links each entry point alone. The patterns are part of the preparation cache
   key. Names follow esbuild's rules where observed, including what it deliberately breaks
   (an enum member read `E.x_` is mangled, the enum's own strings are not).
+- **`--inject`** (`inject.rs`): every export of an injected file (dotted string names like
+  `"a.b"` and `import.meta.x` included) replaces the same free name or member chain in every
+  other module, after `define` (a define with a value wins; one that names an injected export
+  forwards to it). Each entry imports every injected file first, in the order given; the
+  added imports don't make a CommonJS file an ES module (`Prepared::injected`). Writing to
+  an injected name and a missing file are errors. Without `--bundle` the build bundles only
+  the injected files (`BuildOptions::bundle_only_injected`, tree shaking off, ESM by
+  default); every other import stays as written. The injected files and their exports are
+  part of each file's preparation cache key.
 - Never panic on user input; every problem is a `Message` (esbuild-style text).
 - At most `TS_R_THREADS` worker threads (default: cores, capped at 8). While a fresh graph
   loads, one more thread reads module files ahead of the workers (`CachedFs::read_ahead`)

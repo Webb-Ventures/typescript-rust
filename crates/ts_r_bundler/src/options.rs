@@ -197,6 +197,10 @@ pub struct BuildOptions {
     /// `--inject:file`: files whose exports replace the matching free names of every module
     /// and which run before the entry points.
     pub inject: Vec<String>,
+    /// Not an esbuild option: set by `BuildContext::new` for `--inject` without `--bundle`.
+    /// The build bundles only the injected files into each entry, as esbuild does; every
+    /// other import stays as written.
+    pub bundle_only_injected: bool,
     pub sourcemap: SourceMapMode,
     pub sources_content: bool,
     pub splitting: bool,
@@ -297,6 +301,7 @@ impl Default for BuildOptions {
             reserve_props: None,
             mangle_quoted: false,
             inject: Vec::new(),
+            bundle_only_injected: false,
             alias: Vec::new(),
             metafile: false,
             loaders: FxHashMap::default(),
@@ -461,9 +466,6 @@ impl BuildOptions {
         }
         if self.splitting && self.outdir.is_none() && self.write {
             return Err("splitting requires \"outdir\"".into());
-        }
-        if !self.inject.is_empty() {
-            return Err("\"inject\" is not supported yet".into());
         }
         if self.entry_points.len() > 1 && self.outfile.is_some() {
             return Err("must use \"outdir\" when there are multiple input files".into());

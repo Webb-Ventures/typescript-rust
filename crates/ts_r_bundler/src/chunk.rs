@@ -345,17 +345,22 @@ pub fn assemble(
         .reserve(frags.iter().map(|(_, f)| f.code.len()).sum::<usize>() + 64);
     let mut printed = frags.iter().zip(measured).peekable();
     for &cm in &c.modules {
-        if let Some(stmts) = c.before.get(&cm) {
-            let mut last = None;
-            for (importer, s) in stmts {
-                if !compact && last != Some(*importer) {
-                    out.line(&format!("// {}", graph.modules[*importer as usize].pretty));
-                }
-                last = Some(*importer);
+        // Statements of other modules first; the module's own (its external requires) go
+        // under its header.
+        let before = c.before.get(&cm).map_or(&[][..], Vec::as_slice);
+        let mut last = None;
+        for (importer, s) in before.iter().filter(|(i, _)| *i != cm) {
+            if !compact && last != Some(*importer) {
+                out.line(&format!("// {}", graph.modules[*importer as usize].pretty));
+            }
+            last = Some(*importer);
+            out.stmt(s);
+        }
+        let own = || before.iter().filter(|(i, _)| *i == cm).map(|(_, s)| s);
+        if printed.peek().is_none_or(|((m, _), _)| *m != cm) {
+            for s in own() {
                 out.stmt(s);
             }
-        }
-        if printed.peek().is_none_or(|((m, _), _)| *m != cm) {
             continue;
         }
         let Some(((m, _), (code, size, fmap))) = printed.next() else {
@@ -364,6 +369,9 @@ pub fn assemble(
         let module = &graph.modules[*m as usize];
         if !compact {
             out.line(&format!("// {}", module.pretty));
+        }
+        for s in own() {
+            out.stmt(s);
         }
         if let (Some(cm), Some((enc, rel, content))) = (map.as_mut(), fmap) {
             let si = cm.add_source_json(rel, content);

@@ -724,9 +724,40 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         // runs before the rest of the importer).
         {
             let order = external_order(g, out.chunks[ci].entry, &mods);
-            let rank = |p: &str| order.iter().position(|o| *o == p).unwrap_or(usize::MAX);
+            let rank = |p: &str| order.iter().position(|o| o.path == p).unwrap_or(usize::MAX);
             ext_requires.sort_by_key(|(p, _)| rank(p));
             ext_imports.sort_by_key(|x| rank(&x.path));
+            // CommonJS and IIFE output: an external that an unwrapped module of this chunk
+            // loads first is required where that import runs, as esbuild does: before the
+            // code of the next module to finish in evaluation order (the importer's own, or
+            // a dependency it imports next). The rest load at the top of the chunk.
+            let c = &mut out.chunks[ci];
+            ext_requires.retain(|(path, var)| {
+                let Some(at) = order.iter().find(|o| o.path == path) else {
+                    return true;
+                };
+                if l.wrap[at.importer as usize] != Wrap::None
+                    || !mods.contains(&at.importer)
+                    || !mods.contains(&at.before)
+                {
+                    return true;
+                }
+                let path = crate::graph::split_external(path).0;
+                let call = format!("require({})", Expr::Str(path.to_owned()).to_text(true));
+                let text = if var.is_empty() {
+                    format!("{call};")
+                } else {
+                    format!(
+                        "var {var}{sp}={sp}{}({call});",
+                        p.helper_names[Helper::ToEsm as usize]
+                    )
+                };
+                c.before
+                    .entry(at.before)
+                    .or_default()
+                    .push((at.importer, text));
+                false
+            });
         }
         // CSS modules reachable from this chunk.
         let c = &mut out.chunks[ci];
@@ -1666,10 +1697,16 @@ pub fn relative_import(from: &str, to: &str) -> String {
 
 /// External import keys in evaluation order, walking from the chunk's entry and then its
 /// other modules. Iterative so deep import chains cannot overflow the stack.
-fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) -> Vec<&'g str> {
-    let mut order: Vec<&'g str> = Vec::new();
+fn external_order<'g>(
+    g: &'g Graph,
+    entry: Option<ModuleId>,
+    mods: &[ModuleId],
+) -> Vec<ExternalAt<'g>> {
+    let mut order: Vec<ExternalAt<'g>> = Vec::new();
     let mut seen: FxHashSet<&'g str> = FxHashSet::default();
     let mut visited = vec![false; g.modules.len()];
+    // Externals waiting for the next module whose code ends (post-order).
+    let mut pending = 0;
     for root in entry.into_iter().chain(mods.iter().copied()) {
         if visited[root as usize] {
             continue;
@@ -1681,6 +1718,10 @@ fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) 
             let (m, i) = *top;
             let module = &g.modules[m as usize];
             if i >= module.targets.len() {
+                for e in &mut order[pending..] {
+                    e.before = m;
+                }
+                pending = order.len();
                 stack.pop();
                 continue;
             }
@@ -1693,7 +1734,11 @@ fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) 
             match &module.targets[i] {
                 Target::External(x) => {
                     if seen.insert(x.as_str()) {
-                        order.push(x.as_str());
+                        order.push(ExternalAt {
+                            path: x.as_str(),
+                            importer: m,
+                            before: m,
+                        });
                     }
                 }
                 Target::Module(t) if !dynamic && !visited[*t as usize] => {
@@ -1705,4 +1750,12 @@ fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) 
         }
     }
     order
+}
+
+/// An external in evaluation order: the module that loads it first, and the module before
+/// whose code it loads (the next one whose code ends, in evaluation order).
+struct ExternalAt<'g> {
+    path: &'g str,
+    importer: ModuleId,
+    before: ModuleId,
 }

@@ -382,7 +382,11 @@ function flagsFor(c) {
         if (v?.ident === '&defines' && c.defines?.items) list = c.defines.items.map((it) => [null, it.value]);
         else if (v?.type === '&config.ProcessedDefines') {
           const pd = asObject(v);
-          if (Object.keys(pd).every((x) => x === 'IdentifierDefines')) list = pd.IdentifierDefines.items.map((it) => [it.key, it.value]);
+          // DotDefines are keyed by the last part, each entry naming its own `KeyParts`.
+          if (Object.keys(pd).every((x) => x === 'IdentifierDefines' || x === 'DotDefines')) {
+            list = (pd.IdentifierDefines?.items ?? []).map((it) => [it.key, it.value]);
+            for (const it of pd.DotDefines?.items ?? []) list.push(...asList(it.value).map((d) => [null, d]));
+          }
         }
         const fl = list?.map(([key, d]) => defineFlag(key, d));
         if (!fl || fl.some((x) => x === null)) { why.push(k); break; }
@@ -391,6 +395,7 @@ function flagsFor(c) {
       }
       // The input root is only known per tool run: buildAndRun fills it in.
       case 'TSConfigPath': flags.push(`--tsconfig=\0IN${v}`); break;
+      case 'InjectPaths': for (const f of asList(v)) flags.push(`--inject:\0IN${f}`); break;
       case 'DropLabels': flags.push(`--drop-labels=${asList(v).join(',')}`); break;
       // Absolute replacements are paths in the test's file system.
       case 'PackageAliases':
@@ -508,7 +513,9 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
     const r = await run(process.execPath, [o], path.dirname(o), 10000);
     runs.push({
       file: path.relative(outRoot, o),
-      stdout: normalizeHashes(r.stdout.split(outRoot).join('<out>').split(inRoot).join('<in>')),
+      // Printing `process` (UseStrictDirectiveBundleIssue1837) shows the process ids.
+      stdout: normalizeHashes(r.stdout.split(outRoot).join('<out>').split(inRoot).join('<in>'))
+        .replace(/^(\s+p?pid): \d+,$/gm, '$1: <pid>,'),
       error: r.code === 0 ? '' : errorLine(r.stderr, [outRoot, inRoot]) || `exit ${r.code}${r.signal ? ` ${r.signal}` : ''}`,
       ...(mangled ? { unmangled: unmangled(fs.readFileSync(o, 'utf8'), mangled) } : {}),
     });

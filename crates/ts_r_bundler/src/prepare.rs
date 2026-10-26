@@ -660,6 +660,8 @@ pub struct PrepareContext {
     pub resolver: Arc<Resolver>,
     /// `--mangle-props` (checked by `BuildContext::new`).
     pub props: Option<crate::props::PropMatcher>,
+    /// `--inject`: set at the start of each build (`BuildContext::build`).
+    inject: RwLock<Arc<crate::inject::Inject>>,
     /// tsconfig path (or "") -> base transform options and their [`Self::cache_key`].
     ts: RwLock<FxHashMap<String, OptionsEntry>>,
 }
@@ -673,6 +675,7 @@ impl PrepareContext {
             opts,
             defines,
             resolver,
+            inject: RwLock::default(),
             ts: RwLock::default(),
         }
     }
@@ -780,7 +783,28 @@ impl PrepareContext {
 
     /// A stable string describing everything that affects preparation of `path`.
     pub fn cache_key(&self, path: &str) -> Arc<str> {
-        self.options_entry(path).1
+        let base = self.options_entry(path).1;
+        let inject = self.inject();
+        if inject.is_empty() {
+            return base;
+        }
+        let role = if inject.is_injected(path) {
+            "injected"
+        } else if inject.entries.contains(path) {
+            "entry"
+        } else {
+            "module"
+        };
+        Arc::from(format!("{base}|inject:{role}\n{}", inject.key))
+    }
+
+    /// The `--inject` settings of the current build.
+    pub fn inject(&self) -> Arc<crate::inject::Inject> {
+        Arc::clone(&self.inject.read().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    pub fn set_inject(&self, inject: crate::inject::Inject) {
+        *self.inject.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(inject);
     }
 }
 
@@ -820,6 +844,9 @@ pub struct Prepared {
     pub default_sym: Option<SymbolId>,
     pub messages: Vec<Message>,
     pub strict: bool,
+    /// `--inject`: the import statements added for injected names, which do not make the
+    /// file an ES module (`inject.rs`).
+    pub injected: Vec<NodeId>,
 }
 
 fn source_kind(path: &str, loader: Loader) -> SourceKind {
@@ -1149,7 +1176,9 @@ pub fn prepare_with(
     let mut scopes = Scopes::analyze(&ast, strict);
     let mut dirty = false;
     if !ctx.defines.is_empty()
-        && ctx.defines.roots.iter().any(|r| src.contains(r.as_str()))
+        // The JSX transform writes factory names (`React.createElement`) that the source
+        // may not contain.
+        && (first_jsx.is_some() || ctx.defines.roots.iter().any(|r| src.contains(r.as_str())))
         && apply_defines(&mut ast, &scopes, &ctx.defines)
     {
         scopes = Scopes::analyze(&ast, strict);
@@ -1164,6 +1193,22 @@ pub fn prepare_with(
     }
     if dirty {
         scopes = Scopes::analyze(&ast, strict);
+    }
+    let mut injected = Vec::new();
+    let inject = ctx.inject();
+    if !inject.is_empty() && !inject.is_injected(path) {
+        let is_entry = inject.entries.contains(path);
+        let mut errors = Vec::new();
+        injected = crate::inject::apply(&mut ast, &scopes, &inject, is_entry, &mut |at, text| {
+            errors.push((at, text));
+        });
+        for (at, text) in errors {
+            let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+            messages.push(lines.message(Severity::Error, display, at, text));
+        }
+        if !injected.is_empty() {
+            scopes = Scopes::analyze(&ast, strict);
+        }
     }
     if ctx.opts.bundle || ctx.opts.minify_syntax {
         constant_assignments(&ast, &scopes, ctx.opts.bundle, |at, text| {
@@ -1188,6 +1233,7 @@ pub fn prepare_with(
         default_sym,
         messages,
         strict,
+        injected,
     }
 }
 
