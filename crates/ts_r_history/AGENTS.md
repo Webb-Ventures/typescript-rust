@@ -111,7 +111,8 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   program's paths, plus TS2688 for a `/// <reference types>` that resolves nowhere
   (`type_reference_diagnostics`: the full path takes the names from
   `ProgramFiles::missing_type_references`, the fast path from the saved references without
-  a target), refreshing them when the source or its resolutions change.
+  a target), refreshing them when the source or its resolutions change. A blocking syntax
+  error drops them, as in `check_program` (tsc reports only the syntax errors then).
   Link diagnostics go through `driver::link_diagnostic_reported`, as in `check_program`:
   a checked file's, unless `@ts-ignore` / `@ts-expect-error` governs the line
   (@colors/colors). Lib-side ones stay out (ts-r-check prints lib diagnostics without a path).

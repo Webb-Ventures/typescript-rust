@@ -215,6 +215,14 @@ fn check_program_impl<'a>(
         }
         syntax.extend(invalid.into_iter().map(|d| d.with_file(FileId(i as u32))));
     }
+    // Blocking syntax errors: only they are reported, not the program diagnostics below
+    // either (tsc 7.0.2: a missing `/// <reference path|types>` target elsewhere is not
+    // reported next to a syntax error).
+    if !through_syntax_errors && broken.iter().any(|&b| b) {
+        return CheckResult {
+            diagnostics: sort_and_dedup(program, syntax),
+        };
+    }
     // Program diagnostics (`/// <reference path>` targets) come with the syntax ones.
     let paths: rustc_hash::FxHashSet<&str> =
         program.files.iter().map(|f| f.path.as_str()).collect();
@@ -235,11 +243,6 @@ fn check_program_impl<'a>(
                 .into_iter()
                 .map(|d| d.with_file(FileId(i as u32))),
         );
-    }
-    if !through_syntax_errors && broken.iter().any(|&b| b) {
-        return CheckResult {
-            diagnostics: sort_and_dedup(program, syntax),
-        };
     }
     // Files with syntax errors get no checker grammar errors (TS1xxx) from the checker
     // either: tsc's checker reports those only in a file without parse errors.

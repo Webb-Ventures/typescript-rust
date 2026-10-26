@@ -294,13 +294,15 @@ impl History {
                     .collect()
             })
             .collect();
-        let mut syntax = syntax;
-        syntax.extend(references.iter().flatten().cloned());
         if blocking {
-            // Nothing is checked; the history stays as it was (it describes texts by hash).
+            // Nothing is checked, and only the syntax errors are reported (not the reference
+            // diagnostics), as `check_program`; the history stays as it was (it describes
+            // texts by hash).
             stats.blocked = true;
             return (ts_r_checker::sort_and_dedup(program, syntax), stats);
         }
+        let mut syntax = syntax;
+        syntax.extend(references.iter().flatten().cloned());
         let key = program_key(program);
         if key != self.key {
             self.files.clear();

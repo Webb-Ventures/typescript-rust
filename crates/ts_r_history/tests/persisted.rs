@@ -540,8 +540,9 @@ fn wildcard_types_survive_edits_and_track_package_changes() {
 /// Program diagnostics `check_program` reports outside the checker (TS1084 for a malformed
 /// reference directive, TS2688 for a `/// <reference types>` that resolves nowhere) and link
 /// diagnostics under `@ts-ignore` come out of the history the same, cold, warm and after
-/// edits (the fast path included). tsc 7.0.2: TS1084 at (1,1), TS2688 at (1,23), and the
-/// ignored `bold` duplicate of the global `String` only on the lib side (@colors/colors).
+/// edits (the fast path included). tsc 7.0.2: TS1084 at (1,1), TS2688 at (1,23), only the
+/// TS1109 of a parse error next to missing references, and the ignored `bold` duplicate of
+/// the global `String` only on the lib side (@colors/colors).
 #[test]
 fn reference_directives_and_ignored_link_errors_match_check_program() {
     let Some(libs) = LibStore::locate() else {
@@ -551,7 +552,7 @@ fn reference_directives_and_ignored_link_errors_match_check_program() {
     let ignored = "export {};\ndeclare global {\n  interface String {\n    // @ts-ignore\n    bold: string;\n  }\n}\nconst n: number = \"s\";\n";
     // Name, texts in turn, and (code, offset) of main.ts's diagnostics with the case.
     type Case<'a> = (&'a str, &'a [&'a str], &'a [(u32, u32)]);
-    let cases: [Case; 3] = [
+    let cases: [Case; 4] = [
         (
             "missing-quote",
             &[
@@ -571,6 +572,17 @@ fn reference_directives_and_ignored_link_errors_match_check_program() {
                 "/// <reference types=\"nope\" />\nexport const x = 1;\n",
             ],
             &[(2688, 22)],
+        ),
+        (
+            // A parse error drops the reference diagnostics: TS1109 at (3,18) only.
+            "parse-error",
+            &[
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = ;\n",
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = ;\n// edit\n",
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = 1;\n",
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = ;\n",
+            ],
+            &[(1109, 81)],
         ),
         (
             "ignored-merge",

@@ -1200,7 +1200,8 @@ fn regression_root_dir_uses_history_and_keeps_ts6059() {
 /// What the plain driver reports outside the checker comes out of the history too: TS1084 for
 /// a malformed `/// <reference />` (it blocks the check), TS2688 at a `/// <reference types>`
 /// that resolves nowhere, and no link diagnostic under `@ts-ignore` (the global `String`'s
-/// `bold` merge, @colors/colors). Cold, warm and after an edit; tsc 7.0.2's output, exit 1.
+/// `bold` merge, @colors/colors). A blocking syntax error drops the reference diagnostics
+/// too. Cold, warm and after an edit; tsc 7.0.2's output, exit 1.
 #[test]
 fn regression_reference_directives_and_ignored_link_errors_on_the_history_path() {
     let lib = "interface Array<T> {}\ninterface Boolean {}\ninterface Function {}\ninterface CallableFunction {}\ninterface NewableFunction {}\ninterface IArguments {}\ninterface Number {}\ninterface Object {}\ninterface RegExp {}\ninterface String {\n    bold(): string;\n}\n";
@@ -1247,13 +1248,8 @@ fn regression_reference_directives_and_ignored_link_errors_on_the_history_path()
         std::fs::write(dir.join(f), format!("{text}// edited\n")).unwrap();
         assert_eq!(with_history(), (tsc.to_owned(), 1), "{f} edited");
     }
-    // A malformed directive is a syntax error: nothing else is reported (tsc 7.0.2). Alone,
-    // since the driver keeps other files' program diagnostics next to syntax errors.
-    std::fs::write(
-        dir.join("tsconfig.json"),
-        config.replace(r#""b.ts","c.ts","lib.d.ts""#, r#""lib.d.ts""#),
-    )
-    .unwrap();
+    // A malformed directive is a syntax error: nothing else is reported, not even b.ts's
+    // TS2688 (tsc 7.0.2).
     std::fs::write(
         dir.join("a.ts"),
         "/// <reference path=\"missingquote.ts />\nexport const x: number = \"s\";\n",
@@ -1263,5 +1259,24 @@ fn regression_reference_directives_and_ignored_link_errors_on_the_history_path()
     assert_eq!(no_history(), (ts1084.to_owned(), 1), "no history");
     assert_eq!(with_history(), (ts1084.to_owned(), 1), "malformed, edited");
     assert_eq!(with_history(), (ts1084.to_owned(), 1), "malformed, warm");
+    // Nor next to a parse error: no TS2688 or TS6053 (a missing `/// <reference path>`).
+    std::fs::write(dir.join("a.ts"), "export const x = ;\n").unwrap();
+    std::fs::write(
+        dir.join("b.ts"),
+        "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const y: number = \"s\";\n",
+    )
+    .unwrap();
+    let ts1109 = "a.ts(1,18): error TS1109: Expression expected.\n";
+    assert_eq!(
+        no_history(),
+        (ts1109.to_owned(), 1),
+        "parse error, no history"
+    );
+    assert_eq!(
+        with_history(),
+        (ts1109.to_owned(), 1),
+        "parse error, edited"
+    );
+    assert_eq!(with_history(), (ts1109.to_owned(), 1), "parse error, warm");
     let _ = std::fs::remove_dir_all(&dir);
 }
