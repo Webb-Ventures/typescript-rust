@@ -292,6 +292,7 @@ unicorn/no-duplicate-if-branches 30/30
 unicorn/no-exports-in-scripts 22/22
 unicorn/no-global-object-property-assignment 34/34
 unicorn/no-instanceof-builtins 175/175
+unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20

@@ -304,6 +304,7 @@ mod unicorn_no_duplicate_if_branches;
 mod unicorn_no_exports_in_scripts;
 mod unicorn_no_global_object_property_assignment;
 mod unicorn_no_instanceof_builtins;
+mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
@@ -695,6 +696,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
     &unicorn_no_instanceof_builtins::RULE,
+    &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
