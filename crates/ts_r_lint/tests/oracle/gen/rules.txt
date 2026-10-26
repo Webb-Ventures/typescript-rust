@@ -288,3 +288,7 @@ unicorn/no-xor-as-exponentiation
 unicorn/prefer-date-now
 unicorn/no-instanceof-builtins
 unicorn/no-typeof-undefined
+unicorn/new-for-builtins
+unicorn/throw-new-error
+unicorn/no-new-array
+unicorn/prefer-type-error
