@@ -2565,17 +2565,22 @@ impl<'a> Binder<'a> {
             Node::Ident { name: a } => {
                 let t = self.ast.atom(a);
                 // Intrinsic elements start with a lowercase letter and are not references.
+                // A value tag is a narrowable reference (`if (C) <C />`).
                 if t.chars().next().is_some_and(|c| !c.is_ascii_lowercase()) && !t.contains('-') {
                     self.add_ref(name, meaning::VALUE, false);
+                    self.record_flow(name);
                 }
             }
             Node::JsxMemberExpr { obj, .. } => {
+                self.record_flow(name);
                 let mut o = obj;
                 while let Node::JsxMemberExpr { obj, .. } = *self.ast.node(o) {
+                    self.record_flow(o);
                     o = obj;
                 }
                 if let Node::Ident { .. } = self.ast.node(o) {
                     self.add_ref(o, meaning::VALUE, false);
+                    self.record_flow(o);
                 } else {
                     self.bind_expr(o);
                 }

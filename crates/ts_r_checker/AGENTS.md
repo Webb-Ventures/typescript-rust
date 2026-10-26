@@ -115,7 +115,8 @@ Files, by layer:
   resolves against construct signatures before call signatures, and a union tag without
   either combines each member's like a union's call signatures: props are the first
   parameter, the return is checked against `Element | null | ElementClass`, and a member
-  without any is TS2604; tsc: `getUninstantiatedJsxSignaturesOfType` in `jsx.go`; a
+  without any is TS2604; tsc: `getUninstantiatedJsxSignaturesOfType` in `jsx.go`; the
+  tag is a narrowable reference, `<o.C />` included, so `if (C) <C />` reads `C` narrowed; a
   fragment under `jsx: react` with default factories checks `{ children }` against
   `React.Fragment`'s props at `<>`, tsc: `getJSXFragmentType`),
   TS2608 (a props or children name container with several properties, once at its first

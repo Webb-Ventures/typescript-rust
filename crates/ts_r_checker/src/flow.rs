@@ -189,8 +189,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.compute_ref_key(Loc::new(l.file, last), depth + 1, through_assign)
             }
             // `typeof x.p` and `typeof this.a.b` in a type name the references `x.p` and
-            // `this.a.b`.
+            // `this.a.b`; a JSX tag `<o.C />` is the reference `o.C`.
             Node::Member { obj, prop, .. }
+            | Node::JsxMemberExpr { obj, prop }
             | Node::QualifiedName {
                 left: obj,
                 right: prop,
@@ -277,6 +278,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 } => return Some("import.meta".into()),
                 Node::Paren { expr } | Node::NonNull { expr } => n = expr,
                 Node::Member { obj, .. }
+                | Node::JsxMemberExpr { obj, .. }
                 | Node::Index { obj, .. }
                 | Node::QualifiedName { left: obj, .. } => n = obj,
                 Node::Seq { exprs } => n = *ast.list(exprs).last()?,

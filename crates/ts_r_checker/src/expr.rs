@@ -4746,7 +4746,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 | Node::MetaProperty {
                     kind: ts_r_ast::MetaPropKind::ImportMeta,
                 } => return true,
-                Node::Member { obj, .. } => n = obj,
+                Node::Member { obj, .. } | Node::JsxMemberExpr { obj, .. } => n = obj,
                 Node::Index { obj, index, .. } => {
                     if !matches!(
                         ast.node(skip_parens(ast, index)),
