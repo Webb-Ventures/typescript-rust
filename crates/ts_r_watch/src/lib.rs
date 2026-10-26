@@ -11,11 +11,19 @@
 //!   window becomes one change. A file that is *empty* when the burst settles gets a short
 //!   grace period to be filled; the server also drops changes whose content hash didn't
 //!   change, so a late second identical write costs nothing.
-//! - **Delete then recreate** (backup-rename editors): a missing file is re-checked after a
-//!   grace period before being reported as removed.
+//! - **Delete then recreate** (backup-rename editors, a deleted file restored): a missing file
+//!   is re-checked after a grace period before being reported as removed; if it is back, it is
+//!   reported once, as created (chokidar without `atomic` reports a removal and an addition;
+//!   consumers act on the addition, like the dev server retrying failed imports).
 //! - **Removing a file reported earlier**: FSEvents keeps a path's flags for a while, so the
 //!   removal of a file created a moment ago arrives flagged as created *and* removed, like a
-//!   temp file. A path this debouncer has already reported as present is reported as removed.
+//!   temp file. A path this debouncer has already reported as present is reported as removed,
+//!   and so is a path the consumer said it read ([`WatchAdder::known`]): a file that existed
+//!   before the watch started and was never edited during it is otherwise unknown here (by the
+//!   time the event arrives the file is gone, so probing then can't tell it from a temp file).
+//! - **Editing a file created a moment ago**: the same sticky flags mark the edit as a
+//!   creation. A known path (reported as present, or read by the consumer) that is still there
+//!   is reported as modified; after its removal is reported, re-creating it is a creation again.
 //!
 //! The quiet window is the latency floor of this step (budget: 1–5 ms), so it is short.
 //!
@@ -111,6 +119,8 @@ struct Pending {
     first_wall: SystemTime,
     last: Instant,
     saw_create: bool,
+    /// A probe found the file missing (it may have come back since).
+    saw_missing: bool,
     /// Grace re-check deadline once the file was found empty or missing.
     grace_until: Option<Instant>,
 }
@@ -131,7 +141,8 @@ pub struct Debouncer {
     pending: BTreeMap<PathBuf, Pending>,
     burst_start: Option<Instant>,
     last_event: Option<Instant>,
-    /// Paths last reported as created or modified (only files that changed while watched).
+    /// Paths known to exist: last reported as created or modified, or named by the consumer
+    /// ([`Debouncer::known`]). Removing one is never a temp file.
     reported: BTreeSet<PathBuf>,
 }
 
@@ -146,6 +157,12 @@ impl Debouncer {
         }
     }
 
+    /// The consumer read `path`, so it exists: its removal is reported even when the native
+    /// events also flag it as created (see the module docs).
+    pub fn known(&mut self, path: PathBuf) {
+        self.reported.insert(path);
+    }
+
     pub fn event(&mut self, path: PathBuf, kind: RawKind, now: Instant, wall: SystemTime) {
         if kind == RawKind::Other {
             return;
@@ -157,6 +174,7 @@ impl Debouncer {
             first_wall: wall,
             last: now,
             saw_create: false,
+            saw_missing: false,
             grace_until: None,
         });
         p.last = now;
@@ -204,8 +222,13 @@ impl Debouncer {
                 continue;
             }
             let in_grace = p.grace_until.is_some();
+            // FSEvents' sticky flags mark edits of a recently created file as creations too;
+            // a file known to exist that is still there was modified. One that was seen gone
+            // and is back was deleted and restored: a creation (chokidar reports the removal
+            // and the addition; the addition is what consumers act on).
+            let created = (p.saw_create && !self.reported.contains(path)) || p.saw_missing;
             let kind = match probe(path) {
-                FileState::Present => Some(if p.saw_create {
+                FileState::Present => Some(if created {
                     ChangeKind::Created
                 } else {
                     ChangeKind::Modified
@@ -215,7 +238,7 @@ impl Debouncer {
                     continue;
                 }
                 // Still empty: a new empty file is still a new file.
-                FileState::Empty => Some(if p.saw_create {
+                FileState::Empty => Some(if created {
                     ChangeKind::Created
                 } else {
                     ChangeKind::Modified
@@ -224,6 +247,7 @@ impl Debouncer {
                 FileState::Missing if p.saw_create && !self.reported.contains(path) => None,
                 FileState::Missing if !in_grace => {
                     p.grace_until = Some(now + self.opts.grace);
+                    p.saw_missing = true;
                     continue;
                 }
                 FileState::Missing => Some(ChangeKind::Removed),
@@ -302,6 +326,7 @@ type RawEvent = (PathBuf, RawKind, Instant, SystemTime);
 enum Msg {
     Event(RawEvent),
     Watch(PathBuf, RecursiveMode),
+    Known(PathBuf),
 }
 
 impl std::fmt::Debug for Msg {
@@ -309,6 +334,7 @@ impl std::fmt::Debug for Msg {
         match self {
             Msg::Event(e) => write!(f, "Event({:?})", e.0),
             Msg::Watch(p, _) => write!(f, "Watch({p:?})"),
+            Msg::Known(p) => write!(f, "Known({p:?})"),
         }
     }
 }
@@ -355,6 +381,13 @@ impl WatchAdder {
             RecursiveMode::NonRecursive
         };
         let _ = self.tx.send(Msg::Watch(dir.to_path_buf(), mode));
+    }
+
+    /// Tells the watcher the consumer read `file` (it exists): deleting it is reported as a
+    /// removal even when FSEvents also flags it as created, like a temp file. Call it once
+    /// per file, when first read.
+    pub fn known(&self, file: &Path) {
+        let _ = self.tx.send(Msg::Known(file.to_path_buf()));
     }
 }
 
@@ -523,6 +556,7 @@ pub fn watch_filtered(
                     Msg::Watch(dir, mode) => {
                         let _ = watcher.watch(&dir, mode);
                     }
+                    Msg::Known(path) => d.known(path),
                 };
                 match msg {
                     Ok(m) => {
@@ -669,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_then_recreate_is_a_modify_and_real_delete_is_removed() {
+    fn delete_then_recreate_is_one_creation_and_real_delete_is_removed() {
         let fs = Fs::new();
         let mut d = Debouncer::new(opts());
         let t0 = Instant::now();
@@ -678,7 +712,8 @@ mod tests {
         assert!(d.poll(t0 + ms(3), fs.probe()).is_empty(), "missing → grace");
         fs.set("/p/a.js", FileState::Present);
         let out = d.poll(t0 + ms(43), fs.probe());
-        assert_eq!(kinds(&out), [("/p/a.js".to_owned(), ChangeKind::Modified)]);
+        // Seen gone, then back: restored (one change, a creation), even for a known file.
+        assert_eq!(kinds(&out), [("/p/a.js".to_owned(), ChangeKind::Created)]);
 
         d.event("/p/b.js".into(), RawKind::Remove, t0 + ms(50), w);
         assert!(d.poll(t0 + ms(53), fs.probe()).is_empty());
@@ -744,6 +779,63 @@ mod tests {
         d.event("/p/x.tmp".into(), RawKind::Create, t1 + ms(110), w);
         d.event("/p/x.tmp".into(), RawKind::Remove, t1 + ms(110), w);
         assert!(d.poll(t1 + ms(120), fs.probe()).is_empty());
+    }
+
+    #[test]
+    fn removing_a_known_file_flagged_as_created_is_a_removal() {
+        // A file that existed before the watch and was never edited during it: the consumer
+        // read it, so its deletion (flagged create + remove by FSEvents) is a removal.
+        let fs = Fs::new();
+        let mut d = Debouncer::new(opts());
+        d.known("/p/re-export.js".into());
+        let t0 = Instant::now();
+        let w = SystemTime::now();
+        d.event("/p/re-export.js".into(), RawKind::Create, t0, w);
+        d.event("/p/re-export.js".into(), RawKind::Remove, t0, w);
+        assert!(d.poll(t0 + ms(3), fs.probe()).is_empty()); // grace
+        let out = d.poll(t0 + ms(50), fs.probe());
+        assert_eq!(
+            kinds(&out),
+            [("/p/re-export.js".to_owned(), ChangeKind::Removed)]
+        );
+        // The same events for a file nobody read are still a temp file.
+        d.event("/p/other.js".into(), RawKind::Create, t0 + ms(60), w);
+        d.event("/p/other.js".into(), RawKind::Remove, t0 + ms(60), w);
+        assert!(d.poll(t0 + ms(63), fs.probe()).is_empty());
+        assert!(d.poll(t0 + ms(120), fs.probe()).is_empty());
+    }
+
+    #[test]
+    fn a_known_file_flagged_as_created_is_modified() {
+        // FSEvents keeps the "created" flag on later edits of a file created a moment ago
+        // (or copied in just before the watch started): an edit, not a new file.
+        let fs = Fs::new();
+        fs.set("/p/a.js", FileState::Present);
+        let mut d = Debouncer::new(opts());
+        let t0 = Instant::now();
+        let w = SystemTime::now();
+        d.event("/p/a.js".into(), RawKind::Create, t0, w);
+        let out = d.poll(t0 + ms(3), fs.probe());
+        assert_eq!(kinds(&out), [("/p/a.js".to_owned(), ChangeKind::Created)]);
+        d.event("/p/a.js".into(), RawKind::Create, t0 + ms(10), w);
+        d.event("/p/a.js".into(), RawKind::Modify, t0 + ms(10), w);
+        let out = d.poll(t0 + ms(13), fs.probe());
+        assert_eq!(kinds(&out), [("/p/a.js".to_owned(), ChangeKind::Modified)]);
+        d.known("/p/b.js".into());
+        fs.set("/p/b.js", FileState::Present);
+        d.event("/p/b.js".into(), RawKind::Create, t0 + ms(20), w);
+        let out = d.poll(t0 + ms(23), fs.probe());
+        assert_eq!(kinds(&out), [("/p/b.js".to_owned(), ChangeKind::Modified)]);
+        // Deleted, then restored: a new file again.
+        fs.set("/p/a.js", FileState::Missing);
+        d.event("/p/a.js".into(), RawKind::Remove, t0 + ms(30), w);
+        assert!(d.poll(t0 + ms(33), fs.probe()).is_empty()); // grace
+        let out = d.poll(t0 + ms(80), fs.probe());
+        assert_eq!(kinds(&out), [("/p/a.js".to_owned(), ChangeKind::Removed)]);
+        fs.set("/p/a.js", FileState::Present);
+        d.event("/p/a.js".into(), RawKind::Create, t0 + ms(90), w);
+        let out = d.poll(t0 + ms(93), fs.probe());
+        assert_eq!(kinds(&out), [("/p/a.js".to_owned(), ChangeKind::Created)]);
     }
 
     #[test]
