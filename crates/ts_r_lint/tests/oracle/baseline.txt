@@ -276,6 +276,7 @@ symbol-description 8/8
 unicorn/catch-error-name 120/120
 unicorn/consistent-assert 31/31
 unicorn/consistent-class-member-order 38/38
+unicorn/consistent-compound-words 154/154
 unicorn/consistent-date-clone 26/26
 unicorn/consistent-empty-array-spread 36/36
 unicorn/consistent-existence-index-check 56/56
@@ -459,6 +460,7 @@ unicorn/prefer-set-size 67/67
 unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-simple-sort-comparator 66/66
 unicorn/prefer-single-array-predicate 32/32
+unicorn/prefer-single-replace 86/86
 unicorn/prefer-split-limit 77/77
 unicorn/prefer-spread 626/626
 unicorn/prefer-string-match-all 68/68

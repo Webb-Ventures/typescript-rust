@@ -310,7 +310,7 @@ mod unicorn_catch_error_name;
 mod unicorn_conditions;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_class_member_order;
-mod unicorn_consistent_conditional_object_spread;
+mod unicorn_consistent_compound_words;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_existence_index_check;
@@ -514,7 +514,7 @@ mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_condition_first;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
-mod unicorn_prefer_single_object_destructuring;
+mod unicorn_prefer_single_replace;
 mod unicorn_prefer_split_limit;
 mod unicorn_prefer_spread;
 mod unicorn_prefer_string_match_all;
@@ -1123,6 +1123,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_literal_ascii::RULE,
     &unicorn_single_line_block_comment_style::RULE,
     &unicorn_no_non_function_verb_prefix::RULE,
+    &unicorn_consistent_compound_words::RULE,
+    &unicorn_prefer_single_replace::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
