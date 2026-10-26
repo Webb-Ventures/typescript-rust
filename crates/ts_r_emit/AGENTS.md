@@ -225,12 +225,12 @@ Latest (2026-10-27, v1 emit round 8, `cargo run --release -p ts_r_check --exampl
 emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,098 (97.2%), shape 2,143
 (99.3%; the 16 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18
 bytes-exact outputs with a map baseline (158 of 162 at all targets); all 17,352 outputs:
-16,457 bytes-exact (94.8%; 16,342 at checker round 7), JS 13,846 / 14,476 (95.6%), below
-ES2022 11,748 / 12,317 (es2015 11,305 / 11,859), `.d.ts` 2,406 / 2,640 (91.1%). Declarations
+16,458 bytes-exact (94.8%; 16,342 at checker round 7), JS 13,847 / 14,476 (95.7%), below
+ES2022 11,749 / 12,317 (es2015 11,306 / 11,859), `.d.ts` 2,406 / 2,640 (91.1%). Declarations
 (E2): 1,414 / 1,634 baselines have every `.d.ts` bytes-exact (86.5%, gate 85% met); 1,414 of
 1,557 without TSR2006 refusals (90.8%). TSR2006 refuses 86 JavaScript inputs' `.d.ts` (was
 168; `@typedef`/`@callback`/`@template`/`@import` and `module.exports = v` are now written).
-Tests with every output bytes-exact: 11,120 of 11,925 (11,009 at checker round 7). Extra
+Tests with every output bytes-exact: 11,121 of 11,925 (11,009 at checker round 7). Extra
 outputs: 13 (was 25; the oracle now passes only the last file when it reads `require(` or
 `reference path`, as the harness does).
 The paragraphs below are the milestone measurements.
