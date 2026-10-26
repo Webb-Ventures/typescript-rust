@@ -1,0 +1,2 @@
+a.ts(4,13): error TS2418: Type of computed property's value is '"str"', which is not assignable to type '"sym"'.
+a.ts(5,21): error TS2322: Type '2' is not assignable to type '1'.

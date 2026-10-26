@@ -10207,8 +10207,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 reported = true;
                 continue;
             }
+            // A computed name that is not a literal (`[SYM]: 'str'`) says so in the head
+            // (tsc: `isComputedNonLiteralName` in `elaborateElementwise`, relater.go).
+            let computed_head = match *ast.node(key) {
+                Node::ComputedKey { expr } => !matches!(
+                    *ast.node(expr),
+                    Node::StringLit { .. } | Node::NumberLit { .. }
+                ),
+                _ => false,
+            }
+            .then_some(crate::relate::Head {
+                info: dg::TYPE_OF_COMPUTED_PROPERTY_S_VALUE_IS_0_WHICH_IS_NOT_ASSIGNABLE_TO_TYPE_1_2418,
+            });
             let (chain, at) =
-                self.relation_error_chain(vt, tprop_type, RelationKind::Assignable, None);
+                self.relation_error_chain(vt, tprop_type, RelationKind::Assignable, computed_head);
             let mark = self.diags.len();
             self.error_chain(at.unwrap_or(kl), &chain);
             self.relate_expected_property(mark, target, nid, &name);

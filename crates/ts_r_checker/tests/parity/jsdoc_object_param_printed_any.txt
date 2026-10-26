@@ -1,0 +1,4 @@
+a.js(4,1): error TS2322: Type '(keyframes: Array<any>) => void' is not assignable to type '(keyframes: Keyframe[] | PropertyIndexedKeyframes, options?: number | KeyframeAnimationOptions) => Animation'.
+  Type 'void' is not assignable to type 'Animation'.
+a.js(10,5): error TS2322: Type '(keyframes: Array<any>) => void' is not assignable to type '(x: any[]) => number'.
+  Type 'void' is not assignable to type 'number'.

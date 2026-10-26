@@ -1633,6 +1633,28 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if t.is_empty() {
                     return None;
                 }
+                // JSDoc's own names write the type they mean (`Array.<Object>` is
+                // `Array<any>`), unless a local declaration of that name is meant.
+                if type_args.is_none() && ast.is_jsdoc(name) {
+                    let kw = match t.as_str() {
+                        "String" => Some("string"),
+                        "Number" => Some("number"),
+                        "Boolean" => Some("boolean"),
+                        "Void" => Some("void"),
+                        "Undefined" => Some("undefined"),
+                        "Null" => Some("null"),
+                        "BigInt" => Some("bigint"),
+                        "Object" if !self.c.opts.no_implicit_any => Some("any"),
+                        _ => None,
+                    };
+                    if let Some(kw) = kw {
+                        let l = Loc::new(file, name);
+                        let local = self.c.resolve_ident(l, meaning::TYPE);
+                        if local.is_none() || local == self.c.global_symbol(&t, meaning::TYPE) {
+                            return Some(kw.to_owned());
+                        }
+                    }
+                }
                 match type_args {
                     None => t,
                     Some(ta) => {

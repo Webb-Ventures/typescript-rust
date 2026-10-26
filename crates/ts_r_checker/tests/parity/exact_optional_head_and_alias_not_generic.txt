@@ -1,0 +1,7 @@
+a.ts(6,12): error TS2375: Type 'Src' is not assignable to type 'Dst' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Property 'index' is optional in type 'Src' but required in type 'Dst'.
+a.ts(7,12): error TS2322: Type 'Src' is not assignable to type 'Plain'.
+  Property 'index' is optional in type 'Src' but required in type 'Plain'.
+a.ts(8,6): error TS2379: Argument of type 'Src' is not assignable to parameter of type 'Dst' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Property 'index' is optional in type 'Src' but required in type 'Dst'.
+a.ts(11,17): error TS2315: Type 'U' is not generic.

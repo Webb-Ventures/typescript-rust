@@ -921,6 +921,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         let info = match head {
+            Some(h)
+                if h.info.code
+                    == dg::ARGUMENT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_PARAMETER_OF_TYPE_1_2345.code
+                    && self.has_exact_optional_unassignable_props(s, t) =>
+            {
+                dg::ARGUMENT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_PARAMETER_OF_TYPE_1_WITH_EXACTOPTIONALPR_2379
+            }
             Some(h) => h.info,
             None => {
                 if rel == RelationKind::Comparable {
@@ -928,6 +935,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 } else if gs == ts {
                     // Even qualified, the names are alike (two type parameters `T`).
                     dg::TYPE_0_IS_NOT_ASSIGNABLE_TO_TYPE_1_TWO_DIFFERENT_TYPES_WITH_THIS_NAME_EXIST_BUT_T_2719
+                } else if self.has_exact_optional_unassignable_props(s, t) {
+                    dg::TYPE_0_IS_NOT_ASSIGNABLE_TO_TYPE_1_WITH_EXACTOPTIONALPROPERTYTYPES_TRUE_CONSIDER_2375
                 } else {
                     // A string literal against a union of string literals suggests the
                     // closest one.
@@ -949,6 +958,36 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(r) = self.rel.report.as_mut() {
             r.last_names = Some((gs, ts));
         }
+    }
+
+    /// Whether, under `exactOptionalPropertyTypes`, some property of the object target is
+    /// optional (its type has `missing`) while the source's property of that name may be
+    /// `undefined`. Such a pair names the option in a relation message's head, even when
+    /// another property failed (`RegExpMatchArray` to `RegExpExecArray`: both have an
+    /// optional `groups`); never between two tuples (tsc:
+    /// `getExactOptionalUnassignableProperties` in `tsc/internal/checker/relater.go`).
+    fn has_exact_optional_unassignable_props(&mut self, s: TypeId, t: TypeId) -> bool {
+        if !self.c.opts.exact_optional_property_types
+            || !self.store().flags(t).contains(TypeFlags::OBJECT)
+            || (self.c.is_tuple_type(s) && self.c.is_tuple_type(t))
+        {
+            return false;
+        }
+        for (name, tp) in self.properties_of(t) {
+            let tt = self.type_of_symbol(tp);
+            if !self.some_member(tt, |m| m == TypeId::MISSING) {
+                continue;
+            }
+            let Some(sp) = self.property_of_type_id(s, name) else {
+                continue;
+            };
+            let st_ = self.type_of_symbol(sp);
+            let store = self.store();
+            if self.some_member(st_, |m| store.flags(m).contains(TypeFlags::UNDEFINED)) {
+                return true;
+            }
+        }
+        false
     }
 
     /// The hints tsc adds under a relation message about the global `Object` type (TS2696:

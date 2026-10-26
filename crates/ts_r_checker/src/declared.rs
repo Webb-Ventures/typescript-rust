@@ -2223,7 +2223,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             let filled = self.fill_type_args(&local, args);
             let m = self.store().mapper(&local, &filled);
-            return self.instantiate(d, m);
+            let r = self.instantiate(d, m);
+            // A body that does not use the parameters is still named by the arguments
+            // given (`type B<T> = () => any`: `B<string>` prints as such).
+            if r == d
+                && let Some(info) = self.store().alias_of(d)
+                && info.sym == sym
+                && info.args != ListId::EMPTY
+            {
+                let a = self.store().list(&filled);
+                if a != info.args {
+                    let alias = self.store().alias(sym, a);
+                    return self.with_alias(d, alias);
+                }
+            }
+            return r;
         }
         if flags
             .intersects(SymbolFlags::ENUM | SymbolFlags::ENUM_MEMBER | SymbolFlags::TYPE_PARAMETER)

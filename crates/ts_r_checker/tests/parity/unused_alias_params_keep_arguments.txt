@@ -1,0 +1,9 @@
+a.ts(2,5): error TS2322: Type '{}' is not assignable to type 'B<string>'.
+  Type '{}' provides no match for the signature '(): any'.
+a.ts(4,5): error TS2322: Type '{}' is not assignable to type 'D<string>'.
+  Type '{}' provides no match for the signature '(): any'.
+a.ts(6,5): error TS2741: Property 'a' is missing in type '{}' but required in type 'E<string>'.
+a.ts(8,5): error TS2322: Type '"c"' is not assignable to type 'U<string>'.
+a.ts(10,5): error TS2322: Type '{}' is not assignable to type 'I<string>'.
+  Property 'a' is missing in type '{}' but required in type '{ a: 1; }'.
+a.ts(13,5): error TS2322: Type 'F<string>' is not assignable to type 'number'.
