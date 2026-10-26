@@ -8,6 +8,7 @@ pub mod data_url;
 pub mod expr;
 pub mod features;
 pub mod fscache;
+pub(crate) mod glob;
 pub mod graph;
 #[cfg(feature = "hmr")]
 pub mod hmr;

@@ -475,12 +475,16 @@ impl Walker<'_> {
                         && ast.atom(name) == "require"
                         && self.scopes.symbol_of(callee).is_none()
                         && let [arg] = ast.list(args)
-                        && let Some(spec) = string_arg(ast, *arg)
+                        && let Some((spec, kind)) = string_arg(ast, *arg)
+                            .map(|s| (s, RecordKind::Require))
+                            .or_else(|| {
+                                glob_pattern(ast, *arg).map(|g| (g, RecordKind::GlobRequire))
+                            })
                     {
                         let span = ast.span(*arg);
                         part.records.push(m.records.len() as u32);
                         m.records.push(Record {
-                            kind: RecordKind::Require,
+                            kind,
                             spec,
                             start: span.start,
                             end: span.end,
@@ -491,19 +495,36 @@ impl Walker<'_> {
                         });
                     }
                 }
-                Node::ImportCall { arg, phase, .. } => {
-                    if let Some(spec) = string_arg(ast, arg) {
+                Node::ImportCall {
+                    arg,
+                    phase,
+                    options,
+                    ..
+                } => {
+                    let found = string_arg(ast, arg)
+                        .map(|s| (s, RecordKind::Dynamic))
+                        .or_else(|| match phase {
+                            ImportPhase::Evaluation => {
+                                glob_pattern(ast, arg).map(|g| (g, RecordKind::GlobDynamic))
+                            }
+                            _ => None,
+                        });
+                    if let Some((spec, kind)) = found {
                         let span = ast.span(arg);
                         part.records.push(m.records.len() as u32);
                         m.records.push(Record {
-                            kind: RecordKind::Dynamic,
+                            kind,
                             spec,
                             start: span.start,
                             end: span.end,
                             node: id.raw(),
                             in_try: flags & IN_TRY != 0 || self.guarded.contains(&id.raw()),
                             phase: phase_code(phase),
-                            attrs: String::new(),
+                            attrs: match (kind, options) {
+                                // A glob's files are imported with the call's `type`.
+                                (RecordKind::GlobDynamic, Some(o)) => glob_attributes(ast, o),
+                                _ => String::new(),
+                            },
                         });
                     }
                 }
@@ -585,6 +606,42 @@ fn attributes_text(ast: &Ast, id: NodeId) -> String {
     }
 }
 
+/// The `with` attributes of an `import(x, { with: { type: "json" } })` call, in the form
+/// [`attributes_text`] gives a static import's; empty when there are none.
+fn glob_attributes(ast: &Ast, options: NodeId) -> String {
+    let Node::ObjectLit { props } = *ast.node(options) else {
+        return String::new();
+    };
+    for &p in ast.list(props) {
+        let Node::Property { key, value, .. } = *ast.node(p) else {
+            continue;
+        };
+        if ast.name_of(key) != Some("with") {
+            continue;
+        }
+        let Node::ObjectLit { props: inner } = *ast.node(value) else {
+            return String::new();
+        };
+        let mut parts = Vec::new();
+        for &e in ast.list(inner) {
+            let Node::Property { key, value, .. } = *ast.node(e) else {
+                continue;
+            };
+            if let (Some(k), Some(v)) = (ast.name_of(key), string_arg(ast, value)) {
+                parts.push(format!(
+                    "{}: {}",
+                    crate::expr::Expr::Str(k.to_owned()).to_text(true),
+                    crate::expr::Expr::Str(v).to_text(true)
+                ));
+            }
+        }
+        if !parts.is_empty() {
+            return format!("with {{ {} }}", parts.join(", "));
+        }
+    }
+    String::new()
+}
+
 fn string_arg(ast: &Ast, id: NodeId) -> Option<String> {
     match *ast.node(id) {
         Node::StringLit { value } => Some(ast.atom(value).to_owned()),
@@ -600,6 +657,92 @@ fn string_arg(ast: &Ast, id: NodeId) -> Option<String> {
         },
         _ => None,
     }
+}
+
+/// Most parts a glob specifier may have (`"./a/" + x + "/" + y + ...`): longer chains are
+/// left as written.
+const GLOB_MAX_PARTS: usize = 64;
+
+/// The glob pattern of a `require()`/`import()` argument that builds a relative path from
+/// string literals and other values, as esbuild bundles it: `"./src/" + x` and
+/// `` `./src/${x}` `` are `./src/**/*`, `"./src/file-" + x + ".js"` is `./src/file-*.js`.
+/// A value right after a `/` may name a path through subdirectories (`**/*`); elsewhere it
+/// stays inside one path segment (`*`). `None` unless the first part is a literal starting
+/// with `./` or `../` and some part is not a literal.
+fn glob_pattern(ast: &Ast, id: NodeId) -> Option<String> {
+    // `None` is a value part, `Some` a literal.
+    let mut parts: Vec<Option<String>> = Vec::new();
+    match *ast.node(id) {
+        Node::TemplateLit { parts: list } => {
+            for (i, &p) in ast.list(list).iter().enumerate() {
+                if i % 2 == 1 {
+                    parts.push(None);
+                    continue;
+                }
+                match *ast.node(p) {
+                    Node::TemplateElement {
+                        cooked,
+                        invalid_escape: false,
+                    } => parts.push(Some(ast.atom(cooked).to_owned())),
+                    _ => return None,
+                }
+            }
+        }
+        Node::Binary {
+            op: ts_r_ast::BinaryOp::Add,
+            ..
+        } => {
+            // `a + b + c` nests to the left: walk down the left spine, then read it back.
+            let mut spine = Vec::new();
+            let mut cur = id;
+            while let Node::Binary {
+                left,
+                op: ts_r_ast::BinaryOp::Add,
+                right,
+            } = *ast.node(cur)
+            {
+                if spine.len() >= GLOB_MAX_PARTS {
+                    return None;
+                }
+                spine.push(right);
+                cur = left;
+            }
+            spine.push(cur);
+            for &p in spine.iter().rev() {
+                parts.push(string_arg(ast, p));
+            }
+        }
+        _ => return None,
+    }
+    if parts.len() > GLOB_MAX_PARTS || parts.iter().all(Option::is_some) {
+        return None;
+    }
+    match parts.first() {
+        Some(Some(first)) if first.starts_with("./") || first.starts_with("../") => {}
+        _ => return None,
+    }
+    let mut out = String::new();
+    let mut wild = false;
+    for p in parts {
+        match p {
+            Some(text) => {
+                // `*` and `?` in the text would read as wildcards.
+                if text.contains(['*', '?']) {
+                    return None;
+                }
+                if !text.is_empty() {
+                    wild = false;
+                }
+                out.push_str(&text);
+            }
+            None if wild => {}
+            None => {
+                wild = true;
+                out.push_str(if out.ends_with('/') { "**/*" } else { "*" });
+            }
+        }
+    }
+    Some(out)
 }
 
 /// A `return` statement outside every function (allowed at the top of a CommonJS module).

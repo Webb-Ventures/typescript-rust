@@ -2930,3 +2930,65 @@ fn injected_star_reexports_inject_nothing() {
         "{text}"
     );
 }
+
+#[test]
+fn glob_require_and_import_bundle_every_matching_file() {
+    let fs = project(&[
+        (
+            "entry.js",
+            concat!(
+                "const x = globalThis.x;\n",
+                "console.log(require('./src/' + x + '.js'));\n",
+                "import(`./src/file-${x}.js`).then(console.log);\n",
+                "require('./src/' + x + '.json');\n",
+                "require(`./sr${x}`);\n",
+            ),
+        ),
+        ("src/file-a.js", "module.exports = 'a';\n"),
+        ("src/file-a.js.map", "DO NOT BUNDLE\n"),
+        ("src/nested/dir/file-b.js", "module.exports = 'b';\n"),
+        ("src/data.json", "{ \"n\": 1 }\n"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    // `*` reaches no file (`src` is a directory): a warning, and an empty map.
+    assert!(
+        text.iter()
+            .any(|m| m.contains("The glob pattern require(\"./sr*\") did not match any files")),
+        "{text:?}"
+    );
+    assert!(!r.has_errors(), "{text:?}");
+    let js = file(&r, "/proj/out/entry.js");
+    // `./src/**/*.js` reaches into subdirectories; `./src/file-*.js` stays in `src`.
+    assert!(
+        js.contains("\"./src/file-a.js\": () => require_file_a(), \"./src/nested/dir/file-b.js\": () => require_file_b()"),
+        "{js}"
+    );
+    assert!(
+        js.contains("__tsrGlob({ \"./src/file-a.js\": () => Promise.resolve().then(() => __tsrToEsm(require_file_a())) })(`./src/file-${x}.js`)"),
+        "{js}"
+    );
+    assert!(
+        js.contains("__tsrGlob({ \"./src/data.json\": () => require_data() })"),
+        "{js}"
+    );
+    assert!(js.contains("__tsrGlob({})(`./sr${x}`)"), "{js}");
+    assert!(js.contains("Module not found in bundle: "), "{js}");
+    assert!(!js.contains("DO NOT BUNDLE"), "{js}");
+}
+
+#[test]
+fn glob_of_a_missing_directory_is_an_error() {
+    let fs = project(&[("entry.js", "require('./nope/' + globalThis.x);\n")]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter()
+            .any(|m| m.contains("Could not resolve require(\"./nope/**/*\")")),
+        "{text:?}"
+    );
+}

@@ -198,7 +198,17 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
             continue;
         };
         let at = ast.span(rec).start;
-        let new = e.build(&mut ast, at);
+        let mut new = e.build(&mut ast, at);
+        if plan.globs.contains(&(i as u32)) {
+            // The glob's lookup function, called with the path the code computes.
+            let arg = match *ast.node(rec) {
+                Node::Call { args, .. } => ast.list(args).first().copied(),
+                Node::ImportCall { arg, .. } => Some(arg),
+                _ => None,
+            };
+            let Some(arg) = arg else { continue };
+            new = build::call(&mut ast, new, &[arg], at);
+        }
         build::replace(&mut ast, rec, new);
     }
     // 5. `import.meta` outside ES modules or below its target: the module's empty object

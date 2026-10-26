@@ -216,6 +216,19 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   isn't a file is a glob (sorted, bounded, skipping directories the pattern cannot match).
   Reaching a traversal size or depth limit is an error, never a partial expansion. CSS
   entries are printed without `--bundle`; a missing `--tsconfig` is an error.
+- **Glob `require`/`import()`** (`scan.rs` `glob_pattern`, `graph.rs` `expand_globs`,
+  `glob.rs`): a call whose argument joins string literals and other values and starts with
+  `./` or `../` (`"./src/" + x`, `` `./src/file-${x}.js` ``) is a `GlobRequire`/`GlobDynamic`
+  record with a pattern as its spec: a value right after `/` is `**/*` (zero or more
+  directories, then a name), elsewhere `*` (within one segment), as esbuild names them. Each
+  build walks the pattern's directory again (the cached meta keeps the record unexpanded)
+  and adds a plain `Require`/`Dynamic` record per matching file, sorted, with the glob's call
+  node and part; `import()`'s `with: { type }` goes to each file. The plan builds
+  `__tsrGlob({ "./src/a.js": () => require_a(), ... })` from those records and the printer
+  calls it with the original argument; an unknown path throws esbuild's
+  `Module not found in bundle: <path>`. A missing directory is `Could not resolve
+  require("./src/**/*")`, no match a warning, and passing 10,000 entries or 64 levels an
+  error (never a partial map). Without `--bundle` the call stays.
 - **`--pure:name`** (`BuildOptions::pure`, `ts_r_minify::purity::Purity::pure_calls`):
   calls of those globals (`a.b` member chains too) are removable when unused, in tree
   shaking only. `--ignore-annotations` ignores them and `sideEffects: false` too.

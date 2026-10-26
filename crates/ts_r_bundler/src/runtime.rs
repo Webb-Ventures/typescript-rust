@@ -33,10 +33,16 @@ pub enum Helper {
     ToCjs,
     /// `--keep-names`: `__tsrName(fn, "name")` sets a renamed function's or class's `name`.
     Name,
+    /// `__tsrGlob({ "./src/a.js": () => require_a() })(path)`: a `require()`/`import()` of a
+    /// glob pattern looks the path up among the files it bundled.
+    Glob,
 }
 
+/// How many [`Helper`]s there are.
+pub const HELPER_COUNT: usize = 8;
+
 impl Helper {
-    pub const ALL: [Helper; 7] = [
+    pub const ALL: [Helper; HELPER_COUNT] = [
         Helper::Cjs,
         Helper::Esm,
         Helper::Export,
@@ -44,6 +50,7 @@ impl Helper {
         Helper::ToEsm,
         Helper::ToCjs,
         Helper::Name,
+        Helper::Glob,
     ];
 
     /// Preferred name.
@@ -56,6 +63,7 @@ impl Helper {
             Helper::ToEsm => "__tsrToEsm",
             Helper::ToCjs => "__tsrToCjs",
             Helper::Name => "__tsrName",
+            Helper::Glob => "__tsrGlob",
         }
     }
 
@@ -74,14 +82,14 @@ impl Helper {
 /// A set of helpers with their final names.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Helpers {
-    pub used: [bool; 7],
-    pub names: [String; 7],
+    pub used: [bool; HELPER_COUNT],
+    pub names: [String; HELPER_COUNT],
 }
 
 impl Helpers {
-    pub fn with_names(names: [String; 7]) -> Helpers {
+    pub fn with_names(names: [String; HELPER_COUNT]) -> Helpers {
         Helpers {
-            used: [false; 7],
+            used: [false; HELPER_COUNT],
             names,
         }
     }
@@ -122,6 +130,7 @@ impl Helpers {
         let to_esm = n(Helper::ToEsm);
         let to_cjs = n(Helper::ToCjs);
         let name = n(Helper::Name);
+        let glob = n(Helper::Glob);
         // Each helper is a self-contained `var`; locals use names that can't collide with
         // the helper names (those are reserved for the whole chunk). `__tsrCjs` and `__tsrEsm`
         // keep their state in a second parameter that callers never pass (shorter than a
@@ -169,6 +178,12 @@ impl Helpers {
             let _ = writeln!(
                 s,
                 "var {name} = (target, value) => Object.defineProperty(target, \"name\", {{ value, configurable: true }});"
+            );
+        }
+        if self.used[Helper::Glob.index()] {
+            let _ = write!(
+                s,
+                "var {glob} = (files) => (path) => {{\n  const load = files[path];\n  if (load) return load();\n  throw new Error(\"Module not found in bundle: \" + path);\n}};\n"
             );
         }
         if minify && !s.is_empty() {

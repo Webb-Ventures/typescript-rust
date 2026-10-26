@@ -53,6 +53,9 @@ syntax that an ES5 target forbids is an error, as in esbuild (`features.rs`, `lo
 4. **Graph** (`graph.rs`). Modules load in parallel on a std-thread pool (at most
    `TS_R_THREADS`), then get ids in **DFS pre-order** from the entries, which is the
    evaluation order and makes everything downstream deterministic.
+   A `require()`/`import()` of a computed relative path (`"./src/" + x`) is a glob record:
+   each build lists the files its pattern matches and adds a plain record per file, and the
+   call becomes a lookup in a map of them (`__tsrGlob`), as esbuild bundles these.
 5. **Link** (`link.rs`). Each module is `Esm` or `Cjs` (a stylesheet is an `Esm` stub whose
    exports are its local names). A module is CommonJS if it has
    no ESM exports and uses `module`/`exports`, or is `require`d, or is a non-JS loader. CJS
@@ -217,15 +220,14 @@ linked batch runs under Node.
 - CSS is bundled (`@import` order, duplicates, `@layer`/`@supports`/`@media` conditions,
   `url()` assets, `local-css`/`global-css` and `composes`), but of esbuild's syntax lowering
   only nesting, of its minification rewrites only dropping repeated rules, `calc()` folding
-  and short numbers, and with our own minified local names. No plugins, no `--watch` serve mode, no legal-comment extraction.
+  and short numbers; minified local names follow esbuild's (letters by frequency, names by use count). No plugins, no `--watch` serve mode, no legal-comment extraction.
 - No lowering below ES2015: `const`, classes, destructuring and the like are errors at
   `--target=es5`, as in esbuild; arrows and template literals are kept.
 - IIFE output is not re-indented; runtime helpers are repeated per chunk.
 - With several entries and no splitting, tree-shaking liveness is shared across entries.
 - `var` declarations nested in blocks of a lazily wrapped ESM module stay inside its closure.
-- No `--drop`, no `--pure`.
-- Not implemented: `import defer`/`import source`, glob `require`/`import()` of template
-  strings, Yarn PnP module resolution (only a tsconfig `extends` goes through PnP). Missing
+- No `--drop` (`--drop-labels` and `--pure` are supported).
+- Not implemented: `import defer`/`import source`, Yarn PnP module resolution (only a tsconfig `extends` goes through PnP). Missing
   diagnostics: assignments to imports and constants, export cycles, strict `package.json`
   JSON. The oracle README lists the remaining failures by cause.
 - Minified output is 2.9% smaller than esbuild's in total over the top npm packages (median
