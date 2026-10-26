@@ -622,7 +622,9 @@ impl Parser<'_> {
 
     /// A declaration directly in an `if`, loop or label body (through labels): TS1156 for
     /// `let`, `const`, `using` and `await using` (at the keyword), `type` and `interface` (at
-    /// the name), unless it has modifiers. Nothing under a `with` body is checked.
+    /// the name), unless it has modifiers. Nothing under a `with` body is checked. For a
+    /// variable statement tsc's checker reports it even in a file with syntax errors (kept);
+    /// for `type` and `interface` only in a clean file (deferred).
     pub(crate) fn check_embedded_declaration(&mut self, stmt: NodeId) {
         if self.with_depth > 0 {
             return;
@@ -649,7 +651,9 @@ impl Parser<'_> {
                     VarKind::Using => "using",
                     VarKind::AwaitUsing => "await using",
                 };
-                (word, self.ast.span(s))
+                let span = self.ast.span(s);
+                self.kept_grammar_error_at(messages::DECLARATION_ONLY_IN_BLOCK, span, &[word]);
+                return;
             }
             Node::TypeAlias { name, .. } => ("type", self.ast.span(name)),
             Node::Interface { name, .. } => ("interface", self.ast.span(name)),

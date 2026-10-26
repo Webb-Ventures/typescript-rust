@@ -231,8 +231,8 @@ Files:
   `ParseResult::grammar`, so a consumer that wants syntax errors only (the linter) can drop
   them (`ParseResult::syntax_errors`). A checker grammar error tsc reports next to syntax
   errors without stopping the check (TS18037, an `await` expression in a class static
-  block) goes to `kept_grammar` (`kept_grammar_error_at`): always in both lists, never
-  deduplicated.
+  block; TS1156 for `if (x) let y`) goes to `kept_grammar` (`kept_grammar_error_at`):
+  always in both lists, never deduplicated.
   Statement grammar errors come from `grammar.rs`, checked as each statement is parsed
   (no extra tree walk: a walk cost 28% of parse time): jump targets
   (TS1104/1105/1107/1115/1116, from a `Jump` scope stack pushed around loop, switch and
@@ -244,7 +244,9 @@ Files:
   TS1096/1017/1018/1019/1020, TS1268 for a keyword key type, then TS1021 only when the key
   type is surely valid: other key types are the checker's), class heritage (one of
   TS1172/1173/1174/1175), declarations without modifiers as `if`/loop bodies, through
-  labels (TS1156), `import(T)` types (TS1141), and ambient rules: initializers (TS1039;
+  labels (TS1156; kept next to syntax errors for `let`/`const`/`using`, which tsc's
+  checker reports with a plain error, deferred for `type`/`interface`), `import(T)` types
+  (TS1141), and ambient rules: initializers (TS1039;
   TS1254 for a `const` or `readonly` without a type whose initializer is not a literal, a
   literal enum reference or similar), bodies (TS1183, also accessor bodies in types and
   `declare` class method bodies, not `declare` accessors or constructors) and

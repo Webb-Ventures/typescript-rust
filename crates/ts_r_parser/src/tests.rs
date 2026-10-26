@@ -3085,3 +3085,22 @@ fn checked_js_grammar_is_grammar_only_in_javascript() {
     assert_eq!(codes(&r.diagnostics), vec![1109]);
     assert!(r.grammar.is_empty());
 }
+
+/// TS1156 for a `let`, `const`, `using` or `await using` statement as an `if` or loop body
+/// is reported next to syntax errors (tsc 7's checker reports it with `error`, not as a
+/// grammar error that waits for a clean file); for `type` and `interface` it waits
+/// (disallowedBlockScopedInPresenceOfParseErrors1).
+#[test]
+fn embedded_variable_statement_is_reported_next_to_syntax_errors() {
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    let src = "function f() {\n  if (1 > 0)\n    const e = 3;\n  while (x) l: let y = 1;\n  if (x) type T = 1;\n  }\n}\n";
+    let r = parse(src, SourceKind::Ts);
+    // (TS1344 for the label is the binder's: `ts_r_binder` reports it either way.)
+    assert_eq!(codes(&r.diagnostics), vec![1156, 1156, 1128]);
+    assert_eq!(codes(&r.grammar), vec![1156, 1156]);
+    assert_eq!(codes(&r.syntax_errors()), vec![1128]);
+    // In a clean file all three are reported.
+    let r = parse(&src[..src.len() - 2], SourceKind::Ts);
+    assert_eq!(codes(&r.diagnostics), vec![1156, 1344, 1156, 1156]);
+    assert_eq!(r.grammar, r.diagnostics);
+}

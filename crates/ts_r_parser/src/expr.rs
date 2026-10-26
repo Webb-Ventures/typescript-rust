@@ -810,7 +810,7 @@ impl<'a> Parser<'a> {
             T::Await if self.is_await_expression() => {
                 if self.ctx.has(Ctx::STATIC_BLOCK) {
                     let span = self.tok().span();
-                    self.kept_grammar_error_at(messages::AWAIT_IN_STATIC_BLOCK, span);
+                    self.kept_grammar_error_at(messages::AWAIT_IN_STATIC_BLOCK, span, &[]);
                 }
                 self.bump();
                 if self.lists & List::Parameters.bit() != 0

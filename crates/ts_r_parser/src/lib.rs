@@ -863,9 +863,15 @@ impl<'a> Parser<'a> {
     }
 
     /// A checker grammar error tsc reports next to syntax errors without stopping the
-    /// check (TS18037): see `kept_grammar`. Does not fail speculation.
-    fn kept_grammar_error_at(&mut self, msg: DiagnosticMessage, span: Span) {
-        self.kept_grammar.push(Diagnostic::new(msg, span, &[]));
+    /// check (TS18037, TS1156 for `if (x) let y`): see `kept_grammar`. Does not fail
+    /// speculation.
+    pub(crate) fn kept_grammar_error_at(
+        &mut self,
+        msg: DiagnosticMessage,
+        span: Span,
+        args: &[&str],
+    ) {
+        self.kept_grammar.push(Diagnostic::new(msg, span, args));
     }
 
     /// A grammar error tsc's checker reports only when the file has no syntax errors: kept
