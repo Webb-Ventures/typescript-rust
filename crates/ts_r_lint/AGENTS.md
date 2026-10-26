@@ -1713,252 +1713,172 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-invalid-well-kn
 Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its oracle, all
 `NO_PRESET`. What we learned, in our words (each file's header has the details):
 
-- **no-new-buffer**: the method comes from the first argument (`is_number` means `alloc`;
-  arrays, templates, a static string encoding or a static string/array value mean
-  `from`); `alloc` with extra arguments is only a suggestion, and none when a comment or a
-  side effect would be dropped.
-- **relative-url-style**: JavaScript `new URL(a, b)` / `URL.canParse` / `URL.parse` and JSX
-  `href`/`src`/... attributes (CSS, HTML and Markdown need other languages). A `./` is added
-  or removed only when the URL resolves the same with and without it against the static
-  base or three default bases; `unicorn_url.rs` is the small WHATWG resolver that decides
-  (special schemes, dot segments, `?`/`#`/empty inputs, `file` drive letters).
-  `unicorn_html.rs` decodes HTML attribute character references (numeric ones as the HTML
-  parser does; names only from the JSX table, anything else is "can't say") and splits
-  `srcset` candidates.
-- **prefer-modern-math-apis**: `Math.log(x) * Math.LOG10E`-style products and quotients and
-  `Math.sqrt` of a `+` tree of squares. Fixed only when the result provably can't change
-  (the value is unused, or the static operands make both forms exact), else suggested.
-- **prefer-classlist-toggle**: an `if`/`else` or `?:` choosing between `classList.add(n)`
-  and `classList.remove(n)` on the same reference, and `classList[c ? "add" : "remove"](n)`.
-  The condition is negated when the true branch removes and dropped when it is a matching
-  `classList.contains(n)`; a fix for statements, a suggestion inside expressions, nothing
-  when a comment would be lost.
-- **no-blob-to-file**: a single-use `const file = new File([blob], "name")` that only
-  reaches `URL.createObjectURL(file)` or a `new FormData()` constant's `append`/`set`. The
-  suggestion removes the declaration and passes the blob (plus the name for a two-argument
-  `append`); it is withheld when a comment sits in, on, or on the line above the
-  declaration.
-- **no-unsafe-sqlite-interpolation**: `exec`/`prepare` on a `node:sqlite` `DatabaseSync`
-  (`new` of the runtime import, the namespace's or default import's `.DatabaseSync`, or a
-  `const` alias of either) with a template substitution or any tagged template as the SQL.
-  Names resolve to value bindings, past type aliases of the same name; `require()`,
-  `import()` and `let` are not followed.
-- **no-late-event-control**: `preventDefault()`/`stopPropagation()`/
-  `stopImmediatePropagation()` on an event parameter (named or typed as one) in a nested
-  function, a generator handler, or after a suspension point of the handler has finished.
-  It shares the event checker and suspension helpers of `no-late-current-target-access`.
-- **prefer-abort-signal-timeout**: `const c = new AbortController()` directly followed by
-  `setTimeout(() => c.abort(), delay)` and otherwise only read as `c.signal`.
-  `unicorn_abort.rs` holds the shared controller shape (declarator, abort callback,
-  `.signal` reads that aren't aliased, written or asked for `reason`/`throwIfAborted`) and
-  the suggestion (rename to `signal`/`abortSignal` when free, remove the statements).
-- **prefer-url-search-parameters**: `query.split("&").map(p => p.split("="))` alone or as
-  the argument of `Object.fromEntries`/`new Map`/`new URLSearchParams` (reported with its
-  wrapper, unless the wrapper has type arguments). Only suggested; nothing when
-  `URLSearchParams` is a local runtime binding other than the `url` module's.
-- **prefer-number-is-safe-integer**: `Number.isInteger` (renamed, suggested) and
-  `x % 1 === 0`, `Math.floor|trunc(x) === x`, lodash/underscore `isInteger`/`isSafeInteger`
-  (suggested as `Number.isSafeInteger(x)` when `Number` isn't local).
-- **prefer-url-can-parse**: a `try { new URL(a, b); return/assign bool } catch { opposite }`
-  becomes `URL.canParse(a, b)` (fixed). Arguments that could throw while converted
-  (side effects with implicit conversions, objects, classes, templates with
-  substitutions, tagged templates, the global `Symbol`) are skipped; `declare` and
-  type-only bindings of `URL`/`Symbol` count as the global.
-- **require-passive-events**: `addEventListener` for touch/wheel events with an inline
-  listener that can't call `preventDefault()` (every use of its event parameter is a
-  member chain without a `preventDefault` link, a write or a dynamic call; no `arguments`)
-  gets `passive: true` (fixed; `undefined`/`null` options only reported).
-- **prefer-toggle-attribute**: like prefer-classlist-toggle, for `setAttribute(n, v)` /
-  `removeAttribute(n)`; a matching `hasAttribute(n)` test makes a plain
-  `toggleAttribute(n)`. Fixed only for an empty value without a `force`; a non-static value
-  or a `force` after `?.` is reported without a fix.
-- **no-prevent-default-in-passive-listener**: `event.preventDefault()` directly in an inline
-  listener registered with `{passive: true}` (last `passive` key; plain properties only),
-  before any suspension (shares the suspension helpers above); suggests `passive: false`.
-- **prefer-path2d**: one `run_file` walk (explicit stack, no recursion) groups canvas path
-  calls per function and innermost loop by receiver (`beginPath()` closes a group); the
-  receiver is a context by its local annotation (aliases, interfaces' `extends`, type
-  parameter constraints, unions/intersections), a `getContext("2d")` initializer or the
-  names `context`/`ctx`. Functions passed to the global `requestAnimationFrame`/
-  `setInterval`, called in loops, or called (transitively) from those are repeated; two
-  builders and a consumer in a repeated draw are reported. No fix.
-- **no-invalid-integrity**: the last `integrity` prop of a native JSX `<script>`/`<link>`
-  (no spread after it; string with entities decoded, or a control-flow static string) is
-  split on HTML whitespace; recognized entries (`sha256`/`sha384`/`sha512`/`ed25519`) must
-  be `alg-base64[=|==][?printable-options]` with 43/64/86/43 base64 characters (either
-  alphabet); each bad entry is reported, and metadata without a recognized one once.
-- **prefer-scoped-selector**: element `querySelector(All)` with one static selector, not on
-  `document`, a non-element root or a non-node value: branches are split CSS-tokenizer
-  style (strings, comments, escapes, nested groups), and a branch with a top-level
-  combinator but no `:scope` token is reported; one branch suggests a `:scope ` prefix.
-- **prefer-url-href**: `<url>.toString()` and global `String(<url>)` for a syntactically
-  known native URL (`rules/unicorn_url_type.rs`: global or `url`-module `URL` constructor,
-  `const` initializers, annotations through local aliases, return types; annotations of
-  parameters and return types don't see types declared in the function body). Fixed to
-  `.href` only for a fresh `new URL(...)`, without lost comments.
-- **no-url-in-search-params**: `new URLSearchParams(arg)` with a URL (the builtin type
-  checker with `URL`, its `url`-module imports, no class heritage), a URL's or `location`'s
-  `.href`, or a static `scheme://` string that parses (authority host/port checks only).
-  Suggestions: a detached `.search` copy, the live `.searchParams` (parenthesized as a
-  `new` callee containing a call), or `new URL(...).searchParams`.
-- **no-invalid-url-protocol-comparison**: `<url>.protocol` (shared URL detection) compared
-  by equality, `switch` or `[...].includes`/`indexOf`/`lastIndexOf`/`new Set([...]).has`
-  with a scheme-like static string not in `lowercase:` form; fixed inside the quotes unless
-  another `case` already has that protocol.
-- **no-incorrect-query-selector**: `qsa(...)[0]`/`.at(0)`/`.item(0)` (first-match, fixed),
-  `querySelectorAll("#id")` (id-selector), a `querySelectorAll()` result or `const` used as a
-  control-flow test (length-check, sharing explicit-length-check's `boolean_ancestor` and
-  `is_control_flow_test`), and nullish comparisons of both queries.
-- **no-unsafe-buffer-conversion**: `new <TypedArray>(v.buffer...)`, `Buffer.from(v.buffer...)`
-  (prefer-spread's `is_buffer_reference`) and `v.buffer.slice(...)` without the view's
-  `byteOffset`/`byteLength` (or with a known wrong one); no type information, so every
-  view counts. The suggestion needs no `?.`, no comment and a side-effect-free view.
-- **no-invalid-style-set-property**: `<style>.setProperty(name, value[, priority])` on a style
-  declaration (builtin type checker, else `style`/`.style`): a camelCase name whose dashed
-  form is a CSS property (`rules/unicorn_css_properties.rs`: the 724 property names mdn-data
-  lists, shipped with css-tree 4.1.2, as data; plus the WHATWG `-webkit-` aliases), a value
-  with a top-level `!important` (a small css-syntax-3 tokenizer: comments, strings, escapes,
-  `url(`, functions and blocks), and a non-empty priority other than `important`.
-- **prefer-observer-apis**: a `resize`/`scroll` listener (inline, or a never-reassigned
-  function binding) whose body reads layout (element `offset*`/`client*`/`scroll{Width,Height}`
-  and `getBoundingClientRect()`/`getClientRects()` on anything that could be an element,
-  the global `innerWidth`/`innerHeight`, `visualViewport.width`/`height`, also through object
-  patterns); writes and `delete` don't count.
-- **no-selector-as-dom-name**: a string or template whose text starts with `.`/`#` passed
-  as a class name to `classList.add`/`remove`/`contains`/`toggle`/`replace`, or as the name
-  to `getElementById`/`getElementsByClassName`; the fix drops the prefix for a simple name or
-  a `` `.${x}` `` template.
-- **consistent-json-file-read**: the argument of a plain `JSON.parse(x)`, through `await`s
-  and single-use variables (one plain declarator; the initialising write and the read are its
-  two references), that is a `readFile`/`readFileSync` call (non-optional member, or a name
-  imported from an `fs` module) with one or two non-spread arguments. String mode: no
-  encoding (fix adds `'utf8'`, after a trailing comma if there is one) or a static
-  `undefined`/`null`/`{encoding: undefined | null}` second argument (replaced by `'utf8'`
-  unless it holds a comment). Buffer mode: a static `"utf8"`/`"utf-8"` (any case) or
-  `{encoding: <that>}` second argument, removed. An options name whose `encoding` gets a
-  `get`/`set` descriptor through `Object.defineProperty(ies)`, also through `const` aliases,
-  is never static.
-- **require-text-decoder-streaming**: `decode(chunk, opts?)` (callee through wrappers) in
-  a loop, on a receiver resolving to `new TextDecoder(...)`, with non-streaming options
-  (missing, static nullish, or a plain literal whose last `stream` is missing or static
-  falsy), where the chunk is the `for await` binding over `(await fetch(...)).body` (or its
-  `.values(x?)`), or `value` of `await reader.read()` awaited in that loop with
-  `reader = <body>.getReader()`. Names resolve through earlier never-reassigned `const`s in
-  the same function. The suggestion (only for the plain `for await` / `while (true)` +
-  `if (done) break;` shapes, a `const` decoder and a `let text = ''` declared before the
-  loop in its block and used nowhere else, no comments in or right after the loop) turns on
-  `stream: true` and adds `text += decoder.decode();` after the loop unless it is there.
-- **prefer-https**: a text scan of the whole file for `http(s)://` (any case, not after a
-  word character, `+`, `-` or `.`), an authority and the rest of the URL; the next search
-  starts after the match. Lowercase `http` is reported over the authority unless the URL is
-  a known identifier URI (exact list and patterns, run on `regex_exec`), matches `ignore`
-  (strings or `{regex, flags}`), follows `xmlns=`/`xmlns:p=` within 30 UTF-16 units, or the
-  host is not public: the WHATWG host (after the last `@`, numeric port up to 65535,
-  percent-decoded, fullwidth forms and ideographic dots folded, forbidden code points
-  failing) must not be an IP address (last label numeric or `0x` hex) and its last label
-  must have a letter (non-ASCII counts, as punycode) and not be a reserved suffix.
-- **prefer-temporal-conversion**: `new Temporal.<T>(...)` / `Temporal.<T>.from(x)` (and
-  `Temporal.Instant.fromEpochMilli/Nanoseconds(x)`) for `Instant`, `PlainDateTime`,
-  `PlainDate`, `PlainTime`, whose source (`.from(s.toString()/toJSON())`, `.from(s)`,
-  `s.epochNanoseconds`/`epochMilliseconds`, or every target field read from one
-  side-effect-free receiver, positionally or as object keys with `monthCode`/`calendar`)
-  is a `Temporal.ZonedDateTime` (or `PlainDateTime` for date/time targets) by unicorn's
-  type guess, with `Temporal.X.from(a, b?)`, `new Temporal.X()` and `Temporal.Now.*ISO(x?)`
-  as known sources. Fixed or suggested as `s.to<T>()`; string and millisecond `Instant`
-  sources and date reconstructions without `calendar` (or by constructor) are suggestions.
-- **no-unnecessary-fetch-options**: the options literal of the global `fetch(input, o)` /
-  `new Request(input, o)`: empty as the last argument, or (all keys static and unique)
-  request-init keys statically `undefined`, `body: null`, and, for an input that is surely
-  not a `Request` (string literal, plain template, `new URL(...)`), empty `headers` and
-  default values (`method` compared upper-cased). Values evaluate as unicorn's
-  `getStaticValueForNode` (control flow for branches, no side effects when a member may
-  have changed). The first report removes the whole argument when every property goes
-  (none with getter-aware side effects or reading a later declaration, no comments); the
-  rest remove their line, inline span with one comma, or tokens (lexed with `ts_r_lexer`).
+A second batch adds six more, also at 100% of their oracle cases: `isolated-functions`,
+`no-unsafe-property-key`, `no-unnecessary-parameters`, `no-unused-builtin-method-return`,
+`no-nonstandard-builtin-properties` and `no-unsafe-json-serialization`.
+Four opt-in rules (`NO_PRESET`) follow, also at 100%: `consistent-function-style`,
+`no-keyword-prefix`, `consistent-arrow-return-style` and `id-match`.
 
-- `prefer-abort-signal-any` (`unicorn_prefer_abort_signal_any.rs`): a `const` `AbortController`
-  followed by either one non-`await` `for (const <signal-like> of <source>)` whose only
-  statement is `<same name>.addEventListener('abort', <aborts the controller>)`, or two or more
-  such listeners in a row on signal-like names (`signal`, `*Signal`) or side-effect-free
-  `AbortSignal.any/timeout(...)`. Options are absent, a boolean or `{capture, once, passive}`
-  booleans; the callback may pass `<source>.reason`. Loop sources are names, array literals,
-  `Array.of`/`Array(...)`, or `Array.from(<known array>)`; a known element list needs two or
-  more direct sources. A spread, the controller's own `.signal`, `AbortSignal.abort()`, or a
-  `const` array written before the loop stops it; annotated names must be `AbortSignal` arrays
-  (tuples, `Array<T>`, `ReadonlyArray<T>`, local aliases). Readonly sources (`as const`,
-  `readonly T[]`, `ReadonlyArray`) are copied (`[...x]`) in the shared `AbortController`
-  suggestion. `unicorn_abort::abort_reference_from` and `is_same_binding` are the shared
-  pieces.
+- **Column-0 problems** (`directives.rs`). ESLint puts a problem reported at column 0 (a
+  whole-file report) before the problems on its line. `ProblemPos.before_line` carries that,
+  and the sort key is `(pos, !before_line)`.
+- **Template literal types** (`engine.rs`, `is_template_type_escape`). An invalid escape
+  inside a template literal type (TS1125, 1198, 1199, 1487, 1488) is not a fatal parse error
+  for lint, because ESLint's parser accepts it.
+- **Working directory** (`LintEnv.cwd`, `ResolveOptions.cwd`). `filename-case` needs
+  ESLint's `cwd` for its directory checks.
+- **Shared naming helpers** (`unicorn_names.rs`, not a rule). `RegexOpt` holds a regex
+  option (`source`, `flags`). It also has the plugin's word splitting and
+  camel/pascal/kebab/snake casing, which `filename-case`, `consistent-compound-words`,
+  `name-replacements` and `consistent-boolean-name` use. `name-replacements` reuses
+  compound-words' import and rename checks (`import_check`, `can_rename`).
+- **Escapes and text.** `no-useless-template-literals` folds static interpolations, and
+  rebuilds either a string literal or a template depending on what the result needs.
+  `prefer-escaped-irregular-whitespace` writes `\u{X}`, keeps an LS/PS that is already
+  escaped, fixes regexes only with `u`/`v`, and skips JSX attribute strings.
+  `prefer-unicode-code-point-escapes` scans bytes and joins surrogate pairs. In a regex
+  without `u`, it only suggests, and checks the result with `crate::regex::parse`.
+  `prefer-literal-ascii` has no fix in a directive, when a following digit would extend a
+  legacy escape, or in a template literal type with a backslash.
+- **Comments.** `single-line-block-comment-style` leaves tooling directives alone
+  (matched by hand) and ESLint inline-config comments.
+- **Typed without the typed oracle.** `no-non-function-verb-prefix` is not `.typed()`,
+  because the untyped oracle cannot run typed rules. It checks
+  `cx.types().is_available()` and reports nothing without types. Class fields read
+  `type_at(PropertyDef)`.
+- **Renames.** `consistent-compound-words` matches the longest words first and checks
+  that a match ends on a word boundary. It walks (scope, symbol) in order, and a tracker of
+  names already used stops two renames from colliding. It only suggests.
+  `name-replacements` takes its table from the plugin defaults (generated once by a
+  script outside the repo). `locale_cmp` approximates `localeCompare` for ordering. The
+  filename report has its own location. A JSDoc `@param` attached to a parameter blocks
+  that parameter's fix.
+- **`prefer-single-replace`.** Reads the `crate::regex` tree: one alternative holding one
+  character, or a non-negated class of one character.
+- **`consistent-boolean-name`.** Every binding is boolean, non-boolean or unknown, and
+  unknown never reports.
+  - Type annotations are evaluated with an environment of generic arguments.
+  - An interface with call signatures and `Promise<T>` returns count. `as`/`satisfies`
+    use the target type first.
+  - A compound write makes a binding non-boolean, and an optional chain makes it unknown.
+  - React `useRef` and Vue `ref`/`computed` suppress the non-boolean report.
+  - Members dedupe per owner and name. Merged interfaces share an owner (found by
+    namespace path), and overload signatures decide over the implementation.
+  - JSDoc `@type`/`@param`/`@returns` are tokenized and parsed by our own small parser
+    (unions, intersections, `?`/`!`/`=`, function types, generics, records). Numeric
+    record keys follow the numeric-literal token rules: `.5` is a key, `1.5n` is not.
+  - A conditional or logical expression has a kind (string, array, ...) only when both
+    branches agree.
+- **`isolated-functions`.** Built on the ESTree view (`crate::estree`, `crate::esquery`
+  selectors). The reasons a function is isolated are tried in order: a comment tag before the
+  function (or its declarator, declaration, export, property or method), a call to one of the
+  `functions`, the first argument of `browser.execute`/`page.evaluate`, the `func` of
+  `{browser,chrome}.scripting.executeScript`, then the selectors by specificity.
+  - Outside references are the scope chain's "through" references. Type, `typeof`-type and
+    implicit references don't count.
+  - Allowed globals: `overrideGlobals` first, then comment globals (`off` forbids), then
+    `env.globals`. `Object.prototype` names are not globals here, because the plugin reads
+    the `globals` package, not ESLint's ES3 list.
+  - `this`/`super` are walked until a non-arrow function. Classes are entered only through
+    `superClass` and computed keys.
+- **`no-unsafe-property-key`.** Keys are classified as unsafe, safe or unknown by our own
+  rules first. Unknown keys fall back to an `unicorn_types::Checker` over the array target
+  names. Annotations resolve through `type_definition` from the declaring scope, and
+  well-known `Symbol.*` keys are safe.
+- **`no-unnecessary-parameters`.** Its local-call tracker covers symbols with one
+  declaration, plus `#private` methods through the nearest class. It stops at the global
+  scope, writes, exports, decorators and non-call references.
+  - The rule skips a whole file with `with`, direct `eval` or a sloppy-mode block function,
+    and skips functions that use their own `arguments` or have type parameters.
+    `ARGUMENTS` symbols are not in `scope.symbols`, so it scans `sem.symbols()`.
+  - Fixes remove the parameter and the argument (`remove_object_property` works
+    token-wise), add a local default with `unicorn_util_h2::{indent_unit, line_indent}`, and
+    replace references, adding parentheses and ASI guards where needed.
+  - It only suggests in TypeScript, or when the file has JSDoc types or `@ts-check`.
+- **`no-unused-builtin-method-return`.** A call counts as discarded when
+  `is_value_not_usable` holds, or when it is a `for` init/update, looking through `await`
+  and TS wrappers (`void` is a deliberate use).
+  - The receiver resolves through an unwritten single declarator or a plain parameter. A
+    member, a destructured, defaulted or optional parameter, or a write before the call
+    makes it uncertain, and uncertain receivers are skipped.
+  - Set and Temporal methods need a known receiver: `unicorn_types::SET`, or one local
+    `Checker` per Temporal method over dotted `Temporal.X` names plus `new Temporal.X()` /
+    `Temporal.X.from()`. Array methods only need the receiver not to be obviously
+    something else.
+  - Lazy iterator helpers are left to `no-unused-iterator-helper`. The check for them is a
+    small local copy of the iterator-expression test, which should fold into h2's
+    `unicorn_iter`.
+- **`no-nonstandard-builtin-properties`.** The data is a `Shape` per kind of object (its
+  own props, its own methods, and a base: `OBJECT`, `FUNCTION` or `CONSTRUCTOR`), with a
+  `(instance, prototype, static)` triple per global.
+  - Property names are literal keys only. Like `getPropertyName` without a scope, they
+    don't follow constants.
+  - Indexes count as standard: array indexes on arrays and strings, and canonical numeric
+    strings on typed arrays.
+  - The call kind looks up through parentheses and TS wrappers. A class's `extends`
+    clause counts as construction.
+- **`no-unsafe-json-serialization`.** Map, Set, WeakMap, WeakSet, BigInt and RegExp come
+  from the shared checkers. Symbols and functions have local `Checker`s: `Symbol.for(...)`,
+  the `symbol` keyword, well-known `Symbol.*` builtins as a static type, and function or
+  class syntax or a never-reassigned function or class name.
+  - The search keeps a per-path visited set. A `const` initializer reports its first
+    problem at the use, without suggestions.
+  - The report node is the argument without parentheses (ESTree has none). TS wrappers are
+    kept.
+- **`consistent-function-style`.** The role comes from the function's slot, looking
+  through parentheses. FunctionDecl spans drop `export`/`default` to match ESTree.
+  Accessor, class-member, default-value and IIFE slots have no role.
+- **`no-keyword-prefix` and `id-match`.** Both run over the ESTree view (`run_file`,
+  `EsTree::build`), because the rules decide by ESTree parent types. Reports are deduped by
+  range (shorthand properties are two nodes). `id-match` follows ESLint's core `id-match`
+  (`eslint/lib/rules/id-match.js`, read as a reference) and tests with `RegexOpt` and the
+  `u` flag. Configured and comment globals are skipped as references.
+- **`consistent-arrow-return-style`.** Reuses `concise_arrow_body_text` (from
+  `no-useless-boolean-cast`), `unicorn_ast::linebreak` and h2's
+  `indent_unit`/`line_indent`. The token after the block is checked as text, and a
+  template continuation is found by climbing to a `TemplateLit` parent.
+- **Gaps.**
+  - `expiring-todo-comments` does not check package, engine or peer-dependency
+    conditions, and recognizes only some CI vendors when detecting a PR.
+  - CSS, JSON and HTML languages are not linted.
+  - `consistent-boolean-name` has no checker type information and no `wrappers`
+    option, and does not mask `{@link}` or code spans inside JSDoc.
+  - `isolated-functions` does not treat JSX element names as references.
+    `no-unnecessary-parameters` skips every generic function, which only approximates the
+    plugin's type-aware check. `no-unused-builtin-method-return`, `no-unsafe-property-key`
+    and `no-unsafe-json-serialization` see no checker types: only syntax, annotations and
+    JSDoc.
 
-- `prefer-dom-node-replace-children` (`unicorn_prefer_dom_node_replace_children.rs`):
-  `x.innerHTML = ""` (static key whose computed form has no side effects, empty string or
-  template), `while (x.firstChild) x.removeChild(x.firstChild)` (or `lastChild`), and
-  `x.replaceChildren(); x.append/prepend(…)` as consecutive statements. The receiver is
-  skipped when it can't be a node, has an optional link anywhere, is known not to be a DOM
-  node, or not a `ParentNode` (`prefer-modern-dom-apis`' `REPLACE_CHILDREN_RECEIVER`, now
-  `pub(crate)`). For `innerHTML`, `Document`/`DocumentFragment`/`ParentNode` are excluded too,
-  as are the global `document` (`window.document`-style, `const` aliases), a
-  `createElement("template")` / `createElementNS(<HTML or unknown namespace>, "template")`
-  result (an unknown tag counts when its expression reads a possibly mutated member) and
-  possible `HTMLTemplateElement`s. Messages quote the receiver as written at its own place, and
-  the fix as written at the statement. Replace-and-add is a suggestion when an argument is not
-  a non-regex literal or substitution-free template, the receiver has getter side effects, or
-  it may be a document; with a comment inside the first call there is no fix.
-
-- `better-dom-traversing` (`unicorn_better_dom_traversing.rs`): read-only `x.childNodes[0]` /
-  `x.children[0]` (plain member names, a non-negative integer literal) suggest `.firstChild` /
-  `.firstElementChild` (renaming the member and dropping `[0]`, so parentheses around the
-  collection stay; no suggestion with a comment inside); another `x.children[N]` hints at
-  `.querySelector()`, except the inner index of `x.children[1].children[2]` and
-  `props.children` / `x.props.children`. The outermost `.parentElement.parentElement` chain
-  hints at `.closest()`. The outermost run of two or more one-argument static-string
-  `.querySelector()` calls (the next call up not another static one, no optional link
-  anywhere on the chain's member/call spine, which parentheses end) suggests one call with the
-  selectors joined by spaces, prefixed `:scope ` unless the root is `document` /
-  `window.document` / `globalThis.document`; none when a selector has `,` or `:scope` or there
-  is a comment inside. The quote is `"` only when the innermost selector is a `"` string.
-  Receivers that can't be nodes stop all three.
-
-- `no-invalid-argument-count` (`unicorn_no_invalid_argument_count.rs`, data in
-  `unicorn_argument_counts.rs`): calls and `new` on known globals, by the callee's dotted path
-  of plain names (through parentheses, TS wrappers and optional links) with leading
-  `globalThis`/`global`/`self`/`window` dropped, only when the root is the global binding.
-  Counts are exact, `{min, max}` or a set of allowed counts; with a spread only the other
-  arguments count, against the maximum, and the message says "at least N". Options add
-  patterns (`*` matches one segment) matched on the raw path without scope; one naming a
-  default replaces it and stays global-only. Defaults come first, then options in order, and
-  the first broken one reports on the callee. Failing that, a spread-free call to a function
-  written in place or a never-reassigned single declaration (`listener_function` in
-  `unicorn_prefer_observer_apis`, now `pub(crate)`) with more arguments than parameters
-  (`this` aside, no rest) reports; too few never does. The table of about 870 API counts is
-  data (facts about the APIs): it was generated from the plugin's published table into a
-  sorted Rust array, not translated code.
-
-Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
-`relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
-`utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
-`fix/replace-node-or-token-and-spaces-before.js`, `fix/remove-parentheses.js`,
-`prefer-classlist-toggle.js`, `utils/get-negated-expression-text.js`,
-`utils/should-add-parentheses-to-unary-expression.js`, `utils/single-statement.js`,
-`fix/replace-member-expression-property.js`, `ast/is-expression-statement.js`,
-`ast/literal.js`, `no-blob-to-file.js`, `utils/comments.js`, `fix/append-argument.js`,
-`fix/remove-statement.js`, `no-unsafe-sqlite-interpolation.js`, `no-late-event-control.js`,
-`shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
-`prefer-abort-signal-timeout.js`, `shared/abort-controller.js`,
-`utils/is-global-identifier.js`, `utils/function-body.js`, `prefer-url-search-parameters.js`,
-`ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`,
-`require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
-`no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`, `no-invalid-integrity.js`, `prefer-scoped-selector.js`,
-`prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`,
-`no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`,
-`no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`,
-`no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`,
-`no-selector-as-dom-name.js`, `consistent-json-file-read.js`,
-`require-text-decoder-streaming.js`, `utils/single-statement.js`, `fix/append-argument.js`,
-`prefer-https.js`, `prefer-temporal-conversion.js`,
-`no-unnecessary-fetch-options.js`, `fix/remove-argument.js`, `fix/remove-object-property.js`,
-`utils/get-static-value.js`, `prefer-abort-signal-any.js`,
-`utils/is-array.js`, `prefer-dom-node-replace-children.js`,
-`utils/should-report-replace-children-receiver.js`, `utils/is-dom-node.js`,
-`utils/is-node-value-not-dom-node.js`, `better-dom-traversing.js`,
-`utils/is-left-hand-side.js`, `ast/is-member-expression.js`, `no-invalid-argument-count.js`.
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
+`rules/no-abusive-eslint-disable.js`, `rules/filename-case.js`, `rules/import-style.js`,
+`rules/template-indent.js`, `rules/shared/is-jest-inline-snapshot.js`,
+`rules/expiring-todo-comments.js`, `rules/shared/package-json.js`,
+`rules/prefer-bigint-literals.js`, `rules/no-useless-template-literals.js`,
+`rules/utils/escape-template-element-raw.js`,
+`rules/utils/has-template-incompatible-escape.js`,
+`rules/prefer-escaped-irregular-whitespace.js`,
+`rules/prefer-unicode-code-point-escapes.js`, `rules/prefer-literal-ascii.js`,
+`rules/single-line-block-comment-style.js`, `rules/no-non-function-verb-prefix.js`,
+`rules/consistent-compound-words.js`, `rules/shared/identifier-checks.js`,
+`rules/prefer-single-replace.js`, `rules/name-replacements.js`,
+`rules/shared/name-replacements.js`, `rules/consistent-boolean-name.js`,
+`rules/utils/is-boolean.js`, `rules/utils/jsdoc.js`, `rules/utils/jsdoc-type.js`,
+`rules/utils/parse-jsdoc-type.js`, `rules/utils/get-jsdoc-boolean-state.js`,
+`rules/utils/type-helpers.js` (parts), `rules/utils/get-type-boolean-state.js`,
+`rules/utils/function-body.js`, `rules/utils/is-string.js`, `rules/utils/is-array.js`,
+`rules/utils/is-react-hook-name.js`, `rules/utils/get-boolean-wrapper-variable-state.js`
+(header), `rules/isolated-functions.js`, `docs/rules/isolated-functions.md`,
+`rules/no-unsafe-property-key.js`, `rules/utils/builtins.js`, `rules/shared/builtin-errors.js`,
+`rules/shared/typed-array.js`, `rules/no-unnecessary-parameters.js`,
+`docs/rules/no-unnecessary-parameters.md`, `rules/utils/track-local-function-calls.js`,
+`rules/utils/get-primitive-literal-value.js`, `rules/fix/remove-object-property.js`,
+`rules/fix/replace-reference-identifier.js`, `rules/fix/remove-argument.js`,
+`rules/utils/get-indent-unit.js`, `rules/utils/has-javascript-type-annotations.js`,
+`rules/no-unused-builtin-method-return.js`, `rules/shared/iterator-helpers.js`,
+`rules/no-nonstandard-builtin-properties.js`, `rules/utils/unwrap-typescript-expression.js`,
+`rules/utils/member-expression.js`, `rules/no-unsafe-json-serialization.js`,
+`rules/utils/get-const-variable-initializer.js`, `rules/consistent-function-style.js`,
+`rules/utils/has-unsafe-arrow-conversion-reference.js`, `rules/no-keyword-prefix.js`,
+`rules/consistent-arrow-return-style.js`, `rules/utils/function-body.js`,
+`rules/utils/reindent-text.js`, `rules/utils/get-concise-arrow-body-text.js`,
+`rules/utils/comments.js`, `rules/id-match.js`; ESLint 9: `lib/rules/id-match.js`.
