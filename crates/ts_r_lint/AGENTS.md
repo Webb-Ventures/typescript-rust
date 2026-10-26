@@ -2034,20 +2034,8 @@ obvious from the plugin's docs:
   is a comment inside. The quote is `"` only when the innermost selector is a `"` string.
   Receivers that can't be nodes stop all three.
 
-- `no-invalid-argument-count` (`unicorn_no_invalid_argument_count.rs`, data in
-  `unicorn_argument_counts.rs`): calls and `new` on known globals, by the callee's dotted path
-  of plain names (through parentheses, TS wrappers and optional links) with leading
-  `globalThis`/`global`/`self`/`window` dropped, only when the root is the global binding.
-  Counts are exact, `{min, max}` or a set of allowed counts; with a spread only the other
-  arguments count, against the maximum, and the message says "at least N". Options add
-  patterns (`*` matches one segment) matched on the raw path without scope; one naming a
-  default replaces it and stays global-only. Defaults come first, then options in order, and
-  the first broken one reports on the callee. Failing that, a spread-free call to a function
-  written in place or a never-reassigned single declaration (`listener_function` in
-  `unicorn_prefer_observer_apis`, now `pub(crate)`) with more arguments than parameters
-  (`this` aside, no rest) reports; too few never does. The table of about 870 API counts is
-  data (facts about the APIs): it was generated from the plugin's published table into a
-  sorted Rust array, not translated code.
+- `no-invalid-argument-count`: written here too, but the lead's copy (same 1431/1431) is the
+  one kept; it is described in "eslint-plugin-unicorn rules (round 6, lead)".
 
 - `prefer-uint8array-hex` (`unicorn_prefer_uint8array_hex.rs`): hand-written hex encoding
   (`[...x]` / `Array.from(x)` `.map(cb)`, `Array.from(x, cb)`, `Array.prototype.map.call` /
