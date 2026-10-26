@@ -1,0 +1,1 @@
+tsconfig.nul-byte.json(1,27): error TS1005: '}' expected.

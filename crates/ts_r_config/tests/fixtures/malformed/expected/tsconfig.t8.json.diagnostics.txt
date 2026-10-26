@@ -1,0 +1,3 @@
+tsconfig.t8.json(1,38): error TS1136: Property assignment expected.
+
+tsconfig.t8.json(1,39): error TS1136: Property assignment expected.

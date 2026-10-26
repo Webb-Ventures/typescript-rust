@@ -1,0 +1,3 @@
+error TS18003: No inputs were found in config file '${FIXTURE}/tsconfig.v1.json'. Specified 'include' paths were '[1]' and 'exclude' paths were '[]'.
+
+tsconfig.v1.json(1,15): error TS5024: Compiler option 'include' requires a value of type string.

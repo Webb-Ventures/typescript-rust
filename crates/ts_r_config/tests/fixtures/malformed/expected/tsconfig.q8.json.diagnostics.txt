@@ -1,0 +1,11 @@
+tsconfig.q8.json(1,19): error TS5024: Compiler option 'compileOnSave' requires a value of type boolean.
+
+tsconfig.q8.json(1,20): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.q8.json(1,38): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.q8.json(1,39): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.q8.json(1,60): error TS5024: Compiler option 'typeAcquisition' requires a value of type object.
+
+tsconfig.q8.json(1,61): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

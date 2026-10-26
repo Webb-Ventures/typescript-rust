@@ -1,0 +1,5 @@
+tsconfig.p29.json(1,1): error TS1005: '{' expected.
+
+tsconfig.p29.json(1,1): error TS1136: Property assignment expected.
+
+tsconfig.p29.json(1,3): error TS1005: ',' expected.

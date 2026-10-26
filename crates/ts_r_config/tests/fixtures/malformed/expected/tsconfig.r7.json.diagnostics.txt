@@ -1,0 +1,1 @@
+tsconfig.r7.json(1,6): error TS1012: Unexpected token.

@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {},
+    "files": [
+        "./a.ts"
+    ],
+    "include": [
+        "a.ts"
+    ]
+}

@@ -1,0 +1,5 @@
+tsconfig.key-only-root.json(1,20): error TS5024: Compiler option 'compilerOptions' requires a value of type object.
+
+tsconfig.key-only-root.json(1,21): error TS1005: ':' expected.
+
+tsconfig.key-only-root.json(1,21): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

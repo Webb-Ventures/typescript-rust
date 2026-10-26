@@ -1,0 +1,5 @@
+tsconfig.p22.json(1,39): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.p22.json(1,40): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.p22.json(1,40): error TS5063: Substitutions for pattern 'a' should be an array.

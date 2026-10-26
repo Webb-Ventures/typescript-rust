@@ -1,0 +1,1 @@
+tsconfig.nested-unclosed-arr.json(1,41): error TS1005: ',' expected.

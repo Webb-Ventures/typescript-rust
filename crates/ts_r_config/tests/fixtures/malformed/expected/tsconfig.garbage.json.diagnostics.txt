@@ -1,0 +1,5 @@
+tsconfig.garbage.json(1,1): error TS1005: '{' expected.
+
+tsconfig.garbage.json(1,1): error TS1136: Property assignment expected.
+
+tsconfig.garbage.json(1,6): error TS1005: '}' expected.

@@ -1,0 +1,3 @@
+tsconfig.p4.json(1,1): error TS1005: '{' expected.
+
+tsconfig.p4.json(1,7): error TS1005: '}' expected.

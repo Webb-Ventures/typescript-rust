@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "outDir": "./dist } }"
+    },
+    "files": [
+        "./a.ts"
+    ],
+    "exclude": [
+        "${FIXTURE}/dist } }"
+    ]
+}

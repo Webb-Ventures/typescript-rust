@@ -70,6 +70,23 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   aliases, `fallbackPool`), then resolved as usual (`exports`, `tsconfig`). This goes past
   tsc 7, which has no PnP and reports TS6053; it only applies where tsc would fail, and
   matches esbuild (`TsconfigPackageJsonExportsYarnPnP`, `TsconfigStackOverflowYarnPnP`).
+- **Malformed JSON is reported as tsc 7 reports it** (`jsonc.rs` module and `parse` docs;
+  observed with `tsc -p`, 220 inputs in `tests/fixtures/malformed`). tsc parses the file as
+  one expression, so: parse errors keep one per position (TS1005, TS1109 "Expression
+  expected." for a missing value, TS1136/TS1137 for a token a list cannot use, TS1012, and the
+  scanner's TS1002/1010/1121/1124/1125/1127/1160/1161/1177/1178/1198/1199/1351/1489/6188/6189);
+  conversion errors are a separate list: TS1327 for a key (or value) that is not a
+  double-quoted string, TS1328 once over a value that is not JSON (an identifier, a missing
+  value, `a + b`, `f()`, a regex, a template), TS1136 for a shorthand or spread member
+  (`Member::key_form`). The option pass then reports such a value again at its *full start*:
+  TS5024 where an option type applies, else TS1328 (TS1136 for a shorthand) under unknown
+  keys, unknown compiler options (which then get no TS5023), `watchOptions`, plugin entries
+  and `paths` entries (`Diags::free_form`). Non-JSON list elements are dropped (a list of
+  only those is not set), and a later element's error is anchored at the written element
+  whose index it has in what is left (`list_anchor`). A root without `{` parses as an object
+  after "'{' expected."; tokens after the root are TS1012 once and parsed too; the first
+  object literal is the config. A bad escape keeps its text (`"\u12"`). Number options are
+  truncated to integers, saturating (`1.5` is 1), as tsc 7 stores them.
 - **Two kinds of config diagnostics.** `diagnostics` are parse errors (JSON, unknown option
   TS5023, wrong type TS5024, bad value TS6046); tsc still checks the program after them.
   `option_diagnostics()` (`verify.rs`) and `emit_overwrite_diagnostics()` (TS5055) are tsc's
@@ -127,8 +144,10 @@ gives directly.
 - Diagnostics use the local `ConfigDiagnostic` (code, message, file, byte span); they move to
   `ts_r_diagnostics` once that crate settles.
 - No TS5011/TS6059 (`rootDir` must contain all sources) or other checks that need the program.
-- JSONC error *recovery* matches tsc on common mistakes only; exotic broken files may report
-  different follow-on errors.
+- JSONC error recovery follows tsc's expression grammar only as far as JSON mistakes need:
+  methods and accessors in objects (`{ a() {} }`), `new`, arrow bodies, JSX and the
+  missing-expression position after a decorator (`@x }`, where tsc points at the trivia) can
+  report different follow-on errors. Past 256 levels of nesting each token is one TS1328.
 - Wildcard directories for watch mode are not exposed yet; `watchOptions` is parsed but unused.
 - The command line does not reject some well-formed `--locale` tags tsc has no messages for
   (`xx`); only malformed tags give TS6048.

@@ -1,0 +1,5 @@
+tsconfig.string-in-obj.json(1,45): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.string-in-obj.json(1,46): error TS1005: ':' expected.
+
+tsconfig.string-in-obj.json(1,46): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

@@ -1,0 +1,1 @@
+tsconfig.q18.json(1,39): error TS1005: ',' expected.

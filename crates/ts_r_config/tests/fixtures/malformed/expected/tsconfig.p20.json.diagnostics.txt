@@ -1,0 +1,1 @@
+tsconfig.p20.json(1,40): error TS1136: Property assignment expected.

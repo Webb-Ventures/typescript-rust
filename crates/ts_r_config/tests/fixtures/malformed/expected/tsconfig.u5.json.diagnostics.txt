@@ -1,0 +1,7 @@
+error TS18003: No inputs were found in config file '${FIXTURE}/tsconfig.u5.json'. Specified 'include' paths were '[1]' and 'exclude' paths were '[]'.
+
+tsconfig.u5.json(1,15): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.u5.json(1,15): error TS5024: Compiler option 'include' requires a value of type Array.
+
+tsconfig.u5.json(1,15): error TS5024: Compiler option 'include' requires a value of type string.

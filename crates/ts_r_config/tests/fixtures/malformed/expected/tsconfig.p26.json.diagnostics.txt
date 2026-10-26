@@ -1,0 +1,1 @@
+tsconfig.p26.json(2,16): error TS1010: '*/' expected.

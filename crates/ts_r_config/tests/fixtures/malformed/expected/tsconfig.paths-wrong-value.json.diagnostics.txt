@@ -1,0 +1,1 @@
+tsconfig.paths-wrong-value.json(1,40): error TS5063: Substitutions for pattern 'a' should be an array.

@@ -1,0 +1,1 @@
+tsconfig.wrong-type-obj.json(1,33): error TS5024: Compiler option 'paths' requires a value of type object.

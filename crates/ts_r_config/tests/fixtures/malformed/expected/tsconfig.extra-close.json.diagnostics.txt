@@ -1,0 +1,1 @@
+tsconfig.extra-close.json(1,43): error TS1012: Unexpected token.

@@ -1,0 +1,3 @@
+error TS5092: The root value of a 'tsconfig.json' file must be an object.
+
+tsconfig.r3.json(1,5): error TS1012: Unexpected token.

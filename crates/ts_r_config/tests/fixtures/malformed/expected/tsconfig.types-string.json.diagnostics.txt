@@ -1,0 +1,1 @@
+tsconfig.types-string.json(1,33): error TS5024: Compiler option 'types' requires a value of type Array.

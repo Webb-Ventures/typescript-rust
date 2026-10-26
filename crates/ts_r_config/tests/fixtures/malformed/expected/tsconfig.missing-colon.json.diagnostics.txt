@@ -1,0 +1,1 @@
+tsconfig.missing-colon.json(1,33): error TS1005: ':' expected.

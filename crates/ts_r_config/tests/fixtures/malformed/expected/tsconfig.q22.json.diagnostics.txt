@@ -1,0 +1,5 @@
+tsconfig.q22.json(1,12): error TS1005: ',' expected.
+
+tsconfig.q22.json(1,14): error TS1012: Unexpected token.
+
+tsconfig.q22.json(1,15): error TS1005: '}' expected.

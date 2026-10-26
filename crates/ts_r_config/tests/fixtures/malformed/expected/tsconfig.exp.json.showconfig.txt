@@ -1,0 +1,8 @@
+{
+    "compilerOptions": {
+        "maxNodeModuleJsDepth": 100
+    },
+    "files": [
+        "./a.ts"
+    ]
+}

@@ -1,0 +1,13 @@
+tsconfig.p2.json(1,23): error TS1136: Property assignment expected.
+
+tsconfig.p2.json(1,24): error TS1136: Property assignment expected.
+
+tsconfig.p2.json(1,31): error TS1005: ',' expected.
+
+tsconfig.p2.json(1,31): error TS1327: String literal with double quotes expected.
+
+tsconfig.p2.json(1,35): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.p2.json(1,36): error TS1005: ':' expected.
+
+tsconfig.p2.json(1,36): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

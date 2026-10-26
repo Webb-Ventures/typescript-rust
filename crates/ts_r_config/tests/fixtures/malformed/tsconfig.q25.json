@@ -1,0 +1,1 @@
+{ "compilerOptions": { "strict": f(1, 2) } }
