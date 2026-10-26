@@ -352,12 +352,7 @@ mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
-mod unicorn_prefer_promise_static_methods;
-mod unicorn_prefer_promise_try;
-mod unicorn_prefer_promise_with_resolvers;
-mod unicorn_prefer_short_escape_sequences;
-mod unicorn_prefer_single_array_predicate;
-mod unicorn_prefer_string_repeat;
+mod unicorn_prefer_string_slice;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
@@ -750,15 +745,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
-    &unicorn_prefer_promise_static_methods::RULE,
-    &unicorn_prefer_promise_try::RULE,
-    &unicorn_prefer_queue_microtask::RULE,
-    &unicorn_prefer_response_static_json::RULE,
-    &unicorn_prefer_promise_with_resolvers::RULE,
-    &unicorn_prefer_short_escape_sequences::RULE,
-    &unicorn_prefer_single_array_predicate::RULE,
-    &unicorn_prefer_string_repeat::RULE,
-    &unicorn_prefer_structured_clone::RULE,
+    &unicorn_prefer_string_slice::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,

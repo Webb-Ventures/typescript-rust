@@ -340,12 +340,7 @@ unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-coercion 60/60
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
-unicorn/prefer-promise-static-methods 51/51
-unicorn/prefer-promise-try 71/71
-unicorn/prefer-promise-with-resolvers 37/37
-unicorn/prefer-short-escape-sequences 28/28
-unicorn/prefer-single-array-predicate 32/32
-unicorn/prefer-string-repeat 79/79
+unicorn/prefer-string-slice 142/142
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112
 unicorn/prefer-type-literal-last 37/37
