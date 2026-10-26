@@ -5089,11 +5089,35 @@ impl<'c, 'a> Ck<'c, 'a> {
             .params
             .len()
             .max(self.store().sig(tsig).params.len());
+        // A generic rest of the source (`...args: A`) infers from the target's parameters
+        // from that position on as a whole (`A` from the target's `...args: A2`; tsc:
+        // `applyToParameterTypes` with the rest type at that position).
+        let generic_rest = {
+            let d = self.store().sig(ssig);
+            match d.params.last().map(|p| p.ty) {
+                Some(r)
+                    if d.has_rest()
+                        && self.store().tuple_shape_of(r).is_none()
+                        && self
+                            .store()
+                            .flags(r)
+                            .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS) =>
+                {
+                    Some((d.params.len() - 1, r))
+                }
+                _ => None,
+            }
+        };
+        let n = generic_rest.map_or(n, |(at, _)| at);
         for i in 0..n {
             if let (Some(sp), Some(tp)) = (self.param_type_at(ssig, i), self.param_type_at(tsig, i))
             {
                 self.infer_types(&mut ctx, tp, sp, 0);
             }
+        }
+        if let Some((at, r)) = generic_rest {
+            let tr = self.rest_type_at(tsig, at);
+            self.infer_types(&mut ctx, tr, r, 0);
         }
         let mut rctx = crate::infer::InferenceContext::new(tps);
         rctx.filter_by_constraint = true;
