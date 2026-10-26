@@ -1741,6 +1741,16 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   after `a === k && a !== b`. Any side effect or tagged template between the first and last
   analyzed operand stops it; a removal that could run getters or conversions is a
   suggestion.
+- **no-negated-comparison**: `!(a === b)` -> `a !== b` for the four equality operators only
+  (a negated relational comparison also rejects `NaN`, so it stays). The parentheses go
+  unless the parent is an operator that needs the group (a logical expression isn't one:
+  ESTree has no `BinaryExpression` there). `return`/`throw` whose argument starts on a later
+  line than the `!` get the argument parenthesized; a `yield` like that gets no fix.
+  `checkLogicalExpressions` applies De Morgan to chains of equalities only.
+- **no-chained-comparison**: `a < b < c` and friends; an equality against a boolean
+  (`isBoolean`, typed or inferred) is skipped. The `a < b && b < c` suggestion needs both
+  operators of the same kind, a plain middle without side effects, and a spot where the
+  `&&` can't be captured by an operator around it.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, and `global_value_available` (type-only bindings
@@ -1748,10 +1758,13 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
-`prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`;
+`prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`,
+`no-negated-comparison.js`, `no-chained-comparison.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
-`comments.js`, `comparison.js`, `is-logical-expression.js`; `rules/fix/remove-statement.js`;
+`comments.js`, `comparison.js`, `is-logical-expression.js`,
+`get-unparenthesized-keyword-argument-parent.js`; `rules/fix/remove-statement.js`,
+`add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
 `rules/shared/nullish-check.js`. ESLint docs for `operator-assignment` and
 `logical-assignment-operators`.

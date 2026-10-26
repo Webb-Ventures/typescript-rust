@@ -345,6 +345,7 @@ mod unicorn_no_await_expression_member;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_canvas_to_image;
+mod unicorn_no_chained_comparison;
 mod unicorn_no_collection_bracket_access;
 mod unicorn_no_conflicting_constraints;
 mod unicorn_no_confusing_array_with;
@@ -375,6 +376,7 @@ mod unicorn_no_lonely_if;
 mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_misrefactored_assignment;
 mod unicorn_no_named_default;
+mod unicorn_no_negated_comparison;
 mod unicorn_no_negated_condition;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
@@ -899,6 +901,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
+    &unicorn_no_chained_comparison::RULE,
     &unicorn_no_confusing_array_with::RULE,
     &unicorn_no_array_method_this_argument::RULE,
     &unicorn_no_conflicting_constraints::RULE,
@@ -928,6 +931,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_magic_array_flat_depth::RULE,
     &unicorn_no_misrefactored_assignment::RULE,
     &unicorn_no_named_default::RULE,
+    &unicorn_no_negated_comparison::RULE,
     &unicorn_no_negated_condition::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,

@@ -306,6 +306,7 @@ unicorn/no-await-expression-member 72/72
 unicorn/no-await-in-promise-methods 111/111
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-canvas-to-image 41/41
+unicorn/no-chained-comparison 126/126
 unicorn/no-collection-bracket-access 129/129
 unicorn/no-conflicting-constraints 61/61
 unicorn/no-confusing-array-with 49/49
@@ -334,6 +335,7 @@ unicorn/no-lonely-if 20/20
 unicorn/no-magic-array-flat-depth 27/27
 unicorn/no-misrefactored-assignment 79/79
 unicorn/no-named-default 66/66
+unicorn/no-negated-comparison 117/117
 unicorn/no-negated-condition 134/134
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
