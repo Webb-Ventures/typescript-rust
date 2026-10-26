@@ -278,6 +278,7 @@ unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
+unicorn/no-named-default 66/66
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
@@ -295,8 +296,10 @@ unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46
+unicorn/prefer-global-this 154/154
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-optional-catch-binding 25/25
+unicorn/prefer-string-repeat 79/79
 unicorn/prefer-structured-clone 47/47
 unicorn/prefer-type-error 112/112
 unicorn/text-encoding-identifier-case 101/101

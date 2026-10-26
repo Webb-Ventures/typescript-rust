@@ -305,3 +305,6 @@ unicorn/no-exports-in-scripts
 unicorn/consistent-tuple-labels
 unicorn/no-leading-empty-lines
 unicorn/prefer-add-event-listener-options
+unicorn/prefer-global-this
+unicorn/no-named-default
+unicorn/prefer-string-repeat

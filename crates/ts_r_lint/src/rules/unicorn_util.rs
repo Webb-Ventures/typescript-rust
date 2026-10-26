@@ -411,7 +411,7 @@ pub(crate) fn new_to_call(cx: &Ctx<'_, '_>, new: NodeId) -> Fix {
 
 /// `node` (not parenthesized) is, through members, tags and TS wrappers, the callee of a
 /// `new`.
-fn in_unparenthesized_new_callee(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+pub(crate) fn in_unparenthesized_new_callee(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
     let mut cur = node;
     for _ in 0..100_000 {
         let Some(parent) = cx.parent(cur) else {

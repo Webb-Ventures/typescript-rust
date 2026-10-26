@@ -288,6 +288,7 @@ mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
+mod unicorn_no_named_default;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
@@ -305,8 +306,10 @@ mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
+mod unicorn_prefer_global_this;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
 mod unicorn_text_encoding_identifier_case;
@@ -625,6 +628,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
+    &unicorn_no_named_default::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
@@ -642,8 +646,10 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_text_encoding_identifier_case::RULE,

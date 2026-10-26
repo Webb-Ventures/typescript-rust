@@ -603,6 +603,11 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
 - **prefer-structured-clone**'s JSON suggestion deletes `JSON.stringify` with each
   parenthesis around it, the inner call's `(`, `)` and trailing comma; the clone-function
   form replaces the callee inside its parentheses.
+- **prefer-global-this**, **no-named-default**: see each file's header.
+- **prefer-string-repeat** skips literals the syntax needs (`unicorn_ast::is_string_literal_required`:
+  non-computed keys and any key of an abstract member or signature, module sources and
+  specifiers, import attributes, JSX attribute values, enum members, module names,
+  `require` references, any child of a type) and `expect(x).toMatchInlineSnapshot(lit)`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -612,4 +617,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `no-negation-in-equality-check.js`, `no-useless-error-capture-stack-trace.js`,
 `prefer-event-target.js`, `no-exports-in-scripts.js`, `consistent-tuple-labels.js`,
 `no-leading-empty-lines.js`, `prefer-add-event-listener-options.js`, `utils/needs-semicolon.js`,
-`fix/add-parentheses-to-return-or-throw-expression.js`.
+`fix/add-parentheses-to-return-or-throw-expression.js`, `prefer-global-this.js`,
+`no-named-default.js`, `prefer-string-repeat.js`, `utils/is-string-literal-required.js`.

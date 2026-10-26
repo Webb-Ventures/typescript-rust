@@ -244,6 +244,108 @@ pub(crate) fn paren_return_or_throw(cx: &Ctx<'_, '_>, stmt: NodeId) -> Vec<(Span
     ]
 }
 
+/// JavaScript's `\s`: whitespace and line terminators, including U+FEFF but not U+0085.
+pub(crate) fn is_js_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202f}'
+                | '\u{205f}'
+                | '\u{3000}'
+                | '\u{feff}'
+    )
+}
+
+/// The syntax requires the string or template literal `node` to stay a literal: module
+/// sources and specifier names, import attributes, non-computed keys (and any key of
+/// abstract members and signatures), JSX attribute values, enum members, module names,
+/// `require` references, and types.
+pub(crate) fn is_string_literal_required(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+    let ast = cx.ast();
+    let Some(parent) = cx.parent(node) else {
+        return false;
+    };
+    let abstract_member = |m: NodeId| match *ast.node(m) {
+        Node::MethodDef { modifiers, .. } | Node::PropertyDef { modifiers, .. } => {
+            modifiers.contains(Modifiers::ABSTRACT)
+        }
+        Node::PropertySignature { .. } | Node::MethodSignature { .. } => true,
+        _ => false,
+    };
+    match *ast.node(parent) {
+        Node::ComputedKey { .. } => cx.parent(parent).is_some_and(abstract_member),
+        Node::Property { key, .. }
+        | Node::PropertyDef { key, .. }
+        | Node::MethodDef { key, .. } => key == node,
+        Node::ImportDecl { source, .. } | Node::ExportAll { source, .. } if source == node => true,
+        Node::ExportNamed {
+            source: Some(source),
+            ..
+        } => source == node,
+        Node::ExportAll { exported, .. } => exported == Some(node),
+        Node::ImportAttribute { .. }
+        | Node::ImportSpecifier { .. }
+        | Node::ExportSpecifier { .. }
+        | Node::JsxAttr { .. }
+        | Node::EnumMember { .. }
+        | Node::ExternalModuleRef { .. } => true,
+        Node::Module { name, .. } => name == node,
+        Node::VarDeclarator { type_ann, .. }
+        | Node::Param { type_ann, .. }
+        | Node::IndexSignature { type_ann, .. } => type_ann == Some(node),
+        Node::FunctionDecl { return_type, .. }
+        | Node::FunctionExpr { return_type, .. }
+        | Node::Arrow { return_type, .. } => return_type == Some(node),
+        Node::TypeAlias { ty, .. }
+        | Node::As { ty, .. }
+        | Node::Satisfies { ty, .. }
+        | Node::TypeAssertion { ty, .. } => ty == node,
+        _ => matches!(
+            ast.kind(parent),
+            NodeKind::TypeRef
+                | NodeKind::TemplateLitType
+                | NodeKind::ArrayType
+                | NodeKind::TupleType
+                | NodeKind::NamedTupleMember
+                | NodeKind::OptionalType
+                | NodeKind::RestType
+                | NodeKind::UnionType
+                | NodeKind::IntersectionType
+                | NodeKind::FunctionType
+                | NodeKind::ConstructorType
+                | NodeKind::PropertySignature
+                | NodeKind::MethodSignature
+                | NodeKind::CallSignature
+                | NodeKind::ConstructSignature
+                | NodeKind::TypeOperator
+                | NodeKind::IndexedAccessType
+                | NodeKind::ConditionalType
+                | NodeKind::MappedType
+                | NodeKind::ParenType
+                | NodeKind::TypePredicate
+                | NodeKind::ImportType
+                | NodeKind::TypeParam
+                | NodeKind::TypeArgs
+        ),
+    }
+}
+
+/// `expect(x).toMatchInlineSnapshot(node)`.
+pub(crate) fn is_jest_inline_snapshot(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
+    let ast = cx.ast();
+    let Some(call) = cx.parent(node).and_then(|p| method_call(ast, p)) else {
+        return false;
+    };
+    call.name == "toMatchInlineSnapshot"
+        && call.plain()
+        && call.args == [node]
+        && matches!(*ast.node(skip_parens(ast, call.obj)), Node::Call { callee, optional: false, args, .. }
+            if ident_name(ast, skip_parens(ast, callee)) == Some("expect") && ast.list(args).len() == 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +364,16 @@ mod tests {
             panic!("call");
         };
         (parsed, callee)
+    }
+
+    #[test]
+    fn js_space_matches_regexp_backslash_s() {
+        for c in ['\t', '\u{b}', '\u{a0}', '\u{2007}', '\u{3000}', '\u{feff}'] {
+            assert!(is_js_space(c), "{c:?}");
+        }
+        for c in ['a', '\u{85}', '\u{200b}', '0'] {
+            assert!(!is_js_space(c), "{c:?}");
+        }
     }
 
     #[test]
