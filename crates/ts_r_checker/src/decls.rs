@@ -143,6 +143,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         for c in classes {
             if matches!(self.ast(file).node(c), Node::ClassDecl { .. }) {
+                self.check_decorator_placement(file, c);
                 self.check_decorator_expressions(file, c);
             }
             self.check_type_parameter_merge(Loc::new(file, c));
