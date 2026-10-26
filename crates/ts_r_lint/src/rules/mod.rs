@@ -307,6 +307,7 @@ mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_catch_error_name;
+mod unicorn_class_reference_in_static_methods;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_date_clone;
@@ -556,6 +557,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_class_reference_in_static_methods::RULE,
     &unicorn_require_proxy_trap_boolean_return::RULE,
     &unicorn_no_invalid_property_descriptor::RULE,
     &unicorn_no_uncalled_method::RULE,
