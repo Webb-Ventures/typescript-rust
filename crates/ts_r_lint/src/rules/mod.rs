@@ -35,6 +35,7 @@ mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
 mod jsdoc_require_hyphen_before_param_description;
+mod jsdoc_require_jsdoc;
 mod jsdoc_require_next_description;
 mod jsdoc_require_next_type;
 mod jsdoc_require_param;
@@ -634,6 +635,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_reject_function_type::RULE,
     &jsdoc_require_asterisk_prefix::RULE,
     &jsdoc_require_hyphen_before_param_description::RULE,
+    &jsdoc_require_jsdoc::RULE,
     &jsdoc_require_next_description::RULE,
     &jsdoc_require_next_type::RULE,
     &jsdoc_require_param::RULE,

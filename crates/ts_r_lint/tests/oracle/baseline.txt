@@ -122,6 +122,7 @@ jsdoc/reject-any-type 5/5
 jsdoc/reject-function-type 4/4
 jsdoc/require-asterisk-prefix 24/24
 jsdoc/require-hyphen-before-param-description 32/32
+jsdoc/require-jsdoc 198/198
 jsdoc/require-next-description 2/2
 jsdoc/require-next-type 2/2
 jsdoc/require-param 154/154

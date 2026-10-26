@@ -777,7 +777,9 @@ impl<'a> Finder<'a> {
         }
     }
 
-    fn start_of(&self, id: NodeId) -> u32 {
+    /// Where a node starts for comment lookup: its first decorator (or its parent's), else
+    /// itself.
+    pub fn start_of(&self, id: NodeId) -> u32 {
         let own = self.ast.span(id).start;
         let dec = self
             .decorators(id)
@@ -799,7 +801,8 @@ impl<'a> Finder<'a> {
         }
     }
 
-    fn find(&self, id: NodeId) -> Option<usize> {
+    /// The JSDoc block right before `id` (`findJSDocComment`), without reducing it first.
+    pub fn find(&self, id: NodeId) -> Option<usize> {
         let mut cur = self.start_of(id);
         let mut paren: Option<u32> = None;
         let cs = &self.ast.comments;
@@ -837,7 +840,8 @@ impl<'a> Finder<'a> {
         )
     }
 
-    fn reduce(&self, id: NodeId) -> NodeId {
+    /// The node whose comment documents `id` (`getReducedASTNode`).
+    pub fn reduce(&self, id: NodeId) -> NodeId {
         match self.ast.node(id) {
             Node::FunctionDecl { body: None, .. }
             | Node::ClassExpr { .. }
@@ -1783,14 +1787,21 @@ fn is_void_like_type(ast: &Ast, ty: NodeId) -> bool {
 /// `hasValueOrExecutorHasNonEmptyResolveValue`: the function returns a value, or returns a
 /// `new Promise` whose executor resolves with one (any Promise when `any_promise`).
 pub fn has_return_value(ast: &Ast, id: NodeId, any_promise: bool) -> bool {
-    returns_value(ast, id, any_promise, 0)
+    returns_value(ast, id, Some(any_promise), 0)
 }
 
-fn returns_value(ast: &Ast, id: NodeId, any_promise: bool, depth: u32) -> bool {
+/// `hasReturnValue` without a Promise filter: any `return` with a value counts.
+pub fn has_plain_return_value(ast: &Ast, id: NodeId) -> bool {
+    returns_value(ast, id, None, 0)
+}
+
+/// `promises`: `None` counts every value return; `Some(any_promise)` looks into returned
+/// `new Promise`s.
+fn returns_value(ast: &Ast, id: NodeId, promises: Option<bool>, depth: u32) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }
-    let rec = |n: NodeId| returns_value(ast, n, any_promise, depth + 1);
+    let rec = |n: NodeId| returns_value(ast, n, promises, depth + 1);
     match *ast.node(id) {
         Node::FunctionDecl {
             body: None,
@@ -1829,7 +1840,12 @@ fn returns_value(ast: &Ast, id: NodeId, any_promise: bool, depth: u32) -> bool {
         Node::Return { arg: None } => false,
         Node::Return { arg: Some(a) } => {
             let a = skip_parens(ast, a);
-            !is_new_promise(ast, a) || promise_resolves(ast, a, any_promise, depth + 1)
+            match promises {
+                None => true,
+                Some(any_promise) => {
+                    !is_new_promise(ast, a) || promise_resolves(ast, a, any_promise, depth + 1)
+                }
+            }
         }
         Node::Switch { cases, .. } => ast.list(cases).iter().any(|&c| match *ast.node(c) {
             Node::SwitchCase { body, .. } => ast.list(body).iter().any(|&s| rec(s)),
