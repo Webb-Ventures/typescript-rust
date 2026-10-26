@@ -295,6 +295,8 @@ mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
 mod unicorn_no_empty_file;
+mod unicorn_no_exports_in_scripts;
+mod unicorn_no_for_each;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
@@ -677,6 +679,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_empty_file::RULE,
+    &unicorn_no_exports_in_scripts::RULE,
+    &unicorn_no_for_each::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,

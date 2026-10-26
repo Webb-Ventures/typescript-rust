@@ -286,6 +286,8 @@ unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
 unicorn/no-empty-file 58/58
+unicorn/no-exports-in-scripts 22/22
+unicorn/no-for-each 431/431
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
