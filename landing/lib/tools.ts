@@ -145,19 +145,19 @@ Usage: ts-r-dev [root] [options]
     name: 'ts-r-lint',
     title: 'linter',
     replaces: 'ESLint + typescript-eslint',
-    body: 'A linter that reads your ESLint flat config, runs 292 ESLint, typescript-eslint, jsdoc and unicorn rules, 51 of them type-aware, and honours eslint-disable comments.',
+    body: 'A linter that reads your ESLint flat config, runs 473 ESLint, typescript-eslint, jsdoc and unicorn rules, 51 of them type-aware, and honours eslint-disable comments.',
     intro:
       'ts-r-lint runs ESLint-compatible rules over JavaScript and TypeScript. It reads the config you already have, reports in ESLint’s formats and exits with ESLint’s codes, so it can stand in for eslint in scripts and CI when your config only uses the rules it has.',
     works: [
-      '292 rules: all 64 of ESLint 10’s recommended set and 70 more core rules, typescript-eslint’s recommended and strict rules, 40 jsdoc rules and 23 unicorn rules; 51 are type-aware, on ts-r’s own checker',
-      '25,042 of 25,060 cases of the published ESLint, typescript-eslint, eslint-plugin-jsdoc and eslint-plugin-unicorn tests for those rules match',
+      '473 rules: all 64 of ESLint 10’s recommended set and 70 more core rules, typescript-eslint’s recommended and strict rules, 48 jsdoc rules and 196 unicorn rules; 51 are type-aware, on ts-r’s own checker',
+      '43,855 of 43,874 cases of the published ESLint, typescript-eslint, eslint-plugin-jsdoc and eslint-plugin-unicorn tests for those rules match',
       'ESLint flat config, .oxlintrc.json and biome.json',
       '--fix, eslint-disable comments and inline config, with unused-disable reports',
       'Output as stylish, json, sarif or GitHub Actions annotations',
     ],
     notYet: [
       'Type-aware rules only where ts-r-check matches your tsc on the project; elsewhere they are skipped and listed on stderr',
-      'No ESLint plugins other than typescript-eslint, apart from 40 jsdoc and 23 unicorn rules',
+      'No ESLint plugins other than typescript-eslint, apart from 48 jsdoc and 196 unicorn rules',
     ],
     usage: `ts-r-lint [options] [paths...]
 

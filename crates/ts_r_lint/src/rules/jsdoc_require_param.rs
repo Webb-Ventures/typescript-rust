@@ -558,6 +558,7 @@ impl Editor<'_> {
             typ,
             description: String::new(),
             source: vec![id],
+            problems: Vec::new(),
         };
         let tag_at = splice_at(tag_at, b.tags.len());
         let tag_end = (tag_at + count).min(b.tags.len());

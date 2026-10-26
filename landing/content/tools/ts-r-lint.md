@@ -13,12 +13,12 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 ## What works today
 
-- 292 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
-  typescript-eslint 8.71 `recommended` and `strict` rules and a few more, 40
-  eslint-plugin-jsdoc rules and 23 eslint-plugin-unicorn rules. 51 of them are type-aware
+- 473 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
+  typescript-eslint 8.71 `recommended` and `strict` rules and a few more, 48
+  eslint-plugin-jsdoc rules and 196 eslint-plugin-unicorn rules. 51 of them are type-aware
   and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
 - The published ESLint, typescript-eslint, eslint-plugin-jsdoc and eslint-plugin-unicorn tests for
-  those rules: 25,042 of 25,060 cases match (18,140 of 18,140 for rules without types, 6,902 of
+  those rules: 43,855 of 43,874 cases match (36,953 of 36,954 for rules without types, 6,902 of
   6,920 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
@@ -31,7 +31,7 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 - Type-aware rules run only on a tsconfig project where ts-r-check reports the same
   diagnostics as your tsc. Elsewhere they are skipped, and listed on stderr with the reason.
-- No ESLint plugins other than typescript-eslint, apart from 40 eslint-plugin-jsdoc and 23
+- No ESLint plugins other than typescript-eslint, apart from 48 eslint-plugin-jsdoc and 196
   eslint-plugin-unicorn rules
   (`ts-r-lint --list-rules` names them). Rules from other plugins are skipped and
   listed as "plugin not implemented".

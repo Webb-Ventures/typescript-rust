@@ -24,8 +24,8 @@ pub(crate) fn global_path(cx: &Ctx<'_, '_>, expr: NodeId) -> Option<String> {
     out
 }
 
-/// True when `expr` can be the global object itself (`globalThis`, `window`, an alias
-/// `const g = globalThis`), as [`global_path`] follows it.
+/// True when `expr` is the global object (`globalThis`, `window`, ... or a variable
+/// initialised from one), as ESLint's reference tracker follows it.
 pub(crate) fn is_global_object(cx: &Ctx<'_, '_>, expr: NodeId) -> bool {
     let mut out = false;
     path_of(cx, expr, 0, &mut |p| out |= p.is_empty());

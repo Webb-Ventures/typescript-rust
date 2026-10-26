@@ -20,6 +20,7 @@ mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
+mod jsdoc_check_tag_names;
 mod jsdoc_check_types;
 mod jsdoc_check_values;
 mod jsdoc_empty_tags;
@@ -61,6 +62,7 @@ mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
 mod jsdoc_tag_lines;
+mod jsdoc_ts_no_empty_object_type;
 mod jsdoc_valid_types;
 mod max_depth;
 mod max_nested_callbacks;
@@ -280,50 +282,87 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_array_mutate;
+mod unicorn_ast;
 mod unicorn_catch_error_name;
+mod unicorn_consistent_assert;
+mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_date_clone;
+mod unicorn_consistent_empty_array_spread;
+mod unicorn_consistent_existence_index_check;
 mod unicorn_consistent_function_scoping;
+mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
+mod unicorn_dom_node_dataset;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
 mod unicorn_explicit_length_check;
+mod unicorn_explicit_timer_delay;
+mod unicorn_length_or_infinity;
+mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
 mod unicorn_no_accidental_bitwise_operator;
 mod unicorn_no_array_concat_in_loop;
 mod unicorn_no_array_from_fill;
+mod unicorn_no_array_method_this_argument;
+mod unicorn_no_array_reduce;
 mod unicorn_no_array_reverse;
 mod unicorn_no_array_sort;
 mod unicorn_no_array_splice;
+mod unicorn_no_asterisk_prefix_in_documentation_comments;
 mod unicorn_no_async_promise_finally;
+mod unicorn_no_await_expression_member;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
+mod unicorn_no_canvas_to_image;
 mod unicorn_no_collection_bracket_access;
+mod unicorn_no_conflicting_constraints;
+mod unicorn_no_confusing_array_with;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
+mod unicorn_no_double_comparison;
+mod unicorn_no_duplicate_if_branches;
+mod unicorn_no_duplicate_logical_operands;
+mod unicorn_no_duplicate_set_values;
 mod unicorn_no_empty_file;
 mod unicorn_no_exports_in_scripts;
+mod unicorn_no_for_each;
+mod unicorn_no_for_loop;
 mod unicorn_no_global_object_property_assignment;
 mod unicorn_no_impossible_length_comparison;
+mod unicorn_no_incorrect_template_string_interpolation;
+mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_invalid_well_known_symbol_methods;
+mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
+mod unicorn_no_magic_array_flat_depth;
+mod unicorn_no_misrefactored_assignment;
+mod unicorn_no_named_default;
 mod unicorn_no_negated_condition;
+mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
+mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
+mod unicorn_no_process_exit;
 mod unicorn_no_shorthand_property_overrides;
+mod unicorn_no_static_only_class;
+mod unicorn_no_thenable;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
+mod unicorn_no_top_level_assignment_in_function;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
+mod unicorn_no_undeclared_class_members;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
@@ -332,13 +371,22 @@ mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
+mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
+mod unicorn_no_useless_collection_argument;
 mod unicorn_no_useless_compound_assignment;
+mod unicorn_no_useless_concat;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_error_capture_stack_trace;
+mod unicorn_no_useless_fallback_in_spread;
+mod unicorn_no_useless_length_check;
+mod unicorn_no_useless_override;
+mod unicorn_no_useless_promise_resolve_reject;
 mod unicorn_no_useless_re_export;
+mod unicorn_no_useless_recursion;
 mod unicorn_no_useless_spread;
 mod unicorn_no_useless_switch_case;
 mod unicorn_no_useless_undefined;
@@ -347,9 +395,13 @@ mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener;
+mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
+mod unicorn_prefer_array_from_range;
 mod unicorn_prefer_array_index_of;
+mod unicorn_prefer_array_last_methods;
+mod unicorn_prefer_array_slice;
 mod unicorn_prefer_array_some;
 mod unicorn_prefer_at;
 mod unicorn_prefer_blob_reading_methods;
@@ -357,53 +409,87 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_default_parameters;
+mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
+mod unicorn_prefer_dom_node_remove;
+mod unicorn_prefer_dom_node_text_content;
 mod unicorn_prefer_event_target;
+mod unicorn_prefer_export_from;
+mod unicorn_prefer_flat_math_min_max;
 mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterator_to_array;
+mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_location_assign;
 mod unicorn_prefer_math_abs;
+mod unicorn_prefer_math_constants;
 mod unicorn_prefer_math_min_max;
+mod unicorn_prefer_math_trunc;
+mod unicorn_prefer_modern_dom_apis;
+mod unicorn_prefer_module;
+mod unicorn_prefer_native_coercion_functions;
+mod unicorn_prefer_negative_index;
 mod unicorn_prefer_node_protocol;
+mod unicorn_prefer_number_coercion;
+mod unicorn_prefer_number_properties;
+mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_promise_static_methods;
 mod unicorn_prefer_promise_try;
 mod unicorn_prefer_promise_with_resolvers;
+mod unicorn_prefer_prototype_methods;
+mod unicorn_prefer_query_selector;
 mod unicorn_prefer_queue_microtask;
+mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_set_methods;
+mod unicorn_prefer_set_size;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
 mod unicorn_prefer_split_limit;
 mod unicorn_prefer_spread;
+mod unicorn_prefer_string_match_all;
 mod unicorn_prefer_string_pad_start_end;
+mod unicorn_prefer_string_raw;
 mod unicorn_prefer_string_repeat;
+mod unicorn_prefer_string_replace_all;
+mod unicorn_prefer_string_slice;
+mod unicorn_prefer_string_starts_ends_with;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_switch;
 mod unicorn_prefer_ternary;
+mod unicorn_prefer_then_catch;
 mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
+mod unicorn_prefer_unary_minus;
+mod unicorn_require_array_join_separator;
 mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
 mod unicorn_require_module_attributes;
+mod unicorn_require_module_specifiers;
+mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_splice;
 mod unicorn_static;
+mod unicorn_switch_case_braces;
 mod unicorn_switch_case_break_position;
 mod unicorn_text;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
 mod unicorn_util;
+mod unicorn_util_h1;
+mod unicorn_util_h2;
 mod unicorn_util_h4;
+mod unicorn_util_h5;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -706,70 +792,114 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
+    &jsdoc_ts_no_empty_object_type::RULE,
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
     // eslint-plugin-unicorn
-    &unicorn_catch_error_name::RULE,
+    &unicorn_consistent_assert::RULE,
+    &unicorn_consistent_class_member_order::RULE,
     &unicorn_consistent_date_clone::RULE,
+    &unicorn_consistent_existence_index_check::RULE,
+    &unicorn_consistent_empty_array_spread::RULE,
+    &unicorn_consistent_optional_chaining::RULE,
+    &unicorn_catch_error_name::RULE,
     &unicorn_consistent_function_scoping::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
+    &unicorn_dom_node_dataset::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,
+    &unicorn_explicit_timer_delay::RULE,
+    &unicorn_max_nested_calls::RULE,
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
     &unicorn_no_accidental_bitwise_operator::RULE,
     &unicorn_no_array_concat_in_loop::RULE,
+    &unicorn_no_array_reduce::RULE,
     &unicorn_no_array_reverse::RULE,
     &unicorn_no_array_sort::RULE,
+    &unicorn_no_asterisk_prefix_in_documentation_comments::RULE,
     &unicorn_no_array_splice::RULE,
     &unicorn_no_async_promise_finally::RULE,
     &unicorn_no_array_from_fill::RULE,
+    &unicorn_no_await_expression_member::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
+    &unicorn_no_canvas_to_image::RULE,
+    &unicorn_no_confusing_array_with::RULE,
+    &unicorn_no_array_method_this_argument::RULE,
+    &unicorn_no_conflicting_constraints::RULE,
     &unicorn_no_collection_bracket_access::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
-    &unicorn_no_empty_file::RULE,
+    &unicorn_no_double_comparison::RULE,
+    &unicorn_no_duplicate_logical_operands::RULE,
+    &unicorn_no_duplicate_set_values::RULE,
+    &unicorn_no_duplicate_if_branches::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
+    &unicorn_no_ineffective_csp_directives::RULE,
+    &unicorn_no_empty_file::RULE,
+    &unicorn_no_for_each::RULE,
+    &unicorn_no_for_loop::RULE,
+    &unicorn_no_incorrect_template_string_interpolation::RULE,
     &unicorn_no_impossible_length_comparison::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
+    &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_invalid_well_known_symbol_methods::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
+    &unicorn_no_magic_array_flat_depth::RULE,
+    &unicorn_no_misrefactored_assignment::RULE,
+    &unicorn_no_named_default::RULE,
     &unicorn_no_negated_condition::RULE,
+    &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,
     &unicorn_no_object_methods_with_collections::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
+    &unicorn_no_object_as_default_parameter::RULE,
+    &unicorn_no_process_exit::RULE,
+    &unicorn_no_static_only_class::RULE,
+    &unicorn_no_thenable::RULE,
     &unicorn_no_shorthand_property_overrides::RULE,
     &unicorn_no_this_assignment::RULE,
+    &unicorn_no_top_level_assignment_in_function::RULE,
     &unicorn_no_this_outside_of_class::RULE,
     &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
+    &unicorn_no_undeclared_class_members::RULE,
     &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
     &unicorn_no_unnecessary_global_this::RULE,
     &unicorn_no_unnecessary_nested_ternary::RULE,
     &unicorn_no_unnecessary_slice_end::RULE,
+    &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unnecessary_splice::RULE,
     &unicorn_no_unnecessary_string_trim::RULE,
     &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_unsafe_string_replacement::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_coercion::RULE,
     &unicorn_no_useless_compound_assignment::RULE,
+    &unicorn_no_useless_collection_argument::RULE,
+    &unicorn_no_useless_concat::RULE,
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
+    &unicorn_no_useless_override::RULE,
     &unicorn_no_useless_re_export::RULE,
+    &unicorn_no_useless_recursion::RULE,
+    &unicorn_no_useless_fallback_in_spread::RULE,
+    &unicorn_no_useless_length_check::RULE,
+    &unicorn_no_useless_promise_resolve_reject::RULE,
     &unicorn_no_useless_spread::RULE,
     &unicorn_no_useless_switch_case::RULE,
     &unicorn_no_useless_undefined::RULE,
@@ -788,6 +918,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
     &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_flat_math_min_max::RULE,
+    &unicorn_prefer_export_from::RULE,
     &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
@@ -797,6 +929,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_location_assign::RULE,
     &unicorn_prefer_math_abs::RULE,
     &unicorn_prefer_math_min_max::RULE,
+    &unicorn_prefer_module::RULE,
+    &unicorn_prefer_math_constants::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
@@ -811,6 +945,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
+    &unicorn_prefer_string_match_all::RULE,
     &unicorn_prefer_split_limit::RULE,
     &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_structured_clone::RULE,
@@ -821,17 +956,42 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_slice::RULE,
     &unicorn_prefer_string_starts_ends_with::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
-    &unicorn_prefer_structured_clone::RULE,
-    &unicorn_prefer_switch::RULE,
-    &unicorn_prefer_ternary::RULE,
-    &unicorn_prefer_top_level_await::RULE,
+    &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
+    &unicorn_prefer_unary_minus::RULE,
     &unicorn_require_array_sort_compare::RULE,
     &unicorn_require_css_escape::RULE,
     &unicorn_prefer_type_literal_last::RULE,
     &unicorn_require_module_attributes::RULE,
     &unicorn_require_module_specifiers::RULE,
     &unicorn_switch_case_break_position::RULE,
+    &unicorn_prefer_add_event_listener::RULE,
+    &unicorn_prefer_array_flat::RULE,
+    &unicorn_prefer_array_flat_map::RULE,
+    &unicorn_prefer_array_index_of::RULE,
+    &unicorn_prefer_array_some::RULE,
+    &unicorn_prefer_code_point::RULE,
+    &unicorn_prefer_default_parameters::RULE,
+    &unicorn_prefer_dom_node_append::RULE,
+    &unicorn_prefer_dom_node_remove::RULE,
+    &unicorn_prefer_dom_node_text_content::RULE,
+    &unicorn_prefer_keyboard_event_key::RULE,
+    &unicorn_prefer_math_trunc::RULE,
+    &unicorn_prefer_modern_dom_apis::RULE,
+    &unicorn_prefer_native_coercion_functions::RULE,
+    &unicorn_prefer_negative_index::RULE,
+    &unicorn_prefer_object_from_entries::RULE,
+    &unicorn_prefer_prototype_methods::RULE,
+    &unicorn_prefer_query_selector::RULE,
+    &unicorn_prefer_reflect_apply::RULE,
+    &unicorn_prefer_set_size::RULE,
+    &unicorn_prefer_string_raw::RULE,
+    &unicorn_require_array_join_separator::RULE,
+    &unicorn_require_number_to_fixed_digits_argument::RULE,
+    &unicorn_prefer_switch::RULE,
+    &unicorn_prefer_ternary::RULE,
+    &unicorn_prefer_top_level_await::RULE,
+    &unicorn_switch_case_braces::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
 ];

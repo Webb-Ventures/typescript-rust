@@ -519,7 +519,6 @@ pub fn parse_for_lint(path: &str, src: &str, env: &LintEnv) -> ts_r_parser::Pars
             // binary operators after `as T` / `satisfies T` as TypeScript 5 does.
             module: env.source_type == crate::env::SourceType::Module,
             assertion_continues: true,
-            ..Default::default()
         },
     )
 }

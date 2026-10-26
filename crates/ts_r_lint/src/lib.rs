@@ -12,6 +12,7 @@ pub mod estree;
 pub mod fix;
 pub mod globals;
 pub mod jsdoc;
+pub mod jsdoc_export;
 pub mod jsdoc_tags;
 pub mod jsdoc_tree;
 pub mod jsdoc_type;
