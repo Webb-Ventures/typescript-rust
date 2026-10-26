@@ -388,14 +388,14 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   `abstract class`, `interface`, `enum`/`const enum`, `(enum member) E.m = 0`,
   `namespace`/`module`, `(type parameter) T in C<T>`/`in f<T>(x: T): void`/
   `in type A<T>`, `type A<T> = <body>`.
-- A type alias's body is its declared type as printed (`type B = Exclude<A, "a">` shows
-  the union it makes, `type R = ReturnType<..>` the object). Until the checker's
-  `PrintMode::quick_info_alias` (tsc's `InTypeAlias`: the outermost type prints without
-  its own alias) is on the stack, a body the printer names by the alias itself is spelled
-  out from its members for JSDoc `@typedef`/`@callback` aliases and TypeScript object types
-  of plain properties (`readonly`, `?` without the `undefined` it adds), and is otherwise
-  the text as written, as is a conditional type. A JSDoc alias's documentation is the
-  comment it sits in, without the `@property`/`@param`/`@returns` tags that build it.
+- A type alias's body is its declared type printed with `PrintMode::quick_info_alias`
+  (tsc's `InTypeAlias`: the outermost type without its own alias), so `type B = Exclude<A,
+  "a">` shows the union it makes and a JSDoc `@typedef`/`@callback` its object or function
+  type. A conditional type shows its text as written (tsc keeps one with a generic check
+  type deferred; our checker does not yet). A JSDoc alias's documentation is the comment it
+  sits in, without the `@property`/`@param`/`@returns` tags that build it.
+- An accessor at its setter's name or written through (`o.v = 1`) shows the setter's
+  accepted type (`Ck::write_type_of_symbol`); elsewhere the getter's.
 - Names inside JSDoc tag types (`@type {Bar}`, `@param {Bar} x`, `@extends {a.B}`) are
   found by `locate::node_at`: a tag's type lies in a comment, outside its host's span, so
   an offset inside one descends from that type (hover, definition, references, rename).

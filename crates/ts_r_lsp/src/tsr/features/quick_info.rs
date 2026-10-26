@@ -23,7 +23,7 @@
 //!   do not enclose the location. An alias's target whose name does not reach the location
 //!   (it lives in another module) shows under the alias's own name.
 
-use ts_r_ast::{ModuleKind, Node, VarKind};
+use ts_r_ast::{MethodKind, ModuleKind, Node, VarKind};
 use ts_r_binder::{SymbolFacts, SymbolFlags, decl_name_node, meaning};
 use ts_r_checker::members::SigKind;
 use ts_r_checker::{Ck, Loc, PrintMode};
@@ -259,7 +259,7 @@ impl Writer {
             self.line();
             let name = self.name(ck, s);
             let tps = self.type_params(ck, s);
-            let body = alias_body(ck, s, &name, self.mode());
+            let body = alias_body(ck, s, PrintMode::quick_info_alias(self.at));
             self.out.push_str(&format!("type {name}{tps} = {body}"));
         }
         if flags.intersects(SymbolFlags::SIGNATURE) {
@@ -336,6 +336,11 @@ impl Writer {
         // `exactOptionalPropertyTypes` `?`).
         let t = if self.alias.is_some() {
             ck.type_of_symbol(s)
+        } else if flags.intersects(SymbolFlags::ACCESSOR)
+            && (assigned_member(ck, self.at) || is_setter_name(ck, self.at))
+        {
+            // A setter's name or a write through it: the type it accepts.
+            ck.write_type_of_symbol(s)
         } else if flags.intersects(SymbolFlags::PROPERTY) && assigned_member(ck, self.at) {
             let t = ck.type_of_symbol(s);
             ck.remove_missing(t)
@@ -868,6 +873,16 @@ pub(super) fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Lo
     sigs
 }
 
+/// Whether `at` is the name of a `set` accessor declaration.
+fn is_setter_name(ck: &Ck<'_, '_>, at: Loc) -> bool {
+    let c = ck.c;
+    c.parent(at).is_some_and(|p| {
+        matches!(*c.node(p),
+            Node::MethodDef { kind: MethodKind::Set, key, .. }
+            | Node::MethodSignature { kind: MethodKind::Set, key, .. } if key == at.node)
+    })
+}
+
 /// Whether `at` names the member an assignment writes (`o.p = 1`, `o["p"] ??= 1`, `o.p++`).
 fn assigned_member(ck: &Ck<'_, '_>, at: Loc) -> bool {
     let c = ck.c;
@@ -957,120 +972,24 @@ fn var_prefix(ck: &Ck<'_, '_>, s: SymId) -> &'static str {
     }
 }
 
-/// The aliased type of a type alias, printed as tsc's quick info prints it (the declared
-/// type, so `Exclude<A, "_0">` shows the union it makes). When the printer names the type
-/// by the alias itself (an object type or union written in the alias), a JSDoc
-/// `@typedef`/`@callback` and a TypeScript object type of plain properties are spelled
-/// out from their members ([`spelled_alias_body`]); other TypeScript aliases show their
-/// text as written (whitespace collapsed), as conditional types do (tsc keeps one with a
-/// generic check type deferred).
-// When the checker can print a type without its own alias (tsc's `InTypeAlias`), that
-// replaces both fallbacks.
-fn alias_body(ck: &mut Ck<'_, '_>, s: SymId, shown: &str, mode: PrintMode) -> String {
+/// The aliased type of a type alias, printed as tsc's quick info prints it: the declared
+/// type with its own alias expanded (`PrintMode::quick_info_alias`, tsc's `InTypeAlias`),
+/// so `Exclude<A, "_0">` shows the union it makes. A conditional type shows its text as
+/// written (whitespace collapsed): tsc keeps one with a generic check type deferred, which
+/// the checker does not yet.
+fn alias_body(ck: &mut Ck<'_, '_>, s: SymId, mode: PrintMode) -> String {
     let c = ck.c;
     let t = ck.declared_type_of_symbol(s);
-    let printed = ck.type_to_string_with(t, mode);
-    let Some(d) = c
+    if let Some(d) = c
         .decls(s)
         .into_iter()
         .find(|d| matches!(c.node(*d), Node::TypeAlias { .. }))
-    else {
-        return printed;
-    };
-    let Node::TypeAlias { ty, .. } = *c.node(d) else {
-        return printed;
-    };
-    // The printer names the alias (by its own name, or the import alias it is shown as).
-    let base = printed.split('<').next().unwrap_or("");
-    let base = base.rsplit('.').next().unwrap_or(base);
-    let names_itself = base == c.sym_name(s) || Some(base) == shown.rsplit('.').next();
-    let decl_text = c.text(d);
-    if decl_text.starts_with("typedef") || decl_text.starts_with("callback") {
-        return if names_itself {
-            spelled_alias_body(ck, t, Loc::new(d.file, ty), mode).unwrap_or(printed)
-        } else {
-            printed
-        };
-    }
-    let ast = c.ast(d.file);
-    if !names_itself && !matches!(ast.node(ty), Node::ConditionalType { .. }) {
-        return printed;
-    }
-    if names_itself
-        && let Node::TypeLiteral { members } = *ast.node(ty)
-        && ast
-            .list(members)
-            .iter()
-            .all(|&m| matches!(ast.node(m), Node::PropertySignature { .. }))
-        && let Some(body) = spelled_alias_body(ck, t, Loc::new(d.file, ty), mode)
+        && let Node::TypeAlias { ty, .. } = *c.node(d)
+        && matches!(c.ast(d.file).node(ty), Node::ConditionalType { .. })
     {
-        return body;
+        return super::hover::collapse_ws(c.text(Loc::new(d.file, ty)));
     }
-    super::hover::collapse_ws(c.text(Loc::new(d.file, ty)))
-}
-
-/// An alias's type written out from the type itself (a JSDoc alias's source is comment
-/// text): a `@callback`'s signature as an arrow, properties as an object literal type
-/// (`readonly` as declared), a union member by member.
-fn spelled_alias_body(ck: &mut Ck<'_, '_>, t: TypeId, ty: Loc, mode: PrintMode) -> Option<String> {
-    let c = ck.c;
-    match c.node(ty) {
-        Node::FunctionType { .. } => {
-            let sigs = ck.signatures_of(t, SigKind::Call);
-            let [sig] = sigs.as_slice() else { return None };
-            Some(ck.signature_to_string_with(*sig, SigKind::Call, true, mode))
-        }
-        Node::TypeLiteral { .. } => {
-            let mut out = String::from("{ ");
-            for (_, p) in ck.properties_of(t) {
-                let name = c.sym_name(p);
-                let readonly = c.decls(p).iter().any(|d| {
-                    matches!(*c.node(*d), Node::PropertySignature { modifiers, .. }
-                        if modifiers.contains(ts_r_ast::Modifiers::READONLY))
-                });
-                if readonly {
-                    out.push_str("readonly ");
-                }
-                if super::complete::is_identifier_name(name) {
-                    out.push_str(name);
-                } else {
-                    out.push_str(&ts_r_checker::print::quote_string(name));
-                }
-                let optional = c.sym_flags(p).intersects(SymbolFlags::OPTIONAL);
-                if optional {
-                    out.push('?');
-                }
-                let pt = ck.type_of_symbol(p);
-                let printed = ck.type_to_string_with(pt, mode);
-                // `a?: T` shows `T`, without the `undefined` the `?` adds, unless written.
-                let written_undefined = c.decls(p).iter().any(|d| {
-                    matches!(*c.node(*d), Node::PropertySignature { type_ann: Some(ta), .. }
-                        if c.text(Loc::new(d.file, ta)).contains("undefined"))
-                });
-                let printed = match printed.strip_suffix(" | undefined") {
-                    Some(rest) if optional && !written_undefined => rest.to_string(),
-                    _ => printed,
-                };
-                out.push_str(": ");
-                out.push_str(&printed);
-                out.push_str("; ");
-            }
-            out.push('}');
-            Some(out)
-        }
-        _ => {
-            let store = ck.store();
-            let TypeKind::Union { list, .. } = store.kind(t) else {
-                return None;
-            };
-            let items = store.list_items(list).to_vec();
-            let parts: Vec<String> = items
-                .into_iter()
-                .map(|m| ck.type_to_string_with(m, mode))
-                .collect();
-            Some(parts.join(" | "))
-        }
-    }
+    ck.type_to_string_with(t, mode)
 }
 
 pub fn strip_ts_ext(path: &str) -> &str {

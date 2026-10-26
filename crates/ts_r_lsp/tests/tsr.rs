@@ -855,7 +855,9 @@ fn hover_on_type_aliases_and_jsdoc_typedefs() {
         return;
     }
     let ts = "type A = \"a\" | \"b\";\ntype B = Exclude<A, \"a\">;\ntype O = { x: number };\n\
-              class D<T> { constructor(val: T) {} }\nnew D<string>();\n";
+              class D<T> { constructor(val: T) {} }\nnew D<string>();\n\
+              class S { set v(x: string | number) {} get v(): string { return \"\"; } }\n\
+              new S().v = new S().v;\n";
     let js = "/**\n * Bar doc\n * @typedef {Object} Bar\n * @property {string} baz\n */\n\
               /** @callback Cb\n * @param {string} x\n */\n\
               /** @type {Bar} */\nexport const bar = { baz: \"\" };\n";
@@ -885,6 +887,18 @@ fn hover_on_type_aliases_and_jsdoc_typedefs() {
         h.contains("constructor D<string>(val: string): D<string>"),
         "{h}"
     );
+    // A setter's name and a write through it show the type it accepts; a read the getter's.
+    for (line, ch, want) in [
+        (5, 15, "string | number"),
+        (6, 8, "string | number"),
+        (6, 20, "C.v: string\n"),
+    ] {
+        let h = hover_text(&mut c, &ua, line, ch);
+        assert!(
+            h.contains(want) || h.contains(&want.replace("C.", "S.")),
+            "{line}:{ch} {h}"
+        );
+    }
     let want = "type Bar = {\n    baz: string;\n}";
     let h = hover_text(&mut c, &ub, 2, 22);
     assert!(h.contains(want), "{h}");
