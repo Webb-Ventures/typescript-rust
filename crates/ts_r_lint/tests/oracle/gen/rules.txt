@@ -339,3 +339,5 @@ unicorn/prefer-number-coercion
 unicorn/prefer-unary-minus
 unicorn/prefer-promise-try
 unicorn/no-invalid-fetch-options
+unicorn/no-misrefactored-assignment
+unicorn/no-useless-compound-assignment

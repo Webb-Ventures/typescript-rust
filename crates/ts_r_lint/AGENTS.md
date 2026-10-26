@@ -674,7 +674,8 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `no-duplicate-logical-operands.js`, `utils/comparison.js`, `utils/is-reference-context.js`,
 `prefer-block-statement-over-iife.js`, `ast/is-direct-eval-call.js`, `prefer-number-coercion.js`,
 `prefer-unary-minus.js`, `ast/is-negative-one.js`, `utils/should-add-parentheses-to-unary-expression.js`,
-`prefer-promise-try.js`, `no-invalid-fetch-options.js`.
+`prefer-promise-try.js`, `no-invalid-fetch-options.js`, `no-misrefactored-assignment.js`,
+`no-useless-compound-assignment.js`.
 
 ## eslint-plugin-unicorn type guessing (round 5)
 

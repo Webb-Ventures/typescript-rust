@@ -74,7 +74,7 @@ fn is_simple_reference(ast: &Ast, id: NodeId, depth: u32) -> bool {
 
 /// The expression (through parentheses and TS wrappers) is a callee, a tag or a `delete`
 /// operand.
-fn is_reference_context(cx: &Ctx<'_, '_>, mut id: NodeId) -> bool {
+pub(crate) fn is_reference_context(cx: &Ctx<'_, '_>, mut id: NodeId) -> bool {
     let ast = cx.ast();
     for _ in 0..10_000 {
         let Some(p) = cx.parent(id) else {

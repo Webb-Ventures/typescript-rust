@@ -309,6 +309,7 @@ mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_magic_array_flat_depth;
+mod unicorn_no_misrefactored_assignment;
 mod unicorn_no_named_default;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
@@ -325,6 +326,7 @@ mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_boolean_cast;
+mod unicorn_no_useless_compound_assignment;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_re_export;
@@ -701,6 +703,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_magic_array_flat_depth::RULE,
+    &unicorn_no_misrefactored_assignment::RULE,
     &unicorn_no_named_default::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
@@ -717,6 +720,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_slice_end::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
+    &unicorn_no_useless_compound_assignment::RULE,
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_re_export::RULE,
