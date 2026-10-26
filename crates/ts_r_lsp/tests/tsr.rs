@@ -1234,6 +1234,141 @@ fn completion_in_string_literals() {
     c.shutdown();
 }
 
+/// Completions inside object literals and object binding patterns offer the properties of
+/// the contextual or destructured type not written yet; optional ones are labelled `name?`
+/// (inserting `name`); a variable's own initializer does not offer the variable.
+#[test]
+fn completion_object_literals_and_patterns() {
+    if !libs_present() {
+        return;
+    }
+    let text = "interface P { a: number; b?: string; c: boolean }\nconst p: P = { a: 1, };\nconst q: P = {\n  a: 1\n  \n};\ndeclare const v: P;\nconst { a, } = v;\nv.;\nconst zz = z;\nfunction g({ }: P) {}\n";
+    let env = Env::new(
+        "complete-objects",
+        &[("tsconfig.json", TSCONFIG), ("src/o.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/o.ts");
+    let u = env.uri("src/o.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    // `{ a: 1, |}`
+    let r = result(&mut c, "textDocument/completion", at(&u, 1, 21));
+    assert_eq!(labels(&r), ["b?", "c"], "{r}");
+    let b = &r["items"][0];
+    assert_eq!(b["insertText"], "b", "{b}");
+    assert_eq!(b["filterText"], "b", "{b}");
+    // After a member with no comma yet.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&u, 4, 2)));
+    assert_eq!(l, ["b?", "c"]);
+    // `const { a, | } = v`
+    let l = labels(&result(&mut c, "textDocument/completion", at(&u, 7, 11)));
+    assert_eq!(l, ["b?", "c"]);
+    // `v.|`
+    let l = labels(&result(&mut c, "textDocument/completion", at(&u, 8, 2)));
+    assert_eq!(l, ["a", "b?", "c"]);
+    // `const zz = z|`
+    let l = labels(&result(&mut c, "textDocument/completion", at(&u, 9, 12)));
+    assert!(!l.iter().any(|x| x == "zz"), "{l:?}");
+    assert!(l.iter().any(|x| x == "q"), "{l:?}");
+    // A parameter's pattern.
+    let l = labels(&result(&mut c, "textDocument/completion", at(&u, 10, 13)));
+    assert_eq!(l, ["a", "b?", "c"]);
+    c.shutdown();
+}
+
+/// Module specifier completions follow a package's `exports` patterns (names relative to
+/// the typed directory) and the project's `imports` map.
+#[test]
+fn completion_package_exports_and_imports() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "complete-exports",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            (
+                "package.json",
+                r##"{"name": "app", "type": "module", "imports": {"#lib/*": "./src/lib/*.js"}}"##,
+            ),
+            (
+                "node_modules/pkg/package.json",
+                r#"{"name": "pkg", "exports": {"./sub/*": "./dist/*.js", "./main": "./dist/main.js"}}"#,
+            ),
+            ("node_modules/pkg/dist/a.d.ts", "export {};\n"),
+            ("node_modules/pkg/dist/b/c.d.ts", "export {};\n"),
+            ("node_modules/pkg/dist/main.d.ts", "export {};\n"),
+            ("src/lib/x.ts", "export {};\n"),
+            (
+                "src/i.ts",
+                "import {} from \"pkg/\";\nimport {} from \"pkg/sub/b/\";\nimport {} from \"#lib/\";\n",
+            ),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/i.ts");
+    let u = env.uri("src/i.ts");
+    let labels = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<String> {
+        let r = result(c, "textDocument/completion", at(&u, line, ch));
+        let mut l: Vec<String> = r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|i| i["label"].as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        l.sort();
+        l
+    };
+    // `pkg/`: the exact key and the pattern key's directory.
+    assert_eq!(labels(&mut c, 0, 20), ["main", "sub"]);
+    // `pkg/sub/b/`: files below the pattern's target, named from the typed directory; the
+    // pattern's own `.js` suffix is not repeated.
+    assert_eq!(labels(&mut c, 1, 26), ["c"]);
+    // `#lib/`: the project's `imports` map, from source files.
+    assert_eq!(labels(&mut c, 2, 21), ["x"]);
+    c.shutdown();
+}
+
+/// A CommonJS JavaScript file has `module` and `exports` in scope.
+#[test]
+fn completion_commonjs_locals() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "complete-commonjs",
+        &[
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions": {"allowJs": true, "module": "nodenext", "target": "es2022", "noEmit": true}, "include": ["src"]}"#,
+            ),
+            ("src/m.js", "const x = require(\"./n.js\");\nexp\n"),
+            ("src/n.js", "module.exports = 1;\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/m.js");
+    let u = env.uri("src/m.js");
+    let r = result(&mut c, "textDocument/completion", at(&u, 1, 3));
+    let l: Vec<&str> = r["items"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|i| i["label"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(l.contains(&"exports") && l.contains(&"module"), "{l:?}");
+    c.shutdown();
+}
+
 /// Signature help shows a generic call's instantiated signature, constructors without
 /// `new`, and tagged templates (the template text is argument 0).
 #[test]

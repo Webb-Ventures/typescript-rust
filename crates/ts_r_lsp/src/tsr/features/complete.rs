@@ -7,7 +7,7 @@ use super::locate::{is_expression_name, meaning_at, node_at};
 use super::{Ctx, LspLines};
 use serde_json::{Value, json};
 use std::collections::HashSet;
-use ts_r_ast::{Ast, Node, NodeId};
+use ts_r_ast::{Ast, Modifiers, Node, NodeId};
 use ts_r_binder::{SymbolFacts, SymbolFlags, meaning};
 use ts_r_checker::checker::GlobalType;
 use ts_r_checker::members::SigKind;
@@ -15,11 +15,12 @@ use ts_r_checker::{Checker, Ck, Loc};
 use ts_r_config::{CompilerOptions, ModuleResolution, RealFs};
 use ts_r_diagnostics::FileId;
 use ts_r_resolver::{ModuleFormat, Resolver, ResolverOptions};
-use ts_r_types::SymId;
+use ts_r_types::{SymId, TypeFlags, TypeId};
 
 /// Sort groups (tsserver's: locals before globals before auto-imports).
 const SORT_LOCAL: &str = "11";
 const SORT_MEMBER: &str = "11";
+const SORT_OPTIONAL: &str = "12";
 const SORT_GLOBAL: &str = "15";
 const SORT_AUTO_IMPORT: &str = "16";
 const SORT_KEYWORD: &str = "15";
@@ -300,7 +301,13 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             }
             for (label, kind) in found {
                 let label = super::strings::escape_label(&label, template);
-                items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
+                let optional = kind & super::strings::OPTIONAL != 0;
+                let kind = kind & !super::strings::OPTIONAL;
+                let mut item = json!({"label": label, "kind": kind, "sortText": SORT_LOCAL});
+                if optional {
+                    mark_optional(&mut item, &label);
+                }
+                items.push(item);
             }
         }
         Context::Reference => {
@@ -317,12 +324,16 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 if !is_identifier_name(&name) {
                     continue;
                 }
-                items.push(json!({
+                let mut item = json!({
                     "label": name,
                     "kind": item_kind(c, s),
                     "sortText": SORT_MEMBER,
                     "data": data("m", &name),
-                }));
+                });
+                if is_optional(c, s) {
+                    mark_optional(&mut item, &name);
+                }
+                items.push(item);
             }
         }
         Context::Scope {
@@ -330,6 +341,23 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             types_only,
             values_only,
         } => {
+            if let Some(found) = object_items(ck, cx.file, anchor, offset)
+                .or_else(|| pattern_items(ck, cx.file, anchor, offset))
+            {
+                for (name, s) in found {
+                    let optional = is_optional(c, s);
+                    let mut item = json!({
+                        "label": name,
+                        "kind": item_kind(c, s),
+                        "sortText": if optional { SORT_OPTIONAL } else { SORT_MEMBER },
+                    });
+                    if optional {
+                        mark_optional(&mut item, &name);
+                    }
+                    items.push(item);
+                }
+                return json!({"isIncomplete": false, "items": items});
+            }
             let want = if types_only {
                 meaning::TYPE | meaning::NAMESPACE
             } else if values_only {
@@ -338,12 +366,13 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 meaning::ALL
             };
             let mut seen: HashSet<String> = HashSet::new();
+            let own = own_initializer(c, Loc::new(cx.file, anchor), offset, !prefix.is_empty());
             for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
                 if !c.has_meaning(c.resolve_alias(s).unwrap_or(s), want) && !c.has_meaning(s, want)
                 {
                     continue;
                 }
-                if !seen.insert(name.clone()) {
+                if !seen.insert(name.clone()) || own.as_deref() == Some(name.as_str()) {
                     continue;
                 }
                 items.push(json!({
@@ -363,6 +392,14 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                     "sortText": SORT_LOCAL,
                     "data": data("s", "arguments"),
                 }));
+            }
+            // A CommonJS JavaScript module has `module` and `exports` as file locals.
+            if !types_only && is_commonjs(c, cx.file) {
+                for name in ["module", "exports"] {
+                    if seen.insert(name.to_string()) {
+                        items.push(json!({"label": name, "kind": 6, "sortText": SORT_LOCAL}));
+                    }
+                }
             }
             // Globals do not hide auto-imports (tsserver offers both); locals do.
             let locals = seen.clone();
@@ -503,6 +540,336 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
     out
 }
 
+/// Whether the property `s` is optional (declared with `?`, or made so by a mapped type or
+/// a union).
+pub(super) fn is_optional(c: &Checker<'_>, s: SymId) -> bool {
+    c.sym_flags(s).intersects(SymbolFlags::OPTIONAL)
+        || c.sym_check_flags(s) & ts_r_checker::symbols::check_flags::OPTIONAL != 0
+}
+
+/// An optional member's label ends in `?` while the typed and inserted text stays the plain
+/// name (how VS Code's TypeScript extension shows it; tsc 7 does the same,
+/// `tsc: tsc/internal/ls/completions.go`).
+fn mark_optional(item: &mut Value, name: &str) {
+    item["label"] = json!(format!("{name}?"));
+    item["insertText"] = json!(name);
+    item["filterText"] = json!(name);
+}
+
+/// The object literal whose property name the cursor is typing (`{ |`, `{ a: 1, pre|`):
+/// the name follows the literal's `{` or a `,` between its members.
+fn object_container(c: &Checker<'_>, file: FileId, anchor: NodeId, offset: u32) -> Option<NodeId> {
+    let ast = c.ast(file);
+    let parents = c.file(file).parents();
+    let obj = match *ast.node(anchor) {
+        Node::ObjectLit { .. } => anchor,
+        Node::Ident { .. } => {
+            let p = parents.parent(anchor)?;
+            match *ast.node(p) {
+                Node::ShorthandProp { name, .. } if name == anchor => parents.parent(p)?,
+                Node::Property { key, .. } if key == anchor => parents.parent(p)?,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    if !matches!(ast.node(obj), Node::ObjectLit { .. }) || ast.span(obj).start >= offset {
+        return None;
+    }
+    let text = c.file(file).text.as_bytes();
+    let (ws, _) = word_before(&c.file(file).text, offset);
+    let mut d = ws as usize;
+    while d > 0 && text[d - 1].is_ascii_whitespace() {
+        d -= 1;
+    }
+    if d == 0 || d as u32 <= ast.span(obj).start {
+        return None;
+    }
+    if matches!(text[d - 1], b'{' | b',') {
+        return Some(obj);
+    }
+    // A member just before the name without a comma between (`{ a: 1\n  b| }`, which the
+    // completion's edit would fix): a shorthand one only from an earlier line.
+    let Node::ObjectLit { props } = *ast.node(obj) else {
+        return None;
+    };
+    let before = ast
+        .list(props)
+        .iter()
+        .find(|&&p| ast.span(p).end == d as u32)?;
+    if text[d - 1] == b':' {
+        return None;
+    }
+    if matches!(ast.node(*before), Node::ShorthandProp { .. })
+        && !text[d..ws as usize].contains(&b'\n')
+    {
+        return None;
+    }
+    Some(obj)
+}
+
+/// Property-name completions in an object literal: the properties of its contextual type
+/// that no other member already writes. `None` when the literal has no contextual type (or
+/// the type has no properties): the names in scope are offered instead.
+/// (Rule from `tsc: tsc/internal/ls/completions.go`, the object-like completion symbols.)
+fn object_items(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    anchor: NodeId,
+    offset: u32,
+) -> Option<Vec<(String, SymId)>> {
+    let c = ck.c;
+    let obj = object_container(c, file, anchor, offset)?;
+    let ast = c.ast(file);
+    let parents = c.file(file).parents();
+    let mut at = obj;
+    let mut ct = ck.contextual_type(Loc::new(file, obj));
+    // `f(() => ({ | }))`: a parenthesized literal takes its context from outside the parens.
+    for _ in 0..32 {
+        if ct.is_some() {
+            break;
+        }
+        let Some(p) = parents.parent(at) else { break };
+        if !matches!(ast.node(p), Node::Paren { .. }) {
+            break;
+        }
+        at = p;
+        ct = ck.contextual_type(Loc::new(file, p));
+    }
+    let ct = ct?;
+    // A union offers every property of its object members (not of primitives, arrays or
+    // callable members).
+    let mut props: Vec<(String, SymId)> = Vec::new();
+    let members = ck.union_members(ct);
+    let union = members.len() > 1;
+    for m in members {
+        let flags = ck.store().flags(m);
+        if union
+            && (flags.intersects(TypeFlags::PRIMITIVE)
+                || c.is_array_like_type(m)
+                || !ck.signatures_of(m, SigKind::Call).is_empty()
+                || !ck.signatures_of(m, SigKind::Construct).is_empty())
+        {
+            continue;
+        }
+        if flags.intersects(TypeFlags::ANY_OR_UNKNOWN) {
+            continue;
+        }
+        let a = ck.apparent_type(m);
+        for (n, s) in ck.properties_of(a) {
+            let name = ck.store().str(n).to_string();
+            if !props.iter().any(|(x, _)| *x == name) {
+                props.push((name, s));
+            }
+        }
+    }
+    if props.is_empty() {
+        return None;
+    }
+    // Names other members already write (not the one being typed, not spreads).
+    let Node::ObjectLit { props: list } = *ast.node(obj) else {
+        return None;
+    };
+    let mut written: HashSet<String> = HashSet::new();
+    for &p in ast.list(list) {
+        let sp = ast.span(p);
+        if sp.start <= offset && offset <= sp.end {
+            continue;
+        }
+        if matches!(ast.node(p), Node::Spread { .. }) {
+            continue;
+        }
+        if let Some(k) = ts_r_binder::decl_name_node(ast, p)
+            && let Some(name) = ts_r_checker::nodes::key_text(ast, k)
+        {
+            written.insert(name);
+        }
+    }
+    let mut out = Vec::new();
+    for (name, s) in props {
+        if name.starts_with("__@") || name.starts_with('#') || written.contains(&name) {
+            continue;
+        }
+        // A member only this literal declares (`f<T>(x: T)` called with `{ abc| }`) is the
+        // literal's own, not one to offer.
+        let decls = c.decls(s);
+        if !decls.is_empty()
+            && decls
+                .iter()
+                .all(|d| d.file == file && parents.parent(d.node) == Some(obj))
+        {
+            continue;
+        }
+        let label = if is_identifier_name(&name) {
+            name
+        } else {
+            serde_json::to_string(&name).unwrap_or(name)
+        };
+        out.push((label, s));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(out)
+}
+
+/// Property-name completions in an object binding pattern (`const { | } = v`): the
+/// properties of the destructured type it can reach, minus the names already bound. Always a
+/// list (empty when the type is unknown): a pattern only binds properties.
+/// (Rule from `tsc: tsc/internal/ls/completions.go`, the object-like completion symbols.)
+fn pattern_items(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    anchor: NodeId,
+    offset: u32,
+) -> Option<Vec<(String, SymId)>> {
+    let c = ck.c;
+    let ast = c.ast(file);
+    let parents = c.file(file).parents();
+    let pat = match *ast.node(anchor) {
+        Node::ObjectPattern { .. } => anchor,
+        Node::Ident { .. } => {
+            let p = parents.parent(anchor)?;
+            match *ast.node(p) {
+                Node::BindingProperty {
+                    key, value: None, ..
+                } if key == anchor => parents.parent(p)?,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    if !matches!(ast.node(pat), Node::ObjectPattern { .. }) || ast.span(pat).start >= offset {
+        return None;
+    }
+    let text = c.file(file).text.as_bytes();
+    let (ws, _) = word_before(&c.file(file).text, offset);
+    let mut d = ws as usize;
+    while d > 0 && text[d - 1].is_ascii_whitespace() {
+        d -= 1;
+    }
+    if d == 0 || d as u32 <= ast.span(pat).start || !matches!(text[d - 1], b'{' | b',') {
+        return None;
+    }
+    let Some(t) = pattern_type(ck, Loc::new(file, pat), 0) else {
+        return Some(Vec::new());
+    };
+    let Node::ObjectPattern { props: list } = *ast.node(pat) else {
+        return None;
+    };
+    let mut written: HashSet<String> = HashSet::new();
+    for &p in ast.list(list) {
+        let sp = ast.span(p);
+        if sp.start <= offset && offset <= sp.end {
+            continue;
+        }
+        if let Node::BindingProperty { key, .. } = *ast.node(p)
+            && let Some(name) = ts_r_checker::nodes::key_text(ast, key)
+        {
+            written.insert(name);
+        }
+    }
+    let a = ck.apparent_type(t);
+    let mut out = Vec::new();
+    for (n, s) in ck.properties_of(a) {
+        let name = ck.store().str(n).to_string();
+        if name.starts_with("__@") || name.starts_with('#') || written.contains(&name) {
+            continue;
+        }
+        if !accessible_at(c, s, Loc::new(file, pat)) {
+            continue;
+        }
+        out.push((name, s));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Some(out)
+}
+
+/// The type an object binding pattern destructures, when it can be known without the
+/// pattern's own shape: a declared or initialized variable, a `for-of` variable, a parameter
+/// (declared or contextually typed), or a property of an outer pattern.
+fn pattern_type(ck: &mut Ck<'_, '_>, pat: Loc, depth: u32) -> Option<TypeId> {
+    if depth > 32 {
+        return None;
+    }
+    let c = ck.c;
+    let p = c.parent(pat)?;
+    let ast = c.ast(p.file);
+    match *ast.node(p.node) {
+        Node::VarDeclarator {
+            name,
+            type_ann,
+            init,
+            ..
+        } if name == pat.node => {
+            if let Some(ta) = type_ann {
+                return Some(ck.type_from_node(Loc::new(p.file, ta)));
+            }
+            if let Some(i) = init {
+                return Some(ck.quietly(|ck| ck.check_expr(Loc::new(p.file, i))));
+            }
+            let list = c.parent(p)?;
+            let stmt = c.parent(list)?;
+            match *ast.node(stmt.node) {
+                Node::ForOf {
+                    left,
+                    right,
+                    is_await,
+                    ..
+                } if left == list.node => {
+                    let t = ck.quietly(|ck| ck.check_expr(Loc::new(p.file, right)));
+                    ck.iterated_type(t, is_await)
+                }
+                _ => None,
+            }
+        }
+        Node::Param {
+            pattern, type_ann, ..
+        } if pattern == pat.node => {
+            let t = ck.param_type(p);
+            (type_ann.is_some() || !ck.store().flags(t).intersects(TypeFlags::ANY)).then_some(t)
+        }
+        Node::BindingProperty {
+            key,
+            value: Some(v),
+            ..
+        } if v == pat.node => {
+            let outer = c.parent(p)?;
+            let t = pattern_type(ck, outer, depth + 1)?;
+            let name = ts_r_checker::nodes::key_text(ast, key)?;
+            let a = ck.apparent_type(t);
+            let prop = ck
+                .properties_of(a)
+                .into_iter()
+                .find(|(n, _)| ck.store().str(*n) == name)?
+                .1;
+            Some(ck.type_of_symbol(prop))
+        }
+        _ => None,
+    }
+}
+
+/// Whether member `s` may be read at `at`: a `private` or `protected` member only inside the
+/// class body that declares it.
+fn accessible_at(c: &Checker<'_>, s: SymId, at: Loc) -> bool {
+    for d in c.decls(s) {
+        let m = c.ast(d.file).node(d.node).modifiers();
+        if !m.intersects(Modifiers::PRIVATE | Modifiers::PROTECTED) {
+            continue;
+        }
+        let Some(class) = c.parent(d) else {
+            return false;
+        };
+        if class.file != at.file {
+            return false;
+        }
+        let span = c.ast(class.file).span(class.node);
+        let here = c.ast(at.file).span(at.node);
+        if !(span.start <= here.start && here.end <= span.end) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Whether `arguments` is in scope at `l`: inside a function that is not an arrow function
 /// (arrows see their parent's), and not reached through a class member initializer.
 fn has_arguments(c: &Checker<'_>, l: Loc) -> bool {
@@ -524,6 +891,53 @@ fn has_arguments(c: &Checker<'_>, l: Loc) -> bool {
         cur = parents.parent(n);
     }
     false
+}
+
+/// A JavaScript file that uses `require`, `exports` or `module` without declaring them (and
+/// has no `import`/`export`) is a CommonJS module.
+fn is_commonjs(c: &Checker<'_>, file: FileId) -> bool {
+    let b = c.bound(file);
+    let ast = c.ast(file);
+    b.commonjs
+        && b.refs
+            .free
+            .iter()
+            .any(|r| matches!(b.name_text(ast, r.name), "require" | "exports" | "module"))
+}
+
+/// The variable whose initializer holds `l` (`const a = |`): it is not offered there. A
+/// function body, arrow body or binding pattern on the way up ends the search, as the
+/// variable is usable inside a function it initializes. The declaration must hold `offset`
+/// unless a word ends there (after `x[|` at the end of an unclosed `var y = x[` the
+/// position is past the declaration, so `y` is offered). A JSX tag being typed
+/// (`var y = <|`) is inside the declaration.
+fn own_initializer(c: &Checker<'_>, l: Loc, offset: u32, after_word: bool) -> Option<String> {
+    let ast = c.ast(l.file);
+    let parents = c.file(l.file).parents();
+    let mut cur = Some(l.node);
+    let mut in_tag = false;
+    for _ in 0..100_000 {
+        let n = cur?;
+        match *ast.node(n) {
+            Node::Block { .. }
+            | Node::Arrow { .. }
+            | Node::ObjectPattern { .. }
+            | Node::ArrayPattern { .. } => return None,
+            Node::JsxOpening { .. } | Node::JsxClosing { .. } => in_tag = true,
+            Node::VarDeclarator { name, .. } => {
+                if !after_word && !in_tag && offset >= ast.span(n).end {
+                    return None;
+                }
+                return match ast.node(name) {
+                    Node::Ident { name } => Some(ast.atom(*name).to_string()),
+                    _ => None,
+                };
+            }
+            _ => {}
+        }
+        cur = parents.parent(n);
+    }
+    None
 }
 
 /// Names visible at `l`: every enclosing scope's locals, innermost first.

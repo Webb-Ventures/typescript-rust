@@ -7,13 +7,15 @@
 
 use super::Ctx;
 use super::complete::ImportStyle;
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use ts_r_ast::{Ast, BinaryOp, Node, NodeId};
 use ts_r_binder::SymbolFlags;
 use ts_r_checker::members::SigKind;
 use ts_r_checker::{Ck, Loc};
+use ts_r_config::jsonc::{Value, ValueKind};
 use ts_r_diagnostics::FileId;
-use ts_r_resolver::ResolverOptions;
+use ts_r_resolver::{ImportKind, PackageJson, Resolver, ResolverOptions};
 use ts_r_types::{TypeId, TypeKind};
 
 /// LSP CompletionItemKind values used here.
@@ -28,8 +30,12 @@ const MAX_ENTRIES: usize = 2000;
 /// Ancestor directories visited at most.
 const MAX_ANCESTORS: usize = 64;
 
-/// One string completion: label and LSP kind.
+/// One string completion: label and LSP kind (with [`OPTIONAL`] added for an optional
+/// property).
 pub(super) type Item = (String, u32);
+
+/// Kind bit marking an optional property's name (its label gets a `?`).
+pub(super) const OPTIONAL: u32 = 1 << 16;
 
 /// The string literal (or no-substitution template) holding `offset`, if any: the cursor is
 /// after its opening quote and before its closing one (an unterminated literal runs to its
@@ -120,23 +126,29 @@ pub(super) fn string_items(
     let (parent, child) = parent_skipping_parens(ck, Loc::new(file, lit))?;
     let pl = Loc::new(file, parent);
     match *ast.node(parent) {
-        Node::ImportDecl { source, .. } if source == child => module_items(cx, ck, fragment),
+        Node::ImportDecl { source, .. } if source == child => {
+            module_items(cx, ck, fragment, ImportKind::Static)
+        }
         Node::ExportNamed {
             source: Some(s), ..
         }
         | Node::ExportAll { source: s, .. }
             if s == child =>
         {
-            module_items(cx, ck, fragment)
+            module_items(cx, ck, fragment, ImportKind::Static)
         }
-        Node::ExternalModuleRef { .. } => module_items(cx, ck, fragment),
-        Node::ImportCall { arg, .. } if arg == child => module_items(cx, ck, fragment),
-        Node::ImportType { arg, .. } if arg == child => module_items(cx, ck, fragment),
+        Node::ExternalModuleRef { .. } => module_items(cx, ck, fragment, ImportKind::ImportEquals),
+        Node::ImportCall { arg, .. } if arg == child => {
+            module_items(cx, ck, fragment, ImportKind::Dynamic)
+        }
+        Node::ImportType { arg, .. } if arg == child => {
+            module_items(cx, ck, fragment, ImportKind::Static)
+        }
         Node::Call { callee, args, .. }
             if ast.list(args).first() == Some(&child)
                 && matches!(ast.node(callee), Node::Ident { name } if ast.atom(*name) == "require") =>
         {
-            module_items(cx, ck, fragment)
+            module_items(cx, ck, fragment, ImportKind::RequireCall)
         }
         Node::Index { obj, index, .. } if index == child => {
             let t = ck.check_expr(Loc::new(file, obj));
@@ -456,7 +468,12 @@ fn property_items(ck: &mut Ck<'_, '_>, t: TypeId, skip: &[String]) -> Vec<Item> 
                 } else {
                     KIND_PROPERTY
                 };
-                out.push((name, kind));
+                let opt = if super::complete::is_optional(ck.c, s) {
+                    OPTIONAL
+                } else {
+                    0
+                };
+                out.push((name, kind | opt));
             }
         }
     }
@@ -483,43 +500,93 @@ struct Listing<'a> {
     json: bool,
     jsx_preserve: bool,
     ending: Ending,
+    /// With `allowImportingTsExtensions`: whether a TypeScript file is named with its own
+    /// extension. `always` for ES modules under node16/nodenext; `wildcard` for matches of a
+    /// package.json `exports`/`imports` wildcard when extensionless names are preferred.
+    ts_always: bool,
+    ts_wildcard: bool,
     /// Extensions ambient `declare module "*.css"` patterns make importable.
     extra_exts: &'a [String],
 }
 
+const TS_EXTS: &[&str] = &[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".mts", ".cts"];
+const JS_EXTS: &[&str] = &[".js", ".jsx", ".mjs", ".cjs"];
+
+/// The known extension `name` ends with (`.d.ts` before `.ts`), if any.
+fn known_ext(name: &str) -> Option<&'static str> {
+    TS_EXTS
+        .iter()
+        .chain(JS_EXTS)
+        .chain(&[".json"])
+        .find(|e| name.len() > e.len() && name.ends_with(*e))
+        .copied()
+}
+
+/// `a.d.css.ts` declares `a.css`, so `a.css` is what an import names.
+fn declared_file(name: &str) -> Option<String> {
+    let no_ts = name.strip_suffix(".ts")?;
+    if name.ends_with(".d.ts") {
+        return None;
+    }
+    let d = no_ts.find(".d.")?;
+    let ext = &no_ts[no_ts.rfind('.')?..];
+    Some(format!("{}{ext}", &no_ts[..d]))
+}
+
 impl Listing<'_> {
+    /// Whether the file `name` can be imported: a TypeScript file, a JavaScript file with
+    /// `allowJs`, JSON with `resolveJsonModule`, or an extension an ambient pattern declares.
+    /// Hidden files (`.x`) are never listed.
+    fn importable(&self, name: &str) -> bool {
+        if name.starts_with('.') {
+            return false;
+        }
+        match known_ext(name) {
+            Some(e) if JS_EXTS.contains(&e) => self.allow_js,
+            Some(".json") => self.json || self.extra_exts.iter().any(|x| x == ".json"),
+            Some(_) => true,
+            None => self.extra_exts.iter().any(|e| name.ends_with(e.as_str())),
+        }
+    }
+
+    /// The name an import writes for the file `name`. A `wildcard` match of package.json
+    /// `exports`/`imports` (`"./*": "./src/*"`) must name the file, so its extension is
+    /// never dropped.
+    fn module_name(&self, name: &str, wildcard: bool) -> String {
+        if let Some(real) = declared_file(name) {
+            return real;
+        }
+        if self.ending == Ending::Filename {
+            return name.to_string();
+        }
+        let Some(ext) = known_ext(name) else {
+            return name.to_string();
+        };
+        let stem = &name[..name.len() - ext.len()];
+        if (self.ts_always || (wildcard && self.ts_wildcard))
+            && matches!(ext, ".ts" | ".tsx" | ".mts" | ".cts")
+        {
+            return name.to_string();
+        }
+        if self.ending == Ending::Minimal
+            && !wildcard
+            && matches!(ext, ".d.ts" | ".ts" | ".tsx" | ".js" | ".jsx")
+        {
+            return stem.to_string();
+        }
+        match ext {
+            ".d.ts" | ".ts" => format!("{stem}.js"),
+            ".tsx" if self.jsx_preserve => format!("{stem}.jsx"),
+            ".tsx" => format!("{stem}.js"),
+            ".d.mts" | ".mts" => format!("{stem}.mjs"),
+            ".d.cts" | ".cts" => format!("{stem}.cjs"),
+            _ => name.to_string(),
+        }
+    }
+
     /// The completion name of the file `name`, or `None` when it cannot be imported.
     fn file_name(&self, name: &str) -> Option<String> {
-        const TS: &[&str] = &[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".mts", ".cts"];
-        const JS: &[&str] = &[".js", ".jsx", ".mjs", ".cjs"];
-        let ext = TS
-            .iter()
-            .chain(JS.iter())
-            .find(|e| name.len() > e.len() && name.ends_with(*e))
-            .copied();
-        let ext = match ext {
-            Some(e) if JS.contains(&e) && !self.allow_js => return None,
-            Some(e) => e,
-            None if self.json && name.ends_with(".json") => return Some(name.to_string()),
-            None if self.extra_exts.iter().any(|e| name.ends_with(e.as_str())) => {
-                return Some(name.to_string());
-            }
-            None => return None,
-        };
-        if self.ending == Ending::Filename {
-            return Some(name.to_string());
-        }
-        let stem = &name[..name.len() - ext.len()];
-        let out = match (self.ending, ext) {
-            (Ending::Minimal, ".d.ts" | ".ts" | ".tsx" | ".js" | ".jsx") => stem.to_string(),
-            (_, ".d.ts" | ".ts") => format!("{stem}.js"),
-            (_, ".tsx") if self.jsx_preserve => format!("{stem}.jsx"),
-            (_, ".tsx") => format!("{stem}.js"),
-            (_, ".d.mts" | ".mts") => format!("{stem}.mjs"),
-            (_, ".d.cts" | ".cts") => format!("{stem}.cjs"),
-            _ => name.to_string(),
-        };
-        Some(out)
+        self.importable(name).then(|| self.module_name(name, false))
     }
 }
 
@@ -608,9 +675,17 @@ fn directory_items(
     }
 }
 
+/// Adds `name` once: a module name wins over a file of that name, a file over a folder.
 fn push(out: &mut Vec<Item>, name: String, kind: u32) {
-    if !out.iter().any(|(n, _)| *n == name) {
-        out.push((name, kind));
+    let rank = |k: u32| match k {
+        KIND_FOLDER => 0,
+        KIND_FILE => 1,
+        _ => 2,
+    };
+    match out.iter_mut().find(|(n, _)| *n == name) {
+        Some(e) if rank(e.1) < rank(kind) => e.1 = kind,
+        Some(_) => {}
+        None => out.push((name, kind)),
     }
 }
 
@@ -638,12 +713,14 @@ fn listing_for<'a>(
     let o = &cx.program.options;
     let e = o.effective();
     let mut ending = ending;
+    let allow_ts = e.allow_importing_ts_extensions();
+    let (mut ts_always, mut ts_wildcard) = (false, false);
     if ending == Ending::Minimal {
-        let mut style = ImportStyle::of(ck.c, cx.file);
-        if super::complete::needs_js_extension(o, &ck.c.file(cx.file).path) {
-            style.js_ext = true;
-        }
-        if style.js_ext {
+        let style = ImportStyle::of(ck.c, cx.file);
+        let esm_node = super::complete::needs_js_extension(o, &ck.c.file(cx.file).path);
+        ts_always = allow_ts && esm_node;
+        ts_wildcard = allow_ts && !style.js_ext;
+        if style.js_ext || esm_node {
             ending = Ending::Js;
         }
     }
@@ -652,6 +729,8 @@ fn listing_for<'a>(
         json: e.resolve_json_module(),
         jsx_preserve: o.jsx() == Some(ts_r_config::JsxEmit::Preserve),
         ending,
+        ts_always,
+        ts_wildcard,
         extra_exts: extra,
     }
 }
@@ -669,30 +748,497 @@ fn ambient_exts(ck: &Ck<'_, '_>) -> Vec<String> {
         .collect()
 }
 
-/// Completions for a module specifier being typed (`fragment`).
-fn module_items(cx: &Ctx<'_, '_>, ck: &Ck<'_, '_>, fragment: &str) -> Option<Vec<Item>> {
+/// Which kind of pattern map a key comes from: compiler `paths` and package.json
+/// `typesVersions`, or package.json `exports` / `imports`.
+#[derive(Clone, Copy, PartialEq)]
+enum Table {
+    Paths,
+    Exports,
+    Imports,
+}
+
+/// A map key or target: exact, or one `*` between a prefix and a suffix.
+#[derive(Clone, Copy)]
+enum Pattern<'a> {
+    Exact,
+    Star(&'a str, &'a str),
+}
+
+/// `None` for a pattern with more than one `*` (such a key is ignored).
+fn pattern(s: &str) -> Option<Pattern<'_>> {
+    match s.find('*') {
+        None => Some(Pattern::Exact),
+        Some(i) if !s[i + 1..].contains('*') => Some(Pattern::Star(&s[..i], &s[i + 1..])),
+        Some(_) => None,
+    }
+}
+
+/// `Less` when key `a` wins over `b`. `paths`: the longer prefix (a key without `*` counts
+/// whole). `exports`/`imports`: Node's order: the longer text up to and including the `*`,
+/// then a key with a `*` before one without, then the longer key.
+fn key_order(table: Table, a: &str, b: &str) -> Ordering {
+    if table == Table::Paths {
+        let len = |k: &str| match pattern(k) {
+            Some(Pattern::Star(p, _)) => p.len(),
+            _ => k.len(),
+        };
+        return len(b).cmp(&len(a));
+    }
+    let (sa, sb) = (a.find('*'), b.find('*'));
+    let base = |k: &str, s: Option<usize>| s.map_or(k.len(), |i| i + 1);
+    base(b, sb)
+        .cmp(&base(a, sa))
+        .then_with(|| match (sa.is_some(), sb.is_some()) {
+            (false, _) => Ordering::Greater,
+            (true, false) => Ordering::Less,
+            _ => b.len().cmp(&a.len()),
+        })
+}
+
+/// The suffixes a target's suffix stands for on disk: `*.js` is written by `*.d.ts`, `*.ts`,
+/// `*.tsx`, ... files (`.mjs` by `.d.mts`, `.mts`; `.cjs` by `.d.cts`, `.cts`).
+fn matching_suffixes(suffix: &str) -> Vec<String> {
+    const REMOVABLE: &[&str] = &[
+        ".d.ts", ".d.mts", ".d.cts", ".mjs", ".mts", ".cjs", ".cts", ".ts", ".js", ".tsx", ".jsx",
+        ".json",
+    ];
+    if suffix.is_empty() {
+        return vec![String::new()];
+    }
+    let ends = |es: &[&str]| es.iter().any(|e| suffix.ends_with(e));
+    let decl = if ends(&[".mjs", ".mts"]) {
+        ".d.mts"
+    } else if ends(&[".cjs", ".cts"]) {
+        ".d.cts"
+    } else if ends(&[".json"]) {
+        ".d.json.ts"
+    } else {
+        ".d.ts"
+    };
+    let inputs: &[&str] = if ends(&[".d.mts", ".mjs", ".mts"]) {
+        &[".mts", ".mjs"]
+    } else if ends(&[".d.cts", ".cjs", ".cts"]) {
+        &[".cts", ".cjs"]
+    } else if ends(&[".d.json.ts"]) {
+        &[".json"]
+    } else {
+        &[".tsx", ".ts", ".jsx", ".js"]
+    };
+    let change = |ext: &str| match REMOVABLE.iter().find(|e| suffix.ends_with(*e)) {
+        Some(e) => format!("{}{ext}", &suffix[..suffix.len() - e.len()]),
+        None => suffix.to_string(),
+    };
+    let mut out = vec![change(decl)];
+    out.extend(inputs.iter().map(|e| change(e)));
+    out.push(suffix.to_string());
+    out
+}
+
+/// Files under `dir` (depth-first, files of a directory before its subdirectories), leaving
+/// out `node_modules` and hidden entries. At most `MAX_ENTRIES` files, `MAX_DEPTH` levels.
+fn files_below(dir: &str, depth: u32, out: &mut Vec<String>) {
+    const MAX_DEPTH: u32 = 16;
+    if depth > MAX_DEPTH || out.len() >= MAX_ENTRIES {
+        return;
+    }
+    let entries = read_dir(dir);
+    let dir = dir.trim_end_matches('/');
+    for (name, is_dir) in &entries {
+        if !is_dir && !name.starts_with('.') && out.len() < MAX_ENTRIES {
+            out.push(format!("{dir}/{name}"));
+        }
+    }
+    for (name, is_dir) in &entries {
+        if *is_dir
+            && !name.starts_with('.')
+            && !matches!(
+                name.as_str(),
+                "node_modules" | "bower_components" | "jspm_packages"
+            )
+        {
+            files_below(&format!("{dir}/{name}"), depth + 1, out);
+        }
+    }
+}
+
+/// The pattern of an `exports`/`imports` target: a string, or the first key of a conditions
+/// object that is `default`, one of `conditions` or `types@<range>` matching our version.
+fn first_condition(v: &Value, conditions: &[String], depth: u32) -> Option<String> {
+    match &v.kind {
+        ValueKind::String(s) => Some(s.clone()),
+        ValueKind::Object(members) if depth < 16 => {
+            let m = members.iter().find(|m| {
+                m.key == "default"
+                    || conditions.contains(&m.key)
+                    || m.key.strip_prefix("types@").is_some_and(|r| {
+                        conditions.iter().any(|c| c == "types")
+                            && ts_r_resolver::semver::range_matches(r, ts_r_resolver::TS_VERSION)
+                    })
+            })?;
+            first_condition(&m.value, conditions, depth + 1)
+        }
+        _ => None,
+    }
+}
+
+/// `paths`-like entries of a `typesVersions` path map.
+fn path_entries(v: &Value) -> Vec<(String, Vec<String>)> {
+    let Some(members) = v.as_object() else {
+        return Vec::new();
+    };
+    members
+        .iter()
+        .filter_map(|m| {
+            let targets = m
+                .value
+                .as_array()?
+                .iter()
+                .filter_map(|t| t.as_str().map(str::to_owned))
+                .collect();
+            Some((m.key.clone(), targets))
+        })
+        .collect()
+}
+
+/// Lists module specifiers: directory listings, and the `paths` / `typesVersions` /
+/// `exports` / `imports` pattern maps.
+struct Modules<'a> {
+    listing: Listing<'a>,
+    /// For `imports` targets: output directories (`outDir`, `declarationDir`) and the source
+    /// directory they mirror.
+    out_dirs: Vec<(String, String)>,
+}
+
+impl Modules<'_> {
+    /// A non-relative listing of `fragment`'s directory under `base` (a `node_modules`
+    /// folder): when a package.json above that directory has `typesVersions` paths that
+    /// match, only they are listed.
+    fn package_directory(&self, base: &str, fragment: &str, out: &mut Vec<Item>) {
+        let dir_part = match fragment.rfind('/') {
+            Some(i) => &fragment[..=i],
+            None => "",
+        };
+        let abs = join(base, dir_part);
+        for d in ancestors(&abs) {
+            let pj = format!("{}/package.json", d.trim_end_matches('/'));
+            let Ok(text) = std::fs::read_to_string(&pj) else {
+                continue;
+            };
+            let paths = PackageJson::parse(&d, &pj, &text).and_then(|p| {
+                p.types_versions_paths(ts_r_resolver::TS_VERSION)
+                    .map(path_entries)
+            });
+            if let Some(paths) = paths {
+                let inside = abs
+                    .strip_prefix(d.trim_end_matches('/'))
+                    .unwrap_or("")
+                    .trim_start_matches('/');
+                let inside = if inside.is_empty() {
+                    String::new()
+                } else {
+                    format!("{inside}/")
+                };
+                if self.add_from_patterns(out, Table::Paths, &inside, &d, &paths) {
+                    return;
+                }
+            }
+            break;
+        }
+        directory_items(base, fragment, &self.listing, None, out);
+    }
+
+    /// Adds what the pattern map `entries` (key, targets) offers for `fragment`, targets
+    /// relative to `base`. When a key with a `*` matches, the best matching key's results
+    /// replace those of earlier matches, and keys that rank below it add nothing; exact keys
+    /// are always offered. Returns whether a key matched.
+    fn add_from_patterns(
+        &self,
+        out: &mut Vec<Item>,
+        table: Table,
+        fragment: &str,
+        base: &str,
+        entries: &[(String, Vec<String>)],
+    ) -> bool {
+        let mut groups: Vec<(bool, Vec<Item>)> = Vec::new();
+        let mut best: Option<String> = None;
+        for (key, targets) in entries {
+            if key == "." {
+                continue;
+            }
+            let mut k = key.strip_prefix("./").unwrap_or(key).to_string();
+            if table != Table::Paths && key.ends_with('/') {
+                k.push('*');
+            }
+            let Some(p) = pattern(&k) else {
+                continue;
+            };
+            let is_match = matches!(p, Pattern::Star(pre, suf)
+                if fragment.len() >= pre.len() + suf.len()
+                    && fragment.starts_with(pre)
+                    && fragment.ends_with(suf));
+            if is_match
+                && best
+                    .as_deref()
+                    .is_none_or(|b| key_order(table, &k, b) == Ordering::Less)
+            {
+                best = Some(k.clone());
+                groups.retain(|g| !g.0);
+            }
+            let keep = matches!(p, Pattern::Exact)
+                || best
+                    .as_deref()
+                    .is_none_or(|b| key_order(table, &k, b) != Ordering::Greater);
+            if keep {
+                let items = self.path_mapping(&k, p, targets, fragment, base, table);
+                groups.push((is_match, items));
+            }
+        }
+        for (_, items) in groups {
+            for (name, kind) in items {
+                push(out, name, kind);
+            }
+        }
+        best.is_some()
+    }
+
+    /// What one key offers: an exact key itself; a `*` key the fragment has not reached yet
+    /// its directory (`foo/*` as `foo`) or its targets' files wrapped in the key; a `*` key the
+    /// fragment is inside the targets' files for the rest of the fragment.
+    fn path_mapping(
+        &self,
+        key: &str,
+        p: Pattern<'_>,
+        targets: &[String],
+        fragment: &str,
+        base: &str,
+        table: Table,
+    ) -> Vec<Item> {
+        // Names are written relative to the fragment's directory (`foo/` of `foo/b`).
+        let frag_dir = match fragment.rfind('/') {
+            Some(i) => &fragment[..=i],
+            None => "",
+        };
+        let named = |name: &str, kind: u32| -> Vec<Item> {
+            if !name.starts_with(fragment) {
+                return Vec::new();
+            }
+            let n = if name.len() > 1 {
+                name.strip_suffix('/').unwrap_or(name)
+            } else {
+                name
+            };
+            let n = n.strip_prefix(frag_dir).unwrap_or(n);
+            vec![(n.to_string(), kind)]
+        };
+        // A file match is wrapped in the key's text after the `*`; a folder is not.
+        let wrap = |lead: &str, items: Vec<Item>, suf: &str| -> Vec<Item> {
+            items
+                .into_iter()
+                .map(|(n, k)| {
+                    let tail = if k == KIND_FILE { suf } else { "" };
+                    (format!("{lead}{n}{tail}"), k)
+                })
+                .collect()
+        };
+        match p {
+            Pattern::Exact => named(key, KIND_FILE),
+            Pattern::Star(pre, suf) => match fragment.strip_prefix(pre) {
+                None if !pre.starts_with(fragment) => Vec::new(),
+                None if key.ends_with("/*") => named(pre, KIND_FOLDER),
+                None => {
+                    let lead = pre.get(frag_dir.len()..).unwrap_or("");
+                    let items = targets
+                        .iter()
+                        .flat_map(|t| self.pattern_modules("", base, t, table))
+                        .collect();
+                    wrap(lead, items, suf)
+                }
+                Some(rest) => {
+                    let lead = if frag_dir.starts_with(pre) {
+                        ""
+                    } else {
+                        pre.get(frag_dir.len()..).unwrap_or("")
+                    };
+                    let items = targets
+                        .iter()
+                        .flat_map(|t| self.pattern_modules(rest, base, t, table))
+                        .collect();
+                    wrap(lead, items, suf)
+                }
+            },
+        }
+    }
+
+    /// Files and folders the target pattern `target` (under `base`) offers for `fragment`,
+    /// the part of the specifier the key's `*` stands for.
+    fn pattern_modules(&self, fragment: &str, base: &str, target: &str, table: Table) -> Vec<Item> {
+        let Some(Pattern::Star(pre, suf)) = pattern(target) else {
+            return Vec::new();
+        };
+        let (pre_dir, pre_base) = if pre.is_empty() || pre.ends_with('/') {
+            (pre, "")
+        } else {
+            match pre.rfind('/') {
+                Some(i) => (&pre[..=i], &pre[i + 1..]),
+                None => ("", pre),
+            }
+        };
+        let frag_dir = fragment.contains('/').then(|| {
+            if fragment.ends_with('/') {
+                fragment
+            } else {
+                dir_of(fragment)
+            }
+        });
+        let expanded = match frag_dir {
+            Some(d) => format!("{pre_dir}{pre_base}{d}"),
+            None => pre_dir.to_string(),
+        };
+        let mut dirs = vec![join(base, &expanded)];
+        if table == Table::Imports {
+            for (out_dir, src) in &self.out_dirs {
+                let rest = dirs[0]
+                    .strip_prefix(out_dir.as_str())
+                    .filter(|r| r.is_empty() || r.starts_with('/'));
+                if let Some(rest) = rest {
+                    dirs.push(format!("{src}{rest}"));
+                }
+            }
+        }
+        let suffixes = matching_suffixes(suf);
+        let wildcard = table != Table::Paths && target.ends_with("/*");
+        let mut out = Vec::new();
+        for dir in &dirs {
+            let prefix = match frag_dir {
+                Some(_) => dir.clone(),
+                None => format!("{}/{pre_base}", dir.trim_end_matches('/')),
+            };
+            let mut files = Vec::new();
+            if suf.is_empty() {
+                let d = dir.trim_end_matches('/');
+                files.extend(
+                    read_dir(dir)
+                        .into_iter()
+                        .filter(|(_, is_dir)| !is_dir)
+                        .map(|(n, _)| format!("{d}/{n}")),
+                );
+            } else {
+                files_below(dir, 0, &mut files);
+            }
+            for f in files {
+                let name = f.rsplit('/').next().unwrap_or(&f);
+                if !self.listing.importable(name) {
+                    continue;
+                }
+                let inner = suffixes.iter().find_map(|s| {
+                    let i = f.strip_prefix(prefix.as_str())?.strip_suffix(s.as_str())?;
+                    Some(i.strip_prefix('/').unwrap_or(i))
+                });
+                let Some(inner) = inner.filter(|i| !i.is_empty()) else {
+                    continue;
+                };
+                match inner.split_once('/') {
+                    Some((first, _)) => push(&mut out, first.to_string(), KIND_FOLDER),
+                    None => push(
+                        &mut out,
+                        self.listing.module_name(inner, wildcard),
+                        KIND_FILE,
+                    ),
+                }
+            }
+        }
+        if suf.is_empty() {
+            for dir in &dirs {
+                for (name, is_dir) in read_dir(dir) {
+                    if is_dir && name != "node_modules" {
+                        push(&mut out, name, KIND_FOLDER);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// `exports` or `imports` of a package.json (in `dir`) for `fragment`. Returns whether
+    /// the search for the package stops here: a map was read, or `exports` is a single
+    /// entry point (or `null`).
+    fn lookup(
+        &self,
+        out: &mut Vec<Item>,
+        table_value: Option<&Value>,
+        table: Table,
+        fragment: &str,
+        dir: &str,
+        conditions: &[String],
+    ) -> bool {
+        let Some(v) = table_value else {
+            return false;
+        };
+        let Some(members) = v.as_object() else {
+            return true;
+        };
+        let entries: Vec<(String, Vec<String>)> = members
+            .iter()
+            .filter_map(|m| {
+                let mut p = first_condition(&m.value, conditions, 0)?;
+                if m.key.ends_with('/') && p.ends_with('/') {
+                    p.push('*');
+                }
+                Some((m.key.clone(), vec![p]))
+            })
+            .collect();
+        self.add_from_patterns(out, table, fragment, dir, &entries);
+        true
+    }
+}
+
+/// Completions for a module specifier being typed (`fragment`), written as `kind`.
+fn module_items(
+    cx: &Ctx<'_, '_>,
+    ck: &Ck<'_, '_>,
+    fragment: &str,
+    kind: ImportKind,
+) -> Option<Vec<Item>> {
     let c = ck.c;
+    let fragment = fragment.replace('\\', "/");
+    let fragment = fragment.as_str();
     let path = c.file(cx.file).path.clone();
     let script_dir = dir_of(&path).to_string();
     let extra = ambient_exts(ck);
-    let listing = listing_for(cx, ck, Ending::Minimal, &extra);
-    let mut out = Vec::new();
     let opts = &cx.program.options;
+    let ro = ResolverOptions::from_compiler_options(opts);
+    let mut out_dirs = Vec::new();
+    if let Some(src) = ro.root_dir.clone().or_else(|| ro.config_dir.clone()) {
+        for d in [&ro.out_dir, &ro.declaration_dir].into_iter().flatten() {
+            out_dirs.push((
+                d.trim_end_matches('/').to_string(),
+                src.trim_end_matches('/').to_string(),
+            ));
+        }
+    }
+    let m = Modules {
+        listing: listing_for(cx, ck, Ending::Minimal, &extra),
+        out_dirs,
+    };
+    let mut out = Vec::new();
     if is_relative(fragment) || (opts.paths().is_none() && fragment.starts_with('/')) {
-        directory_items(&script_dir, fragment, &listing, Some(&path), &mut out);
+        directory_items(&script_dir, fragment, &m.listing, Some(&path), &mut out);
         return Some(out);
     }
-    let frag_dir = fragment.contains('/').then(|| match fragment.rfind('/') {
-        Some(i) => &fragment[..i],
-        None => fragment,
-    });
-    // `paths` keys without wildcards.
-    if let Some(paths) = opts.paths() {
-        for (key, _) in &paths.0 {
-            if !key.contains('*') && key.starts_with(fragment) {
-                push(&mut out, key.clone(), KIND_MODULE);
-            }
+    let frag_dir = fragment.contains('/').then(|| {
+        if fragment.ends_with('/') {
+            fragment.trim_end_matches('/')
+        } else {
+            dir_of(fragment)
         }
+    });
+    if let Some(paths) = opts.paths() {
+        let base = ro
+            .paths_base
+            .clone()
+            .or_else(|| ro.config_dir.clone())
+            .unwrap_or_else(|| script_dir.clone());
+        m.add_from_patterns(&mut out, Table::Paths, fragment, &base, &paths.0);
     }
     // Ambient modules (`declare module "x"`).
     for (name, _) in &c.link.ambient_modules {
@@ -706,7 +1252,10 @@ fn module_items(cx: &Ctx<'_, '_>, ck: &Ck<'_, '_>, fragment: &str) -> Option<Vec
         };
         push(&mut out, shown.to_string(), KIND_MODULE);
     }
-    typings_items(cx, &script_dir, frag_dir, &listing, &mut out);
+    typings_items(cx, &script_dir, frag_dir, &m.listing, &mut out);
+    if ro.algorithm == ts_r_config::ModuleResolution::Classic {
+        return Some(out);
+    }
     // Packages: the dependencies package.json files name, or else what node_modules holds.
     let mut found = false;
     if frag_dir.is_none() {
@@ -717,13 +1266,78 @@ fn module_items(cx: &Ctx<'_, '_>, ck: &Ck<'_, '_>, fragment: &str) -> Option<Vec
             }
         }
     }
-    if !found {
-        for d in ancestors(&script_dir) {
-            let nm = format!("{}/node_modules", d.trim_end_matches('/'));
-            if std::path::Path::new(&nm).is_dir() {
-                directory_items(&nm, fragment, &listing, None, &mut out);
+    if found {
+        return Some(out);
+    }
+    let fs = ts_r_config::RealFs::new();
+    let exports_on = ro.resolve_package_json_exports;
+    let imports_on = ro.resolve_package_json_imports;
+    let resolver = Resolver::new(&fs, ro);
+    let mut conditions = resolver.conditions(resolver.mode_for(&path, kind)).to_vec();
+    conditions.push("default".to_string());
+    let mut seen_scope = false;
+    let imports = |d: &str, out: &mut Vec<Item>, seen: &mut bool| {
+        if !imports_on || *seen {
+            return;
+        }
+        let pj = format!("{}/package.json", d.trim_end_matches('/'));
+        let Ok(text) = std::fs::read_to_string(&pj) else {
+            return;
+        };
+        *seen = true;
+        if let Some(p) = PackageJson::parse(d, &pj, &text) {
+            m.lookup(
+                out,
+                p.imports.as_ref(),
+                Table::Imports,
+                fragment,
+                d,
+                &conditions,
+            );
+        }
+    };
+    let comps: Vec<&str> = fragment.split('/').filter(|s| !s.is_empty()).collect();
+    for d in ancestors(&script_dir) {
+        let root = d.trim_end_matches('/');
+        if frag_dir.is_some() && exports_on && !comps.is_empty() {
+            let (pkg, rest) = if comps[0].starts_with('@') && comps.len() > 1 {
+                (format!("{}/{}", comps[0], comps[1]), &comps[2..])
+            } else {
+                (comps[0].to_string(), &comps[1..])
+            };
+            let scoped_alone = comps[0].starts_with('@') && comps.len() == 1;
+            if !scoped_alone {
+                if imports_on && pkg.starts_with('#') {
+                    imports(&d, &mut out, &mut seen_scope);
+                    continue;
+                }
+                let pkg_dir = format!("{root}/node_modules/{pkg}");
+                let pj = format!("{pkg_dir}/package.json");
+                if let Ok(text) = std::fs::read_to_string(&pj)
+                    && let Some(p) = PackageJson::parse(&pkg_dir, &pj, &text)
+                {
+                    let mut sub = rest.join("/");
+                    if !rest.is_empty() && fragment.ends_with('/') {
+                        sub.push('/');
+                    }
+                    if m.lookup(
+                        &mut out,
+                        p.exports.as_ref(),
+                        Table::Exports,
+                        &sub,
+                        &pkg_dir,
+                        &conditions,
+                    ) {
+                        continue;
+                    }
+                }
             }
         }
+        let nm = format!("{root}/node_modules");
+        if std::path::Path::new(&nm).is_dir() {
+            m.package_directory(&nm, fragment, &mut out);
+        }
+        imports(&d, &mut out, &mut seen_scope);
     }
     Some(out)
 }
@@ -856,6 +1470,8 @@ pub(super) fn reference_items(cx: &Ctx<'_, '_>, ck: &Ck<'_, '_>, offset: u32) ->
     if frag.contains('"') || frag.contains('\'') {
         return None;
     }
+    let frag = frag.replace('\\', "/");
+    let frag = frag.as_str();
     let path = c.file(cx.file).path.clone();
     let script_dir = dir_of(&path).to_string();
     let mut out = Vec::new();
@@ -900,6 +1516,8 @@ mod tests {
             json: true,
             jsx_preserve: false,
             ending: Ending::Minimal,
+            ts_always: false,
+            ts_wildcard: false,
             extra_exts: &[],
         };
         assert_eq!(l.file_name("a.ts").as_deref(), Some("a"));
@@ -917,6 +1535,14 @@ mod tests {
         };
         assert_eq!(js.file_name("a.tsx").as_deref(), Some("a.js"));
         assert_eq!(js.file_name("a.js").as_deref(), Some("a.js"));
+        // `allowImportingTsExtensions`: a wildcard export match keeps `.ts`, a plain one doesn't.
+        let ts = Listing {
+            ts_wildcard: true,
+            ..l
+        };
+        assert_eq!(ts.module_name("a.tsx", true), "a.tsx");
+        assert_eq!(ts.module_name("a.d.ts", true), "a.js");
+        assert_eq!(ts.module_name("a.ts", false), "a");
         assert!(is_relative("./x") && is_relative("../") && !is_relative(".") && !is_relative("x"));
     }
 }

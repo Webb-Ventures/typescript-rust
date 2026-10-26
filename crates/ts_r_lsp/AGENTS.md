@@ -274,8 +274,49 @@ terms. The fourslash tests are the oracle.
   exists. A bare fragment lists `paths` keys without `*`, ambient module names, type roots'
   packages (`@types/a__b` as `@a/b`, filtered by `types`), then the dependencies of every
   package.json above the file, or, if none, what the ancestor `node_modules` hold.
+- Package entry points (`tsc: tsc/internal/ls/string_completions.go`): a package with
+  `exports` lists only what its keys allow (conditions read in the order the import kind
+  resolves with: `types`, `import` or `require`, `node`, `default`; the first matching
+  condition wins); with no `exports`, `typesVersions` paths, then the package's files. The
+  project's own `imports` (`#x`) work the same way from the nearest package.json, mapping
+  output paths back to sources through `outDir`/`rootDir`. A pattern key (`./sub/*`,
+  `./bar/_*/suffix`) lists the files below its target directory that match the target's
+  suffix, named relative to the directory already typed (`pkg/sub/b/` lists `c`, not
+  `sub/b/c`), with the key's suffix added to files but not folders; when the typed text
+  stops inside the key's prefix, only the rest of the prefix is offered. A target whose
+  suffix already gives the extension (`*.js`) is not given it twice; a declaration file
+  stands for its `.js`. `paths` keys follow the same pattern rule.
+- `allowImportingTsExtensions`: an ES module under `node16`/`nodenext` names `.ts`/`.tsx`/
+  `.mts`/`.cts` files with their extension; elsewhere they keep it only behind a wildcard
+  target (`#*` -> `./src/*`) and only when the file does not already write `.js` endings.
 - `/// <reference path="|` lists files with their names as on disk; `types="|` lists type
   roots' packages. Directory listings stop at 2000 entries and 64 ancestors.
+
+## Completion contexts (`tsr/features/complete.rs`)
+
+Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/binder.go`
+(v7.0.2), in our words; the fourslash tests are the oracle.
+
+- Object literal: when the name being typed follows the literal's `{`, a `,`, or the end of
+  an earlier member with no comma yet (a shorthand member only from an earlier line), the
+  list is the contextual type's properties (a parenthesized literal takes its parens'
+  context; for a union, every property of its object members, leaving out primitives,
+  arrays and callable members) minus the names other members write (spreads do not count;
+  the member under the cursor does not either), minus members that only this literal
+  declares (an inferred type parameter). Non-identifier names are quoted. With no
+  contextual type, or one without properties, the names in scope are offered instead.
+- Object binding pattern (`const { | } = v`, `({ | }: T) =>`, `for (const { | } of xs)`,
+  nested `{ a: { | } }`): the properties of the destructured type (declared type, then
+  initializer, then the iterated type; a parameter's declared or contextual type) minus
+  the names already bound; `private`/`protected` members only inside their class. When that
+  type cannot be known the list is empty, never the scope.
+- Optional properties (`?`, a mapped type's or a union's optional result) are labelled
+  `name?` with `insertText`/`filterText` `name`, in member, object, pattern and string
+  (`"|" in o`, `o["|"]`) lists; object and pattern lists sort them after required ones.
+- Scope: a variable is not offered inside its own initializer (`const x = |`), except when
+  the cursor is past the initializer's end with nothing typed, or inside a JSX tag; blocks,
+  arrows and patterns end the search. A CommonJS JavaScript file (one that refers to
+  `require`, `module` or `exports` freely) has `module` and `exports` as locals.
 
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
@@ -687,9 +728,9 @@ features stay on ts-r (hover p50 0.12 ms).
   `f<string>(x: string)`); JSX intrinsic attributes (`<form onSubmit>`) have no symbol
   (the checker does not type JSX yet); references do not follow renaming imports
   (`import { a as b }`: uses of `b`) or contextually typed object literal properties.
-  Completions: no module-specifier path completions, no bracket-notation members
-  (`o["a-b"]`), no accessibility filtering (private members are listed), auto-imports only
-  from the project's own (non-`node_modules`) modules and never `default` exports.
+  Completions: no JSX attribute lists, no bracket-notation members (`o["a-b"]`), no
+  accessibility filtering after `.` (private members are listed), auto-imports only from
+  the project's own (non-`node_modules`) modules and never `default` exports.
 - Input watching is per directory and add-only (directories stay watched after their files
   leave the program); a project inside a directory named `target` is not watched;
   `node_modules` changes (installs) need "Reload Project" or a restart.
