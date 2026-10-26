@@ -319,3 +319,4 @@ unicorn/prefer-dom-node-text-content
 unicorn/prefer-keyboard-event-key
 unicorn/no-array-method-this-argument
 unicorn/prefer-logical-operator-over-ternary
+unicorn/prefer-string-raw

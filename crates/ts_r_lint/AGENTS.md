@@ -720,6 +720,15 @@ member reads don't count). What we learned, in our words:
   `Array.from` / `Array.fromAsync` (three). Removal (from the comma before it) is a fix for
   an arrow callback with an identifier/literal/`this`/static-string `thisArg`, otherwise a
   suggestion; non-arrow callbacks also get `cb.bind(t)`.
+- **prefer-string-raw**: one-line strings / untagged templates whose only escapes are `\\`
+  (and the string's own quote) become ``String.raw`...` ``, except where a literal is
+  required (keys, module sources/specifiers, import attributes, JSX attribute values, enum
+  members, module names, literal and import types, abstract/signature keys), Jest inline
+  snapshots and `as const`. With the TypeScript grammar or a `.ts`-family name (no type
+  information) only `let`/`var` without annotation and `: string` declarators are fixed;
+  the rest get a suggestion. ``String.raw`...` `` without a backslash loses its tag (`'...'`
+  unless it has expressions or line breaks), with ASI `;`, `return`/`throw`/`yield`
+  parentheses when the template starts on a later line, and the tag's parentheses removed.
 - `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
   not count tagged templates; `has_possible_side_effect` adds tagged templates and
   spreads anywhere, like unicorn).
@@ -734,7 +743,7 @@ member reads don't count). What we learned, in our words:
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `prefer-modern-dom-apis.js`, `prefer-query-selector.js`, `prefer-dom-node-text-content.js`, `prefer-keyboard-event-key.js`, `no-array-method-this-argument.js`, `fix/remove-argument.js`, `shared/event-keys.js`, `utils/is-dom-node.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `prefer-modern-dom-apis.js`, `prefer-query-selector.js`, `prefer-dom-node-text-content.js`, `prefer-keyboard-event-key.js`, `no-array-method-this-argument.js`, `fix/remove-argument.js`, `prefer-string-raw.js`, `utils/is-string-literal-required.js`, `shared/is-jest-inline-snapshot.js`, `utils/get-unparenthesized-keyword-argument-parent.js`, `fix/add-parentheses-to-return-or-throw-expression.js`, `shared/event-keys.js`, `utils/is-dom-node.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
 get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement,is-node-matches,comments,get-const-variable-initializer,array-or-object-prototype-property,get-parent-pattern,single-statement,should-report-replace-children-receiver}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).
