@@ -269,6 +269,7 @@ preserve-caught-error 81/81
 radix 91/91
 require-yield 15/15
 symbol-description 8/8
+unicorn/consistent-assert 31/31
 unicorn/consistent-date-clone 26/26
 unicorn/consistent-existence-index-check 56/56
 unicorn/consistent-template-literal-escape 20/20
@@ -299,6 +300,7 @@ unicorn/no-new-array 111/111
 unicorn/no-null 94/94
 unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-this-assignment 23/23
+unicorn/no-top-level-assignment-in-function 32/32
 unicorn/no-typeof-undefined 100/100
 unicorn/no-unnecessary-array-flat-depth 20/20
 unicorn/no-unnecessary-array-splice-count 78/78

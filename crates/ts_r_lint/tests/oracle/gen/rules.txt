@@ -324,3 +324,5 @@ unicorn/no-useless-recursion
 unicorn/no-array-from-fill
 unicorn/no-duplicate-if-branches
 unicorn/switch-case-break-position
+unicorn/consistent-assert
+unicorn/no-top-level-assignment-in-function

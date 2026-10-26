@@ -280,6 +280,7 @@ mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_array_mutate;
 mod unicorn_ast;
+mod unicorn_consistent_assert;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_existence_index_check;
 mod unicorn_consistent_template_literal_escape;
@@ -311,6 +312,7 @@ mod unicorn_no_new_array;
 mod unicorn_no_null;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_this_assignment;
+mod unicorn_no_top_level_assignment_in_function;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_unnecessary_array_flat_depth;
 mod unicorn_no_unnecessary_array_splice_count;
@@ -660,6 +662,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_tag_lines::RULE,
     &jsdoc_ts_no_empty_object_type::RULE,
     // eslint-plugin-unicorn
+    &unicorn_consistent_assert::RULE,
     &unicorn_consistent_date_clone::RULE,
     &unicorn_consistent_existence_index_check::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
@@ -690,6 +693,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_null::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_this_assignment::RULE,
+    &unicorn_no_top_level_assignment_in_function::RULE,
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_unnecessary_array_flat_depth::RULE,
     &unicorn_no_unnecessary_array_splice_count::RULE,
