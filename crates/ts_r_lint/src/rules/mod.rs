@@ -493,6 +493,7 @@ mod unicorn_no_unreadable_iife;
 mod unicorn_no_unreadable_new_expression;
 mod unicorn_no_unreadable_object_destructuring;
 mod unicorn_no_unsafe_buffer_conversion;
+mod unicorn_no_unsafe_dom_html;
 mod unicorn_no_unsafe_json_serialization;
 mod unicorn_no_unsafe_promise_all_settled_values;
 mod unicorn_no_unsafe_property_key;
@@ -582,6 +583,7 @@ mod unicorn_prefer_https;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
+mod unicorn_prefer_iterator_concat;
 mod unicorn_prefer_iterator_helpers;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_iterator_to_array_at_end;
@@ -729,6 +731,8 @@ pub static ALL: &[&RuleDef] = &[
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
+    &unicorn_no_unsafe_dom_html::RULE,
+    &unicorn_prefer_iterator_concat::RULE,
     &unicorn_prefer_short_arrow_method::RULE,
     &unicorn_require_post_message_target_origin::RULE,
     &unicorn_try_complexity::RULE,
