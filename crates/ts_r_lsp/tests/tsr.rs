@@ -1652,6 +1652,145 @@ fn completion_package_exports_and_imports() {
     c.shutdown();
 }
 
+/// Source with `¦` markers: the text without them and each marker's (line, character).
+fn marked(src: &str) -> (String, Vec<(u32, u32)>) {
+    let mut text = String::new();
+    let mut at = Vec::new();
+    let (mut line, mut ch) = (0u32, 0u32);
+    for c in src.chars() {
+        match c {
+            '¦' => at.push((line, ch)),
+            '\n' => {
+                text.push(c);
+                line += 1;
+                ch = 0;
+            }
+            _ => {
+                text.push(c);
+                ch += c.len_utf16() as u32;
+            }
+        }
+    }
+    (text, at)
+}
+
+fn completion_labels(r: &Value) -> Vec<String> {
+    r["items"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|i| i["label"].as_str().unwrap().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Completions from what a position expects: a type literal in a type argument, literal
+/// values, members of an optional value and members that are not identifiers.
+#[test]
+fn completion_expected_types_and_literals() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(
+        "interface Foo { one: string; two: number; 333: symbol }\n\
+         interface Bar<T extends Foo> { foo: T }\n\
+         var x: Bar<{ one: string, ¦ }>;\n\
+         declare function test<P extends \"a\" | \"b\">(p: P): void;\n\
+         test(¦);\n\
+         var y: Pick<Foo, \"¦\">;\n\
+         declare const o: { \"a b\": 1; c?: { d: number } };\n\
+         o.¦;\n\
+         o.c?.¦;\n",
+    );
+    let env = Env::new(
+        "complete-expected",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", &a)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let u = env.uri("src/a.ts");
+    let ask = |c: &mut ScriptedClient, (l, ch): (u32, u32)| {
+        result(c, "textDocument/completion", at(&u, l, ch))
+    };
+    let l = completion_labels(&ask(&mut c, m[0]));
+    assert_eq!(l, ["\"333\"", "two"]);
+    let l = completion_labels(&ask(&mut c, m[1]));
+    for want in ["\"a\"", "\"b\""] {
+        assert!(l.iter().any(|x| x == want), "{want}: {l:?}");
+    }
+    let l = completion_labels(&ask(&mut c, m[2]));
+    assert!(
+        l.contains(&"one".to_string()) && l.contains(&"two".to_string()),
+        "{l:?}"
+    );
+    let r = ask(&mut c, m[3]);
+    let ab = r["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "a b")
+        .cloned()
+        .unwrap_or_else(|| panic!("{r}"));
+    assert_eq!(ab["insertText"], "[\"a b\"]", "{ab}");
+    assert_eq!(ab["textEdit"]["range"]["start"]["character"], 1, "{ab}");
+    assert!(completion_labels(&r).contains(&"c?".to_string()), "{r}");
+    let l = completion_labels(&ask(&mut c, m[4]));
+    assert_eq!(l, ["d"]);
+    c.shutdown();
+}
+
+/// Names being declared get no list (a constructor parameter only its modifiers); an
+/// unclosed function's names are in scope at the end of the file, except the parameter being
+/// written and the later ones.
+#[test]
+fn completion_definition_locations_and_unclosed_scopes() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(
+        "class ¦\nfunction f(a, ¦) {}\nclass K { constructor(¦) {} }\nenum E { A, ¦ }\n\
+         import * as ¦ from \"./b.js\";\nfunction g<T, ¦>() {}\nnamespace ¦N {}\n",
+    );
+    let (b, mb) =
+        marked("export {};\nfunction foo(x: string) {\n  function bar(a: number, b: string = ¦");
+    let env = Env::new(
+        "complete-definitions",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", &a),
+            ("src/b.ts", &b),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ua = env.uri("src/a.ts");
+    for (i, &(l, ch)) in m.iter().enumerate() {
+        let r = result(&mut c, "textDocument/completion", at(&ua, l, ch));
+        let labels = completion_labels(&r);
+        match i {
+            2 => assert_eq!(
+                labels,
+                ["override", "private", "protected", "public", "readonly"]
+            ),
+            6 => assert!(labels.contains(&"K".to_string()), "{labels:?}"),
+            _ => assert!(labels.is_empty(), "marker {i}: {labels:?}"),
+        }
+    }
+    let ub = env.uri("src/b.ts");
+    let l = completion_labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&ub, mb[0].0, mb[0].1),
+    ));
+    for want in ["a", "x", "foo", "bar"] {
+        assert!(l.iter().any(|x| x == want), "{want}: {l:?}");
+    }
+    assert!(!l.iter().any(|x| x == "b"), "{l:?}");
+    c.shutdown();
+}
+
 /// A CommonJS JavaScript file has `module` and `exports` in scope.
 #[test]
 fn completion_commonjs_locals() {
