@@ -324,7 +324,10 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - JSX: a spread of an object literal is flattened into the props object unless the literal
   sets `__proto__` (`{ __proto__: x }` or `{ "__proto__": x }`, not computed/shorthand).
   A pragma (`@jsx h`) counts only first on its comment line; `&#X41;` (upper-case `X`) is
-  not an entity.
+  not an entity. The `createElement`/`jsx` call keeps the element's span (tsc keeps its
+  text range), so an array literal or conditional around it keeps the source's line breaks.
+- A `declare class` or `declare function` emits nothing, so a namespace merged with it
+  writes its own `var C;`. An enum under a top-level label is still top-level (`var E;`).
 - CommonJS `export = x` becomes `module.exports = x;` at the end of the file, and the
   comments on the `export =` line go. After a top-level `using` it is `_default = x;` in the
   `try` and `module.exports = _default;` after it.

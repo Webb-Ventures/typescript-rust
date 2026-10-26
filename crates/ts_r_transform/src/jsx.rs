@@ -376,7 +376,11 @@ pub(crate) fn jsx(tx: &mut Tx, id: NodeId) {
         }
         _ => automatic(tx, tag, &attrs, kids, at, m == JsxMode::AutomaticDev),
     };
+    // The call keeps the element's span, as tsc's keeps its text range: line breaks around
+    // it in an array literal or a conditional are the source's.
+    let span = tx.span(id);
     replace(tx.ast, id, call);
+    tx.ast.set_span(id, span);
 }
 
 /// `jsx: preserve`: only the embedded expressions are transformed.

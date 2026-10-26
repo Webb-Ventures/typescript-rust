@@ -291,3 +291,10 @@ fn class_semicolons() {
 fn ambient_merges() {
     check("ambient_merges");
 }
+
+/// A JSX element's `createElement` call keeps the element's source position: an array
+/// literal or a conditional around it keeps the source's line breaks.
+#[test]
+fn jsx_source_lines() {
+    check("jsx_source_lines");
+}
