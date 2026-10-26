@@ -1345,6 +1345,12 @@ Files, by layer:
   (`[+s]`, `[s + s]`); named members meet written indexes only (`written_indexes` in
   `indexes.rs`). `static [k: K]: V` signatures are on the static side (`typeof C`) and are
   not compared by TS2417.
+- **Static side of a derived class.** Its own members are the class's exports (a merged
+  namespace's too); the base constructor's properties are added for names it lacks, and also
+  replace an own member that is an alias (`export { S as default }` in the namespace has no
+  value meaning of its own), so `R.default` is the base's and TS2417 compares nothing there
+  (`class_static_members` in `members.rs`; `static_alias_member_inherited`, seen on postcss;
+  tsc: checker.go addInheritedMembers).
 - **Flow containers.** Functions, class property initializers and method bodies (and the
   computed key of a method or property) and namespace bodies are flow containers (outer variables are assumed assigned inside); a static block is not (its
   body runs inline in the surrounding flow, binder too). An outer local `let` that is never
