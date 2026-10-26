@@ -396,8 +396,7 @@ mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_argument_count;
 mod unicorn_no_invalid_fetch_options;
-mod unicorn_no_invalid_integrity;
-mod unicorn_no_invalid_property_descriptor;
+mod unicorn_no_invalid_intl_options;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_invalid_response_options;
 mod unicorn_no_invalid_style_set_property;
@@ -1063,7 +1062,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_argument_count::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
-    &unicorn_no_invalid_integrity::RULE,
+    &unicorn_no_invalid_intl_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_invalid_style_set_property::RULE,
     &unicorn_no_invalid_url_protocol_comparison::RULE,
