@@ -606,6 +606,7 @@ impl Printer<'_> {
             }
             Node::ImportCall {
                 phase,
+                type_args,
                 arg,
                 options,
             } => {
@@ -615,6 +616,9 @@ impl Printer<'_> {
                     ImportPhase::Defer => "import.defer",
                     ImportPhase::Source => "import.source",
                 });
+                if let Some(ta) = type_args {
+                    self.ty(ta);
+                }
                 self.tok("(");
                 let saved = self.no_in;
                 self.no_in = false;

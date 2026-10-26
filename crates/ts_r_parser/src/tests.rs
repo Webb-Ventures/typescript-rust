@@ -3202,3 +3202,35 @@ fn import_type_has_no_comma_after_attributes() {
     );
     assert!(at("type A = typeof import(\"a\", { with: {}, });").is_empty());
 }
+
+/// `import<T>(x)` and `import<T>` keep their type arguments on the `ImportCall` (the
+/// checker resolves them: importWithTypeArguments, TS2304 on `T`); `import<>` has none.
+#[test]
+fn import_call_keeps_type_arguments() {
+    for (src, expect) in [
+        ("import<T>(\"m\");", Some(1)),
+        ("import<T>\nconst a = import<string, number>", Some(1)),
+        ("const a = import<string, number>(\"m\");", Some(2)),
+        ("import<>(\"m\");", None),
+        ("import(\"m\");", None),
+    ] {
+        let r = parse(src, SourceKind::Ts);
+        let ast = &r.ast;
+        let call = (1..ast.nodes.len() as u32)
+            .filter_map(ts_r_ast::NodeId::from_raw)
+            .find(|&id| matches!(ast.node(id), ts_r_ast::Node::ImportCall { .. }))
+            .expect("an import call");
+        let ts_r_ast::Node::ImportCall { type_args, .. } = *ast.node(call) else {
+            unreachable!()
+        };
+        let n = type_args.map(|ta| match *ast.node(ta) {
+            ts_r_ast::Node::TypeArgs { args } => ast.list(args).len(),
+            _ => panic!("{src}: type_args is {:?}", ast.kind(ta)),
+        });
+        assert_eq!(n, expect, "{src}");
+        // Children before parents, in source order.
+        if let Some(ta) = type_args {
+            assert!(ta < call);
+        }
+    }
+}

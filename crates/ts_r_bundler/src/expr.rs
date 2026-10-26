@@ -103,6 +103,7 @@ impl Expr {
                 ast.add(
                     ts_r_ast::Node::ImportCall {
                         phase: ts_r_ast::ImportPhase::Evaluation,
+                        type_args: None,
                         arg,
                         options: None,
                     },

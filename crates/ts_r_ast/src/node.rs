@@ -645,8 +645,10 @@ define_nodes! {
     /// `obj[index]` / `obj?.[index]`.
     Index { obj: NodeId, optional: bool, index: NodeId }
     MetaProperty { kind: MetaPropKind }
-    /// `import(x)`, `import(x, opts)`, `import.defer(x)`, `import.source(x)`.
-    ImportCall { phase: ImportPhase, arg: NodeId, options: Option<NodeId> }
+    /// `import(x)`, `import(x, opts)`, `import.defer(x)`, `import.source(x)`. `type_args` is
+    /// the `TypeArgs` of `import<T>(x)` / `import<T>` (an error, TS1326, but the checker
+    /// still resolves the names in them); `None` otherwise and for an empty `import<>`.
+    ImportCall { phase: ImportPhase, type_args: Option<NodeId>, arg: NodeId, options: Option<NodeId> }
     As { expr: NodeId, ty: NodeId }
     Satisfies { expr: NodeId, ty: NodeId }
     /// `<T>expr`

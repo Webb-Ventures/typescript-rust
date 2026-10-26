@@ -1589,7 +1589,24 @@ impl<'a> Tx<'a> {
                     crate::cjs::update_live_exports(self, id, &live);
                 }
             }
-            Node::ImportCall { arg, options, .. } => {
+            Node::ImportCall {
+                phase,
+                type_args,
+                arg,
+                options,
+            } => {
+                if type_args.is_some() {
+                    self.erase_opt(type_args);
+                    self.set(
+                        id,
+                        Node::ImportCall {
+                            phase,
+                            type_args: None,
+                            arg,
+                            options,
+                        },
+                    );
+                }
                 self.expr(arg);
                 if let Some(o) = options {
                     self.expr(o);

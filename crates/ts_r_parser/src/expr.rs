@@ -1024,21 +1024,25 @@ impl<'a> Parser<'a> {
             // `import<T>("m")`, `import<>("m")`, `import<T>;`: type arguments are parsed
             // and dropped, the call is still a module request, and the whole expression is
             // the checker's TS1326 (importCallExpressionWithTypeArgument).
+            // The type arguments are kept on the node: the checker resolves their names
+            // (importWithTypeArguments: TS2304 on `T`).
             self.bump();
-            if self.at(T::Lt) && self.peek_kind() == T::Gt {
+            let type_args = if self.at(T::Lt) && self.peek_kind() == T::Gt {
                 self.bump();
                 self.bump();
+                None
             } else {
-                self.parse_type_args();
-            }
+                Some(self.parse_type_args())
+            };
             let call = if self.at(T::LParen) {
-                self.parse_import_call_rest(start, ImportPhase::Evaluation)
+                self.parse_import_call_rest(start, ImportPhase::Evaluation, type_args)
             } else {
                 let arg = self.missing();
                 self.finish_node(
                     start,
                     Node::ImportCall {
                         phase: ImportPhase::Evaluation,
+                        type_args,
                         arg,
                         options: None,
                     },
@@ -1075,11 +1079,16 @@ impl<'a> Parser<'a> {
                 );
             }
         }
-        self.parse_import_call_rest(start, phase)
+        self.parse_import_call_rest(start, phase, None)
     }
 
     /// `(specifier, options)` of an `import()` call starting at `start`.
-    fn parse_import_call_rest(&mut self, start: u32, phase: ImportPhase) -> NodeId {
+    fn parse_import_call_rest(
+        &mut self,
+        start: u32,
+        phase: ImportPhase,
+        type_args: Option<NodeId>,
+    ) -> NodeId {
         let open = self.start();
         if !self.expect(T::LParen) {
             let arg = self.missing();
@@ -1087,6 +1096,7 @@ impl<'a> Parser<'a> {
                 start,
                 Node::ImportCall {
                     phase,
+                    type_args,
                     arg,
                     options: None,
                 },
@@ -1122,6 +1132,7 @@ impl<'a> Parser<'a> {
             start,
             Node::ImportCall {
                 phase,
+                type_args,
                 arg,
                 options,
             },
