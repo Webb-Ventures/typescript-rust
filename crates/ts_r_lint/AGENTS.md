@@ -559,8 +559,10 @@ typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visi
 ## eslint-plugin-unicorn rules (round 5, lead)
 
 `prefer-blob-reading-methods`, `consistent-date-clone`, `no-invalid-remove-event-listener`,
-`prefer-structured-clone` (each at 100% of its oracle) and `no-await-in-promise-methods`
-(110 of 111: the last case needs the parser's module goal, see below). Shared call shapes are
+`prefer-structured-clone`, `prefer-event-target`, `no-useless-error-capture-stack-trace`,
+`no-negation-in-equality-check` (each at 100% of its oracle), `no-await-in-promise-methods`
+(110 of 111) and `no-unnecessary-await` (63 of 66): their last cases need the parser's
+module goal, see below. Shared call shapes are
 in `rules/unicorn_ast.rs`: `method_call` (a call of `obj.name` with an identifier property,
 parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_.cloneDeep`,
 `new.target.x`, `this.y`), `call_tokens` (a call's `(`, `)` and trailing `,`),
@@ -577,6 +579,21 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
 - **consistent-date-clone** reports `.getTime()` in `new Date(x.getTime())` from the method
   name to the end of the call; the fix deletes from the end of the receiver's parentheses to
   the end of the member, and from the end of the parenthesized callee to the end of the call.
+- **no-unnecessary-await** fixes only an `await` that is the last thing its function or
+  module evaluates (`is_last_evaluated`: the end of an arrow body, function body or
+  program, through `if` arms, declarations, `return`/`throw` and expression statements).
+  Open: 3 cases (`await +x`, `await\n[]` at the top level of a `.js` module) parse as
+  `await` the name for the same module-goal reason as above.
+- **no-negation-in-equality-check** and the fix helpers it shares with
+  `no-typeof-undefined` (`keyword_argument_parent`, `start_needs_parens`) and
+  `no-instanceof-builtins` (`starts_continued_statement`).
+- **no-useless-error-capture-stack-trace**: the nearest function or class around the call
+  must be the constructor of a class whose `extends` is a global built-in error;
+  `new.target`, `this.constructor` and the class's own single-declaration name count as
+  the class.
+- **prefer-event-target**: `EventEmitter` as superclass or `new` callee, unless declared by
+  an import of (or a `const` destructuring / `.EventEmitter` of `require`/`await import`
+  of) `@angular/core` or `eventemitter3`.
 - **prefer-structured-clone**'s JSON suggestion deletes `JSON.stringify` with each
   parenthesis around it, the inner call's `(`, `)` and trailing comma; the clone-function
   form replaces the callee inside its parentheses.
@@ -585,4 +602,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
 `no-invalid-remove-event-listener.js`, `prefer-structured-clone.js`, `ast/is-method-call.js`,
 `ast/call-or-new-expression.js`, `utils/is-node-matches.js`, `utils/comments.js`,
-`fix/remove-method-call.js`, `fix/remove-spaces-after.js`.
+`fix/remove-method-call.js`, `fix/remove-spaces-after.js`, `no-unnecessary-await.js`,
+`no-negation-in-equality-check.js`, `no-useless-error-capture-stack-trace.js`,
+`prefer-event-target.js`, `utils/needs-semicolon.js`,
+`fix/add-parentheses-to-return-or-throw-expression.js`.

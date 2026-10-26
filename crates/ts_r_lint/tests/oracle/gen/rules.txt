@@ -297,3 +297,7 @@ unicorn/no-await-in-promise-methods
 unicorn/consistent-date-clone
 unicorn/no-invalid-remove-event-listener
 unicorn/prefer-structured-clone
+unicorn/prefer-event-target
+unicorn/no-useless-error-capture-stack-trace
+unicorn/no-unnecessary-await
+unicorn/no-negation-in-equality-check

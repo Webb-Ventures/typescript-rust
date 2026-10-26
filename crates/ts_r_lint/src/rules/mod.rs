@@ -285,18 +285,22 @@ mod unicorn_no_document_cookie;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_lonely_if;
+mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
 mod unicorn_no_this_assignment;
 mod unicorn_no_typeof_undefined;
+mod unicorn_no_unnecessary_await;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_event_target;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_structured_clone;
@@ -614,18 +618,22 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_lonely_if::RULE,
+    &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_typeof_undefined::RULE,
+    &unicorn_no_unnecessary_await::RULE,
     &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_structured_clone::RULE,

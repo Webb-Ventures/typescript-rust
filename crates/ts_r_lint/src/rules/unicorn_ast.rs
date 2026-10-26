@@ -174,6 +174,76 @@ pub(crate) fn call_tokens(cx: &Ctx<'_, '_>, call: NodeId) -> Option<(u32, u32, O
     Some((open as u32, close, comma))
 }
 
+/// The `extends` expression of a class (ESTree's `superClass`).
+pub(crate) fn superclass(ast: &Ast, class: NodeId) -> Option<NodeId> {
+    let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) = *ast.node(class)
+    else {
+        return None;
+    };
+    ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+        Node::HeritageClause {
+            kind: ts_r_ast::HeritageKind::Extends,
+            types,
+        } => ast.list(types).first().map(|&t| match *ast.node(t) {
+            Node::ExprWithTypeArgs { expr, .. } => expr,
+            _ => t,
+        }),
+        _ => None,
+    })
+}
+
+/// The identifier that declares the variable `ident` refers to (its first declaration), or
+/// `None` for an undeclared or global name.
+pub(crate) fn declared_name(cx: &Ctx<'_, '_>, ident: NodeId) -> Option<NodeId> {
+    let sem = cx.semantic();
+    let Resolution::Symbol(s) = sem.reference(sem.reference_at(ident)?).resolution else {
+        return None;
+    };
+    sem.symbol(s).decls.first().map(|d| d.name)
+}
+
+/// A statement (expression, declaration, `return`, `throw`, `export default`) that ends
+/// without `;`, so code starting with `(`, `[`, `+`, ... on the next line would continue it.
+pub(crate) fn ends_without_semicolon(cx: &Ctx<'_, '_>, stmt: NodeId) -> bool {
+    matches!(
+        cx.ast().node(stmt),
+        Node::ExprStmt { .. }
+            | Node::VarDecl { .. }
+            | Node::Return { .. }
+            | Node::Throw { .. }
+            | Node::ExportDefaultExpr { .. }
+    ) && !cx.span(stmt).text(cx.src()).trim_end().ends_with(';')
+}
+
+/// Code starting with `first` that replaces the start of statement `stmt` needs a `;` in
+/// front: it could continue the previous statement.
+pub(crate) fn needs_semicolon_before(cx: &Ctx<'_, '_>, stmt: NodeId, first: Option<char>) -> bool {
+    first.is_some_and(|c| "[(/`+-*,.<".contains(c))
+        && prev_statement(cx.ast(), cx.file.parents, stmt)
+            .is_some_and(|p| ends_without_semicolon(cx, p))
+}
+
+/// Parenthesize a `return`/`throw` argument: ` (` after the keyword and `)` before the
+/// statement's `;` (or after it).
+pub(crate) fn paren_return_or_throw(cx: &Ctx<'_, '_>, stmt: NodeId) -> Vec<(Span, String)> {
+    let span = cx.span(stmt);
+    let kw = match cx.node(stmt) {
+        Node::Return { .. } => "return",
+        Node::Throw { .. } => "throw",
+        _ => return Vec::new(),
+    };
+    let after_kw = span.start + kw.len() as u32;
+    let close = if cx.span(stmt).text(cx.src()).ends_with(';') {
+        span.end - 1
+    } else {
+        span.end
+    };
+    vec![
+        (Span::at(after_kw), " (".to_owned()),
+        (Span::at(close), ")".to_owned()),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
