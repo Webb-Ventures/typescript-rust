@@ -3651,3 +3651,26 @@ fn completions_for_labels_literals_and_type_parameters() {
     assert!(l.iter().any(|x| x == "C"), "{l:?}");
     c.shutdown();
 }
+
+const THIS_SRC: &str = "interface R { n: number }\ninterface F { (this: void, n: number): void }\nclass Foo {\n  p: this;\n  m(this: R) {}\n  f() { type Y = typeof this.p; }\n}\nlet g: F = function (this, n) {};\n";
+
+#[test]
+fn hover_on_this_parameters_types_and_type_queries() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "hover8",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", THIS_SRC)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let u = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    // The `this` type, a `this` parameter (declared and contextual), and `typeof this`.
+    assert!(hover_text(&mut c, &u, 3, 6).contains("\nthis\n"));
+    assert!(hover_text(&mut c, &u, 4, 5).contains("(parameter) this: R"));
+    assert!(hover_text(&mut c, &u, 5, 25).contains("this: this"));
+    assert!(hover_text(&mut c, &u, 7, 22).contains("(parameter) this: void"));
+    c.shutdown();
+}

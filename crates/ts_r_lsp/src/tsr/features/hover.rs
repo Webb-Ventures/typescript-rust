@@ -32,7 +32,12 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
     };
     let l = Loc::new(cx.file, n);
     let span = ast.span(n);
+    if let Some(display) = this_name_display(ck, l) {
+        return contents(lines, text, &display, "", span.start, span.end);
+    }
     let (display, doc) = match ast.node(n) {
+        // The `this` type in a class or interface member.
+        Node::ThisType {} => ("this".to_owned(), String::new()),
         Node::This {} => {
             let t = ck.check_expr(l);
             (format!("this: {}", ck.type_to_string(t)), String::new())
@@ -116,6 +121,101 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         _ => return Value::Null,
     };
     contents(lines, text, &display, &doc, span.start, span.end)
+}
+
+/// The display of `this` written as a name: a `this` parameter (`(parameter) this: T`, its
+/// declared or contextual type) or the head of a type query (`typeof this`, `typeof
+/// this.x`: `this: T`, the type of `this` there).
+fn this_name_display(ck: &mut Ck<'_, '_>, l: Loc) -> Option<String> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    if name_text(ast, l.node) != Some("this") || !matches!(ast.node(l.node), Node::Ident { .. }) {
+        return None;
+    }
+    let p = c.parent(l)?;
+    if let Node::Param {
+        pattern, type_ann, ..
+    } = *c.node(p)
+        && pattern == l.node
+    {
+        // Without an annotation: the `this` type the contextual signature declares, else
+        // the parameter's own type.
+        let contextual = type_ann
+            .is_none()
+            .then(|| c.parent(p))
+            .flatten()
+            .and_then(|f| ck.contextual_signature(f))
+            .and_then(|sig| ck.store().sig(sig).this_type);
+        let t = contextual.unwrap_or_else(|| ck.param_type(p));
+        return Some(format!("(parameter) this: {}", ck.type_to_string(t)));
+    }
+    // Up the left sides of a qualified name to the type query.
+    let mut cur = l;
+    for _ in 0..256 {
+        let up = c.parent(cur)?;
+        match *c.node(up) {
+            Node::QualifiedName { left, .. } if left == cur.node => cur = up,
+            Node::TypeQuery { expr_name, .. } if expr_name == cur.node => {
+                let t = if cur == l {
+                    ck.type_from_node(up)
+                } else {
+                    this_expression_type(ck, l)?
+                };
+                return Some(format!("this: {}", ck.type_to_string(t)));
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The type `this` has at `l` (for a name that is not a `this` expression node): an
+/// explicit `this` parameter of the enclosing function, the class's `this` type in an
+/// instance member (the class itself in a static one), or an object literal's contextual
+/// type (else its own type) in its method. Arrow functions are transparent.
+fn this_expression_type(ck: &mut Ck<'_, '_>, l: Loc) -> Option<TypeId> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    let mut cur = c.parent(l);
+    for _ in 0..4096 {
+        let n = cur?;
+        match *c.node(n) {
+            Node::FunctionDecl { params, .. } | Node::FunctionExpr { params, .. } => {
+                let this_ann = ast.list(params).first().and_then(|&p| match *ast.node(p) {
+                    Node::Param {
+                        type_ann: Some(t), ..
+                    } if ts_r_checker::nodes::is_this_param(ast, p) => Some(t),
+                    _ => None,
+                });
+                if let Some(t) = this_ann {
+                    return Some(ck.type_from_node(Loc::new(l.file, t)));
+                }
+                let m = c.parent(n).filter(|m| {
+                    matches!(c.node(*m), Node::MethodDef { .. })
+                        && matches!(c.node(n), Node::FunctionExpr { .. })
+                })?;
+                let owner = c.parent(m)?;
+                return match *c.node(owner) {
+                    Node::ObjectLit { .. } => Some(
+                        ck.contextual_type(owner)
+                            .unwrap_or_else(|| ck.check_expr(owner)),
+                    ),
+                    Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                        if c.node(m).modifiers().contains(ts_r_ast::Modifiers::STATIC) {
+                            let s = c.sym_of_decl(owner)?;
+                            Some(ck.type_of_symbol(s))
+                        } else {
+                            ck.this_type_at(l)
+                        }
+                    }
+                    _ => None,
+                };
+            }
+            Node::Program { .. } | Node::Module { .. } => return None,
+            _ => cur = c.parent(n),
+        }
+    }
+    None
 }
 
 /// The hover reply: `display` as a code block, then `doc`, for the span `start..end`.

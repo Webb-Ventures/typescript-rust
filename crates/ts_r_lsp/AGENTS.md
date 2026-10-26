@@ -421,6 +421,12 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
 Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checker.go`
 (`instantiateSymbol`), v7.0.2, in our words; the fourslash tests are the oracle.
 
+- `this` (`hover.rs`, observed on `quickInfoOnThis*`): the `this` type in a member shows
+  `this`; a `this` parameter `(parameter) this: T`, with `T` its annotation or else the
+  `this` type of the contextual signature; the head of `typeof this` / `typeof this.x`
+  shows `this: T`, the type `this` has there (an explicit `this` parameter, the class's
+  `this` type or, in an object literal method, the literal's contextual or own type).
+
 - The location's meaning (value, type or namespace position; a declaration name is all
   three) picks which of a merged symbol's meanings get a line; when none match, all are
   shown. Each meaning is its own line: `(local) var`, `(property)`, `(accessor)` (also
@@ -1099,7 +1105,7 @@ features stay on ts-r (hover p50 0.12 ms).
   (`a<string>` for `import a = require(..)`); references do not go back up from a
   re-export to the declaration the way tsc does from some imports (`import boom from
   "./d"` where `d` re-exports a renamed default), nor through JSDoc `@param`/`@import`,
-  `require` or import types.
+  `require` or import types of JavaScript exports.
   Completions: no accessibility filtering after `.` (private members are listed),
   auto-imports only from the project's own (non-`node_modules`) modules and never
   `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no
