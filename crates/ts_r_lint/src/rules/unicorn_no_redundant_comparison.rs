@@ -16,8 +16,9 @@ use super::prelude::*;
 use super::unicorn_ast::contains_node;
 use super::unicorn_static::{Static, static_value_no_side_effects};
 use super::unicorn_text::{needs_semicolon, paren_span};
-use super::unicorn_util_h1::{
-    is_outermost_logical, is_same_reference, logical_operands, unwrap_ts,
+use super::unicorn_util::has_side_effect_with as has_side_effect;
+use super::unicorn_util::{
+    is_outermost_logical, is_same_reference, logical_operands, skip_wrappers as unwrap_ts,
 };
 use super::unicorn_util_h4::has_side_effect;
 use ts_r_ast::Ast;

@@ -310,6 +310,7 @@ mod unicorn_catch_error_name;
 mod unicorn_conditions;
 mod unicorn_consistent_assert;
 mod unicorn_consistent_class_member_order;
+mod unicorn_consistent_conditional_object_spread;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_existence_index_check;
@@ -580,6 +581,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_consistent_conditional_object_spread::RULE,
     &unicorn_default_export_style::RULE,
     &unicorn_prefer_private_class_fields::RULE,
     &unicorn_class_reference_in_static_methods::RULE,
