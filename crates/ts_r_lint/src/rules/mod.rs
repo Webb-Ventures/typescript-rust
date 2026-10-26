@@ -57,6 +57,7 @@ mod import_no_unassigned_import;
 mod import_no_unresolved;
 mod import_no_useless_path_segments;
 mod import_no_webpack_loader_syntax;
+mod import_order;
 mod import_prefer_default_export;
 mod import_unambiguous;
 pub(crate) mod import_util;
@@ -804,6 +805,7 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_relative_parent_imports::RULE,
     &import_unambiguous::RULE,
     &import_no_extraneous_dependencies::RULE,
+    &import_order::RULE,
     &import_no_empty_named_blocks::RULE,
     &import_no_commonjs::RULE,
     &import_no_mutable_exports::RULE,
