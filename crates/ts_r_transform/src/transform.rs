@@ -38,6 +38,8 @@ pub(crate) struct Tx<'a> {
     pub top: Vec<NodeId>,
     /// Statements appended at the end of the module.
     pub bottom: Vec<NodeId>,
+    /// The `export {};` marker this transform added, if any.
+    pub marker: Option<NodeId>,
     /// Names generated so far.
     pub taken: FxHashSet<String>,
     pub ns_stack: Vec<NsFrame>,
@@ -143,6 +145,7 @@ pub(crate) fn run(
         diags: Vec::new(),
         top: Vec::new(),
         bottom: Vec::new(),
+        marker: None,
         taken: FxHashSet::default(),
         ns_stack: Vec::new(),
         enums: FxHashMap::default(),
@@ -187,6 +190,7 @@ pub(crate) fn run(
         crate::downlevel::lower::run(&mut tx);
     }
     crate::cjs::finish_helper_import(&mut tx);
+    drop_marker_for_helper_import(&mut tx);
     let unlowered: Vec<(Span, &'static str)> = using
         .or_else(|| crate::downlevel::unlowered(&*tx.ast, src, opts))
         .into_iter()
@@ -236,6 +240,27 @@ pub(crate) fn run(
             r
         },
     }
+}
+
+/// An ES module whose helpers come from `import { ... } from "tslib"` is a module through
+/// that import, so it needs no `export {};` marker (observed: `export {}; { using a = null; }`
+/// with `importHelpers` emits the import and no marker).
+fn drop_marker_for_helper_import(tx: &mut Tx) {
+    let Some(marker) = tx.marker else {
+        return;
+    };
+    if !tx.opts.import_helpers || tx.opts.is_cjs() || tx.helpers.render(tx.opts).is_empty() {
+        return;
+    }
+    let root = tx.ast.root;
+    let Node::Program { stmts } = tx.n(root) else {
+        return;
+    };
+    let mut items = tx.items(stmts);
+    items.retain(|&s| s != marker);
+    let stmts = tx.new_list(&items);
+    tx.set(root, Node::Program { stmts });
+    tx.marker = None;
 }
 
 fn sorted(mut v: Vec<NodeId>) -> Vec<NodeId> {
@@ -544,6 +569,7 @@ impl<'a> Tx<'a> {
                 0,
             );
             self.bottom.push(empty);
+            self.marker = Some(empty);
         }
         let mut all: Vec<NodeId> = Vec::with_capacity(out.len() + 8);
         let needs_strict = self.opts.always_strict

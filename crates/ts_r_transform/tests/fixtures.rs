@@ -120,3 +120,25 @@ fn wide_exported_destructuring_keeps_member_and_property_ranges() {
     }
     assert_eq!(members, BINDINGS + 4);
 }
+
+/// With `importHelpers`, the `tslib` import makes the file a module: tsc adds no `export {};`
+/// marker after erasing the source's own (awaitUsingDeclarationsWithImportHelpers).
+#[test]
+fn helper_import_replaces_the_module_marker() {
+    let src = "export {};\nasync function f() {\n    await using a = null;\n}\n";
+    let opts = TransformOptions::from_json(
+        r#"{"target":"es2022","module":"esnext","importHelpers":true}"#,
+        "a.ts",
+    );
+    let out = transpile("a.ts", src, &opts, &CodegenOptions::default());
+    assert!(out.code.contains(r#"from "tslib""#), "{}", out.code);
+    assert!(!out.code.contains("export {}"), "{}", out.code);
+    // Without helpers the marker stays.
+    let out = transpile(
+        "a.ts",
+        "export {};\nlet x = 1;\n",
+        &opts,
+        &CodegenOptions::default(),
+    );
+    assert!(out.code.contains("export {}"), "{}", out.code);
+}
