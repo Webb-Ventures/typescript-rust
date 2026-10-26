@@ -26,7 +26,14 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         }
         Node::Ident { .. } | Node::PrivateName { .. } => {
             let m = meaning_at(ck, l);
-            let Some(s) = m.primary else {
+            // An object literal member typed by a contextual type: that type's property
+            // (one declared property, not a union's).
+            let contextual = m.contextual.filter(|&p| {
+                c.synth_sym(p).is_none_or(|x| {
+                    x.check & ts_r_checker::symbols::check_flags::SYNTHETIC_UNION == 0
+                })
+            });
+            let Some(s) = contextual.or(m.primary) else {
                 // A property of `any` (or one the checker cannot resolve): its type alone.
                 if let Some(p) = c.parent(l)
                     && let Node::Member { prop, .. } = *c.node(p)
@@ -62,6 +69,7 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         Node::ClassDecl { .. }
         | Node::ClassExpr { .. }
         | Node::FunctionDecl { .. }
+        | Node::FunctionExpr { .. }
         | Node::Interface { .. }
         | Node::Enum { .. }
             if on_decl_keyword(text, offset) =>
@@ -72,7 +80,19 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
             let display = super::quick_info::quick_info(ck, s, l, true);
             (display, super::doc_source::documentation(ck, s, Some(l)))
         }
+        // The `=>` of an arrow function: the function.
+        Node::Arrow { .. } if on_arrow_token(text, offset) => {
+            let Some(s) = c.sym_of_decl(l) else {
+                return Value::Null;
+            };
+            let display = super::quick_info::quick_info(ck, s, l, true);
+            (display, super::doc_source::documentation(ck, s, Some(l)))
+        }
         // A literal member name (`"a"() {}`, `1: x`) or element access key (`o["a"]`).
+        Node::StringLit { .. } if module_name_display(ck, l).is_some() => (
+            module_name_display(ck, l).unwrap_or_default(),
+            String::new(),
+        ),
         Node::StringLit { .. } | Node::NumberLit { .. } => {
             let Some((s, is_decl)) = literal_name_symbol(ck, l) else {
                 return Value::Null;
@@ -92,6 +112,46 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         "contents": {"kind": "markdown", "value": value},
         "range": lines.range(text, span.start, span.end),
     })
+}
+
+/// On a module name (`"m"` of `import .. from "m"`, `declare module "m"`): `module "m"`,
+/// or `module x` for `import x = require("m")`. Only names that resolve to a module.
+fn module_name_display(ck: &Ck<'_, '_>, l: Loc) -> Option<String> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    let Node::StringLit { value } = *ast.node(l.node) else {
+        return None;
+    };
+    let text = ast.atom(value);
+    let p = c.parent(l)?;
+    // `declare module "m" {}`.
+    if matches!(*c.node(p), Node::Module { name, .. } if name == l.node) {
+        return Some(format!("module \"{text}\""));
+    }
+    let b = &c.file(l.file).bound;
+    let ri = b.module_requests.iter().position(|r| r.node == l.node)?;
+    let target = c.link.module_target(l.file, ri as u32);
+    if target == ts_r_binder::program::ModuleTarget::Unresolved {
+        return None;
+    }
+    if matches!(c.node(p), Node::ExternalModuleRef { .. })
+        && let Some(ie) = c.parent(p)
+        && let Node::ImportEquals { name, .. } = *c.node(ie)
+    {
+        let own = name_text(ast, name)?.to_string();
+        let first = c
+            .sym_of_decl(ie)
+            .and_then(|x| c.resolve_alias(x))
+            .and_then(|m| super::quick_info::first_equals_alias(ck, l.file, m));
+        return Some(format!("module {}", first.unwrap_or(own)));
+    }
+    Some(format!("module \"{text}\""))
+}
+
+/// Whether `offset` touches an `=>` token.
+fn on_arrow_token(text: &str, offset: u32) -> bool {
+    let o = offset as usize;
+    text.get(o..o + 2) == Some("=>") || (o > 0 && text.get(o - 1..o + 1) == Some("=>"))
 }
 
 /// Whether `offset` is on a declaration keyword that tsc's quick info answers for
