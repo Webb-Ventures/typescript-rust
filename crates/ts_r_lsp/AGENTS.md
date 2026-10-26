@@ -368,10 +368,14 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   the location (declared in another module or an ambient `declare module "m"`) is shown
   under the alias's name; a module target is `(alias) module m` (`import = require`) or
   `(alias) namespace m`.
-- Optional members and parameters lose the `| undefined` that optionality adds
-  (`c?: () => string`), and an optional chain's link (`a?.b`) shows the property's own type.
-  This is text post-processing of the checker's printed types (`drop_optional_undefined`)
-  until the printer has a quick-info mode.
+- Types and signatures print through the checker's quick-info mode
+  (`PrintMode::quick_info(at)`: names scoped to the location, aliases followed, optional
+  parameters without the `| undefined` optionality adds); no text post-processing. An
+  optional property read keeps `| undefined`; an optional method's signatures come from its
+  type without that `undefined` (`remove_optionality`); a property being assigned
+  (`o.p = 1`, `o["p"] += 1`, `o.p++`) shows its type without `missing` (the write type under
+  `exactOptionalPropertyTypes`); an optional chain's link (`a?.b`) shows the property's own
+  type.
 - Hovering the `class`, `function`, `interface`, `enum` or `default` keyword of a
   declaration describes the declaration; a string or number literal that names a member
   (`o["a"]`, `{ 1: x }`) describes that member.

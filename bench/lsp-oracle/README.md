@@ -33,7 +33,7 @@ node bench/lsp-oracle/fails.mjs [REGEX]   # list failures from target/lsp-oracle
 `--filter REGEX` and `--feature hover,completion` narrow the run, `--show N` prints the first
 N differences, `--keep` leaves the temporary projects, `--tsr PATH` runs another ts-r-lsp
 binary, and `--dump FILE` appends every compared query as a JSON line
-(`{test, feature, marker, file, tsc, tsr}`) for grouping mismatches by cause. Tests are skipped when they verify no
+(`{test, feature, marker, file, at, tsc, tsr}`; `at` is the marker's line with `¦` at the marker) for grouping mismatches by cause. Tests are skipped when they verify no
 compared feature (code fixes, formatting, navigation bars, ...), when both servers answer
 nothing at every marker, or when they need a setup the harness can't give both servers the
 same way: non-TS extensions, `outFile`, symlinks, files outside the project, non-source files,

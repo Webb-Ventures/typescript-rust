@@ -1692,6 +1692,44 @@ fn hover_quick_info_through_aliases() {
     c.shutdown();
 }
 
+/// Quick info prints through the checker's quick-info mode: optional parameters and methods
+/// without the `| undefined` optionality adds (an optional property read keeps it), an
+/// optional chain's link with the property's own type, and a property being assigned with
+/// its declared (write) type.
+#[test]
+fn hover_optional_members_and_write_locations() {
+    if !libs_present() {
+        return;
+    }
+    let src = "interface I {\n    p?: number;\n    f?(x?: string): void;\n}\ndeclare const i: I;\ni.p;\ni.f;\ndeclare const o: { a?: { b: string } } | undefined;\no?.a?.b;\n";
+    // Under exactOptionalPropertyTypes a write shows the declared type.
+    let w = "declare const xx: { prop?: number };\nxx.prop = 1;\n";
+    let exact = r#"{"compilerOptions": {"strict": true, "exactOptionalPropertyTypes": true, "noEmit": true}, "include": ["src"]}"#;
+    for (name, config, file, text) in [
+        ("hover-optional", TSCONFIG, "src/o.ts", src),
+        ("hover-optional-write", exact, "src/w.ts", w),
+    ] {
+        let env = Env::new(name, &[("tsconfig.json", config), (file, text)]);
+        let mut c = env.lsp("w1");
+        env.open(&mut c, file);
+        let u = env.uri(file);
+        let mut h = |needle: &str, k: usize| {
+            let (l, ch) = pos_of(text, needle, k);
+            let v = hover_text(&mut c, &u, l, ch);
+            let v = v.strip_prefix("```typescript\n").unwrap_or(&v);
+            v.split("\n```").next().unwrap_or("").to_string()
+        };
+        if text == src {
+            assert_eq!(h("i.p;", 2), "(property) I.p?: number | undefined");
+            assert_eq!(h("i.f;", 2), "(method) I.f?(x?: string): void");
+            assert_eq!(h("?.b;", 2), "(property) b: string");
+        } else {
+            assert_eq!(h("xx.prop =", 3), "(property) prop?: number");
+        }
+        c.shutdown();
+    }
+}
+
 /// `o?.next` reads `next` through the object's non-nullable part; destructuring
 /// `{ next: { next } }` of an optional `next` does not (tsc finds no property there).
 #[test]
