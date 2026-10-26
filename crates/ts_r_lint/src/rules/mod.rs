@@ -321,7 +321,7 @@ mod unicorn_consistent_function_scoping;
 mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
-mod unicorn_default_export_style;
+mod unicorn_css_properties;
 mod unicorn_dom_node_dataset;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
@@ -391,6 +391,7 @@ mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_remove_event_listener;
+mod unicorn_no_invalid_style_set_property;
 mod unicorn_no_invalid_url_protocol_comparison;
 mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
@@ -541,7 +542,7 @@ mod unicorn_prefer_number_properties;
 mod unicorn_prefer_object_define_properties;
 mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_object_from_entries;
-mod unicorn_prefer_object_iterable_methods;
+mod unicorn_prefer_observer_apis;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_path2d;
 mod unicorn_prefer_promise_static_methods;
@@ -1025,6 +1026,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_integrity::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
+    &unicorn_no_invalid_style_set_property::RULE,
     &unicorn_no_invalid_url_protocol_comparison::RULE,
     &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_invalid_well_known_symbol_methods::RULE,
@@ -1149,7 +1151,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_is_safe_integer::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
-    &unicorn_prefer_object_iterable_methods::RULE,
+    &unicorn_prefer_observer_apis::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_path2d::RULE,
     &unicorn_prefer_promise_static_methods::RULE,

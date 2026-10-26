@@ -1813,6 +1813,17 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   (prefer-spread's `is_buffer_reference`) and `v.buffer.slice(...)` without the view's
   `byteOffset`/`byteLength` (or with a known wrong one); no type information, so every
   view counts. The suggestion needs no `?.`, no comment and a side-effect-free view.
+- **no-invalid-style-set-property**: `<style>.setProperty(name, value[, priority])` on a style
+  declaration (builtin type checker, else `style`/`.style`): a camelCase name whose dashed
+  form is a CSS property (`rules/unicorn_css_properties.rs`: the 724 property names mdn-data
+  lists, shipped with css-tree 4.1.2, as data; plus the WHATWG `-webkit-` aliases), a value
+  with a top-level `!important` (a small css-syntax-3 tokenizer: comments, strings, escapes,
+  `url(`, functions and blocks), and a non-empty priority other than `important`.
+- **prefer-observer-apis**: a `resize`/`scroll` listener (inline, or a never-reassigned
+  function binding) whose body reads layout (element `offset*`/`client*`/`scroll{Width,Height}`
+  and `getBoundingClientRect()`/`getClientRects()` on anything that could be an element,
+  the global `innerWidth`/`innerHeight`, `visualViewport.width`/`height`, also through object
+  patterns); writes and `delete` don't count.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1831,4 +1842,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`, `no-invalid-integrity.js`, `prefer-scoped-selector.js`,
 `prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`,
 `no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`,
-`no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`.
+`no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`,
+`no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`.
