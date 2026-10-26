@@ -1866,6 +1866,15 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   type guess, with `Temporal.X.from(a, b?)`, `new Temporal.X()` and `Temporal.Now.*ISO(x?)`
   as known sources. Fixed or suggested as `s.to<T>()`; string and millisecond `Instant`
   sources and date reconstructions without `calendar` (or by constructor) are suggestions.
+- **no-unnecessary-fetch-options**: the options literal of the global `fetch(input, o)` /
+  `new Request(input, o)`: empty as the last argument, or (all keys static and unique)
+  request-init keys statically `undefined`, `body: null`, and, for an input that is surely
+  not a `Request` (string literal, plain template, `new URL(...)`), empty `headers` and
+  default values (`method` compared upper-cased). Values evaluate as unicorn's
+  `getStaticValueForNode` (control flow for branches, no side effects when a member may
+  have changed). The first report removes the whole argument when every property goes
+  (none with getter-aware side effects or reading a later declaration, no comments); the
+  rest remove their line, inline span with one comma, or tokens (lexed with `ts_r_lexer`).
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1888,4 +1897,6 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`,
 `no-selector-as-dom-name.js`, `consistent-json-file-read.js`,
 `require-text-decoder-streaming.js`, `utils/single-statement.js`, `fix/append-argument.js`,
-`prefer-https.js`, `prefer-temporal-conversion.js`.
+`prefer-https.js`, `prefer-temporal-conversion.js`,
+`no-unnecessary-fetch-options.js`, `fix/remove-argument.js`, `fix/remove-object-property.js`,
+`utils/get-static-value.js`.
