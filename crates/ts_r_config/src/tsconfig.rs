@@ -856,10 +856,16 @@ pub fn resolve_extends(fs: &dyn FileSystem, spec: &str, from_dir: &str) -> Optio
         }
         let parent = path::directory_of(&dir).to_owned();
         if parent == dir || parent.is_empty() {
-            return None;
+            break;
         }
         dir = parent;
     }
+    // No `node_modules` copy: a Yarn Plug'n'Play manifest may place the package (esbuild's
+    // `TsconfigPackageJsonExportsYarnPnP`). tsc 7 has no PnP support and reports TS6053 here.
+    let pnp = crate::pnp::PnpManifest::find(fs, from_dir)?;
+    let pkg_dir = pnp.package_dir(pkg_name, &path::combine(from_dir, "tsconfig.json"))?;
+    let found = resolve_in_config_package(fs, pkg_dir.trim_end_matches('/'), subpath)?;
+    Some(fs.realpath(&found))
 }
 
 /// Splits `@scope/name/sub/path` into (`@scope/name`, `sub/path`).

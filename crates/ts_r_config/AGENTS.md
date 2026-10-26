@@ -65,6 +65,11 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   to 4 threads (`prefetch`); that is only a cache, the serial walk decides what is listed.
 - `extends` specs are rebased one level at a time; `${configDir}` is substituted only as a
   prefix; package `extends` uses conditions node/require/types/default and real paths.
+  A package with no `node_modules` copy is looked up in the nearest Yarn PnP
+  `.pnp.data.json` (`pnp.rs`: owner by longest `packageLocation`, its `packageDependencies`,
+  aliases, `fallbackPool`), then resolved as usual (`exports`, `tsconfig`). This goes past
+  tsc 7, which has no PnP and reports TS6053; it only applies where tsc would fail, and
+  matches esbuild (`TsconfigPackageJsonExportsYarnPnP`, `TsconfigStackOverflowYarnPnP`).
 - **Two kinds of config diagnostics.** `diagnostics` are parse errors (JSON, unknown option
   TS5023, wrong type TS5024, bad value TS6046); tsc still checks the program after them.
   `option_diagnostics()` (`verify.rs`) and `emit_overwrite_diagnostics()` (TS5055) are tsc's
