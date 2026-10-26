@@ -290,10 +290,7 @@ mod unicorn_no_array_method_this_argument;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
-mod unicorn_no_double_comparison;
-mod unicorn_no_duplicate_if_branches;
-mod unicorn_no_exports_in_scripts;
-mod unicorn_no_ineffective_csp_directives;
+mod unicorn_no_empty_file;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
@@ -673,12 +670,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
-    &unicorn_no_double_comparison::RULE,
-    &unicorn_no_duplicate_logical_operands::RULE,
-    &unicorn_no_duplicate_set_values::RULE,
-    &unicorn_no_duplicate_if_branches::RULE,
-    &unicorn_no_exports_in_scripts::RULE,
-    &unicorn_no_ineffective_csp_directives::RULE,
+    &unicorn_no_empty_file::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
