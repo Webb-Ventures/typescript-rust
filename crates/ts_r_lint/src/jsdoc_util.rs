@@ -1570,7 +1570,7 @@ pub fn regex_string_matches(re: &str, text: &str) -> bool {
         _ => (re, "v"),
     };
     crate::regex::parse(pattern, crate::regex::Flags::new(flags))
-        .is_ok_and(|r| r.is_match(text, flags.contains('i')))
+        .is_ok_and(|r| r.is_match_flags(text, flags))
 }
 
 // ---------------------------------------------------------------------------------------------

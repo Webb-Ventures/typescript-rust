@@ -75,7 +75,9 @@ mod jsdoc_check_values;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
 mod jsdoc_implements_on_classes;
+mod jsdoc_informative_docs;
 mod jsdoc_lines_before_block;
+mod jsdoc_match_description;
 mod jsdoc_match_name;
 mod jsdoc_multiline_blocks;
 mod jsdoc_no_bad_blocks;
@@ -1111,7 +1113,9 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_check_indentation::RULE,
     &jsdoc_check_syntax::RULE,
     &jsdoc_check_template_names::RULE,
+    &jsdoc_informative_docs::RULE,
     &jsdoc_lines_before_block::RULE,
+    &jsdoc_match_description::RULE,
     &jsdoc_match_name::RULE,
     &jsdoc_no_bad_blocks::RULE,
     &jsdoc_require_description::RULE,

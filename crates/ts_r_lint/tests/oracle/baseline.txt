@@ -161,7 +161,9 @@ jsdoc/check-values 41/41
 jsdoc/empty-tags 18/18
 jsdoc/escape-inline-tags 38/38
 jsdoc/implements-on-classes 17/17
+jsdoc/informative-docs 64/64
 jsdoc/lines-before-block 34/34
+jsdoc/match-description 90/90
 jsdoc/match-name 23/23
 jsdoc/multiline-blocks 65/65
 jsdoc/no-bad-blocks 22/22
