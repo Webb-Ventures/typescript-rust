@@ -469,6 +469,7 @@ mod unicorn_prefer_number_properties;
 mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_private_class_fields;
 mod unicorn_prefer_promise_static_methods;
 mod unicorn_prefer_promise_try;
 mod unicorn_prefer_promise_with_resolvers;
@@ -557,6 +558,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_prefer_private_class_fields::RULE,
     &unicorn_class_reference_in_static_methods::RULE,
     &unicorn_require_proxy_trap_boolean_return::RULE,
     &unicorn_no_invalid_property_descriptor::RULE,
