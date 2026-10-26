@@ -3,8 +3,13 @@
 //! Rules observed from tsc 7.0.2, per statement list or class body. Members are named by
 //! their key text, or for a computed key by the literal or unique symbol its type denotes
 //! (`[Symbol.iterator]`); computed keys of wider types (`[s]` for `s: symbol`) form no group.
-//! - Consecutive body-less declarations of one name form an overload group. The next
-//!   declaration must be the implementation (same name, with a body):
+//! - A body is one the source has: the empty block the parser makes up for a missing
+//!   one (`function f(), ...`) is none (tsc: `NodeIsPresent`).
+//! - Consecutive body-less declarations of one name form an overload group; consecutive
+//!   means only trivia lies between them (a skipped token in between, as in
+//!   `function f(), function f();`, ends the group; tsc compares `End()` with the next
+//!   declaration's `Pos()`). The next declaration must be the implementation (same name,
+//!   with a body):
 //!   - none follows (outside ambient contexts): TS2391 at the last overload (TS2390 for
 //!     constructors), unless that last overload is abstract or optional and no later
 //!     declaration of the member follows in the list; when one does, an abstract last
@@ -12,6 +17,9 @@
 //!   - a function or method with another name and a body follows: TS2389 at it ("must be
 //!     'f'");
 //!   - the same method name with different `static`-ness follows: TS2387/TS2388 at it.
+//! - An implementation followed, not consecutively, by a body-less declaration of the
+//!   same member in the same list: TS2391 at the implementation too (TS2390 for a
+//!   constructor, TS2516 when abstract).
 //! - Each declaration whose `export`, `declare`, visibility, `?` or `abstract` differs from
 //!   the implementation's (else the first declaration's): TS2383/2384/2385/2386/2512 at its
 //!   name.
@@ -53,6 +61,9 @@ struct FnDecl {
     name: String,
     kind: Kind,
     has_body: bool,
+    /// The parser made up an empty body (`function f(), ...`): no body for the overload
+    /// rules, but not a missing one at the end of a group (tsc: `Body() == nil`).
+    recovered_body: bool,
     is_static: bool,
     modifiers: Modifiers,
     optional: bool,
@@ -103,6 +114,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
             }
         }
+        if !ambient_container {
+            self.check_implementations_followed_by_overloads(file, &items);
+        }
         let mut i = 0;
         while i < items.len() {
             let Some(a) = &items[i] else {
@@ -117,14 +131,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             let mut group: Vec<&FnDecl> = vec![a];
             let mut j = i + 1;
             while let Some(Some(b)) = items.get(j) {
-                if b.has_body || b.name != a.name || b.kind != a.kind || b.is_static != a.is_static
+                if b.has_body
+                    || b.name != a.name
+                    || b.kind != a.kind
+                    || b.is_static != a.is_static
+                    || !self.consecutive(file, group[group.len() - 1].node, b.node)
                 {
                     break;
                 }
                 group.push(b);
                 j += 1;
             }
-            let next = items.get(j).and_then(Option::as_ref);
+            let next = items
+                .get(j)
+                .and_then(Option::as_ref)
+                .filter(|b| self.consecutive(file, group[group.len() - 1].node, b.node));
             let ambient = ambient_container
                 || group
                     .iter()
@@ -140,8 +161,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .flatten()
                     .any(|d| d.name == a.name && d.kind == a.kind && d.is_static == a.is_static);
             let abstract_group = (last_abstract || last.optional) && !continued_later;
+            // A recovered body ends the member's declarations without an error.
+            let recovered_end = last.recovered_body
+                && !items[j..]
+                    .iter()
+                    .flatten()
+                    .any(|d| d.name == a.name && d.kind == a.kind && d.is_static == a.is_static);
             let mut implementation: Option<&FnDecl> = None;
-            match next {
+            match next.filter(|_| !recovered_end) {
                 Some(b)
                     if b.name == a.name
                         && b.kind == a.kind
@@ -175,7 +202,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     );
                 }
                 _ => {
-                    if !ambient && !abstract_group {
+                    if !ambient && !abstract_group && !recovered_end {
                         if a.kind == Kind::Constructor {
                             let span = self.decl_name_span(file, last);
                             self.error_span(
@@ -219,6 +246,58 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             i = j;
+        }
+    }
+
+    /// Whether declaration `b` follows `a` with only trivia between them.
+    fn consecutive(&self, file: FileId, a: NodeId, b: NodeId) -> bool {
+        let ast = self.ast(file);
+        let (end, start) = (ast.span(a).end as usize, ast.span(b).start as usize);
+        let text = &self.c.file(file).text;
+        text.get(end..start).is_some_and(only_trivia)
+    }
+
+    /// TS2391 (TS2390, TS2516) at an implementation when the next declaration of the same
+    /// member in the list is body-less and does not follow it consecutively (tsc:
+    /// checkFunctionOrConstructorSymbol reports the previous declaration then).
+    fn check_implementations_followed_by_overloads(
+        &mut self,
+        file: FileId,
+        items: &[Option<FnDecl>],
+    ) {
+        for (k, a) in items.iter().enumerate() {
+            let Some(a) = a else { continue };
+            if !a.has_body || a.modifiers.contains(Modifiers::DECLARE) {
+                continue;
+            }
+            let Some(b) = items[k + 1..]
+                .iter()
+                .flatten()
+                .find(|b| b.name == a.name && b.kind == a.kind && b.is_static == a.is_static)
+            else {
+                continue;
+            };
+            if b.has_body || b.modifiers.contains(Modifiers::DECLARE) {
+                continue;
+            }
+            let next_is_b =
+                items.get(k + 1).and_then(Option::as_ref).map(|n| n.node) == Some(b.node);
+            if next_is_b && self.consecutive(file, a.node, b.node) {
+                continue;
+            }
+            let info = if a.kind == Kind::Constructor {
+                dg::CONSTRUCTOR_IMPLEMENTATION_IS_MISSING_2390
+            } else if a.modifiers.contains(Modifiers::ABSTRACT) {
+                dg::ALL_DECLARATIONS_OF_AN_ABSTRACT_METHOD_MUST_BE_CONSECUTIVE_2516
+            } else {
+                dg::FUNCTION_IMPLEMENTATION_IS_MISSING_OR_NOT_IMMEDIATELY_FOLLOWING_THE_DECLARATION_2391
+            };
+            if a.kind == Kind::Constructor {
+                let span = self.decl_name_span(file, a);
+                self.error_span(file, span, info, &[]);
+            } else {
+                self.error(Loc::new(file, a.name_node), info, &[]);
+            }
         }
     }
 
@@ -303,7 +382,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 name_node: name,
                 name: crate::nodes::ident_text(ast, name)?.to_owned(),
                 kind: Kind::Function,
-                has_body: body.is_some(),
+                has_body: body.is_some_and(|b| !ast.span(b).is_empty()),
+                recovered_body: body.is_some_and(|b| ast.span(b).is_empty()),
                 is_static: false,
                 modifiers,
                 optional: false,
@@ -347,7 +427,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     name_node: key,
                     name,
                     kind: k,
-                    has_body: fn_parts(ast, value).is_some_and(|p| p.body.is_some()),
+                    has_body: fn_parts(ast, value)
+                        .and_then(|p| p.body)
+                        .is_some_and(|b| !ast.span(b).is_empty()),
+                    recovered_body: fn_parts(ast, value)
+                        .and_then(|p| p.body)
+                        .is_some_and(|b| ast.span(b).is_empty()),
                     is_static: modifiers.contains(Modifiers::STATIC),
                     modifiers,
                     optional,
@@ -452,7 +537,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 !self.c.file(l.file).is_js()
                                     && matches!(
                                         self.node(*l),
-                                        Node::FunctionDecl { body: Some(_), .. }
+                                        Node::FunctionDecl { body: Some(b), .. }
+                                            if !self.ast(l.file).span(*b).is_empty()
                                     )
                             })
                             .count()
@@ -754,4 +840,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         let sr = self.return_type_of(s);
         skip(self, sr) || self.is_assignable(sr, tr)
     }
+}
+
+/// Whether `text` is only whitespace and comments.
+fn only_trivia(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c => i += 1,
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => match text[i + 2..].find("*/") {
+                Some(e) => i += 2 + e + 2,
+                None => return false,
+            },
+            _ if b[i] >= 0x80 => {
+                // Unicode whitespace (no-break space, line separators, BOM).
+                let c = text[i..].chars().next().unwrap_or('x');
+                if !c.is_whitespace() && c != '\u{feff}' {
+                    return false;
+                }
+                i += c.len_utf8();
+            }
+            _ => return false,
+        }
+    }
+    true
 }

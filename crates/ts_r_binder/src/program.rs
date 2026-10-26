@@ -1310,14 +1310,30 @@ impl<'a> Program<'a> {
                 self.resolve_export_in(target, rname, active)?
             } else {
                 let t = ls.exports;
-                self.lookup_in(resolved, |_| t, rname).filter(|s| {
+                let attached = |s: &SymbolRef| {
                     !self
                         .file(s.file)
                         .bound
                         .symbol(s.symbol)
                         .facts
                         .intersects(SymbolFacts::DETACHED)
-                })?
+                };
+                match self.lookup_in(resolved, |_| t, rname).filter(attached) {
+                    Some(s) => s,
+                    // A global namespace merges across files: `OnRtls.Mappa` written inside
+                    // `namespace OnRtls.Carrello` of one file finds `Mappa` declared in
+                    // another file's `namespace OnRtls` (constEnumOnlyModuleImportAliasEmit).
+                    None => {
+                        let lname = lf.bound.name_text(lf.ast, ls.name);
+                        let g = self
+                            .global(lname)
+                            .filter(|g| g.symbols.contains(&resolved))?;
+                        g.symbols.iter().find_map(|&o| {
+                            let t = self.exports_table(o);
+                            self.lookup_in(o, |_| t, rname).filter(attached)
+                        })?
+                    }
+                }
             };
         }
         Some(l)

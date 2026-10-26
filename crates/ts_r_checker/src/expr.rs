@@ -1664,7 +1664,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .sym_flags(t)
                     .intersects(SymbolFlags::NAMESPACE_MODULE)
             {
-                self.error(e, type_as_value_info(name), &[name]);
+                self.report_type_as_value(e, name, t);
             } else {
                 self.error(e, dg::CANNOT_USE_NAMESPACE_0_AS_A_VALUE_2708, &[name]);
             }
@@ -1948,6 +1948,50 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let suggestion = format!("{}Number.isNaN({name})", if eq { "" } else { "!" });
         self.relate_last(mark, other, dg::DID_YOU_MEAN_0_1369, &[&suggestion]);
+    }
+
+    /// TS2693 for the type-only symbol `t` read as a value by `e`: TS2585 for an ES2015
+    /// constructor name, TS2690 ("did you mean `K in T`") for the only member's computed
+    /// key in a type literal when `t` is a union of string-like or number-like types (tsc:
+    /// checkAndReportErrorForUsingTypeAsValue, maybeMappedType in checker.go).
+    pub(crate) fn report_type_as_value(&mut self, e: Loc, name: &str, t: ts_r_types::SymId) {
+        let info = type_as_value_info(name);
+        if info.code == 2693 && self.maybe_mapped_type(e, t) {
+            let k = if name == "K" { "P" } else { "K" };
+            self.error(
+                e,
+                dg::_0_ONLY_REFERS_TO_A_TYPE_BUT_IS_BEING_USED_AS_A_VALUE_HERE_DID_YOU_MEAN_TO_USE_1_I_2690,
+                &[name, k],
+            );
+            return;
+        }
+        self.error(e, info, &[name]);
+    }
+
+    fn maybe_mapped_type(&mut self, e: Loc, t: ts_r_types::SymId) -> bool {
+        let ast = self.ast(e.file);
+        let mut cur = self.c.parent(e);
+        for _ in 0..4 {
+            match cur.map(|p| ast.node(p.node)) {
+                Some(Node::ComputedKey { .. } | Node::PropertySignature { .. }) => {
+                    cur = cur.and_then(|p| self.c.parent(p));
+                }
+                _ => break,
+            }
+        }
+        let Some(Node::TypeLiteral { members }) = cur.map(|p| ast.node(p.node)) else {
+            return false;
+        };
+        if ast.list(*members).len() != 1 {
+            return false;
+        }
+        let d = self.declared_type_of_symbol(t);
+        let st = self.store();
+        st.flags(d).contains(TypeFlags::UNION)
+            && st.members_of_union(d).iter().all(|&m| {
+                st.flags(m)
+                    .intersects(TypeFlags::STRING_LIKE | TypeFlags::NUMBER_LIKE)
+            })
     }
 
     /// TS2304 and its "did you mean" / missing-types variants.

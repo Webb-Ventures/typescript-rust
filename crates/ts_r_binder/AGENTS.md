@@ -174,6 +174,13 @@ texts), `dump.rs`.
   TS5061: an ambient module that is not an augmentation
   (a script's, or one not at a module file's top level) whose name has more than one `*`,
   at the name (`tsc: tsc/internal/binder/binder.go`, module declarations).
+- **Type parameters of a function** (`PendingRef::in_type_params`) do not see its parameters
+  or its body's locals (`<T extends typeof a>(a: T)` leaves `a` free). A symbol that is
+  also a type parameter keeps that meaning (tsc: checker.go resolveNameHelper, the
+  function-like locals rule).
+- **Entity names through merged globals.** `Program::resolve_entity` looks a member of a
+  global namespace up in every file's declaration of it (`A.B` from inside `namespace A.C`
+  of one file finds `B` from another file's `namespace A`).
 - Front-end crates are read-only for this crate; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 

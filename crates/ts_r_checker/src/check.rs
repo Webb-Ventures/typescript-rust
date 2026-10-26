@@ -450,7 +450,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             // tsc does not check a `with` body (its names are `any`); TS1300 directly in an
-            // async function, TS2410 always.
+            // async function, TS2410 only in a file that parsed cleanly (tsc:
+            // `checkWithStatement` in `tsc/internal/checker/checker.go`).
             Node::With { obj, .. } => {
                 self.check_expr(at(obj));
                 if let Some(func) = self.containing_function(l)
@@ -463,11 +464,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                         &[],
                     );
                 }
-                self.error(
-                    l,
-                    dg::THE_WITH_STATEMENT_IS_NOT_SUPPORTED_ALL_SYMBOLS_IN_A_WITH_BLOCK_WILL_HAVE_TYPE_A_2410,
-                    &[],
-                );
+                if !self.has_syntax_errors(file) {
+                    self.error(
+                        l,
+                        dg::THE_WITH_STATEMENT_IS_NOT_SUPPORTED_ALL_SYMBOLS_IN_A_WITH_BLOCK_WILL_HAVE_TYPE_A_2410,
+                        &[],
+                    );
+                }
             }
             Node::VarDecl { decls, .. } => {
                 self.check_await_using_context(l);
@@ -4692,6 +4695,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::ExprWithTypeArgs { .. } => {
                     // Class `extends` expressions are values; their type arguments are types.
                 }
+                // tsc checks nothing under a `return` outside a function (TS1108), not even
+                // the annotations of functions in it (multiLinePropertyAccessAndArrowFunctionIndent1).
+                Node::Return { arg: Some(_) }
+                    if self
+                        .containing_function_or_method(Loc::new(file, n))
+                        .is_none() =>
+                {
+                    continue;
+                }
                 Node::InferType { type_param } => {
                     self.check_infer_constraints(Loc::new(file, type_param));
                 }
@@ -8181,7 +8193,6 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2725 at the name of a class named `Object` (not ambient) in a file emitted as
     /// CommonJS.
     fn check_class_named_object(&mut self, l: Loc) {
-        use ts_r_config::ModuleKind as M;
         let ast = self.ast(l.file);
         let name = match *ast.node(l.node) {
             Node::ClassDecl { name: Some(n), .. } | Node::ClassExpr { name: Some(n), .. } => n,
@@ -8194,13 +8205,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return;
         }
-        let module = match self.c.opts.module {
-            M::Node16 => "Node16",
-            M::Node18 => "Node18",
-            M::Node20 => "Node20",
-            M::NodeNext => "NodeNext",
-            _ => "CommonJS",
-        };
+        let module = self.node_module_kind_name();
         self.error(
             Loc::new(l.file, name),
             dg::CLASS_NAME_CANNOT_BE_OBJECT_WHEN_TARGETING_ES5_AND_ABOVE_WITH_MODULE_0_2725,
@@ -9179,6 +9184,80 @@ impl<'c, 'a> Ck<'c, 'a> {
                 s
             }
         };
+        // A JSON module (or a `.d.json.ts` declaration) imported by an ES module under the
+        // Node module kinds has only its default (TS1544 for any other name); otherwise its
+        // named imports are the properties of its value (tsc: tsc/internal/checker/checker.go
+        // isOnlyImportableAsDefault, getExternalModuleMember).
+        if let Some(i) = resolved_file
+            && (self.c.files[i].is_json() || is_json_declaration(&self.c.files[i].path))
+        {
+            let only_default = self.only_importable_as_default(file, i);
+            // TS1543: under `node18`..`nodenext` an ES module's (value) import of JSON needs
+            // `with { type: "json" }` (tsc: checkImportDeclaration).
+            if let Node::ImportDecl {
+                type_only: false,
+                has_clause: true,
+                attributes,
+                ..
+            } = *ast.node(l.node)
+                && only_default
+                && !matches!(self.c.opts.module, ts_r_config::ModuleKind::Node16)
+                && !has_type_json_attribute(ast, attributes)
+            {
+                self.error(
+                    Loc::new(file, source),
+                    dg::IMPORTING_A_JSON_FILE_INTO_AN_ECMASCRIPT_MODULE_REQUIRES_A_TYPE_JSON_IMPORT_ATTR_1543,
+                    &[self.node_module_kind_name()],
+                );
+            }
+            let json_value = if self.c.files[i].is_json() && !only_default {
+                self.json_value_type(module_sym)
+            } else {
+                None
+            };
+            if only_default || json_value.is_some() {
+                for &s in ast.list(specifiers) {
+                    let name_node = match *ast.node(s) {
+                        Node::ImportSpecifier {
+                            imported: Some(n), ..
+                        }
+                        | Node::ImportSpecifier {
+                            imported: None,
+                            local: n,
+                            ..
+                        }
+                        | Node::ExportSpecifier { local: n, .. } => n,
+                        _ => continue,
+                    };
+                    let name = match *ast.node(name_node) {
+                        Node::Ident { name } | Node::StringLit { value: name } => {
+                            ast.atom(name).to_owned()
+                        }
+                        _ => continue,
+                    };
+                    if name == "default" || self.c.export_of(module_sym, &name).is_some() {
+                        continue;
+                    }
+                    if only_default {
+                        self.error(
+                            Loc::new(file, name_node),
+                            dg::NAMED_IMPORTS_FROM_A_JSON_FILE_INTO_AN_ECMASCRIPT_MODULE_ARE_NOT_ALLOWED_WHEN_MO_1544,
+                            &[self.node_module_kind_name()],
+                        );
+                    } else if let Some(v) = json_value
+                        && self.property_of_type(v, &name).is_none()
+                    {
+                        self.report_missing_import_member(
+                            Loc::new(file, name_node),
+                            &spec,
+                            &name,
+                            module_sym,
+                        );
+                    }
+                }
+                return;
+            }
+        }
         // `export =`: named imports are the entity's exports, or properties of its value
         // (tsc: tsc/internal/checker/checker.go getExternalModuleMember).
         let mut entity_value = None;
@@ -9302,6 +9381,32 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             parts.iter().any(|&m| has(self, m))
         }
+    }
+
+    /// The `module` option as tsc prints it in messages about the Node module kinds
+    /// (`CommonJS` for any other kind).
+    fn node_module_kind_name(&self) -> &'static str {
+        use ts_r_config::ModuleKind as M;
+        match self.c.opts.module {
+            M::Node16 => "Node16",
+            M::Node18 => "Node18",
+            M::Node20 => "Node20",
+            M::NodeNext => "NodeNext",
+            _ => "CommonJS",
+        }
+    }
+
+    /// Whether `file` (an ES module under `node16`..`nodenext`) can only import the JSON
+    /// module (or `.d.json.ts` declaration) `target` as a default (tsc:
+    /// tsc/internal/checker/checker.go isOnlyImportableAsDefault).
+    fn only_importable_as_default(&self, file: FileId, target: usize) -> bool {
+        use ts_r_config::ModuleKind as M;
+        let t = &self.c.files[target];
+        matches!(
+            self.c.opts.module,
+            M::Node16 | M::Node18 | M::Node20 | M::NodeNext
+        ) && self.c.file(file).esm_format
+            && (t.is_json() || is_json_declaration(&t.path))
     }
 
     /// TS2305 for a missing named import: TS2724 with a spelling suggestion among the
@@ -10768,4 +10873,28 @@ fn pattern_declares(ast: &ts_r_ast::Ast, pattern: NodeId, name: &str) -> bool {
         }
     }
     false
+}
+
+/// A `.d.json.ts` declaration file: the types of a JSON module.
+fn is_json_declaration(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".d.json.ts")
+}
+
+/// Whether import attributes `attributes` contain `type: "json"`.
+fn has_type_json_attribute(ast: &ts_r_ast::Ast, attributes: Option<NodeId>) -> bool {
+    let Some(a) = attributes else { return false };
+    let Node::ImportAttributes { entries, .. } = *ast.node(a) else {
+        return false;
+    };
+    ast.list(entries).iter().any(|&e| {
+        let Node::ImportAttribute { key, value } = *ast.node(e) else {
+            return false;
+        };
+        let key = match *ast.node(key) {
+            Node::Ident { name } | Node::StringLit { value: name } => ast.atom(name),
+            _ => return false,
+        };
+        key == "type"
+            && matches!(*ast.node(value), Node::StringLit { value: v } if ast.atom(v) == "json")
+    })
 }

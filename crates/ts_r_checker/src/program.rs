@@ -1447,7 +1447,7 @@ pub fn resolve_request_in<R: FileSystem>(
         // (the program loader admits it).
         let js_library = r.resolved_file_name.contains("/node_modules/");
         let arbitrary_extension = !resolver.options().allow_arbitrary_extensions
-            && needs_arbitrary_extensions(&r.resolved_file_name, from);
+            && needs_arbitrary_extensions(&r.resolved_file_name, from, spec);
         let included = includable(r.extension, allow_js && !js_library) && !arbitrary_extension;
         Resolution {
             resolved: r.resolved_file_name.clone(),
@@ -1467,15 +1467,33 @@ pub fn resolve_request_in<R: FileSystem>(
 }
 
 /// Whether linking `resolved` from `from` needs `allowArbitraryExtensions`: `resolved` is
-/// an arbitrary-extension declaration (`x.d.html.ts`, not `.d.ts`/`.d.mts`/`.d.cts`) and
-/// `from` is not a declaration file (tsc: tsc/internal/module/util.go GetResolutionDiagnostic).
-pub fn needs_arbitrary_extensions(resolved: &str, from: &str) -> bool {
+/// an arbitrary-extension declaration (`x.d.html.ts`, not `.d.ts`/`.d.mts`/`.d.cts`) found
+/// for a specifier `spec` naming `x.html` (the resolver's lookup of `x.d.html.ts`), and
+/// `from` is not a declaration file (tsc: tsc/internal/module/util.go
+/// GetResolutionDiagnostic, which goes by the extension of the lookup: a package `exports`
+/// target written `./typed.d.json.ts` is a `.ts` file there, nodeModulesJson).
+pub fn needs_arbitrary_extensions(resolved: &str, from: &str, spec: &str) -> bool {
     let lower = resolved.to_ascii_lowercase();
-    is_declaration_file_name(&lower)
-        && ![".d.ts", ".d.mts", ".d.cts"]
+    if !is_declaration_file_name(&lower)
+        || [".d.ts", ".d.mts", ".d.cts"]
             .iter()
             .any(|e| lower.ends_with(e))
-        && !is_declaration_file_name(&from.to_ascii_lowercase())
+        || is_declaration_file_name(&from.to_ascii_lowercase())
+    {
+        return false;
+    }
+    // `x.d.html.ts` is the lookup of `x.html` only when the specifier ends with that name.
+    let base = lower.rsplit('/').next().unwrap_or(&lower);
+    let Some(stem_ext) = base.strip_suffix(".ts") else {
+        return false;
+    };
+    let Some(dot) = stem_ext.rfind(".d.") else {
+        return false;
+    };
+    let named = format!("{}{}", &stem_ext[..dot], &stem_ext[dot + 2..]);
+    let spec = spec.to_ascii_lowercase();
+    let spec_base = spec.rsplit('/').next().unwrap_or(&spec);
+    spec_base == named
 }
 
 /// `types: ["*"]` stands for every package directory in the type roots (`typeRoots`, else

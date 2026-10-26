@@ -2976,6 +2976,32 @@ Files, by layer:
     through `string | number | symbol` down to `string`.
   - Sources: tsc relater.go, structuredTypeRelatedToWorker and mappedTypeRelatedTo; checker.go,
     getCombinedMappedTypeOptionality. Fixture: `generic_mapped_pair_relation`.
+- **Rules from the v1 checker round 5** (each with a test; tsc sources read as a reference):
+  - JSON modules under `node16`..`nodenext`: an ES module (or a `.d.json.ts` declaration)
+    only imports JSON as a default. A named import is TS1544. A value import without
+    `with { type: "json" }` is TS1543 under `node18`..`nodenext` (not `node16`). A CommonJS
+    file's named imports are the value's properties, and its `import * as ns` is the value.
+    Only a value with its own `default` property gets the synthetic `{ ...props, default }`
+    (tsc: checker.go isOnlyImportableAsDefault, checkImportDeclaration,
+    resolveESModuleSymbol). TS6263 is only for the resolver's `x.d.html.ts` lookup of a
+    specifier `x.html`. An `exports` target written `./typed.d.json.ts` is a `.ts` file
+    (`program::needs_arbitrary_extensions`; tsc: module/util.go GetResolutionDiagnostic).
+  - TS2410 (`with`) only in a file that parsed cleanly (checkWithStatement). Under a
+    `return` outside a function nothing is checked, not even annotations.
+  - Overloads (`overloads.rs`): a zero-width body made up by the parser is no body. A
+    group only continues across trivia. An implementation followed later, not
+    consecutively, by a body-less declaration of the same member is TS2391 too
+    (checkFunctionOrConstructorSymbol).
+  - A function's type parameters do not see its parameters (`<T extends typeof a>(a: T)`
+    is TS2304) or its body's locals. This applies in the binder's reference resolution
+    and in `lookup_in_scope_chain`. A name that is both a type parameter and a parameter
+    keeps its type meaning.
+  - TS2690 ("did you mean `P in K`") replaces TS2693 for a type read as the only computed
+    key of a type literal when the type is a union of string-like or number-like types
+    (maybeMappedType).
+  - `import m = A.B` resolves `A.B` through every declaration of a global namespace `A`.
+    So an alias written inside `namespace A.C` of one file finds `B` declared in another
+    file's `namespace A` (binder `resolve_entity_in`; `tests/const_enum_access.rs`).
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 

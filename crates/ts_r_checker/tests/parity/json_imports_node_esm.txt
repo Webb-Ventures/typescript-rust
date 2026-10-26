@@ -1,0 +1,3 @@
+a.mts(1,15): error TS1543: Importing a JSON file into an ECMAScript module requires a 'type: "json"' import attribute when 'module' is set to 'NodeNext'.
+a.mts(2,10): error TS1544: Named imports from a JSON file into an ECMAScript module are not allowed when 'module' is set to 'NodeNext'.
+b.cts(4,4): error TS2339: Property 'default' does not exist on type '{ x: number; }'.

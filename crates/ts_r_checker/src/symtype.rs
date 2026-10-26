@@ -131,8 +131,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Under the Node module kinds, the type of alias `s` of JSON module `t` when it is
-    /// not the module's own: a default import or import-equals is the value, and a
-    /// CommonJS file's `import * as ns` sees the value's properties and `default: value` (observed).
+    /// not the module's own: a default import or import-equals is the value, and so is a
+    /// CommonJS file's `import * as ns`, except that a value with its own `default`
+    /// property gets the value's properties and `default: value` (tsc adds the synthetic
+    /// default to a value with signatures or a `default` property, `resolveESModuleSymbol`;
+    /// nodeModulesJson, nodeModulesResolveJsonModule).
     pub(crate) fn json_import_type(&mut self, s: SymId, t: SymId) -> Option<TypeId> {
         if !self.node_module_kind() {
             return None;
@@ -156,6 +159,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         match kind {
             Some(Node::ImportDefaultSpecifier { .. } | Node::ImportEquals { .. }) => Some(v),
             Some(Node::ImportNamespaceSpecifier { .. }) if !self.c.file(d.file).esm_format => {
+                if self.property_of_type(v, "default").is_none() {
+                    return Some(v);
+                }
                 let props = self.properties_of(v);
                 Some(self.json_with_default(v, &props))
             }
