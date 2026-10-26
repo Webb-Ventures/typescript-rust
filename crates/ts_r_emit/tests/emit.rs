@@ -1011,11 +1011,9 @@ fn javascript_many_this_properties_are_linear() {
         .iter()
         .find(|o| o.path == "/p/out/a.d.ts")
         .unwrap();
-    // The checker's flow analysis gives up on a constructor this long and adds
-    // `| undefined`; this test is about the emitter's linearity, not that type.
-    assert_eq!(d.text.matches(": number").count(), n);
+    assert_eq!(d.text.matches(": number;").count(), n);
     assert!(
-        d.text.contains("    /** p1 */\n    p1: number"),
+        d.text.contains("    /** p1 */\n    p1: number;\n"),
         "{}",
         &d.text[..400]
     );
