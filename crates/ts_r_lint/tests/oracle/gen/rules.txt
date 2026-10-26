@@ -285,3 +285,6 @@ unicorn/no-zero-fractions
 unicorn/empty-brace-spaces
 unicorn/numeric-separators-style
 unicorn/no-xor-as-exponentiation
+unicorn/prefer-date-now
+unicorn/no-instanceof-builtins
+unicorn/no-typeof-undefined
