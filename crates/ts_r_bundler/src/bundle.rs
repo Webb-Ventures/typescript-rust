@@ -16,6 +16,9 @@ use crate::link::{Kind, LinkOptions, link};
 use crate::meta::RecordKind;
 use crate::options::{BuildOptions, Format, Loader};
 use crate::plan::{ModulePlan, PlanInput, plan};
+
+/// `--keep-names` without bundling: the helper's name in each output file (esbuild's).
+const KEEP_NAMES_HELPER: &str = "__name";
 use crate::prepare::{Asset, Defines, PrepareContext, Prepared};
 use crate::print::{Fragment, print_module};
 use crate::resolve::{Resolution, ResolveKind, Resolver};
@@ -924,9 +927,10 @@ impl BuildContext {
                 };
                 crate::print::empty_import_meta(&mut ast, kind);
             }
+            let mut keep_names_used = false;
             if opts.minify_syntax || opts.minify_identifiers {
                 let module = prepared.strict;
-                ts_r_minify::minify_ast(
+                keep_names_used = ts_r_minify::minify_ast_keep_names(
                     &mut ast,
                     &prepared.src,
                     &ts_r_minify::MinifyOptions {
@@ -936,8 +940,22 @@ impl BuildContext {
                         module,
                     },
                     module,
+                    opts.keep_names.then_some(KEEP_NAMES_HELPER),
                 );
             }
+            // `--keep-names` without bundling: the helper is defined at the top of the file.
+            let prelude = if keep_names_used {
+                let mut h = crate::runtime::Helpers::with_names(
+                    crate::runtime::Helper::ALL.map(|h| h.name().to_owned()),
+                );
+                h.names[crate::runtime::Helper::Name as usize] = KEEP_NAMES_HELPER.to_owned();
+                h.mark(crate::runtime::Helper::Name);
+                let mut p = h.render(opts.minify_whitespace && opts.minify_identifiers);
+                p.push_str(&prepared.prelude);
+                p
+            } else {
+                prepared.prelude.clone()
+            };
             let cg = ts_r_codegen::CodegenOptions {
                 layout: if opts.minify_whitespace {
                     ts_r_codegen::Layout::Compact
@@ -965,7 +983,7 @@ impl BuildContext {
                 &cg,
                 &ts_r_codegen::PrintHints {
                     erased: &prepared.erased,
-                    prelude: &prepared.prelude,
+                    prelude: &prelude,
                     ..Default::default()
                 },
             );

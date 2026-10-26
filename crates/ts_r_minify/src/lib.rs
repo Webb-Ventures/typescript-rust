@@ -20,6 +20,7 @@
 pub mod build;
 pub mod compress;
 pub mod fold;
+pub mod keep_names;
 pub mod names;
 pub mod private;
 pub mod purity;
@@ -125,6 +126,20 @@ pub fn minify(
 /// Runs folding, compression and mangling on a parsed tree in place. The tree must be
 /// shallow enough for the current thread's stack (see `ts_r_codegen::with_stack_for`).
 pub fn minify_ast(ast: &mut Ast, src: &str, opts: &MinifyOptions, strict: bool) {
+    minify_ast_keep_names(ast, src, opts, strict, None);
+}
+
+/// [`minify_ast`] with `--keep-names`: when `keep_names` names the helper, renamed
+/// functions and classes get `helper(f, "f")` calls ([`keep_names`]). Returns whether any
+/// call was added (the caller defines the helper).
+pub fn minify_ast_keep_names(
+    ast: &mut Ast,
+    src: &str,
+    opts: &MinifyOptions,
+    strict: bool,
+    keep_names: Option<&str>,
+) -> bool {
+    let mut used = false;
     let mut scopes = Scopes::analyze(ast, strict);
     if fold::fold(ast, src, &scopes) {
         scopes = Scopes::analyze(ast, strict);
@@ -142,11 +157,24 @@ pub fn minify_ast(ast: &mut Ast, src: &str, opts: &MinifyOptions, strict: bool) 
                 mode: rename::RenameMode::Mangle,
                 fixed: &fixed,
                 include_module_scope: opts.module,
-                reserved: &|_| false,
+                reserved: &|n| keep_names == Some(n),
                 module_reserved: &|_| false,
             },
         );
         rename::apply(ast, &scopes, &renames);
+        if let Some(helper) = keep_names {
+            used = keep_names::apply(
+                ast,
+                &scopes,
+                helper,
+                keep_names::KeepNamesOptions {
+                    program: true,
+                    top_classes: false,
+                },
+            )
+            .used;
+        }
         private::mangle(ast, scopes.has_direct_eval);
     }
+    used
 }

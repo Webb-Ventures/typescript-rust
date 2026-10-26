@@ -43,6 +43,7 @@ Advanced options:
   --metafile=...            Write metadata about the build to a JSON file
   --minify-whitespace       Remove whitespace
   --minify-identifiers      Shorten identifiers
+  --keep-names              Keep function and class names when identifiers are renamed
   --minify-syntax           Use equivalent but shorter syntax
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
@@ -210,6 +211,7 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             "minify-whitespace" => o.minify_whitespace = bool_value(name, value)?,
             "minify-identifiers" => o.minify_identifiers = bool_value(name, value)?,
             "minify-syntax" => o.minify_syntax = bool_value(name, value)?,
+            "keep-names" => o.keep_names = bool_value(name, value)?,
             "sourcemap" => {
                 o.sourcemap = match value {
                     None | Some("true") | Some("linked") => SourceMapMode::Linked,

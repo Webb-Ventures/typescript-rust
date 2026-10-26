@@ -291,6 +291,7 @@ function flagsFor(c) {
       case 'MinifySyntax': if (v === true) flags.push('--minify-syntax'); break;
       case 'MinifyIdentifiers': if (v === true) flags.push('--minify-identifiers'); break;
       case 'MinifyWhitespace': if (v === true) flags.push('--minify-whitespace'); break;
+      case 'KeepNames': if (v === true) flags.push('--keep-names'); break;
       case 'TreeShaking': flags.push(`--tree-shaking=${v === true}`); break;
       case 'IgnoreDCEAnnotations': if (v === true) flags.push('--ignore-annotations'); break;
       case 'ExternalPackages': if (v === true) flags.push('--packages=external'); break;

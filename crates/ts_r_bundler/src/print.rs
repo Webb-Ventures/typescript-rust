@@ -248,6 +248,22 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
         },
     );
     rename::apply(&mut ast, &scopes, &renames);
+    // `--keep-names`: renamed functions and classes get `__tsrName(f, "f")`; the calls
+    // after program-level declarations are placed in step 7.
+    let mut kept_after = if plan.keep_names.is_empty() {
+        FxHashMap::default()
+    } else {
+        ts_r_minify::keep_names::apply(
+            &mut ast,
+            &scopes,
+            &plan.keep_names,
+            ts_r_minify::keep_names::KeepNamesOptions {
+                program: false,
+                top_classes: true,
+            },
+        )
+        .after
+    };
     if plan.mangle {
         ts_r_minify::private::mangle(&mut ast, scopes.has_direct_eval);
     }
@@ -265,6 +281,7 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
             erased.push(ast.span(s));
             continue;
         }
+        let kept = kept_after.remove(&s);
         match *ast.node(s) {
             Node::Directive { .. } => {
                 if plan.wrap == Wrap::Cjs {
@@ -321,6 +338,7 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
             }
             _ => body.push(s),
         }
+        body.extend(kept.into_iter().flatten());
     }
     let mut prologue = Vec::new();
     for p in &plan.prologue {

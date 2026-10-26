@@ -185,6 +185,8 @@ pub struct BuildOptions {
     pub minify_whitespace: bool,
     pub minify_identifiers: bool,
     pub minify_syntax: bool,
+    /// `--keep-names`: functions and classes keep their `name` when renamed.
+    pub keep_names: bool,
     pub sourcemap: SourceMapMode,
     pub sources_content: bool,
     pub splitting: bool,
@@ -280,6 +282,7 @@ impl Default for BuildOptions {
             packages_external: false,
             define: Vec::new(),
             drop_labels: Vec::new(),
+            keep_names: false,
             alias: Vec::new(),
             metafile: false,
             loaders: FxHashMap::default(),

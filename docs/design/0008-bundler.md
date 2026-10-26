@@ -223,7 +223,7 @@ linked batch runs under Node.
 - IIFE output is not re-indented; runtime helpers are repeated per chunk.
 - With several entries and no splitting, tree-shaking liveness is shared across entries.
 - `var` declarations nested in blocks of a lazily wrapped ESM module stay inside its closure.
-- No `--mangle-props`, no `--drop`, no `--pure`, no `--keep-names`.
+- No `--mangle-props`, no `--drop`, no `--pure`.
 - Not implemented: `import defer`/`import source`, glob `require`/`import()` of template
   strings, Yarn PnP module resolution (only a tsconfig `extends` goes through PnP). Missing
   diagnostics: assignments to imports and constants, export cycles, strict `package.json`
