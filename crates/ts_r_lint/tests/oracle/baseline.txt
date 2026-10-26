@@ -323,6 +323,7 @@ unicorn/numeric-separators-style 128/128
 unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-array-slice 61/61
 unicorn/prefer-blob-reading-methods 12/12
+unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46
 unicorn/prefer-global-number-constants 22/22
@@ -331,6 +332,7 @@ unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 243/247
 unicorn/prefer-location-assign 54/54
 unicorn/prefer-node-protocol 80/80
+unicorn/prefer-number-coercion 60/60
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
 unicorn/prefer-promise-with-resolvers 37/37

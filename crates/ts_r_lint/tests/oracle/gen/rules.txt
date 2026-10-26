@@ -334,3 +334,5 @@ unicorn/prefer-promise-with-resolvers
 unicorn/prefer-type-literal-last
 unicorn/consistent-class-member-order
 unicorn/consistent-optional-chaining
+unicorn/prefer-block-statement-over-iife
+unicorn/prefer-number-coercion

@@ -335,6 +335,7 @@ mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_array_slice;
 mod unicorn_prefer_blob_reading_methods;
+mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_global_number_constants;
@@ -343,6 +344,7 @@ mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_location_assign;
 mod unicorn_prefer_node_protocol;
+mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_promise_with_resolvers;
@@ -719,6 +721,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_array_slice::RULE,
     &unicorn_prefer_blob_reading_methods::RULE,
+    &unicorn_prefer_block_statement_over_iife::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_global_number_constants::RULE,
@@ -727,6 +730,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_location_assign::RULE,
     &unicorn_prefer_node_protocol::RULE,
+    &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_promise_with_resolvers::RULE,
