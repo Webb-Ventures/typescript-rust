@@ -444,6 +444,7 @@ mod unicorn_no_magic_array_flat_depth;
 mod unicorn_no_manually_wrapped_comments;
 mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
+mod unicorn_no_missing_local_resource;
 mod unicorn_no_named_default;
 mod unicorn_no_negated_array_predicate;
 mod unicorn_no_negated_comparison;
@@ -740,6 +741,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_iteration_fallback_style::RULE,
     &unicorn_no_invalid_file_input_accept::RULE,
     &unicorn_no_manually_wrapped_comments::RULE,
+    &unicorn_no_missing_local_resource::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_no_unsafe_dom_html::RULE,
     &unicorn_prefer_dispose::RULE,
