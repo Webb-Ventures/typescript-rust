@@ -330,6 +330,11 @@ unicorn/prefer-module 152/152
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-object-from-entries 172/172
 unicorn/prefer-optional-catch-binding 25/25
+unicorn/prefer-short-escape-sequences 28/28
+unicorn/prefer-string-repeat 79/79
+unicorn/prefer-string-trim-start-end 23/23
+unicorn/prefer-structured-clone 47/47
+unicorn/prefer-switch 68/68
 unicorn/prefer-top-level-await 228/228
 unicorn/prefer-type-error 112/112
 unicorn/switch-case-braces 56/56

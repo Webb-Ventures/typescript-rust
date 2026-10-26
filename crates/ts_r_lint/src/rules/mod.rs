@@ -339,6 +339,11 @@ mod unicorn_prefer_module;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_short_escape_sequences;
+mod unicorn_prefer_string_repeat;
+mod unicorn_prefer_string_trim_start_end;
+mod unicorn_prefer_structured_clone;
+mod unicorn_prefer_switch;
 mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_switch_case_braces;
@@ -713,6 +718,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_short_escape_sequences::RULE,
+    &unicorn_prefer_string_repeat::RULE,
+    &unicorn_prefer_string_trim_start_end::RULE,
+    &unicorn_prefer_structured_clone::RULE,
+    &unicorn_prefer_switch::RULE,
     &unicorn_prefer_top_level_await::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_switch_case_braces::RULE,

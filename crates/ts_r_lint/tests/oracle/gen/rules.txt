@@ -346,3 +346,4 @@ unicorn/no-unnecessary-array-splice-count
 unicorn/no-array-reverse
 unicorn/no-array-sort
 unicorn/consistent-function-scoping
+unicorn/prefer-switch
