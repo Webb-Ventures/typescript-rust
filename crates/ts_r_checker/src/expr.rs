@@ -7848,7 +7848,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 .store()
                                 .flags(pt)
                                 .intersects(TypeFlags::ANY | TypeFlags::UNKNOWN | TypeFlags::NEVER);
-                            let has_undef = self.nullable_facts(pt).0;
+                            // Under exactOptionalPropertyTypes only `?` makes it optional.
+                            let has_undef = !self.c.opts.exact_optional_property_types
+                                && self.nullable_facts(pt).0;
                             if !optional && !any_like && !has_undef {
                                 self.error(
                                     il,

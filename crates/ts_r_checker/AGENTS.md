@@ -3223,6 +3223,8 @@ Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7
 - An unannotated parameter whose default reads itself, directly or through another
   parameter's default (`f(a = b, b = a)`), is TS7022 under `noImplicitAny`, as variables are
   (`param_default_self_reference`).
+- Under `exactOptionalPropertyTypes`, `delete o.p` needs `p?`: `undefined` in its type no
+  longer makes it optional (TS2790) (`delete_exact_optional`).
 
 ## Levels (`layers.rs`, design record 0005)
 
