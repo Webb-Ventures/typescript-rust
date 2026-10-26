@@ -389,7 +389,7 @@ mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_property_descriptor;
 mod unicorn_no_invalid_remove_event_listener;
-mod unicorn_no_invalid_response_options;
+mod unicorn_no_invalid_temporal_arithmetic;
 mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
@@ -1007,6 +1007,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_character_comparison::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
+    &unicorn_no_invalid_temporal_arithmetic::RULE,
     &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_invalid_well_known_symbol_methods::RULE,
     &unicorn_no_leading_empty_lines::RULE,
