@@ -124,6 +124,7 @@ jsdoc/require-asterisk-prefix 24/24
 jsdoc/require-hyphen-before-param-description 32/32
 jsdoc/require-next-description 2/2
 jsdoc/require-next-type 2/2
+jsdoc/require-param 154/154
 jsdoc/require-param-description 19/19
 jsdoc/require-param-name 13/13
 jsdoc/require-param-type 17/17

@@ -252,6 +252,10 @@ jsdoc/no-missing-syntax
 jsdoc/require-property
 jsdoc/require-asterisk-prefix
 jsdoc/check-param-names
+jsdoc/require-param
+jsdoc/require-jsdoc
+jsdoc/check-tag-names
+jsdoc/ts-no-empty-object-type
 no-promise-executor-return
 grouped-accessor-pairs
 no-else-return

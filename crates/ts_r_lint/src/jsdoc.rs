@@ -889,6 +889,25 @@ impl<'a> Finder<'a> {
                 .filter(|&m| matches!(self.ast.node(m), Node::MethodDef { .. }))
                 .unwrap_or(id),
             Node::VarDeclarator { type_ann, .. } if is(type_ann) => var_decl_of(p).unwrap_or(id),
+            // An arrow's return type in a variable's initializer borrows the comment of what
+            // holds the declaration (the plugin's walk goes one level past it); the
+            // program starts at its first token, which is its first statement's.
+            Node::Arrow { return_type, .. } if is(return_type) => {
+                let Some(holder) = self
+                    .parent(p)
+                    .filter(|&d| matches!(self.ast.node(d), Node::VarDeclarator { .. }))
+                    .and_then(var_decl_of)
+                    .and_then(|d| self.parent(d))
+                else {
+                    return id;
+                };
+                match *self.ast.node(holder) {
+                    Node::Program { stmts } => {
+                        self.ast.list(stmts).first().copied().unwrap_or(holder)
+                    }
+                    _ => holder,
+                }
+            }
             Node::Param {
                 type_ann, pattern, ..
             } if is(type_ann) && matches!(self.ast.node(pattern), Node::Ident { .. }) => {
@@ -1224,6 +1243,9 @@ pub struct Contexts {
     /// The plugin's `matchContext` under object `any` entries: every block is checked once
     /// per entry whose `comment` matches it (or that has none), not just the first.
     pub additive: bool,
+    /// The plugin's `noTracking`: under `any`, a block is checked once for every node it
+    /// documents (an export and its declaration both), not just the first.
+    pub no_tracking: bool,
 }
 
 pub const DEFAULT_CONTEXTS: &[&str] = &[
@@ -1312,6 +1334,7 @@ impl Contexts {
             all,
             plain_any,
             additive: false,
+            no_tracking: false,
         })
     }
 
@@ -1435,7 +1458,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
             for t in targets.into_iter().flatten() {
                 if contexts.all {
                     if let Some(c) = finder.jsdoc_of_target(t)
-                        && !claimed[c]
+                        && (!claimed[c] || contexts.no_tracking)
                     {
                         claimed[c] = true;
                         for comment in via(c) {
