@@ -330,6 +330,7 @@ mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_class_fields;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
+mod unicorn_prefer_export_from;
 mod unicorn_prefer_module;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
@@ -697,6 +698,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_class_fields::RULE,
     &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_export_from::RULE,
     &unicorn_prefer_module::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
