@@ -290,9 +290,7 @@ mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
-mod unicorn_explicit_timer_delay;
-mod unicorn_length_or_infinity;
-mod unicorn_max_nested_calls;
+mod unicorn_explicit_length_check;
 mod unicorn_new_for_builtins;
 mod unicorn_no_array_from_fill;
 mod unicorn_no_await_in_promise_methods;
@@ -682,8 +680,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,
-    &unicorn_explicit_timer_delay::RULE,
-    &unicorn_max_nested_calls::RULE,
+    &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
     &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_in_promise_methods::RULE,

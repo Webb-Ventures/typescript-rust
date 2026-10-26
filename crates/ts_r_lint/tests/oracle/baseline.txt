@@ -279,8 +279,7 @@ unicorn/consistent-tuple-labels 30/30
 unicorn/empty-brace-spaces 213/213
 unicorn/error-message 106/106
 unicorn/escape-case 198/198
-unicorn/explicit-timer-delay 60/60
-unicorn/max-nested-calls 26/26
+unicorn/explicit-length-check 224/224
 unicorn/new-for-builtins 366/366
 unicorn/no-array-from-fill 30/30
 unicorn/no-await-in-promise-methods 110/111
