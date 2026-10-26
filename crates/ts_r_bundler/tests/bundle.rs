@@ -2992,3 +2992,47 @@ fn glob_of_a_missing_directory_is_an_error() {
         "{text:?}"
     );
 }
+
+#[test]
+fn exports_arrays_stop_at_a_valid_target_and_bare_paths_match_local_browser_keys() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import red from 'pkg/apples/red.js';\nimport green from 'pkg/apples/green.js';\nconsole.log(red, green);\n",
+        ),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "exports": { "./apples/*": ["./good/*", "./bad/*"] } }"#,
+        ),
+        (
+            "node_modules/pkg/good/green.js",
+            "export default 'green';\n",
+        ),
+        ("node_modules/pkg/bad/red.js", "export default 'red';\n"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    // `./good/red.js` is missing: Node and esbuild don't go on to `./bad/red.js`.
+    assert!(r.has_errors(), "{text:?}");
+    assert!(
+        text.iter().any(|m| m.contains("pkg/apples/red.js")),
+        "{text:?}"
+    );
+    assert!(!text.iter().any(|m| m.contains("green")), "{text:?}");
+
+    let fs = project(&[
+        ("entry.js", "require('pkg/sub');\n"),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "browser": { "./sub": "./sub/foo.js", "./sub/sub": "./sub/bar.js" } }"#,
+        ),
+        ("node_modules/pkg/sub/foo.js", "require('sub');\n"),
+        ("node_modules/pkg/sub/bar.js", "works();\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.platform = Platform::Browser;
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/entry.js").contains("works()"));
+}

@@ -679,10 +679,17 @@ impl Resolver {
         if self.packages_external {
             return Resolution::External(spec.to_owned());
         }
-        // The importing package's `browser` map can redirect or disable bare imports.
+        // The importing package's `browser` map can redirect or disable bare imports. Like
+        // esbuild, a bare path also matches the key of the same path relative to the
+        // importing directory, exactly (`sub` in `pkg/sub/` is `./sub/sub`; esbuild:
+        // `PackageJsonBrowserIssue2002B`).
         if self.platform == Platform::Browser
             && let Some(pkg) = self.package_scope(dir)
-            && let Some(rep) = pkg.browser_map.get(spec)
+            && let Some(rep) = pkg.browser_map.get(spec).or_else(|| {
+                let local = path::resolve(dir, spec);
+                let rel = local.strip_prefix(pkg.dir.as_str())?.strip_prefix('/')?;
+                pkg.browser_map.get(&format!("./{rel}"))
+            })
         {
             return match rep {
                 None => Resolution::Disabled,
@@ -1178,21 +1185,24 @@ impl Resolver {
             ms.iter()
                 .any(|m| m.key.ends_with('/') && key.starts_with(m.key.as_str()))
         });
+        // A valid target is the answer even when its file is missing (then nothing
+        // resolves): as in Node and esbuild, an array's later targets are tried only after
+        // invalid ones, not after missing files (esbuild: `PackageJsonExportsAlternatives`).
         let mut try_target = |t: &str| {
             let f = path::resolve(&dir, t);
             if self.fs.file_exists(&f) {
-                Some(f)
+                Some(Some(f))
             } else if folder {
-                self.load_file(&f)
+                Some(self.load_file(&f))
             } else {
                 // A `.js` target may be compiled from a `.ts` file next to it.
-                self.ts_rewrite(&f)
+                Some(self.ts_rewrite(&f))
             }
         };
         if let Some(f) =
             ts_r_config::exports::evaluate_exports(exports, &key, &cond, &mut try_target).found()
         {
-            return Some(f);
+            return f;
         }
         // esbuild also lets a pattern's `*` match the empty string (`"./foo*"` for `./foo`).
         let ms = exports.as_object()?;
@@ -1209,7 +1219,8 @@ impl Resolver {
                     ts_r_config::exports::MapKind::Exports,
                     &mut try_target,
                 )
-                .found();
+                .found()
+                .flatten();
             }
         }
         None

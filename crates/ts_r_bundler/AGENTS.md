@@ -236,7 +236,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   from JavaScript with no output path (stdout), and `assert { type: 'json' }` on a file
   another loader loads (`with` sets the loader instead).
 - **Resolution**: `NODE_PATH` directories (`BuildOptions::node_paths`) are searched after
-  every `node_modules`. A `package.json` `exports` target or import of `./x.js` that is missing
+  every `node_modules`. An `exports` array stops at its first valid target even when that
+  file is missing (Node's rule; `ts_r_config::exports` keeps TypeScript's try-the-next), and
+  a bare import also matches the `browser` key of the same path relative to the importing
+  directory (`sub` in `pkg/sub/` is `./sub/sub`, esbuild's issue 2002). A `package.json` `exports` target or import of `./x.js` that is missing
   falls back to `./x.ts`/`./x.tsx` (`.jsx` tries `.ts` first); esbuild's dual-package rule
   (require picks `main`) applies only with the default main fields.
 - **`--mangle-props`** (`props.rs`, `ts_r_minify::props`): a bundle gives each matching
