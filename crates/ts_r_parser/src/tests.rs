@@ -3044,3 +3044,44 @@ fn jsx_name_unicode_escapes_are_ts17021() {
     assert_eq!(errs(r"<a></b>;")[0].0, 17002);
     assert!(errs("<a-b c-d='' />;").is_empty());
 }
+
+/// TypeScript-only grammar rules on valid JavaScript (TS1313 `if (x);`, TS1108 a top-level
+/// `return`, TS1052 `set x(v = 0)`) are in `grammar` only in a JavaScript file: tsc 7 reports
+/// them there only with `checkJs`. A TypeScript file has them in both. Other grammar errors
+/// (TS1105 `break` outside a loop) stay in both. Found in @babel/parser, which, ora (ecosystem).
+#[test]
+fn checked_js_grammar_is_grammar_only_in_javascript() {
+    let src = "if (!m) ;else f();\nreturn;\nclass C { set indent(indent = 0) {} }\nvar o = { set c(c = []) {} };";
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    for kind in [SourceKind::Js, SourceKind::Jsx] {
+        let r = parse(src, kind);
+        assert_eq!(codes(&r.diagnostics), Vec::<u32>::new(), "{kind:?}");
+        assert_eq!(codes(&r.grammar), vec![1313, 1108, 1052, 1052], "{kind:?}");
+        let r = crate::parse_with(
+            src,
+            kind,
+            crate::ParseOptions {
+                ts_in_js: crate::TsInJs::Report,
+            },
+        );
+        assert_eq!(codes(&r.diagnostics), Vec::<u32>::new(), "{kind:?} checker");
+        assert_eq!(codes(&r.grammar), vec![1313, 1108, 1052, 1052], "{kind:?}");
+    }
+    for kind in [SourceKind::Ts, SourceKind::Tsx] {
+        let r = parse(src, kind);
+        assert_eq!(
+            codes(&r.diagnostics),
+            vec![1313, 1108, 1052, 1052],
+            "{kind:?}"
+        );
+        assert_eq!(r.grammar, r.diagnostics, "{kind:?}");
+    }
+    let r = parse("if (x);\nbreak;", SourceKind::Js);
+    assert_eq!(codes(&r.diagnostics), vec![1105]);
+    assert_eq!(codes(&r.grammar), vec![1313, 1105]);
+    assert!(r.syntax_errors().is_empty());
+    // With a syntax error there are no grammar errors at all.
+    let r = parse("if (x);\nreturn;\nlet = ;", SourceKind::Js);
+    assert_eq!(codes(&r.diagnostics), vec![1109]);
+    assert!(r.grammar.is_empty());
+}

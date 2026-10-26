@@ -40,7 +40,8 @@ pub struct ParseResult {
     /// stop at syntax errors only, like typescript-eslint's, do not report them. TS1501 and
     /// TS1503 (regex flags and named groups newer than the target,
     /// [`is_target_regex_error`]) are only here, not in `diagnostics`: the checker keeps
-    /// them for older targets.
+    /// them for older targets. So are, in a JavaScript file, the TypeScript-only rules of
+    /// [`is_checked_js_grammar`] (`if (x);`), which only a checked JavaScript file reports.
     pub grammar: Vec<Diagnostic>,
     /// Syntax errors to tsc that ESLint's parser and esbuild accept in sloppy code: octal
     /// and `\8` escapes in strings (TS1487, TS1488; `"\033"`). They are also in `grammar`,
@@ -108,6 +109,18 @@ fn in_sorted(rest: &mut &[Diagnostic], d: &Diagnostic) -> bool {
 pub fn is_target_regex_error(d: &Diagnostic) -> bool {
     d.code == messages::REGEX_FLAG_NEEDS_TARGET.code
         || d.code == messages::REGEX_NAMED_GROUPS_NEED_TARGET.code
+}
+
+/// Checker grammar errors about code JavaScript accepts, which tsc 7 reports in a JavaScript
+/// file only when it is type checked (`checkJs`, `// @ts-check`), not in a plain one or with
+/// `noCheck`: an empty `if` body (TS1313, `if (x);`), `return` outside a function (TS1108, a
+/// CommonJS script may return) and a `set` accessor parameter's initializer (TS1052). In a
+/// JavaScript file they are only in [`ParseResult::grammar`], not in `diagnostics` (observed;
+/// minified bundles and CommonJS bins in the ecosystem run hit all three).
+pub fn is_checked_js_grammar(d: &Diagnostic) -> bool {
+    d.code == messages::EMPTY_IF_BODY.code
+        || d.code == messages::RETURN_OUTSIDE_FUNCTION.code
+        || d.code == messages::SET_ACCESSOR_PARAMETER_INITIALIZER.code
 }
 
 /// What to do with TypeScript-only syntax (types, `interface`, `as`, ...) in a JavaScript
@@ -530,6 +543,12 @@ impl<'a> Parser<'a> {
                 .any(|k| k == d)
         });
         grammar.dedup_by(|a, b| a.span.start == b.span.start);
+        if !self.ast.source_kind.is_typescript() && !grammar.is_empty() {
+            // TypeScript-only rules on valid JavaScript: only a checked JavaScript file
+            // reports them (`checkJs`), and the checker reads them from `grammar`.
+            let mut g = grammar.as_slice();
+            diags.retain(|d| !(is_checked_js_grammar(d) && in_sorted(&mut g, d)));
+        }
         if clean && !self.regex_errs.is_empty() {
             grammar.extend(self.regex_errs.iter().cloned());
             grammar.sort_by_key(|d| d.span.start);

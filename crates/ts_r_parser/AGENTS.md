@@ -258,6 +258,13 @@ Files:
   told apart by `Jump::StaticBlock`), generator overloads (TS1222),
   definite assignment `!` (TS1255/1263/1264), abstract accessor bodies (TS1318) and index
   signature trailing commas (TS1025). Nothing under a `with` body is checked.
+- **Some grammar errors are checked-JS only.** In a JavaScript file, TS1313 (`if (x);`),
+  TS1108 (top-level `return`, as in CommonJS bins) and TS1052 (a `set` parameter
+  initializer) are in `ParseResult::grammar` but not in `diagnostics`
+  (`is_checked_js_grammar`). tsc 7 reports them in a JS file only with `checkJs` (they are
+  not plain-JS errors), and `node --check` accepts the code, so a tool that reads JS
+  (bundler, linter, the ecosystem parse stage) must not fail on them. The checker still
+  reports `grammar` for checked files. TypeScript files keep them in both lists.
 - **Import calls take an argument list.** `import(...)` parses its arguments like a call:
   the first is the specifier, the second the options, later ones are parsed and dropped
   (tsc's TS1450 for them, and for `import()`, is a checker message). A spread argument is

@@ -1,0 +1,46 @@
+Program 0..422
+  stmts[0]: If 249..298
+    test: Unary 253..261 op=Not
+      arg: Ident 254..261 name="matches" `matches`
+    cons: Empty 263..264 `;`
+    alt: If 269..298
+      test: Binary 273..294 op=StrictEq
+        left: Index 273..283
+          obj: Ident 273..280 name="matches" `matches`
+          index: NumberLit 281..282 value=1 `1`
+        right: StringLit 288..294 value="flow" `"flow"`
+      cons: Block 296..298 `{}`
+  stmts[1]: If 299..337
+    test: Unary 303..315 op=Not
+      arg: Member 304..315
+        obj: Ident 304..308 name="argv" `argv`
+        prop: Ident 309..315 name="length" `length`
+    cons: Block 317..337
+      stmts[0]: Return 321..335
+        arg: Call 328..335
+          callee: Ident 328..333 name="usage" `usage`
+  stmts[2]: ClassDecl 338..379
+    name: Ident 344..347 name="Ora" `Ora`
+    members[0]: MethodDef 352..377 kind=Set
+      key: Ident 356..362 name="indent" `indent`
+      value: FunctionExpr 362..377
+        params[0]: Param 363..373
+          pattern: Ident 363..369 name="indent" `indent`
+          init: NumberLit 372..373 value=0 `0`
+        body: Block 375..377 `{}`
+  stmts[3]: VarDecl 380..421
+    decls[0]: VarDeclarator 384..420
+      name: Ident 384..385 name="o" `o`
+      init: ObjectLit 388..420
+        props[0]: MethodDef 390..418 kind=Set
+          key: Ident 394..401 name="choices" `choices`
+          value: FunctionExpr 401..418
+            params[0]: Param 402..414
+              pattern: Ident 402..409 name="choices" `choices`
+              init: ArrayLit 412..414 `[]`
+            body: Block 416..418 `{}`
+---- comments ----
+Line 0..86 "// TypeScript-only grammar rules on valid JavaScript: tsc 7 reports TS1313, TS1108 and"
+Line 87..167 "// TS1052 here only with checkJs, so a plain JavaScript file has no diagnostics."
+Line 168..248 "// Reduced from @babel/parser lib/index.js, which bin/which.js and ora index.js."
+---- diagnostics ----
