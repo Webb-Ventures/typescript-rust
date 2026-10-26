@@ -1180,3 +1180,38 @@ pub(crate) fn has_type_arguments(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
         }
     )
 }
+
+/// unicorn's `removeStatement` for one statement: a `;` in its place when the token before
+/// could run into what follows, else the statement with its own line(s) when nothing else
+/// is on them, else just the statement.
+pub(crate) fn remove_statement(cx: &Ctx<'_, '_>, stmt: NodeId) -> Fix {
+    let span = cx.span(stmt);
+    if needs_semicolon(cx, span.start, "(") {
+        return Fix::replace(span, ";");
+    }
+    let src = cx.src();
+    let lines = cx.file.lines;
+    let first = lines.line_span(lines.line_of(span.start));
+    let last = lines.line_span(lines.line_of(span.end));
+    let (Some(first), Some(last)) = (first, last) else {
+        return Fix::delete(span);
+    };
+    let before = &src[first.start as usize..span.start as usize];
+    let after_line = &src[span.end as usize..last.end as usize];
+    let after = after_line.trim_end_matches(['\n', '\r', '\u{2028}', '\u{2029}']);
+    if !before.trim().is_empty() || !after.trim().is_empty() {
+        return Fix::delete(span);
+    }
+    let mut start = first.start as usize;
+    let mut end = span.end as usize + after.len();
+    if start == 0 {
+        end += if src[end..].starts_with("\r\n") {
+            2
+        } else {
+            usize::from(end < src.len())
+        };
+    } else {
+        start -= if src[..start].ends_with("\r\n") { 2 } else { 1 };
+    }
+    Fix::delete(Span::new(start as u32, end as u32))
+}

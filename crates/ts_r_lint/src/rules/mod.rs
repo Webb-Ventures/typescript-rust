@@ -350,9 +350,7 @@ mod unicorn_prefer_modern_dom_apis;
 mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_negative_index;
 mod unicorn_prefer_node_protocol;
-mod unicorn_prefer_number_coercion;
-mod unicorn_prefer_number_properties;
-mod unicorn_prefer_object_destructuring_defaults;
+mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_prototype_methods;
 mod unicorn_prefer_query_selector;
@@ -744,9 +742,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_native_coercion_functions::RULE,
     &unicorn_prefer_negative_index::RULE,
     &unicorn_prefer_node_protocol::RULE,
-    &unicorn_prefer_number_coercion::RULE,
-    &unicorn_prefer_number_properties::RULE,
-    &unicorn_prefer_object_destructuring_defaults::RULE,
+    &unicorn_prefer_object_from_entries::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_prototype_methods::RULE,
     &unicorn_prefer_query_selector::RULE,

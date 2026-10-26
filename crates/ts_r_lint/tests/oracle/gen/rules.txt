@@ -321,3 +321,4 @@ unicorn/no-array-method-this-argument
 unicorn/prefer-logical-operator-over-ternary
 unicorn/prefer-string-raw
 unicorn/prefer-default-parameters
+unicorn/prefer-object-from-entries
