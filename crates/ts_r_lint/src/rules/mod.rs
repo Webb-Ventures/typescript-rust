@@ -360,6 +360,7 @@ mod unicorn_prefer_number_properties;
 mod unicorn_prefer_object_destructuring_defaults;
 mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_prototype_methods;
+mod unicorn_prefer_query_selector;
 mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_set_size;
 mod unicorn_prefer_type_error;
@@ -757,6 +758,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
     &unicorn_prefer_prototype_methods::RULE,
+    &unicorn_prefer_query_selector::RULE,
     &unicorn_prefer_reflect_apply::RULE,
     &unicorn_prefer_set_size::RULE,
     &unicorn_prefer_type_error::RULE,

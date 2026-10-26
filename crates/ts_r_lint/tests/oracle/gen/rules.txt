@@ -314,3 +314,4 @@ unicorn/require-array-join-separator
 unicorn/no-unreadable-array-destructuring
 unicorn/prefer-dom-node-remove
 unicorn/prefer-modern-dom-apis
+unicorn/prefer-query-selector

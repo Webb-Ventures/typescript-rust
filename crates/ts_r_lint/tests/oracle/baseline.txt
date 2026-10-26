@@ -349,6 +349,7 @@ unicorn/prefer-number-properties 474/474
 unicorn/prefer-object-destructuring-defaults 44/44
 unicorn/prefer-optional-catch-binding 25/25
 unicorn/prefer-prototype-methods 79/79
+unicorn/prefer-query-selector 127/127
 unicorn/prefer-reflect-apply 79/79
 unicorn/prefer-set-size 67/67
 unicorn/prefer-type-error 112/112
