@@ -328,12 +328,7 @@ mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
-mod unicorn_no_undeclared_class_members;
-mod unicorn_no_unnecessary_array_flat_depth;
-mod unicorn_no_unnecessary_array_splice_count;
-mod unicorn_no_unnecessary_await;
-mod unicorn_no_unnecessary_nested_ternary;
-mod unicorn_no_unnecessary_slice_end;
+mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_useless_boolean_cast;
@@ -728,12 +723,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_this_outside_of_class::RULE,
     &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
-    &unicorn_no_undeclared_class_members::RULE,
-    &unicorn_no_unnecessary_array_flat_depth::RULE,
-    &unicorn_no_unnecessary_array_splice_count::RULE,
-    &unicorn_no_unnecessary_await::RULE,
-    &unicorn_no_unnecessary_nested_ternary::RULE,
-    &unicorn_no_unnecessary_slice_end::RULE,
+    &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
