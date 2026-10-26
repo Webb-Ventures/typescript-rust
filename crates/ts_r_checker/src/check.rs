@@ -637,6 +637,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if !misplaced {
                     self.check_isolated_export_assignment(l, expr);
                 }
+                // TS2714: in an ambient context (a `.d.ts`, `declare module`) the expression
+                // must be a dotted name (`export = 2 + 2` is not). A grammar error: none in
+                // a file with syntax errors (tsc: checker.go, checkExportAssignment).
+                if !crate::nodes::is_entity_name_expr(ast, expr)
+                    && self.is_ambient_node(l)
+                    && !self.has_syntax_errors(file)
+                {
+                    self.error(
+                        at(expr),
+                        dg::THE_EXPRESSION_OF_AN_EXPORT_ASSIGNMENT_MUST_BE_AN_IDENTIFIER_OR_QUALIFIED_NAME_I_2714,
+                        &[],
+                    );
+                }
                 // `export = X` / `export default X` of an identifier exports whatever `X`
                 // names: a type or a namespace without values is no error (TS2693/TS2708).
                 let only_type = matches!(ast.node(expr), Node::Ident { .. })
