@@ -514,7 +514,7 @@ mod unicorn_prefer_flat_math_min_max;
 mod unicorn_prefer_get_or_insert_computed;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
-mod unicorn_prefer_hoisting_branch_code;
+mod unicorn_prefer_https;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
@@ -577,6 +577,7 @@ mod unicorn_prefer_string_starts_ends_with;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_switch;
+mod unicorn_prefer_temporal_conversion;
 mod unicorn_prefer_ternary;
 mod unicorn_prefer_then_catch;
 mod unicorn_prefer_toggle_attribute;
@@ -595,6 +596,7 @@ mod unicorn_require_module_attributes;
 mod unicorn_require_module_specifiers;
 mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_require_passive_events;
+mod unicorn_require_text_decoder_streaming;
 mod unicorn_splice;
 mod unicorn_static;
 mod unicorn_switch_case_braces;
@@ -1133,7 +1135,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_get_or_insert_computed::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
-    &unicorn_prefer_hoisting_branch_code::RULE,
+    &unicorn_prefer_https::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,
@@ -1180,6 +1182,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_slice::RULE,
     &unicorn_prefer_string_starts_ends_with::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
+    &unicorn_prefer_temporal_conversion::RULE,
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_toggle_attribute::RULE,
     &unicorn_prefer_type_error::RULE,
@@ -1194,6 +1197,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_require_module_attributes::RULE,
     &unicorn_require_module_specifiers::RULE,
     &unicorn_require_passive_events::RULE,
+    &unicorn_require_text_decoder_streaming::RULE,
     &unicorn_switch_case_break_position::RULE,
     &unicorn_prefer_add_event_listener::RULE,
     &unicorn_prefer_array_flat::RULE,

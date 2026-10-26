@@ -1838,6 +1838,34 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   `{encoding: <that>}` second argument, removed. An options name whose `encoding` gets a
   `get`/`set` descriptor through `Object.defineProperty(ies)`, also through `const` aliases,
   is never static.
+- **require-text-decoder-streaming**: `decode(chunk, opts?)` (callee through wrappers) in
+  a loop, on a receiver resolving to `new TextDecoder(...)`, with non-streaming options
+  (missing, static nullish, or a plain literal whose last `stream` is missing or static
+  falsy), where the chunk is the `for await` binding over `(await fetch(...)).body` (or its
+  `.values(x?)`), or `value` of `await reader.read()` awaited in that loop with
+  `reader = <body>.getReader()`. Names resolve through earlier never-reassigned `const`s in
+  the same function. The suggestion (only for the plain `for await` / `while (true)` +
+  `if (done) break;` shapes, a `const` decoder and a `let text = ''` declared before the
+  loop in its block and used nowhere else, no comments in or right after the loop) turns on
+  `stream: true` and adds `text += decoder.decode();` after the loop unless it is there.
+- **prefer-https**: a text scan of the whole file for `http(s)://` (any case, not after a
+  word character, `+`, `-` or `.`), an authority and the rest of the URL; the next search
+  starts after the match. Lowercase `http` is reported over the authority unless the URL is
+  a known identifier URI (exact list and patterns, run on `regex_exec`), matches `ignore`
+  (strings or `{regex, flags}`), follows `xmlns=`/`xmlns:p=` within 30 UTF-16 units, or the
+  host is not public: the WHATWG host (after the last `@`, numeric port up to 65535,
+  percent-decoded, fullwidth forms and ideographic dots folded, forbidden code points
+  failing) must not be an IP address (last label numeric or `0x` hex) and its last label
+  must have a letter (non-ASCII counts, as punycode) and not be a reserved suffix.
+- **prefer-temporal-conversion**: `new Temporal.<T>(...)` / `Temporal.<T>.from(x)` (and
+  `Temporal.Instant.fromEpochMilli/Nanoseconds(x)`) for `Instant`, `PlainDateTime`,
+  `PlainDate`, `PlainTime`, whose source (`.from(s.toString()/toJSON())`, `.from(s)`,
+  `s.epochNanoseconds`/`epochMilliseconds`, or every target field read from one
+  side-effect-free receiver, positionally or as object keys with `monthCode`/`calendar`)
+  is a `Temporal.ZonedDateTime` (or `PlainDateTime` for date/time targets) by unicorn's
+  type guess, with `Temporal.X.from(a, b?)`, `new Temporal.X()` and `Temporal.Now.*ISO(x?)`
+  as known sources. Fixed or suggested as `s.to<T>()`; string and millisecond `Instant`
+  sources and date reconstructions without `calendar` (or by constructor) are suggestions.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1858,4 +1886,6 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`,
 `no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`,
 `no-invalid-style-set-property.js`, `prefer-observer-apis.js`, `utils/get-function-from-identifier.js`,
-`no-selector-as-dom-name.js`, `consistent-json-file-read.js`.
+`no-selector-as-dom-name.js`, `consistent-json-file-read.js`,
+`require-text-decoder-streaming.js`, `utils/single-statement.js`, `fix/append-argument.js`,
+`prefer-https.js`, `prefer-temporal-conversion.js`.
