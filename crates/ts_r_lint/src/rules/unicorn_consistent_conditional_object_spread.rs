@@ -368,18 +368,14 @@ fn boolean_cast_problems(cx: &mut Ctx<'_, '_>, node: NodeId) {
     };
     let mut cur = skip_parens(ast, left);
     // Each step moves to a strictly smaller left operand.
-    loop {
-        match *ast.node(cur) {
-            Node::Binary {
-                left,
-                op: BinaryOp::LogicalAnd,
-                right,
-            } => {
-                boolean_cast_problem(cx, right);
-                cur = skip_parens(ast, left);
-            }
-            _ => break,
-        }
+    while let Node::Binary {
+        left,
+        op: BinaryOp::LogicalAnd,
+        right,
+    } = *ast.node(cur)
+    {
+        boolean_cast_problem(cx, right);
+        cur = skip_parens(ast, left);
     }
     boolean_cast_problem(cx, cur);
 }

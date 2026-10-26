@@ -536,12 +536,12 @@ impl<'a> Builder<'a> {
                 let rhs_runs = match op {
                     BinaryOp::LogicalAnd => truth,
                     BinaryOp::LogicalOr => truth.map(|t| !t),
-                    _ => truth.and_then(|_| {
+                    _ => truth.map(|_| {
                         let mut l = left;
                         while let Node::Paren { expr } = *ast.node(l) {
                             l = expr;
                         }
-                        Some(matches!(ast.node(l), Node::NullLit {}))
+                        matches!(ast.node(l), Node::NullLit {})
                     }),
                 };
                 self.short_circuit(left, right, rhs_runs);
