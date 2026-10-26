@@ -21,7 +21,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 ```
 
 > **Status: preview.** The type checker is the most mature tool. It gives tsc 7's exact output on
-> 97.6% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns,
+> 97.7% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns,
 > TypeORM and Playwright, and is within a few diagnostics on RxJS (none extra, 5 missing, of
 > about 21,900). Every other tool works on real projects
 > but has known gaps (below). Version numbers stay below 1.0 until that changes.
@@ -42,7 +42,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 | Tool | Replaces | Works today | Known gaps |
 |---|---|---|---|
 | `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and narrowing; 3.0% of conformance tests still differ |
-| `ts-r-lint` | ESLint, oxlint | 716 rules, 51 of them type-aware on ts-r's own checker; 76,923 of 76,963 cases of ESLint's, typescript-eslint's, eslint-plugin-jsdoc's, eslint-plugin-unicorn's and eslint-plugin-import's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint (and 73 eslint-plugin-jsdoc, 368 eslint-plugin-unicorn and 46 eslint-plugin-import rules) |
+| `ts-r-lint` | ESLint, oxlint | 716 rules, 51 of them type-aware on ts-r's own checker; 76,925 of 76,963 cases of ESLint's, typescript-eslint's, eslint-plugin-jsdoc's, eslint-plugin-unicorn's and eslint-plugin-import's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint (and 73 eslint-plugin-jsdoc, 368 eslint-plugin-unicorn and 46 eslint-plugin-import rules) |
 | `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | `ts-r-run` | tsx, ts-node | Runs TypeScript on Node 22.15+ with tsc 7's JavaScript output | Only the entry's tsconfig is used |
 | `ts-r-dev` | `vite dev` | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling, `vite.config` and Vite plugins | No CSS preprocessors; some `vite.config` options and plugin APIs; HTTP/1.1 only |

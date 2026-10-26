@@ -153,8 +153,8 @@ Files:
 
 - 716 rules (134 core ESLint, 95 typescript-eslint, 73 eslint-plugin-jsdoc, 368
   eslint-plugin-unicorn, 46 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  76,923 / 76,963 cases. The non-type-aware cases are 69,927 / 69,951 and the type-aware
-  cases 6,996 / 7,012 (2026-10-27); the 16 type-aware failures are a subset of the 46 listed
+  76,925 / 76,963 cases. The non-type-aware cases are 69,927 / 69,951 and the type-aware
+  cases 6,998 / 7,012 (2026-10-27); the 14 type-aware failures are a subset of the 46 listed
   in design record 0006. The 24 others: import/no-unresolved 77/80 (3 cases need the
   uppercase absolute path of the machine that recorded them), import/default 22/23 (its
   `FooES7` case needs espree's ecmaVersion parse error) and import/no-unused-modules 111/131
