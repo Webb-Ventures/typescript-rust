@@ -297,3 +297,6 @@ unicorn/throw-new-error
 unicorn/no-new-array
 unicorn/prefer-type-error
 unicorn/catch-error-name
+unicorn/switch-case-braces
+unicorn/no-process-exit
+unicorn/no-useless-switch-case

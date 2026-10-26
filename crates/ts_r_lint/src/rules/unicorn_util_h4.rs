@@ -291,3 +291,158 @@ pub(crate) fn estree_ident_span(cx: &Ctx<'_, '_>, ident: NodeId) -> Span {
     };
     Span::new(span.start, end)
 }
+
+/// The last comment after `end` (before the next token) that starts on the line `end` is
+/// on: the plugin's "trailing comment on the same line".
+pub(crate) fn trailing_comment_same_line(cx: &Ctx<'_, '_>, end: u32) -> Option<Span> {
+    let next = skip_trivia_forward(cx.src(), end as usize) as u32;
+    let line = cx.file.lines.line_of(end);
+    cx.ast()
+        .comments_between(end, next)
+        .iter()
+        .rev()
+        .find(|c| cx.file.lines.line_of(c.span.start) == line)
+        .map(|c| c.span)
+}
+
+/// The whitespace right before `pos` on its line.
+pub(crate) fn indent_before<'a>(cx: &Ctx<'_, 'a>, pos: u32) -> &'a str {
+    let lines = cx.file.lines;
+    let start = lines.line_start(lines.line_of(pos)).unwrap_or(0);
+    let before = cx.src().get(start as usize..pos as usize).unwrap_or("");
+    let trimmed = before.trim_end_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    &before[trimmed.len()..]
+}
+
+/// The file's first line break, or `\n`.
+pub(crate) fn linebreak(src: &str) -> &'static str {
+    for (i, c) in src.char_indices() {
+        match c {
+            '\r' if src[i + 1..].starts_with('\n') => return "\r\n",
+            '\r' => return "\r",
+            '\n' => return "\n",
+            '\u{2028}' => return "\u{2028}",
+            '\u{2029}' => return "\u{2029}",
+            _ => {}
+        }
+    }
+    "\n"
+}
+
+/// `@eslint-community/eslint-utils`' `hasSideEffect`: calls, `new`, assignments, updates,
+/// `await`, `yield`, `import()` and `delete` anywhere in `id` (not inside nested functions).
+/// `getters` makes every member access count; `conversions` makes implicit type
+/// conversions count (operators on non-literals, computed non-literal keys).
+pub(crate) fn has_side_effect(ast: &Ast, id: NodeId, getters: bool, conversions: bool) -> bool {
+    side_effect_in(ast, id, getters, conversions, 0)
+}
+
+fn is_literal(ast: &Ast, id: NodeId) -> bool {
+    matches!(
+        ast.node(skip_parens(ast, id)),
+        Node::NullLit {}
+            | Node::BoolLit { .. }
+            | Node::NumberLit { .. }
+            | Node::BigIntLit { .. }
+            | Node::StringLit { .. }
+            | Node::RegexLit { .. }
+    )
+}
+
+fn side_effect_in(ast: &Ast, id: NodeId, getters: bool, conversions: bool, depth: u32) -> bool {
+    if depth > 256 {
+        return true;
+    }
+    match *ast.node(id) {
+        Node::Arrow { .. } | Node::FunctionExpr { .. } => return false,
+        Node::Assign { .. }
+        | Node::Await { .. }
+        | Node::Call { .. }
+        | Node::ImportCall { .. }
+        | Node::New { .. }
+        | Node::Update { .. }
+        | Node::Yield { .. } => return true,
+        Node::Unary { op, arg } => {
+            if op == UnaryOp::Delete {
+                return true;
+            }
+            if conversions
+                && matches!(
+                    op,
+                    UnaryOp::Minus | UnaryOp::Plus | UnaryOp::Not | UnaryOp::BitNot
+                )
+                && !is_literal(ast, arg)
+            {
+                return true;
+            }
+        }
+        Node::Binary {
+            left, op, right, ..
+        } => {
+            use BinaryOp::*;
+            if conversions
+                && matches!(
+                    op,
+                    Eq | NotEq
+                        | Lt
+                        | LtEq
+                        | Gt
+                        | GtEq
+                        | Shl
+                        | Shr
+                        | UShr
+                        | Add
+                        | Sub
+                        | Mul
+                        | Div
+                        | Mod
+                        | BitOr
+                        | BitXor
+                        | BitAnd
+                        | In
+                )
+                && !(is_literal(ast, left) && is_literal(ast, right))
+            {
+                return true;
+            }
+        }
+        Node::Member { .. } if getters => return true,
+        Node::Index { index, .. } => {
+            if getters || (conversions && !is_literal(ast, index)) {
+                return true;
+            }
+        }
+        Node::ComputedKey { expr } if conversions && !is_literal(ast, expr) => return true,
+        _ => {}
+    }
+    let mut found = false;
+    ast.for_each_child(id, |c| {
+        if !found && side_effect_in(ast, c, getters, conversions, depth + 1) {
+            found = true;
+        }
+    });
+    found
+}
+
+/// A `case`/`default` clause's head: from its keyword to the end of its colon.
+pub(crate) fn switch_case_head(cx: &Ctx<'_, '_>, case: NodeId) -> Span {
+    let src = cx.src();
+    let span = cx.span(case);
+    let test = match *cx.node(case) {
+        Node::SwitchCase { test, .. } => test,
+        _ => None,
+    };
+    let mut pos = match test {
+        Some(t) => cx.span(t).end as usize,
+        None => (span.start as usize + "default".len()).min(src.len()),
+    };
+    for _ in 0..src.len() {
+        pos = skip_trivia_forward(src, pos);
+        match src.as_bytes().get(pos) {
+            Some(b':') => return Span::new(span.start, pos as u32 + 1),
+            Some(_) => pos += 1,
+            None => break,
+        }
+    }
+    span
+}

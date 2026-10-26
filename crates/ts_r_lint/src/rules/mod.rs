@@ -307,21 +307,14 @@ mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
-mod unicorn_no_optional_chaining_on_undeclared_variable;
+mod unicorn_no_process_exit;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
-mod unicorn_no_unsafe_string_replacement;
-mod unicorn_no_useless_boolean_cast;
-mod unicorn_no_useless_compound_assignment;
-mod unicorn_no_useless_continue;
-mod unicorn_no_useless_error_capture_stack_trace;
-mod unicorn_no_useless_override;
-mod unicorn_no_useless_re_export;
-mod unicorn_no_useless_recursion;
+mod unicorn_no_useless_switch_case;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
@@ -355,8 +348,7 @@ mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_set_size;
 mod unicorn_prefer_string_raw;
 mod unicorn_prefer_type_error;
-mod unicorn_require_array_join_separator;
-mod unicorn_require_number_to_fixed_digits_argument;
+mod unicorn_switch_case_braces;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
@@ -698,21 +690,14 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,
-    &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
+    &unicorn_no_process_exit::RULE,
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_this_outside_of_class::RULE,
     &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unreadable_iife::RULE,
-    &unicorn_no_unsafe_string_replacement::RULE,
-    &unicorn_no_useless_boolean_cast::RULE,
-    &unicorn_no_useless_compound_assignment::RULE,
-    &unicorn_no_useless_continue::RULE,
-    &unicorn_no_useless_error_capture_stack_trace::RULE,
-    &unicorn_no_useless_override::RULE,
-    &unicorn_no_useless_re_export::RULE,
-    &unicorn_no_useless_recursion::RULE,
+    &unicorn_no_useless_switch_case::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
@@ -756,39 +741,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
-    &unicorn_prefer_unary_minus::RULE,
-    &unicorn_require_array_sort_compare::RULE,
-    &unicorn_require_css_escape::RULE,
-    &unicorn_prefer_type_literal_last::RULE,
-    &unicorn_require_module_attributes::RULE,
-    &unicorn_switch_case_break_position::RULE,
-    &unicorn_prefer_add_event_listener::RULE,
-    &unicorn_prefer_array_flat::RULE,
-    &unicorn_prefer_array_flat_map::RULE,
-    &unicorn_prefer_array_index_of::RULE,
-    &unicorn_prefer_array_some::RULE,
-    &unicorn_prefer_code_point::RULE,
-    &unicorn_prefer_date_now::RULE,
-    &unicorn_prefer_default_parameters::RULE,
-    &unicorn_prefer_dom_node_append::RULE,
-    &unicorn_prefer_dom_node_remove::RULE,
-    &unicorn_prefer_dom_node_text_content::RULE,
-    &unicorn_prefer_keyboard_event_key::RULE,
-    &unicorn_prefer_math_trunc::RULE,
-    &unicorn_prefer_modern_dom_apis::RULE,
-    &unicorn_prefer_native_coercion_functions::RULE,
-    &unicorn_prefer_negative_index::RULE,
-    &unicorn_prefer_node_protocol::RULE,
-    &unicorn_prefer_object_from_entries::RULE,
-    &unicorn_prefer_optional_catch_binding::RULE,
-    &unicorn_prefer_prototype_methods::RULE,
-    &unicorn_prefer_query_selector::RULE,
-    &unicorn_prefer_reflect_apply::RULE,
-    &unicorn_prefer_set_size::RULE,
-    &unicorn_prefer_string_raw::RULE,
-    &unicorn_prefer_type_error::RULE,
-    &unicorn_require_array_join_separator::RULE,
-    &unicorn_require_number_to_fixed_digits_argument::RULE,
+    &unicorn_switch_case_braces::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,
 ];
