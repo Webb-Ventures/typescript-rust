@@ -458,6 +458,7 @@ mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_prevent_default_in_passive_listener;
 mod unicorn_no_process_exit;
 mod unicorn_no_redundant_comparison;
+mod unicorn_no_repeated_call_wrappers;
 mod unicorn_no_return_array_push;
 mod unicorn_no_selector_as_dom_name;
 mod unicorn_no_shorthand_property_overrides;
@@ -671,6 +672,7 @@ mod unicorn_require_module_attributes;
 mod unicorn_require_module_specifiers;
 mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_require_passive_events;
+mod unicorn_require_post_message_target_origin;
 mod unicorn_require_proxy_trap_boolean_return;
 mod unicorn_require_text_decoder_streaming;
 mod unicorn_single_line_block_comment_style;
@@ -726,7 +728,9 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_prefer_short_arrow_method::RULE,
+    &unicorn_require_post_message_target_origin::RULE,
     &unicorn_try_complexity::RULE,
     &unicorn_no_unreadable_new_expression::RULE,
     &unicorn_no_barrel_files::RULE,
