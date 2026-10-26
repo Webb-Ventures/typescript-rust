@@ -318,6 +318,7 @@ mod unicorn_consistent_function_scoping;
 mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
 mod unicorn_consistent_tuple_labels;
+mod unicorn_default_export_style;
 mod unicorn_dom_node_dataset;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
@@ -558,6 +559,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_default_export_style::RULE,
     &unicorn_prefer_private_class_fields::RULE,
     &unicorn_class_reference_in_static_methods::RULE,
     &unicorn_require_proxy_trap_boolean_return::RULE,

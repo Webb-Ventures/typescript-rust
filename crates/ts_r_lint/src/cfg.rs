@@ -188,7 +188,7 @@ fn const_true(ast: &Ast, test: NodeId) -> bool {
     }
 }
 
-fn is_type_kind(k: NodeKind) -> bool {
+pub(crate) fn is_type_kind(k: NodeKind) -> bool {
     use NodeKind::*;
     matches!(
         k,
