@@ -437,6 +437,7 @@ mod unicorn_no_useless_re_export;
 mod unicorn_no_useless_recursion;
 mod unicorn_no_useless_spread;
 mod unicorn_no_useless_switch_case;
+mod unicorn_no_useless_template_literals;
 mod unicorn_no_useless_undefined;
 mod unicorn_no_using_resource_escape;
 mod unicorn_no_xor_as_exponentiation;
@@ -468,7 +469,7 @@ mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
 mod unicorn_prefer_dom_node_text_content;
-mod unicorn_prefer_early_return;
+mod unicorn_prefer_escaped_irregular_whitespace;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_export_from;
 mod unicorn_prefer_flat_math_min_max;
@@ -530,7 +531,7 @@ mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
 mod unicorn_prefer_unary_minus;
-mod unicorn_prefer_while_loop_condition;
+mod unicorn_prefer_unicode_code_point_escapes;
 mod unicorn_require_array_join_separator;
 mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
@@ -1114,6 +1115,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_template_indent::RULE,
     &unicorn_expiring_todo_comments::RULE,
     &unicorn_prefer_bigint_literals::RULE,
+    &unicorn_no_useless_template_literals::RULE,
+    &unicorn_prefer_escaped_irregular_whitespace::RULE,
+    &unicorn_prefer_unicode_code_point_escapes::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

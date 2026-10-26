@@ -29,7 +29,7 @@ struct PreferBigintLiterals;
 
 /// An arbitrary-size unsigned integer, little-endian base-2^32 limbs.
 #[derive(Clone, Debug, PartialEq)]
-struct Big(Vec<u32>);
+pub(super) struct Big(Vec<u32>);
 
 impl Big {
     fn zero() -> Big {
@@ -72,7 +72,7 @@ impl Big {
         }
         Some(b)
     }
-    fn to_string_radix(&self, base: u32) -> String {
+    pub(super) fn to_string_radix(&self, base: u32) -> String {
         if self.is_zero() {
             return "0".to_owned();
         }
@@ -108,13 +108,13 @@ impl Big {
 }
 
 /// A signed big integer.
-struct BigInt {
-    neg: bool,
-    mag: Big,
+pub(super) struct BigInt {
+    pub(super) neg: bool,
+    pub(super) mag: Big,
 }
 
 /// `BigInt(string)`, or `None` where it throws.
-fn string_to_bigint(s: &str) -> Option<BigInt> {
+pub(super) fn string_to_bigint(s: &str) -> Option<BigInt> {
     let t = s.trim_matches(is_js_space);
     if t.is_empty() {
         return Some(BigInt {

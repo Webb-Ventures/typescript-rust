@@ -388,6 +388,7 @@ unicorn/no-useless-re-export 22/22
 unicorn/no-useless-recursion 29/29
 unicorn/no-useless-spread 283/283
 unicorn/no-useless-switch-case 34/34
+unicorn/no-useless-template-literals 89/89
 unicorn/no-useless-undefined 271/271
 unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
@@ -416,6 +417,7 @@ unicorn/prefer-dom-node-append 69/69
 unicorn/prefer-dom-node-html-methods 67/67
 unicorn/prefer-dom-node-remove 118/118
 unicorn/prefer-dom-node-text-content 31/31
+unicorn/prefer-escaped-irregular-whitespace 96/96
 unicorn/prefer-event-target 46/46
 unicorn/prefer-export-from 158/158
 unicorn/prefer-flat-math-min-max 47/47
@@ -473,7 +475,7 @@ unicorn/prefer-top-level-await 228/228
 unicorn/prefer-type-error 112/112
 unicorn/prefer-type-literal-last 37/37
 unicorn/prefer-unary-minus 71/71
-unicorn/prefer-while-loop-condition 56/56
+unicorn/prefer-unicode-code-point-escapes 79/79
 unicorn/require-array-join-separator 80/80
 unicorn/require-array-sort-compare 64/64
 unicorn/require-css-escape 54/54
