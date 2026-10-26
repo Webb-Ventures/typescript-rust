@@ -684,6 +684,17 @@ member reads don't count). What we learned, in our words:
   non-optional parents become `child.remove()`. Otherwise suggestions: `?.remove()` and
   `.remove()` when the callee/parent member chain has an optional link, else `.remove()`.
   Any comment in the call blocks fixes and suggestions.
+- **prefer-modern-dom-apis**: `p.replaceChild(a, b)` / `p.insertBefore(a, b)` on plain
+  identifiers (not `undefined`) become `b.replaceWith(a)` (fix) / `b.before(a)`
+  (suggestion; `insertBefore(x, null)` appends) when the value is unused; `r.insertAdjacent
+  Text|Element(pos, x)` with a known static position and a literal/identifier/static-string
+  `x` becomes `before`/`prepend`/`append`/`after` (not when an `insertAdjacentElement`
+  result is used); `while (p.firstChild) p.firstChild.remove();` becomes
+  `p.replaceChildren();` unless `p` has an optional link anywhere, can't be a node, or the
+  syntax checker (a `unicorn_types::Checker` with class syntax, `ParentNode`-like targets,
+  `Node`/`Text`/`Window`... non-targets, `window`/`self`/`globalThis` globals) rules it out.
+  `expression_start_needs_parens` now treats a statement replacement (the `while`) as a
+  statement start.
 - `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
   not count tagged templates; `has_possible_side_effect` adds tagged templates and
   spreads anywhere, like unicorn).
@@ -698,7 +709,7 @@ member reads don't count). What we learned, in our words:
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement,is-node-matches,comments,get-const-variable-initializer,array-or-object-prototype-property,get-parent-pattern}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `prefer-array-flat-map.js`, `prefer-array-flat.js`, `require-array-join-separator.js`, `no-unreadable-array-destructuring.js`, `prefer-dom-node-remove.js`, `prefer-modern-dom-apis.js`, `fix/append-argument.js`, `fix/remove-method-call.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement,is-node-matches,comments,get-const-variable-initializer,array-or-object-prototype-property,get-parent-pattern,single-statement,should-report-replace-children-receiver}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).

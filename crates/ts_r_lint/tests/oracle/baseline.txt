@@ -340,6 +340,7 @@ unicorn/prefer-date-now 61/61
 unicorn/prefer-dom-node-append 69/69
 unicorn/prefer-dom-node-remove 118/118
 unicorn/prefer-math-trunc 142/142
+unicorn/prefer-modern-dom-apis 142/142
 unicorn/prefer-native-coercion-functions 110/110
 unicorn/prefer-negative-index 167/167
 unicorn/prefer-node-protocol 80/80

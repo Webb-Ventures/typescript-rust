@@ -351,6 +351,7 @@ mod unicorn_prefer_date_now;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_remove;
 mod unicorn_prefer_math_trunc;
+mod unicorn_prefer_modern_dom_apis;
 mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_negative_index;
 mod unicorn_prefer_node_protocol;
@@ -747,6 +748,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_dom_node_append::RULE,
     &unicorn_prefer_dom_node_remove::RULE,
     &unicorn_prefer_math_trunc::RULE,
+    &unicorn_prefer_modern_dom_apis::RULE,
     &unicorn_prefer_native_coercion_functions::RULE,
     &unicorn_prefer_negative_index::RULE,
     &unicorn_prefer_node_protocol::RULE,

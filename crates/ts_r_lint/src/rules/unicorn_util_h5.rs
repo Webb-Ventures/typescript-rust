@@ -720,6 +720,9 @@ pub(crate) fn expression_start_needs_parens(
     };
     let mut node = replacement;
     for _ in 0..10_000 {
+        if is_statement(cx.node(node)) {
+            return !regex;
+        }
         let Some(parent) = cx.parent(node) else {
             return false;
         };
@@ -743,6 +746,31 @@ pub(crate) fn expression_start_needs_parens(
         node = parent;
     }
     false
+}
+
+/// Statement nodes (ESTree's `*Statement` types).
+fn is_statement(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::ExprStmt { .. }
+            | Node::Block { .. }
+            | Node::Empty {}
+            | Node::If { .. }
+            | Node::For { .. }
+            | Node::ForIn { .. }
+            | Node::ForOf { .. }
+            | Node::While { .. }
+            | Node::DoWhile { .. }
+            | Node::Return { .. }
+            | Node::Break { .. }
+            | Node::Continue { .. }
+            | Node::Throw { .. }
+            | Node::Labeled { .. }
+            | Node::Switch { .. }
+            | Node::Try { .. }
+            | Node::Debugger {}
+            | Node::With { .. }
+    )
 }
 
 /// `new Foo` without its own argument parentheses.
