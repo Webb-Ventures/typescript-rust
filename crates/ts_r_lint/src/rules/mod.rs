@@ -307,8 +307,8 @@ mod yoda;
 pub(crate) mod prelude {
     pub(crate) use super::{
         ESLINT_REC, FromOptions, NO_PRESET, TS_ESLINT_REC, TS_REC, TS_REC_TC, TS_STRICT,
-        TS_STRICT_TC, TS_STYLISTIC_TC, bool_field, create, create_default, max_option, meta,
-        obj_opt, str_field, str_list,
+        TS_STRICT_TC, TS_STYLISTIC, TS_STYLISTIC_TC, bool_field, create, create_default,
+        max_option, meta, obj_opt, str_field, str_list,
     };
     pub(crate) use crate::ast_util::*;
     pub(crate) use crate::diagnostic::Fix;
@@ -641,7 +641,9 @@ pub(crate) const TS_REC_TC: &[Preset] = &[
 /// `strict-type-checked` only.
 #[allow(dead_code)]
 pub(crate) const TS_STRICT_TC: &[Preset] = &[Preset::TsStrictTypeChecked];
-/// `stylistic-type-checked`.
+/// `stylistic` (and so `stylistic-type-checked`).
+pub(crate) const TS_STYLISTIC: &[Preset] = &[Preset::TsStylistic];
+/// The type-checked part of `stylistic-type-checked`.
 #[allow(dead_code)]
 pub(crate) const TS_STYLISTIC_TC: &[Preset] = &[Preset::TsStylisticTypeChecked];
 

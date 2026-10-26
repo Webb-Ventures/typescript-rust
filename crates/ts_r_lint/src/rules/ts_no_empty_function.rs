@@ -8,7 +8,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/no-empty-function",
         "Disallow empty functions",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Suspicious,
     )
     .suggestions(),

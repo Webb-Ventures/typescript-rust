@@ -15,7 +15,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/prefer-function-type",
         "Enforce using function types instead of interfaces with call signatures",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable(),

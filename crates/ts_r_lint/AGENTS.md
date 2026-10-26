@@ -163,6 +163,10 @@ Files:
   `gen-rule-oracle.mjs --fixtures <typescript-eslint>/packages/eslint-plugin/tests/fixtures`.
 - After improving rules: `TS_R_LINT_ORACLE_BLESS=1 cargo test -p ts_r_lint --test
   rule_oracle` rewrites the baseline.
+- `tests/presets.rs` checks every ESLint and typescript-eslint rule's `Preset` tags against
+  the published presets (`tests/oracle/presets.txt`, from `gen/gen-presets.mjs --tools <dir>`),
+  fails if one of their rules is missing, and prints how many rules of each preset (jsdoc and
+  unicorn too) are implemented (`-- --nocapture`).
 - Regenerating oracle data needs ESLint and typescript-eslint installed in a temp dir; see the
   header of `tests/oracle/gen/gen-rule-oracle.mjs`. Run it under `scripts/limit.sh`. The
   generator records tester-level `sourceType` and the parser options that change scope
@@ -234,8 +238,8 @@ Read to understand (not ported), ESLint `lib/rules/`: `no-eval.js`, `no-lonely-i
 
 ## typescript-eslint rules (round 4)
 
-Round 4 adds 13 typescript-eslint rules, each at 100% of its oracle; all use `NO_PRESET`
-(upstream puts them in the plain `stylistic` set, which has no `Preset` here yet).
+Round 4 adds 13 typescript-eslint rules, each at 100% of its oracle; all are tagged
+`TS_STYLISTIC` (upstream's plain `stylistic` set, `Preset::TsStylistic`).
 
 - **array-type**: `array`, `generic` or `array-simple` (`T[]` only for simple element
   types: names, keywords, `this`, arrays, references without type arguments), with a

@@ -16,7 +16,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/consistent-generic-constructors",
         "Enforce specifying generic type arguments on type annotation or constructor name of a constructor call",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable(),

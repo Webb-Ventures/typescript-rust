@@ -17,7 +17,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/consistent-type-definitions",
         "Enforce type definitions to consistently use either `interface` or `type`",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable(),

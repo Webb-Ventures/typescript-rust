@@ -16,7 +16,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/adjacent-overload-signatures",
         "Require that function overload signatures be consecutive",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     ),
     create: create_default::<AdjacentOverloadSignatures>,

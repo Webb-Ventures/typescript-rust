@@ -14,7 +14,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/prefer-for-of",
         "Enforce the use of `for-of` loop over the standard `for` loop where possible",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     ),
     create: create_default::<PreferForOf>,

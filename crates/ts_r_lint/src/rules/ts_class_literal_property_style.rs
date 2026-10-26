@@ -21,7 +21,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/class-literal-property-style",
         "Enforce that literals on classes are exposed in a consistent style",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .suggestions(),

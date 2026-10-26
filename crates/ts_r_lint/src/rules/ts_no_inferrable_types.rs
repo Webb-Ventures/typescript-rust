@@ -18,7 +18,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/no-inferrable-types",
         "Disallow explicit type declarations for variables or parameters initialized to a number, string, or boolean",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable(),

@@ -23,7 +23,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/consistent-type-assertions",
         "Enforce consistent usage of type assertions",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable()
