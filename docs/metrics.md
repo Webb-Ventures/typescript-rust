@@ -125,7 +125,7 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Stage | Pass |
 |---|---|
-| Parse | 97.0% (959 / 989; the 30 failures are grammar errors ts-r's parser reports in JavaScript that Node and tsc accept, most often TS1313) |
+| Parse | 100% (989 / 989) |
 | TS transform | 100% (48 / 48) |
 | Bundle and run, vs esbuild | 100% (915 / 915) |
 | Type check, vs tsc 7 | 92.0% (652 / 709) |
