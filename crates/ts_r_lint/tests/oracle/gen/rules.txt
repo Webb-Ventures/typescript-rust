@@ -262,3 +262,4 @@ unicorn/prefer-optional-catch-binding
 unicorn/text-encoding-identifier-case
 unicorn/no-console-spaces
 @typescript-eslint/array-type
+@typescript-eslint/consistent-indexed-object-style
