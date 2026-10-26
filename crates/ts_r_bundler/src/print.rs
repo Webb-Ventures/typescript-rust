@@ -370,7 +370,7 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
         Wrap::Esm => {
             let all: Vec<NodeId> = prologue.into_iter().chain(body).collect();
             let (mut outside, inside) = hoist(&mut ast, &all);
-            let f = build::arrow(&mut ast, &[], &inside, false, 0);
+            let f = build::arrow(&mut ast, &[], &inside, plan.wrap_async, 0);
             let call = Expr::ident(&plan.helper_esm).build(&mut ast, 0);
             let call = build::call(&mut ast, call, &[f], 0);
             let name = build::ident(&mut ast, &plan.wrapper_name, 0);

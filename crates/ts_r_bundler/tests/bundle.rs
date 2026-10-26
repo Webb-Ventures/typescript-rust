@@ -743,6 +743,50 @@ fn missing_import_is_an_error() {
 }
 
 #[test]
+fn dynamic_import_of_top_level_await_waits_through_cycles() {
+    // The wrappers of `main`, `a` and `b` become async because `dep` awaits; the cycle
+    // between `a` and `b` must not deadlock (esbuild issue 4498).
+    let fs = project(&[
+        ("src/entry.mjs", "await import('./main.mjs');\nconsole.log('done');\n"),
+        ("src/main.mjs", "import { a } from './a.mjs';\nconsole.log(a());\n"),
+        (
+            "src/a.mjs",
+            "import { b } from './b.mjs';\nimport { tla } from './dep.mjs';\nexport function a() { return b() + tla; }\n",
+        ),
+        (
+            "src/b.mjs",
+            "import { a } from './a.mjs';\nexport function b() { return typeof a; }\n",
+        ),
+        ("src/dep.mjs", "export const tla = await Promise.resolve('x');\n"),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.mjs"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("async () =>"), "{code}");
+    if have_node() {
+        assert_eq!(run_node("tla-cycle", &r, "entry.js"), "functionx\ndone\n");
+    }
+}
+
+#[test]
+fn require_of_a_transitive_top_level_await_is_an_error() {
+    let fs = project(&[
+        ("src/entry.js", "require('./a');\n"),
+        ("src/a.js", "import './b';\n"),
+        ("src/b.js", "await 0;\n"),
+    ]);
+    let ctx = BuildContext::new(opts(&["src/entry.js"]), Arc::new(fs)).expect("options");
+    let r = ctx.build();
+    assert!(r.has_errors());
+    assert!(
+        r.messages
+            .iter()
+            .any(|m| m.text.contains("transitive dependency") && m.text.contains("b.js")),
+        "{:?}",
+        r.messages
+    );
+}
+
+#[test]
 fn side_effects_false_keeps_effects_of_used_files() {
     let fs = project(&[
         (

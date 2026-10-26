@@ -64,6 +64,9 @@ pub enum Binding {
 pub struct Link {
     pub kinds: Vec<Kind>,
     pub wrap: Vec<Wrap>,
+    /// `init_x()` returns a promise: the module (or an ES module it imports, through any
+    /// depth) has a top-level await, so its wrapper is an `async` arrow that callers await.
+    pub async_init: Vec<bool>,
     pub included: Vec<bool>,
     pub live: Vec<Vec<bool>>,
     /// The module's namespace object (`x_exports`) is needed.
@@ -151,6 +154,7 @@ pub fn link(g: &Graph, entries: &[ModuleId], dynamic_entries: &[ModuleId], o: Li
         l: Link {
             kinds: vec![Kind::Esm; n],
             wrap: vec![Wrap::None; n],
+            async_init: vec![false; n],
             included: vec![false; n],
             live: g
                 .modules
@@ -199,6 +203,7 @@ pub fn link(g: &Graph, entries: &[ModuleId], dynamic_entries: &[ModuleId], o: Li
     }
     lk.compute_kinds();
     lk.compute_wraps();
+    lk.compute_async();
     // `require()` of an external may become an import of it (`require_to_import`).
     for m in &g.modules {
         for (r, t) in m.meta.records.iter().zip(&m.targets) {
@@ -291,7 +296,9 @@ impl Linker<'_> {
                 Kind::Esm
             } else if meta.uses_cjs {
                 Kind::Cjs
-            } else if meta.has_esm_syntax {
+            } else if meta.has_esm_syntax || meta.has_tla {
+                // Top-level await only parses in a module: the file is ESM even when it is
+                // `require()`d (which then is an error).
                 Kind::Esm
             } else if required[i] || m.loader == Loader::Empty {
                 Kind::Cjs
@@ -345,16 +352,6 @@ impl Linker<'_> {
             // object; `mark_part` asks for it when such a record is live.
             self.l.wrap[ti] = Wrap::Esm;
             let m = &g.modules[ti];
-            if m.meta.has_tla {
-                self.l.messages.push(Message::new(
-                    Severity::Error,
-                    Some(m.pretty.clone()),
-                    format!(
-                        "This require call is not allowed because the imported file {:?} contains a top-level await",
-                        m.pretty
-                    ),
-                ));
-            }
             for (i, r) in m.meta.records.iter().enumerate() {
                 if matches!(r.kind, RecordKind::Import | RecordKind::ReExport)
                     && let Target::Module(u) = m.targets[i]
@@ -364,6 +361,94 @@ impl Linker<'_> {
                 }
             }
         }
+    }
+
+    /// Marks wrapped ES modules whose evaluation awaits (their own top-level await or a
+    /// statically imported wrapped module's), and reports `require()` calls that reach one:
+    /// a `require()` cannot wait. A dynamic `import()` can: its wrapper becomes `async`.
+    fn compute_async(&mut self) {
+        let g = self.g;
+        let n = g.modules.len();
+        // Static ESM dependencies (the `init_x()` calls in a wrapper).
+        let kinds = &self.l.kinds;
+        let deps: Vec<Vec<usize>> = g
+            .modules
+            .iter()
+            .map(|module| {
+                module
+                    .meta
+                    .records
+                    .iter()
+                    .zip(&module.targets)
+                    .filter_map(|(r, t)| match (r.kind, t) {
+                        (RecordKind::Import | RecordKind::ReExport, Target::Module(u))
+                            if kinds[*u as usize] == Kind::Esm =>
+                        {
+                            Some(*u as usize)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut is_async: Vec<bool> = (0..n)
+            .map(|i| self.l.wrap[i] == Wrap::Esm && g.modules[i].meta.has_tla)
+            .collect();
+        // Monotone fixed point: each round turns at least one module async or stops.
+        let mut changed = true;
+        let mut rounds = 0;
+        while changed && rounds <= n {
+            changed = false;
+            rounds += 1;
+            for i in 0..n {
+                if !is_async[i] && self.l.wrap[i] == Wrap::Esm && deps[i].iter().any(|&u| is_async[u]) {
+                    is_async[i] = true;
+                    changed = true;
+                }
+            }
+        }
+        let mut errors = Vec::new();
+        for m in &g.modules {
+            for (r, t) in m.meta.records.iter().zip(&m.targets) {
+                let Target::Module(t) = *t else { continue };
+                let ti = t as usize;
+                if r.kind != RecordKind::Require || !is_async[ti] {
+                    continue;
+                }
+                let target = &g.modules[ti];
+                let text = if target.meta.has_tla {
+                    format!(
+                        "This require call is not allowed because the imported file {:?} contains a top-level await",
+                        target.pretty
+                    )
+                } else {
+                    // The nearest module with the await itself, breadth first.
+                    let mut seen = vec![false; n];
+                    let mut queue = std::collections::VecDeque::from([ti]);
+                    seen[ti] = true;
+                    let mut found = ti;
+                    while let Some(x) = queue.pop_front() {
+                        if g.modules[x].meta.has_tla {
+                            found = x;
+                            break;
+                        }
+                        for &u in &deps[x] {
+                            if !seen[u] {
+                                seen[u] = true;
+                                queue.push_back(u);
+                            }
+                        }
+                    }
+                    format!(
+                        "This require call is not allowed because the transitive dependency {:?} contains a top-level await",
+                        g.modules[found].pretty
+                    )
+                };
+                errors.push(Message::new(Severity::Error, Some(m.pretty.clone()), text));
+            }
+        }
+        self.l.messages.extend(errors);
+        self.l.async_init = is_async;
     }
 
     fn ext_id(&mut self, path: &str) -> u32 {

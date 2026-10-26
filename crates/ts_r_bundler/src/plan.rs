@@ -56,6 +56,8 @@ pub enum PrologueStmt {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ModulePlan {
     pub wrap: Wrap,
+    /// The `init_x()` wrapper is an `async` arrow (see [`Link::async_init`]).
+    pub wrap_async: bool,
     /// `require_x` / `init_x` (empty when not wrapped).
     pub wrapper_name: String,
     /// Live parts.
@@ -517,7 +519,8 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                     }
                     if wrap == Wrap::Esm {
                         refs.insert(p.wrapper[ei].clone());
-                        tail.push(format!("{}();", p.wrapper[ei]));
+                        let wait = if l.async_init[ei] { "await " } else { "" };
+                        tail.push(format!("{wait}{}();", p.wrapper[ei]));
                     }
                     if keep && (format == Format::Esm || l.needs_ns[ei]) {
                         match format {
@@ -806,6 +809,16 @@ impl Planner<'_> {
         }
     }
 
+    /// `init_x()`, or `await init_x()` when `x`'s wrapper is async.
+    fn init_call(&self, t: ModuleId) -> Expr {
+        let call = Expr::call(&self.wrapper[t as usize], vec![]);
+        if self.l.async_init[t as usize] {
+            Expr::Await(Box::new(call))
+        } else {
+            call
+        }
+    }
+
     fn import_var(&mut self, importer: ModuleId, t: ModuleId) -> String {
         if let Some(n) = self.import_vars.get(&(importer, t)) {
             return n.clone();
@@ -1036,10 +1049,13 @@ impl Planner<'_> {
                             Kind::Esm => {
                                 refs.insert(self.wrapper[ti].clone());
                                 refs.insert(self.ns_name[ti].clone());
-                                Expr::promise_then(Expr::Seq(vec![
-                                    Expr::call(&self.wrapper[ti], vec![]),
-                                    Expr::ident(&self.ns_name[ti]),
-                                ]))
+                                let init = Expr::call(&self.wrapper[ti], vec![]);
+                                let ns = Expr::ident(&self.ns_name[ti]);
+                                if l.async_init[ti] {
+                                    Expr::promise_then_after(init, ns)
+                                } else {
+                                    Expr::promise_then(Expr::Seq(vec![init, ns]))
+                                }
                             }
                             Kind::Css => Expr::promise_then(Expr::Object(Vec::new())),
                         })
@@ -1133,7 +1149,7 @@ impl Planner<'_> {
                 Wrap::Esm => {
                     if inited.insert(t) {
                         refs.insert(self.wrapper[ti].clone());
-                        prologue.push(PrologueStmt::Expr(Expr::call(&self.wrapper[ti], vec![])));
+                        prologue.push(PrologueStmt::Expr(self.init_call(t)));
                     }
                 }
                 Wrap::None => {}
@@ -1147,10 +1163,7 @@ impl Planner<'_> {
         for t in inits {
             if inited.insert(t) {
                 refs.insert(self.wrapper[t as usize].clone());
-                prologue.push(PrologueStmt::Expr(Expr::call(
-                    &self.wrapper[t as usize],
-                    vec![],
-                )));
+                prologue.push(PrologueStmt::Expr(self.init_call(t)));
             }
         }
         if l.needs_ns[mi] {
@@ -1247,6 +1260,7 @@ impl Planner<'_> {
             .collect();
         ModulePlan {
             wrap,
+            wrap_async: wrap == Wrap::Esm && l.async_init[mi],
             wrapper_name: self.wrapper[mi].clone(),
             live,
             names,
