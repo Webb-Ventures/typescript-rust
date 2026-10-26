@@ -299,6 +299,7 @@ unicorn/name-replacements 377/377
 unicorn/new-for-builtins 366/366
 unicorn/no-abusive-eslint-disable 33/33
 unicorn/no-accidental-bitwise-operator 66/66
+unicorn/no-array-callback-reference 312/312
 unicorn/no-array-concat-in-loop 33/33
 unicorn/no-array-from-fill 30/30
 unicorn/no-array-method-this-argument 137/137
@@ -401,6 +402,7 @@ unicorn/numeric-separators-style 128/128
 unicorn/operator-assignment 21/21
 unicorn/prefer-add-event-listener 97/97
 unicorn/prefer-add-event-listener-options 26/26
+unicorn/prefer-array-find 411/411
 unicorn/prefer-array-flat 330/330
 unicorn/prefer-array-flat-map 114/114
 unicorn/prefer-array-from-range 90/90

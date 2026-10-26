@@ -339,7 +339,7 @@ mod unicorn_names;
 mod unicorn_new_for_builtins;
 mod unicorn_no_abusive_eslint_disable;
 mod unicorn_no_accidental_bitwise_operator;
-mod unicorn_no_anonymous_default_export;
+mod unicorn_no_array_callback_reference;
 mod unicorn_no_array_concat_in_loop;
 mod unicorn_no_array_from_fill;
 mod unicorn_no_array_front_mutation;
@@ -461,7 +461,7 @@ mod unicorn_numeric_separators_style;
 mod unicorn_operator_assignment;
 mod unicorn_prefer_add_event_listener;
 mod unicorn_prefer_add_event_listener_options;
-mod unicorn_prefer_aggregate_error;
+mod unicorn_prefer_array_find;
 mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
 mod unicorn_prefer_array_from_range;
@@ -939,6 +939,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_explicit_length_check::RULE,
     &unicorn_new_for_builtins::RULE,
     &unicorn_no_accidental_bitwise_operator::RULE,
+    &unicorn_no_array_callback_reference::RULE,
     &unicorn_no_array_concat_in_loop::RULE,
     &unicorn_no_array_reduce::RULE,
     &unicorn_no_array_reverse::RULE,
@@ -1043,7 +1044,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_numeric_separators_style::RULE,
     &unicorn_operator_assignment::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
-    &unicorn_prefer_aggregate_error::RULE,
+    &unicorn_prefer_array_find::RULE,
     &unicorn_prefer_array_from_range::RULE,
     &unicorn_prefer_array_slice::RULE,
     &unicorn_prefer_array_last_methods::RULE,
