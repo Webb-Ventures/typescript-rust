@@ -27,7 +27,7 @@ pub fn serve(engine: &Engine) -> std::io::Result<()> {
         match parts.next() {
             Some("C") => {
                 let path = crate::project::absolute(parts.next().unwrap_or(""));
-                match engine.compile_file(&path) {
+                match engine.compile_file(&path, false) {
                     Ok(u) => {
                         let f = match u.compiled.format {
                             Format::Esm => "esm",

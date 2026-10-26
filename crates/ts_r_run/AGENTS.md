@@ -11,7 +11,9 @@ Design and measurements: [../../docs/design/0002-transform-and-codegen.md](../..
 prebuild|hook] [--node <bin>] [node flags] <file> [args...]`. Unknown flags before the file
 go to Node (`-r`, `--require`, `--import`, `--env-file`, `-C`, `--conditions`, ... take the next
 argument). Internal modes: `--compile <file>` (prints `esm`/`cjs`, a newline, the code; used by
-the preload for files the graph walk missed), `--resolve <parent> <specifier>` (prints the
+the preload for files the graph walk missed), `--compile-cjs <file>` (the same for a file
+loaded with `require()`: an ES module comes out as CommonJS unless it has top-level `await`),
+`--resolve <parent> <specifier>` (prints the
 tsconfig `paths`/`baseUrl` target or nothing; used by the preload for plain JavaScript
 parents) and `--serve` (the hook strategy's compiler).
 `ts-r-run --test [node flags]` with no file runs Node's test runner on its default patterns
@@ -106,6 +108,31 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   - `require()` of a module with top-level `await` throws a `TransformError` (Node's
     `ERR_REQUIRE_ASYNC_MODULE` renamed, its message after tsx's reason), and the preload's
     `Module.prototype.require` wrapper does only that.
+  - `import()` stays native in CommonJS output (`TransformOptions::node_module`), so an ES
+    module with top-level `await` still loads through it; only static imports become
+    `require` (and are the graph's `require` edges).
+  - Exports are declared in name order: `compile::sort_cjs_exports` replaces the transform's
+    `exports.x = void 0` lists with one chain right after the `__esModule` marker, names
+    sorted, the first innermost (so assigned first), 50 per statement; `Object.keys` of the
+    module then lists them as esbuild's CommonJS output does under tsx. `__importStar` sets
+    `default` before copying the other keys (`default_first_in_import_star`).
+  - `require()` of an ES module gets it compiled to CommonJS, as under tsx: `.ts` files
+    (`compile(.., as_cjs)`, the `Compiled::forced` flag), and plain `.mjs` or `.js` that Node
+    runs as ESM (`requiredEsm` in the preload, through `--compile-cjs`, also inside
+    node_modules; one process per file). Not one with top-level `await`, which stays an ES
+    module (and `require` throws the `TransformError` above). A forced file that mentions
+    `module.exports` also honours an `export { x as "module.exports" }` the way Node's
+    `require(esm)` does (`MODULE_EXPORTS_EXPORT`).
+  - The graph walks a file once per way it is loaded: `(path, as_cjs)`, `true` for `require`
+    edges. A natural CommonJS file is one module for both. A forced compilation is stored in
+    the manifest under `path + "\0cjs"` (`graph::CJS_VARIANT`, in `"f"` and `"r"`); the
+    preload takes it for `require()`, and for `import` too outside a `"type": "module"`
+    package, so a file that is both required and imported is one CommonJS instance, as under
+    tsx. Two instances would run its code twice, and Node keys source maps by URL, so one
+    instance's stack traces would be mapped with the other's map.
+  - Plain JavaScript outside node_modules that calls `import(` (ES or CommonJS, `.cjs`
+    included) is compiled (`interopJs`), so its `import()` gets the same unwrap as compiled
+    code.
 - **Node never strips types from what the preload returns**: a `Module.prototype._compile`
   wrapper maps the `*-typescript` formats Node's CommonJS loader gives a `.ts` file to the
   plain ones for compiled files (Node refuses type stripping inside node_modules, and the code
@@ -165,7 +192,9 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   `--tsconfig`, `--test` locations, the signal relay, `import.meta` and the `__esModule`
   marker in CommonJS, `?query` instances, syntax errors behind `import()`, `require` of
   top-level `await`, the `import()` unwrap, JSON named exports, TypeScript in packages,
-  `require('..')` in a package, `--test` without files).
+  `require('..')` in a package, `--test` without files, `require()` of ES modules as one
+  CommonJS instance, source maps of a file both imported and required, a `?query` import
+  after a plain one in CommonJS, `require` through an `imports` map, `--compile-cjs`).
   Skipped when Node is missing.
 - Parity oracle: [`bench/run-oracle`](../../bench/run-oracle/README.md) runs tsx's own suite and
   Node's TypeScript tests against ts-r-run (`node bench/run-oracle/run.mjs`; numbers there).
@@ -215,10 +244,11 @@ install a signal handler, and the crate denies `unsafe`). Dev: `ts_r_testing`.
 - Only the entry's tsconfig is used for every file (like tsx); per-package tsconfigs in a
   monorepo are ignored.
 - From the run oracle (bench/run-oracle/README.md has the cases):
-  - `require()` reaching an ES module: tsx compiles every such module to CommonJS with
-    esbuild's interop (namespace keys sorted, `default` first, `.mjs` and ES packages turned
-    into CommonJS); ts-r-run keeps Node's `require(esm)` and tsc's helpers. This is the two
-    "package type: undefined" smoke cases (from `.js` and from `.ts`).
+  - In a package without `type`, tsx runs every TypeScript file as CommonJS; ts-r-run keeps
+    Node's syntax detection, so a typeless `.ts` with ES syntax and no CommonJS global is an
+    ES module when imported (`typeof require` is `undefined` there). When the graph sees the
+    same file `require()`d it is one CommonJS instance (above); a file only imported from
+    plain JavaScript stays an ES module.
   - Hook strategy: the preload's resolve fallback, lenient `.js` and `--resolve` are only in
     the prebuild preload (`js/hooks.mjs`).
   - `require` isn't defined in ES output (tsx defines it).

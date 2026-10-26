@@ -31,7 +31,9 @@ node bench/run-oracle/fails.mjs --skips [REGEX]  # skips with their reasons
 
 `--source tsx|node`, `--spec NAME` and `--filter REGEX` narrow a run. Every process runs under
 `scripts/limit.sh`, at most four tests at a time, each with a timeout. The run uses its own
-`TS_R_CACHE_DIR` and deletes it when it finishes.
+`TS_R_CACHE_DIR` and deletes it when it finishes. `TS_R_ORACLE_KEEP=<dir>` copies each tsx
+test's fixture to `<dir>/<n>` before it runs, to reproduce a failure by hand (with
+`--filter`, so that only the failing tests are copied).
 
 Tests are skipped when they fail with tsx itself in this setup, or when they test something
 `ts-r-run` does not offer by design: the Node API (`tsx/esm/api`, `register()`), the REPL,

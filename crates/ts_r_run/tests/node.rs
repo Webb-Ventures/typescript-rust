@@ -523,3 +523,114 @@ fn require_of_a_parent_directory_in_a_package_finds_its_typescript_index() {
     };
     assert_eq!(stdout(&out), "ts-index\n");
 }
+
+#[test]
+fn required_es_modules_run_as_one_commonjs_instance_like_tsx() {
+    // `require()` of an ES module (`.ts`, `.mjs`, `.js` in a `"type": "module"` package) gets
+    // it compiled to CommonJS: exports in name order, a hidden `__esModule`, no added
+    // `default`. A plain `.cjs` file's `import()` of the same file shares that instance.
+    let files = [
+        ("package.json", "{}"),
+        ("mod/package.json", r#"{ "type": "module" }"#),
+        (
+            "main.cts",
+            "const a = require('./a.ts');\nconst m = require('./m.mjs');\nconst p = require('./mod/p.js');\nconsole.log(Object.keys(a).join(','), a.__esModule, a.default, Object.keys(m).join(','), m.__esModule, Object.keys(p).join(','));\nrequire('./c.cjs');\n",
+        ),
+        (
+            "a.ts",
+            "export const z = 1;\nexport function b() {}\nexport default 3;\nconsole.log('a runs', typeof module);\n",
+        ),
+        ("m.mjs", "export const m = 1;\nexport default 2;\n"),
+        ("mod/p.js", "export const p = 1;\n"),
+        (
+            "c.cjs",
+            "import('./a.ts').then((ns) => console.log('ns', Object.keys(ns).join(','), ns.default));\n",
+        ),
+    ];
+    let Some(out) = run("require-esm", &files, &["main.cts"]) else {
+        return;
+    };
+    assert_eq!(
+        stdout(&out),
+        "a runs object\nb,default,z true 3 default,m true p\nns b,default,z 3\n"
+    );
+}
+
+#[test]
+fn an_imported_file_with_a_require_caller_keeps_its_source_map() {
+    // `t.ts` is `import()`ed by a plain `.cjs` file before the entry `require`s it: both get
+    // the one CommonJS instance, so its stack trace is mapped with its own source map.
+    let files = [
+        ("package.json", "{}"),
+        (
+            "main.ts",
+            "import * as c from './c.cjs';\nimport './t.ts';\nconsole.log(typeof c, typeof require('node:fs'));\n",
+        ),
+        ("c.cjs", "import('./t.ts');\n"),
+        (
+            "t.ts",
+            "enum E { A }\nexport const a: E = E.A;\nconsole.log('t', new Error().stack!.split('\\n')[1].trim().split(':').at(-2));\n",
+        ),
+    ];
+    let Some(out) = run("import-and-require", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "t 3\nobject object\n");
+}
+
+#[test]
+fn a_query_import_after_a_plain_one_is_a_module_of_its_own_in_commonjs() {
+    // CommonJS output keeps `import()` native, so an ES module with top-level `await` loads.
+    let files = [
+        ("package.json", "{}"),
+        (
+            "main.ts",
+            "import './j.js';\nimport './j.js?q=1';\nimport('./t.mjs').then((m) => console.log('tla', m.v));\nconsole.log('main', typeof require('node:fs'));\n",
+        ),
+        (
+            "j.js",
+            "console.log(import.meta.url.split('/').pop(), typeof __filename !== 'undefined' ? __filename.split('/').pop() : undefined);\nexport const j = 1;\n",
+        ),
+        ("t.mjs", "export const v = await Promise.resolve(5);\n"),
+    ];
+    let Some(out) = run("query-after-plain", &files, &["main.ts"]) else {
+        return;
+    };
+    assert_eq!(
+        stdout(&out),
+        "j.js j.js\nj.js?q=1 j.js\nmain object\ntla 5\n"
+    );
+}
+
+#[test]
+fn require_through_an_imports_map_finds_typescript() {
+    let files = [
+        ("package.json", r##"{ "imports": { "#e.js": "./e.js" } }"##),
+        ("main.cts", "console.log(require('#e.js').e);\n"),
+        ("e.ts", "export const e: string = 'e-ts';\n"),
+    ];
+    let Some(out) = run("require-imports-map", &files, &["main.cts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "e-ts\n");
+}
+
+#[test]
+fn compile_cjs_prints_an_es_module_as_commonjs() {
+    let files = [
+        ("package.json", r#"{ "type": "module" }"#),
+        ("a.ts", "export const a: number = 1;\n"),
+        ("t.ts", "export const t = await Promise.resolve(1);\n"),
+    ];
+    let Some(out) = run("compile-cjs", &files, &["--compile-cjs", "a.ts"]) else {
+        return;
+    };
+    let text = stdout(&out);
+    assert!(text.starts_with("cjs\n"), "{text}");
+    assert!(text.contains("exports.a = "), "{text}");
+    // Top-level `await` needs an ES module: it stays one.
+    let Some(out) = run("compile-cjs-tla", &files, &["--compile-cjs", "t.ts"]) else {
+        return;
+    };
+    assert!(stdout(&out).starts_with("esm\n"));
+}

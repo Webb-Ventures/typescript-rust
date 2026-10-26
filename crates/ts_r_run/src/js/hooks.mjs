@@ -61,9 +61,11 @@ Object.defineProperty(TransformError.prototype, 'name', { value: 'TransformError
 const transformError = (errors) => new TransformError(`Transform failed:\n${errors.trimEnd()}`);
 
 // A file the graph walk didn't reach (computed specifier, require from plain JS): compile
-// it now with a short-lived ts-r-run process.
-function compileNow(path) {
-  const r = spawnSync(bin, sourceMaps ? ['--compile', path] : ['--no-source-maps', '--compile', path], {
+// it now with a short-lived ts-r-run process. `cjs`: it is loaded with `require()`, which
+// gets an ES module compiled to CommonJS, as under tsx (unless it has top-level `await`).
+function compileNow(path, cjs = false) {
+  const mode = cjs ? '--compile-cjs' : '--compile';
+  const r = spawnSync(bin, sourceMaps ? [mode, path] : ['--no-source-maps', mode, path], {
     encoding: 'utf8',
     maxBuffer: 1 << 30,
     env: { ...env, TS_R_RUN_TSCONFIG: tsconfig ?? '', TS_R_RUN_ENTRY: entry ?? '' },
@@ -97,6 +99,23 @@ function withUrl(source, url) {
   const at = source.lastIndexOf(META_URL);
   return at === -1 ? source : source.slice(0, at) + JSON.stringify(url) + source.slice(at + META_URL.length);
 }
+
+// Node names an alias module after its alias (`config.ts?x=1`); under tsx `__filename` and
+// `__dirname` are the real file's. Set after the directive prologue, on its line.
+function withRealFilename(r, alias, url) {
+  if (r.format !== 'commonjs' || r.source == null) return r;
+  const cut = url.search(/[?#]/);
+  const path = toPath(cut === -1 ? url : url.slice(0, cut));
+  if (path === toPath(alias)) return r;
+  const text = typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
+  const n = PROLOGUE.exec(text)[0].length;
+  const dir = path.slice(0, Math.max(path.lastIndexOf('/'), 1));
+  const set = `__filename=${JSON.stringify(path)};__dirname=${JSON.stringify(dir)};`;
+  return { ...r, source: text.slice(0, n) + set + text.slice(n) };
+}
+
+// The manifest's name for a file's CommonJS compilation for `require()` (graph::CJS_VARIANT).
+const CJS_VARIANT = '\0cjs';
 
 const SWAP = { '.js': ['.ts', '.tsx'], '.jsx': ['.tsx'], '.mjs': ['.mts'], '.cjs': ['.cts'] };
 // Not `.mts` or `.cts`: an extensionless path never finds those, under tsx.
@@ -165,6 +184,10 @@ function failedTarget(specifier, parent, error) {
   // A package `main` that doesn't exist: "Cannot find package '<dir>/<main>' imported from".
   const m = /^Cannot find package '([^']+)' imported from /.exec(String(error?.message ?? ''));
   if (m !== null && (m[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(m[1]))) return pathToFileURL(m[1]).href;
+  // `require()` of a package `imports`/`exports` target that doesn't exist: "Cannot find
+  // module '<file>'" with the absolute file the map gave.
+  const t = error?.code === 'MODULE_NOT_FOUND' ? /^Cannot find module '([^']+)'/.exec(String(error.message)) : null;
+  if (t !== null && (t[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(t[1]))) return pathToFileURL(t[1]).href;
   // `require()` says only "Cannot find module": the path is the package's directory in the
   // nearest node_modules that has it, joined with the subpath.
   if (error?.code === 'MODULE_NOT_FOUND' && BARE.test(specifier) && parent?.startsWith('file:')) {
@@ -275,6 +298,7 @@ function lenientJs(url, bare, context, nextLoad) {
   if (r.source == null || (r.format !== 'commonjs' && r.format !== 'module' && r.format != null)) return r;
   const text = typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
   if (!ESM_SYNTAX.test(text)) return interopJs(r, url, bare, text);
+  if (isRequire(context) && r.format === 'module') return requiredEsm(r, url, bare);
   const type = packageType(bare);
   if (type === 'module' || (type !== 'commonjs' && !CJS_GLOBALS.test(text))) return interopJs(r, url, bare, text);
   let [format, source] = compileNow(toPath(bare));
@@ -289,11 +313,27 @@ const isRequire = (context) => {
   return Array.isArray(c) ? c.includes('require') && !c.includes('import') : c.has('require') && !c.has('import');
 };
 
-// An ES module in plain JavaScript that calls `import()` is compiled too, so that the result
-// goes through the same interop as in TypeScript (compile.rs, IMPORT_INTEROP), as tsx does.
-// Packages in node_modules are left as they are: compiling one costs a process.
+// An ES module in plain JavaScript loaded with `require()` (`.mjs`, or `.js` Node runs as
+// ESM) is compiled to CommonJS, as tsx does, inside node_modules too; one with top-level
+// `await` is left to Node, whose error the `require` wrapper below names as tsx does.
+function requiredEsm(r, url, bare) {
+  if (r.format !== 'module' || r.source == null) return r;
+  let compiled;
+  try {
+    compiled = compileNow(toPath(bare), true);
+  } catch {
+    // Node runs it as it is, and reports its own errors.
+    return r;
+  }
+  if (compiled[0] !== 1) return r;
+  return { format: 'commonjs', source: url === bare ? compiled[1] : withUrl(compiled[1], url), shortCircuit: true };
+}
+
+// Plain JavaScript (an ES module or CommonJS) that calls `import()` is compiled too, so that
+// the result goes through the same interop as in TypeScript (compile.rs, IMPORT_INTEROP), as
+// tsx does. Packages in node_modules are left as they are: compiling one costs a process.
 function interopJs(r, url, bare, text) {
-  if (r.format !== 'module' || r.source == null || bare.includes('/node_modules/')) return r;
+  if ((r.format !== 'module' && r.format !== 'commonjs') || r.source == null || bare.includes('/node_modules/')) return r;
   text ??= typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
   if (!/\bimport\s*\(/.test(text)) return r;
   let compiled;
@@ -303,7 +343,9 @@ function interopJs(r, url, bare, text) {
     // Node runs it as it is, and reports its own errors.
     return r;
   }
-  return compiled[0] === 1 ? r : { format: 'module', source: compiled[1], shortCircuit: true };
+  if (r.format === 'module') return compiled[0] === 1 ? r : { format: 'module', source: compiled[1], shortCircuit: true };
+  if (compiled[0] !== 1) return r;
+  return { format: 'commonjs', source: url === bare ? compiled[1] : withUrl(compiled[1], url), shortCircuit: true };
 }
 
 // A JSON object imported as an ES module: its keys are named exports as well as `default`
@@ -368,7 +410,9 @@ registerHooks({
     return resolveModule(specifier, parent ? { ...context, parentURL: parent } : context, nextResolve);
   },
   load(url, context, nextLoad) {
-    const r = loadModule(aliases.get(url) ?? url, context, nextLoad);
+    const real = aliases.get(url);
+    let r = loadModule(real ?? url, context, nextLoad);
+    if (real !== undefined) r = withRealFilename(r, url, real);
     return swapsRequire ? withRealRequire(r, context) : r;
   },
 });
@@ -406,14 +450,16 @@ Module.prototype._compile = function _compile(content, filename, format) {
 function resolveModule(specifier, context, nextResolve) {
   const parent = context.parentURL;
   if (parent !== undefined && parent.startsWith('file:')) {
-    const map = resolved[toPath(parent)];
-    if (map !== undefined) {
-      const target = map[specifier];
-      if (target !== undefined) {
-        const cut = specifier.search(/[?#]/);
-        const url = pathToFileURL(target).href;
-        return cut === -1 ? { url, shortCircuit: true } : queryAlias(new URL(specifier.slice(cut), url).href);
-      }
+    // A file's CommonJS compilation for `require()` resolves on its own (all `require`).
+    const from = toPath(parent);
+    const own = resolved[from];
+    const cjs = resolved[from + CJS_VARIANT];
+    const [first, second] = isRequire(context) ? [cjs, own] : [own, cjs];
+    const target = first?.[specifier] ?? second?.[specifier];
+    if (target !== undefined) {
+      const cut = specifier.search(/[?#]/);
+      const url = pathToFileURL(target).href;
+      return cut === -1 ? { url, shortCircuit: true } : queryAlias(new URL(specifier.slice(cut), url).href, isRequire(context));
     }
   }
   try {
@@ -447,20 +493,32 @@ function loadModule(url, context, nextLoad) {
     if (COMPILED.test(bare) && !DECL.test(bare)) {
       const path = toPath(bare);
       if (failed[path] !== undefined) throw transformError(failed[path]);
-      const f = files[path];
+      const required = isRequire(context);
+      // A file the graph saw `require()`d outside a `"type": "module"` package is one
+      // CommonJS module for `import` too, as under tsx (which runs such files as CommonJS):
+      // two instances would run its code twice, and Node keys source maps by URL, so one
+      // instance's stack traces would be mapped with the other's map.
+      const variant = files[path + CJS_VARIANT];
+      const shared = variant !== undefined && !/\.mts$/i.test(bare) && packageType(bare) !== 'module';
+      const f = (required || shared ? variant : undefined) ?? files[path];
       let format;
       let source;
-      if (f !== undefined) {
+      if (f !== undefined && (f[0] === 1 || !required)) {
         format = f[0];
         source = blob.toString('utf8', base + f[1], base + f[2]);
       } else {
-        [format, source] = compileNow(path);
+        // Not in the graph, or an ES module the graph didn't see `require()`d.
+        [format, source] = compileNow(path, required);
       }
       if (format === 1 && end !== url.length) source = withUrl(source, url);
       return { format: format === 1 ? 'commonjs' : 'module', source, shortCircuit: true };
     }
     if (bare.endsWith('.js')) return lenientJs(url, bare, context, nextLoad);
-    if (bare.endsWith('.mjs')) return interopJs(nextLoad(url, context), url, bare);
+    if (bare.endsWith('.cjs')) return interopJs(nextLoad(url, context), url, bare);
+    if (bare.endsWith('.mjs')) {
+      const r = nextLoad(url, context);
+      return isRequire(context) ? requiredEsm(r, url, bare) : interopJs(r, url, bare);
+    }
     // JSON imports need no `with { type: 'json' }` attribute, as under tsx, and an object's
     // keys are named exports too.
     if (bare.endsWith('.json') && context.importAttributes?.type === undefined) {

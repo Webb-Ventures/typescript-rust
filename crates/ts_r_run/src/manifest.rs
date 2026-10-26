@@ -8,7 +8,8 @@
 //! ```
 //!
 //! `f` maps a file to `[format (0 ESM, 1 CJS), start, end]`, byte offsets into the code
-//! after the newline; `r` holds the specifiers ts-r-run resolved; `e`, when present, maps a
+//! after the newline; an ES module also compiled to CommonJS for `require()` has that under
+//! its path plus `\0cjs` (`graph::CJS_VARIANT`), in `f` and `r`; `r` holds the specifiers ts-r-run resolved; `e`, when present, maps a
 //! module only loaded lazily that failed to compile to its rendered errors. The name is the BLAKE3
 //! hash of the contents, so an unchanged graph is never rewritten.
 //!
@@ -57,7 +58,7 @@ pub fn render(g: &Graph) -> Vec<u8> {
         if i > 0 {
             index.push(',');
         }
-        json_string(&mut index, &m.path);
+        json_string(&mut index, &m.key());
         let fmt = match m.format {
             Format::Esm => 0,
             Format::Cjs => 1,
@@ -72,7 +73,7 @@ pub fn render(g: &Graph) -> Vec<u8> {
             index.push(',');
         }
         first = false;
-        json_string(&mut index, &m.path);
+        json_string(&mut index, &m.key());
         index.push_str(":{");
         for (j, (spec, target)) in m.resolved.iter().enumerate() {
             if j > 0 {
@@ -222,6 +223,9 @@ mod tests {
                     code: "import './b.js';\n".into(),
                     resolved: vec![("./b.js".into(), Arc::from("/p/b.ts"))],
                     eager: vec![Arc::from("/p/b.ts")],
+                    forced: false,
+                    imported: Vec::new(),
+                    required: Vec::new(),
                 },
                 Module {
                     path: "/p/\"b\".ts".into(),
@@ -229,6 +233,19 @@ mod tests {
                     code: "x\n".into(),
                     resolved: Vec::new(),
                     eager: Vec::new(),
+                    forced: false,
+                    imported: Vec::new(),
+                    required: Vec::new(),
+                },
+                Module {
+                    path: "/p/a.ts".into(),
+                    format: Format::Cjs,
+                    code: "y\n".into(),
+                    resolved: vec![("./b.js".into(), Arc::from("/p/b.ts"))],
+                    eager: Vec::new(),
+                    forced: true,
+                    imported: Vec::new(),
+                    required: Vec::new(),
                 },
             ],
             ..Graph::default()
@@ -238,7 +255,7 @@ mod tests {
         let (index, code) = text.split_once('\n').unwrap();
         assert_eq!(
             index,
-            r#"{"f":{"/p/a.ts":[0,0,17],"/p/\"b\".ts":[1,17,19]},"r":{"/p/a.ts":{"./b.js":"/p/b.ts"}}}"#
+            r#"{"f":{"/p/a.ts":[0,0,17],"/p/\"b\".ts":[1,17,19],"/p/a.ts\u0000cjs":[1,19,21]},"r":{"/p/a.ts":{"./b.js":"/p/b.ts"},"/p/a.ts\u0000cjs":{"./b.js":"/p/b.ts"}}}"#
         );
         assert_eq!(&code[17..19], "x\n");
     }
