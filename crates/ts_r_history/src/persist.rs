@@ -186,9 +186,6 @@ impl Paths<'_> {
     }
 
     pub fn rel(&self, p: &str) -> String {
-        if !p.starts_with('/') {
-            return format!("?{p}");
-        }
         self.key().rel(p)
     }
 
@@ -895,6 +892,17 @@ mod tests {
         ] {
             assert_eq!(p.abs(&p.rel(a)), a);
         }
+    }
+
+    #[test]
+    fn lib_paths_on_a_drive() {
+        // Windows: the lib dir is a drive path, and its files are still libs.
+        let p = Paths {
+            base: "C:/w/proj",
+            lib_dir: Some("C:/opt/lib".to_owned()),
+        };
+        assert_eq!(p.rel("C:/opt/lib/lib.es5.d.ts"), "lib:lib.es5.d.ts");
+        assert_eq!(p.abs("lib:lib.es5.d.ts"), "C:/opt/lib/lib.es5.d.ts");
     }
 
     /// Another process saves a different manifest while this run scans files against the one

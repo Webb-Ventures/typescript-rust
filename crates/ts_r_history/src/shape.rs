@@ -433,14 +433,17 @@ pub struct PathKey {
 
 impl PathKey {
     pub fn rel(&self, p: &str) -> String {
-        if !p.starts_with('/') {
-            return format!("?{p}");
-        }
+        // The lib dir first: on Windows it is a drive path (`C:/...`), which the `/` test
+        // below would write as `?C:/...`, so a lib file's stored diagnostics would no
+        // longer name it as a lib.
         if let Some(d) = &self.lib_dir
             && let Some(rest) = p.strip_prefix(d.as_str())
             && let Some(name) = rest.strip_prefix('/')
         {
             return format!("lib:{name}");
+        }
+        if !p.starts_with('/') {
+            return format!("?{p}");
         }
         let base = self.base.trim_end_matches('/');
         if let Some(rest) = p.strip_prefix(base)
