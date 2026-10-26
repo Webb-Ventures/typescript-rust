@@ -303,11 +303,19 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
                     }
                     _ => {}
                 }
-                body.push(s);
+                body.push(class_to_var(&mut ast, &scopes, s, plan.mangle));
             }
             Node::VarDecl { .. } => {
-                if let Node::VarDecl { modifiers, .. } = ast.node_mut(s) {
+                // Top-level `let` and `const` become `var` when bundling, as in esbuild: the
+                // bundle moves code around, and top-level TDZ checks are slow.
+                if let Node::VarDecl {
+                    modifiers, kind, ..
+                } = ast.node_mut(s)
+                {
                     modifiers.remove(Modifiers::EXPORT);
+                    if matches!(kind, VarKind::Let | VarKind::Const) {
+                        *kind = VarKind::Var;
+                    }
                 }
                 body.push(s);
             }
@@ -457,6 +465,81 @@ fn build_rewrite(ast: &mut Ast, r: &Rewrite, at: u32, callee: bool) -> NodeId {
             }
         }
     }
+}
+
+/// A top-level class declaration as `var C = class {}` when bundling, as esbuild prints it.
+/// A class whose body refers to its own name keeps an inner name for those references,
+/// `_C` (or, when mangling, the same short name): `var C = class _C { static c = new _C() }`.
+/// Decorated classes stay declarations.
+fn class_to_var(ast: &mut Ast, scopes: &Scopes, s: NodeId, mangle: bool) -> NodeId {
+    let Node::ClassDecl {
+        decorators,
+        modifiers,
+        name: Some(name),
+        type_params,
+        heritage,
+        members,
+    } = *ast.node(s)
+    else {
+        return s;
+    };
+    if !ast.list(decorators).is_empty() || modifiers.contains(Modifiers::DECLARE) {
+        return s;
+    }
+    let at = ast.span(s).start;
+    // References to the class inside it, and every name used there.
+    let sym = scopes.symbol_of(name);
+    let mut inner_refs = Vec::new();
+    let mut used: FxHashSet<ts_r_ast::Atom> = FxHashSet::default();
+    let mut stack: Vec<NodeId> = Vec::new();
+    for &h in ast.list(heritage) {
+        stack.push(h);
+    }
+    for &m in ast.list(members) {
+        stack.push(m);
+    }
+    while let Some(id) = stack.pop() {
+        if let Node::Ident { name: a } = *ast.node(id) {
+            used.insert(a);
+            if sym.is_some() && scopes.symbol_of(id) == sym {
+                inner_refs.push(id);
+            }
+        }
+        ast.for_each_child(id, |c| stack.push(c));
+    }
+    let class_name = if inner_refs.is_empty() {
+        None
+    } else if mangle {
+        let (n, sp) = (*ast.node(name), ast.span(name));
+        Some(ast.add(n, sp))
+    } else {
+        let own = ast.name_of(name).unwrap_or_default().to_owned();
+        let base = format!("_{own}");
+        let mut candidate = base.clone();
+        let mut i = 2;
+        while used.contains(&ast.intern(&candidate)) {
+            candidate = format!("{base}{i}");
+            i += 1;
+        }
+        let a = ast.intern(&candidate);
+        for &r in &inner_refs {
+            *ast.node_mut(r) = Node::Ident { name: a };
+        }
+        let name_at = ast.span(name).start;
+        Some(build::ident(ast, &candidate, name_at))
+    };
+    let class = ast.add(
+        Node::ClassExpr {
+            decorators,
+            modifiers: Modifiers::NONE,
+            name: class_name,
+            type_params,
+            heritage,
+            members,
+        },
+        ast.span(s),
+    );
+    build::var_decl(ast, VarKind::Var, name, Some(class), at)
 }
 
 /// Splits a lazily initialized ES module's statements into declarations hoisted outside

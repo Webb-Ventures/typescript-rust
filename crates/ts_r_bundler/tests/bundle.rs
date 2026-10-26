@@ -2218,3 +2218,66 @@ fn exported_const_enums_keep_their_object() {
     let r = run_build(&fs, opts(&["foo.ts"]));
     assert_eq!(run_node("const-enum-export", &r, "foo.js"), "1 y 3 1 2\n");
 }
+
+#[test]
+fn namespace_import_of_commonjs_names_the_import_after_the_alias() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import * as ns from './cjs.js';\nconsole.log(ns.x);\n",
+        ),
+        ("src/cjs.js", "exports.x = 1;\n"),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(
+        code.contains("var ns = __tsrToEsm(require_cjs())"),
+        "{code}"
+    );
+    assert!(!code.contains("import_cjs"), "{code}");
+}
+
+#[test]
+fn every_commonjs_entry_runs_unwrapped_in_cjs_format() {
+    let fs = project(&[
+        ("src/a.js", "module.exports = { a: 1 };\n"),
+        ("src/b.js", "exports.b = 2;\nconsole.log(typeof module);\n"),
+    ]);
+    let mut o = opts(&["src/a.js", "src/b.js"]);
+    o.format = Some(Format::Cjs);
+    let r = run_build(&fs, o);
+    for (path, text) in [
+        ("/proj/out/a.js", "module.exports = { a: 1 };"),
+        ("/proj/out/b.js", "exports.b = 2;"),
+    ] {
+        let code = file(&r, path);
+        assert!(code.contains(text), "{code}");
+        assert!(!code.contains("__tsrCjs"), "{code}");
+    }
+}
+
+#[test]
+fn top_level_let_const_and_class_become_var() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import { Foo, Bar, n } from './lib.js';\nconsole.log(new Foo().constructor.name, Bar.self === Bar, n);\n",
+        ),
+        (
+            "src/lib.js",
+            "export class Foo {}\nexport class Bar { static self = Bar; }\nexport let n = 1;\nexport const m = 2;\nfor (const i of [m]) n += i;\n{ const inner = 3; n += inner; }\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("var Foo = class {"), "{code}");
+    assert!(code.contains("var Bar = class _Bar {"), "{code}");
+    assert!(code.contains("static self = _Bar;"), "{code}");
+    assert!(code.contains("var n = 1;"), "{code}");
+    assert!(code.contains("var m = 2;"), "{code}");
+    assert!(code.contains("for (const i of [m])"), "{code}");
+    assert!(code.contains("const inner = 3;"), "{code}");
+    if have_node() {
+        assert_eq!(run_node("class-var", &r, "entry.js"), "Foo true 6\n");
+    }
+}
