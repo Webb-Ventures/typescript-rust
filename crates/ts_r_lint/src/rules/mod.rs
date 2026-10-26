@@ -488,6 +488,7 @@ mod unicorn_no_unnecessary_fetch_options;
 mod unicorn_no_unnecessary_global_this;
 mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_parameters;
+mod unicorn_no_unnecessary_polyfills;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
@@ -1403,6 +1404,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_isolated_functions::RULE,
     &unicorn_no_unsafe_property_key::RULE,
     &unicorn_no_unnecessary_parameters::RULE,
+    &unicorn_no_unnecessary_polyfills::RULE,
     &unicorn_no_unused_builtin_method_return::RULE,
     &unicorn_no_nonstandard_builtin_properties::RULE,
     &unicorn_no_unsafe_json_serialization::RULE,

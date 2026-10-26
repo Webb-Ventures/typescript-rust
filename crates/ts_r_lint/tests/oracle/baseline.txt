@@ -454,6 +454,7 @@ unicorn/no-unnecessary-fetch-options 168/168
 unicorn/no-unnecessary-global-this 77/77
 unicorn/no-unnecessary-nested-ternary 39/39
 unicorn/no-unnecessary-parameters 198/198
+unicorn/no-unnecessary-polyfills 101/101
 unicorn/no-unnecessary-slice-end 39/39
 unicorn/no-unnecessary-splice 97/97
 unicorn/no-unnecessary-string-trim 95/95
@@ -554,6 +555,7 @@ unicorn/prefer-https 165/165
 unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-import-meta-properties 48/48
 unicorn/prefer-includes 247/247
+unicorn/prefer-includes-over-repeated-comparisons 201/201
 unicorn/prefer-iterable-in-constructor 76/76
 unicorn/prefer-iterator-concat 87/87
 unicorn/prefer-iterator-helpers 138/138
