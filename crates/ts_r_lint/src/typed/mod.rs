@@ -113,8 +113,9 @@ pub fn check_and_lint(project: &LoadedProject, lint: &[TypedFile], threads: usiz
     for (i, t) in lint.iter().enumerate() {
         lint_of.insert(t.file, i);
     }
+    let plain_js = |i: usize| ts_r_checker::driver::is_plain_js(program, i);
     let mut targets: Vec<usize> = (0..program.files.len())
-        .filter(|&i| should_check(program, i) || lint_of.contains_key(&i))
+        .filter(|&i| should_check(program, i) || plain_js(i) || lint_of.contains_key(&i))
         .collect();
     // Lint files first so the slowest part starts early.
     targets.sort_by_key(|i| !lint_of.contains_key(i));
@@ -143,6 +144,17 @@ pub fn check_and_lint(project: &LoadedProject, lint: &[TypedFile], threads: usiz
                 Ok((d, r)) => {
                     if should_check(program, fi) {
                         local.extend(d);
+                    } else if plain_js(fi) {
+                        // As `check_program`: a plain JavaScript file reports only some
+                        // errors, and its JSDoc syntax errors are for checked files only.
+                        let jsdoc = &program.files[fi].jsdoc;
+                        local.extend(
+                            d.into_iter()
+                                .filter(|d| {
+                                    !jsdoc.iter().any(|j| j.span == d.span && j.code == d.code)
+                                })
+                                .filter_map(ts_r_checker::driver::plain_js_diagnostic),
+                        );
                     }
                     if let Some((li, r)) = r {
                         *results[li].lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
@@ -492,5 +504,49 @@ mod tests {
         let missing = keys("/// <reference path=\"./nope.ts\" />\nconst n: number = \"s\";\n");
         assert!(missing.keys().any(|k| k.contains("TS6053")), "{missing:?}");
         assert!(missing.keys().any(|k| k.contains("TS2322")), "{missing:?}");
+    }
+    /// A plain JavaScript file (`allowJs`, no `checkJs`) is checked as `check_program`
+    /// checks it: its redeclaration (TS2451) is in the keys tsc gives, the errors tsc does
+    /// not report there (TS2304) are not, and so the project's parity holds and type-aware
+    /// rules stay on.
+    #[test]
+    fn plain_js_files_report_what_tsc_reports() {
+        let Some(libs) = LibStore::locate() else {
+            eprintln!("skipped: lib files missing (cargo xtask upstream sync --minimal)");
+            return;
+        };
+        let mut fs = ts_r_config::MemoryFs::new();
+        fs.set_cwd("/p");
+        fs.add_file(
+            "/p/tsconfig.json",
+            r#"{"compilerOptions": {"strict": true, "noEmit": true, "allowJs": true, "types": []}, "files": ["a.ts", "b.js"]}"#,
+        );
+        fs.add_file("/p/a.ts", "export const n: number = 1;\n");
+        fs.add_file(
+            "/p/b.js",
+            "let x = 1;\nlet x = 2;\nconsole.log(missingName);\n/** @type {string */\nexport const s = '';\n",
+        );
+        let project = load_project(&fs, "/p/tsconfig.json", &libs, 1);
+        let ours = check_and_lint(&project, &[], 1).keys;
+        let expected = keys_of(
+            &project,
+            &ts_r_checker::driver::check_program(&project.program, Default::default()).diagnostics,
+        );
+        assert_eq!(ours, expected);
+        assert_eq!(
+            ours.keys().filter(|k| k.contains("TS2451")).count(),
+            2,
+            "{ours:?}"
+        );
+        assert!(!ours.keys().any(|k| k.contains("TS2304")), "{ours:?}");
+        // The lint of a JavaScript file still runs with the plain-JS filter in place.
+        let fc = file_config_for_test(
+            r#"{"@typescript-eslint/no-unnecessary-type-assertion": "error"}"#,
+        )
+        .expect("config");
+        let file = project.file_index("/p/b.js").expect("b.js");
+        let run = check_and_lint(&project, &[TypedFile { file, cfg: fc }], 1);
+        assert!(run.failed.is_empty());
+        assert_eq!(run.keys, expected);
     }
 }
