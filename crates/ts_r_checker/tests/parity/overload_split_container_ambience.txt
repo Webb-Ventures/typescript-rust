@@ -1,0 +1,3 @@
+a.ts(5,21): error TS2384: Overload signatures must all be ambient or non-ambient.
+a.ts(8,21): error TS2391: Function implementation is missing or not immediately following the declaration.
+a.ts(11,14): error TS2384: Overload signatures must all be ambient or non-ambient.

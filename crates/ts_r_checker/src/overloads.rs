@@ -80,6 +80,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ambient_container = self.is_ambient_node(Loc::new(file, container));
         self.check_duplicate_implementations(file, &items);
+        let split = self.check_split_overload_ambience(file, &items);
         // TS2392 at every constructor declaration when several have a body.
         let ctor_impls = items
             .iter()
@@ -199,7 +200,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                 }
             }
-            self.check_overload_modifiers(file, &group, implementation, ambient_container);
+            let split_set = split.contains(&a.name);
+            self.check_overload_modifiers(
+                file,
+                &group,
+                implementation,
+                ambient_container,
+                split_set,
+            );
             if let Some(imp) = implementation
                 && !ambient
             {
@@ -349,6 +357,71 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// TS2384 for functions whose declarations span several containers (merged
+    /// namespaces): every declaration is ambient or none is. The canonical declaration is
+    /// the implementation when it shares a container with the file's first declaration,
+    /// else that first declaration; deviating declarations of this list get TS2384 at
+    /// their name (`declare namespace M { function f(); }` with `namespace M { function
+    /// f() {} }` reports the implementation; tsc: checker.go,
+    /// checkFunctionOrConstructorSymbol, read as a reference). Returns the names checked
+    /// here, which the per-list check skips.
+    fn check_split_overload_ambience(
+        &mut self,
+        file: FileId,
+        items: &[Option<FnDecl>],
+    ) -> Vec<String> {
+        let mut split = Vec::new();
+        for d in items.iter().flatten() {
+            if d.kind != Kind::Function || split.contains(&d.name) {
+                continue;
+            }
+            let here = Loc::new(file, d.node);
+            let Some(sym) = self.c.sym_of_decl(here) else {
+                continue;
+            };
+            let decls: Vec<Loc> = self
+                .c
+                .decls(sym)
+                .into_iter()
+                .filter(|l| matches!(self.node(*l), Node::FunctionDecl { .. }))
+                .collect();
+            let parents: Vec<Option<Loc>> = decls.iter().map(|&l| self.c.parent(l)).collect();
+            if decls.len() < 2 || parents.iter().all(|p| *p == parents[0]) {
+                continue;
+            }
+            split.push(d.name.clone());
+            let has_body =
+                |ck: &Self, l: Loc| matches!(ck.node(l), Node::FunctionDecl { body: Some(_), .. });
+            if decls.iter().all(|&l| has_body(self, l)) {
+                continue;
+            }
+            let ambient: Vec<bool> = decls.iter().map(|&l| self.is_ambient_node(l)).collect();
+            if ambient.iter().all(|&a| a == ambient[0]) {
+                continue;
+            }
+            let Some(first) = (0..decls.len()).find(|&k| decls[k].file == file) else {
+                continue;
+            };
+            let canon = match decls.iter().position(|&l| has_body(self, l)) {
+                Some(k) if parents[k] == parents[first] => k,
+                _ => first,
+            };
+            for e in items.iter().flatten() {
+                if e.kind != Kind::Function || e.name != d.name {
+                    continue;
+                }
+                if self.is_ambient_node(Loc::new(file, e.node)) != ambient[canon] {
+                    self.error(
+                        Loc::new(file, e.name_node),
+                        dg::OVERLOAD_SIGNATURES_MUST_ALL_BE_AMBIENT_OR_NON_AMBIENT_2384,
+                        &[],
+                    );
+                }
+            }
+        }
+        split
+    }
+
     /// TS2393 for names implemented more than once in one list.
     fn check_duplicate_implementations(&mut self, file: FileId, items: &[Option<FnDecl>]) {
         // Methods: implementations per (name, static) in this class body.
@@ -450,6 +523,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         group: &[&FnDecl],
         implementation: Option<&FnDecl>,
         ambient_container: bool,
+        split_set: bool,
     ) {
         let all: Vec<&FnDecl> = group.iter().copied().chain(implementation).collect();
         if all.len() < 2 {
@@ -480,8 +554,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                     &[],
                 );
             }
-            if d.modifiers.contains(Modifiers::DECLARE)
-                != canon.modifiers.contains(Modifiers::DECLARE)
+            // (A function declared in several containers is checked across all of them.)
+            if !split_set
+                && d.modifiers.contains(Modifiers::DECLARE)
+                    != canon.modifiers.contains(Modifiers::DECLARE)
             {
                 self.error_span(
                     file,
@@ -570,10 +646,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn overload_compatible(&mut self, os: SigId, is: SigId, ctor: bool, bivariant: bool) -> bool {
         // Types this layer may approximate are not compared.
         let skip = |ck: &Self, t: TypeId| {
-            t == TypeId::UNRESOLVED
-                || ck.store().is_error(t)
-                || ck.could_contain_type_params(t)
-                || ck.mentions_enum(t)
+            t == TypeId::UNRESOLVED || ck.store().is_error(t) || ck.could_contain_type_params(t)
         };
         // Returns, in either direction (`void` overloads accept any implementation).
         if !ctor {
@@ -654,10 +727,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// `void` (tsc: checker/relater.go, compareSignaturesRelated in callback mode).
     fn overload_callback_compatible(&mut self, s: SigId, t: SigId) -> bool {
         let skip = |ck: &Self, t: TypeId| {
-            t == TypeId::UNRESOLVED
-                || ck.store().is_error(t)
-                || ck.could_contain_type_params(t)
-                || ck.mentions_enum(t)
+            t == TypeId::UNRESOLVED || ck.store().is_error(t) || ck.could_contain_type_params(t)
         };
         let (s_count, s_rest) = self.param_count(s);
         let (t_count, t_rest) = self.param_count(t);

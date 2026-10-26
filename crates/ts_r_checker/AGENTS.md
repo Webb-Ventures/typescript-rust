@@ -750,7 +750,16 @@ Files, by layer:
   parameters compare as signatures, overload callback to implementation callback with
   parameters only contravariant, also without strictFunctionTypes, so
   `cb: (x: 'hi') => number` against `cb: (x: string) => number` is incompatible:
-  `overload_callback_params`; tsc: checker/relater.go, compareSignaturesRelated),
+  `overload_callback_params`; tsc: checker/relater.go, compareSignaturesRelated; return
+  types that mention enums are compared like any other, so `first.E` against `second.E`
+  is TS2394, and an implementation returning `string` for a `first.E` overload too). A
+  function whose declarations sit in different containers (`declare namespace N` and
+  `namespace N`) is checked for ambience as one set: the canonical declaration is the
+  implementation when it shares a container with the first declaration, otherwise the
+  first declaration, and every declaration whose ambience differs from it gets TS2384 at
+  its name; the per-list `declare` check skips such names
+  (`check_split_overload_ambience`; tsc: checker/checker.go,
+  checkFunctionOrConstructorSymbol and getCanonicalOverload),
   `abstracts.rs` (abstract
   method bodies and unimplemented inherited abstract members: TS1245, TS2515/2650/
   2653-2656; TS2513 for `super.m` lives in `expr.rs`), `overrides.rs` (`override` and
