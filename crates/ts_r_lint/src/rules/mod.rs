@@ -380,6 +380,7 @@ mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_property_descriptor;
 mod unicorn_no_invalid_remove_event_listener;
+mod unicorn_no_invalid_response_options;
 mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
@@ -594,6 +595,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_invalid_response_options::RULE,
     &unicorn_no_invalid_dom_token::RULE,
     &unicorn_no_unsafe_promise_all_settled_values::RULE,
     &unicorn_prefer_object_define_properties::RULE,
