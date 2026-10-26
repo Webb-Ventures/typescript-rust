@@ -34,7 +34,7 @@
 @typescript-eslint/no-invalid-void-type 96/96
 @typescript-eslint/no-meaningless-void-operator 43/43
 @typescript-eslint/no-misused-new 19/19
-@typescript-eslint/no-misused-promises 246/248
+@typescript-eslint/no-misused-promises 248/248
 @typescript-eslint/no-misused-spread 134/134
 @typescript-eslint/no-mixed-enums 64/64
 @typescript-eslint/no-namespace 43/43
@@ -142,8 +142,10 @@ import/no-restricted-paths 39/39
 import/no-self-import 23/23
 import/no-unassigned-import 32/32
 import/no-unresolved 77/80
+import/no-unused-modules 111/131
 import/no-useless-path-segments 94/94
 import/no-webpack-loader-syntax 19/19
+import/order 168/168
 import/prefer-default-export 38/38
 import/unambiguous 11/11
 jsdoc/check-access 18/18

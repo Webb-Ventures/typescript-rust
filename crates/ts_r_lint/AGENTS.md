@@ -2786,6 +2786,60 @@ no-useless-path-segments, no-cycle, extensions, no-internal-modules,
 no-restricted-paths}.js`; minimatch 3.1 `makeRe` (observed output) and is-glob's strict
 check.
 
+## eslint-plugin-import rules (round 8)
+
+The last 10 rules; all 46 are implemented. Oracle: order 168/168, enforce-node-protocol-usage
+52/52, group-exports 34/34, no-default-export 24/24, no-named-export 21/21,
+no-relative-parent-imports 10/10, unambiguous 11/11, no-extraneous-dependencies 114/114,
+no-unused-modules 111/131; imports-first is first's deprecated name (`IMPORTS_FIRST`, no
+test file of its own).
+
+**Rules, in our words** (each file's header has the details):
+
+- order: ranks from `groups` (index * 2, omitted types share the next rank), path groups
+  (minimatch's own matcher, `modules::minimatch::glob_match`, where `**` may match no
+  segment; position over a power-of-ten maxPosition), type-only imports, requires (+100).
+  `alphabetize` renumbers each rank's members after a segment-wise compare (leading `.`/`..`
+  segments skipped) and keys them by `value|importKind`, so equal ones share a rank.
+  Out-of-order items are reported forwards or, when that gives fewer, backwards ("after");
+  the fix moves whole lines with same-line comments and only crosses single-declarator
+  requires, imports with specifiers and `import x = require()` (statement indexes sorted
+  as strings, as upstream does, so the checked span may be empty). Linear on large inputs:
+  the first higher-ranked item comes from a running maximum, statement indexes from a
+  binary search, and the alphabetize sort is our own merge sort (a comparison that is not a
+  total order must not panic).
+- enforce-node-protocol-usage: is-core-module's version table (2.17) against
+  `import/node-version` (latest when unset).
+- no-extraneous-dependencies: `packageDir` (merged when several), glob allow-lists through
+  `modules::minimatch`, real package names from the resolved file's `package.json`; parse
+  errors of `package.json` are V8's `JSON.parse` messages (`v8_json_error`, depth-limited)
+  at line 0, column 1.
+- group-exports, no-default-export, no-named-export, no-relative-parent-imports,
+  unambiguous: per their headers.
+- no-unused-modules: `missingExports` counts the file's own top-level exports;
+  `unusedExports` checks them against a project table built from the files `src` names
+  (globs, directories walked with a visited set and a depth limit, `node_modules` and dot
+  entries skipped) through the module host and their export maps, which now record each
+  import's specifiers. The table is memoised on the `ModuleHost` (`ModCtx::memo`): once per
+  project run, and never across editor lints, which get a fresh host. It is built from
+  disk: upstream also patches it with every file it lints in one process, so 20 of its
+  test cases depend on what earlier cases linted; real ESLint run on each of those files
+  alone gives our answers.
+
+**Generator** (`gen-rule-oracle.mjs`, header has the details): import rules run with an
+ESLint 9 context shim (`parserOptions`, `getTokenOrComment*`), rule stubs carry the real
+`meta`, the plugin's checkout root is rewritten to `/import` (columns shifted), mocha
+hooks and chai are stubbed, tester-level `settings` are merged into cases; no-unused-modules
+needs ESLint 9 (its FileEnumerator) with the plugin's eslintrc dependencies installed.
+Vendored for it: `bundled-dependencies/*/node_modules` and the `file-added-*` fixtures.
+
+Upstream files read (eslint-plugin-import 2.32.0): `src/rules/{order, no-default-export,
+no-named-export, group-exports, unambiguous, no-relative-parent-imports,
+enforce-node-protocol-usage, no-extraneous-dependencies, no-unused-modules}.js`,
+`src/core/{packagePath, staticRequire}.js`, `src/exportMap/{builder, visitor,
+captureDependency}.js`, eslint-module-utils `unambiguous.js`; is-core-module's `core.json`
+(data); typescript-estree's `convert.js` (export kinds).
+
 ## eslint-plugin-unicorn rules (round 7, h1)
 
 The three `recommended` unicorn rules that were missing, each at 100% of its oracle cases:
