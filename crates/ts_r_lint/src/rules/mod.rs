@@ -480,6 +480,7 @@ mod unicorn_prefer_set_size;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
+mod unicorn_prefer_single_object_destructuring;
 mod unicorn_prefer_split_limit;
 mod unicorn_prefer_spread;
 mod unicorn_prefer_string_match_all;
@@ -552,6 +553,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_prefer_single_object_destructuring::RULE,
     &unicorn_no_incomplete_accessor_override::RULE,
     &unicorn_no_unreadable_object_destructuring::RULE,
     &unicorn_consistent_export_decorator_position::RULE,
