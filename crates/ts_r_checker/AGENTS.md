@@ -321,7 +321,12 @@ Files, by layer:
   isConstantReference).
   Type arguments get the same treatment for constraint checks (TS2344): inside
   `T extends X ? <here> : ...` the argument is instantiated with `T := X & T` first
-  (`narrowed_in_true_branch` in `check.rs`).
+  (`narrowed_in_true_branch` in `check.rs`). A generic check type that is not a type
+  parameter (`T[K] extends X ? F<T[K]>`) makes the argument `X & T[K]`, and so does an
+  intersection argument with it as a member (`F<T[K] & {}>`, `F<{} & T[K]>`); the walk then
+  goes on outwards, so an outer `K extends keyof T ?` still maps `K`
+  (`conditional_narrowed_intersection_argument`; seen on @babel/traverse; tsc:
+  checker.go getConditionalFlowTypeOfType).
 - Syntax-only expression checks: `shapes.rs` (TS2695 comma left sides without side effects,
   TS2872/TS2873 conditions always truthy/falsy, TS2869/TS2871 `??` left sides never/always
   nullish; observed rules in the module doc).

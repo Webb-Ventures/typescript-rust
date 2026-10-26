@@ -6052,6 +6052,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// is `X & T` (tsc's implied constraint).
     fn narrowed_in_true_branch(&mut self, a: Loc, at: TypeId) -> TypeId {
         let ast = self.ast(a.file);
+        let mut at = at;
         let mut cur = a;
         let mut params = Vec::new();
         let mut implied = Vec::new();
@@ -6095,18 +6096,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 implied.push(both);
                             }
                         }
-                    } else if ct == at
-                        && self
-                            .store()
-                            .traits(ct)
-                            .contains(ts_r_types::TypeTraits::CONTAINS_TYPE_PARAMETER)
+                    } else if self
+                        .store()
+                        .traits(ct)
+                        .contains(ts_r_types::TypeTraits::CONTAINS_TYPE_PARAMETER)
                     {
                         // `T["k"] extends X ? F<T["k"]> : ...`: the argument is `T["k"] & X`
                         // (so is any generic check type: `[A, B] extends unknown[][] ?
-                        // Bar<[A, B]>`, `Set<A> extends Set<unknown[]> ? Bar<Set<A>>`).
-                        let et = self.type_from_node(Loc::new(a.file, extends));
-                        if !self.store().is_error(et) && et != TypeId::UNRESOLVED {
-                            return self.intersection(&[et, at]);
+                        // Bar<[A, B]>`, `Set<A> extends Set<unknown[]> ? Bar<Set<A>>`), and
+                        // so is that member of an intersection argument (`F<T["k"] & {}>`).
+                        // Outer conditionals narrow the result further.
+                        let s = self.store();
+                        let member = s.flags(at).contains(TypeFlags::INTERSECTION)
+                            && s.members_of_union(at).contains(&ct);
+                        if ct == at || member {
+                            let et = self.type_from_node(Loc::new(a.file, extends));
+                            if !self.store().is_error(et) && et != TypeId::UNRESOLVED {
+                                at = self.intersection(&[et, at]);
+                            }
                         }
                     }
                 }
