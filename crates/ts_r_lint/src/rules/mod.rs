@@ -32,6 +32,7 @@ mod jsdoc_no_missing_syntax;
 mod jsdoc_no_multi_asterisks;
 mod jsdoc_no_restricted_syntax;
 mod jsdoc_no_types;
+mod jsdoc_no_undefined_types;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
@@ -674,6 +675,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_tag_lines::RULE,
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
+    &jsdoc_no_undefined_types::RULE,
     // eslint-plugin-unicorn
     &unicorn_consistent_assert::RULE,
     &unicorn_consistent_class_member_order::RULE,

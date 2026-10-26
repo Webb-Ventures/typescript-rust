@@ -298,3 +298,4 @@ unicorn/no-new-array
 unicorn/prefer-type-error
 jsdoc/valid-types
 jsdoc/check-types
+jsdoc/no-undefined-types

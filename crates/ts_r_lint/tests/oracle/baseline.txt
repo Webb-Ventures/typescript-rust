@@ -119,6 +119,7 @@ jsdoc/no-missing-syntax 20/20
 jsdoc/no-multi-asterisks 33/33
 jsdoc/no-restricted-syntax 46/46
 jsdoc/no-types 17/17
+jsdoc/no-undefined-types 114/114
 jsdoc/reject-any-type 5/5
 jsdoc/reject-function-type 4/4
 jsdoc/require-asterisk-prefix 24/24
