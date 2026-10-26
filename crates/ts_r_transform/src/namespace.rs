@@ -347,9 +347,22 @@ fn needs_var(tx: &mut Tx, seg: NodeId) -> bool {
     let Some(&b) = tx.sc.decl_of.get(&seg) else {
         return true;
     };
+    first_declaration(tx, b)
+}
+
+/// Whether a namespace or enum of binding `b` must declare its variable: no earlier class,
+/// function or variable (not a `declare var`, which writes nothing) supplies the name, and
+/// no namespace or enum declared it already (observed: `class C {} enum C {}` and `var x;
+/// namespace x {}` write no `var`). The binding's kind is that of its first declaration.
+pub(crate) fn first_declaration(tx: &mut Tx, b: BindingId) -> bool {
     let bnd = tx.sc.binding(b);
     match bnd.kind {
-        BindingKind::Class | BindingKind::Function | BindingKind::Enum => false,
+        BindingKind::Class | BindingKind::Function => false,
+        BindingKind::Var | BindingKind::Let | BindingKind::Const
+            if !tx.sc.ambient_vars.contains(&bnd.decl) =>
+        {
+            false
+        }
         _ => tx.ns_declared.insert(b),
     }
 }
@@ -681,6 +694,53 @@ pub(crate) fn entity_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
     };
     let top: Vec<NodeId> = tx.ast.list(stmts).to_vec();
     member_is_value(tx, &top, root, &path, 0, false)
+}
+
+/// [`entity_is_value`] with the root resolved by scope analysis: a name declared in an
+/// enclosing namespace body is looked up among that body's statements
+/// (`namespace M { namespace N {} export import X = N; }`).
+pub(crate) fn alias_target_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
+    let mut path = Vec::new();
+    let mut n = entity;
+    while let Node::QualifiedName { left, right } = tx.n(n) {
+        path.push(right);
+        n = left;
+    }
+    let Node::Ident { name: root } = tx.n(n) else {
+        return None;
+    };
+    path.reverse();
+    let Some(b) = tx.sc.binding_of_ref(n) else {
+        return entity_is_value(tx, entity);
+    };
+    let scope = tx.sc.binding(b).scope;
+    match tx.sc.scopes[scope as usize].kind {
+        crate::scope::ScopeKind::Module => entity_is_value(tx, entity),
+        crate::scope::ScopeKind::Namespace(m) => {
+            let Node::Module {
+                name,
+                body: Some(body),
+                ..
+            } = tx.n(m)
+            else {
+                return None;
+            };
+            // Only the last segment's scope (`namespace A.B`) holds the block's statements.
+            let last = match tx.n(name) {
+                Node::QualifiedName { right, .. } => right,
+                _ => name,
+            };
+            if tx.sc.ns_scope_of.get(&last) != Some(&scope) {
+                return None;
+            }
+            let Node::ModuleBlock { stmts } = tx.n(body) else {
+                return None;
+            };
+            let stmts: Vec<NodeId> = tx.ast.list(stmts).to_vec();
+            member_is_value(tx, &stmts, root, &path, 0, false)
+        }
+        _ => None,
+    }
 }
 
 /// `export = X;` where this file declares `X` only as a type (an interface, a type alias, a

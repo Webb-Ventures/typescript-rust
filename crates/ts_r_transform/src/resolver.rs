@@ -71,6 +71,14 @@ pub trait EmitResolver: Sync {
         None
     }
 
+    /// The value of the enum member `member` (an `EnumMember` node of any enum) whose
+    /// initializer the file alone cannot evaluate: one that reads another file's enum
+    /// (`A = Other.B`). `None` when the member is not constant.
+    fn enum_member_value(&self, file: FileId, member: NodeId) -> Option<ConstValue> {
+        let _ = (file, member);
+        None
+    }
+
     /// How decorator metadata serializes the type reference `ty` (a `TypeRef` node).
     fn metadata_type(&self, file: FileId, ty: NodeId) -> MetadataType {
         let _ = (file, ty);

@@ -110,7 +110,7 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         let member = member_name(tx, mname);
         let mat = tx.at(m);
         let value = match init {
-            Some(i) => eval(tx, i, &info, &enum_name),
+            Some(i) => eval(tx, i, &info, &enum_name).or_else(|| resolver_member_value(tx, m)),
             None => next.map(Value::Num),
         };
         next = match &value {
@@ -189,7 +189,7 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
     let parent = tx.ns_stack.last().copied();
     let exported = modifiers.contains(Modifiers::EXPORT);
     let top_level = parent.is_none() && tx.list_depth == 0;
-    let first_decl = binding.is_none_or(|b| tx.enum_declared.insert(b));
+    let first_decl = binding.is_none_or(|b| crate::namespace::first_declaration(tx, b));
     if first_decl {
         let kind = if top_level {
             VarKind::Var
@@ -540,6 +540,19 @@ fn resolver_const_enum_value(tx: &Tx, access: NodeId) -> Option<Value> {
         return None;
     }
     match tx.resolver.const_enum_value(tx.file, access)? {
+        crate::ConstValue::Number(n) => Some(Value::Num(n)),
+        crate::ConstValue::String(s) => Some(Value::Str(s)),
+    }
+}
+
+/// The program resolver's value for an enum member the file-local evaluator could not
+/// fold (an initializer reading another file's enum). Only original members count.
+fn resolver_member_value(tx: &Tx, member: NodeId) -> Option<Value> {
+    let span = tx.ast.span(member);
+    if span.start >= span.end {
+        return None;
+    }
+    match tx.resolver.enum_member_value(tx.file, member)? {
         crate::ConstValue::Number(n) => Some(Value::Num(n)),
         crate::ConstValue::String(s) => Some(Value::Str(s)),
     }

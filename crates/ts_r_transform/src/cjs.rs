@@ -78,6 +78,23 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
         let n = tx.n(s);
         let mods = n.modifiers();
         if mods.contains(Modifiers::DECLARE) {
+            // `export declare let a;` has no declaration in the output: its references read
+            // `exports.a` (observed; functions, classes, enums and namespaces stay as written).
+            if let Node::VarDecl { decls, .. } = n
+                && mods.contains(Modifiers::EXPORT)
+            {
+                for d in tx.items(decls) {
+                    if let Node::VarDeclarator { name, .. } = tx.n(d) {
+                        let mut ids = Vec::new();
+                        collect_pattern_idents(tx.ast, name, &mut ids);
+                        for i in ids {
+                            if let Some(&b) = tx.sc.decl_of.get(&i) {
+                                tx.cjs.exported_vars.insert(b);
+                            }
+                        }
+                    }
+                }
+            }
             continue;
         }
         match n {
@@ -259,17 +276,26 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
                     }
                 }
             }
-            // `export import x = require("m")` is assigned in place without a `void 0`.
+            // `export import x = require("m")` is assigned in place without a `void 0`. Both
+            // forms are read through `exports.x` (observed).
             Node::ImportEquals {
                 type_only: false,
                 name,
                 module_ref,
                 ..
-            } if mods.contains(Modifiers::EXPORT)
-                && tx.kind(module_ref) != NodeKind::ExternalModuleRef =>
-            {
-                let n = tx.name(name).to_owned();
-                tx.cjs.void0.push(n);
+            } if mods.contains(Modifiers::EXPORT) => {
+                if tx.kind(module_ref) != NodeKind::ExternalModuleRef {
+                    if !tx.opts.verbatim_module_syntax
+                        && crate::namespace::alias_target_is_value(tx, module_ref) == Some(false)
+                    {
+                        continue;
+                    }
+                    let n = tx.name(name).to_owned();
+                    tx.cjs.void0.push(n);
+                }
+                if let Some(&b) = tx.sc.decl_of.get(&name) {
+                    tx.cjs.exported_vars.insert(b);
+                }
             }
             _ => {}
         }

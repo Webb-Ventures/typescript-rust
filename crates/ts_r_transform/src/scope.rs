@@ -106,6 +106,8 @@ pub(crate) struct Scopes {
     /// `const x = init` without a type annotation: declaring identifier → initializer (enum
     /// initializers fold such constants, as tsc's evaluator does).
     pub const_inits: FxHashMap<NodeId, NodeId>,
+    /// Identifiers declared by a `declare var/let/const` (no declaration in the output).
+    pub ambient_vars: FxHashSet<NodeId>,
 }
 
 impl Scopes {
@@ -195,6 +197,7 @@ pub(crate) fn analyze<'a>(
             ns_namespaces: FxHashMap::default(),
             jsx_scope: FxHashMap::default(),
             const_inits: FxHashMap::default(),
+            ambient_vars: FxHashSet::default(),
         },
         refs: Vec::new(),
         metadata: decorator_metadata,
@@ -797,6 +800,9 @@ impl Walker<'_> {
             {
                 self.pattern(name, target, bk, exported);
                 if declare {
+                    if matches!(self.ast.node(name), Node::Ident { .. }) {
+                        self.out.ambient_vars.insert(name);
+                    }
                     continue;
                 }
                 if kind == VarKind::Const

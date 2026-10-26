@@ -51,7 +51,6 @@ pub(crate) struct Tx<'a> {
     /// Whether a member receiver chain starts at an import binding.
     pub enum_import_roots: FxHashMap<NodeId, bool>,
     /// Enums already given a `var` (merged declarations).
-    pub enum_declared: FxHashSet<BindingId>,
     /// Namespaces already given a `var`, by binding.
     pub ns_declared: FxHashSet<BindingId>,
     pub is_module: bool,
@@ -173,7 +172,6 @@ pub(crate) fn run(
         value_bindings_by_name: None,
         enums: FxHashMap::default(),
         enum_import_roots: FxHashMap::default(),
-        enum_declared: FxHashSet::default(),
         ns_declared: FxHashSet::default(),
         is_module,
         list_depth: 0,
@@ -1981,7 +1979,16 @@ impl<'a> Tx<'a> {
                 || jsx
                 || self.kind(module_ref) != NodeKind::ExternalModuleRef
                 || self.value_alias(id));
-        if type_only || !(exported || used || kept_by_verbatim || script_global || jsx) {
+        // An exported alias of something that is only a type (`export import X = N` of an
+        // uninstantiated namespace) is dropped (observed).
+        let type_target = exported
+            && !self.opts.verbatim_module_syntax
+            && self.kind(module_ref) != NodeKind::ExternalModuleRef
+            && crate::namespace::alias_target_is_value(self, module_ref) == Some(false);
+        if type_only
+            || type_target
+            || !(exported || used || kept_by_verbatim || script_global || jsx)
+        {
             self.erase(id);
             return;
         }

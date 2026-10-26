@@ -24,7 +24,10 @@ import alias names a value (`Yes`/`No`/`Unknown`). `SyntacticResolver` (per-file
 answers from the file alone, as isolatedModules; `ts_r_emit::CheckerResolver` asks the
 checker. `const_enum_value` gives the value of another file's const enum member for an
 access whose root is an import, or a local const enum member the file-only evaluator could
-not resolve (`enums.rs` inlines it as `0 /* E.A */`). `jsx_runtime_found` says the
+not resolve (`enums.rs` inlines it as `0 /* E.A */`). `enum_member_value` folds an enum
+member whose initializer reads another file (`A = Other.B`); it is asked only for original
+members the file-local evaluator could not fold (default `None`; `CheckerResolver` does not
+answer it yet). `jsx_runtime_found` says the
 automatic JSX runtime module (`react/jsx-runtime`) resolves in the program: JSX then no
 longer keeps the classic factory's root import (`React`) alive, as in tsc; the per-file
 default is `false` (keep it).
@@ -351,6 +354,17 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `import()` becomes `Promise.resolve().then(() => require())` (`importDeferCallCommonJS`).
 - A const enum read through an `import X = M.E` alias asks the program resolver, like an
   imported root.
+- CommonJS reads an exported `declare var/let/const` and an exported `import x = ...`
+  (either form) through `exports.x` everywhere, assignments and calls included
+  (`(0, exports.r)()`); exported `declare` functions, classes, enums and namespaces stay as
+  written.
+- An exported `import X = N` whose target is only a type (an uninstantiated namespace, an
+  interface, a type alias, found through the enclosing namespace bodies) is dropped, with
+  no `void 0` entry (`namespace::alias_target_is_value`; `acceptableAlias1`).
+- A namespace or enum writes no `var` when an earlier class, function, `var`, `let` or
+  `const` of that name (not a `declare var`) or an earlier namespace or enum declared it:
+  `class C {} enum C { A }` is `class C {} (function (C) {...})(C || (C = {}));`
+  (`namespace::first_declaration`).
 
 ## Dependencies
 
