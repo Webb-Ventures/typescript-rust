@@ -20,6 +20,7 @@ mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
+mod jsdoc_check_tag_names;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
 mod jsdoc_implements_on_classes;
@@ -620,6 +621,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_check_alignment::RULE,
     &jsdoc_check_param_names::RULE,
     &jsdoc_check_property_names::RULE,
+    &jsdoc_check_tag_names::RULE,
     &jsdoc_empty_tags::RULE,
     &jsdoc_escape_inline_tags::RULE,
     &jsdoc_implements_on_classes::RULE,

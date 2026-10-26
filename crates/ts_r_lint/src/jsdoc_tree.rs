@@ -119,6 +119,11 @@ fn is_space(c: char) -> bool {
     c.is_whitespace()
 }
 
+/// The tag names of a description's inline tags, in [`inline_tags`] order.
+pub fn inline_tag_names(desc: &str) -> Vec<&str> {
+    inline_tags(desc).into_iter().map(|t| t.tag).collect()
+}
+
 /// The `{@tag namepath text}` and `[text]{@tag namepath}` inline tags of a description, the
 /// prefixed ones first (`parseInlineTags`).
 fn inline_tags(desc: &str) -> Vec<Inline<'_>> {

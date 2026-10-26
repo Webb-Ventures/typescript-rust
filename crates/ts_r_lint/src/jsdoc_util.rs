@@ -1026,6 +1026,13 @@ pub fn reject_type_names(cx: &mut Ctx<'_, '_>, rejected: &[(&str, &str)]) {
 /// closes the comment, or the block's first line when it has other tags, is blanked
 /// instead (its delimiters stay). Removing from the block's first line drops everything.
 pub fn remove_tag(b: &mut Block, idx: usize, offset: usize) {
+    remove_tag_with(b, idx, offset, false);
+}
+
+/// [`remove_tag`] with the plugin's `removeEmptyBlock`: when set, only the block's first
+/// line (with other tags present) is blanked; any other line, even one that opens or closes
+/// the comment, is dropped.
+pub fn remove_tag_with(b: &mut Block, idx: usize, offset: usize, remove_empty_block: bool) {
     let Some(tag) = b.tags.get(idx) else {
         return;
     };
@@ -1048,7 +1055,9 @@ pub fn remove_tag(b: &mut Block, idx: usize, offset: usize) {
         return;
     };
     let t = &b.lines[line].tokens;
-    if (at == 0 && b.tags.len() >= 2) || !t.end.is_empty() || t.delimiter == "/**" {
+    if (at == 0 && b.tags.len() >= 2)
+        || (!remove_empty_block && (!t.end.is_empty() || t.delimiter == "/**"))
+    {
         let t = &mut b.lines[line].tokens;
         for s in [
             &mut t.post_delimiter,
