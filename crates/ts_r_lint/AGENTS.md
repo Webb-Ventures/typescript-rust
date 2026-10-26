@@ -640,3 +640,69 @@ reportSettings, makeReport, avoidDocs), `src/utils/hasReturnValue.js`;
 `@es-joy/jsdoccomment` `src/jsdoccomment.js` (getJSDocComment with checkOverloads,
 findJSDocComment, getTSFunctionComment, getReducedASTNode, the overload sibling helpers),
 `src/parseComment.js` (default no-type / no-name tags), `src/parseInlineTags.js`.
+
+## eslint-plugin-unicorn rules (round 5, h1)
+
+`no-useless-recursion`, `no-array-from-fill`, `no-duplicate-if-branches`,
+`switch-case-break-position`, `consistent-assert`, `no-top-level-assignment-in-function`,
+`prefer-single-array-predicate`, `no-global-object-property-assignment`,
+`require-module-attributes`, `consistent-empty-array-spread`, `prefer-promise-with-resolvers`,
+`prefer-type-literal-last`, `consistent-class-member-order`, `consistent-optional-chaining`
+(each at 100% of its oracle). Each file's header states the rule as we learned it; the
+points below are the ones that are easy to get wrong. More helpers live in
+`rules/unicorn_util_h1.rs`: `unwrap_ts` (parentheses and TS wrappers, as ESTree sees through
+them), `static_string`, `is_same_reference` (same static string, `this`, `super`, name, equal
+literals, or member accesses with the same object and the same static or same computed
+property; nesting capped at 200), `logical_operands` / `is_outermost_logical` (flatten an
+`&&`/`||` chain), `token_runs` (non-space runs of a span outside comments) and `delete_all`.
+
+- **no-useless-recursion**: `return f(...)` inside the named function `f` (a plain
+  identifier resolving to the function's own name) is a loop in disguise; generators, calls
+  inside a `try`, and calls after a `using` / `await using` (whose cleanup runs after the
+  call) are left alone.
+- **no-duplicate-if-branches** compares a branch with the previous one in the chain by
+  tokens and tree shape (literals by raw text), ignoring comments, layout, empty statements
+  and a trailing `;`.
+- **switch-case-break-position**: a `break`/`continue`/`return`/`throw` after a case's only
+  block belongs inside it; only `break` and `continue` are fixed, moved before the block's
+  `}` at the indentation of its last statement, and not when a comment sits in between, the
+  block is on one line, or the statement has a trailing comment. The oracle harness
+  (`tests/rule_oracle.rs`, `config_for`) sets `reportUnusedDisableDirectives: "warn"` when a
+  case's expected messages include ESLint's "Unused eslint-disable directive" report (null
+  `ruleId`), because that report's fix shapes ESLint's output there.
+- **no-top-level-assignment-in-function** runs once per file over the Program's global and
+  module scopes: a write (not a declaration's initialiser) to a top-level binding from inside
+  a function, arrow or method is reported; `/* global */` comments declare nothing, and
+  class field initialisers and static blocks are not functions.
+- **no-global-object-property-assignment**: writes include compound and logical assignment,
+  update, destructuring targets and `for-in`/`of` heads; `delete` is not a write.
+- **prefer-promise-with-resolvers**: `new Promise<T>(...)` in a `.js` file is a comparison
+  (`new Promise < T > (...)`), so it has no argument and is not reported. The fix needs the
+  promise in a plain (not exported) single-declarator `const` in a statement list, preceded
+  only by the `let`s it replaces; a named function expression executor whose name is the
+  target resolves the assignment to that name, so the outer `let` does not match and there
+  is no fix.
+- **prefer-type-literal-last**: `null`/`undefined` stay last and unions/intersections are
+  skipped when looking for "another type", but in the fix a union or intersection member is
+  an ordinary other type. A comment between the token before the union and the token after
+  it, outside every member, drops the fix.
+- **consistent-class-member-order**: only the first out-of-order member is reported. The
+  suggestion needs comment-free bodies with every member starting its line, and refuses to
+  move a static field past a static block (or back), since both run in order.
+- **consistent-optional-chaining** reports the right side only; with `&&` any `?.` on the
+  right is unnecessary, with `||` the right must match the left.
+
+Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursion.js`,
+`rules/no-array-from-fill.js`, `rules/no-duplicate-if-branches.js`,
+`rules/switch-case-break-position.js`, `rules/consistent-assert.js`,
+`rules/no-top-level-assignment-in-function.js`, `rules/prefer-single-array-predicate.js`,
+`rules/no-global-object-property-assignment.js`, `rules/require-module-attributes.js`,
+`rules/consistent-empty-array-spread.js`, `rules/prefer-promise-with-resolvers.js`,
+`rules/prefer-type-literal-last.js`, `rules/consistent-class-member-order.js`,
+`rules/consistent-optional-chaining.js`, and the utils `get-enclosing-function.js`,
+`is-same-statement.js`, `is-same-tokens.js`, `get-indent-string.js`, `comments.js`
+(getLastTrailingCommentOnSameLine, getCommentSafeProblem), `is-same-reference.js`,
+`is-logical-expression.js`, `unwrap-typescript-expression.js`, `is-global-identifier.js`,
+`type-arguments.js`, `member-expression.js` (getMemberAccessOperatorRange),
+`fix/remove-object-property.js`, `ast/literal.js`, `ast/function-types.js`,
+`ast/call-or-new-expression.js`, `ast/matches-name-constraint.js`.
