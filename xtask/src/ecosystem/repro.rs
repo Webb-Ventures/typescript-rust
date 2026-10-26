@@ -12,15 +12,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use super::report::{STAGES, StageResult, Status};
-use super::{Worker, build_binaries, run_worker};
+use super::{Worker, build_binaries, default_bin_dir, run_worker};
 use crate::args::Args;
 use crate::util::{Result, read_to_string, rel, root};
 
 pub fn run(mut args: Args) -> Result<ExitCode> {
     let no_build = args.flag("no-build");
-    let bin_dir = args
-        .opt("bin-dir")?
-        .unwrap_or_else(|| "target/release".into());
+    let bin_dir = args.opt("bin-dir")?.unwrap_or_else(default_bin_dir);
     let mut files: Vec<PathBuf> = args.rest().into_iter().map(PathBuf::from).collect();
     args.finish()?;
     if files.is_empty() {
