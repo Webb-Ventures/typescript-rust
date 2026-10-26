@@ -1,4 +1,4 @@
-// ts-r dev client runtime. Served at /@ts-r/client (alias /@vite/client).
+// ts-r dev client runtime. Served at /@vite/client (/@ts-r/client re-exports it).
 //
 // - HMR over a WebSocket to the dev server (protocol messages are Vite's, so plugins written
 //   for Vite keep working): connected, update (js-update / css-update), full-reload, prune,
@@ -347,23 +347,57 @@ export function createHotContext(ownerPath) {
 // ---------------------------------------------------------------------------------------
 // CSS modules served as JS
 
+// Style tags by id (the stylesheet's file path). `<style>` and `<link rel=stylesheet>` tags a
+// server rendered with a `data-vite-dev-id` are reused: the module's CSS updates the `<style>`
+// only when it differs, and is not added at all while a linked sheet with its id is on the
+// page (removing the module removes that link too).
 const styles = new Map();
+const linkedSheets = new Map();
+let lastInsertedStyle;
+if (typeof document !== "undefined") {
+  for (const el of document.querySelectorAll("style[data-vite-dev-id]")) {
+    styles.set(el.getAttribute("data-vite-dev-id"), el);
+  }
+  for (const el of document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]')) {
+    linkedSheets.set(el.getAttribute("data-vite-dev-id"), el);
+  }
+}
 
 export function updateStyle(id, content) {
+  if (linkedSheets.has(id)) return;
   let el = styles.get(id);
   if (!el) {
     el = document.createElement("style");
     el.setAttribute("type", "text/css");
     el.setAttribute("data-vite-dev-id", id);
     el.textContent = content;
-    document.head.appendChild(el);
+    // Styles added in one task (the modules of one import graph evaluating) stay together, in
+    // import order, ahead of tags the app's own code appended meanwhile; Vite's client does
+    // the same, so a stylesheet imported after a script that inserts a `<style>` doesn't
+    // override it.
+    if (lastInsertedStyle?.isConnected) {
+      lastInsertedStyle.after(el);
+    } else {
+      document.head.appendChild(el);
+      setTimeout(() => {
+        lastInsertedStyle = undefined;
+      }, 0);
+    }
+    lastInsertedStyle = el;
     styles.set(id, el);
-  } else {
+  } else if (el.textContent !== content) {
     el.textContent = content;
   }
 }
 
 export function removeStyle(id) {
+  if (linkedSheets.has(id)) {
+    // An update may have replaced the link: look them up again.
+    for (const el of document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]')) {
+      if (el.getAttribute("data-vite-dev-id") === id) el.remove();
+    }
+    linkedSheets.delete(id);
+  }
   const el = styles.get(id);
   if (el) {
     el.remove();

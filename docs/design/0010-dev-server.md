@@ -74,7 +74,8 @@ rewritten); `/x.css` (CSS for `<link>`; with `?import`, a self-accepting JS modu
 dependency through `bundle`); `/@ts-r/deps/<name>[.map]` (batch files); `/@fs/<abs>` (only
 files the graph reached); `/@id/<id>` (plugin modules the graph knows, `\0` written
 `__x00__`); `/@ts-r/up/<n>/<path>` (only files inside a `node_modules` directory);
-`/@ts-r/client` (alias `/@vite/client`); `/@ts-r/env` (alias `/@vite/env`); `/@ts-r/ws`;
+`/@vite/client` (the client pages get; alias `/@ts-r/client`, which re-exports it);
+`/@ts-r/env` (alias `/@vite/env`); `/@ts-r/ws`;
 `/@ts-r/stats`; `/@ts-r/ping`; then the public dir, the root, plugin middlewares and the SPA
 fallback.
 
@@ -219,7 +220,9 @@ inlined (depth ≤ 32, cycles dropped) and `url()`s rewritten to served URLs.
   ReadDirectoryChangesW) on the root, recursively. Paths with a `node_modules`, `.git`, `.hg`,
   `.svn` or `.DS_Store` component are ignored. A dedicated watch thread owns the native watcher
   and the `Debouncer`. Defaults: quiet window 3 ms, maximum wait 30 ms, and a 40 ms grace for
-  files that are empty (truncate then write) or missing (delete then recreate). Atomic saves
+  files that are empty (truncate then write) or missing (delete then recreate). A file found
+  missing that is back after the grace is reported once, as created (chokidar reports a
+  removal and an addition; the server acts on the addition). Atomic saves
   (temp file + rename) come out as one modification of the target.
 - macOS fast path: the 64 most recently changed files (`FAST_PATH_FILES`) are also watched
   with kqueue on their own thread, re-armed after every change. FSEvents delivers in about

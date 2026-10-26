@@ -142,7 +142,7 @@ fn fast_refresh_keeps_or_resets_state_per_react_rules() {
         cdp.wait_for(&text(id, &format!("{id} v1 0")), T);
     }
     cdp.wait_for(
-        "performance.getEntriesByType('resource').some(e => e.name.includes('/@ts-r/client'))",
+        "performance.getEntriesByType('resource').some(e => e.name.includes('/@vite/client'))",
         T,
     );
     std::thread::sleep(Duration::from_millis(300));

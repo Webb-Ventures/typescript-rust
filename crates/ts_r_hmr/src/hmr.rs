@@ -77,10 +77,14 @@ pub(crate) fn on_batch(shared: &Shared, batch: ChangeBatch) {
     if retry_errored && out.full_reload.is_none() {
         // A new file may fix a "Failed to resolve import" error elsewhere.
         let errored: Vec<(ModuleId, std::path::PathBuf)> = {
-            let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-            g.ids()
-                .filter(|&i| g.node(i).errored)
-                .map(|i| (i, g.node(i).file.clone()))
+            let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+            let ids: Vec<ModuleId> = g.ids().filter(|&i| g.node(i).retry_on_create).collect();
+            ids.into_iter()
+                .map(|i| {
+                    let n = g.node_mut(i);
+                    n.retry_on_create = false;
+                    (i, n.file.clone())
+                })
                 .collect()
         };
         for (_, file) in errored {
@@ -138,6 +142,13 @@ fn handle_change(
 ) {
     let path = &change.path;
     let url = server::url_for_file(&shared.root, path);
+    // A new file may fix a "Failed to resolve import" error elsewhere, whether or not the
+    // graph already has a module for it (a deleted file restored): Vite adds the modules
+    // that failed to resolve an import to every create event's update
+    // (`vite: packages/vite/src/node/server/hmr.ts`, `handleHMRUpdate`).
+    if change.kind == ChangeKind::Created {
+        *retry_errored = true;
+    }
     shared
         .changed_at
         .lock()
@@ -250,9 +261,6 @@ fn handle_change(
         reprepare(shared, d, timestamp, timing, out);
     }
     let Some(id) = own else {
-        if change.kind == ChangeKind::Created {
-            *retry_errored = true;
-        }
         return;
     };
     // The page no longer imports it (often a late event from before the import was removed).
@@ -260,8 +268,12 @@ fn handle_change(
     // browser's instance of the old URL.
     {
         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+        if change.kind == ChangeKind::Removed {
+            g.detach(id);
+        }
         let n = g.node(id);
-        if n.pruned {
+        // A pruned `<link>`ed stylesheet still updates its link (below).
+        if n.pruned && !n.linked_css {
             // Deleting a file the page stopped importing in an earlier batch: nothing on the
             // page accepts it, so the page reloads (Vite still has the module, with no
             // importers: a dead end). A deletion in the batch that pruned it (the import
@@ -304,7 +316,9 @@ fn handle_change(
         let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let n = g.node(id);
         let same = !n.errored && n.prepared.as_ref().is_some_and(|p| p.hash == hash);
-        (n.kind, same, n.served_as_js, n.linked_css, n.url.clone())
+        // No JS module imports a pruned stylesheet any more: only its link updates.
+        let as_js = n.served_as_js && !n.pruned;
+        (n.kind, same, as_js, n.linked_css, n.url.clone())
     };
     if unchanged {
         return; // touch, or the second of a double write
@@ -323,7 +337,11 @@ fn handle_change(
                     let dead_end = {
                         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
                         g.node_mut(id).errored = true;
-                        g.propagate(id, false).full_reload.is_some()
+                        let dead_end = g.propagate(id, false).full_reload.is_some();
+                        // The reloaded page asks for the module again if it still uses it,
+                        // and that failure marks it for the next creation's retry.
+                        g.node_mut(id).retry_on_create = !dead_end;
+                        dead_end
                     };
                     // Vite propagates a change through the graph before transforming it: with
                     // no module accepting it the page reloads, and the reloaded page gets the
@@ -416,10 +434,10 @@ fn reprepare(
     let (file, url, kind, css_use, pruned) = {
         let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let n = g.node(id);
-        let css_use = (n.linked_css, n.served_as_js);
+        let css_use = (n.linked_css, n.served_as_js && !n.pruned);
         (n.file.clone(), n.url.clone(), n.kind, css_use, n.pruned)
     };
-    if kind == ModuleKind::Css && !pruned {
+    if kind == ModuleKind::Css && (!pruned || css_use.0) {
         out.files.push(url.clone());
         css_changed(shared, id, &url, css_use, timestamp, timing, out);
         return;
@@ -462,7 +480,7 @@ fn reprepare(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .node_mut(id)
-                .errored = true;
+                .fail();
             report_error(shared, &e);
             out.files.push(url);
             out.errored = true;

@@ -72,7 +72,21 @@ from the documented plugin API (no Vite code).
   first `.ext` up to the end that is known: `js`, `jsx`, `ts`, `tsx`, `json`, `text`,
   `css`; else `js`), a post-stage one `js` (our built-in step made JS, as Vite's JSON and
   TS plugins return), and a hook returning `moduleType` changes it for the hooks after it.
-  A `filter.moduleType` list (or `{ include }`) skips a hook for other types.
+  A `filter.moduleType` list (or `{ include }`) skips a hook for other types. A stylesheet's
+  post stage is the exception: it runs on CSS (type `css`) and only the normal-order hooks,
+  the ones Vite runs between `vite:css` and `vite:css-post`
+  (`vite: packages/vite/src/node/plugins/index.ts`, `resolvePlugins`); `enforce: 'post'` and
+  `order: 'post'` hooks, which see the JS wrapper there, are skipped.
+- **`this.addWatchFile` / `this.getWatchFiles`** in `load` and `transform`: the context
+  collects the files per call, and `load`/`transform` answers carry them (`watchFiles`; a
+  transform that only watched files answers with `code: null`). The server keys and watches
+  them (`ts_r_hmr`, "Plugin watch files"). `hooks.load_files` says a `load` hook has no
+  filter, so regular files go through it too.
+- **An ESM config in a CommonJS package** (`vite.config.js` with `import` in a
+  `"type": "commonjs"` package): when importing it throws a `SyntaxError`, the sidecar copies
+  it next to itself as `<config>.timestamp-<pid>-ts-r.mjs` (`.mts` for TS), imports that and
+  removes it in a `finally` (`vite: packages/vite/src/node/config.ts`,
+  `loadConfigFromBundledFile` writes a temp `.mjs` the same way).
 - **`/plugin-react` is replaced, not run:** plugins named `vite:react*`
   / `@vitejs/plugin-react*` only run their `config` hooks; JSX options from the resolved config
   (`oxc.jsx.importSource`/`runtime`, `esbuild.jsx*`) configure `TsTransform`, and Fast Refresh
@@ -194,7 +208,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 
 - Vite plugins: the seam gaps in [`ts_r_hmr`](../ts_r_hmr/AGENTS.md#gaps) apply; `this.parse`,
   `this.load`, `ssrLoadModule` throw; `server.moduleGraph` only knows modules a plugin's `load` produced (`getModuleById`, a minimal module record); `invalidateModule`/`invalidateAll` drop the server's kept `load` result and `server.reloadModule` (also on `environments.client`) re-loads and hot-updates the module (sidecar messages `forget`, `forget_all`, `reload`); `server.watcher` only
-  sees changes that reach `handleHotUpdate`; `this.addWatchFile` is a no-op. The sidecar costs ~25 ms to start with inline plugins and
+  sees changes that reach `handleHotUpdate`. The sidecar costs ~25 ms to start with inline plugins and
   ~80–440 ms when the config imports `vite` (cold disk cache); with a cached manifest that happens in the background after "ready".
 - From `vite.config`: no `css.*` (preprocessor options, CSS modules), `server.hmr`,
   `server.fs`, `server.watch`, `optimizeDeps.exclude`/`esbuildOptions`, proxy

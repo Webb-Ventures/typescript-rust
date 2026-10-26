@@ -48,7 +48,7 @@ are cached by content hash. Change `cache_id` when output for the same input can
 | `proxy.rs` | `server.proxy`: rule matching, streamed HTTP forwarding, WebSocket tunnels |
 | `cors.rs` | `server.cors`: preflights and response headers; `js_regex` (JS regex source → `regex-lite`) |
 | `sourcemap.rs` | VLQ, map composition (plugin chain), column shifting for render-time edits |
-| `client/client.js` | browser runtime served at `/@ts-r/client` (alias `/@vite/client`) |
+| `client/client.js` | browser runtime served at `/@vite/client` (alias `/@ts-r/client`) |
 | `testutil.rs` | `#[doc(hidden)]` temp dirs, fixture app, HTTP GET, shared with `ts_r_dev` tests |
 
 ## Invariants
@@ -296,6 +296,42 @@ are cached by content hash. Change `cache_id` when output for the same input can
 - **The server's own modules have two names and any query.** `/@ts-r/client` and
   `/@vite/client`, `/@ts-r/env` and `/@vite/env` (with or without a query) are served URLs:
   an import of them is kept under the base, never resolved as a file.
+- **The client is `/@vite/client`**, injected and imported under that name (Vite's playground
+  tests look for it); `/@ts-r/client` re-exports it, so both names share one module instance
+  (one socket, one `import.meta.hot` registry). The client imports `/@vite/env` for the global
+  `define`s, as Vite's does: the same module graph, so a page's modules and the socket's
+  `connected` race as they do under Vite (hmr's `acceptExports([])` tests read that order).
+- **Stylesheet identity is the absolute file path.** `<style data-vite-dev-id>` and
+  `<link data-vite-dev-id>` carry `paths::id(file)`, as Vite's do. The client adopts the
+  styles and links the page was served with (by that id) instead of adding a second copy;
+  a stylesheet the page links is never also inserted as a `<style>`; `updateStyle` sets the
+  text only when it changed and inserts new styles after the last one it inserted (Vite's
+  order: `vite: packages/vite/src/client/client.ts`, `updateStyle`).
+- **Linked CSS is pruned like a module.** A `<link>`ed stylesheet whose last JS import is
+  removed gets a `prune` for its URL, and the client removes its link.
+- **A deleted module lets go of its imports** (`ModuleGraph::detach`, Vite's
+  `moduleGraph.ts`, `onFileDelete`): its dependencies lose it as an importer, so they can be
+  pruned, and restoring the file starts it fresh.
+- **The watcher hears about every file the page uses** (`WatchAdder::known`, once per node:
+  `ModuleNode::known_to_watcher`): scripts, stylesheets and assets, on their first serve. A
+  known file the debouncer sees flagged as created is a modification while it exists and a
+  removal once it is gone.
+- **A file creation retries modules that failed** (`ModuleNode::retry_on_create`): every
+  `Created` change re-prepares them, whether or not the graph knows the new file (a deleted
+  file restored), like Vite's `_hasResolveFailedErrorModules` in `handleHMRUpdate`. A retry
+  takes a module out of the set, as Vite's `invalidateModule` does; only a later failure the
+  page asked for (a request, or an update the page keeps) puts it back. A retry that reloads
+  the page leaves it out: the reloaded page asks for it again if it still uses it.
+- **Plugin watch files** (`this.addWatchFile` in `load` and `transform`): kept per file in
+  `Shared::plugin_watch`, their contents join the module's transform cache key, and editing
+  one re-runs the hooks and updates the module. Stylesheets go through the plugins'
+  `transform` hooks too (pre on the source, post on the built-in step's CSS; the sidecar runs
+  only normal-order hooks there), and their watch files join the stylesheet's dependencies.
+  `load` runs for regular files when a `load` hook has no filter (`PluginHooks::load_files`).
+- **The transform cache is single-flight**: concurrent misses for one key run the transform
+  once and the others wait for its result (`cache.rs`, `Flight`); a result whose watch files
+  change its key is stored under the new key. The dependency scan shares `cached_transform`,
+  so it never runs a module's plugin transforms a second time.
 - **The config's `process.env` writes count.** A `vite.config.*` runs in the plugin sidecar,
   so variables it sets on `process.env` are returned with the dev options (`processEnv`) and
   overlaid on the server's environment when `.env` files and prefixes are loaded. The
@@ -491,8 +527,11 @@ wrapper ~0.6, browser ~2.4).
 ## Gaps
 
 - No `parse<T>` validator expansion here (`ts_r_dev` wraps the transform). React Fast Refresh
-  and Vite config/plugin loading live in `ts_r_dev`. Plugin seam gaps: `load` isn't called for
-  plain script, CSS, JSON or asset files; no `this.addWatchFile`/`emitFile`; plugin source maps
+  and Vite config/plugin loading live in `ts_r_dev`. Plugin seam gaps: filtered `load` hooks
+  aren't called for plain script, CSS, JSON or asset files; JSON and asset modules' watch
+  files aren't tracked; no `emitFile`; `import.meta.glob` is expanded (and template
+  `import()` resolved) after the cached transform, so post `transform` hooks don't see the
+  expansion (glob-import's "visible to post transform plugins"); plugin source maps
   are composed but asset/JSON modules carry no map; middlewares run only for requests no built-in route serves (and non-GET
   requests), with buffered bodies (no streaming/SSE); the dependency scan resolves through `resolveId` and aliases but doesn't look
   through plugin modules (their bare imports are found on request: re-batch + reload).
@@ -521,6 +560,6 @@ wrapper ~0.6, browser ~2.4).
   (inotify is already fast; Windows untested).
 - Resolution results are cached with the prepared module; a newly created file that would
   change how an existing import resolves (e.g. adding `x.ts` next to `x.js`) is picked up only
-  when the importer changes. Errored modules are retried when any file is created.
+  when the importer changes. Errored modules are retried when a file is created.
 - `full-reload` latency isn't measured (no acknowledgement after a reload).
 - HTTP/1.1 only (also over TLS: no HTTP/2), no compression.

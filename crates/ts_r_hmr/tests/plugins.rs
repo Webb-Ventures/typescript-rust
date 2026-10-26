@@ -12,8 +12,8 @@ use ts_r_hmr::paths;
 use ts_r_hmr::testutil::{TempDir, http_get};
 use ts_r_hmr::ws::WsClient;
 use ts_r_hmr::{
-    CacheMode, DevConfig, DevServer, PluginHooks, PluginHost, PluginResolution, ServerHandle,
-    Stage, Transformed,
+    CacheMode, DevConfig, DevServer, Loaded, PluginHooks, PluginHost, PluginResolution,
+    ServerHandle, Stage, Transformed,
 };
 
 #[derive(Debug, Default)]
@@ -33,6 +33,7 @@ impl PluginHost for Host {
             resolve_pre: true,
             resolve_post: true,
             load: true,
+            load_files: false,
             transform_pre: true,
             transform_post: true,
             index_html: true,
@@ -412,6 +413,182 @@ fn plugin_loads_are_kept_until_the_module_is_invalidated() {
     // `moduleGraph.invalidateModule`: the next request loads it again.
     (handle.forget_load)(Some("\0virtual:n"));
     assert!(http_get(addr, url, &[]).2.contains("d + 3;"));
+    server.shutdown();
+}
+
+/// A plugin like Vite's transform-plugin playground: an unfiltered `load` hook watches
+/// `load-dep.txt` for `main.js` (returning no code), and its transform watches `dep.txt` and
+/// stamps how often it ran.
+#[derive(Debug)]
+struct WatchFileHost {
+    root: String,
+    runs: Mutex<u32>,
+}
+
+impl PluginHost for WatchFileHost {
+    fn cache_id(&self) -> &str {
+        "watch-file-host/1"
+    }
+
+    fn hooks(&self) -> PluginHooks {
+        PluginHooks {
+            load: true,
+            load_files: true,
+            transform_post: true,
+            ..PluginHooks::default()
+        }
+    }
+
+    fn resolve_ids(
+        &self,
+        _stage: Stage,
+        _importer: &str,
+        specifiers: &[String],
+    ) -> Result<Vec<Option<PluginResolution>>, String> {
+        Ok(vec![None; specifiers.len()])
+    }
+
+    fn load(&self, _id: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn load_with_watch(&self, id: &str) -> Result<Loaded, String> {
+        Ok(Loaded {
+            code: None,
+            watch_files: if id.ends_with("/src/main.js") {
+                vec![format!("{}/load-dep.txt", self.root)]
+            } else {
+                Vec::new()
+            },
+        })
+    }
+
+    fn transform(&self, _: Stage, id: &str, code: &str) -> Result<Option<Transformed>, String> {
+        if !id.ends_with("/src/main.js") {
+            return Ok(None);
+        }
+        let mut n = self.runs.lock().unwrap();
+        *n += 1;
+        Ok(Some(Transformed {
+            code: format!("const RUNS = {};\n{code}", *n),
+            watch_files: vec![format!("{}/dep.txt", self.root)],
+            ..Transformed::default()
+        }))
+    }
+}
+
+/// `this.addWatchFile` in `load` and `transform`: the files' contents join the module's
+/// cache key (fetching it again reuses the output), and editing one runs the hooks again and
+/// updates the module.
+#[test]
+fn files_plugins_watch_rerun_the_module_hooks() {
+    let app = TempDir::new("plug-watch");
+    let cache = TempDir::new("plug-watch-cache");
+    app.write("src/main.js", "console.log(RUNS);\n");
+    app.write("dep.txt", "a");
+    app.write("load-dep.txt", "a");
+    let root = paths::id(&paths::canonicalize(app.path()).unwrap()).into_owned();
+    let host = Arc::new(WatchFileHost {
+        root,
+        runs: Mutex::new(0),
+    });
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 1;"));
+    assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 1;"));
+    let mut ws = WsClient::connect(&addr.to_string(), "/@ts-r/ws").unwrap();
+    ws.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server.client_count() == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.write("dep.txt", "b");
+    next_of(&mut ws, "full-reload");
+    assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 2;"));
+    app.write("load-dep.txt", "b");
+    next_of(&mut ws, "full-reload");
+    assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 3;"));
+    assert_eq!(*host.runs.lock().unwrap(), 3);
+    server.shutdown();
+}
+
+/// A `transform` hook that fills a stylesheet's `replaced` from `color.txt`, watching it.
+#[derive(Debug)]
+struct CssWatchHost {
+    root: String,
+}
+
+impl PluginHost for CssWatchHost {
+    fn cache_id(&self) -> &str {
+        "css-watch-host/1"
+    }
+
+    fn hooks(&self) -> PluginHooks {
+        PluginHooks {
+            transform_post: true,
+            ..PluginHooks::default()
+        }
+    }
+
+    fn resolve_ids(
+        &self,
+        _stage: Stage,
+        _importer: &str,
+        specifiers: &[String],
+    ) -> Result<Vec<Option<PluginResolution>>, String> {
+        Ok(vec![None; specifiers.len()])
+    }
+
+    fn load(&self, _id: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn transform(&self, stage: Stage, id: &str, code: &str) -> Result<Option<Transformed>, String> {
+        if stage != Stage::Post || !id.ends_with("/src/main.css") {
+            return Ok(None);
+        }
+        let dep = format!("{}/color.txt", self.root);
+        let color = std::fs::read_to_string(&dep).map_err(|e| e.to_string())?;
+        Ok(Some(Transformed {
+            code: code.replace("replaced", color.trim()),
+            watch_files: vec![dep],
+            ..Transformed::default()
+        }))
+    }
+}
+
+/// Stylesheets go through the plugins' `transform` hooks too (Vite's hmr "CSS HMR with
+/// this.addWatchFile"): editing a file the hook watches updates the stylesheet.
+#[test]
+fn stylesheet_transforms_run_and_their_watch_files_update_the_stylesheet() {
+    let app = TempDir::new("plug-css");
+    let cache = TempDir::new("plug-css-cache");
+    app.write("src/main.css", ".a { color: replaced; }\n");
+    app.write("color.txt", "red");
+    let root = paths::id(&paths::canonicalize(app.path()).unwrap()).into_owned();
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    config.plugins = Some(Arc::new(CssWatchHost { root }) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    let body = http_get(addr, "/src/main.css?import", &[]).2;
+    assert!(body.contains("color: red;"), "{body}");
+    let mut ws = WsClient::connect(&addr.to_string(), "/@ts-r/ws").unwrap();
+    ws.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server.client_count() == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.write("color.txt", "green");
+    let m = next_of(&mut ws, "update");
+    assert_eq!(m["updates"][0]["path"], "/src/main.css", "{m}");
+    let body = http_get(addr, "/src/main.css?import", &[]).2;
+    assert!(body.contains("color: green;"), "{body}");
     server.shutdown();
 }
 

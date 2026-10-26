@@ -3,8 +3,10 @@
 
 use crate::scan::ImportRecord;
 
-/// URL the client runtime is served from.
-pub const CLIENT_URL: &str = "/@ts-r/client";
+/// URL the client runtime is served from, and the one pages and modules import it by: Vite's,
+/// so a page or plugin that names `/@vite/client` shares the one instance (`/@ts-r/client`
+/// re-exports it).
+pub const CLIENT_URL: &str = "/@vite/client";
 
 /// One replacement in a code string.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,16 +132,18 @@ fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
 /// its default, so a page importing one still links; app CSS modules go through
 /// [`css_module_with_exports`].
 pub fn css_module(url: &str, css: &str) -> String {
-    css_module_at(CLIENT_URL, url, css)
+    css_module_at(CLIENT_URL, url, url, css)
 }
 
-/// [`css_module`] with the client at `client` (under a base).
-pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
+/// [`css_module`] with the client at `client` (under a base). `style_id` names the `<style>`
+/// tag (`data-vite-dev-id`): Vite uses the stylesheet's file path, so a page rendered with a
+/// `<style>` or `<link>` carrying that id is reused instead of styled twice.
+pub fn css_module_at(client: &str, url: &str, style_id: &str, css: &str) -> String {
     let exports = match is_css_module(url) {
         true => "export default {};\n".to_owned(),
         false => String::new(),
     };
-    style_module(client, url, css, &exports)
+    style_module(client, url, style_id, css, &exports)
 }
 
 /// A CSS module (scoped by [`crate::css_modules`]) as a JS module: the style, the class map
@@ -148,6 +152,7 @@ pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
 pub fn css_module_with_exports(
     client: &str,
     url: &str,
+    style_id: &str,
     css: &str,
     exports: &[(String, String)],
 ) -> String {
@@ -164,7 +169,7 @@ pub fn css_module_with_exports(
     }
     map.push_str(if exports.is_empty() { "};\n" } else { "\n};\n" });
     code.push_str(&map);
-    style_module(client, url, css, &code)
+    style_module(client, url, style_id, css, &code)
 }
 
 /// Whether a CSS module name can be a named export (`const <name>`).
@@ -228,12 +233,13 @@ fn is_export_name(k: &str) -> bool {
         && !k.starts_with("__ts_r_")
 }
 
-fn style_module(client: &str, url: &str, css: &str, exports: &str) -> String {
-    let id = js_string(url);
+fn style_module(client: &str, url: &str, style_id: &str, css: &str, exports: &str) -> String {
+    let hot = js_string(url);
+    let id = js_string(style_id);
     let client = js_string(client);
     format!(
         "import {{ createHotContext as __ts_r_hot, updateStyle as __ts_r_update_style, removeStyle as __ts_r_remove_style }} from {client};\n\
-         import.meta.hot = __ts_r_hot({id});\n\
+         import.meta.hot = __ts_r_hot({hot});\n\
          const __ts_r_id = {id};\n\
          const __ts_r_css = {};\n\
          __ts_r_update_style(__ts_r_id, __ts_r_css);\n\
@@ -505,7 +511,7 @@ mod tests {
     fn injects_client_script() {
         let out = inject_client("<!doctype html><html><head><title>x</title></head></html>");
         assert!(out.contains(
-            "<head>\n    <script type=\"module\" src=\"/@ts-r/client\"></script><title>"
+            "<head>\n    <script type=\"module\" src=\"/@vite/client\"></script><title>"
         ));
         let out = inject_client("<HTML lang=en><header>no head</header>");
         assert!(out.starts_with("<HTML lang=en>\n    <script"));
