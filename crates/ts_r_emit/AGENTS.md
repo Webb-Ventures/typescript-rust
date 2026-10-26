@@ -176,7 +176,10 @@ so the file is refused with TSR2002. `const_enum_value` answers an access of ano
 file's const enum member (`E.A`, `E["A"]`, `ns.E.A` through an import), or a local enum
 whose initializer depends on an import, with
 `Checker::const_enum_access_value`; under `isolatedModules` it answers nothing, so tsc's
-property access stays. `jsx_runtime_found` is precomputed per file
+property access stays. `enum_member_value` answers an enum member whose initializer reads
+another file (``A = `${BAR}` ``, `G = 2 + BAR` with `BAR` imported) with
+`Checker::enum_member_value`, under `isolatedModules` too: tsc folds those either way
+(computedEnumMemberSyntacticallyString2). `jsx_runtime_found` is precomputed per file
 (`jsx_runtimes_found`): the file's runtime specifier
 (`ts_r_checker::jsx_runtime::runtime_specifier`) names an ambient module or resolves to a
 program file. Without the program (per-file
@@ -200,10 +203,10 @@ import reference.
 
 ## Measurements
 
-Latest (2026-10-26, v1/emit4, `cargo run --release -p ts_r_check --example emit_oracle --
---emitter program`): ES2022+ JS outputs 2,159: bytes 2,081 (96.4%), shape 2,128 (98.6%; the
-31 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18 bytes-exact outputs
-with a map baseline; all 17,352 outputs: 15,837 bytes-exact (91.3%), JS 13,674 / 14,476
+Latest (2026-10-26, v1/checker4, `cargo run --release -p ts_r_check --example emit_oracle --
+--emitter program`): ES2022+ JS outputs 2,159: bytes 2,081 (96.4%), shape 2,130 (98.7%; the
+29 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18 bytes-exact outputs
+with a map baseline; all 17,352 outputs: 15,842 bytes-exact (91.3%), JS 13,679 / 14,476
 (94.5%), `.d.ts` 1,961 / 2,640. Declarations (E2): 1,191 of 1,315 baselines without
 JavaScript inputs have every `.d.ts` bytes-exact (90.6%); 1,191 / 1,634 over all baselines.
 The paragraphs below are the milestone measurements.
