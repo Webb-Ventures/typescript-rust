@@ -1796,6 +1796,15 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   `const` initializers, annotations through local aliases, return types; annotations of
   parameters and return types don't see types declared in the function body). Fixed to
   `.href` only for a fresh `new URL(...)`, without lost comments.
+- **no-url-in-search-params**: `new URLSearchParams(arg)` with a URL (the builtin type
+  checker with `URL`, its `url`-module imports, no class heritage), a URL's or `location`'s
+  `.href`, or a static `scheme://` string that parses (authority host/port checks only).
+  Suggestions: a detached `.search` copy, the live `.searchParams` (parenthesized as a
+  `new` callee containing a call), or `new URL(...).searchParams`.
+- **no-invalid-url-protocol-comparison**: `<url>.protocol` (shared URL detection) compared
+  by equality, `switch` or `[...].includes`/`indexOf`/`lastIndexOf`/`new Set([...]).has`
+  with a scheme-like static string not in `lowercase:` form; fixed inside the quotes unless
+  another `case` already has that protocol.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1812,4 +1821,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`,
 `require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
 `no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`, `no-invalid-integrity.js`, `prefer-scoped-selector.js`,
-`prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`.
+`prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`,
+`no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`.

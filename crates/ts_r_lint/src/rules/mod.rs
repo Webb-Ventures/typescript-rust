@@ -391,7 +391,7 @@ mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_remove_event_listener;
-mod unicorn_no_invalid_temporal_arithmetic;
+mod unicorn_no_invalid_url_protocol_comparison;
 mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
 mod unicorn_no_late_event_control;
@@ -444,7 +444,7 @@ mod unicorn_no_unreadable_for_of_expression;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_unsafe_sqlite_interpolation;
 mod unicorn_no_unsafe_string_replacement;
-mod unicorn_no_unused_iterator_helper;
+mod unicorn_no_url_in_search_params;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
 mod unicorn_no_useless_collection_argument;
@@ -1024,7 +1024,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_integrity::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
-    &unicorn_no_invalid_temporal_arithmetic::RULE,
+    &unicorn_no_invalid_url_protocol_comparison::RULE,
     &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_invalid_well_known_symbol_methods::RULE,
     &unicorn_no_late_event_control::RULE,
@@ -1074,7 +1074,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_unsafe_sqlite_interpolation::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
-    &unicorn_no_unused_iterator_helper::RULE,
+    &unicorn_no_url_in_search_params::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
     &unicorn_no_useless_coercion::RULE,
     &unicorn_no_useless_compound_assignment::RULE,
