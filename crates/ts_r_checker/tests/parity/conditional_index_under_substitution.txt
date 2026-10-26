@@ -1,0 +1,1 @@
+a.ts(18,15): error TS2536: Type 'number' cannot be used to index type 'V6<T>'.

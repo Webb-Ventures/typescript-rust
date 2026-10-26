@@ -2802,6 +2802,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let nullable = s
                             .flags(t)
                             .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED | TypeFlags::VOID);
+                        // A recursive alias spread in its own branch (`[A, ...M<Tail<T>>]`)
+                        // relates through ever deeper instantiations; running out there
+                        // counts as a fit, not TS2589 (tsc's relation stops at deeply nested
+                        // types with a maybe; type-fest's MergeDeep).
+                        let overflowed = self.inst_overflow;
                         let fits = !nullable
                             && self
                                 .global_reference(
@@ -2809,6 +2814,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                                     &[TypeId::ANY],
                                 )
                                 .is_some_and(|ro| self.is_assignable(t, ro));
+                        let fits = if self.inst_overflow && !overflowed {
+                            self.inst_overflow = false;
+                            true
+                        } else {
+                            fits
+                        };
                         if !fits {
                             self.error(
                                 Loc::new(file, e),
@@ -5096,6 +5107,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let o0 = o;
         let mut o = self.with_implied_constraints(obj, o);
+        if o == o0 {
+            o = self.mapped_under_implied_constraints(obj, o);
+        }
         // An unconstrained `...infer R` in a rest position is an array.
         if let Some(c) = self.rest_infer_array(o) {
             o = self.intersection(&[o, c]);
@@ -5120,14 +5134,33 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let mut changed = false;
             let mut out = Vec::with_capacity(ms.len());
-            for m in ms {
-                match self.rest_infer_array(m) {
-                    Some(rc) => {
-                        out.push(rc);
-                        changed = true;
-                    }
-                    None => out.push(m),
+            // A conditional member (a nested conditional in a branch) is read through its
+            // own constraint, a few levels deep.
+            let mut work: Vec<(TypeId, u8)> = ms.into_iter().rev().map(|m| (m, 0)).collect();
+            while let Some((m, depth)) = work.pop() {
+                if let Some(rc) = self.rest_infer_array(m) {
+                    out.push(rc);
+                    changed = true;
+                    continue;
                 }
+                if depth < 8
+                    && self.store().flags(m).contains(TypeFlags::CONDITIONAL)
+                    && let Some(mc) = self.conditional_constraint(m)
+                    && mc != m
+                {
+                    let s = self.store();
+                    let inner = if s.flags(mc).contains(TypeFlags::UNION) {
+                        s.members_of_union(mc).to_vec()
+                    } else {
+                        vec![mc]
+                    };
+                    if inner.iter().any(|&x| self.rest_infer_array(x).is_some()) {
+                        changed = true;
+                        work.extend(inner.into_iter().rev().map(|x| (x, depth + 1)));
+                        continue;
+                    }
+                }
+                out.push(m);
             }
             if changed {
                 o = self.union(&out);
@@ -5171,6 +5204,50 @@ impl<'c, 'a> Ck<'c, 'a> {
             );
             return;
         }
+    }
+
+    /// Mapped or conditional type `o` written at `obj` inside the true branch of conditionals
+    /// whose check types are type parameters, with each such `T` replaced by `E & T` (tsc
+    /// reads `T` there as a substitution type, so `{ [K in keyof T]: K }[number]` under
+    /// `T extends any[] ?` is keyed by `number`, and so is `W<T>` with `W<X> = X extends
+    /// unknown ? X : never`; expect-type's `UsefulKeys`, array-flatten's `PickValue`,
+    /// type-fest's `VariablePartOfArray<T>[number]`).
+    fn mapped_under_implied_constraints(&mut self, obj: Loc, o: TypeId) -> TypeId {
+        if self.mapped_info(o).is_none()
+            && !self.store().flags(o).contains(TypeFlags::CONDITIONAL)
+        {
+            return o;
+        }
+        let mut src = Vec::new();
+        let mut dst = Vec::new();
+        let mut cur = obj;
+        for _ in 0..200 {
+            let Some(p) = self.c.parent(cur) else {
+                break;
+            };
+            if let Node::ConditionalType { check, true_ty, .. } = *self.node(p)
+                && true_ty == cur.node
+            {
+                let ct = self.type_from_node(Loc::new(p.file, check));
+                if self.store().flags(ct).contains(TypeFlags::TYPE_PARAMETER) && !src.contains(&ct)
+                {
+                    let n = self.with_implied_constraints(obj, ct);
+                    if n != ct {
+                        src.push(ct);
+                        dst.push(n);
+                    }
+                }
+            }
+            if self.node(p).is_statement() {
+                break;
+            }
+            cur = p;
+        }
+        if src.is_empty() {
+            return o;
+        }
+        let m = self.store().mapper(&src, &dst);
+        self.instantiate(o, m)
     }
 
     /// `unknown[]` for an unconstrained `infer X` in a rest position (tsc:

@@ -1449,6 +1449,14 @@ Files, by layer:
   `O`'s constraint (an object `O`, or recursively an indexed access `O`), a generic key into
   a string index signature reading the signature's type (tsc: relater.go,
   structuredTypeRelatedToWorker; getConstraintFromIndexedAccess).
+  When `O` itself is a mapped or conditional type (not a bare type variable) written in
+  the true branch of conditionals over type parameters, each such check type `C` is
+  replaced by its `E & C` inside `O` first (`mapped_under_implied_constraints`): under
+  `T extends any[] ?`, `{ [K in keyof T]: K }[number]` and `V<T>[number]` for a
+  distributive `V<X> = X extends unknown ? ... : never` are valid. A conditional `O` is
+  keyed by its constraint, and a nested conditional in a branch is read through its own
+  constraint (a few levels) when that ends at a rest-position `infer` array
+  (type-fest's `VariablePartOfArray<T>[number]`, expect-type, array-flatten).
 - **`arguments` in a function.** Inside a function other than an arrow, `arguments` that
   resolves to a declaration outside the innermost such function is that function's
   arguments object (`IArguments`), reads and assignment targets both (tsc:
@@ -1564,6 +1572,10 @@ Files, by layer:
   optional element after a rest TS1266 (both grammar errors, skipped in files with syntax
   errors); the first error stops the walk. `infer X` in a rest position, and references to
   such an `X`, are implicitly array-constrained, so they are never checked.
+  When relating `T` to `readonly any[]` runs out of instantiation depth (a recursive
+  alias spread in its own branch, `[A, ...M<Tail<T>, A>]`), the element counts as an
+  array and no TS2589 is reported: tsc's relation stops at deeply nested types with a
+  maybe (tsc: `isDeeplyNestedType` in `relater.go`; type-fest's `MergeDeep`).
 - **Object rest in an assignment pattern.** `({ a, ...r } = o)` assigns `o` without the
   named properties (`object_rest_type`) to a plain target `r`, so an incompatible target
   is TS2322 at `r`. Only a last rest with statically known names is typed.

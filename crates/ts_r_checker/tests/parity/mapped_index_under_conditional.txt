@@ -1,0 +1,1 @@
+a.ts(5,14): error TS2536: Type 'number' cannot be used to index type '{ [K in keyof T]: K; }'.
