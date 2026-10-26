@@ -304,6 +304,7 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_abort;
 mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_catch_error_name;
@@ -393,6 +394,7 @@ mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_invalid_temporal_arithmetic;
 mod unicorn_no_invalid_well_known_symbol_methods;
 mod unicorn_no_late_current_target_access;
+mod unicorn_no_late_event_control;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_loop_iterable_mutation;
@@ -439,8 +441,7 @@ mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_for_of_expression;
 mod unicorn_no_unreadable_iife;
-mod unicorn_no_unsafe_json_serialization;
-mod unicorn_no_unsafe_property_key;
+mod unicorn_no_unsafe_sqlite_interpolation;
 mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_unused_iterator_helper;
 mod unicorn_no_useless_boolean_cast;
@@ -470,7 +471,7 @@ mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
-mod unicorn_operator_assignment;
+mod unicorn_prefer_abort_signal_timeout;
 mod unicorn_prefer_add_event_listener;
 mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_array_find;
@@ -1018,6 +1019,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_invalid_temporal_arithmetic::RULE,
     &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_invalid_well_known_symbol_methods::RULE,
+    &unicorn_no_late_event_control::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_loop_iterable_mutation::RULE,
@@ -1061,6 +1063,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_string_trim::RULE,
     &unicorn_no_unreadable_for_of_expression::RULE,
     &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_unsafe_sqlite_interpolation::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
     &unicorn_no_unused_iterator_helper::RULE,
     &unicorn_no_useless_boolean_cast::RULE,
@@ -1088,7 +1091,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
-    &unicorn_operator_assignment::RULE,
+    &unicorn_prefer_abort_signal_timeout::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_array_find::RULE,
     &unicorn_prefer_array_from_async::RULE,

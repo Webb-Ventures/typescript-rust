@@ -346,6 +346,7 @@ unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
 unicorn/no-invalid-well-known-symbol-methods 57/57
 unicorn/no-late-current-target-access 49/49
+unicorn/no-late-event-control 83/83
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
 unicorn/no-loop-iterable-mutation 197/197
@@ -387,6 +388,7 @@ unicorn/no-unnecessary-string-trim 95/95
 unicorn/no-unreadable-array-destructuring 104/104
 unicorn/no-unreadable-for-of-expression 108/108
 unicorn/no-unreadable-iife 14/14
+unicorn/no-unsafe-sqlite-interpolation 79/79
 unicorn/no-unsafe-string-replacement 78/78
 unicorn/no-unused-iterator-helper 115/115
 unicorn/no-useless-boolean-cast 61/61
@@ -413,7 +415,7 @@ unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
 unicorn/numeric-separators-style 128/128
-unicorn/operator-assignment 21/21
+unicorn/prefer-abort-signal-timeout 83/83
 unicorn/prefer-add-event-listener 97/97
 unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-array-find 411/411

@@ -1738,6 +1738,20 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   suggestion removes the declaration and passes the blob (plus the name for a two-argument
   `append`); it is withheld when a comment sits in, on, or on the line above the
   declaration.
+- **no-unsafe-sqlite-interpolation**: `exec`/`prepare` on a `node:sqlite` `DatabaseSync`
+  (`new` of the runtime import, the namespace's or default import's `.DatabaseSync`, or a
+  `const` alias of either) with a template substitution or any tagged template as the SQL.
+  Names resolve to value bindings, past type aliases of the same name; `require()`,
+  `import()` and `let` are not followed.
+- **no-late-event-control**: `preventDefault()`/`stopPropagation()`/
+  `stopImmediatePropagation()` on an event parameter (named or typed as one) in a nested
+  function, a generator handler, or after a suspension point of the handler has finished.
+  It shares the event checker and suspension helpers of `no-late-current-target-access`.
+- **prefer-abort-signal-timeout**: `const c = new AbortController()` directly followed by
+  `setTimeout(() => c.abort(), delay)` and otherwise only read as `c.signal`.
+  `unicorn_abort.rs` holds the shared controller shape (declarator, abort callback,
+  `.signal` reads that aren't aliased, written or asked for `reason`/`throwIfAborted`) and
+  the suggestion (rename to `signal`/`abortSignal` when free, remove the statements).
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1747,4 +1761,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/should-add-parentheses-to-unary-expression.js`, `utils/single-statement.js`,
 `fix/replace-member-expression-property.js`, `ast/is-expression-statement.js`,
 `ast/literal.js`, `no-blob-to-file.js`, `utils/comments.js`, `fix/append-argument.js`,
-`fix/remove-statement.js`.
+`fix/remove-statement.js`, `no-unsafe-sqlite-interpolation.js`, `no-late-event-control.js`,
+`shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
+`prefer-abort-signal-timeout.js`, `shared/abort-controller.js`,
+`utils/is-global-identifier.js`, `utils/function-body.js`.
