@@ -254,3 +254,16 @@ fn env_reads_the_keys_of_an_alias_of_an_interface() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&cache);
 }
+
+#[test]
+fn eval_code_expands_parse_calls() {
+    if !have_node() {
+        eprintln!("skipped: node not found");
+        return;
+    }
+    let cache = scratch("eval-cache");
+    let code = "import { parse } from '@ts-r.dev/guard'; console.log(parse<number>(1))";
+    let out = ts_r_run(&app(), &cache, &["--no-cache", "-e", code]);
+    assert_eq!(text(&out.stdout), "1\n", "{}", text(&out.stderr));
+    let _ = std::fs::remove_dir_all(&cache);
+}

@@ -663,6 +663,17 @@ fn run_eval(cli: &Cli, ev: &Eval) -> i32 {
         }
         // No source map: there is no file for Node to map the code back to.
         let engine = Engine::new(project, cli.cache, false);
+        // `parse<T>` call sites are expanded as in a file (`Engine::compile_file`).
+        let code = match engine.guard.expand(&path, &code) {
+            Some(x) if !x.errors.is_empty() => {
+                x.errors
+                    .iter()
+                    .for_each(|e| eprintln!("{}", e.render(&path)));
+                return 1;
+            }
+            Some(x) => x.code,
+            None => code,
+        };
         let compiled = engine.compile_source(
             &path,
             &code,
