@@ -127,7 +127,7 @@ fn has_ts_syntax(ast: &Ast, root: NodeId) -> bool {
 }
 
 /// `this`, `super`, `new.target`, `arguments` or a direct `eval()` anywhere inside.
-fn has_unsafe_arrow_reference(ast: &Ast, root: NodeId) -> bool {
+pub(crate) fn has_unsafe_arrow_reference(ast: &Ast, root: NodeId) -> bool {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         let unsafe_here = match *ast.node(id) {

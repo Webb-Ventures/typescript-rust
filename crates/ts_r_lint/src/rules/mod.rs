@@ -341,6 +341,7 @@ mod unicorn_no_accidental_bitwise_operator;
 mod unicorn_no_anonymous_default_export;
 mod unicorn_no_array_concat_in_loop;
 mod unicorn_no_array_from_fill;
+mod unicorn_no_array_front_mutation;
 mod unicorn_no_array_method_this_argument;
 mod unicorn_no_array_reduce;
 mod unicorn_no_array_reverse;
@@ -350,6 +351,7 @@ mod unicorn_no_asterisk_prefix_in_documentation_comments;
 mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_expression_member;
 mod unicorn_no_await_in_promise_methods;
+mod unicorn_no_barrel_files;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_canvas_to_image;
 mod unicorn_no_chained_comparison;
@@ -425,6 +427,7 @@ mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_unreadable_new_expression;
 mod unicorn_no_unreadable_object_destructuring;
 mod unicorn_no_unsafe_promise_all_settled_values;
 mod unicorn_no_unsafe_string_replacement;
@@ -517,6 +520,7 @@ mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_response_static_json;
 mod unicorn_prefer_set_methods;
 mod unicorn_prefer_set_size;
+mod unicorn_prefer_short_arrow_method;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_condition_first;
 mod unicorn_prefer_simple_sort_comparator;
@@ -556,6 +560,7 @@ mod unicorn_template_indent;
 mod unicorn_text;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
+mod unicorn_try_complexity;
 mod unicorn_types;
 mod unicorn_util;
 mod use_isnan;
@@ -597,6 +602,11 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_prefer_short_arrow_method::RULE,
+    &unicorn_try_complexity::RULE,
+    &unicorn_no_unreadable_new_expression::RULE,
+    &unicorn_no_barrel_files::RULE,
+    &unicorn_no_array_front_mutation::RULE,
     &unicorn_no_invalid_argument_count::RULE,
     &unicorn_no_invalid_boolean_attribute_value::RULE,
     &unicorn_no_invalid_response_options::RULE,
