@@ -308,7 +308,11 @@ Read to understand (not ported), typescript-eslint `packages/eslint-plugin/src/r
 ## eslint-plugin-unicorn rules
 
 23 rules from eslint-plugin-unicorn 79.0.0, each at 100% of its oracle, all `NO_PRESET`.
-Rule files are `rules/unicorn_*.rs`; shared helpers are in `rules/unicorn_util.rs`. Configs
+Rule files are `rules/unicorn_*.rs`; shared helpers are in `rules/unicorn_util.rs` (one module:
+round 6 folded the per-helper `unicorn_util_h1/h2/h4/h5` modules into it, keeping one copy
+of each helper), `unicorn_text.rs` (fix text: parentheses, comments, expression and member
+object text, `needsSemicolon`), `unicorn_ast.rs` (call shapes, statement removal, line
+breaks), `unicorn_static.rs` and `unicorn_types.rs`. Configs
 name them `unicorn/<rule>`, in ESLint and oxlint configs alike (oxlint's `jsdoc/` names map
 the same way). What we learned, in our words:
 
@@ -853,10 +857,10 @@ findJSDocComment, getTSFunctionComment, getReducedASTNode, the overload sibling 
 `prefer-type-literal-last`, `consistent-class-member-order`, `consistent-optional-chaining`
 (each at 100% of its oracle). Each file's header states the rule as we learned it; the
 points below are the ones that are easy to get wrong. More helpers live in
-`rules/unicorn_util_h1.rs`: `unwrap_ts` (parentheses and TS wrappers, as ESTree sees through
-them), `static_string`, `is_same_reference` (same static string, `this`, `super`, name, equal
-literals, or member accesses with the same object and the same static or same computed
-property; nesting capped at 200), `logical_operands` / `is_outermost_logical` (flatten an
+`rules/unicorn_util.rs` (round 6 folded the per-helper modules into it): `skip_wrappers`
+(parentheses and TS wrappers, as ESTree sees through them), `is_same_reference` (same static
+string, `this`, `super`, name, equal literals, or member accesses with the same object and the
+same static or same computed property), `logical_operands` / `is_outermost_logical` (flatten an
 `&&`/`||` chain), `token_runs` (non-space runs of a span outside comments) and `delete_all`.
 
 - **no-useless-recursion**: `return f(...)` inside the named function `f` (a plain
@@ -1052,7 +1056,7 @@ their output, not translated.
 `no-ineffective-csp-directives`, `prefer-array-last-methods`, `prefer-then-catch`,
 `prefer-object-destructuring-defaults`, `no-undeclared-class-members`,
 `prefer-flat-math-min-max`, `no-this-outside-of-class`, `no-confusing-array-with`,
-`no-late-current-target-access` (each at 100% of its oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
+`no-late-current-target-access` (each at 100% of its oracle). Helpers these rules share are in `rules/unicorn_util.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
 the initialiser of the plain `const` it names when that is declared once before the use and
 read only there; the declaration's initialising write is one of its two references) and
 `decode_jsx_entities` (JSX attribute strings with `&#45;`, `&#x2D;` and the HTML 4 names
@@ -1167,7 +1171,7 @@ JSX parser decodes); only numeric references appear in the oracle.
 ## eslint-plugin-unicorn rules (round 5, h5)
 
 Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its oracle, all
-`NO_PRESET`. Shared helpers are in `rules/unicorn_util_h5.rs`: `would_remove_comments` (a
+`NO_PRESET`. Shared helpers are in `rules/unicorn_util.rs` and `rules/unicorn_text.rs`: `would_remove_comments` (a
 comment wholly inside the replaced range and outside every kept range), `expression_text` /
 `call_argument_text` (a node's text without redundant parentheses unless those hold a
 comment; a sequence is wrapped when it becomes one argument), `call_parens` /
@@ -1366,15 +1370,15 @@ member reads don't count). What we learned, in our words:
   scope (`dataset[k]` is never known, `dataset['a' + 'b']` is). The `const data = el.dataset`
   suggestion inlines every `data.k` read and needs the element name to resolve to the same
   never-reassigned binding at each use. Added `escape_string` (quote-js-string's escapes),
-  `is_identifier_name`, `indent_before` and `linebreak` to `unicorn_util_h5.rs`.
-- `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
+  `is_identifier_name` and `indent_before` to `unicorn_util.rs` (`linebreak` is `unicorn_ast`'s).
+- `has_side_effect` is `unicorn_static::has_side_effect` (eslint-utils does
   not count tagged templates; `has_possible_side_effect` adds tagged templates and
   spreads anywhere, like unicorn).
-- Shared parenthesization helpers in `unicorn_util_h5.rs`: `expression_start_needs_parens`
+- Shared parenthesization helpers in `unicorn_text.rs`: `needs_parens_at_expression_start`
   (a `{`/`class`/`function`/`async function`/`let [` start moved to a statement, arrow
   body, `export default` or `for` init), `member_object_needs_parens` /
-  `member_object_text`, `in_unparenthesized_new_callee`, `member_on_needs_new_parens`, and
-  `needs_semicolon` (from the token before the insertion point: the statement it ends,
+  `member_object_text` and `needs_semicolon` (`in_unparenthesized_new_callee` and
+  `member_on_needs_new_parens` are in `unicorn_util.rs`; `needs_semicolon` works from the token before the insertion point: the statement it ends,
   `]`, `)` except a control statement's head, a function/class expression's `}`, literals,
   object literals, template ends, `!`, identifiers other than `for-of`'s `of` and
   `await`).
@@ -1402,9 +1406,9 @@ no-useless-switch-case 34/34, no-useless-undefined 271/271, prefer-export-from 1
 prefer-module 152/152, prefer-switch 68/68, prefer-ternary 142/142, prefer-top-level-await
 228/228, switch-case-braces 56/56.
 
-Shared helpers of this round live in `unicorn_util_h4.rs` (method calls, identifier
+Shared helpers of this round live in `unicorn_util.rs` (method calls, identifier
 validity, free names, renames, ESTree identifier spans, same-line trailing comments,
-indentation, line breaks, `hasSideEffect` with the getter/conversion options, switch-case
+indentation, line breaks, `hasSideEffect` with the getter/conversion options (`has_side_effect_with`), switch-case
 heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path`).
 
 - **Oracle data.** The generator writes RegExp-valued options as `{regex, flags}` (they
@@ -1455,12 +1459,12 @@ heads, keyword-argument parents, token neighbours, `fix_of`, `is_typescript_path
   Member references compare their computed keys after folding literals (`a["b" + ""]` is
   `a.b`), which `is_same_reference` alone doesn't do.
 - **no-for-loop.** The plugin singularizes the array name with the `pluralize` package;
-  `singular` in `unicorn_util_h4.rs` is our own small set of English rules (irregulars,
+  `singular` in `unicorn_util.rs` is our own small set of English rules (irregulars,
   `-ies`, `-xes`/`-ches`/`-shes`/`-sses`, else drop `s`), enough for the oracle names.
   An optional `arr?.[i]` sits in an ESTree chain expression, so `delete (arr?.[i])` is a
   read (reported, unfixed as a reference context). The type-aware `.entries()` check
   (with parser services) is not implemented, only the annotation and syntax checks.
-  `remove_statement` (shared) drops a statement with its own line, as `removeStatement`.
+  `unicorn_ast::remove_statements` drops a statement with its own line, as `removeStatement`.
 - **prefer-ternary.** The plugin's "minimal ternary" fix (branches that differ in one
   inner value become `foo(test ? a : b)`) is not implemented: no oracle case expects it, so
   only whole `return`/assignment merges are fixed. `let x = a; if (t) x = b;` is a
@@ -1520,8 +1524,8 @@ files of the rules above, plus `utils/get-available-variable-name.js`,
 `prefer-dom-node-html-methods`, `prefer-string-match-all`, `no-useless-concat` (each at 100%
 of its oracle) and `require-module-specifiers` (67 of 68: `declare export type {} from "m"`
 in a `.js` file is a parse error for ts-r, while typescript-eslint recovers). New helpers in
-`rules/unicorn_util_h1.rs`: `static_property_name`, `decode_jsx_numeric_entities` (`&#49;` /
-`&#x31;`; JSX attribute strings reach rules undecoded), `evaluates_node` (a `containsNode`
+`rules/unicorn_util.rs`: `static_property_name`, `decode_jsx_entities` (shared with the h2
+rules; JSX attribute strings reach rules undecoded), `evaluates_node` (a `containsNode`
 that skips function bodies and non-static field values but still walks their computed keys;
 depth 64), `is_direct_eval_call` and `is_type_slot` (the child sits where a type goes: an
 `as` / `satisfies` / assertion type, a type alias body, a type annotation or return type, or

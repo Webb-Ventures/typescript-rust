@@ -7,7 +7,7 @@
 
 use super::prelude::*;
 use super::unicorn_text::{paren_text, would_remove_comments};
-use super::unicorn_util::{has_side_effect_strict, plain_key_name};
+use super::unicorn_util::{has_side_effect_with, plain_key_name};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -77,7 +77,7 @@ fn default_props(ast: &Ast, props: &[NodeId]) -> Option<(Vec<(String, NodeId)>, 
     let Node::Spread { arg } = *ast.node(spread) else {
         return None;
     };
-    if has_side_effect_strict(ast, arg) {
+    if has_side_effect_with(ast, arg, true, true) {
         return None;
     }
     let mut out: Vec<(String, NodeId)> = Vec::new();
@@ -89,7 +89,7 @@ fn default_props(ast: &Ast, props: &[NodeId]) -> Option<(Vec<(String, NodeId)>, 
             } => (plain_key_name(ast, name)?, name),
             _ => return None,
         };
-        if has_side_effect_strict(ast, value) || out.iter().any(|(n, _)| *n == name) {
+        if has_side_effect_with(ast, value, true, true) || out.iter().any(|(n, _)| *n == name) {
             return None;
         }
         out.push((name, value));

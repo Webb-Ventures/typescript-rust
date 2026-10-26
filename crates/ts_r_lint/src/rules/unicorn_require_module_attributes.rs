@@ -8,7 +8,7 @@
 //! the comma after it (or, for the last of several properties, the comma before).
 
 use super::prelude::*;
-use super::unicorn_util::parenthesized_span;
+use super::unicorn_text::paren_span;
 use super::unicorn_util::{delete_all, token_runs};
 
 pub static RULE: RuleDef = RuleDef {
@@ -124,7 +124,7 @@ impl RequireModuleAttributes {
             }
             delete_all(spans)
         } else {
-            let outer = parenthesized_span(cx, target);
+            let outer = paren_span(cx, target);
             let mut spans = Vec::new();
             // The comma before the outermost parenthesis.
             let before = skip_trivia_backward(ast, src, outer.start as usize);

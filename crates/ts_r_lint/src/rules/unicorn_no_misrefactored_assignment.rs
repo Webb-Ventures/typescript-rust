@@ -5,7 +5,8 @@
 //! outside it would be lost.
 
 use super::prelude::*;
-use super::unicorn_text::{is_same_reference, paren_span, would_remove_comments};
+use super::unicorn_text::{paren_span, would_remove_comments};
+use super::unicorn_util::is_same_reference;
 use crate::ast_util::precedence;
 
 pub static RULE: RuleDef = RuleDef {

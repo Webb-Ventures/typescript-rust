@@ -13,10 +13,10 @@ use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_static::has_side_effect_with_getters;
 use super::unicorn_text::{
-    has_comment_in, is_same_reference, member_object_text, needs_semicolon, paren_text,
-    unary_replacement_needs_parens,
+    has_comment_in, member_object_text, needs_semicolon, paren_text, unary_replacement_needs_parens,
 };
 use super::unicorn_types::builtin_collection_type;
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::{
     in_unparenthesized_new_callee, skip_wrappers, space_around_keyword, with_edits,
 };

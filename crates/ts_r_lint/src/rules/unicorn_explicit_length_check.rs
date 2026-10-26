@@ -24,9 +24,9 @@ use super::unicorn_static::{
     Static, static_value, static_value_control_flow, static_value_no_side_effects,
 };
 use super::unicorn_text::{
-    has_comment_in, is_parenthesized, is_same_reference, is_written,
-    needs_parens_at_expression_start, needs_semicolon,
+    has_comment_in, is_parenthesized, is_written, needs_parens_at_expression_start, needs_semicolon,
 };
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::{space_around_keyword, with_edits};
 use ts_r_ast::Ast;
 

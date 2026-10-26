@@ -15,10 +15,13 @@
 //!   replaced by `p.replaceChildren();`.
 
 use super::prelude::*;
+use super::unicorn_ast::is_value_not_usable;
+use super::unicorn_text::member_object_needs_parens;
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::Checker;
 use super::unicorn_util::{
-    is_same_reference, is_value_not_dom_node, is_value_not_usable, member_object_needs_parens,
-    method_call_of, needs_semicolon, static_string, would_remove_comments,
+    is_same_reference, is_value_not_dom_node, method_call_of, static_string,
 };
 
 pub static RULE: RuleDef = RuleDef {

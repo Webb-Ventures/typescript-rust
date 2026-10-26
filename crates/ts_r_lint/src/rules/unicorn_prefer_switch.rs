@@ -19,7 +19,8 @@
 use super::prelude::*;
 use super::unicorn_ast::linebreak;
 use super::unicorn_static::{Static, static_value};
-use super::unicorn_text::{is_same_reference, static_string_value, would_remove_comments};
+use super::unicorn_text::{static_string_value, would_remove_comments};
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::{fix_of, has_side_effect_with, indent_before};
 use ts_r_ast::{Ast, BinaryOp};
 

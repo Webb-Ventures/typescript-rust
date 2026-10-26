@@ -27,9 +27,10 @@ use super::unicorn_static::{
     Static, mutable_member_access, static_value, static_value_no_side_effects,
 };
 use super::unicorn_text::has_comment_in;
+use super::unicorn_text::paren_span;
 use super::unicorn_types::{binding_annotation, is_array, is_number};
+use super::unicorn_util::has_optional_chain;
 use super::unicorn_util::{available_name, fix_of, is_method_call, scope_within, singular};
-use super::unicorn_util::{has_optional_chain, parenthesized_span};
 use crate::semantic::{DeclKind, RefId, Reference, ScopeId, Semantic, SymbolId};
 use ts_r_ast::{
     AssignOp, Ast, BinaryOp, KeywordTypeKind, TypeOperatorKind, UnaryOp, UpdateOp, VarKind,
@@ -802,7 +803,7 @@ impl NoForLoop {
             )
         };
         let mut edits = vec![(
-            Span::new(cx.span(init).start, parenthesized_span(cx, update).end),
+            Span::new(cx.span(init).start, paren_span(cx, update).end),
             replacement,
         )];
         for &r in array_refs {

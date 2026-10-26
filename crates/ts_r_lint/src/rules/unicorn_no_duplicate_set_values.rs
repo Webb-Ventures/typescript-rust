@@ -6,7 +6,7 @@
 
 use super::prelude::*;
 use super::unicorn_static::{Static, skip_ts_only, static_value_no_side_effects};
-use super::unicorn_text::is_same_reference;
+use super::unicorn_util::is_same_reference;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

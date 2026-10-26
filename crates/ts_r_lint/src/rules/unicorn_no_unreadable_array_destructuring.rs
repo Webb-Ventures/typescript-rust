@@ -14,8 +14,10 @@
 //! rest elements; an object pattern stops the search) is an array pattern is reported too.
 
 use super::prelude::*;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::member_object_needs_parens;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::{is_known_non_array, is_known_non_indexed_collection};
-use super::unicorn_util::{is_parenthesized, member_object_needs_parens, would_remove_comments};
 use super::unicorn_util::{space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {

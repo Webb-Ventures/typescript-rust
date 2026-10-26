@@ -14,9 +14,11 @@
 //! plugin's "minimal ternary" forms such as `foo(test ? a : b)`) are not handled here.
 
 use super::prelude::*;
-use super::unicorn_text::{is_parenthesized, is_same_reference, needs_semicolon, paren_text};
+use super::unicorn_text::paren_span;
+use super::unicorn_text::{is_parenthesized, needs_semicolon, paren_text};
+use super::unicorn_util::is_same_reference;
+use super::unicorn_util::skip_wrappers;
 use super::unicorn_util::{has_side_effect_with, trailing_comment_same_line};
-use super::unicorn_util::{parenthesized_span, skip_wrappers};
 use crate::semantic::RefFlags;
 use ts_r_ast::{AssignOp, Ast, VarKind};
 
@@ -472,7 +474,7 @@ impl PreferTernary {
                     text: if other_writes { "let" } else { "const" }.into(),
                 },
                 crate::diagnostic::Edit {
-                    span: parenthesized_span(cx, init_inner),
+                    span: paren_span(cx, init_inner),
                     text: ternary,
                 },
                 crate::diagnostic::Edit {

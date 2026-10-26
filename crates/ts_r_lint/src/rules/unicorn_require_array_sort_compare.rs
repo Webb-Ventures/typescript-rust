@@ -5,9 +5,9 @@
 
 use super::prelude::*;
 use super::unicorn_ast::{call_tokens, method_call};
+use super::unicorn_text::paren_span;
 use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::is_known_non_array;
-use super::unicorn_util::parenthesized_span;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -50,7 +50,7 @@ impl Rule for RequireArraySortCompare {
         }
         let fixes = match first {
             Some(a) => {
-                let range = parenthesized_span(cx, a);
+                let range = paren_span(cx, a);
                 (!would_remove_comments(cx, range, &[])).then(|| {
                     [
                         Fix::replace(range, "(a, b) => a - b"),

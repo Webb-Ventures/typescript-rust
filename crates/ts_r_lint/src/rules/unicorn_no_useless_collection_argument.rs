@@ -8,8 +8,8 @@
 
 use super::prelude::*;
 use super::unicorn_ast::{remove_argument, would_remove_comments};
+use super::unicorn_text::paren_span;
 use super::unicorn_text::static_string_value;
-use super::unicorn_util::parenthesized_span;
 use ts_r_ast::Ast;
 use ts_r_span::Span;
 
@@ -103,7 +103,7 @@ impl Rule for NoUselessCollectionArgument {
         };
         // The argument's removal range: with its parentheses and a trailing comma.
         let src = cx.src();
-        let mut removal = parenthesized_span(cx, iterable);
+        let mut removal = paren_span(cx, iterable);
         let after = skip_trivia_forward(src, removal.end as usize);
         if src.as_bytes().get(after) == Some(&b',') {
             removal = Span::new(removal.start, after as u32 + 1);

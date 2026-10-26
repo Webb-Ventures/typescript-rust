@@ -4,7 +4,7 @@
 
 use super::prelude::*;
 use super::unicorn_ast::{method_call, would_remove_comments};
-use super::unicorn_util::parenthesized_span;
+use super::unicorn_text::paren_span;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -41,7 +41,7 @@ impl Rule for ConsistentDateClone {
             return;
         }
         let call_span = cx.span(call_id);
-        let obj = parenthesized_span(cx, call.obj);
+        let obj = paren_span(cx, call.obj);
         let Node::Call { callee, .. } = *ast.node(call_id) else {
             return;
         };

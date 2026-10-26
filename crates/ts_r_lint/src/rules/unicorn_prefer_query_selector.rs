@@ -19,11 +19,13 @@
 //!   keep their argument.
 
 use super::prelude::*;
-use super::unicorn_util::parenthesized_span;
+use super::unicorn_ast::is_left_hand_side;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_util::skip_wrappers;
 use super::unicorn_util::{
-    is_left_hand_side, is_number_literal, is_value_not_dom_node, method_call_of,
-    parent_through_parens, remove_method_call, would_remove_comments,
+    is_number_literal, is_value_not_dom_node, method_call_of, parent_through_parens,
+    remove_method_call,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -173,7 +175,7 @@ fn is_document_object(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
 fn first_element_access(cx: &Ctx<'_, '_>, call: NodeId) -> Option<Fix> {
     let ast = cx.ast();
     let (parent, child) = parent_through_parens(cx, call)?;
-    let call_end = parenthesized_span(cx, call).end;
+    let call_end = paren_span(cx, call).end;
     let clean = |access: NodeId| {
         !is_left_hand_side(cx, access)
             && !would_remove_comments(cx, Span::new(call_end, cx.span(access).end), &[])

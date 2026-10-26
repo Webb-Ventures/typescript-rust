@@ -16,8 +16,8 @@
 
 use super::prelude::*;
 use super::unicorn_static::has_side_effect;
+use super::unicorn_text::is_parenthesized;
 use super::unicorn_types::should_skip_known_non_array_receiver;
-use super::unicorn_util::is_parenthesized;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

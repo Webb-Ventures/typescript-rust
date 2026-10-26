@@ -15,11 +15,11 @@
 //! effects (and, as it copies the left side, no comment anywhere).
 
 use super::prelude::*;
-use super::unicorn_util::{
-    call_argument_text, call_arguments_text, call_parens, is_number_literal, operator_after,
-    would_remove_comments,
-};
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
+use super::unicorn_text::call_argument_text;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
+use super::unicorn_util::{call_arguments_text, call_parens, is_number_literal, operator_after};
+use super::unicorn_util::{space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -80,7 +80,7 @@ impl Rule for PreferMathTrunc {
                     return;
                 }
                 let span = cx.span(node);
-                let ok = !would_remove_comments(cx, span, &[parenthesized_span(cx, operand)]);
+                let ok = !would_remove_comments(cx, span, &[paren_span(cx, operand)]);
                 let fix = ok.then(|| {
                     let text = format!("Math.trunc({})", call_argument_text(cx, operand));
                     with_edits(Fix::replace(span, text), space_around_keyword(cx, node))
@@ -130,7 +130,7 @@ fn check_bitwise(
     let kept: Vec<Span> = if assignment {
         Vec::new()
     } else {
-        vec![parenthesized_span(cx, left)]
+        vec![paren_span(cx, left)]
     };
     let ok = (!assignment || !super::unicorn_static::has_side_effect(cx.ast(), left))
         && !would_remove_comments(cx, span, &kept);

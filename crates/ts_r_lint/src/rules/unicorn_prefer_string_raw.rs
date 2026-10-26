@@ -21,7 +21,8 @@
 //!   too. A comment inside the tag blocks the fix.
 
 use super::prelude::*;
-use super::unicorn_util::{method_call_of, needs_semicolon, parent_through_parens};
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_util::{method_call_of, parent_through_parens};
 use super::unicorn_util::{space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {

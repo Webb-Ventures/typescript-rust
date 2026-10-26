@@ -28,10 +28,11 @@ use super::unicorn_static::{
     Static, const_definition, has_side_effect, mutable_member_access, static_value_no_side_effects,
 };
 use super::unicorn_text::{
-    has_comment_in, has_possible_side_effect, has_unparenthesized_optional_chain,
-    is_same_reference, needs_semicolon, paren_span, paren_text, would_remove_comments,
+    has_comment_in, has_possible_side_effect, has_unparenthesized_optional_chain, needs_semicolon,
+    paren_span, paren_text, would_remove_comments,
 };
 use super::unicorn_types::{binding_annotation, type_definition};
+use super::unicorn_util::is_same_reference;
 use crate::semantic::Decl;
 use ts_r_ast::{Ast, KeywordTypeKind, TypeOperatorKind, VarKind};
 

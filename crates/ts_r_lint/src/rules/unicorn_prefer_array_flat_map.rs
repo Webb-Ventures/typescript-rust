@@ -14,11 +14,15 @@
 //!   `x.flatMap(p => test ? [a, b] : [])` unless the call holds a comment.
 
 use super::prelude::*;
+use super::unicorn_text::has_unparenthesized_optional_chain;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::member_object_text;
+use super::unicorn_text::paren_text;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::{is_known_non_indexed_collection, should_skip_known_non_array_receiver};
 use super::unicorn_util::{
-    has_type_arguments, has_unparenthesized_optional_chain, is_parenthesized,
-    is_side_effect_free_function, member_object_text, method_call_of, node_matches_path,
-    parenthesized_text, remove_method_call, would_remove_comments,
+    has_type_arguments, is_side_effect_free_function, method_call_of, node_matches_path,
+    remove_method_call,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -151,7 +155,7 @@ fn check_filter_flat_map(cx: &mut Ctx<'_, '_>, node: NodeId) {
         return;
     };
     if has_type_arguments(cx, filter_call)
-        || has_unparenthesized_optional_chain(ast, skip_parens(ast, receiver))
+        || has_unparenthesized_optional_chain(cx, skip_parens(ast, receiver))
         || is_known_non_indexed_collection(cx, receiver)
     {
         return;
@@ -171,7 +175,7 @@ fn check_filter_flat_map(cx: &mut Ctx<'_, '_>, node: NodeId) {
     let receiver = skip_parens(ast, receiver);
     let test = skip_parens(ast, filter_body);
     let test_text = if is_parenthesized(cx, test) {
-        parenthesized_text(cx, test).to_owned()
+        paren_text(cx, test).to_owned()
     } else if matches!(
         ast.node(test),
         Node::Arrow { .. }

@@ -7,8 +7,9 @@
 use super::prelude::*;
 use super::unicorn_ast::is_value_not_usable;
 use super::unicorn_static::static_value;
+use super::unicorn_text::paren_span;
 use super::unicorn_text::{has_possible_side_effect, paren_text, would_remove_comments};
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
+use super::unicorn_util::{space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -97,7 +98,7 @@ impl Rule for PreferLocationAssign {
             return;
         }
         let span = cx.span(node);
-        let right_span = parenthesized_span(cx, right);
+        let right_span = paren_span(cx, right);
         let fixable = op == AssignOp::Assign
             && is_value_not_usable(cx, node)
             && is_direct_location(cx, obj)

@@ -7,8 +7,9 @@
 //! parenthesized `await`.
 
 use super::prelude::*;
+use super::unicorn_text::paren_span;
 use super::unicorn_util::fix_of;
-use super::unicorn_util::{parenthesized_span, skip_wrappers};
+use super::unicorn_util::skip_wrappers;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -122,7 +123,7 @@ impl Rule for NoAwaitExpressionMember {
                 ("{", "}")
             };
             let member = cx.span(node);
-            let kept = parenthesized_span(cx, awaited);
+            let kept = paren_span(cx, awaited);
             if ast
                 .comments_in(member)
                 .iter()

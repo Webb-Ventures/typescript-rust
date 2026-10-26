@@ -19,10 +19,11 @@
 use super::prelude::*;
 use super::unicorn_static::{Static, const_definition, static_value_no_side_effects};
 use super::unicorn_text::{
-    has_comment_in, is_parenthesized, is_same_reference, is_written, member_object_text,
-    needs_semicolon, paren_span, paren_text, would_remove_comments,
+    has_comment_in, is_parenthesized, is_written, member_object_text, needs_semicolon, paren_span,
+    paren_text, would_remove_comments,
 };
 use super::unicorn_types::Checker;
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::{space_around_keyword, with_edits};
 use ts_r_ast::Ast;
 

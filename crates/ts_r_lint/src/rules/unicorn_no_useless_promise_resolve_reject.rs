@@ -11,7 +11,7 @@
 //! inside a `try` and, for `yield`, only when the `yield` is the whole statement.
 
 use super::prelude::*;
-use super::unicorn_util::parenthesized_span;
+use super::unicorn_text::paren_span;
 use ts_r_ast::FnFlags;
 
 pub static RULE: RuleDef = RuleDef {
@@ -260,12 +260,12 @@ impl NoUselessPromiseResolveReject {
             return None;
         }
         let target = if awaited && !is_reject {
-            parenthesized_span(cx, call)
+            paren_span(cx, call)
         } else if is_reject && is_yield {
-            parenthesized_span(cx, parent)
+            paren_span(cx, parent)
         } else if arrow_body {
             if is_reject {
-                parenthesized_span(cx, expression)
+                paren_span(cx, expression)
             } else {
                 cx.span(call)
             }
