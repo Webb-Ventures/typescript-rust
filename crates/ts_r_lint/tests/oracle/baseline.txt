@@ -271,7 +271,7 @@ preserve-caught-error 81/81
 radix 91/91
 require-yield 15/15
 symbol-description 8/8
-unicorn/dom-node-dataset 338/338
+unicorn/catch-error-name 120/120
 unicorn/empty-brace-spaces 213/213
 unicorn/error-message 106/106
 unicorn/escape-case 198/198

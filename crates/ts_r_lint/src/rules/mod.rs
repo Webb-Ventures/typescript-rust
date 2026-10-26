@@ -280,7 +280,7 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
-mod unicorn_dom_node_dataset;
+mod unicorn_catch_error_name;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
@@ -361,7 +361,7 @@ mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_types;
 mod unicorn_util;
-mod unicorn_util_h5;
+mod unicorn_util_h4;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -669,7 +669,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
     // eslint-plugin-unicorn
-    &unicorn_dom_node_dataset::RULE,
+    &unicorn_catch_error_name::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,

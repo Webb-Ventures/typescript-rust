@@ -437,6 +437,12 @@ function testFileFor(rule) {
 }
 
 fs.mkdirSync(outDir, { recursive: true });
+// A RegExp in rule options (`ignore: [/^skip/]`) is written as `{ "regex": source,
+// "flags": flags }`; plain JSON would turn it into `{}`.
+function regexToJson(key, value) {
+  return value instanceof RegExp ? { regex: value.source, flags: value.flags } : value;
+}
+
 for (const rule of rules) {
   const { files, isTs, source } = testFileFor(rule);
   if (!files.length) {
@@ -485,7 +491,7 @@ for (const rule of rules) {
   const out = { rule, source: source ?? (isTs ? 'typescript-eslint' : 'eslint'), skipped, cases };
   if (rule.startsWith('unicorn/')) out.globals = unicornGlobals;
   const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-').replace('unicorn/', 'unicorn-') + '.json';
-  fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, null, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
+  fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, regexToJson, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
   console.error(`${rule}: ${cases.length} cases, skipped ${JSON.stringify(skipped)}`);
 }
 fs.rmSync(stubDir, { recursive: true, force: true });
