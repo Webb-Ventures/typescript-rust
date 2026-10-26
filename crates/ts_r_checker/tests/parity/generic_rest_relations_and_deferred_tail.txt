@@ -1,0 +1,8 @@
+a.ts(3,49): error TS2322: Type 'Tail<T>' is not assignable to type 'number'.
+  Type 'T[number][]' is not assignable to type 'number'.
+a.ts(8,7): error TS2345: Argument of type '(a: number, b: T[0], ...x: T[number][]) => void' is not assignable to parameter of type '(x: number, ...args: T) => void'.
+  Types of parameters 'b' and 'args' are incompatible.
+    Type 'T' is not assignable to type '[b: T[0], ...x: T[number][]]'.
+      Type 'any[]' is not assignable to type '[b: T[0], ...x: T[number][]]'.
+        Source provides no match for required element at position 0 in target.
+a.ts(15,33): error TS2584: Cannot find name 'console'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.

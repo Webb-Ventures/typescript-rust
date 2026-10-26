@@ -1973,6 +1973,26 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// Whether `t` is a type parameter declared by a declaration enclosing `at` (fixed
+    /// there, not one a call around `at` is inferring).
+    fn is_enclosing_type_param(&self, t: TypeId, at: Loc) -> bool {
+        let Some(sym) = self.store().type_param_data(t).map(|d| d.sym) else {
+            return false;
+        };
+        let Some(d) = self.c.first_decl(sym) else {
+            return false;
+        };
+        let Some(owner) = self.c.parent(d).and_then(|l| self.c.parent(l)) else {
+            return false;
+        };
+        if owner.file != at.file {
+            return false;
+        }
+        let ast = self.ast(at.file);
+        let (os, ps) = (ast.span(owner.node), ast.span(at.node));
+        os.start <= ps.start && ps.end <= os.end
+    }
+
     fn param_type_from_contextual(&mut self, sig: SigId, idx: usize, p: Loc) -> Option<TypeId> {
         let ast = self.ast(p.file);
         let Node::Param { rest, optional, .. } = *ast.node(p.node) else {
@@ -2014,7 +2034,32 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return Some(self.create_tuple(&els, false));
         }
-        let t = self.param_type_at(sig, idx)?;
+        // Past a generic rest (`...args: T`), the element at that position (`T[0]`; tsc:
+        // `tryGetTypeAtPosition`).
+        let generic_rest_el = {
+            let d = self.store().sig(sig);
+            let n = d.params.len();
+            match d.params.last().map(|p| p.ty) {
+                Some(r)
+                    if d.has_rest()
+                        && idx + 1 >= n
+                        && self
+                            .store()
+                            .flags(r)
+                            .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS)
+                        && self.store().tuple_shape_of(r).is_none()
+                        && self.is_enclosing_type_param(r, p) =>
+                {
+                    let k = self.store().number_literal((idx + 1 - n) as f64, false);
+                    self.indexed_access_type(r, k, None)
+                }
+                _ => None,
+            }
+        };
+        let t = match generic_rest_el {
+            Some(t) => t,
+            None => self.param_type_at(sig, idx)?,
+        };
         // A binding pattern contextually typed by `unknown` (declared, or inferred without
         // candidates) takes the pattern's own type, so `p.then(({ data }) => ...)` on a
         // `Promise<unknown>` and `trans(({ a }) => a)` for `trans<T>(f: (x: T) => string)`

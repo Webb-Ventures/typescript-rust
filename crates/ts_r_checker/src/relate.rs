@@ -4830,16 +4830,62 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return false;
         }
-        let count = if s_rest || t_rest {
+        // A rest parameter of a generic type (`...t: T`) is related as a whole, against the
+        // other side's parameters from its position on as a tuple, after the positions both
+        // have (tsc: `getNonArrayRestType` in `compareSignaturesRelated`, relater.go). Tuple
+        // rests keep the element-wise comparison.
+        let generic_rest = |ck: &mut Self, sig: SigId| -> Option<bool> {
+            let d = ck.store().sig(sig);
+            if !d.has_rest() {
+                return Some(false);
+            }
+            let r = d.params.last()?.ty;
+            if ck.store().tuple_shape_of(r).is_some() {
+                return None;
+            }
+            Some(
+                ck.store()
+                    .flags(r)
+                    .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS),
+            )
+        };
+        let rest_index = match (generic_rest(self, ssig), generic_rest(self, tsig)) {
+            (Some(a), Some(b)) if a || b => {
+                let rest_of =
+                    |ck: &Self, sig: SigId| ck.store().sig(sig).params.last().map(|p| p.ty);
+                let r = if a {
+                    rest_of(self, ssig)
+                } else {
+                    rest_of(self, tsig)
+                };
+                if let Some(r) = r {
+                    self.note_unreliable_rest_type(r);
+                }
+                Some(s_count.min(t_count).checked_sub(1))
+            }
+            _ => None,
+        };
+        let count = if let Some(ri) = rest_index {
+            ri.map_or(0, |r| r + 1)
+        } else if s_rest || t_rest {
             s_count.max(t_count)
         } else {
             s_count.min(t_count)
         };
         for i in 0..count {
-            let Some(sp) = self.param_type_at(ssig, i) else {
+            let at_rest = rest_index.flatten() == Some(i);
+            let Some(sp) = (if at_rest {
+                Some(self.rest_type_at(ssig, i))
+            } else {
+                self.param_type_at(ssig, i)
+            }) else {
                 continue;
             };
-            let Some(tp) = self.param_type_at(tsig, i) else {
+            let Some(tp) = (if at_rest {
+                Some(self.rest_type_at(tsig, i))
+            } else {
+                self.param_type_at(tsig, i)
+            }) else {
                 continue;
             };
             // With strict arity, an optional source parameter where the target's is required
