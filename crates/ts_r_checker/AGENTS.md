@@ -3220,6 +3220,9 @@ Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7
   constraint. They were always related, so `Equals<A, B>` built from
   `<T>() => T extends A ? 1 : 2` was `true` for any `A` and `B` (tsc: relater.go,
   structuredTypeRelatedToWorker) (`conditional_pair_relation`).
+- An unannotated parameter whose default reads itself, directly or through another
+  parameter's default (`f(a = b, b = a)`), is TS7022 under `noImplicitAny`, as variables are
+  (`param_default_self_reference`).
 
 ## Levels (`layers.rs`, design record 0005)
 

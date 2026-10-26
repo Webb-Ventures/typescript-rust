@@ -91,6 +91,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 type_ann: Some(_),
                 ..
             } => pattern,
+            // A parameter typed by its default (`function f(x = x)`).
+            Node::Param {
+                pattern,
+                type_ann: None,
+                init: Some(init),
+                ..
+            } if self.c.opts.no_implicit_any
+                && matches!(ast.node(pattern), Node::Ident { .. })
+                && !has_function(ast, init, true) =>
+            {
+                implicit = true;
+                pattern
+            }
             // A class property's initializer reads its siblings through `this`.
             Node::PropertyDef {
                 key,
