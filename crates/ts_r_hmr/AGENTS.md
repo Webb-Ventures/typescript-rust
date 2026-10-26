@@ -248,7 +248,10 @@ are cached by content hash. Change `cache_id` when output for the same input can
   copied by its framing (`Content-Length`, chunked, or to EOF, which then closes the client
   connection), never buffered whole. `Expect: 100-continue` is answered locally. An unreachable
   upstream is a 502 with an empty body. `rewrite` is an `Arc<dyn Fn>` (ts-r-dev calls the
-  plugin sidecar). WebSocket tunnels are raw byte pipes after the upstream's 101.
+  plugin sidecar), and so is `bypass`, run before forwarding: `false` is an empty 404 (no
+  Content-Type), a written response is sent as is, a URL is served by the routes as if
+  requested, a throw is logged and answered with an empty 500, and a rule with no target that
+  isn't bypassed is a 500. WebSocket tunnels are raw byte pipes after the upstream's 101.
 - **TLS (`server.https`, feature `tls`, on by default):** rustls with the `ring` provider,
   ALPN `http/1.1` (no HTTP/2). The handshake has a 10 s timeout. Outbound `https://`/`wss://`
   proxy targets verify against `webpki-roots` unless `secure: false`.

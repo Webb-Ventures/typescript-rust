@@ -127,18 +127,22 @@ impl Manifest {
     /// at run time.
     pub fn needs_sidecar(&self) -> bool {
         self.hooks != PluginHooks::default()
-            || self.dev["server"]["proxy"]
-                .as_array()
-                .is_some_and(|rules| rules.iter().any(|r| r["rewrite"] == true))
+            || self.dev["server"]["proxy"].as_array().is_some_and(|rules| {
+                rules
+                    .iter()
+                    .any(|r| r["rewrite"] == true || r["bypass"] == true)
+            })
     }
 }
 
-/// Applies the manifest's dev options to `config`. `rewrite(index)` makes the function
-/// that runs proxy rule `index`'s `rewrite` (in the sidecar). Returns warnings.
+/// Applies the manifest's dev options to `config`. `rewrite(index)` and `bypass(index)`
+/// make the functions that run proxy rule `index`'s `rewrite` and `bypass` (in the
+/// sidecar). Returns warnings.
 pub fn apply_dev_options(
     dev: &Value,
     config: &mut ts_r_hmr::DevConfig,
     rewrite: &dyn Fn(usize) -> ts_r_hmr::proxy::Rewrite,
+    bypass: &dyn Fn(usize) -> ts_r_hmr::proxy::BypassFn,
 ) -> Vec<String> {
     use ts_r_hmr::cors::{Cors, CorsOptions, Origin, OriginMatch, js_regex};
     let mut warnings = Vec::new();
@@ -238,7 +242,7 @@ pub fn apply_dev_options(
                 Value::Bool(true) => Origin::Reflect,
                 Value::Bool(false) => {
                     config.cors = Cors::Off;
-                    return finish_proxy(s, config, rewrite, warnings);
+                    return finish_proxy(s, config, rewrite, bypass, warnings);
                 }
                 Value::String(o) if o == "*" => Origin::Any,
                 Value::String(o) => Origin::Fixed(o.clone()),
@@ -259,20 +263,30 @@ pub fn apply_dev_options(
         }
         _ => {}
     }
-    finish_proxy(s, config, rewrite, warnings)
+    finish_proxy(s, config, rewrite, bypass, warnings)
 }
 
 fn finish_proxy(
     s: &Value,
     config: &mut ts_r_hmr::DevConfig,
     rewrite: &dyn Fn(usize) -> ts_r_hmr::proxy::Rewrite,
+    bypass: &dyn Fn(usize) -> ts_r_hmr::proxy::BypassFn,
     mut warnings: Vec<String>,
 ) -> Vec<String> {
     for r in s["proxy"].as_array().into_iter().flatten() {
         let key = r["key"].as_str().unwrap_or("");
-        let target = r["target"].as_str().unwrap_or("");
-        match ts_r_hmr::proxy::ProxyRule::new(key, target) {
+        let index = r["index"].as_u64().map(|i| i as usize);
+        let bypass_fn = index.filter(|_| r["bypass"] == true).map(bypass);
+        let made = match (r["target"].as_str(), bypass_fn.clone()) {
+            (Some(target), _) => ts_r_hmr::proxy::ProxyRule::new(key, target),
+            (None, Some(f)) => ts_r_hmr::proxy::ProxyRule::bypass_only(key, f),
+            (None, None) => Err("no target".to_owned()),
+        };
+        match made {
             Ok(mut rule) => {
+                if rule.bypass.is_none() {
+                    rule.bypass = bypass_fn;
+                }
                 rule.change_origin = r["changeOrigin"] == true;
                 rule.ws = r["ws"] == true;
                 rule.secure = r["secure"] != false;
@@ -546,6 +560,34 @@ impl VitePlugins {
             .map(str::to_owned)
     }
 
+    /// Runs `server.proxy[index].bypass(req, res)` in the sidecar. A failed call proxies.
+    pub fn proxy_bypass(&self, index: usize, req: &Request) -> ts_r_hmr::proxy::Bypass {
+        use ts_r_hmr::proxy::Bypass;
+        let headers: serde_json::Map<String, Value> = req
+            .headers
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::from(v.as_str())))
+            .collect();
+        let Ok(v) = self.call(
+            "proxyBypass",
+            json!({ "index": index, "method": req.method, "url": req.target, "headers": headers }),
+        ) else {
+            return Bypass::Proxy;
+        };
+        if !v["response"].is_null() {
+            return Bypass::Respond(response_of(&v["response"]));
+        }
+        match v["kind"].as_str() {
+            Some("url") => match v["url"].as_str() {
+                Some(u) => Bypass::Serve(u.to_owned()),
+                None => Bypass::Proxy,
+            },
+            Some("notFound") => Bypass::NotFound,
+            Some("error") => Bypass::Error(v["message"].as_str().unwrap_or("").to_owned()),
+            _ => Bypass::Proxy,
+        }
+    }
+
     pub fn is_running(&self) -> bool {
         self.sidecar.is_some()
     }
@@ -676,26 +718,7 @@ impl PluginHost for VitePlugins {
         if v.is_null() {
             return Ok(None);
         }
-        let status = v["status"].as_u64().unwrap_or(200).clamp(100, 999) as u16;
-        let body = base64_decode(v["body"].as_str().unwrap_or(""));
-        let mut resp = Response {
-            status,
-            headers: Vec::new(),
-            body,
-        };
-        for pair in v["headers"].as_array().into_iter().flatten() {
-            let (Some(k), Some(val)) = (pair[0].as_str(), pair[1].as_str()) else {
-                continue;
-            };
-            // The server writes these itself.
-            if ["content-length", "connection", "transfer-encoding"]
-                .contains(&k.to_ascii_lowercase().as_str())
-            {
-                continue;
-            }
-            resp = resp.header_owned(k.to_owned(), val);
-        }
-        Ok(Some(resp))
+        Ok(Some(response_of(&v)))
     }
 
     fn client_event(&self, event: &str, data: &Value) {
@@ -703,6 +726,30 @@ impl PluginHost for VitePlugins {
             s.notify(json!({ "op": "event", "event": event, "data": data }));
         }
     }
+}
+
+/// A response the sidecar's fake `res` recorded: `{status, headers: [[k, v]], body}` (base64).
+fn response_of(v: &Value) -> Response {
+    let status = v["status"].as_u64().unwrap_or(200).clamp(100, 999) as u16;
+    let body = base64_decode(v["body"].as_str().unwrap_or(""));
+    let mut resp = Response {
+        status,
+        headers: Vec::new(),
+        body,
+    };
+    for pair in v["headers"].as_array().into_iter().flatten() {
+        let (Some(k), Some(val)) = (pair[0].as_str(), pair[1].as_str()) else {
+            continue;
+        };
+        // The server writes these itself.
+        if ["content-length", "connection", "transfer-encoding"]
+            .contains(&k.to_ascii_lowercase().as_str())
+        {
+            continue;
+        }
+        resp = resp.header_owned(k.to_owned(), val);
+    }
+    resp
 }
 
 type Ready = mpsc::Receiver<Result<Value, String>>;
@@ -1058,7 +1105,8 @@ mod tests {
         let mut config = ts_r_hmr::DevConfig::new(&root);
         let dev = json!({ "envDir": "env", "publicDir": outside });
         let rewrite = |_: usize| -> ts_r_hmr::proxy::Rewrite { unreachable!() };
-        apply_dev_options(&dev, &mut config, &rewrite);
+        let bypass = |_: usize| -> ts_r_hmr::proxy::BypassFn { unreachable!() };
+        apply_dev_options(&dev, &mut config, &rewrite, &bypass);
         assert_eq!(config.env_dir, Some(root.join("env")));
         assert_eq!(config.public_dir, Some(outside));
     }
@@ -1074,7 +1122,8 @@ mod tests {
             { "regex": "(" },
         ] });
         let rewrite = |_: usize| -> ts_r_hmr::proxy::Rewrite { unreachable!() };
-        let warnings = apply_dev_options(&dev, &mut config, &rewrite);
+        let bypass = |_: usize| -> ts_r_hmr::proxy::BypassFn { unreachable!() };
+        let warnings = apply_dev_options(&dev, &mut config, &rewrite, &bypass);
         let f = &config.assets_include;
         assert!(f.matches(&root.join("a/b.unknown")));
         assert!(f.matches(&root.join("nested/b.custom")));

@@ -6,7 +6,7 @@
 // on stdin, one per line on stdout. Plugin output to stdout is moved to stderr so it can't
 // corrupt the protocol.
 //
-// Requests:  {id, op: "resolve"|"load"|"transform"|"html"|"hot"|"middleware"|"proxyRewrite", ...}
+// Requests:  {id, op: "resolve"|"load"|"transform"|"html"|"hot"|"middleware"|"proxyRewrite"|"proxyBypass", ...}
 //            {op: "event", event, data}            (no reply)
 //            {rid, result}                         (reply to a resolve callback)
 // Replies:   {ready: manifest} | {fatal: message}  (first line)
@@ -430,16 +430,17 @@ function proxyOptions(p) {
       const proto = target.protocol ?? 'http:'
       target = `${proto}//${target.host ?? target.hostname ?? 'localhost'}${target.port ? `:${target.port}` : ''}${target.path ?? ''}`
     }
-    if (typeof target !== 'string') {
+    const bypass = typeof o.bypass === 'function'
+    if (typeof target !== 'string' && !bypass) {
       warnings.push(`\`server.proxy['${key}']\` has no target; skipped`)
       continue
     }
     if (o.configure) warnings.push(`\`server.proxy['${key}'].configure\` is not run by ts-r-dev`)
-    if (o.bypass) warnings.push(`\`server.proxy['${key}'].bypass\` is not run by ts-r-dev`)
     proxyRules.push(o)
     out.push({
       key,
-      target,
+      target: typeof target === 'string' ? target : null,
+      bypass,
       changeOrigin: o.changeOrigin === true,
       ws: o.ws === true,
       secure: o.secure !== false,
@@ -456,6 +457,45 @@ function opProxyRewrite({ index, url }) {
   if (!rule || typeof rule.rewrite !== 'function') return null
   const r = rule.rewrite(url)
   return typeof r === 'string' ? r : null
+}
+
+// `bypass(req, res, options)` for proxy rule `index`: what to do with the request, and the
+// response if the function wrote one.
+async function opProxyBypass({ index, method, url, headers }) {
+  const rule = proxyRules[index]
+  if (!rule || typeof rule.bypass !== 'function') return { kind: 'proxy' }
+  const req = new Readable({ read() {} })
+  req.push(null)
+  Object.assign(req, {
+    method,
+    url,
+    originalUrl: url,
+    headers,
+    httpVersion: '1.1',
+    socket: { remoteAddress: '127.0.0.1', encrypted: false },
+  })
+  req.connection = req.socket
+  let finished
+  const written = new Promise((resolve) => (finished = resolve))
+  const res = new FakeResponse(finished)
+  let result
+  try {
+    result = await rule.bypass(req, res, rule)
+  } catch (e) {
+    return { kind: 'error', message: String(e?.stack ?? e) }
+  }
+  let response = null
+  if (res.writableEnded) {
+    const r = await written
+    const out = []
+    for (const [k, v] of r.headerMap.values()) {
+      for (const one of Array.isArray(v) ? v : [v]) out.push([k, String(one)])
+    }
+    response = { status: r.statusCode, headers: out, body: Buffer.concat(r.chunks).toString('base64') }
+  }
+  if (typeof result === 'string') return { kind: 'url', url: result, response }
+  if (result === false) return { kind: 'notFound' }
+  return { kind: 'proxy', response }
 }
 
 // A directory relative to the root when it is given relative or lies inside the root: the
@@ -925,6 +965,7 @@ const ops = {
   hot: opHot,
   middleware: opMiddleware,
   proxyRewrite: opProxyRewrite,
+  proxyBypass: opProxyBypass,
 }
 
 function handle(msg) {

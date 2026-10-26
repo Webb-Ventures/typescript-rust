@@ -867,20 +867,64 @@ fn handle_connection(shared: &Arc<Shared>, stream: TcpStream) -> io::Result<()> 
             return Ok(());
         }
         if let Some(rule) = proxy::find(&shared.proxy, &req.target, false) {
-            let mut cors = Response::new(200, "", Vec::new());
-            cors.headers.clear();
-            shared.cors.apply(&req, &mut cors);
-            let extra: Vec<(String, String)> = cors
-                .headers
-                .into_iter()
-                .map(|(k, v)| (k.into_owned(), v))
-                .collect();
-            match proxy::forward(rule, &req, &mut reader, &mut writer, &extra) {
-                Ok(true) => continue,
-                Ok(false) => return Ok(()),
-                Err(e) => {
-                    shared.log(&format!("http proxy error: {}\n{e}", req.target));
+            // `bypass` first; an empty response (no Content-Type) like `res.end()`.
+            let bare = |status: u16| Response {
+                status,
+                headers: Vec::new(),
+                body: Vec::new(),
+            };
+            let answer = match rule.bypass(&req) {
+                proxy::Bypass::Proxy if rule.no_target => {
+                    shared.log(&format!(
+                        "http proxy error: {}\nserver.proxy['{}'] has no target",
+                        req.target, rule.key
+                    ));
+                    Some(bare(500))
+                }
+                proxy::Bypass::Proxy => None,
+                proxy::Bypass::NotFound => Some(bare(404)),
+                proxy::Bypass::Respond(resp) => Some(resp),
+                proxy::Bypass::Error(msg) => {
+                    shared.log(&format!("{msg}\n  at bypass for {}", req.target));
+                    Some(bare(500))
+                }
+                proxy::Bypass::Serve(url) => {
+                    set_target(&mut req, &url);
+                    Some(bare(0))
+                }
+            };
+            match answer {
+                // Served below at the new URL.
+                Some(resp) if resp.status == 0 => {}
+                Some(mut resp) => {
+                    if !http::drain_body(&mut reader, &req)? {
+                        resp.write_to(&mut writer, head_only, false)?;
+                        return Ok(());
+                    }
+                    shared.cors.apply(&req, &mut resp);
+                    resp.write_to(&mut writer, head_only, req.keep_alive())?;
+                    if req.keep_alive() {
+                        continue;
+                    }
                     return Ok(());
+                }
+                None => {
+                    let mut cors = Response::new(200, "", Vec::new());
+                    cors.headers.clear();
+                    shared.cors.apply(&req, &mut cors);
+                    let extra: Vec<(String, String)> = cors
+                        .headers
+                        .into_iter()
+                        .map(|(k, v)| (k.into_owned(), v))
+                        .collect();
+                    match proxy::forward(rule, &req, &mut reader, &mut writer, &extra) {
+                        Ok(true) => continue,
+                        Ok(false) => return Ok(()),
+                        Err(e) => {
+                            shared.log(&format!("http proxy error: {}\n{e}", req.target));
+                            return Ok(());
+                        }
+                    }
                 }
             }
         }
@@ -989,6 +1033,19 @@ enum BaseMatch {
 
 /// Removes `base` from the request path and target. `/` (and nothing else outside the
 /// base) redirects to the base.
+/// Points `req` at `url` (a path with an optional query), as a `bypass` URL asks.
+fn set_target(req: &mut Request, url: &str) {
+    let url = if url.starts_with('/') {
+        url.to_owned()
+    } else {
+        format!("/{url}")
+    };
+    let (path, query) = url.split_once('?').unwrap_or((&url, ""));
+    req.path = http::percent_decode(path);
+    req.query = query.split('#').next().unwrap_or("").to_owned();
+    req.target = url;
+}
+
 fn strip_base(base: &str, req: &mut Request) -> BaseMatch {
     let bare = base.trim_end_matches('/');
     let rest = if req.path == bare {

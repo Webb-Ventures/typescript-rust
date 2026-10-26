@@ -98,7 +98,10 @@ from the documented plugin API (no Vite code).
   or inside it (checkouts with the same config share the cached manifest) and resolved
   against ts-r-dev's root. A proxy `rewrite` function stays in Node: the rule records its index and
   each proxied request calls the sidecar's `proxyRewrite` op (so a config with a `rewrite`
-  always starts the sidecar). `server.https` `cert`/`key` are cached as PEM text in the
+  always starts the sidecar). A `bypass` function works the same way (`proxyBypass`): it gets
+  a request (headers, no body) and a fake `res`; what it wrote, or what it returned (`false`,
+  a URL, a throw), goes back as a `proxy::Bypass` (`vite: packages/vite/src/node/server/middlewares/proxy.ts`).
+  A rule with a `bypass` and no `target` is kept. `server.https` `cert`/`key` are cached as PEM text in the
   manifest (that is how plugin-generated certificates, e.g. `@vitejs/plugin-basic-ssl`, survive
   a warm start without Node); the cache lives in the user's `~/.cache/ts-r`.
   `TS_R_MODE` passes the mode to the sidecar; the mode is part of the manifest key.
@@ -194,7 +197,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
   ~80–440 ms when the config imports `vite` (cold disk cache); with a cached manifest that happens in the background after "ready".
 - From `vite.config`: no `css.*` (preprocessor options, CSS modules), `server.hmr`,
   `server.fs`, `server.watch`, `optimizeDeps.exclude`/`esbuildOptions`, proxy
-  `configure`/`bypass`, `cors.origin` functions. A changed certificate file is picked up only
+  `configure`, `cors.origin` functions. A changed certificate file is picked up only
   when the manifest key changes (config, `package.json`, lockfile) or with `--force`. No Ctrl-C cleanup beyond the
   OS reclaiming resources (the transform cache flushes on drop only when the server stops
   normally; unflushed entries are just misses next time).

@@ -418,6 +418,58 @@ export default {
 }
 
 #[test]
+fn proxy_bypass_functions_run_in_the_sidecar() {
+    if !node_available() {
+        eprintln!("skipping: node not found (set TS_R_NODE)");
+        return;
+    }
+    let app = TempDir::new("plugins-bypass");
+    let cache = TempDir::new("plugins-bypass-cache");
+    app.write("index.html", "<!doctype html><body>hi</body>\n");
+    app.write("local.txt", "served locally\n");
+    app.write(
+        "vite.config.mjs",
+        r#"const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+export default {
+  server: {
+    proxy: {
+      '/missing': { target: 'http://127.0.0.1:9', bypass: () => false },
+      '/written': {
+        bypass: async (req, res) => {
+          await wait(4)
+          res.writeHead(201, { 'Content-Type': 'text/plain' })
+          res.end('written by ' + req.url)
+          return '/written'
+        },
+      },
+      '/thrown': { bypass: async () => { await wait(4); throw new Error('bypass failed here') } },
+      '/elsewhere': { target: 'http://127.0.0.1:9', bypass: (req) => (req.headers.accept === 'text/plain' ? '/local.txt' : undefined) },
+    },
+  },
+}
+"#,
+    );
+    let dev = DevProcess::start(app.path(), cache.path(), &[]);
+    let addr = dev.addr.parse().unwrap();
+    let (status, headers, body) = http_get(addr, "/missing/app", &[]);
+    assert_eq!(status, 404, "{body}");
+    assert!(
+        body.is_empty() && header(&headers, "content-type").is_none(),
+        "{headers:?}"
+    );
+    let (status, _, body) = http_get(addr, "/written?x=1", &[]);
+    assert_eq!((status, body.as_str()), (201, "written by /written?x=1"));
+    let (status, _, _) = http_get(addr, "/thrown", &[]);
+    assert_eq!(status, 500);
+    assert!(log_after(&dev, "bypass failed here").contains("bypass failed here"));
+    let (status, _, body) = http_get(addr, "/elsewhere/x", &[("accept", "text/plain")]);
+    assert_eq!((status, body.as_str()), (200, "served locally\n"));
+    // Not bypassed: proxied to a closed port.
+    let (status, _, _) = http_get(addr, "/elsewhere/x", &[]);
+    assert_eq!(status, 502);
+}
+
+#[test]
 fn react_only_configs_skip_the_sidecar_once_the_manifest_is_cached() {
     if !node_available() {
         eprintln!("skipping: node not found (set TS_R_NODE)");
