@@ -312,6 +312,7 @@ mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_empty_array_spread;
 mod unicorn_consistent_existence_index_check;
+mod unicorn_consistent_export_decorator_position;
 mod unicorn_consistent_function_scoping;
 mod unicorn_consistent_optional_chaining;
 mod unicorn_consistent_template_literal_escape;
@@ -549,6 +550,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_consistent_export_decorator_position::RULE,
     &unicorn_no_accessor_recursion::RULE,
     &unicorn_no_anonymous_default_export::RULE,
     &import_no_duplicates::RULE,
