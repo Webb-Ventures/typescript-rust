@@ -9,6 +9,7 @@ pub mod engine;
 pub mod env;
 pub mod fix;
 pub mod globals;
+pub mod jsdoc;
 pub mod lib_globals;
 #[rustfmt::skip]
 pub mod lib_globals_generated;

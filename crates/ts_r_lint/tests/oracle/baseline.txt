@@ -84,6 +84,9 @@
 constructor-super 82/82
 for-direction 100/100
 getter-return 81/81
+jsdoc/escape-inline-tags 38/38
+jsdoc/require-param-description 17/19
+jsdoc/require-returns 156/158
 no-array-constructor 142/142
 no-async-promise-executor 11/11
 no-case-declarations 19/19

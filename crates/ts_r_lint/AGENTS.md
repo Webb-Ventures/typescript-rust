@@ -46,6 +46,7 @@ Files:
 - `project.rs`: file discovery (`.gitignore`, ignores, nearest config), parallel runner.
 - `output.rs`: stylish, json, sarif, github.
 - `ast_util.rs`: helpers shared by rules.
+- `jsdoc.rs`: shared machinery for the `jsdoc/*` rules (see "jsdoc rules" below).
 
 ## Invariants
 
@@ -130,10 +131,11 @@ Files:
 
 ## Status (type-aware round 3, `m4/type-aware-3`)
 
-- 154 rules, 51 of them type-aware. Rule oracle: 15,495 / 15,517 cases. The non-type-aware
-  cases are 8,597 / 8,597 and the type-aware cases 6,898 / 6,920 (2026-10-24, `087afc9`); the
-  22 failures are a subset of the 46 listed in design record 0006 (`tests/oracle/baseline.txt`
-  has the current per-rule counts).
+- 157 rules, 51 of them type-aware. Rule oracle: 15,706 / 15,732 cases. The non-type-aware
+  cases are 8,808 / 8,812 and the type-aware cases 6,898 / 6,920 (2026-10-26); the 22
+  type-aware failures are a subset of the 46 listed in design record 0006, and the 4 others
+  are jsdoc cases whose `contexts` are esquery selectors (`tests/oracle/baseline.txt` has the
+  current per-rule counts).
 - private-app against ESLint with every configured rule: all 23 projects pass the parity
   gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
@@ -165,6 +167,55 @@ Files:
   once (`eslint -c oracle.config.mjs -f json -o <out>/ALL.json .`, and `ts-r-lint
   --no-gitignore -c oracle.config.mjs -f json`); `compare.py` treats `ALL.json` as every
   package.
+
+## jsdoc rules
+
+`jsdoc/require-param-description`, `jsdoc/require-returns` and `jsdoc/escape-inline-tags`
+(eslint-plugin-jsdoc 63.3.3; its tests are the oracle, `gen-rule-oracle.mjs --jsdoc-tests
+<plugin>/test/rules/assertions`). What we learned, in our words:
+
+- **Which comment is a node's block.** Expressions (function and class expressions, arrows,
+  object literals, body-less functions) borrow the comment of the nearest enclosing
+  statement-like node (variable declaration, expression statement, property, class member,
+  `export default`, `return`, a parameter with a default), unless they are a call or `new`
+  argument or a comment sits right before them. The block is the last comment before the node
+  (or its first decorator, or its parent's) skipping line comments and one `(`; it must be
+  `/**` + whitespace and end 0 to 1 lines (`minLines`/`maxLines`) above the node.
+- **ESTree shape.** An exported declaration is visited twice, first as its `export` wrapper
+  (`Target::Export`), as ESLint sees `ExportNamedDeclaration` before the declaration. Contexts
+  name ESTree types (`Finder::es_type` maps our nodes); `any` (or an object without a context)
+  switches to "every block once": the first node in pre-order that finds an unclaimed block
+  claims it, and blocks no node claims are checked with no node. esquery selectors and
+  `comment` contexts are not supported (options error).
+- **Block model.** `Block::parse` reproduces the `comment-parser` tokens (start, delimiter,
+  tag, type, name, description, end, line end per line; tag sections split on `@name` outside
+  fenced code) so a fix can rebuild the comment exactly: lines live in an arena shared by the
+  block and its tags, and every fix replaces the whole comment with the mutated block.
+  Reports on a tag go to column 0 of its line (an empty span); others cover the comment.
+- **Settings** (`settings.jsdoc`): `tagNamePreference` (a `false` or message-only entry
+  blocks a tag and reports its use), `ignorePrivate`/`ignoreInternal` skip blocks, the
+  `*ReplacesDocs` flags exempt blocks (or their class's block) with `@ignore`, `@override`,
+  `@implements` (and `@augments`/`@extends` only when asked), `mode` (escape-inline-tags runs
+  only in `typescript`), `exemptDestructuredRootsFromChecks`, `contexts`.
+- **require-param-description**: each `@param` with a blank description is reported; a root
+  parameter that is destructured may instead be exempted or get the default description.
+- **require-returns**: a function whose body returns a value (or a `new Promise` whose
+  executor calls its resolver with an argument, or any Promise with `forceReturnsWithAsync`)
+  needs `@returns`; constructors, setters, abstract/`@type`/`@interface` blocks and
+  `@inheritDoc` are exempt; two `@returns` report once. `publicOnly` uses a simplified export
+  test (export modifiers, `export default x`, `export { x }`, `module.exports`/`exports.x`,
+  `window.x`).
+- **escape-inline-tags**: an `@word` at the start of a description line or after whitespace
+  is reported unless allowed, inside a markdown code span, or the scoped-package part of a
+  `{@link @scope/pkg}`. Descriptions are scanned first, then each tag but `@example`, one
+  report per remaining occurrence; the fixer escapes with `\@` or backticks.
+
+Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc.js`,
+`src/jsdocUtils.js`, `src/utils/hasReturnValue.js`, `src/rules/requireParamDescription.js`,
+`src/rules/requireReturns.js`, `src/rules/escapeInlineTags.js`; `@es-joy/jsdoccomment`
+`src/jsdoccomment.js`, `src/parseComment.js`; `comment-parser` `src/parser/{index,
+source-parser,block-parser,spec-parser}.ts`, `src/parser/tokenizers/{tag,type,name,
+description}.ts`, `src/util.ts`, `src/stringifier/index.ts`.
 
 ## Patterns
 

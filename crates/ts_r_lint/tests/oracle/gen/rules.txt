@@ -154,3 +154,6 @@ no-useless-constructor
 @typescript-eslint/prefer-includes
 @typescript-eslint/prefer-regexp-exec
 @typescript-eslint/prefer-string-starts-ends-with
+jsdoc/escape-inline-tags
+jsdoc/require-param-description
+jsdoc/require-returns
