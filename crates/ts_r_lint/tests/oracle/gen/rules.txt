@@ -308,3 +308,4 @@ unicorn/prefer-module
 unicorn/no-await-expression-member
 unicorn/no-thenable
 unicorn/no-static-only-class
+unicorn/no-useless-promise-resolve-reject

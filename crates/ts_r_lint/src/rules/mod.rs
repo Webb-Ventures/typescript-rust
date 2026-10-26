@@ -312,6 +312,7 @@ mod unicorn_no_typeof_undefined;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_fallback_in_spread;
+mod unicorn_no_useless_promise_resolve_reject;
 mod unicorn_no_useless_switch_case;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
@@ -683,6 +684,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unreadable_array_destructuring::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_fallback_in_spread::RULE,
+    &unicorn_no_useless_promise_resolve_reject::RULE,
     &unicorn_no_useless_switch_case::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,

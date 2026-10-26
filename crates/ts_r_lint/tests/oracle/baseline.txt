@@ -303,6 +303,7 @@ unicorn/no-typeof-undefined 100/100
 unicorn/no-unreadable-array-destructuring 104/104
 unicorn/no-unreadable-iife 14/14
 unicorn/no-useless-fallback-in-spread 61/61
+unicorn/no-useless-promise-resolve-reject 121/121
 unicorn/no-useless-switch-case 34/34
 unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
