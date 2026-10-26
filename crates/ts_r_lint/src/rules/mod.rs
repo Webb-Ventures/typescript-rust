@@ -422,6 +422,7 @@ mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_unreadable_object_destructuring;
+mod unicorn_no_unsafe_promise_all_settled_values;
 mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
@@ -592,6 +593,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_unsafe_promise_all_settled_values::RULE,
     &unicorn_prefer_object_define_properties::RULE,
     &unicorn_consistent_conditional_object_spread::RULE,
     &unicorn_default_export_style::RULE,

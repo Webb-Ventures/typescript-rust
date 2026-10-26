@@ -294,7 +294,7 @@ fn in_short_circuit(cx: &Ctx<'_, '_>, id: NodeId, func: NodeId) -> bool {
 }
 
 /// The `process.exit(...)` calls (on the global `process`) inside `func`, sorted.
-fn process_exit_calls(cx: &Ctx<'_, '_>, func: NodeId) -> Vec<NodeId> {
+pub(crate) fn process_exit_calls(cx: &Ctx<'_, '_>, func: NodeId) -> Vec<NodeId> {
     let ast = cx.ast();
     let mut out = Vec::new();
     let mut stack = vec![func];

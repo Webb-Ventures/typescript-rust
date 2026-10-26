@@ -78,7 +78,22 @@ impl Cfg {
 
     /// The graph of a statement list (`Program`, `StaticBlock`).
     pub fn statements(ast: &Ast, stmts: &[NodeId]) -> Cfg {
+        Cfg::statements_with_exits(ast, stmts, &[], &[])
+    }
+
+    /// [`Cfg::statements`] with program-ending calls, as in [`Cfg::function_with_exits`]. A
+    /// `break` or `continue` whose target is outside `stmts` goes nowhere, like an exit.
+    /// The identifiers in `safe_reads` (sorted) are known to be defined: reading them
+    /// cannot throw.
+    pub fn statements_with_exits(
+        ast: &Ast,
+        stmts: &[NodeId],
+        exits: &[NodeId],
+        safe_reads: &[NodeId],
+    ) -> Cfg {
         let mut b = Builder::new(ast);
+        b.exits = exits;
+        b.safe_reads = safe_reads;
         for &s in stmts {
             b.stmt(s);
         }
@@ -172,6 +187,7 @@ struct Builder<'a> {
     block_budget: usize,
     /// Calls that end the program (sorted).
     exits: &'a [NodeId],
+    safe_reads: &'a [NodeId],
 }
 
 /// A literal test that is always truthy (`while (true)`).
@@ -251,6 +267,7 @@ impl<'a> Builder<'a> {
             case_ends: Vec::new(),
             block_budget: 4 * ast.nodes.len() + 4096,
             exits: &[],
+            safe_reads: &[],
         };
         b.cur = b.new_block();
         b.exit = b.new_block();
@@ -338,17 +355,40 @@ impl<'a> Builder<'a> {
     }
 
     /// Evaluates `first`, then `second` only on some paths.
-    fn short_circuit(&mut self, first: NodeId, second: NodeId) {
+    fn short_circuit(&mut self, first: NodeId, second: NodeId, rhs_runs: Option<bool>) {
         self.expr(first);
         let from = self.cur;
         let rhs = self.new_block();
-        self.edge(from, rhs);
+        if rhs_runs != Some(false) {
+            self.edge(from, rhs);
+        }
         self.cur = rhs;
         self.expr(second);
         let after = self.new_block();
         self.edge(self.cur, after);
-        self.edge(from, after);
+        if rhs_runs != Some(true) {
+            self.edge(from, after);
+        }
         self.cur = after;
+    }
+
+    /// With program-ending calls (the plugin's exit analysis), the truthiness of a literal
+    /// test, which decides the branch. Plain code-path graphs never fold.
+    fn literal_truth(&self, test: NodeId) -> Option<bool> {
+        if self.exits.is_empty() {
+            return None;
+        }
+        let mut id = test;
+        while let Node::Paren { expr } = *self.ast.node(id) {
+            id = expr;
+        }
+        match *self.ast.node(id) {
+            Node::BoolLit { value } => Some(value),
+            Node::NullLit {} => Some(false),
+            Node::NumberLit { value } => Some(value.get() != 0.0 && !value.get().is_nan()),
+            Node::StringLit { value } => Some(!self.ast.atom(value).is_empty()),
+            _ => None,
+        }
     }
 
     /// A default value, evaluated only on some paths.
@@ -489,14 +529,28 @@ impl<'a> Builder<'a> {
         match *ast.node(id) {
             Node::Binary {
                 left,
-                op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::Coalesce,
+                op: op @ (BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::Coalesce),
                 right,
-            } => self.short_circuit(left, right),
+            } => {
+                let truth = self.literal_truth(left);
+                let rhs_runs = match op {
+                    BinaryOp::LogicalAnd => truth,
+                    BinaryOp::LogicalOr => truth.map(|t| !t),
+                    _ => truth.and_then(|_| {
+                        let mut l = left;
+                        while let Node::Paren { expr } = *ast.node(l) {
+                            l = expr;
+                        }
+                        Some(matches!(ast.node(l), Node::NullLit {}))
+                    }),
+                };
+                self.short_circuit(left, right, rhs_runs);
+            }
             Node::Assign {
                 left,
                 op: AssignOp::AndAssign | AssignOp::OrAssign | AssignOp::CoalesceAssign,
                 right,
-            } => self.short_circuit(left, right),
+            } => self.short_circuit(left, right, None),
             Node::Assign { left, right, .. } if matches!(ast.node(left), Node::Ident { .. }) => {
                 self.expr(right);
                 self.event(left);
@@ -542,10 +596,15 @@ impl<'a> Builder<'a> {
             }
             Node::Conditional { test, cons, alt } => {
                 self.expr(test);
+                let truth = self.literal_truth(test);
                 let from = self.cur;
                 let (c, a, after) = (self.new_block(), self.new_block(), self.new_block());
-                self.edge(from, c);
-                self.edge(from, a);
+                if truth != Some(false) {
+                    self.edge(from, c);
+                }
+                if truth != Some(true) {
+                    self.edge(from, a);
+                }
                 self.cur = c;
                 self.expr(cons);
                 self.edge(self.cur, after);
@@ -602,7 +661,7 @@ impl<'a> Builder<'a> {
                         self.expr(c);
                     }
                 }
-                if may_throw(ast.kind(id)) {
+                if may_throw(ast.kind(id)) && self.safe_reads.binary_search(&id).is_err() {
                     self.maybe_throw();
                 }
                 // `generator.return()` resumes a `yield` as a return through `finally`.
@@ -707,9 +766,12 @@ impl<'a> Builder<'a> {
             }
             Node::If { test, cons, alt } => {
                 self.expr(test);
+                let truth = self.literal_truth(test);
                 let from = self.cur;
                 let then_b = self.new_block();
-                self.edge(from, then_b);
+                if truth != Some(false) {
+                    self.edge(from, then_b);
+                }
                 self.cur = then_b;
                 self.stmt(cons);
                 let then_end = self.cur;
@@ -718,11 +780,14 @@ impl<'a> Builder<'a> {
                 match alt {
                     Some(a) => {
                         let else_b = self.new_block();
-                        self.edge(from, else_b);
+                        if truth != Some(true) {
+                            self.edge(from, else_b);
+                        }
                         self.cur = else_b;
                         self.stmt(a);
                         self.edge(self.cur, after);
                     }
+                    None if truth == Some(true) => {}
                     None => self.edge(from, after),
                 }
                 self.cur = after;
