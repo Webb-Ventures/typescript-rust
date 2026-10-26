@@ -279,7 +279,7 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-26, v1/emit5): 1,723 match, 4 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  Last run (2026-10-27, v1/emit5): 1,723 match, 4 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
   syntax errors are skipped); `--filter esDecorators`: 140 match, 0 mismatch. The 4 left need
   another file's declarations, which a per-file transpile cannot see (an imported enum
   value, an imported const enum, an alias of an imported interface); the program emitter
