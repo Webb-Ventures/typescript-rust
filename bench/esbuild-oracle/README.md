@@ -30,21 +30,23 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-b2d0178 plus 07d2cdd (2026-10-24, macOS arm64, esbuild 0.28.2, `--jobs 4`): **832 of 872
-compared cases pass (95.4%)**; 198 of the 1070 cases are skipped. Of the 40 failures, 13 are
+wip/v1-build at e5b1e2c (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**851 of 881 compared cases pass (96.6%)**; 189 of the 1070 cases are skipped. Of the 30 failures, 13 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 7 are oracle
-artifacts; the other 20 are gaps. The esbuild test files come from
+artifacts; the other 10 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-93 more cases are compared than at cb637a3: ts-r-build now takes `--target=es5..esnext` and
-`--supported:<feature>=bool` (any `UnsupportedJSFeatures` set maps), bundles `data:` URL
-modules, keeps `?query` / `#hash` suffixes as separate modules, writes `file` loader URLs per
-chunk, and applies `--public-path` to chunk imports.
+Since 07d2cdd (832 of 872): dead `switch` cases, `@__NO_SIDE_EFFECTS__` and pure calls with
+spread arguments in DCE; top-level await in lazily initialized modules; CommonJS imports run
+in order between inlined modules; top-level `this` is `exports` in a file without exports;
+top-level `let` / `const` / `class` become `var`; every CommonJS entry runs unwrapped; and
+`define` matches `import.meta`, optional chains and string keys. The runner now maps the
+tests' `Defines` lists to `--define`, so 9 more cases are compared (8 pass).
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
 | bundler_css_test.go | 1 | 5 | 56 |
-| bundler_dce_test.go | 110 | 3 | 8 |
-| bundler_default_test.go | 227 | 9 | 67 |
+| bundler_dce_test.go | 113 | 0 | 8 |
+| bundler_default_test.go | 243 | 1 | 59 |
 | bundler_glob_test.go | 1 | 0 | 9 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
@@ -53,7 +55,7 @@ chunk, and applies `--public-path` to chunk imports.
 | bundler_lower_test.go | 72 | 12 | 0 |
 | bundler_packagejson_test.go | 93 | 2 | 1 |
 | bundler_splitting_test.go | 22 | 1 | 0 |
-| bundler_ts_test.go | 66 | 3 | 19 |
+| bundler_ts_test.go | 66 | 4 | 18 |
 | bundler_tsconfig_test.go | 68 | 3 | 9 |
 | bundler_yarnpnp_test.go | 0 | 2 | 1 |
 
@@ -100,30 +102,25 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
 - `SplittingMinifyIdentifiersCrashIssue437`: the output differs only in which short name the
   minifier picks (`o` vs `f`), which shows in a thrown error.
 
-### Gaps (20)
+### Gaps (10)
 
 - **CSS** (5): CSS modules imported from JS, CSS-from-JS missing-import errors, and the
   `[ext]` placeholder in entry names with CSS bundles (`MetafileCSSBundleTwoToOne`).
-- **Top-level await in lazily initialized modules** (3): `require()` of a module with
-  top-level await through a chain, `import()` of one without code splitting and a cycle of
-  them (esbuild makes the module's wrapper async).
-- **Interop and DCE details** (8): TDZ and class renaming (`CommonJSFromES6`, `AvoidTDZ`),
-  `this` in ESM-looking files, namespace shapes of files that are neither ESM nor CommonJS,
-  CommonJS `exports` warnings in an ESM bundle, pure calls with spread arguments,
-  `@__NO_SIDE_EFFECTS__` on unused calls, dead `case` bodies that import a missing file.
 - **Lowering** (2): `super` in static async methods at ES2016 (`LowerStaticAsyncSuperES2016NoBundle`)
   and `super[key]?.()` in a lowered async method (`LowerAsyncSuperES2016NoBundle`).
-- **Yarn PnP** (2).
+- **Yarn PnP** (2): a tsconfig `extends` that names a package resolved through
+  `.pnp.data.json`.
+- **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
+  the enum, so `c = d` with `d=b` refers to the member `b`; ts-r substitutes after.
 
-### Skipped (198)
+### Skipped (189)
 
-CSS bundling entries (44), `Loader=copy` (19), `Loader=localcss` / `globalcss` (19),
-`MangleProps` / `MangleQuoted` / `ReserveProps` (35), `InjectPaths` (17), `Defines` (15),
-nondeterministic (11), Go-only TypeScript options (10), `External.PostResolve` (8),
-`KeepNames` (8), `UnsupportedCSSFeatures` (7), cases sharing a Go variable (6),
-`OriginalTargetEnv` (5), no output path (4), and 1-2 each for `DropLabels`, `PackageAliases`,
-Windows paths, stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin
-and stays skipped.
+CSS bundling entries (44), `MangleProps` / `MangleQuoted` / `ReserveProps` (35), `Loader=copy`
+(19), `Loader=localcss` / `globalcss` (19), `InjectPaths` (17), nondeterministic (11), Go-only
+TypeScript options (10), `External.PostResolve` (8), `KeepNames` (8), `UnsupportedCSSFeatures`
+(7), cases sharing a Go variable (6), `OriginalTargetEnv` (5), no output path (4), `Defines`
+with call flags (`--pure`, 2), and 1-2 each for `DropLabels`, `PackageAliases`, Windows paths,
+stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -137,3 +134,4 @@ and stays skipped.
 | parity/bundler at cb637a3: import phases and attributes, glob entries, strict package.json, re-export cycle errors, JSON namespaces, imported scripts as CommonJS, external evaluation order, exports targets naming compiled TypeScript, exported const enums kept; runner maps JSX, path templates and modern `UnsupportedJSFeatures` | 1070 | 779 | 742 | 37 | 291 | 95.3% |
 | parity/bundler-2 at 9348931: `--target=es5..esnext`, `--supported:F=bool`; runner maps every `UnsupportedJSFeatures` set | 1070 | 872 | 823 | 49 | 198 | 94.4% |
 | parity/bundler-2 at 07d2cdd: `data:` URL modules, `?query` suffixes, per-chunk `file` URLs, `--public-path` for chunks, `import()`-only modules named like chunks | 1070 | 872 | 832 | 40 | 198 | 95.4% |
+| v1 build parity at e5b1e2c: DCE of dead `switch` cases and `@__NO_SIDE_EFFECTS__`, async lazy modules, CommonJS imports in order, top-level `this`, `let`/`const`/`class` to `var`, unwrapped CommonJS entries, `define` on `import.meta` / optional chains; runner maps `Defines` | 1070 | 881 | 851 | 30 | 189 | 96.6% |
