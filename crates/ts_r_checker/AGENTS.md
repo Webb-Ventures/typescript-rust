@@ -1573,7 +1573,9 @@ Files, by layer:
   signatures without a body. In a tuple type, `...X[]` (through parentheses or a lone
   `[...X[]]`) is a rest element by its syntax; any other `...T` is checked by its type: an
   array or a tuple with a rest is a rest, anything else that is nullable or not assignable
-  to `readonly any[]` is TS2574, and the rest are neither. A second rest is TS1265, an
+  to `readonly any[]` is TS2574, and the rest are neither. In a conditional's true branch
+  the type is narrowed by the check first (`M extends readonly X[] ? [...M] : ..`, as for
+  TS2344; @reduxjs/toolkit's `ExtractDispatchExtensions`). A second rest is TS1265, an
   optional element after a rest TS1266 (both grammar errors, skipped in files with syntax
   errors); the first error stops the walk. `infer X` in a rest position, and references to
   such an `X`, are implicitly array-constrained, so they are never checked.

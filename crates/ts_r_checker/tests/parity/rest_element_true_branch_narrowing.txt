@@ -1,0 +1,3 @@
+a.ts(6,33): error TS2574: A rest element type must be an array type.
+a.ts(7,52): error TS2574: A rest element type must be an array type.
+a.ts(8,48): error TS2574: A rest element type must be an array type.

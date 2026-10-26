@@ -2807,13 +2807,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                         // counts as a fit, not TS2589 (tsc's relation stops at deeply nested
                         // types with a maybe; type-fest's MergeDeep).
                         let overflowed = self.inst_overflow;
-                        let fits = !nullable
-                            && self
-                                .global_reference(
-                                    crate::checker::GlobalType::ReadonlyArray,
-                                    &[TypeId::ANY],
-                                )
-                                .is_some_and(|ro| self.is_assignable(t, ro));
+                        let ro = self.global_reference(
+                            crate::checker::GlobalType::ReadonlyArray,
+                            &[TypeId::ANY],
+                        );
+                        let fits = !nullable && ro.is_some_and(|ro| self.is_assignable(t, ro));
+                        // In a conditional's true branch, `M` is narrowed by its check
+                        // (`M extends readonly X[] ? [...M] : ..`).
+                        let fits = fits
+                            || ro.is_some_and(|ro| {
+                                let nt = self.narrowed_in_true_branch(Loc::new(file, ty), t);
+                                nt != t && self.is_assignable(nt, ro)
+                            });
                         let fits = if self.inst_overflow && !overflowed {
                             self.inst_overflow = false;
                             true
