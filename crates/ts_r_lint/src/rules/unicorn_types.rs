@@ -3392,6 +3392,119 @@ pub(crate) fn is_known_non_bigint(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     BIGINT.is_known_non_target(cx, id)
 }
 
+// ---- Built-in collections (`getBuiltinCollectionType`) ----------------------------------
+
+/// The built-in collection names an expression may hold (`Map`, `ReadonlyMap`, `Set`,
+/// `ReadonlySet`), or `None` when unknown.
+fn collection_types(
+    cx: &Ctx<'_, '_>,
+    id: NodeId,
+    visited: &mut Vec<SymbolId>,
+) -> Option<Vec<&'static str>> {
+    let ast = cx.ast();
+    let id = skip_parens(ast, id);
+    if visited.len() > 100 {
+        return None;
+    }
+    match *ast.node(id) {
+        Node::New { callee, .. } => {
+            let name = match ident_name(ast, callee) {
+                Some("Map") => "Map",
+                Some("Set") => "Set",
+                _ => return None,
+            };
+            (matches!(ast.node(callee), Node::Ident { .. }) && cx.is_global_ref(callee, name))
+                .then(|| vec![name])
+        }
+        Node::Ident { .. } => {
+            let sem = cx.semantic();
+            let sym = sem.symbol_of_ident(id)?;
+            let symbol = sem.symbol(sym);
+            let [decl] = symbol.decls.as_slice() else {
+                return None;
+            };
+            if visited.contains(&sym) {
+                return None;
+            }
+            visited.push(sym);
+            let types = collection_annotation_types(cx, binding_annotation(cx, decl.name).0, 0)
+                .or_else(|| match *ast.node(decl.node) {
+                    Node::VarDeclarator {
+                        name,
+                        init: Some(init),
+                        ..
+                    } if decl.kind == DeclKind::Const && name == decl.name => {
+                        collection_types(cx, init, visited)
+                    }
+                    _ => None,
+                });
+            visited.retain(|s| *s != sym);
+            types
+        }
+        Node::As { expr, ty } | Node::Satisfies { expr, ty } | Node::TypeAssertion { expr, ty } => {
+            collection_annotation_types(cx, Some(ty), 0)
+                .or_else(|| collection_types(cx, expr, visited))
+        }
+        Node::NonNull { expr } => collection_types(cx, expr, visited),
+        Node::Conditional { cons, alt, .. } => {
+            let mut a = collection_types(cx, cons, visited)?;
+            a.extend(collection_types(cx, alt, visited)?);
+            Some(a)
+        }
+        _ => None,
+    }
+}
+
+fn collection_annotation_types(
+    cx: &Ctx<'_, '_>,
+    ty: Option<NodeId>,
+    depth: u32,
+) -> Option<Vec<&'static str>> {
+    let ast = cx.ast();
+    let ty = ty?;
+    if depth > 100 {
+        return None;
+    }
+    match *ast.node(ty) {
+        Node::ParenType { ty } => collection_annotation_types(cx, Some(ty), depth + 1),
+        Node::TypeOperator {
+            op: ts_r_ast::TypeOperatorKind::Readonly,
+            ty,
+        } => collection_annotation_types(cx, Some(ty), depth + 1),
+        Node::TypeRef { name, .. } if matches!(ast.node(name), Node::Ident { .. }) => {
+            let n = ident_name(ast, name)?;
+            if type_definition(cx, n, cx.semantic().enclosing_scope(name)).is_some() {
+                return None;
+            }
+            ["Map", "ReadonlyMap", "Set", "ReadonlySet"]
+                .into_iter()
+                .find(|c| *c == n)
+                .map(|c| vec![c])
+        }
+        Node::UnionType { types } => {
+            let mut out = Vec::new();
+            for &t in ast.list(types) {
+                out.extend(collection_annotation_types(cx, Some(t), depth + 1)?);
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+/// `getBuiltinCollectionType`: `"Map"` or `"Set"` when an expression is known to be only
+/// maps or only sets (annotations, `new Map`/`new Set`, `const` initializers).
+pub(crate) fn builtin_collection_type(cx: &Ctx<'_, '_>, id: NodeId) -> Option<&'static str> {
+    let types = collection_types(cx, id, &mut Vec::new())?;
+    let map = types.iter().any(|t| t.ends_with("Map"));
+    let set = types.iter().any(|t| t.ends_with("Set"));
+    match (map, set) {
+        (true, false) => Some("Map"),
+        (false, true) => Some("Set"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

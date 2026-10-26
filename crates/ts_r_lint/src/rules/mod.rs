@@ -305,7 +305,7 @@ mod unicorn_no_document_cookie;
 mod unicorn_no_empty_file;
 mod unicorn_no_exports_in_scripts;
 mod unicorn_no_global_object_property_assignment;
-mod unicorn_no_incorrect_template_string_interpolation;
+mod unicorn_no_impossible_length_comparison;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
@@ -316,6 +316,7 @@ mod unicorn_no_negated_condition;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
 mod unicorn_no_null;
+mod unicorn_no_object_methods_with_collections;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_shorthand_property_overrides;
 mod unicorn_no_this_assignment;
@@ -364,7 +365,8 @@ mod unicorn_prefer_optional_catch_binding;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
-mod unicorn_prefer_string_match_all;
+mod unicorn_prefer_split_limit;
+mod unicorn_prefer_spread;
 mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
@@ -717,7 +719,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_empty_file::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
-    &unicorn_no_incorrect_template_string_interpolation::RULE,
+    &unicorn_no_impossible_length_comparison::RULE,
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
@@ -728,6 +730,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
     &unicorn_no_null::RULE,
+    &unicorn_no_object_methods_with_collections::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_shorthand_property_overrides::RULE,
     &unicorn_no_this_assignment::RULE,
@@ -776,7 +779,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,
-    &unicorn_prefer_string_match_all::RULE,
+    &unicorn_prefer_split_limit::RULE,
     &unicorn_prefer_string_repeat::RULE,
     &unicorn_prefer_string_trim_start_end::RULE,
     &unicorn_prefer_structured_clone::RULE,

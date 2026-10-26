@@ -903,69 +903,61 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
 `type-arguments.js`, `member-expression.js` (getMemberAccessOperatorRange),
 `fix/remove-object-property.js`, `ast/literal.js`, `ast/function-types.js`,
 `ast/call-or-new-expression.js`, `ast/matches-name-constraint.js`.
-
-### Batch 3
-
-`no-invalid-well-known-symbol-methods`, `no-incorrect-template-string-interpolation`,
-`no-conflicting-constraints`, `prefer-iterator-to-array`, `no-shorthand-property-overrides`,
-`prefer-get-or-insert-computed`, `no-accidental-bitwise-operator`, `prefer-math-constants`,
-`prefer-simple-sort-comparator`, `no-useless-collection-argument`,
-`prefer-dom-node-html-methods`, `prefer-string-match-all`, `no-useless-concat` (each at 100%
-of its oracle) and `require-module-specifiers` (67 of 68: `declare export type {} from "m"`
-in a `.js` file is a parse error for ts-r, while typescript-eslint recovers). New helpers in
-`rules/unicorn_util_h1.rs`: `static_property_name`, `decode_jsx_numeric_entities` (`&#49;` /
-`&#x31;`; JSX attribute strings reach rules undecoded), `evaluates_node` (a `containsNode`
-that skips function bodies and non-static field values but still walks their computed keys;
-depth 64), `is_direct_eval_call` and `is_type_slot` (the child sits where a type goes: an
-`as` / `satisfies` / assertion type, a type alias body, a type annotation or return type, or
-inside a type node; literal types are plain literal nodes, so rules on literals need this).
-
-- **no-conflicting-constraints** and **no-shorthand-property-overrides** have CSS and HTML
-  parts upstream (other ESLint languages); only the JSX part is implemented. The shorthand
-  rule keeps its own table of CSS shorthands and the longhands each one resets, with the
-  extra resets added after nested shorthands are expanded.
-- **prefer-math-constants**: a decimal literal is a constant when the constant's shortest
-  text starts with it, or, when the literal is shorter, the constant rounded to the
-  literal's fraction digits equals it; `PI` needs 2 fraction digits, `E` 3, the rest 4.
-  Keys and literal types (`type T = 3.14`, `x as -3.14`) are skipped.
-- **prefer-simple-sort-comparator**: the comparator must be a tree of `<`/`>`/`<=`/`>=`
-  tests on one mirrored pair of parameter paths returning signed number literals, with both
-  signs present, a non-zero first true branch and every branch agreeing with the
-  subtraction; no suggestion when it holds a comment or the receiver is a bigint typed array.
-- **no-useless-collection-argument**: with `a ?? x` the fix removes `?? x` and the
-  parentheses around the `??` (not when its left side is a bare sequence); a comment in the
-  argument's removal range makes it a suggestion.
-- **prefer-dom-node-html-methods**: reading `.innerHTML` is fixed to `.getHTML()` unless the
-  member is itself called, constructed or a tag; writing is only checked with `checkSetHTML`
-  and only suggested for a plain `=` whose value is unused.
-- **prefer-string-match-all** only fires when the rewrite is provably the same loop: `let m;`
-  right before the `while`, `re` a single `let`/`const` in the same statement list built from
-  a static regex with `g` that cannot match the empty string (judged on the parsed pattern
-  with `crate::regex`: assertions, lookarounds, back references, modifier groups, `\q{}` and
-  parse errors all count as "might be empty"), used only in its initializer and the loop
-  test; `s` a `const` with a side-effect-free static string; `m` not used outside the loop,
-  not written in the body and not captured by a function or class member there.
-- **require-module-specifiers**: a bare `export {}` is kept in `.d.ts` / `.d.mts` / `.d.cts`
-  files and whenever it is the file's only module marker. typescript-eslint gives exported
-  interfaces, type aliases and `declare`d declarations the `type` export kind, so they don't
-  count as runtime exports.
-- **no-useless-concat** only folds literals on one line, keeps a split `${...}` placeholder
-  and `'use ' + 'strict'` in a directive prologue, and has no fix when folding would drop a
-  comment or the chain's parentheses, reorder a right template's side effects, or move a
-  legacy octal / `\8` / `\9` escape into a template. Its single-quoted output escapes `\`,
-  `'`, line terminators and control characters.
-
-Read to understand (not ported): eslint-plugin-unicorn `rules/no-invalid-well-known-symbol-methods.js`,
-`rules/no-incorrect-template-string-interpolation.js`, `rules/no-conflicting-constraints.js`,
-`rules/prefer-iterator-to-array.js`, `rules/no-shorthand-property-overrides.js`,
-`rules/shared/css-shorthand-properties.js`, `rules/prefer-get-or-insert-computed.js`,
-`rules/no-accidental-bitwise-operator.js`, `rules/prefer-math-constants.js`,
-`rules/prefer-simple-sort-comparator.js`, `rules/no-useless-collection-argument.js`,
-`rules/prefer-dom-node-html-methods.js`, `rules/prefer-string-match-all.js`,
-`rules/require-module-specifiers.js`, `rules/no-useless-concat.js`, and the utils
-`type-arguments.js`, `ast/literal.js`, `ast/is-direct-eval-call.js`, `ast/is-undefined.js`,
-`ast/is-in-directive-prologue.js`, `contains-node.js`, `get-concise-arrow-body-text.js`,
-`get-expression-text.js`, `get-static-value.js` (getStaticRegExp), `imports.js`,
-`needs-semicolon.js`, `escape-string.js`, `escape-template-element-raw.js`,
-`has-template-incompatible-escape.js`, `fix/replace-argument.js`, `fix/remove-argument.js`,
-`fix/remove-parentheses.js`, `shared/typed-array.js`.
+- **Lengths that are not collection sizes** (`explicit-length-check`, from
+  `unicorn: rules/explicit-length-check.js`). `x.length` is skipped when its static value
+  isn't a safe non-negative integer, or `x` is a single-declaration variable initialised
+  with an object literal whose `length` isn't one. References to `x` before the read in the
+  same function, and every reference in another function or in conditional code (an `if`
+  branch the test doesn't decide, loop bodies, the right of `&&`/`||`/`??`, defaults,
+  `catch`, optional calls), are classified: a `for (x.length in ...)` head or an unknown
+  write makes it unknown (skip); a write of a known integer (`x.length = 3`,
+  `Object.defineProperty(x, "length", {value: 3})`, `Object.assign(x, {length: 3})`)
+  makes it a size (report); an accessor descriptor makes it unknown. A destructuring
+  default (`({length: x.length = 1} = y)`) is not a known value.
+- **DOM collections** (`prefer-at`, from `unicorn: rules/prefer-at.js`). `childNodes`,
+  `children` and the `getElementsBy*` / `querySelectorAll` calls (optional chains
+  included), and values typed `NodeList`/`NodeListOf`/`HTMLCollection`/`HTMLCollectionOf`
+  (nullish union members ignored), are not given `.at()`. Reports sit on the index without
+  its parentheses, as ESTree ranges exclude them.
+- **Regex patterns as strings** (`prefer-string-replace-all`, from
+  `unicorn: rules/prefer-string-replace-all.js`) use the crate's own `regex.rs` tree. A
+  fixed-string pattern keeps each character as written (`\n`, `\x41`, `\u{..}` stay; an
+  identity escape loses its backslash; `\cX` becomes `\r`/`\n`/`\t`/`\u{X}`; `\0`-`\7`
+  octal and null become `\u{X}`; `\8` is `8`; a lone Annex-B backslash, as in `\c_`,
+  becomes `\\`).
+- **Static regexes** (`unicorn_static::static_regexp`, `getStaticRegExp`): a regex value
+  without side effects, or a regex literal / `new RegExp(...)` of static primitive or regex
+  arguments, directly or through a never-reassigned variable, then evaluated in full.
+  `prefer-regexp-test` (from `unicorn: rules/prefer-regexp-test.js`) has no type checker,
+  so its "type information" step always answers unknown; the rule leans on annotations,
+  `const` initializers and static values. A parenthesized optional chain counts as closed
+  (ESTree makes it a whole `ChainExpression`).
+- **Arrays for spreading** (`prefer-spread`, from `unicorn: rules/prefer-spread.js` and
+  its `shared/` helpers). A receiver is an array by annotation (`T[]`, tuples,
+  `Array`/`ReadonlyArray`, `readonly`, aliases and constraints followed), an array literal
+  or an `Array(...)` call; not one by literals, templates, binary expressions,
+  class-like names, `.join()`, `String()`-style calls, `Buffer.concat`, `new X()`, the
+  non-array branch of an `Array.isArray` test, or class/interface/non-array annotations.
+  Without a type checker, every spread fix in a TypeScript file is a suggestion.
+  `mutable_member_access` walks into functions and classes (ESLint's evaluated children
+  only skip names), so `const f = () => f.concat(2)` has no fix.
+- **Known harness gap.** `unicorn/prefer-spread` is 625/626: the one failure has an
+  unused `eslint-disable-next-line` comment, and the expected output is ESLint's fix for
+  the unused directive. The oracle harness turns off `reportUnusedDisableDirectives`, so
+  that fix can't happen there; the rule's own report matches.
+- **Built-in collections** (`no-object-methods-with-collections`, from `unicorn:
+  rules/no-object-methods-with-collections.js` and `utils/get-builtin-collection-type.js`).
+  `builtin_collection_type` finds `Map`/`Set` from `new Map`/`new Set` (global callee),
+  through a single declaration's annotation (`Map`, `ReadonlyMap`, `Set`, `ReadonlySet`
+  not shadowed by a user type, `readonly`, unions of one kind) or `const` initializer,
+  `as`/`satisfies`/`<T>`/`!`, and both branches of a conditional. `(Object).keys(x)`
+  counts: ESTree parentheses are transparent.
+- **Split limits** (`prefer-split-limit`, from `unicorn: rules/prefer-split-limit.js`).
+  The limit goes before the split call's `)`, after a trailing comma when there is one, so
+  `a?.split?.("/")` works too. A destructuring pattern's span takes in its type
+  annotation (ESTree puts the annotation on the pattern).
+- **Impossible length comparisons** (`no-impossible-length-comparison`, from `unicorn:
+  rules/no-impossible-length-comparison.js` and `utils/length-or-size.js`). It shares
+  `known_non_collection_length` and `has_shape_property_check` with
+  `explicit-length-check`. The compared value goes through `static_value_control_flow`,
+  so a `let` reassigned before the comparison is not a constant.

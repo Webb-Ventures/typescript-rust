@@ -330,7 +330,7 @@ fn guarded_by_non_zero_check(cx: &Ctx<'_, '_>, length: NodeId) -> bool {
         .any(|&o| o != length && is_same_length_non_zero_check(cx, o, length))
 }
 
-fn has_shape_property_check(cx: &Ctx<'_, '_>, node: NodeId, length: NodeId) -> bool {
+pub(crate) fn has_shape_property_check(cx: &Ctx<'_, '_>, node: NodeId, length: NodeId) -> bool {
     let ast = cx.ast();
     let root = logical_root(cx, node, BinaryOp::LogicalAnd);
     if !is_logical(ast, root, &[BinaryOp::LogicalAnd]) {
@@ -938,7 +938,7 @@ fn is_conditionally_executed(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
 }
 
 /// `isKnownNonCollectionLengthOrSize`.
-fn known_non_collection_length(cx: &Ctx<'_, '_>, member: NodeId) -> bool {
+pub(crate) fn known_non_collection_length(cx: &Ctx<'_, '_>, member: NodeId) -> bool {
     let ast = cx.ast();
     if let Some(v) = static_value_no_side_effects(cx, member) {
         return !is_safe_non_negative_integer(&v);

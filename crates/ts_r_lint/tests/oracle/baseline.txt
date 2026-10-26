@@ -296,7 +296,7 @@ unicorn/no-document-cookie 21/21
 unicorn/no-empty-file 58/58
 unicorn/no-exports-in-scripts 22/22
 unicorn/no-global-object-property-assignment 34/34
-unicorn/no-incorrect-template-string-interpolation 59/59
+unicorn/no-impossible-length-comparison 77/77
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
@@ -307,6 +307,7 @@ unicorn/no-negated-condition 134/134
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
 unicorn/no-null 94/94
+unicorn/no-object-methods-with-collections 78/78
 unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-shorthand-property-overrides 62/62
 unicorn/no-this-assignment 23/23
@@ -355,7 +356,8 @@ unicorn/prefer-optional-catch-binding 25/25
 unicorn/prefer-short-escape-sequences 28/28
 unicorn/prefer-simple-sort-comparator 66/66
 unicorn/prefer-single-array-predicate 32/32
-unicorn/prefer-string-match-all 68/68
+unicorn/prefer-split-limit 77/77
+unicorn/prefer-spread 625/626
 unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-structured-clone 47/47
