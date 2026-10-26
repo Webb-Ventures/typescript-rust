@@ -18,7 +18,7 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
   eslint-plugin-jsdoc rules and 23 eslint-plugin-unicorn rules. 51 of them are type-aware
   and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
 - The published ESLint, typescript-eslint, eslint-plugin-jsdoc and eslint-plugin-unicorn tests for
-  those rules: 25,040 of 25,060 cases match (18,140 of 18,140 for rules without types, 6,900 of
+  those rules: 25,042 of 25,060 cases match (18,140 of 18,140 for rules without types, 6,902 of
   6,920 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.

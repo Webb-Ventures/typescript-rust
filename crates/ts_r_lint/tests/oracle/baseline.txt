@@ -55,12 +55,12 @@
 @typescript-eslint/no-unnecessary-type-parameters 173/173
 @typescript-eslint/no-unsafe-argument 45/45
 @typescript-eslint/no-unsafe-assignment 91/92
-@typescript-eslint/no-unsafe-call 38/39
+@typescript-eslint/no-unsafe-call 39/39
 @typescript-eslint/no-unsafe-declaration-merging 11/11
 @typescript-eslint/no-unsafe-enum-assignment 256/256
 @typescript-eslint/no-unsafe-enum-comparison 85/85
 @typescript-eslint/no-unsafe-function-type 8/8
-@typescript-eslint/no-unsafe-member-access 35/36
+@typescript-eslint/no-unsafe-member-access 36/36
 @typescript-eslint/no-unsafe-return 62/62
 @typescript-eslint/no-unsafe-unary-minus 23/23
 @typescript-eslint/no-unused-expressions 38/38

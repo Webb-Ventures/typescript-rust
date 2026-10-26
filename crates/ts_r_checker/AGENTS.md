@@ -3165,13 +3165,14 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-26, f7fe53f, wip/v1-checker3 on v1/dev2 with v1/emit3 and v1/lsp3 merged:
-  package deduplication, generic recursive aliases, interface base kinds (TS2312), overload
-  enum returns and split ambience (TS2394, TS2384), made-up bodies (TS2371), non-strict
-  nullish destructuring; 12750 compared variants): 12389 exact (97.2%; all diagnostics and
-  chains), 12409 (97.3%) exact on first lines; 178 variants with a diagnostic tsc does not
-  report, 6 of them tests where tsc reports nothing.
-  Earlier: 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-26, fb99a81, wip/v1-checker4 on v1/lsp4 with v1/lint4 and v1/emit4 merged:
+  namespace import-equals and type-only `export =` namespace imports, libReplacement,
+  `import("m").T<A>` argument checks, UMD globals as types, ambient export assignments
+  (TS2714), type predicate checks (TS2677, TS1225, TS1229, TS1230); 12750 compared
+  variants): 12408 exact (97.3%; all diagnostics and chains), 12428 (97.5%) exact on first
+  lines; 173 variants with a diagnostic tsc does not report, 6 of them tests where tsc
+  reports nothing.
+  Earlier: 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
