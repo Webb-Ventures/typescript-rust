@@ -527,7 +527,12 @@ Files, by layer:
   constraint instantiated with the parameter as the default (TS2344 at the default:
   `<T, U extends T = number>`). A default whose resolution needs itself (`interface
   I<T = I> {}`: the reference fills `T` from its own default) is circular: it reads as no
-  default and is TS2716 at the default. Type argument counts ask whether a default is
+  default and is TS2716 at the default. A default naming a non-generic type alias that is
+  being resolved, directly or as an array element (`T = ParsedNode` in `interface Seq<T =
+  ParsedNode>` with `type ParsedNode = Scalar | Seq`), is no cycle: the alias reads as a
+  forward reference there, because tsc defers a reference inside an alias that needs its
+  defaults (tsc: isDeferredTypeReferenceNode; `default_names_resolving_alias`; yaml,
+  typebox). Type argument counts ask whether a default is
   declared (`has_type_param_default`) without resolving it, so they never start that
   cycle (tsc: checker.go, checkTypeParameter, getResolvedTypeParameterDefault;
   `type_param_default_checks`).
