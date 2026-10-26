@@ -3210,6 +3210,10 @@ Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7
   is built, so `this.p0 = 0; this.p1 = 0; ...` (each reading `this`) checks in linear time:
   64,000 statements in 0.13 s, from 2.8 s for 32,000 (`bounded.rs`,
   `many_this_assignments_walk_flow_linearly`).
+- `#x in v` inside a class where no enclosing class declares `#x` is TS2339 against `v`'s
+  type (not in unchecked JS); otherwise it narrows `v` like `v instanceof C` for the
+  nearest class declaring `#x` (`typeof C` for a static member) (tsc: checkInExpression,
+  narrowTypeByPrivateIdentifierInInExpression) (`private_name_in_undeclared`).
 
 ## Levels (`layers.rs`, design record 0005)
 

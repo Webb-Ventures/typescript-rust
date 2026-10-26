@@ -3208,6 +3208,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 BinaryOp::In => {
                     let l = skip_parens(ast, left);
+                    // `#x in v` narrows `v` like `v instanceof C` for the class declaring
+                    // `#x` (tsc: narrowTypeByPrivateIdentifierInInExpression).
+                    if let Node::PrivateName { name } = *ast.node(l) {
+                        if !self.is_ref(w, at(right)) {
+                            return t;
+                        }
+                        let text = format!("#{}", ast.atom(name));
+                        return match self.private_name_class_type(at(l), &text) {
+                            Some(c) => self.narrow_to_derived(t, c, assume_true),
+                            None => t,
+                        };
+                    }
                     let name = match *ast.node(l) {
                         Node::StringLit { .. } | Node::NumberLit { .. } => key_text(ast, l),
                         Node::TemplateLit { parts } => match ast.list(parts) {
@@ -3936,6 +3948,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(candidate) = self.instance_type_of_constructor(rt) else {
             return t;
         };
+        self.narrow_to_derived(t, candidate, assume_true)
+    }
+
+    /// Narrows `t` by a check that its value derives from `candidate` (`instanceof`,
+    /// `#x in v`): the true branch keeps what derives from it, the false branch drops it.
+    fn narrow_to_derived(&mut self, t: TypeId, candidate: TypeId, assume_true: bool) -> TypeId {
         if assume_true {
             self.narrow_by_instance_type(t, candidate)
         } else {

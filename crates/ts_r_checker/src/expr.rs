@@ -4196,6 +4196,30 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
+    /// The type `#x in v` narrows `v` to: the nearest enclosing class declaring `#x`, its
+    /// instance type for an instance member and the constructor type for a static one.
+    pub(crate) fn private_name_class_type(&mut self, e: Loc, name: &str) -> Option<TypeId> {
+        let mut cur = self.enclosing_class(e);
+        for _ in 0..64 {
+            let c = cur?;
+            if let Some(m) = self.private_member_named(c, name) {
+                let cs = self.c.sym_of_decl(c)?;
+                let is_static = self
+                    .ast(m.file)
+                    .node(m.node)
+                    .modifiers()
+                    .contains(ts_r_ast::Modifiers::STATIC);
+                return Some(if is_static {
+                    self.type_of_symbol(cs)
+                } else {
+                    self.declared_type_of_symbol(cs)
+                });
+            }
+            cur = self.enclosing_class(c);
+        }
+        None
+    }
+
     /// Whether class `outer` encloses class `inner`.
     fn class_encloses(&self, outer: Loc, inner: Loc) -> bool {
         let mut cur = self.enclosing_class(inner);
@@ -8243,6 +8267,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_expr(ll)
                 };
                 let rt = self.check_expr(rl);
+                // `#x in v` inside a class where no enclosing class declares `#x`: TS2339
+                // against the right operand's type (tsc: checkInExpression).
+                if let Node::PrivateName { name } = *self.ast(ll.file).node(ll.node)
+                    && self.enclosing_class(ll).is_some()
+                    && self.reporting(ll.file)
+                    && !self.has_syntax_errors(ll.file)
+                    // Unchecked JavaScript only gets a suggestion.
+                    && !(self.c.file(ll.file).is_js()
+                        && !self.c.opts.check_js
+                        && !self.c.file(ll.file).has_ts_check())
+                {
+                    let text = format!("#{}", self.ast(ll.file).atom(name));
+                    if !self.private_name_in_scope(ll, &text) {
+                        let rs = self.type_to_string(rt);
+                        self.error(
+                            ll,
+                            dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                            &[&text, &rs],
+                        );
+                    }
+                }
                 let lt = self.check_non_null(ll, lt);
                 let rt = self.check_non_null(rl, rt);
                 if !self.store().is_error(lt) {
