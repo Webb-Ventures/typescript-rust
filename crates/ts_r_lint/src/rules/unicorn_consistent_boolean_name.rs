@@ -18,13 +18,20 @@
 //! parameter properties and interface or type-literal signatures are checked the same way
 //! (no suggestions); methods, getters and signatures count once per owner and name, merged
 //! interfaces sharing an owner, and overload signatures decide over the implementation.
-//! Files with JSDoc comments are left alone (JSDoc types are not read yet).
+//! In JavaScript, a JSDoc comment right before a binding, parameter or function supplies
+//! the same facts: `@type`, `@param` and `@returns` types are parsed (unions, intersections,
+//! nullable and optional markers, function types, generics) and classified the same way;
+//! a type the parser cannot read makes the binding unknown. Type information from a checker
+//! is not used, and the `wrappers` option is not read.
 
 use super::prelude::*;
 use super::unicorn_names::{RegexOpt, regex_list};
-use super::unicorn_static::{Static, is_global_ident, static_value_no_side_effects};
+use super::unicorn_static::{
+    Static, evaluated_children, is_global_ident, static_value_no_side_effects,
+};
 use super::unicorn_util_h4::{available_name, estree_ident_span, rename_symbol_fix};
 use crate::semantic::Decl;
+use ts_r_ast::CommentKind;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -264,6 +271,8 @@ struct An<'c, 'x, 'f> {
     visiting_types: Vec<NodeId>,
     visiting_syms: Vec<SymbolId>,
     depth: u32,
+    /// The file has a `/**` comment.
+    jsdoc: bool,
 }
 
 fn unwrap_type(ast: &ts_r_ast::Ast, mut id: NodeId) -> NodeId {
@@ -315,6 +324,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
             visiting_types: Vec::new(),
             visiting_syms: Vec::new(),
             depth: 0,
+            jsdoc: cx.ast().comments.iter().any(|c| {
+                c.kind == CommentKind::Block && cx.src()[c.span.start as usize..].starts_with("/**")
+            }),
         }
     }
 
@@ -1546,6 +1558,13 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
             return St::Non;
         }
         let is_async = flags.contains(FnFlags::ASYNC);
+        if let Some(a) = self.doc_fn_return(func) {
+            return if is_async {
+                St::Unk
+            } else {
+                jd_state(&a, true, false)
+            };
+        }
         let rt = fn_return_type(ast, func);
         let s = self.promised_return_state(rt);
         if s != St::Unk {
@@ -1577,6 +1596,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if flags.intersects(FnFlags::ASYNC | FnFlags::GENERATOR) {
             return false;
         }
+        if let Some(a) = self.doc_return(func) {
+            return jd_state(&a, false, false) == St::Bool;
+        }
         if self.is_boolean_type_ann(fn_return_type(ast, func)) {
             return true;
         }
@@ -1598,6 +1620,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         let flags = fn_flags(ast, func).unwrap_or_default();
         if flags.contains(FnFlags::GENERATOR) {
             return false;
+        }
+        if let Some(a) = self.doc_fn_return(func) {
+            return !flags.contains(FnFlags::ASYNC) && jd_state(&a, false, false) == St::Bool;
         }
         if self.has_boolean_return_type(func) {
             return true;
@@ -1624,6 +1649,21 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
             }
         }
         fn_flags(ast, id).map(|_| id)
+    }
+
+    fn unwrap_ts(&self, mut id: NodeId) -> NodeId {
+        let ast = self.ast();
+        for _ in 0..64 {
+            match *ast.node(id) {
+                Node::As { expr, .. }
+                | Node::Satisfies { expr, .. }
+                | Node::NonNull { expr }
+                | Node::TypeAssertion { expr, .. }
+                | Node::Paren { expr } => id = expr,
+                _ => break,
+            }
+        }
+        id
     }
 
     fn ident_sym(&self, id: NodeId) -> Option<SymbolId> {
@@ -1682,10 +1722,40 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if decls.len() != 1 {
             return false;
         }
+        let d = decls[0];
+        if let Some(a) = self.doc_type(d.name) {
+            let init = match *ast.node(d.node) {
+                Node::VarDeclarator { init, .. } => init,
+                Node::Param { init, .. } => init,
+                _ => None,
+            };
+            let value = init.map(|i| self.unwrap_ts(i));
+            let vflags = value.and_then(|v| fn_flags(ast, v)).unwrap_or_default();
+            let vrt = value.and_then(|v| fn_return_type(ast, v));
+            let is_param = matches!(ast.node(d.node), Node::Param { .. });
+            if vflags.intersects(FnFlags::ASYNC | FnFlags::GENERATOR)
+                || (is_param && (vrt.is_some() || self.has_native_assertion(init)))
+                || self.has_write_after_init(sym)
+            {
+                return false;
+            }
+            return match vrt {
+                Some(rt) => self.is_boolean_type_ann(Some(rt)),
+                None => {
+                    !a.optional
+                        && jd_callable_return(&a.ty).is_some_and(|r| {
+                            let r = Ann {
+                                ty: r,
+                                optional: false,
+                            };
+                            jd_state(&r, false, false) == St::Bool
+                        })
+                }
+            };
+        }
         if let Some(ta) = self.type_ann_of_name(sym) {
             return self.is_boolean_fn_type_ann(Some(ta));
         }
-        let d = decls[0];
         let func = if self.stable_function_name(sym) {
             (!self.has_any_write(sym)).then_some(d.node)
         } else if let Node::VarDeclarator { name, init, .. } = *ast.node(d.node) {
@@ -1843,6 +1913,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 if self.is_global(callee, &["String"]).is_some() {
                     return Some(Kind::String);
                 }
+                if matches!(ast.node(callee), Node::Ident { .. }) {
+                    return self.call_return_kind(callee);
+                }
                 let (obj, optional) = self.member_object(callee)?;
                 let method = self.property_name(callee)?;
                 if optional {
@@ -1852,8 +1925,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                     return matches!(method.as_str(), "fromCharCode" | "fromCodePoint" | "raw")
                         .then_some(Kind::String);
                 }
-                (STRING_RETURNING.contains(&method.as_str())
-                    && self.expression_kind(obj) == Some(Kind::String))
+                let obj_kind = self.expression_kind(obj);
+                ((STRING_RETURNING.contains(&method.as_str()) && obj_kind == Some(Kind::String))
+                    || (method == "join" && obj_kind == Some(Kind::Array)))
                 .then_some(Kind::String)
             }
             Node::New { callee, .. } => {
@@ -1885,6 +1959,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 if let Some(ta) = self.type_ann_of_name(sym) {
                     return self.annotation_kind(ta);
                 }
+                if let Some(a) = self.doc_type(id) {
+                    return jd_kind(&a.ty);
+                }
                 if self.visiting_syms.contains(&sym) {
                     return None;
                 }
@@ -1895,9 +1972,63 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 r
             }
             Node::NonNull { expr } | Node::Satisfies { expr, .. } => self.expression_kind(expr),
+            Node::Seq { exprs } => {
+                let last = *ast.list(exprs).last()?;
+                self.expression_kind(last)
+            }
+            Node::Assign {
+                op: AssignOp::Assign,
+                right,
+                ..
+            } => self.expression_kind(right),
+            Node::TaggedTemplate { tag, .. } => {
+                let tag = skip_parens(ast, tag);
+                let (obj, optional) = self.member_object(tag)?;
+                (!optional
+                    && self.is_global(obj, &["String"]).is_some()
+                    && self.property_name(tag).as_deref() == Some("raw"))
+                .then_some(Kind::String)
+            }
             Node::As { ty, .. } | Node::TypeAssertion { ty, .. } => self.annotation_kind(ty),
+            // Both branches have to agree.
+            Node::Conditional { cons, alt, .. } => {
+                let a = self.expression_kind(cons)?;
+                (self.expression_kind(alt)? == a).then_some(a)
+            }
+            Node::Binary {
+                left,
+                op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::Coalesce,
+                right,
+            } => {
+                let a = self.expression_kind(left)?;
+                (self.expression_kind(right)? == a).then_some(a)
+            }
             _ => None,
         }
+    }
+
+    /// The kind a call of the function `callee` returns, from its return annotation.
+    fn call_return_kind(&mut self, callee: NodeId) -> Option<Kind> {
+        let sym = self.sym_of_ref(callee)?;
+        if self.has_write_after_init(sym) {
+            return None;
+        }
+        let ast = self.ast();
+        let decls = &self.cx.semantic().symbol(sym).decls;
+        let [d] = decls[..] else {
+            return None;
+        };
+        let func = match *ast.node(d.node) {
+            Node::FunctionDecl { .. } => d.node,
+            Node::VarDeclarator {
+                init: Some(init), ..
+            } => self.function_value(init)?,
+            _ => return None,
+        };
+        if let Some(rt) = fn_return_type(ast, func) {
+            return self.annotation_kind(rt);
+        }
+        self.doc_return(func).and_then(|a| jd_kind(&a.ty))
     }
 
     fn is_mutable_keyed(&mut self, id: NodeId) -> bool {
@@ -1911,6 +2042,13 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 let Some(sym) = self.sym_of_ref(id) else {
                     return false;
                 };
+                if let Some(a) = self.doc_type(id) {
+                    let names = jd_names(&a.ty);
+                    return !names.is_empty()
+                        && names.iter().all(|n| {
+                            matches!(n.as_deref(), Some("Map" | "Set" | "WeakMap" | "WeakSet"))
+                        });
+                }
                 if let Some(ta) = self.type_ann_of_name(sym) {
                     let ta = unwrap_type(ast, ta);
                     return self.type_defs(ta).is_empty()
@@ -1987,10 +2125,12 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
             | Node::ObjectLit { .. }
             | Node::TaggedTemplate { .. }
             | Node::TemplateLit { .. } => false,
-            _ => matches!(
-                static_value_no_side_effects(self.cx, id),
-                Some(Static::Bool(_))
-            ),
+            _ => {
+                matches!(
+                    static_value_no_side_effects(self.cx, id),
+                    Some(Static::Bool(_))
+                ) && !self.doc_ref(id)
+            }
         }
     }
 
@@ -2036,6 +2176,12 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         }
         let ast = self.ast();
         let id = skip_parens(ast, id);
+        if matches!(ast.node(id), Node::Ident { .. })
+            && let Some(a) = self.doc_type(id)
+        {
+            self.leave();
+            return jd_state(&a, false, false) == St::Bool;
+        }
         let r = !is_chain(ast, id) && (self.is_boolean_static(id) || self.is_boolean_by_syntax(id));
         self.leave();
         r
@@ -2165,6 +2311,14 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if is_chain(ast, id) {
             return St::Unk;
         }
+        let doc_ref = self.doc_ref(id);
+        if doc_ref
+            && matches!(ast.node(id), Node::Ident { .. })
+            && let Some(sym) = self.sym_of_ref(id)
+            && (self.supported_def(sym).is_some() || self.function_defs(sym).is_some())
+        {
+            return self.var_state(sym, fvb);
+        }
         if let Node::As { ty, .. } | Node::Satisfies { ty, .. } | Node::TypeAssertion { ty, .. } =
             *ast.node(id)
         {
@@ -2176,7 +2330,7 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if !self.potentially_mutable(Some(id)) && self.is_boolean_expr(Some(id)) {
             return St::Bool;
         }
-        if !matches!(ast.node(id), Node::Ident { .. }) {
+        if !matches!(ast.node(id), Node::Ident { .. }) && !doc_ref {
             match static_value_no_side_effects(self.cx, id) {
                 None | Some(Static::Undefined | Static::Null) => {}
                 Some(Static::Bool(_)) => return St::Bool,
@@ -2237,6 +2391,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
     }
 
     fn def_state(&mut self, sym: SymbolId, def: Def, fvb: bool) -> St {
+        if let Some(a) = self.doc_value_type(self.decl(sym).name) {
+            return jd_state(&a, true, fvb);
+        }
         let ta = self.type_ann_of_name(sym);
         let s = self.direct_type_state(ta, TS.fb(fvb));
         if s != St::Unk {
@@ -2364,6 +2521,14 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if let Some(ta) = self.type_ann_of_name(sym) {
             return self.is_boolean_type_annotated(ta);
         }
+        let name = self.decl(sym).name;
+        if let Some(a) = self.doc_value_type(name) {
+            let a = Ann {
+                optional: false,
+                ..a
+            };
+            return jd_state(&a, false, true) == St::Bool;
+        }
         match def {
             Def::Param { param, func } => {
                 func.is_some() && {
@@ -2372,7 +2537,11 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 }
             }
             Def::Var { declarator, .. } => {
-                if let Some(Some(init)) = self.simple_const_init(sym)
+                if let Some(a) = self.doc_type(name) {
+                    if jd_state(&a, false, false) == St::Bool {
+                        return true;
+                    }
+                } else if let Some(Some(init)) = self.simple_const_init(sym)
                     && !self.visiting_syms.contains(&sym)
                 {
                     self.visiting_syms.push(sym);
@@ -2413,6 +2582,10 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                     || {
                         let ta = self.type_ann_of_name(sym);
                         self.callable(ta, TS)
+                    }
+                    || {
+                        let name = self.decl(sym).name;
+                        self.doc_type(name).is_some_and(|a| jd_is_function(&a))
                     }
             }
             _ => false,
@@ -2568,6 +2741,9 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 self.direct_type_state(return_type, TS.fb(false).nl(false))
             }
             Node::MethodDef { value, .. } => {
+                if let Some(a) = self.doc_return(value) {
+                    return jd_state(&a, true, false);
+                }
                 let rt = fn_return_type(ast, value);
                 let s = self.type_state(rt, TS.fb(false));
                 if s != St::Unk {
@@ -2611,6 +2787,13 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if self.is_getter(member) {
             return self.getter_state(member);
         }
+        if matches!(
+            ast.node(member),
+            Node::Property { .. } | Node::ShorthandProp { .. } | Node::PropertyDef { .. }
+        ) && let Some(a) = self.doc_value_type(member)
+        {
+            return jd_state(&a, true, true);
+        }
         match *ast.node(member) {
             Node::Param { .. } => match self.param_property_sym(member) {
                 Some(sym) => self.var_state(sym, true),
@@ -2649,8 +2832,32 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
             Node::Param { .. } => self
                 .param_property_sym(member)
                 .is_some_and(|sym| self.is_boolean_variable(sym)),
-            Node::ShorthandProp { name, .. } => self.is_boolean_value(Some(name)),
-            Node::Property { value, .. } => self.is_boolean_value(Some(value)),
+            Node::ShorthandProp { name, .. } => match self.doc_value_type(member) {
+                Some(a) => {
+                    jd_state(
+                        &Ann {
+                            optional: false,
+                            ..a
+                        },
+                        false,
+                        true,
+                    ) == St::Bool
+                }
+                None => self.is_boolean_value(Some(name)),
+            },
+            Node::Property { value, .. } => match self.doc_value_type(member) {
+                Some(a) => {
+                    jd_state(
+                        &Ann {
+                            optional: false,
+                            ..a
+                        },
+                        false,
+                        true,
+                    ) == St::Bool
+                }
+                None => self.is_boolean_value(Some(value)),
+            },
             Node::MethodDef { kind, value, .. } => {
                 !matches!(kind, MethodKind::Constructor | MethodKind::Set)
                     && self.is_boolean_fn_value(value)
@@ -2659,7 +2866,19 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
                 type_ann, value, ..
             } => match type_ann {
                 Some(t) => self.is_boolean_type_annotated(t),
-                None => self.is_boolean_value(value),
+                None => match self.doc_value_type(member) {
+                    Some(a) => {
+                        jd_state(
+                            &Ann {
+                                optional: false,
+                                ..a
+                            },
+                            false,
+                            true,
+                        ) == St::Bool
+                    }
+                    None => self.is_boolean_value(value),
+                },
             },
             Node::PropertySignature { type_ann, .. } => {
                 type_ann.is_some_and(|t| self.is_boolean_type_annotated(t))
@@ -2758,6 +2977,12 @@ impl<'c, 'x, 'f> An<'c, 'x, 'f> {
         if self.in_declare_context(declarator)
             || init.and_then(|i| self.function_value(i)).is_some()
             || self.export_state(sym).1
+        {
+            return false;
+        }
+        if let Some(a) = self.doc_type(self.decl(sym).name)
+            && jd_state(&a, false, true) == St::Bool
+            && jd_state(&a, false, false) != St::Bool
         {
             return false;
         }
@@ -3369,12 +3594,23 @@ impl ConsistentBooleanName {
         }
         let mut scopes: Vec<ScopeId> = s.refs.iter().map(|&r| sem.reference(r).scope).collect();
         scopes.push(s.scope);
+        let name_range = match an.supported_def(sym) {
+            Some(Def::Param { .. }) => an.param_annotation(ident).and_then(|a| a.name_range),
+            _ => None,
+        };
         for p in &self.prefixes {
             let wanted = hook_replacement_name(&name, &checked, p);
             let Some(n) = available_name(cx, &wanted, &scopes, &|_| true) else {
                 continue;
             };
-            let fix = rename_symbol_fix(cx, sym, &n);
+            let mut fix = rename_symbol_fix(cx, sym, &n);
+            if let Some(r) = name_range {
+                fix.edits.push(crate::diagnostic::Edit {
+                    span: r,
+                    text: n.clone(),
+                });
+                fix.edits.sort_by_key(|e| (e.span.start, e.span.end));
+            }
             problem.suggestions.push((n, fix));
         }
         let first = hook_replacement_name(&name, &checked, &self.prefixes[0]);
@@ -3395,7 +3631,7 @@ impl Rule for ConsistentBooleanName {
         true
     }
     fn run_file(&self, cx: &mut Ctx<'_, '_>) {
-        if self.prefixes.is_empty() || cx.src().contains("/**") {
+        if self.prefixes.is_empty() {
             return;
         }
         let problems: Vec<Problem> = {
@@ -3415,6 +3651,1372 @@ impl Rule for ConsistentBooleanName {
                 r = r.suggest("rename", format!("Rename to `{n}`."), f);
             }
         }
+    }
+}
+
+// ---- JSDoc types, as the plugin reads them ----
+
+/// A JSDoc type reduced to what the rule needs.
+#[derive(Clone, Debug, PartialEq)]
+enum Jd {
+    Unknown,
+    NonPrimitive,
+    Nullish,
+    Name(String),
+    Union(Vec<Jd>),
+    Inter(Vec<Jd>),
+    Nullable(Box<Jd>),
+    Optional(Box<Jd>),
+    Func(Box<Jd>),
+}
+
+#[derive(Clone, Debug)]
+struct Ann {
+    ty: Jd,
+    optional: bool,
+}
+
+#[derive(Clone, Debug)]
+struct Tag {
+    name: String,
+    ty: Option<Jd>,
+    param: Option<String>,
+    optional: bool,
+    name_range: Option<Span>,
+}
+
+fn is_id_start(c: char) -> bool {
+    c == '$' || c == '_' || c.is_alphabetic()
+}
+
+fn is_id_continue(c: char) -> bool {
+    c == '$' || c == '_' || c == '\u{200c}' || c == '\u{200d}' || c.is_alphanumeric()
+}
+
+fn is_identifier(s: &str) -> bool {
+    let mut c = s.chars();
+    c.next().is_some_and(is_id_start) && c.all(is_id_continue)
+}
+
+fn primitive_jd(name: &str) -> Option<Jd> {
+    let n = match name {
+        "Boolean" => "boolean",
+        "String" => "string",
+        "Number" => "number",
+        "Void" => "void",
+        "Null" => "null",
+        "Undefined" => "undefined",
+        n => n,
+    };
+    Some(match n {
+        "any" | "unknown" | "never" => Jd::Unknown,
+        "null" | "undefined" => Jd::Nullish,
+        "true" | "false" | "boolean" => Jd::Name("boolean".into()),
+        "string" | "number" | "bigint" | "symbol" | "void" => Jd::Name(n.into()),
+        _ => return None,
+    })
+}
+
+const UNSUPPORTED_NAMES: &[&str] = &[
+    "import", "typeof", "extends", "new", "keyof", "infer", "asserts", "is", "readonly",
+];
+const RESERVED_NAMES: &[&str] = &["import", "typeof", "extends", "new"];
+
+fn jd_tokens(text: &str) -> Option<(Vec<String>, Vec<usize>)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut tokens = Vec::new();
+    let mut breaks = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            let start = i;
+            while i < chars.len() && chars[i].is_whitespace() {
+                i += 1;
+            }
+            if chars[start..i]
+                .iter()
+                .any(|&c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
+            {
+                breaks.push(tokens.len());
+            }
+            continue;
+        }
+        let start = i;
+        if c == '=' && chars.get(i + 1) == Some(&'>') {
+            i += 2;
+        } else if c == '.' && chars.get(i + 1) == Some(&'.') && chars.get(i + 2) == Some(&'.') {
+            i += 3;
+        } else if is_id_start(c) {
+            i += 1;
+            while i < chars.len() && is_id_continue(chars[i]) {
+                i += 1;
+            }
+        } else if c.is_ascii_digit()
+            || (c == '.' && chars.get(i + 1).is_some_and(char::is_ascii_digit))
+        {
+            i += 1;
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric() || matches!(chars[i], '.' | '_'))
+            {
+                i += 1;
+            }
+        } else if c == '"' || c == '\'' {
+            i += 1;
+            let mut closed = false;
+            while i < chars.len() && !matches!(chars[i], '\n' | '\r') {
+                if chars[i] == '\\' {
+                    i += 2;
+                    continue;
+                }
+                if chars[i] == c {
+                    i += 1;
+                    closed = true;
+                    break;
+                }
+                i += 1;
+            }
+            if !closed {
+                return None;
+            }
+        } else {
+            i += 1;
+        }
+        tokens.push(chars[start..i.min(chars.len())].iter().collect());
+    }
+    Some((tokens, breaks))
+}
+
+fn is_numeric_token(t: &str) -> bool {
+    let b = t.as_bytes();
+    let starts = b.first().is_some_and(u8::is_ascii_digit)
+        || (b.first() == Some(&b'.') && b.get(1).is_some_and(u8::is_ascii_digit));
+    let lower = t.to_ascii_lowercase();
+    starts
+        && (!t.ends_with('n')
+            || lower.starts_with("0b")
+            || lower.starts_with("0o")
+            || lower.starts_with("0x")
+            || !(lower.contains('.') || lower.contains('e')))
+}
+
+/// A JSDoc type that is a function (nullish members aside), as the hook check reads it.
+fn jd_is_function(a: &Ann) -> bool {
+    fn class(t: &Jd) -> Class {
+        let union = |cs: Vec<Class>| {
+            let cs: Vec<Class> = cs.into_iter().filter(|&c| c != Class::Nullish).collect();
+            if cs.is_empty() || cs.iter().all(|&c| c == Class::NonTarget) {
+                Class::NonTarget
+            } else if cs.iter().all(|&c| c == Class::Target) {
+                Class::Target
+            } else {
+                Class::Unknown
+            }
+        };
+        match t {
+            Jd::Func(_) => Class::Target,
+            Jd::Nullable(e) | Jd::Optional(e) => union(vec![class(e), Class::Nullish]),
+            Jd::Union(_) => union(jd_members(t).into_iter().map(class).collect()),
+            Jd::Inter(items) => {
+                let cs: Vec<Class> = items
+                    .iter()
+                    .map(|i| match class(i) {
+                        Class::Nullish => Class::NonTarget,
+                        c => c,
+                    })
+                    .collect();
+                if cs.contains(&Class::Unknown) {
+                    Class::Unknown
+                } else if cs.contains(&Class::Target) {
+                    Class::Target
+                } else {
+                    Class::NonTarget
+                }
+            }
+            Jd::Nullish => Class::Nullish,
+            Jd::Name(n) => {
+                if matches!(
+                    n.as_str(),
+                    "boolean" | "string" | "number" | "bigint" | "symbol" | "void"
+                ) {
+                    Class::NonTarget
+                } else {
+                    Class::Unknown
+                }
+            }
+            Jd::NonPrimitive => Class::NonTarget,
+            Jd::Unknown => Class::Unknown,
+        }
+    }
+    class(&a.ty) == Class::Target
+}
+
+struct JdParser {
+    tokens: Vec<String>,
+    breaks: Vec<usize>,
+    pos: usize,
+    depth: u32,
+}
+
+type JdResult = Result<Jd, ()>;
+
+impl JdParser {
+    fn peek(&self, k: usize) -> Option<&str> {
+        self.tokens.get(self.pos + k).map(String::as_str)
+    }
+    fn eat(&mut self, t: &str) -> bool {
+        if self.peek(0) == Some(t) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+    fn expect(&mut self, t: &str) -> Result<(), ()> {
+        if self.eat(t) { Ok(()) } else { Err(()) }
+    }
+    fn guard(&mut self) -> Result<(), ()> {
+        self.depth += 1;
+        if self.depth > 64 { Err(()) } else { Ok(()) }
+    }
+
+    fn optional(&mut self) -> JdResult {
+        let t = self.union()?;
+        Ok(if self.eat("=") {
+            Jd::Optional(Box::new(t))
+        } else {
+            t
+        })
+    }
+
+    fn union(&mut self) -> JdResult {
+        self.guard()?;
+        self.eat("|");
+        let mut items = vec![self.intersection()?];
+        while self.eat("|") {
+            items.push(self.intersection()?);
+        }
+        self.depth -= 1;
+        Ok(if items.len() == 1 {
+            items.pop().unwrap_or(Jd::Unknown)
+        } else {
+            Jd::Union(items)
+        })
+    }
+
+    fn intersection(&mut self) -> JdResult {
+        self.eat("&");
+        let mut items = vec![self.postfix()?];
+        while self.eat("&") {
+            items.push(self.postfix()?);
+        }
+        Ok(if items.len() == 1 {
+            items.pop().unwrap_or(Jd::Unknown)
+        } else {
+            Jd::Inter(items)
+        })
+    }
+
+    fn postfix(&mut self) -> JdResult {
+        self.guard()?;
+        let mut t = if self.eat("?") {
+            if matches!(self.peek(0), Some("?" | "!")) {
+                return Err(());
+            }
+            match self.peek(0) {
+                None | Some(")" | ">" | "]" | "}" | "," | ";" | "|" | "&") => Jd::Unknown,
+                _ => Jd::Nullable(Box::new(self.postfix()?)),
+            }
+        } else if self.eat("!") {
+            if self.peek(0) == Some("!") {
+                return Err(());
+            }
+            self.postfix()?
+        } else if self.eat("...") {
+            self.postfix()?;
+            Jd::NonPrimitive
+        } else if self.eat("readonly") {
+            let t = self.postfix()?;
+            if !matches!(&t, Jd::Name(n) if n == "Array" || n == "ReadonlyArray") {
+                return Err(());
+            }
+            t
+        } else {
+            self.primary()?
+        };
+        while self.peek(0) == Some("[") && self.peek(1) == Some("]") {
+            self.pos += 2;
+            t = Jd::Name("Array".into());
+        }
+        self.depth -= 1;
+        if self.eat("?") {
+            return Ok(Jd::Nullable(Box::new(t)));
+        }
+        self.eat("!");
+        Ok(t)
+    }
+
+    fn list(
+        &mut self,
+        open: &str,
+        close: &str,
+        member: fn(&mut Self) -> Result<(), ()>,
+    ) -> Result<(), ()> {
+        self.expect(open)?;
+        if self.eat(close) {
+            return Ok(());
+        }
+        for _ in 0..10_000 {
+            member(self)?;
+            if self.eat(close) {
+                return Ok(());
+            }
+            self.expect(",")?;
+            if self.eat(close) {
+                return Ok(());
+            }
+        }
+        Err(())
+    }
+
+    fn arrow_param(&mut self) -> Result<(), ()> {
+        self.eat("...");
+        match self.peek(0) {
+            Some(t) if is_identifier(t) && !RESERVED_NAMES.contains(&t) => self.pos += 1,
+            _ => return Err(()),
+        }
+        self.eat("?");
+        if self.eat(":") {
+            self.union()?;
+        }
+        Ok(())
+    }
+
+    fn function_param(&mut self) -> Result<(), ()> {
+        if self.eat("this") {
+            self.expect(":")?;
+        }
+        self.optional().map(|_| ())
+    }
+
+    fn tuple_member(&mut self) -> Result<(), ()> {
+        let name = self.pos + usize::from(self.peek(0) == Some("..."));
+        let colon = name
+            + if self.tokens.get(name + 1).map(String::as_str) == Some("?") {
+                2
+            } else {
+                1
+            };
+        if self.tokens.get(name).is_some_and(|t| is_identifier(t))
+            && self.tokens.get(colon).map(String::as_str) == Some(":")
+        {
+            self.pos = colon + 1;
+        }
+        self.optional().map(|_| ())
+    }
+
+    fn matching_paren(&self) -> Option<usize> {
+        let mut depth = 0i32;
+        for (i, t) in self.tokens.iter().enumerate().skip(self.pos) {
+            match t.as_str() {
+                "(" | "[" | "{" | "<" => depth += 1,
+                ")" | "]" | "}" | ">" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn record(&mut self) -> JdResult {
+        self.expect("{")?;
+        if self.eat("}") {
+            return Ok(Jd::Unknown);
+        }
+        let mut sigs = Vec::new();
+        for _ in 0..10_000 {
+            if self.eat("}") {
+                return Ok(match sigs.len() {
+                    0 => Jd::NonPrimitive,
+                    1 => sigs.pop().unwrap_or(Jd::Unknown),
+                    _ => Jd::Inter(sigs),
+                });
+            }
+            if self.peek(0) == Some("readonly")
+                && !matches!(self.peek(1), Some(":" | "?" | "(" | "," | ";" | "}"))
+            {
+                self.pos += 1;
+            }
+            if self.peek(0) == Some("(") {
+                self.list("(", ")", Self::arrow_param)?;
+                self.expect(":")?;
+                sigs.push(Jd::Func(Box::new(self.union()?)));
+            } else if self.eat("[") {
+                if !self.peek(0).is_some_and(is_identifier) {
+                    return Err(());
+                }
+                self.pos += 1;
+                self.expect(":")?;
+                self.union()?;
+                self.expect("]")?;
+                self.expect(":")?;
+                self.union()?;
+            } else {
+                let key = self.peek(0).unwrap_or("");
+                let ok = is_identifier(key)
+                    || key.starts_with('"')
+                    || key.starts_with('\'')
+                    || is_numeric_token(key);
+                if !ok {
+                    return Err(());
+                }
+                self.pos += 1;
+                self.eat("?");
+                if self.peek(0) == Some("(") {
+                    self.list("(", ")", Self::arrow_param)?;
+                }
+                if self.eat(":") {
+                    self.union()?;
+                }
+            }
+            if !self.eat(",")
+                && !self.eat(";")
+                && self.peek(0) != Some("}")
+                && !self.breaks.contains(&self.pos)
+            {
+                return Err(());
+            }
+        }
+        Err(())
+    }
+
+    fn primary(&mut self) -> JdResult {
+        let tok = self.peek(0).unwrap_or("").to_owned();
+        match tok.as_str() {
+            "(" => {
+                if self
+                    .matching_paren()
+                    .and_then(|i| self.tokens.get(i + 1))
+                    .map(String::as_str)
+                    == Some("=>")
+                {
+                    self.list("(", ")", Self::arrow_param)?;
+                    self.expect("=>")?;
+                    return Ok(Jd::Func(Box::new(self.union()?)));
+                }
+                self.pos += 1;
+                let t = self.optional()?;
+                self.expect(")")?;
+                Ok(t)
+            }
+            "[" => {
+                self.list("[", "]", Self::tuple_member)?;
+                Ok(Jd::Name("Array".into()))
+            }
+            "{" => self.record(),
+            "function" if self.peek(1) == Some("(") => {
+                self.pos += 1;
+                self.list("(", ")", Self::function_param)?;
+                Ok(Jd::Func(Box::new(if self.eat(":") {
+                    self.union()?
+                } else {
+                    Jd::Unknown
+                })))
+            }
+            "*" => {
+                self.pos += 1;
+                Ok(Jd::Unknown)
+            }
+            t if t.starts_with('"') || t.starts_with('\'') => {
+                self.pos += 1;
+                Ok(Jd::Name("string".into()))
+            }
+            t if t == "-"
+                || t.starts_with(|c: char| c.is_ascii_digit())
+                || t.starts_with('.') && t.len() > 1 =>
+            {
+                self.eat("-");
+                let lit = self.peek(0).unwrap_or("").to_owned();
+                if !is_numeric_token(&lit) {
+                    return Err(());
+                }
+                self.pos += 1;
+                Ok(Jd::Name(
+                    if lit.ends_with('n') {
+                        "bigint"
+                    } else {
+                        "number"
+                    }
+                    .into(),
+                ))
+            }
+            _ => self.named(),
+        }
+    }
+
+    fn named(&mut self) -> JdResult {
+        let tok = self.peek(0).unwrap_or("").to_owned();
+        if !is_identifier(&tok) || UNSUPPORTED_NAMES.contains(&tok.as_str()) {
+            return Err(());
+        }
+        self.pos += 1;
+        let mut name = tok;
+        while self.eat(".") {
+            if self.peek(0) == Some("<") {
+                break;
+            }
+            match self.peek(0) {
+                Some(t) if is_identifier(t) => {
+                    name.push('.');
+                    name.push_str(t);
+                    self.pos += 1;
+                }
+                _ => return Err(()),
+            }
+        }
+        if self.peek(0) == Some("<") {
+            if self.peek(1) == Some(">") || primitive_jd(&name).is_some() {
+                return Err(());
+            }
+            self.list("<", ">", |p| p.union().map(|_| ()))?;
+            if name == "Object" {
+                return Ok(Jd::NonPrimitive);
+            }
+        }
+        Ok(primitive_jd(&name).unwrap_or(Jd::Name(name)))
+    }
+}
+
+fn parse_jd(text: &str) -> Jd {
+    let trimmed = text.trim();
+    if let Some(p) = primitive_jd(trimmed) {
+        return p;
+    }
+    if is_identifier(trimmed) {
+        return if UNSUPPORTED_NAMES.contains(&trimmed) {
+            Jd::Unknown
+        } else {
+            Jd::Name(trimmed.to_owned())
+        };
+    }
+    let Some((tokens, breaks)) = jd_tokens(text) else {
+        return Jd::Unknown;
+    };
+    let mut stack: Vec<&str> = Vec::new();
+    for t in &tokens {
+        match t.as_str() {
+            "(" | "[" | "{" | "<" => stack.push(t),
+            ")" | "]" | "}" | ">" => {
+                let open = stack.pop();
+                let want = match t.as_str() {
+                    ")" => "(",
+                    "]" => "[",
+                    "}" => "{",
+                    _ => "<",
+                };
+                if open != Some(want) {
+                    return Jd::Unknown;
+                }
+            }
+            _ => {}
+        }
+    }
+    if !stack.is_empty() {
+        return Jd::Unknown;
+    }
+    let n = tokens.len();
+    let mut p = JdParser {
+        tokens,
+        breaks,
+        pos: 0,
+        depth: 0,
+    };
+    match p.optional() {
+        Ok(t) if p.pos == n => t,
+        _ => Jd::Unknown,
+    }
+}
+
+fn jd_members(t: &Jd) -> Vec<&Jd> {
+    match t {
+        Jd::Union(items) => items
+            .iter()
+            .flat_map(|i| {
+                if matches!(i, Jd::Union(_)) {
+                    jd_members(i)
+                } else {
+                    vec![i]
+                }
+            })
+            .collect(),
+        Jd::Inter(items) => items
+            .iter()
+            .flat_map(|i| {
+                if matches!(i, Jd::Inter(_)) {
+                    jd_members(i)
+                } else {
+                    vec![i]
+                }
+            })
+            .collect(),
+        _ => vec![t],
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Target,
+    NonTarget,
+    Nullish,
+    Unknown,
+}
+
+fn jd_class(t: &Jd, targets: &[&str], non_targets: &[&str], mixed_target: bool) -> Class {
+    let norm = |c: Class| {
+        if c == Class::Nullish {
+            Class::NonTarget
+        } else {
+            c
+        }
+    };
+    let union = |cs: Vec<Class>| {
+        let cs: Vec<Class> = cs.into_iter().map(norm).collect();
+        if cs.is_empty() {
+            Class::NonTarget
+        } else if if mixed_target {
+            cs.contains(&Class::Target)
+        } else {
+            cs.iter().all(|&c| c == Class::Target)
+        } {
+            Class::Target
+        } else if cs.iter().all(|&c| c == Class::NonTarget) {
+            Class::NonTarget
+        } else {
+            Class::Unknown
+        }
+    };
+    let rec = |x: &Jd| jd_class(x, targets, non_targets, mixed_target);
+    match t {
+        Jd::Nullable(e) | Jd::Optional(e) => union(vec![rec(e), Class::Nullish]),
+        Jd::Union(_) => union(jd_members(t).into_iter().map(rec).collect()),
+        Jd::Inter(items) => {
+            let cs: Vec<Class> = items.iter().map(|i| norm(rec(i))).collect();
+            if cs.contains(&Class::Unknown) {
+                Class::Unknown
+            } else if cs.contains(&Class::Target) {
+                Class::Target
+            } else {
+                Class::NonTarget
+            }
+        }
+        Jd::Nullish => Class::Nullish,
+        Jd::Name(n) => {
+            if targets.contains(&n.as_str()) {
+                Class::Target
+            } else if non_targets.contains(&n.as_str())
+                || matches!(
+                    n.as_str(),
+                    "boolean" | "string" | "number" | "bigint" | "symbol" | "void"
+                )
+            {
+                Class::NonTarget
+            } else {
+                Class::Unknown
+            }
+        }
+        Jd::NonPrimitive | Jd::Func(_) => Class::NonTarget,
+        Jd::Unknown => Class::Unknown,
+    }
+}
+
+fn ann_class(a: &Ann, targets: &[&str], non_targets: &[&str], mixed_target: bool) -> Class {
+    let c = jd_class(&a.ty, targets, non_targets, mixed_target);
+    if a.optional {
+        jd_class(
+            &Jd::Union(vec![a.ty.clone(), Jd::Nullish]),
+            targets,
+            non_targets,
+            mixed_target,
+        )
+    } else {
+        c
+    }
+}
+
+const NON_BOOLEAN_NAMES: &[&str] = &["Array", "ReadonlyArray", "Promise", "PromiseLike"];
+
+fn jd_type_state(t: &Jd, nullish: bool, fn_bool: bool) -> St {
+    match t {
+        Jd::Union(_) => {
+            let states: Vec<St> = jd_members(t)
+                .into_iter()
+                .filter(|m| !nullish || **m != Jd::Nullish)
+                .map(|m| jd_type_state(m, nullish, fn_bool))
+                .collect();
+            combine(&states)
+        }
+        Jd::Inter(_) => {
+            let states: Vec<St> = jd_members(t)
+                .into_iter()
+                .filter(|m| **m != Jd::NonPrimitive)
+                .map(|m| jd_type_state(m, nullish, fn_bool))
+                .collect();
+            if states.is_empty() {
+                St::Non
+            } else {
+                combine(&states)
+            }
+        }
+        Jd::Nullable(e) | Jd::Optional(e) => {
+            if nullish {
+                jd_type_state(e, nullish, fn_bool)
+            } else {
+                St::Unk
+            }
+        }
+        Jd::Func(r) => {
+            if fn_bool {
+                jd_type_state(r, nullish, false)
+            } else {
+                St::Non
+            }
+        }
+        _ => match jd_class(t, &["boolean"], NON_BOOLEAN_NAMES, false) {
+            Class::Target => St::Bool,
+            Class::NonTarget => St::Non,
+            _ => St::Unk,
+        },
+    }
+}
+
+/// The plugin's `getJSDocumentBooleanState`.
+fn jd_state(a: &Ann, nullish: bool, fn_bool: bool) -> St {
+    if a.optional && !nullish {
+        St::Unk
+    } else {
+        jd_type_state(&a.ty, nullish, fn_bool)
+    }
+}
+
+/// The names of a JSDoc type's union members (`None` for a member that is not a name).
+fn jd_names(t: &Jd) -> Vec<Option<String>> {
+    match t {
+        Jd::Union(_) => jd_members(t)
+            .into_iter()
+            .map(|m| match m {
+                Jd::Name(n) => Some(n.clone()),
+                _ => None,
+            })
+            .collect(),
+        Jd::Name(n) => vec![Some(n.clone())],
+        _ => vec![None],
+    }
+}
+
+fn name_kind(n: &str) -> Option<Kind> {
+    Some(match n {
+        "string" => Kind::String,
+        "Array" | "ReadonlyArray" => Kind::Array,
+        n if TYPED_ARRAYS.contains(&n) => Kind::Array,
+        "Map" | "ReadonlyMap" | "WeakMap" | "URLSearchParams" | "Headers" | "FormData" => {
+            Kind::Keyed
+        }
+        "RegExp" => Kind::RegExp,
+        "Set" | "ReadonlySet" => Kind::Set,
+        "WeakSet" => Kind::WeakSet,
+        _ => return None,
+    })
+}
+
+/// The expression kind a JSDoc type names (every union member the same kind).
+fn jd_kind(t: &Jd) -> Option<Kind> {
+    let kinds: Option<Vec<Kind>> = jd_names(t)
+        .into_iter()
+        .map(|n| n.as_deref().and_then(name_kind))
+        .collect();
+    let kinds = kinds?;
+    let first = *kinds.first()?;
+    kinds.iter().all(|&k| k == first).then_some(first)
+}
+
+fn jd_callable_return(t: &Jd) -> Option<Jd> {
+    match t {
+        Jd::Func(r) => Some((**r).clone()),
+        Jd::Union(items) => {
+            let rets: Option<Vec<Jd>> = items.iter().map(jd_callable_return).collect();
+            rets.filter(|r| !r.is_empty()).map(Jd::Union)
+        }
+        Jd::Inter(_) => {
+            let rets: Option<Vec<Jd>> = jd_members(t)
+                .into_iter()
+                .filter(|m| **m != Jd::NonPrimitive)
+                .map(jd_callable_return)
+                .collect();
+            rets.filter(|r| !r.is_empty()).map(Jd::Union)
+        }
+        _ => None,
+    }
+}
+
+fn skip_hspace(t: &[u8], mut i: usize, end: usize) -> usize {
+    while i < end && t[i] != b'\n' && t[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+fn skip_template_space(t: &[u8], mut i: usize, end: usize) -> usize {
+    while i < end {
+        i = skip_hspace(t, i, end);
+        if i >= end || t[i] != b'\n' {
+            return i;
+        }
+        i = skip_hspace(t, i + 1, end);
+        if i < end && t[i] == b'*' {
+            i += 1;
+        }
+    }
+    i
+}
+
+fn delimited_end(t: &[u8], start: usize, end: usize, open: u8) -> Option<usize> {
+    let close = match open {
+        b'{' => b'}',
+        b'[' => b']',
+        _ => b')',
+    };
+    let mut depth = 0;
+    let mut quote = None;
+    let mut i = start;
+    while i < end {
+        let c = t[i];
+        if let Some(q) = quote {
+            if c == b'\\' {
+                i += 2;
+                continue;
+            }
+            if c == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if matches!(c, b'"' | b'\'' | b'`') {
+            quote = Some(c);
+        } else if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i + 1);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn tag_type(text: &str, start: usize, end: usize) -> Option<(Jd, usize)> {
+    let t = text.as_bytes();
+    if t.get(start) != Some(&b'{') {
+        return None;
+    }
+    let e = delimited_end(t, start, end, b'{')?;
+    let inner = text.get(start + 1..e - 1)?;
+    let mut cleaned = String::new();
+    for (i, line) in inner.split('\n').enumerate() {
+        if i > 0 {
+            cleaned.push('\n');
+            let l = line.trim_start_matches([' ', '\t', '\r']);
+            cleaned.push_str(l.strip_prefix('*').unwrap_or(l));
+        } else {
+            cleaned.push_str(line.strip_suffix('\r').unwrap_or(line));
+        }
+    }
+    Some((parse_jd(&cleaned), e))
+}
+
+/// The supported tags of a `/** */` comment whose text (after `/*`) starts at `offset`.
+fn comment_tags(text: &str, offset: u32) -> Vec<Tag> {
+    let t = text.as_bytes();
+    let mut starts = Vec::new();
+    let mut line = 0;
+    while line <= text.len() {
+        let line_end = text[line..].find('\n').map_or(text.len(), |i| line + i);
+        let mut i = skip_hspace(t, line, line_end);
+        if i < line_end && t[i] == b'*' {
+            i = skip_hspace(t, i + 1, line_end);
+        }
+        if i < line_end && t[i] == b'@' {
+            let name_start = i + 1;
+            let mut j = name_start;
+            while j < line_end {
+                let ch = text[j..].chars().next().unwrap_or(' ');
+                if ch.is_alphanumeric() || (j > name_start && ch == '-') {
+                    j += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            if j < line_end && t[j] == b'!' {
+                j += 1;
+            }
+            let next_ok = j >= line_end || t[j].is_ascii_whitespace() || t[j] == b'{';
+            if j > name_start && next_ok {
+                let name = text[name_start..j].trim_end_matches('!').to_lowercase();
+                starts.push((name, j, line));
+            }
+        }
+        line = line_end + 1;
+    }
+    if starts
+        .iter()
+        .any(|(n, ..)| matches!(n.as_str(), "typedef" | "callback" | "overload"))
+    {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (k, (name, content, _)) in starts.iter().enumerate() {
+        let end = starts.get(k + 1).map_or(text.len(), |s| s.2);
+        if let Some(tag) = parse_tag(text, name, *content, end, offset) {
+            out.push(tag);
+        }
+    }
+    out
+}
+
+fn parse_tag(text: &str, name: &str, content: usize, end: usize, offset: u32) -> Option<Tag> {
+    let is_param = matches!(name, "param" | "arg" | "argument");
+    if !is_param && !matches!(name, "type" | "return" | "returns") {
+        return None;
+    }
+    let t = text.as_bytes();
+    let bare = Tag {
+        name: name.to_owned(),
+        ty: None,
+        param: None,
+        optional: false,
+        name_range: None,
+    };
+    let mut start = skip_template_space(t, content, end);
+    let mut ty = None;
+    if t.get(start) == Some(&b'{') {
+        let Some((parsed, e)) = tag_type(text, start, end) else {
+            return Some(bare);
+        };
+        ty = Some(parsed);
+        start = skip_template_space(t, e, end);
+    } else if !is_param {
+        return Some(bare);
+    }
+    if !is_param {
+        return Some(Tag { ty, ..bare });
+    }
+    let optional = t.get(start) == Some(&b'[');
+    let name_end = if optional {
+        delimited_end(t, start, end, b'[')?
+    } else {
+        end
+    };
+    if name_end < end && !t[name_end].is_ascii_whitespace() {
+        return None;
+    }
+    if optional {
+        start += 1;
+    }
+    let rest = text.get(start..name_end)?;
+    let mut chars = rest.char_indices();
+    let len = match chars.next() {
+        Some((_, c)) if is_id_start(c) => chars
+            .find(|&(_, c)| !is_id_continue(c))
+            .map_or(rest.len(), |(i, _)| i),
+        _ => return None,
+    };
+    let pname = rest[..len].to_owned();
+    let after = start + len;
+    let next = skip_template_space(t, after, name_end);
+    if optional {
+        if !matches!(t.get(next), Some(b']' | b'=')) {
+            return None;
+        }
+    } else if after < end && !t[after].is_ascii_whitespace() {
+        return None;
+    }
+    let name_range = Some(Span::new(offset + start as u32, offset + after as u32));
+    if ty.is_none() {
+        let ts = skip_template_space(t, if optional { name_end } else { after }, end);
+        ty = tag_type(text, ts, end).map(|(j, _)| j);
+    }
+    Some(Tag {
+        ty,
+        param: Some(pname),
+        optional,
+        name_range,
+        ..bare
+    })
+}
+
+/// An applicable tag's type (if it has one), optionality and parameter-name range.
+#[derive(Clone, Debug)]
+struct RawAnn {
+    ty: Option<Jd>,
+    optional: bool,
+    name_range: Option<Span>,
+}
+
+impl RawAnn {
+    fn typed(self) -> Option<Ann> {
+        Some(Ann {
+            ty: self.ty?,
+            optional: self.optional,
+        })
+    }
+}
+
+/// The one tag matching `pred` (none when several do).
+fn single_annotation(tags: &[Tag], pred: impl Fn(&Tag) -> bool) -> Option<RawAnn> {
+    let mut it = tags.iter().filter(|t| pred(t));
+    let first = it.next()?;
+    if it.next().is_some() {
+        return None;
+    }
+    Some(RawAnn {
+        ty: first.ty.clone(),
+        optional: first.optional,
+        name_range: first.name_range,
+    })
+}
+
+impl<'c, 'x, 'f> An<'c, 'x, 'f> {
+    /// The tags of the comment right before `pos` (`Some(vec![])` for a comment that is not
+    /// JSDoc), `None` without a comment.
+    fn tags_before(&self, pos: u32) -> Option<Vec<Tag>> {
+        let ast = self.ast();
+        let src = self.cx.src();
+        let p = src[..pos as usize].trim_end().len() as u32;
+        let i = ast.comments.partition_point(|c| c.span.end < p);
+        let c = ast.comments.get(i).filter(|c| c.span.end == p)?;
+        let text = &src[c.span.start as usize..c.span.end as usize];
+        if c.kind != CommentKind::Block || !text.starts_with("/**") || text.len() < 4 {
+            return Some(Vec::new());
+        }
+        Some(comment_tags(&text[2..text.len() - 2], c.span.start + 2))
+    }
+
+    fn doc_tags(&self, owners: &[NodeId]) -> Vec<Tag> {
+        if !self.jsdoc {
+            return Vec::new();
+        }
+        owners
+            .iter()
+            .find_map(|&o| self.tags_before(self.cx.span(o).start))
+            .unwrap_or_default()
+    }
+
+    /// A function's documentation owners: TypeScript wrappers, then the declarator and its
+    /// statement, the assignment and its statement, or the property it is the value of.
+    fn function_owners(&self, func: NodeId) -> Vec<NodeId> {
+        let ast = self.ast();
+        let mut owners = vec![func];
+        let mut node = func;
+        for _ in 0..64 {
+            let Some(p) = self.cx.parent(node) else {
+                break;
+            };
+            match *ast.node(p) {
+                Node::As { expr, .. }
+                | Node::Satisfies { expr, .. }
+                | Node::NonNull { expr }
+                | Node::TypeAssertion { expr, .. }
+                    if expr == node =>
+                {
+                    owners.push(p);
+                    node = p;
+                }
+                Node::Paren { .. } => node = p,
+                _ => break,
+            }
+        }
+        let Some(parent) = self.cx.parent(node) else {
+            return owners;
+        };
+        match *ast.node(parent) {
+            Node::VarDeclarator { init: Some(i), .. } if i == node => {
+                owners.push(parent);
+                if let Some(d) = self.cx.parent(parent)
+                    && matches!(*ast.node(d), Node::VarDecl { decls, .. } if ast.list(decls).len() == 1)
+                {
+                    owners.push(d);
+                }
+            }
+            Node::Assign {
+                op: AssignOp::Assign,
+                right,
+                ..
+            } if right == node => {
+                if let Some(stmt) = self.cx.parent(parent)
+                    && matches!(ast.node(stmt), Node::ExprStmt { .. })
+                {
+                    owners.push(parent);
+                    owners.push(stmt);
+                }
+            }
+            Node::Property { value, .. } if value == node => owners.push(parent),
+            Node::PropertyDef { value: Some(v), .. } if v == node => owners.push(parent),
+            Node::MethodDef { value, .. } if value == node => owners.push(parent),
+            Node::ExportDefaultExpr { .. } => owners.push(parent),
+            _ => {}
+        }
+        owners
+    }
+
+    fn has_native_assertion(&self, id: Option<NodeId>) -> bool {
+        let ast = self.ast();
+        let Some(mut id) = id else {
+            return false;
+        };
+        for _ in 0..64 {
+            match *ast.node(id) {
+                Node::As { .. } | Node::TypeAssertion { .. } => return true,
+                Node::Satisfies { expr, .. } | Node::NonNull { expr } | Node::Paren { expr } => {
+                    id = expr
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// The plugin's `getParameterAnnotation` for the parameter named by `ident`.
+    fn param_annotation(&self, ident: NodeId) -> Option<RawAnn> {
+        if !self.jsdoc {
+            return None;
+        }
+        let ast = self.ast();
+        let param = self.cx.parent(ident)?;
+        let Node::Param {
+            pattern, optional, ..
+        } = *ast.node(param)
+        else {
+            return None;
+        };
+        if pattern != ident {
+            return None;
+        }
+        let func = self
+            .cx
+            .parent(param)
+            .filter(|&f| fn_flags(ast, f).is_some())?;
+        let Node::Ident { name } = *ast.node(ident) else {
+            return None;
+        };
+        let name = ast.atom(name);
+        let inline = single_annotation(&self.doc_tags(&[ident, param]), |t| t.name == "type");
+        let named = single_annotation(&self.doc_tags(&self.function_owners(func)), |t| {
+            matches!(t.name.as_str(), "param" | "arg" | "argument")
+                && t.param.as_deref() == Some(name)
+        });
+        let ann = match &inline {
+            Some(i) if i.ty.is_some() => RawAnn {
+                name_range: named.as_ref().and_then(|n| n.name_range),
+                ..i.clone()
+            },
+            _ => named.clone()?,
+        };
+        let is_opt = |a: &Option<RawAnn>| {
+            a.as_ref()
+                .is_some_and(|a| a.optional || matches!(a.ty, Some(Jd::Optional(_))))
+        };
+        let optional = optional || is_opt(&inline) || is_opt(&named);
+        Some(RawAnn {
+            ty: ann.ty.map(|t| match t {
+                Jd::Optional(e) => *e,
+                t => t,
+            }),
+            optional,
+            name_range: ann.name_range,
+        })
+    }
+
+    /// The plugin's `getJSDocumentTypeAnnotation` for a binding, reference or property.
+    fn doc_type(&self, node: NodeId) -> Option<Ann> {
+        if !self.jsdoc {
+            return None;
+        }
+        let ast = self.ast();
+        let owners = match *ast.node(node) {
+            Node::Property { value, .. } => {
+                if self.has_native_assertion(Some(value)) {
+                    return None;
+                }
+                vec![node]
+            }
+            Node::ShorthandProp { .. } => vec![node],
+            Node::PropertyDef {
+                type_ann, value, ..
+            } => {
+                if type_ann.is_some() || self.has_native_assertion(value) {
+                    return None;
+                }
+                vec![node]
+            }
+            Node::Ident { .. } => {
+                let parent = self.cx.parent(node)?;
+                match *ast.node(parent) {
+                    Node::VarDeclarator {
+                        name,
+                        type_ann,
+                        init,
+                        ..
+                    } if name == node => {
+                        if type_ann.is_some() || self.has_native_assertion(init) {
+                            return None;
+                        }
+                        let mut o = vec![node, parent];
+                        if let Some(d) = self.cx.parent(parent)
+                            && matches!(*ast.node(d), Node::VarDecl { decls, .. } if ast.list(decls).len() == 1)
+                        {
+                            o.push(d);
+                        }
+                        o
+                    }
+                    Node::Param {
+                        pattern, type_ann, ..
+                    } if pattern == node => {
+                        if type_ann.is_some() {
+                            return None;
+                        }
+                        return self.param_annotation(node).and_then(RawAnn::typed);
+                    }
+                    _ => {
+                        let sym = self.sym_of_ref(node)?;
+                        let decls = &self.cx.semantic().symbol(sym).decls;
+                        let [d] = decls[..] else {
+                            return None;
+                        };
+                        if d.name == node || !matches!(ast.node(d.name), Node::Ident { .. }) {
+                            return None;
+                        }
+                        return self.doc_type(d.name);
+                    }
+                }
+            }
+            _ => return None,
+        };
+        single_annotation(&self.doc_tags(&owners), |t| t.name == "type").and_then(RawAnn::typed)
+    }
+
+    /// The plugin's `getJSDocumentValueTypeAnnotation`.
+    fn doc_value_type(&self, node: NodeId) -> Option<Ann> {
+        let ann = self.doc_type(node)?;
+        let ast = self.ast();
+        let value = match *ast.node(node) {
+            Node::Ident { .. } => match self.cx.parent(node).map(|p| ast.node(p)) {
+                Some(&Node::VarDeclarator { name, init, .. }) if name == node => init,
+                _ => None,
+            },
+            Node::Property { value, .. } => Some(value),
+            Node::PropertyDef { value, .. } => value,
+            _ => None,
+        };
+        let func = value.and_then(|v| self.function_value(v));
+        let drop = func.is_some_and(|f| {
+            fn_flags(ast, f).is_some_and(|fl| fl.contains(FnFlags::GENERATOR))
+                || fn_return_type(ast, f).is_some()
+        }) && jd_callable_return(&ann.ty).is_some();
+        (!drop).then_some(ann)
+    }
+
+    /// The plugin's `getJSDocumentReturnType`.
+    fn doc_return(&self, func: NodeId) -> Option<Ann> {
+        if !self.jsdoc || fn_return_type(self.ast(), func).is_some() {
+            return None;
+        }
+        let ast = self.ast();
+        let owners = self.function_owners(func);
+        if owners.iter().any(|&o| match *ast.node(o) {
+            Node::VarDeclarator { type_ann, .. } | Node::PropertyDef { type_ann, .. } => {
+                type_ann.is_some()
+            }
+            _ => false,
+        }) {
+            return None;
+        }
+        let getter = self.cx.parent(func).is_some_and(|p| {
+            matches!(*ast.node(p), Node::MethodDef { kind: MethodKind::Get, value, .. } if value == func)
+        });
+        single_annotation(&self.doc_tags(&owners), |t| {
+            matches!(t.name.as_str(), "return" | "returns") || (getter && t.name == "type")
+        })
+        .and_then(RawAnn::typed)
+    }
+
+    /// The plugin's `getJSDocumentFunctionReturnType`: not when it documents a promise.
+    fn doc_fn_return(&self, func: NodeId) -> Option<Ann> {
+        self.doc_return(func)
+            .filter(|a| ann_class(a, &["Promise", "PromiseLike"], &[], true) != Class::Target)
+    }
+
+    /// The plugin's `hasJSDocumentTypeReference`.
+    fn has_doc_type_ref(&self, id: NodeId, seen: &mut Vec<SymbolId>) -> bool {
+        if !self.jsdoc || seen.len() > 64 {
+            return false;
+        }
+        let ast = self.ast();
+        let mut id = id;
+        for _ in 0..64 {
+            match *ast.node(id) {
+                Node::As { expr, .. }
+                | Node::Satisfies { expr, .. }
+                | Node::NonNull { expr }
+                | Node::TypeAssertion { expr, .. }
+                | Node::Paren { expr } => id = expr,
+                _ => break,
+            }
+        }
+        match *ast.node(id) {
+            Node::Ident { .. } => {
+                if self.doc_type(id).is_some() {
+                    return true;
+                }
+                let Some(sym) = self.sym_of_ref(id) else {
+                    return false;
+                };
+                let decls = &self.cx.semantic().symbol(sym).decls;
+                let [d] = decls[..] else {
+                    return false;
+                };
+                let Node::VarDeclarator {
+                    name,
+                    init: Some(init),
+                    ..
+                } = *ast.node(d.node)
+                else {
+                    return false;
+                };
+                if name != d.name || seen.contains(&sym) {
+                    return false;
+                }
+                seen.push(sym);
+                self.has_doc_type_ref(init, seen)
+            }
+            Node::Arrow { .. }
+            | Node::FunctionExpr { .. }
+            | Node::FunctionDecl { .. }
+            | Node::ClassExpr { .. }
+            | Node::ClassDecl { .. } => false,
+            _ => evaluated_children(ast, id)
+                .into_iter()
+                .any(|c| self.has_doc_type_ref(c, seen)),
+        }
+    }
+
+    fn doc_ref(&self, id: NodeId) -> bool {
+        self.has_doc_type_ref(id, &mut Vec::new())
     }
 }
 
