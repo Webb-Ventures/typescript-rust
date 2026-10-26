@@ -3949,41 +3949,44 @@ impl<'c, 'a> Ck<'c, 'a> {
         name.as_deref() == Some("constructor") && self.is_ref(w, Loc::new(l.file, obj))
     }
 
-    /// `x.constructor === C`: the members of `t` that `C` constructs. A class instance is
-    /// constructed by its own class only (not a base, not a same-shaped class); other
-    /// members (through their apparent type for primitives) when `C`'s instance type is a
-    /// subtype of them.
+    /// `x.constructor === C`: the members of `t` that `C` constructs (tsc: flow.go,
+    /// `narrowTypeByConstructor`). `C` must be a function or constructor type with a
+    /// `prototype` property whose type is not `any`, `Object` or `Function` (so
+    /// `a.constructor === b.constructor`, `b.constructor` being `Function`, narrows
+    /// nothing). A member is kept when it, or the candidate, is a class instance of the
+    /// same class, else when it is a subtype of the candidate.
     fn narrow_by_constructor(&mut self, t: TypeId, ctor: Loc) -> TypeId {
-        if self.store().flags(t).intersects(TypeFlags::ANY) {
+        let ct = self.quietly(|ck| ck.check_expr(ctor));
+        if self.signatures_of(ct, SigKind::Call).is_empty()
+            && self.signatures_of(ct, SigKind::Construct).is_empty()
+        {
             return t;
         }
-        let ct = self.quietly(|ck| ck.check_expr(ctor));
-        let Some(candidate) = self.instance_type_of_constructor(ct) else {
+        let Some(p) = self.property_of_type(ct, "prototype") else {
             return t;
         };
-        if self.store().flags(candidate).intersects(TypeFlags::ANY) {
+        let candidate = self.type_of_symbol(p);
+        if self.store().flags(candidate).intersects(TypeFlags::ANY)
+            || [GlobalType::Object, GlobalType::Function]
+                .iter()
+                .any(|&g| self.global_type(g) == Some(candidate))
+        {
             return t;
+        }
+        if self.store().flags(t).intersects(TypeFlags::ANY) {
+            return candidate;
         }
         let cand_class = self.class_symbol_of_instance(candidate);
         self.filter_type(t, |ck, m| {
-            if let Some(ms) = ck.class_symbol_of_instance(m) {
-                return cand_class.is_some_and(|cs| {
-                    ck.c.first_decl(ms).is_some() && ck.c.first_decl(ms) == ck.c.first_decl(cs)
+            let m_class = ck.class_symbol_of_instance(m);
+            if m_class.is_some() || cand_class.is_some() {
+                return m_class.zip(cand_class).is_some_and(|(ms, cs)| {
+                    ms == cs
+                        || (ck.c.first_decl(ms).is_some()
+                            && ck.c.first_decl(ms) == ck.c.first_decl(cs))
                 });
             }
-            if ck
-                .store()
-                .flags(m)
-                .intersects(TypeFlags::NULLABLE | TypeFlags::NEVER)
-            {
-                return false;
-            }
-            let am = if ck.store().flags(m).intersects(TypeFlags::PRIMITIVE) {
-                ck.apparent_type(m)
-            } else {
-                m
-            };
-            ck.is_subtype(candidate, am)
+            ck.is_subtype(m, candidate)
         })
     }
 

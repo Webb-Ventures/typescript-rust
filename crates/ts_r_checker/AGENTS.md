@@ -159,9 +159,14 @@ Files, by layer:
   and tuples for `Array`), else uses instance types that are subtypes of members, else the
   instance type or an intersection; `prototype` (not `any`) wins over construct
   signatures, and a union of constructors does not narrow the false branch.
-  `x.constructor === C` (true branch only) keeps class instances of `C`'s own class
-  (not bases, not same-shaped classes) and other members (primitives through their
-  apparent type) that `C`'s instance type is a subtype of.
+  `x.constructor === C` (true branch only) narrows only when `C` has call or construct
+  signatures and a `prototype` whose type is not `any`, `Object` or `Function`; it reads
+  the candidate from `prototype` (an `any` reference becomes the candidate), keeps class
+  instances of the candidate's own class (not bases, not same-shaped classes) when either
+  side is a class, and otherwise members (primitives through their apparent type) that are
+  subtypes of the candidate. A comparison with `Object`, with an `any`-typed `prototype`
+  (`y.constructor`, typed `Function`) or with a bare construct-signature type leaves `x` as
+  it is (tsc: flow.go, narrowTypeByConstructor).
   `typeof x` in a type is narrowed where it stands (the binder records the flow at the
   identifier). A loose comparison (`u == 42`, `u == E.A`) never narrows `unknown`, only
   `== null`/`== undefined` do; `u?.p` and `u!` read `unknown` as `{}`.
@@ -1384,6 +1389,8 @@ Files, by layer:
   changes conditional inference: readonly tuples sliced into a rest no longer fit).
   Nodes inside the type arguments of `import("m").X<...>` are not checked: tsc's
   checkImportType resolves them but never walks them (tsc: checker.go, checkImportType).
+  `S` relates to `keyof T` through `keyof C` for `T`'s constraint `C`, where a string index
+  signature gives `string | number` (so `number` indexes a `T extends Record<string, X>`).
   `keyof (A & B)` with a generic member is `keyof A | keyof B` unless a member is `{}`
   (tsc: getIndexTypeEx/shouldDeferIndexType); `keyof S` relates to `keyof T` when `T`
   relates to `S`; a type parameter whose constraint is a union or intersection mentioning
