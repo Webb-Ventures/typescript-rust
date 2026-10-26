@@ -326,6 +326,7 @@ mod unicorn_length_or_infinity;
 mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
 mod unicorn_no_accidental_bitwise_operator;
+mod unicorn_no_anonymous_default_export;
 mod unicorn_no_array_concat_in_loop;
 mod unicorn_no_array_from_fill;
 mod unicorn_no_array_method_this_argument;
@@ -547,6 +548,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_anonymous_default_export::RULE,
     &import_no_duplicates::RULE,
     &import_dynamic_import_chunkname::RULE,
     &import_no_nodejs_modules::RULE,
