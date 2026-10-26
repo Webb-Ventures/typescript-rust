@@ -358,6 +358,7 @@ mod unicorn_no_for_each;
 mod unicorn_no_for_loop;
 mod unicorn_no_global_object_property_assignment;
 mod unicorn_no_impossible_length_comparison;
+mod unicorn_no_incomplete_accessor_override;
 mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
@@ -551,6 +552,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_incomplete_accessor_override::RULE,
     &unicorn_no_unreadable_object_destructuring::RULE,
     &unicorn_consistent_export_decorator_position::RULE,
     &unicorn_no_accessor_recursion::RULE,
