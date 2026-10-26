@@ -131,8 +131,8 @@ Files:
 
 ## Status (type-aware round 3, `m4/type-aware-3`)
 
-- 157 rules, 51 of them type-aware. Rule oracle: 15,706 / 15,732 cases. The non-type-aware
-  cases are 8,808 / 8,812 and the type-aware cases 6,898 / 6,920 (2026-10-26); the 22
+- 157 rules, 51 of them type-aware. Rule oracle: 15,708 / 15,732 cases. The non-type-aware
+  cases are 8,808 / 8,812 and the type-aware cases 6,900 / 6,920 (2026-10-26); the 20
   type-aware failures are a subset of the 46 listed in design record 0006, and the 4 others
   are jsdoc cases whose `contexts` are esquery selectors (`tests/oracle/baseline.txt` has the
   current per-rule counts).
