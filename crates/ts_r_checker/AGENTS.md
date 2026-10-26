@@ -1076,7 +1076,9 @@ Files, by layer:
   (declared, referenced, aliased) come first by name; unnamed ones (type literals, object
   literals, `typeof` types) follow by declaration position, interleaved; a written `{}` is a
   single shared type with no declaration, so it sorts after them (with mapped types); tuples
-  last (`Checker::object_sort_key`). A spread's result lists its properties by where each
+  last (`Checker::object_sort_key`). Unique symbol types sort as enum members do, by their
+  symbol's first declaration and then by name (`typeof zebra | typeof apple` when `zebra`
+  is declared first). A spread's result lists its properties by where each
   was declared, ones with no declaration last by name, not left-then-right
   (`Ck::sort_props_by_declaration`; `spread_member_and_empty_literal_order`).
 - **`extends any` reads as `unknown`** (tsc: `checker.go`, getConstraintFromTypeParameter,

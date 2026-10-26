@@ -1,0 +1,10 @@
+declare const zebra: unique symbol;
+declare const apple: unique symbol;
+declare const u: typeof zebra | typeof apple;
+const n: number = u;
+const k1 = Symbol("k1");
+const k0 = Symbol("k0");
+declare const u2: typeof k1 | typeof k0;
+const n2: number = u2;
+declare const u3: typeof apple | typeof zebra;
+const n3: number = u3;
