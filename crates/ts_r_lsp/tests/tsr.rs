@@ -1587,6 +1587,73 @@ fn completion_in_import_and_export_clauses() {
     c.shutdown();
 }
 
+/// Review fixes for import clauses and type positions: a `}` in a comment does not close the
+/// clause, an unterminated quoted name before the cursor does not panic, and modules that
+/// re-export each other as namespaces are searched once each for a type.
+#[test]
+fn completion_import_clause_edges_and_namespace_cycles() {
+    if !libs_present() {
+        return;
+    }
+    let m = "export const a = 1;\nexport const b = 2;\n";
+    let u = "import { a /* } */,  } from \"./m.js\";\n";
+    let bad = "import { \"\u{e9}\n, } from \"./m.js\";\n";
+    // Each of x and y exports four namespace aliases of the other: 4^17 paths, 2 modules.
+    let x = "export * as y1 from \"./y.js\";\nexport * as y2 from \"./y.js\";\n\
+             export * as y3 from \"./y.js\";\nexport * as y4 from \"./y.js\";\n";
+    let y = "export * as x1 from \"./x.js\";\nexport * as x2 from \"./x.js\";\n\
+             export * as x3 from \"./x.js\";\nexport * as x4 from \"./x.js\";\n";
+    let t = "import * as nx from \"./x.js\";\nlet v: ;\n";
+    let env = Env::new(
+        "complete-clause-edges",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/m.ts", m),
+            ("src/u.ts", u),
+            ("src/bad.ts", bad),
+            ("src/x.ts", x),
+            ("src/y.ts", y),
+            ("src/t.ts", t),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/u.ts", "src/bad.ts", "src/t.ts"] {
+        env.open(&mut c, f);
+    }
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&env.uri("src/u.ts"), 0, 20),
+    ));
+    assert_eq!(l, ["b", "type"], "{l:?}");
+    // After the comma on the line below the unterminated `"\u{e9}`.
+    let r = result(
+        &mut c,
+        "textDocument/completion",
+        at(&env.uri("src/bad.ts"), 1, 2),
+    );
+    assert!(r.is_null() || r["items"].is_array(), "{r}");
+    let started = std::time::Instant::now();
+    let l = labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&env.uri("src/t.ts"), 1, 7),
+    ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(!l.iter().any(|x| x == "nx"), "{l:?}");
+    c.shutdown();
+}
+
 /// Class bodies: the inherited members not written yet (and member keywords) where a member
 /// name goes, `this` members among the names in a method, and private or protected members
 /// only where they may be read.

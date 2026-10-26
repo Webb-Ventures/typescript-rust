@@ -648,7 +648,7 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             };
             let in_type = qualified && qualified_in_type(c, Loc::new(cx.file, obj));
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
-                if in_type && !type_referable(c, s, 0) {
+                if in_type && !type_referable(c, s) {
                     continue;
                 }
                 let plain = is_identifier_name(&name) || is_private_name(&name);
@@ -779,7 +779,7 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 if !has_meaning_through_alias(c, s, want) || later.contains(&name) {
                     continue;
                 }
-                if types_only && !type_referable(c, s, 0) {
+                if types_only && !type_referable(c, s) {
                     continue;
                 }
                 if !seen.insert(name.clone()) || own.as_deref() == Some(name.as_str()) {
@@ -962,13 +962,10 @@ fn import_clause_at(c: &Checker<'_>, file: FileId, ws: u32) -> Option<(NodeId, b
                 source: Some(source),
                 ..
             } => {
-                // Between the clause's `{` and the module specifier.
-                let start = ast.span(n).start as usize;
-                let open = text.get(start..tok as usize + 1)?.find('{')? + start;
-                let closed = text
-                    .get(open..tok as usize)
-                    .is_some_and(|between| between.contains('}'));
-                if closed || tok >= ast.span(source).start {
+                // Between the clause's `{` and the module specifier (braces in comments and
+                // quoted names do not count).
+                let start = ast.span(n).start;
+                if !inside_open_brace(ast, text, start, tok) || tok >= ast.span(source).start {
                     return None;
                 }
                 return Some((n, t == "type"));
@@ -978,6 +975,42 @@ fn import_clause_at(c: &Checker<'_>, file: FileId, ws: u32) -> Option<(NodeId, b
         }
     }
     None
+}
+
+/// Whether the code from `start` up to the `{`, `,` or `type` token at `tok` opens a `{`
+/// that no `}` closes, outside comments and string literals.
+fn inside_open_brace(ast: &ts_r_ast::Ast, text: &str, start: u32, tok: u32) -> bool {
+    let b = text.as_bytes();
+    let end = (tok as usize + 1).min(b.len());
+    let mut i = start as usize;
+    let mut open = false;
+    while i < end {
+        // A comment starting here: jump past it.
+        let k = ast
+            .comments
+            .partition_point(|cm| (cm.span.start as usize) < i);
+        if let Some(cm) = ast.comments.get(k)
+            && cm.span.start as usize == i
+            && cm.span.end as usize > i
+        {
+            i = cm.span.end as usize;
+            continue;
+        }
+        match b[i] {
+            q @ (b'"' | b'\'') => {
+                // To the closing quote, or the end of the line for an unterminated one.
+                i += 1;
+                while i < end && b[i] != q && b[i] != b'\n' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'{' => open = true,
+            b'}' => return false,
+            _ => {}
+        }
+        i += 1;
+    }
+    open
 }
 
 /// The exports of the module an import or export clause names, minus `default` and the
@@ -1021,10 +1054,8 @@ fn import_clause_names(
             _ => continue,
         };
         let n = match *ast.node(name) {
-            Node::StringLit { .. } => {
-                let raw = ast.span(name).text(&c.file(file).text);
-                raw[1..raw.len().saturating_sub(1).max(1)].to_string()
-            }
+            // The literal's value (its text may be unterminated).
+            Node::StringLit { value } => ast.atom(value).to_string(),
             _ => match super::locate::name_text(ast, name) {
                 Some(t) => t.to_string(),
                 None => continue,
@@ -1043,7 +1074,14 @@ fn import_clause_names(
 /// Whether `s` may be named in a type: a type, or a namespace with such a member somewhere
 /// below it (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter; a
 /// namespace of values only is not offered where a type goes).
-fn type_referable(c: &Checker<'_>, s: SymId, depth: u32) -> bool {
+fn type_referable(c: &Checker<'_>, s: SymId) -> bool {
+    let mut seen: HashSet<SymId> = HashSet::new();
+    type_referable_in(c, s, 0, &mut seen)
+}
+
+/// [`type_referable`]'s search; `seen` holds the namespaces already searched (namespaces
+/// that re-export each other are searched once each, not once per path).
+fn type_referable_in(c: &Checker<'_>, s: SymId, depth: u32, seen: &mut HashSet<SymId>) -> bool {
     let s = c.resolve_alias(s).unwrap_or(s);
     if c.has_meaning(s, meaning::TYPE) {
         return true;
@@ -1052,12 +1090,13 @@ fn type_referable(c: &Checker<'_>, s: SymId, depth: u32) -> bool {
         || !c
             .sym_flags(s)
             .intersects(SymbolFlags::VALUE_MODULE | SymbolFlags::NAMESPACE_MODULE)
+        || !seen.insert(s)
     {
         return false;
     }
     c.exports_of(s)
         .into_iter()
-        .any(|(_, x)| x != s && type_referable(c, x, depth + 1))
+        .any(|(_, x)| type_referable_in(c, x, depth + 1, seen))
 }
 
 /// Whether the qualified name whose left side is `left` (`a.b.|`) is a type reference, not
