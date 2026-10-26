@@ -371,6 +371,13 @@ mod unicorn_prefer_math_min_max;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_object_from_entries;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_promise_static_methods;
+mod unicorn_prefer_promise_try;
+mod unicorn_prefer_promise_with_resolvers;
+mod unicorn_prefer_queue_microtask;
+mod unicorn_prefer_regexp_test;
+mod unicorn_prefer_response_static_json;
+mod unicorn_prefer_set_methods;
 mod unicorn_prefer_short_escape_sequences;
 mod unicorn_prefer_simple_sort_comparator;
 mod unicorn_prefer_single_array_predicate;
@@ -795,6 +802,12 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_number_properties::RULE,
     &unicorn_prefer_object_destructuring_defaults::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_promise_static_methods::RULE,
+    &unicorn_prefer_promise_try::RULE,
+    &unicorn_prefer_queue_microtask::RULE,
+    &unicorn_prefer_response_static_json::RULE,
+    &unicorn_prefer_set_methods::RULE,
+    &unicorn_prefer_promise_with_resolvers::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
     &unicorn_prefer_simple_sort_comparator::RULE,
     &unicorn_prefer_single_array_predicate::RULE,

@@ -1357,6 +1357,32 @@ fn side_effect(ast: &Ast, id: NodeId, depth: u32) -> bool {
     }
 }
 
+/// eslint-utils' `hasSideEffect` with `considerGetters`: member reads count too.
+pub(crate) fn has_side_effect_with_getters(ast: &Ast, id: NodeId) -> bool {
+    side_effect_with_getters(ast, id, 0)
+}
+
+fn side_effect_with_getters(ast: &Ast, id: NodeId, depth: u32) -> bool {
+    if depth > 200 {
+        return true;
+    }
+    match ast.node(id) {
+        Node::Member { .. } | Node::Index { .. } => return true,
+        Node::FunctionExpr { .. } | Node::Arrow { .. } | Node::ClassExpr { .. } => return false,
+        _ => {}
+    }
+    if depth == 0 && has_side_effect(ast, id) {
+        return true;
+    }
+    let mut found = false;
+    ast.for_each_child(id, |c| {
+        if !found && side_effect_with_getters(ast, c, depth + 1) {
+            found = true;
+        }
+    });
+    found
+}
+
 /// Type nodes are not evaluated.
 fn is_value_child(ast: &Ast, id: NodeId) -> bool {
     !matches!(

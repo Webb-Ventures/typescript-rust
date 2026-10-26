@@ -7,8 +7,8 @@
 
 use super::prelude::*;
 use super::unicorn_static::{
-    Static, const_definition, has_side_effect, static_value, static_value_control_flow,
-    static_value_no_side_effects,
+    Static, const_definition, has_side_effect_with_getters, static_value,
+    static_value_control_flow, static_value_no_side_effects,
 };
 use super::unicorn_text::{
     call_argument_text, is_written, member_object_text, needs_semicolon, paren_span, paren_text,
@@ -16,7 +16,6 @@ use super::unicorn_text::{
 };
 use super::unicorn_types::{is_map, is_set, is_weak_map, is_weak_set};
 use super::unicorn_util::skip_wrappers;
-use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -140,28 +139,6 @@ fn key_of(v: Static) -> Key {
     }
 }
 
-/// eslint-utils' `hasSideEffect` with `considerGetters`: member reads count too.
-fn has_side_effect_or_getter(ast: &Ast, id: NodeId, depth: u32) -> bool {
-    if depth > 200 {
-        return true;
-    }
-    match ast.node(id) {
-        Node::Member { .. } | Node::Index { .. } => return true,
-        Node::FunctionExpr { .. } | Node::Arrow { .. } | Node::ClassExpr { .. } => return false,
-        _ => {}
-    }
-    if depth == 0 && has_side_effect(ast, id) {
-        return true;
-    }
-    let mut found = false;
-    ast.for_each_child(id, |c| {
-        if !found && has_side_effect_or_getter(ast, c, depth + 1) {
-            found = true;
-        }
-    });
-    found
-}
-
 /// `Symbol.x` / `Symbol[k]` on the global `Symbol` (directly or as a `const`
 /// initializer): the symbol it names.
 fn well_known_symbol(cx: &Ctx<'_, '_>, id: NodeId) -> Option<Key> {
@@ -202,7 +179,7 @@ fn property_values(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> Result<Option<Ve
         _ => None,
     };
     if (branches.is_some() || matches!(ast.node(node), Node::Seq { .. }))
-        && has_side_effect_or_getter(ast, node, 0)
+        && has_side_effect_with_getters(ast, node)
     {
         return Err(());
     }

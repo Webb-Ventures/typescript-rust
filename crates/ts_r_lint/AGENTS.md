@@ -997,3 +997,9 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   definition and no later write. The plugin's 750-line `isBoolean` is cut down to
   literals, `!`, comparisons and global `Boolean`/`isFinite`/`isNaN` calls, which is all
   the oracle needs; JSDoc and TS annotations go through `is_known_non_string`.
+- **Set methods** (`prefer-set-methods`, from `unicorn: rules/prefer-set-methods.js`).
+  "Is a Set" is `builtin_collection_type == Some("Set")`. Operands must be free of side
+  effects with getters counted (`unicorn_static::has_side_effect_with_getters`, eslint-utils'
+  `considerGetters`, shared with `no-collection-bracket-access`), so `obj.set` is never an
+  operand. A `filter` inside `new Set(...)` is reported on the `new`, and the inner call
+  then skips itself as a call argument.
