@@ -765,8 +765,14 @@ fn dropped_aliases_release_their_imports() {
             "import * as ns from \"./a\";\n\nexport import A = ns.A;\n",
         ),
         // An unused alias is dropped, and with it the import only it used, value or not.
-        ("src/c.ts", "import * as ns from \"./a\";\nimport A = ns.A;\n"),
-        ("src/d.ts", "import * as ns from \"./a\";\nimport V = ns.v;\n"),
+        (
+            "src/c.ts",
+            "import * as ns from \"./a\";\nimport A = ns.A;\n",
+        ),
+        (
+            "src/d.ts",
+            "import * as ns from \"./a\";\nimport V = ns.v;\n",
+        ),
         // A chain of unused aliases releases its root too.
         (
             "src/e.ts",
@@ -780,7 +786,12 @@ fn dropped_aliases_release_their_imports() {
     assert!(!r.skipped, "{:?}", codes(&r));
     let out = |name: &str| {
         let path = format!("/p/out/{name}.js");
-        r.outputs.iter().find(|o| o.path == path).unwrap().text.clone()
+        r.outputs
+            .iter()
+            .find(|o| o.path == path)
+            .unwrap()
+            .text
+            .clone()
     };
     for name in ["b", "c", "d", "e"] {
         assert_eq!(out(name), "export {};\n", "{name}.js");
