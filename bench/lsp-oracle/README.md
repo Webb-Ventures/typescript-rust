@@ -31,7 +31,9 @@ node bench/lsp-oracle/fails.mjs [REGEX]   # list failures from target/lsp-oracle
 ```
 
 `--filter REGEX` and `--feature hover,completion` narrow the run, `--show N` prints the first
-N differences, `--keep` leaves the temporary projects. Tests are skipped when they verify no
+N differences, `--keep` leaves the temporary projects, `--tsr PATH` runs another ts-r-lsp
+binary, and `--dump FILE` appends every compared query as a JSON line
+(`{test, feature, marker, file, tsc, tsr}`) for grouping mismatches by cause. Tests are skipped when they verify no
 compared feature (code fixes, formatting, navigation bars, ...), when both servers answer
 nothing at every marker, or when they need a setup the harness can't give both servers the
 same way: non-TS extensions, `outFile`, symlinks, files outside the project, non-source files,
@@ -40,19 +42,20 @@ every skip reason.
 
 ## Results
 
-f591d51 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**1048 of 2543 compared tests pass (41.2%)**; 4677 of 9055 queries agree.
-3776 of the 6319 test files are skipped (3698 verify no compared feature, 130 get no answer
-from either server). Up from 795 of 2549 at 4eda074: 250 tests fixed, none regressed (all of
-them completions).
+88dfde6 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**1308 of 2541 compared tests pass (51.5%)**; 5865 of 9034 queries agree.
+3778 of the 6319 test files are skipped (3698 verify no compared feature, 130 get no answer
+from either server). Up from 1048 of 2543 at f591d51: 261 tests fixed (hover and
+completions), one lost to flakiness (`pathCompletionsPackageJsonExportsWildcard11` passes
+when run again).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 198 | 320 | 20 | 1446 / 2513 |
-| completion | 546 | 506 | 81 | 1532 / 2876 |
+| hover | 292 | 227 | 19 | 1979 / 2514 |
+| completion | 711 | 338 | 84 | 2186 / 2854 |
 | references | 72 | 273 | 12 | 628 / 1443 |
 | rename | 85 | 91 | 13 | 267 / 549 |
-| definition | 45 | 122 | 25 | 297 / 528 |
+| definition | 46 | 121 | 25 | 298 / 528 |
 | signatureHelp | 78 | 74 | 24 | 406 / 658 |
 | highlights | 24 | 93 | 20 | 91 / 431 |
 | typeDefinition | 0 | 16 | 3 | 10 / 57 |
@@ -63,8 +66,15 @@ Remaining failures by cause (example tests in parentheses):
   printed expanded or not where tsc differs, no `... N more ...` truncation
   (`quickInfoCanBeTruncated`), mapped and intersection types, `typeof import("...")` with an
   absolute path, `| undefined` added to optional parameters (`signatureHelp_unionType`),
-  module-qualified names (`qualifyModuleTypeNames`: `m.c`), type predicates printed as
-  `boolean` (`signatureHelpOnTypePredicates`), merged class and namespace aliases.
+  module-qualified names (`qualifyModuleTypeNames`: `m.c`) and unqualified names inside
+  signatures (`quickInfoGenericTypeArgumentInference1`: `Underscore.Iterator`), types not
+  named through their import alias (`quickInfoExportAssignmentOfGenericInterface`), type
+  predicates printed as `boolean` (`signatureHelpOnTypePredicates`), contextual parameters
+  of generic signatures (`contextualTypingGenericFunction1`).
+- **Quick info (ts_r_lsp)**: JSDoc tags and comment parsing (`quickInfoCommentsCommentParsing`),
+  incomplete declarations (`quickInfoDisplayPartsClassIncomplete`: `class __missing`),
+  enum members with odd names (`(typeof Foo)["\t"]`), the name tsc picks for a module
+  reached through several aliases (`quickInfoDisplayPartsExternalModuleAlias`).
 - **Highlights (ts_r_lsp)**: keyword occurrences (`switch`/`case`/`break`, `if`/`else`,
   `async`/`await`, `return`, modifiers, `this`: the `getOccurrences*` tests), members
   inherited across classes, `export { x as y }` names, JSX tag names.
@@ -75,9 +85,10 @@ Remaining failures by cause (example tests in parentheses):
 - **Definition (ts_r_lsp)**: `override` to the base member (`goToDefinitionOverriddenMember*`),
   keywords (`return`, `await`, `yield`, `case`), ambient and shorthand module names,
   contextually typed object literal properties, labels, meta properties, JSX.
-- **Completion (ts_r_lsp)**: JSX attributes and closing tags (`jsxAttributeCompletionStyle*`,
-  `tsxCompletion*`), member declarations in class bodies (`completionsOverridingMethod*`) and
-  type literals in type arguments (`completionListInTypeLiteralInTypeParameter*`), names
+- **Completion (ts_r_lsp)**: JSX in tags the parser closes early
+  (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers (`completionsThisPropertiesInPropertyDeclaration2`) and
+  contextual `this` (`memberListOnContextualThis`), type literals in type arguments
+  (`completionListInTypeLiteralInTypeParameter*`), names
   being declared where tsc gives no list (`completionListAtIdentifierDefinitionLocations_*`),
   scope lists in unclosed functions and parameter lists (`completionListInUnclosedFunction*`),
   `import |` statement and import-type completions (`importStatementCompletions*`,
@@ -102,3 +113,4 @@ Remaining failures by cause (example tests in parentheses):
 | 8c14f29 | 2026-10-24 | 685 | 2550 | 26.9% | First run |
 | 4eda074 | 2026-10-24 | 795 | 2549 | 31.2% | Tagged templates, instantiated and `new`-less signature help; `Function` members and `arguments` completions; tsc 7 alias hover; highlight kinds; overload definitions |
 | f591d51 | 2026-10-26 | 1048 | 2543 | 41.2% | Completions in string literals and module specifiers (package `exports`/`imports`/`typesVersions`, `paths`), object literal and binding pattern properties, `name?` labels for optional members, own-initializer and CommonJS scope rules |
+| 88dfde6 | 2026-10-26 | 1308 | 2541 | 51.5% | tsc 7 quick info in hover (a line per meaning and overload, resolved signatures at calls, owners with type arguments, `(alias)` lines, multi-line object types); completions in class, interface and type literal bodies, `this` members, JSX attributes, closing tags and intrinsic tags |
