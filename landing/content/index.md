@@ -21,7 +21,7 @@ ts-r is in alpha, on the npm dist-tag `next`. To try a tool, [install it from np
 | [`ts-r-dev`](tools/ts-r-dev.md) | `vite dev` | Dev server with hot reload and React Fast Refresh; loads `vite.config` and runs Vite plugins |
 | [`ts-r-build`](tools/ts-r-build.md) | esbuild, Vite build | esbuild-compatible bundler CLI; no plugins or CSS bundling yet |
 | [`ts-r-check`](tools/ts-r-check.md) | `tsc --noEmit` | Type checker in progress: 97.5% of tsc 7's conformance tests match exactly |
-| [`ts-r-lint`](tools/ts-r-lint.md) | ESLint + typescript-eslint, oxlint | 473 rules, 51 type-aware, matching 43,855 of 43,874 of ESLint's tests |
+| [`ts-r-lint`](tools/ts-r-lint.md) | ESLint + typescript-eslint, oxlint | 650 rules, 51 type-aware, matching 73,072 of 73,093 of ESLint's tests |
 | [`ts-r-run`](tools/ts-r-run.md) | tsx, ts-node | Runs a TypeScript file on your Node, with `--watch` and source maps |
 | [`ts-r-lsp`](tools/ts-r-lsp.md) | tsserver, the ESLint server | One shared language server per workspace, with a VS Code extension |
 
