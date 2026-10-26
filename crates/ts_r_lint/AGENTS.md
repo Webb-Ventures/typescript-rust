@@ -2679,7 +2679,8 @@ the `try` spans lines.
 type and subtype must be non-empty HTTP token characters, whitespace before `;` is dropped
 from the subtype, parameters never make it invalid; the essence is lowercased.
 
-**The file system.** no-missing-local-resource is the one rule that reads the disk: it
+**The file system.** no-missing-local-resource reads the disk through the run's
+`FileSystem` (`LintEnv.modules`, the same host the import rules use; never `std::fs`): it
 lists each directory on the way (cached for the one lookup) and compares entries exactly,
 then ignoring case (an ambiguous case-insensitive match counts as missing). When a directory
 can't be listed the whole path's existence decides. The oracle lints `/oracle/<file>`,

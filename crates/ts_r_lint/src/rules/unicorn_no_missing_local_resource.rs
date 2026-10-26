@@ -17,8 +17,8 @@ use super::prelude::*;
 use super::unicorn_text::static_string_value;
 use super::unicorn_util::skip_wrappers;
 use rustc_hash::FxHashMap;
-use std::path::{Path, PathBuf};
 use ts_r_ast::MetaPropKind;
+use ts_r_config::{FileSystem, path as fspath};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -302,20 +302,26 @@ enum Lookup {
     Exists { corrected: Option<String> },
 }
 
-#[derive(Default)]
-struct Finder {
-    dirs: FxHashMap<PathBuf, Option<Entries>>,
+/// Looks paths up through the run's file system (`LintEnv.modules`).
+struct Finder<'a> {
+    fs: &'a dyn FileSystem,
+    dirs: FxHashMap<String, Option<Entries>>,
 }
 
-impl Finder {
-    fn entries(&mut self, dir: &Path) -> Option<&Entries> {
+impl Finder<'_> {
+    fn entries(&mut self, dir: &str) -> Option<&Entries> {
+        let fs = self.fs;
         self.dirs
-            .entry(dir.to_path_buf())
+            .entry(dir.to_owned())
             .or_insert_with(|| {
+                let dir = fspath::normalize(dir);
+                if !fs.directory_exists(&dir) {
+                    return None;
+                }
                 let mut exact = Vec::new();
                 let mut insensitive: FxHashMap<String, Option<String>> = FxHashMap::default();
-                for entry in std::fs::read_dir(dir).ok()? {
-                    let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+                for entry in fs.read_dir(&dir) {
+                    let name = entry.name;
                     let lower = name.to_lowercase();
                     match insensitive.get_mut(&lower) {
                         Some(slot) => *slot = None,
@@ -330,20 +336,25 @@ impl Finder {
             .as_ref()
     }
 
-    fn lookup(&mut self, base: &Path, path: &str) -> Lookup {
-        let mut dir = base.to_path_buf();
+    fn exists(&self, p: &str) -> bool {
+        let p = fspath::normalize(p);
+        self.fs.file_exists(&p) || self.fs.directory_exists(&p)
+    }
+
+    fn lookup(&mut self, base: &str, path: &str) -> Lookup {
+        let mut dir = base.to_owned();
         let mut corrected: Vec<String> = Vec::new();
         let mut wrong_case = false;
         for part in path.split('/') {
             if matches!(part, "" | "." | "..") {
                 if !part.is_empty() {
-                    dir.push(part);
+                    dir = fspath::combine(&dir, part);
                 }
                 corrected.push(part.to_owned());
                 continue;
             }
             let Some(entries) = self.entries(&dir) else {
-                return if base.join(path).exists() {
+                return if self.exists(&fspath::combine(base, path)) {
                     Lookup::Exists { corrected: None }
                 } else {
                     Lookup::Missing
@@ -362,13 +373,13 @@ impl Finder {
                 return Lookup::Missing;
             };
             wrong_case |= found != part;
-            dir.push(&found);
+            dir = fspath::combine(&dir, &found);
             corrected.push(found);
         }
         let exists = if path.ends_with('/') {
-            dir.is_dir()
+            self.fs.directory_exists(&fspath::normalize(&dir))
         } else {
-            dir.exists()
+            self.exists(&dir)
         };
         if !exists {
             return Lookup::Missing;
@@ -443,8 +454,12 @@ impl Rule for NoMissingLocalResource {
         let range =
             value_start.map(|s| Span::new(s + lead as u32, s + lead as u32 + text.len() as u32));
         let report_span = range.unwrap_or(span);
-        let base_dir = Path::new(path).parent().unwrap_or(Path::new(""));
-        match Finder::default().lookup(base_dir, &local.path) {
+        let base_dir = fspath::directory_of(&fspath::normalize_slashes(path)).to_owned();
+        let mut finder = Finder {
+            fs: cx.file.modules().fs(),
+            dirs: FxHashMap::default(),
+        };
+        match finder.lookup(&base_dir, &local.path) {
             Lookup::Missing => {
                 cx.report(report_span, format!("Resource `{text}` does not exist."))
                     .id("missing");
