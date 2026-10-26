@@ -271,7 +271,17 @@ are cached by content hash. Change `cache_id` when output for the same input can
   expression as written (`vite: packages/vite/src/node/plugins/html.ts`, `htmlEnvHook`).
 - **Glob imports are expanded after the transform cache** (in `prepare_script`), so a new or
   deleted file matching a module's patterns (`Shared::glob_watches`) re-prepares that module
-  and propagates like an edit. Aliases in patterns go through the plugin `resolveId` (pre).
+  and propagates like an edit. Before it, a template `import(`./dir/${x}.js`)` in app code
+  (not plugin modules or `node_modules`) becomes a glob lookup through the
+  `__variableDynamicImportRuntimeHelper` served at `/@id/__x00__vite/dynamic-import-helper.js`
+  (`dynamic_import_vars.rs`; `vite: packages/vite/src/node/plugins/dynamicImportVars.ts`,
+  with `@rollup/plugin-dynamic-import-vars`'s rules: the static parts become a `*` glob,
+  `?query` suffixes are kept, a lone `${x}` or one without a directory is left alone). Then
+  the **late stage** (`Stage::Late`: `enforce: 'post'` and `order: 'post'` `transform` hooks)
+  runs on the expanded code, so those hooks see globs and template imports already rewritten,
+  as Vite's user post plugins run after its glob and dynamic-import-vars plugins. The late
+  stage is outside the transform cache, so it runs on every prepare; its watch files and maps
+  join the module's like the other stages'. JSON runs it after the post stage; CSS never does. Aliases in patterns go through the plugin `resolveId` (pre).
   The rules taken from Vite (`vite: packages/vite/src/node/plugins/importMetaGlob.ts`):
   keys are relative only when every pattern starts with `.` or `!` and there is no `base`,
   otherwise root-absolute; glob characters in the importer's (or base's) directory names are
@@ -529,9 +539,7 @@ wrapper ~0.6, browser ~2.4).
 - No `parse<T>` validator expansion here (`ts_r_dev` wraps the transform). React Fast Refresh
   and Vite config/plugin loading live in `ts_r_dev`. Plugin seam gaps: filtered `load` hooks
   aren't called for plain script, CSS, JSON or asset files; JSON and asset modules' watch
-  files aren't tracked; no `emitFile`; `import.meta.glob` is expanded (and template
-  `import()` resolved) after the cached transform, so post `transform` hooks don't see the
-  expansion (glob-import's "visible to post transform plugins"); plugin source maps
+  files aren't tracked; no `emitFile`; plugin source maps
   are composed but asset/JSON modules carry no map; middlewares run only for requests no built-in route serves (and non-GET
   requests), with buffered bodies (no streaming/SSE); the dependency scan resolves through `resolveId` and aliases but doesn't look
   through plugin modules (their bare imports are found on request: re-batch + reload).
@@ -541,9 +549,8 @@ wrapper ~0.6, browser ~2.4).
 - Dep scan: only `<script type="module" src>` in `index.html` (no inline module scripts, no
   multi-page `build.rollupOptions.input`); imports behind non-literal `import(expr)` are found
   only on request (re-batch + reload).
-- Non-literal dynamic `import(expr)` only gets `?import` at run time (bare specifiers in it
-  fail; Vite's `import.meta.glob` expansion of `` `./${x}.js` `` isn't done, the browser
-  resolves it relative to the module); an HTML
+- Non-literal dynamic `import(expr)` that isn't a template with a relative or aliased head
+  only gets `?import` at run time (bare specifiers in it fail); an HTML
   change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app
   (source) CSS, preprocessor `@import`s (`.scss`, ...) aren't handled, and CSS modules ignore
   `css.modules` options (`generateScopedName`, `localsConvention`, ...). Dependency CSS isn't watched (only linked packages).

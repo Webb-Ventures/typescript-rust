@@ -107,6 +107,21 @@ pub struct ModuleScan {
     /// (the text between the backtick and the first `${`), unless a `@vite-ignore` comment
     /// precedes it. The server resolves an aliased head (`@/`, `#sub/`).
     pub template_heads: Vec<(u32, u32)>,
+    /// `` import(`./dir/${name}.js`) ``: dynamic imports whose only argument is a template
+    /// literal with substitutions, unless a `@vite-ignore` comment precedes it. The server
+    /// turns the relative ones into `import.meta.glob` calls, as Vite does
+    /// ([`crate::dynamic_import_vars`]).
+    pub template_imports: Vec<TemplateImport>,
+}
+
+/// One `` import(`...${x}...`) `` call: `start..end` is the whole call (from `import` to
+/// after `)`), `template_start..template_end` the template literal with its backticks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TemplateImport {
+    pub start: u32,
+    pub end: u32,
+    pub template_start: u32,
+    pub template_end: u32,
 }
 
 /// Whether a dynamic import of the template text `raw` asks for a file the server only
@@ -345,6 +360,17 @@ impl Scanner<'_> {
                         .any(|w| w == b"@vite-ignore");
                     if !ignored && let Some(end) = self.template_head_end(q + 1) {
                         self.out.template_heads.push((q as u32 + 1, end as u32));
+                        if let Some(close) = self.template_end(q)
+                            && let r = self.skip_trivia(close)
+                            && self.peek(r) == b')'
+                        {
+                            self.out.template_imports.push(TemplateImport {
+                                start: (after - 6) as u32,
+                                end: r as u32 + 1,
+                                template_start: q as u32,
+                                template_end: close as u32,
+                            });
+                        }
                     }
                     if let Some(end) = self.template_end(q)
                         && needs_import_query(&self.src[q + 1..end - 1])
@@ -1359,6 +1385,28 @@ const o = { import: 1 };
             .map(|&(s, e)| &code[s as usize..e as usize])
             .collect();
         assert_eq!(heads, vec!["@/", "./"]);
+    }
+
+    #[test]
+    fn template_dynamic_imports() {
+        let code = "import(`./a/${x}.js`); import( `../b/${y}.js?raw` ); import(/* @vite-ignore */ `./c/${z}.js`); import(`./d.js`); import(`./e/${v}.js`, {}); import(`./f/${w}.js` + s)";
+        let found: Vec<(&str, &str)> = scan(code)
+            .template_imports
+            .iter()
+            .map(|t| {
+                (
+                    &code[t.start as usize..t.end as usize],
+                    &code[t.template_start as usize..t.template_end as usize],
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                ("import(`./a/${x}.js`)", "`./a/${x}.js`"),
+                ("import( `../b/${y}.js?raw` )", "`../b/${y}.js?raw`"),
+            ]
+        );
     }
 
     #[test]

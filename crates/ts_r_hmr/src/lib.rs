@@ -25,6 +25,7 @@ pub mod css;
 pub mod css_modules;
 pub mod css_refs;
 pub mod deps;
+pub mod dynamic_import_vars;
 pub mod env;
 pub mod glob;
 pub mod graph;

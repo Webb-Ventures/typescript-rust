@@ -9,7 +9,8 @@
 //! | `resolveId` ([`Stage::Post`]) | for specifiers the built-in resolver couldn't resolve |
 //! | `load` | plugin modules: ids a plugin resolved (virtual modules), ids with a query the server doesn't know (`icon.svg?react`) and imports of files that are neither scripts, CSS, JSON nor known assets (`.md`, `.yaml`) |
 //! | `transform` ([`Stage::Pre`]) | on the source, before the built-in TS/JSX transform |
-//! | `transform` ([`Stage::Post`]) | on the JS the built-in transform produced |
+//! | `transform` ([`Stage::Post`]) | on the JS the built-in transform produced (normal-order hooks of plugins without `enforce`) |
+//! | `transform` ([`Stage::Late`]) | `enforce: 'post'` plugins and `order: 'post'` hooks: after the server expanded `import.meta.glob` and variable dynamic imports, uncached (the expansion changes with the files it matches) |
 //! | `transformIndexHtml` | every served HTML page, before the client is injected |
 //! | `handleHotUpdate` | every changed file, before the graph sees it |
 //! | `configureServer` middlewares | requests no built-in route serves (before the SPA fallback), and every non-GET request |
@@ -23,11 +24,13 @@ use std::sync::Arc;
 
 use crate::http::{Request, Response};
 
-/// Which side of the built-in step a hook group runs on.
+/// Which side of the built-in step a hook group runs on. `resolveId` has only `Pre` and
+/// `Post`; `transform` also has `Late`, after the glob and variable-import expansion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Stage {
     Pre,
     Post,
+    Late,
 }
 
 impl Stage {
@@ -35,6 +38,7 @@ impl Stage {
         match self {
             Stage::Pre => "pre",
             Stage::Post => "post",
+            Stage::Late => "late",
         }
     }
 }
@@ -50,6 +54,8 @@ pub struct PluginHooks {
     pub load_files: bool,
     pub transform_pre: bool,
     pub transform_post: bool,
+    /// `transform` hooks of the [`Stage::Late`] group exist.
+    pub transform_late: bool,
     pub index_html: bool,
     pub hot_update: bool,
     pub middleware: bool,
@@ -59,11 +65,11 @@ pub struct PluginHooks {
 impl PluginHooks {
     /// Whether plugin modules exist at all (something can load or transform them).
     pub fn modules(&self) -> bool {
-        self.load || self.transform_pre || self.transform_post
+        self.load || self.transforms()
     }
 
     pub fn transforms(&self) -> bool {
-        self.transform_pre || self.transform_post
+        self.transform_pre || self.transform_post || self.transform_late
     }
 }
 

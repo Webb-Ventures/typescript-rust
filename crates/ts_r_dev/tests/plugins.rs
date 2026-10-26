@@ -417,6 +417,64 @@ export default {
     assert!(v.contains(r#"export const post = "js";"#), "{v}");
 }
 
+/// `enforce: 'post'` plugins and `order: 'post'` hooks see `import.meta.glob` and variable
+/// dynamic imports expanded (Vite runs them after those steps); normal-order hooks see them
+/// as written. The variable import's helper module is served.
+#[test]
+fn late_transform_hooks_see_expanded_globs() {
+    if !node_available() {
+        eprintln!("skipping: node not found (set TS_R_NODE)");
+        return;
+    }
+    let app = TempDir::new("plugins-late");
+    let cache = TempDir::new("plugins-late-cache");
+    app.write("index.html", "<!doctype html><body>hi</body>\n");
+    app.write(
+        "vite.config.mjs",
+        r#"const mark = (name, extra) => ({
+  name,
+  ...extra,
+  transform: {
+    ...(extra.order ? { order: extra.order } : {}),
+    handler(code, id) {
+      if (!id.endsWith('/main.js')) return
+      const seen = code.includes('import.meta.glob') ? 'raw' : code.includes('__variableDynamicImportRuntimeHelper') ? 'expanded' : 'none'
+      return code + `\nexport const ${name} = '${seen}'`
+    },
+  },
+})
+export default {
+  plugins: [mark('normal', {}), mark('enforced', { enforce: 'post' }), mark('ordered', { order: 'post' }), mark('early', { enforce: 'pre', order: 'post' })],
+}
+"#,
+    );
+    app.write(
+        "src/main.js",
+        "const name = 'a'\nexport const globbed = import.meta.glob('./dir/*.js')\nexport const loaded = import(`./dir/${name}.js`)\n",
+    );
+    app.write("src/dir/a.js", "export default 'a'\n");
+    app.write("src/dir/b.js", "export default 'b'\n");
+    let dev = DevProcess::start(app.path(), cache.path(), &[]);
+    let addr = dev.addr.parse().unwrap();
+    let (status, _, main) = http_get(addr, "/src/main.js", &[]);
+    assert_eq!(status, 200, "{main}");
+    assert!(main.contains("export const normal = 'raw'"), "{main}");
+    assert!(
+        main.contains("export const enforced = 'expanded'"),
+        "{main}"
+    );
+    assert!(main.contains("export const ordered = 'expanded'"), "{main}");
+    assert!(main.contains("export const early = 'expanded'"), "{main}");
+    assert!(main.contains("/src/dir/a.js"), "{main}");
+    assert!(main.contains("`./dir/${name}.js`, 3)"), "{main}");
+    let (status, _, helper) = http_get(addr, "/@id/__x00__vite/dynamic-import-helper.js", &[]);
+    assert_eq!(status, 200, "{helper}");
+    assert!(
+        helper.contains("Unknown variable dynamic import: "),
+        "{helper}"
+    );
+}
+
 /// An ES module `vite.config.js` in a `"type": "commonjs"` package loads (Vite bundles it;
 /// the sidecar retries it as `.mjs`), and `this.addWatchFile` in an unfiltered `load` hook and
 /// in `transform` makes editing those files run the module's hooks again.

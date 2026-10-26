@@ -104,6 +104,12 @@ function sorted(plugins, name) {
 const stageOf = (h) =>
   h.order === 'pre' || (h.order !== 'post' && h.plugin.enforce === 'pre') ? 'pre' : 'post'
 
+// `transform` has a third side: Vite runs `enforce: 'post'` plugins and `order: 'post'` hooks
+// after its dynamic-import-vars and `import.meta.glob` steps, so they see those expanded
+// ('late', which ts-r-dev runs after its own expansion).
+const transformStageOf = (h) =>
+  h.order === 'post' || (h.order !== 'pre' && h.plugin.enforce === 'post') ? 'late' : stageOf(h)
+
 function globToRegExp(glob) {
   let re = ''
   for (let i = 0; i < glob.length; i++) {
@@ -368,12 +374,11 @@ async function opTransform({ stage, moduleId, code }) {
   let changed = false
   const maps = []
   // A stylesheet's post stage runs on CSS: only the normal-order hooks, which Vite runs
-  // between its CSS compile and the step that wraps the CSS in JS.
+  // between its CSS compile and the step that wraps the CSS in JS (late hooks never see it).
   const css = stage === 'post' && guessModuleType(moduleId.split('?')[0]) === 'css'
   const options = { ssr: false, moduleType: (stage === 'pre' || css ? guessModuleType(moduleId) : null) ?? 'js' }
   for (const h of sorted(active, 'transform')) {
-    if (stageOf(h) !== stage || !h.test(moduleId, code, options.moduleType)) continue
-    if (css && (h.order === 'post' || h.plugin.enforce === 'post')) continue
+    if (transformStageOf(h) !== stage || !h.test(moduleId, code, options.moduleType)) continue
     let r
     try {
       r = await h.fn.call(context(h.plugin, sink), code, moduleId, options)
@@ -966,7 +971,7 @@ async function start() {
   await flush()
   const stages = (name) => new Set(sorted(active, name).map(stageOf))
   const resolveStages = stages('resolveId')
-  const transformStages = stages('transform')
+  const transformStages = new Set(sorted(active, 'transform').map(transformStageOf))
   const watching = ['change', 'add', 'unlink', 'all'].some((e) => watcher.listenerCount(e) > 0)
   const dev = devOptions()
   const jsx = config.oxc?.jsx ?? {}
@@ -985,6 +990,7 @@ async function start() {
       load_files: sorted(active, 'load').some((h) => !h.filter),
       transform_pre: transformStages.has('pre'),
       transform_post: transformStages.has('post'),
+      transform_late: transformStages.has('late'),
       index_html: sorted(active, 'transformIndexHtml').length > 0,
       hot_update: sorted(active, 'handleHotUpdate').length + sorted(active, 'hotUpdate').length > 0 || watching,
       middleware: stack.length > 0,
