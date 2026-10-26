@@ -195,14 +195,15 @@ pub(super) fn references(
         return Vec::new();
     }
     // Text that needs no escape appears in the source as written wherever a literal holds
-    // it; other text may be written with escapes, so every file's literals are read.
+    // it unescaped; other text, and any file with a backslash, has its literals read.
     let plain = text
         .bytes()
         .all(|b| (b' '..=b'~').contains(&b) && !matches!(b, b'\\' | b'"' | b'\'' | b'`' | b'$'));
     let mut out = Vec::new();
     for &f in files {
         let src = c.file(f).text.as_str();
-        if plain && !src.contains(text.as_str()) {
+        // A file with a backslash may write the text with escapes (`"\u006fne"`).
+        if plain && !src.contains(text.as_str()) && !src.contains('\\') {
             continue;
         }
         let ast = c.ast(f);

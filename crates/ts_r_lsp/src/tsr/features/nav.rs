@@ -1654,7 +1654,9 @@ pub fn rename(
                 if !super::string_refs::renamable(ck, Loc::new(cx.file, lit)) {
                     return Ok(Value::Null);
                 }
-                false
+                // Every reference is a literal's text (`"this"` included), never the
+                // `this` keyword a class rename leaves alone.
+                true
             } else {
                 // A name in a doc comment path renames its declaration.
                 let Some((_, _, s)) = super::doc_links::at(ck, cx.file, offset) else {

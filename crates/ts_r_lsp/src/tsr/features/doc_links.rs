@@ -73,7 +73,9 @@ pub(super) fn links_in(c: &Checker<'_>, f: FileId) -> Vec<Link> {
     let text = c.file(f).text.as_str();
     let b = text.as_bytes();
     let mut out = Vec::new();
-    for cm in &ast.comments {
+    // Built at the first link: one walk of the file for all its comments.
+    let mut hosts: Option<super::jsdoc_items::DocHosts> = None;
+    for (i, cm) in ast.comments.iter().enumerate() {
         if cm.kind != CommentKind::Block {
             continue;
         }
@@ -119,8 +121,11 @@ pub(super) fn links_in(c: &Checker<'_>, f: FileId) -> Vec<Link> {
                 continue;
             }
             p = segs.last().map_or(p, |&(_, e)| e as usize);
-            let host =
-                *host.get_or_insert_with(|| super::jsdoc_items::documented(ast, b, cm.span.end));
+            let host = *host.get_or_insert_with(|| {
+                hosts
+                    .get_or_insert_with(|| super::jsdoc_items::DocHosts::new(ast, b))
+                    .host(ast, i)
+            });
             out.push(Link { host, segs });
         }
     }

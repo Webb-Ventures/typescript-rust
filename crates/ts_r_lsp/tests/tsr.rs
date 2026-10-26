@@ -1687,12 +1687,15 @@ fn completion_awaited_members_import_keywords_and_import_types() {
                 type A = import(\"./m.js\").NS.;\n\
                 type B = typeof import(\"./m.js\").NS.;\n\
                 import {} \n";
+    let bodies = "async function g(p: Promise<string>, ok: boolean) {\n  if (ok) p.\n}\n\
+                  async function h(p: Promise<string>) {\n  const x = 1\n  p.\n}\n";
     let env = Env::new(
         "complete-await-import",
         &[
             ("tsconfig.json", TSCONFIG),
             ("src/m.ts", m),
             ("src/c.ts", text),
+            ("src/d.ts", bodies),
         ],
     );
     let mut c = env.lsp("w1");
@@ -1703,6 +1706,16 @@ fn completion_awaited_members_import_keywords_and_import_types() {
     assert!(items.iter().any(|i| i["label"] == "then"), "{r}");
     let trim = items.iter().find(|i| i["label"] == "trim").expect("trim");
     assert_eq!(trim["insertText"], "(await p).trim");
+    // The body of an `if` gets no `;` (it would end the body); a statement after one
+    // without a `;` does.
+    env.open(&mut c, "src/d.ts");
+    let ud = env.uri("src/d.ts");
+    for (line, ch, want) in [(1, 12, "(await p).trim"), (5, 4, ";(await p).trim")] {
+        let r = result(&mut c, "textDocument/completion", at(&ud, line, ch));
+        let items = r["items"].as_array().cloned().unwrap_or_default();
+        let trim = items.iter().find(|i| i["label"] == "trim").expect("trim");
+        assert_eq!(trim["insertText"], want, "{line}:{ch}");
+    }
     let labels = |r: &Value| -> Vec<String> {
         r["items"]
             .as_array()
@@ -3227,6 +3240,8 @@ const STRING_REFS: &str = "type Options = \"one\" | \"two\";
 let o: Options = \"one\";
 const d: \"one\" = \"one\";
 var x = \"plain\";
+type T = \"this\";
+let t: T = \"this\";
 ";
 
 #[test]
@@ -3236,7 +3251,11 @@ fn references_and_rename_of_string_literal_types() {
     }
     let env = Env::new(
         "navstrings",
-        &[("tsconfig.json", TSCONFIG), ("src/s.ts", STRING_REFS)],
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/s.ts", STRING_REFS),
+            ("src/e.ts", "const e: \"\\u006fne\" = \"\\u006fne\";\n"),
+        ],
     );
     let mut c = env.lsp("w1");
     env.open(&mut c, "src/s.ts");
@@ -3266,7 +3285,10 @@ fn references_and_rename_of_string_literal_types() {
     };
     // Literals of the same union type, not the `"one"` of another type.
     assert_eq!(refs(&mut c, 0, 16), vec![(0, 16), (1, 18)]);
-    assert_eq!(refs(&mut c, 2, 18), vec![(2, 10), (2, 18)]);
+    // The `"one"` type's literals here and, written with escapes, in e.ts (its line 0).
+    let mut one = refs(&mut c, 2, 18);
+    one.sort();
+    assert_eq!(one, vec![(0, 10), (0, 23), (2, 10), (2, 18)]);
     // A literal without a contextual type is found alone.
     assert_eq!(refs(&mut c, 3, 9), vec![(3, 9)]);
     let rename = |c: &mut ScriptedClient, line: u32, ch: u32| -> Value {
@@ -3287,6 +3309,38 @@ fn references_and_rename_of_string_literal_types() {
     assert_eq!(lines, vec![0, 1], "{e}");
     // A plain string is no literal type: nothing to rename.
     assert!(rename(&mut c, 3, 9).is_null());
+    // Literals written with escapes are read by their value, in any file.
+    env.open(&mut c, "src/e.ts");
+    let ue = env.uri("src/e.ts");
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": ue}, "position": {"line": 0, "character": 10},
+               "context": {"includeDeclaration": true}}),
+    );
+    let mut got: Vec<(bool, u64, u64)> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            let s = &l["range"]["start"];
+            (
+                l["uri"].as_str().unwrap().ends_with("e.ts"),
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(false, 2, 10), (false, 2, 18), (true, 0, 10), (true, 0, 23)],
+        "{r}"
+    );
+    // A literal whose text is `this` is renamed like any other.
+    let e = rename(&mut c, 5, 12);
+    let n = e["changes"][u.as_str()].as_array().map_or(0, Vec::len);
+    assert_eq!(n, 2, "{e}");
     c.shutdown();
 }
 

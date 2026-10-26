@@ -1014,13 +1014,27 @@ fn awaited_member_items(
         start = ast.span(p).start;
         outer = p;
     }
-    // `;` when the expression starts a statement right after a line without one.
+    // `;` when the expression starts a statement of a statement list right after a
+    // statement without one. A statement that is the body of `if`, `while`, a label, ...
+    // follows its head (`if (ok) |`), which needs no separator: a `;` there would end the
+    // body.
     let starts_statement = parents.parent(outer).is_some_and(|p| {
-        matches!(ast.node(p), Node::ExprStmt { .. }) && ast.span(p).start == start
+        matches!(ast.node(p), Node::ExprStmt { .. })
+            && ast.span(p).start == start
+            && parents.parent(p).is_some_and(|list| {
+                matches!(
+                    ast.node(list),
+                    Node::Program { .. }
+                        | Node::Block { .. }
+                        | Node::ModuleBlock { .. }
+                        | Node::StaticBlock { .. }
+                        | Node::SwitchCase { .. }
+                )
+            })
     });
     let semi = starts_statement
         && super::position::token_before(ast, text, start)
-            .is_some_and(|(_, t)| !matches!(t, ";" | "{" | "}"));
+            .is_some_and(|(_, t)| !matches!(t, ";" | "{" | "}" | ":"));
     let lines = LspLines::new(text);
     let range = lines.range(text, start, offset);
     props

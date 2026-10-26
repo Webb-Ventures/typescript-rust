@@ -380,6 +380,61 @@ fn documented_params(text: &str, body: usize, end: usize, skip: usize) -> Vec<St
     out
 }
 
+/// [`documented`] for every comment of a file at once: built in one walk of the tree and
+/// one pass over the comments, so asking for each of many comments stays linear.
+pub(super) struct DocHosts {
+    /// The outermost non-empty node starting at each offset, by offset.
+    starts: Vec<(u32, NodeId)>,
+    /// For each comment, where the first token after it (and the comments right after it)
+    /// starts.
+    next_code: Vec<u32>,
+}
+
+impl DocHosts {
+    pub(super) fn new(ast: &Ast, b: &[u8]) -> DocHosts {
+        struct V(Vec<(u32, NodeId)>, NodeId);
+        impl ts_r_ast::visit::Visitor for V {
+            fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
+                let s = ast.span(id);
+                if id != self.1 && s.end > s.start {
+                    self.0.push((s.start, id));
+                }
+                ts_r_ast::visit::Walk::Continue
+            }
+        }
+        let mut v = V(Vec::new(), ast.root);
+        ts_r_ast::visit::walk(ast, ast.root, &mut v);
+        let mut starts = v.0;
+        // A parent is entered before its children: a stable sort keeps the outermost first.
+        starts.sort_by_key(|&(s, _)| s);
+        starts.dedup_by_key(|&mut (s, _)| s);
+        let n = ast.comments.len();
+        let mut next_code = vec![0u32; n];
+        for i in (0..n).rev() {
+            let mut p = ast.comments[i].span.end as usize;
+            while p < b.len() && b[p].is_ascii_whitespace() {
+                p += 1;
+            }
+            next_code[i] = match ast.comments.get(i + 1) {
+                Some(cm) if cm.span.start as usize == p => next_code[i + 1],
+                _ => p as u32,
+            };
+        }
+        DocHosts { starts, next_code }
+    }
+
+    /// The node comment `i` documents (see [`documented`]).
+    pub(super) fn host(&self, ast: &Ast, i: usize) -> NodeId {
+        let Some(&p) = self.next_code.get(i) else {
+            return ast.root;
+        };
+        match self.starts.binary_search_by_key(&p, |&(s, _)| s) {
+            Ok(k) => self.starts[k].1,
+            Err(_) => ast.root,
+        }
+    }
+}
+
 /// The node a comment ending at `end` documents: the outermost node starting at the first
 /// token after it (other comments skipped), else the file.
 pub(super) fn documented(ast: &Ast, b: &[u8], end: u32) -> NodeId {
@@ -464,4 +519,53 @@ fn function_params(ast: &Ast, host: NodeId) -> Option<Vec<String>> {
         };
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hosts_agree(src: &str) {
+        let ast = ts_r_parser::parse(src, ts_r_ast::SourceKind::Ts).ast;
+        let b = src.as_bytes();
+        let hosts = DocHosts::new(&ast, b);
+        for (i, cm) in ast.comments.iter().enumerate() {
+            assert_eq!(hosts.host(&ast, i), documented(&ast, b, cm.span.end), "{i}");
+        }
+    }
+
+    #[test]
+    fn doc_hosts_match_documented() {
+        hosts_agree(
+            "/** a */ /* b */\n// c\nexport function f(/** p */ x: number) {}\n\
+             class C {\n  /** m */ m() {}\n  /** n */\n  /** n2 */ n = 1;\n}\n/** end */",
+        );
+        hosts_agree("");
+        hosts_agree("/** only */");
+    }
+
+    /// Many declarations, each with a doc comment, and a long run of adjacent comments:
+    /// building the hosts is one walk and one pass, not a walk per comment.
+    #[test]
+    fn doc_hosts_are_linear() {
+        let mut src = String::new();
+        for i in 0..20_000 {
+            src.push_str(&format!("/** {{@link X}} */ const v{i} = 1;\n"));
+        }
+        for _ in 0..20_000 {
+            src.push_str("/** a */");
+        }
+        src.push_str("\nconst last = 1;\n");
+        let ast = ts_r_parser::parse(&src, ts_r_ast::SourceKind::Ts).ast;
+        let started = std::time::Instant::now();
+        let hosts = DocHosts::new(&ast, src.as_bytes());
+        let n = ast.comments.len();
+        let last = hosts.host(&ast, n - 1);
+        assert!(matches!(ast.node(last), Node::VarDecl { .. }));
+        assert_eq!(hosts.host(&ast, 20_000), last);
+        for i in 0..n {
+            let _ = hosts.host(&ast, i);
+        }
+        assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    }
 }
