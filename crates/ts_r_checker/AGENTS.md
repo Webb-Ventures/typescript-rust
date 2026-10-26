@@ -3013,6 +3013,17 @@ Files, by layer:
     the fixed indexes plus `keyof` the global `Array` (or `ReadonlyArray`) type. The
     generic `Array` type prints as `T[]`. Fixture:
     `tests/parity/thenables_tuples_and_pattern_defaults`.
+  - A `then` whose every signature declares a `this` that the thenable is not a subtype of
+    makes it no valid promise either: TS1320 is elaborated with TS2684. An async iterator's
+    `next()` returning an invalid thenable is TS1320 at the `yield*` or `for await` operand
+    (`IterNotes::invalid_thenable`; tsc: getPromisedTypeOfPromise, the async iteration
+    resolver). Fixture: `tests/parity/await_this_and_circular_vars`.
+  - A variable that `circular_annotations::is_circular_variable` accepts (the TS7022 kind)
+    is cached as `any` once its resolution is found circular. Otherwise a later resolution
+    would read the initializer's cached type (`var x = { [x]: 1 }` is no TS2464).
+  - Bodies the parser made up (zero width) get no TS2355, TS2366, TS7030 or TS2378. A
+    return type written `!T` or `T!` reports them over the `!` too. Only a class's first
+    `implements` clause is checked (tsc: ast/utilities.go GetHeritageClause).
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 

@@ -420,6 +420,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             else {
                 continue;
             };
+            if !self.is_first_implements_clause(Loc::new(l.file, h)) {
+                continue;
+            }
             for &t in ast.list(types) {
                 let tl = Loc::new(l.file, t);
                 let it = self.type_from_node(tl);

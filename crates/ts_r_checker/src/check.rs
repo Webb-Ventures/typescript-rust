@@ -980,6 +980,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                         &["next"],
                     );
                 }
+                if notes.invalid_thenable {
+                    self.error(
+                        at,
+                        dg::TYPE_OF_AWAIT_OPERAND_MUST_EITHER_BE_A_VALID_PROMISE_OR_MUST_NOT_CONTAIN_A_CALLA_1320,
+                        &[],
+                    );
+                }
                 if let Some(name) = notes.not_method {
                     self.error(
                         at,
@@ -2484,6 +2491,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let file = l.file;
         let ast = self.ast(file);
         let Some(body) = parts.body else { return };
+        // A parser-made zero-width body is no body (`{ get e, }`).
+        if ast.span(body).is_empty() {
+            return;
+        }
         let Some(Node::MethodDef {
             kind: ts_r_ast::MethodKind::Get,
             key,
@@ -2676,6 +2687,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         let file = l.file;
         let ast = self.ast(file);
         let Some(body) = parts.body else { return };
+        // A zero-width body is the parser's recovery for a missing `{` (tsc has none:
+        // typeGuardFunctionErrors, `(x): x is x is A {`).
+        if ast.span(body).is_empty() {
+            return;
+        }
         let target = if parts.flags.contains(ts_r_ast::FnFlags::ASYNC) {
             self.awaited_type(declared)
         } else {
@@ -2693,9 +2709,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let mut returns = Vec::new();
         crate::func::collect_returns(ast, body, &mut returns, 0);
+        // A return type written `!T` or `T!` (TS17019, TS17020) is reported over the `!`
+        // too (parseInvalidNonNullableTypes).
+        let rast = self.ast(rl.file);
+        let rspan = rast
+            .jsdoc_syntax
+            .iter()
+            .find(|j| j.ty == Some(rl.node))
+            .map_or_else(|| self.error_span_of(rl), |j| j.span);
         if target == TypeId::NEVER {
-            self.error(
-                rl,
+            self.error_span(
+                rl.file,
+                rspan,
                 dg::A_FUNCTION_RETURNING_NEVER_CANNOT_HAVE_A_REACHABLE_END_POINT_2534,
                 &[],
             );
@@ -2710,12 +2735,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.c.opts.no_implicit_returns && !self.exempt_from_implicit_returns(target);
         if returns.is_empty() {
             if unknown || !accepts_undefined || implicit_returns {
-                self.error(rl, dg::A_FUNCTION_WHOSE_DECLARED_TYPE_IS_NEITHER_UNDEFINED_VOID_NOR_ANY_MUST_RETURN_A_V_2355, &[]);
+                self.error_span(rl.file, rspan, dg::A_FUNCTION_WHOSE_DECLARED_TYPE_IS_NEITHER_UNDEFINED_VOID_NOR_ANY_MUST_RETURN_A_V_2355, &[]);
             }
         } else if self.c.opts.strict_null_checks && !accepts_undefined {
-            self.error(rl, dg::FUNCTION_LACKS_ENDING_RETURN_STATEMENT_AND_RETURN_TYPE_DOES_NOT_INCLUDE_UNDEFINE_2366, &[]);
+            self.error_span(rl.file, rspan, dg::FUNCTION_LACKS_ENDING_RETURN_STATEMENT_AND_RETURN_TYPE_DOES_NOT_INCLUDE_UNDEFINE_2366, &[]);
         } else if implicit_returns {
-            self.error(rl, dg::NOT_ALL_CODE_PATHS_RETURN_A_VALUE_7030, &[]);
+            self.error_span(
+                rl.file,
+                rspan,
+                dg::NOT_ALL_CODE_PATHS_RETURN_A_VALUE_7030,
+                &[],
+            );
         }
     }
 
@@ -3684,10 +3714,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .unwrap_or(f),
                 },
             };
-            self.error(
+            self.report_invalid_thenable(
                 at_node,
                 dg::THE_RETURN_TYPE_OF_AN_ASYNC_FUNCTION_MUST_EITHER_BE_A_VALID_PROMISE_OR_MUST_NOT_C_1058,
-                &[],
+                t,
             );
         }
         // A setter's `return` takes no value (tsc: checkReturnStatement).
@@ -4703,6 +4733,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     kind: HeritageKind::Implements,
                     types,
                 } => {
+                    // Only the first `implements` clause counts; a later one is TS1175 alone
+                    // (parserClassDeclaration2; tsc: ast/utilities.go GetHeritageClause).
+                    if !self.is_first_implements_clause(Loc::new(file, n)) {
+                        continue;
+                    }
                     for &t in ast.list(types) {
                         if let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(t) {
                             self.check_heritage_entity_name(
@@ -6931,6 +6966,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                 dg::A_CLASS_CANNOT_EXTEND_A_PRIMITIVE_TYPE_LIKE_0_CLASSES_CAN_ONLY_EXTEND_CONSTRUCTA_2863
             }
         })
+    }
+
+    /// Whether the `implements` clause `h` is its class's first (later ones are ignored).
+    pub(crate) fn is_first_implements_clause(&self, h: Loc) -> bool {
+        let ast = self.ast(h.file);
+        let Some(owner) = self.c.parent(h) else {
+            return true;
+        };
+        let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) =
+            *ast.node(owner.node)
+        else {
+            return true;
+        };
+        ast.list(heritage)
+            .iter()
+            .find(|&&c| {
+                matches!(
+                    ast.node(c),
+                    Node::HeritageClause {
+                        kind: HeritageKind::Implements,
+                        ..
+                    }
+                )
+            })
+            .is_none_or(|&c| c == h.node)
     }
 
     /// For a name that is a whole heritage clause entry: the clause kind, and whether the

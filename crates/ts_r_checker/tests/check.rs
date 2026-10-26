@@ -589,7 +589,7 @@ fn semantic_checks_run_through_syntax_errors() {
 #[test]
 fn checks_after_recovered_syntax() {
     let loose = "\"strict\": false, \"target\": \"es2022\"";
-    let cases: [(&str, &[&str]); 3] = [
+    let cases: [(&str, &[&str]); 4] = [
         // TS2410 only in a file that parsed cleanly (missingCloseParenStatements).
         (
             "var x = {};\nwith (x) { }\nlet y = ;\n",
@@ -617,6 +617,21 @@ fn checks_after_recovered_syntax() {
                 "3:10 TS2391: Function implementation is missing or not immediately following the declaration.",
                 "3:17 TS1128: Declaration or statement expected.",
                 "3:28 TS2391: Function implementation is missing or not immediately following the declaration.",
+            ],
+        ),
+        // No missing-return errors for bodies the parser made up (typeGuardFunctionErrors,
+        // objectLiteralShorthandPropertiesErrorFromNotUsingIdentifier); `!T` is reported
+        // from the `!` (parseInvalidNonNullableTypes); a second `implements` clause is
+        // not checked (parserClassDeclaration2).
+        (
+            "class A {}\nfunction g(x): x is x is A {\n    return true;\n}\nvar y = { get e, };\nfunction f8(): !string {}\nclass C implements A implements B {}\n",
+            &[
+                "2:21 TS2749: 'x' refers to a value, but is being used as a type here. Did you mean 'typeof x'?",
+                "2:23 TS1144: '{' or ';' expected.",
+                "2:23 TS2304: Cannot find name 'is'.",
+                "2:26 TS1434: Unexpected keyword or identifier.",
+                "5:16 TS1005: '(' expected.",
+                "6:16 TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.",
             ],
         ),
     ];
