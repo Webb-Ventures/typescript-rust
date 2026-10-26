@@ -324,6 +324,7 @@ mod unicorn_dom_node_dataset;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
+mod unicorn_expiring_todo_comments;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
 mod unicorn_filename_case;
@@ -454,7 +455,7 @@ mod unicorn_prefer_array_last_methods;
 mod unicorn_prefer_array_slice;
 mod unicorn_prefer_array_some;
 mod unicorn_prefer_at;
-mod unicorn_prefer_await;
+mod unicorn_prefer_bigint_literals;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_block_statement_over_iife;
 mod unicorn_prefer_boolean_return;
@@ -1111,6 +1112,8 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_filename_case::RULE,
     &unicorn_import_style::RULE,
     &unicorn_template_indent::RULE,
+    &unicorn_expiring_todo_comments::RULE,
+    &unicorn_prefer_bigint_literals::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

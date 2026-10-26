@@ -287,6 +287,7 @@ unicorn/dom-node-dataset 338/338
 unicorn/empty-brace-spaces 213/213
 unicorn/error-message 106/106
 unicorn/escape-case 198/198
+unicorn/expiring-todo-comments 97/97
 unicorn/explicit-length-check 224/224
 unicorn/explicit-timer-delay 60/60
 unicorn/filename-case 279/279
@@ -403,7 +404,7 @@ unicorn/prefer-array-last-methods 43/43
 unicorn/prefer-array-slice 61/61
 unicorn/prefer-array-some 377/377
 unicorn/prefer-at 482/482
-unicorn/prefer-await 109/110
+unicorn/prefer-bigint-literals 109/109
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-block-statement-over-iife 38/38
 unicorn/prefer-boolean-return 71/71
