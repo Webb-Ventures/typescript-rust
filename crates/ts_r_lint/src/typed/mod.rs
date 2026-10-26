@@ -381,8 +381,9 @@ pub(crate) fn lint_rules_for_test(code: &str, rules: &str) -> Option<FileResult>
 mod tests {
     use super::*;
 
-    /// A link diagnostic under `@ts-ignore` is not in the parity keys, as with tsc 7.0.2
-    /// (@colors/colors: the ignored `bold` member merged into the global `String`).
+    /// A link diagnostic's half under `@ts-ignore` is not in the parity keys, while its lib
+    /// file's half is, as with tsc 7.0.2 (@colors/colors: the ignored `bold` member merged
+    /// into the global `String`).
     #[test]
     fn ts_ignore_hides_link_diagnostics() {
         let Some(libs) = LibStore::locate() else {
@@ -407,7 +408,19 @@ mod tests {
         };
         let ignored = keys("    // @ts-ignore\n");
         assert!(ignored.keys().any(|k| k.contains("TS2322")), "{ignored:?}");
-        assert!(!ignored.keys().any(|k| k.contains("TS2300")), "{ignored:?}");
+        // tsc 7.0.2 drops the ignored half in a.ts but still reports the lib file's half.
+        assert!(
+            !ignored
+                .keys()
+                .any(|k| k.contains("a.ts") && k.contains("TS2300")),
+            "{ignored:?}"
+        );
+        assert!(
+            ignored
+                .keys()
+                .any(|k| k.contains("lib.es2015.core.d.ts") && k.contains("TS2300")),
+            "{ignored:?}"
+        );
         let reported = keys("");
         assert!(
             reported.keys().any(|k| k.contains("TS2300")),
