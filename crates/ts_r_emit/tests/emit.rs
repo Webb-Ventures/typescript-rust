@@ -801,3 +801,44 @@ fn dropped_aliases_release_their_imports() {
         "import * as ns from \"./a\";\nexport var V = ns.v;\n"
     );
 }
+
+/// JavaScript declarations are refused (TSR2006, the file's `.js` still written) when the
+/// file uses a pattern tsc declares from that the emitter does not write: CommonJS
+/// exports, `@typedef`, a `this` property a base class declares, a class's statics.
+#[test]
+fn javascript_declarations_refused_for_unwritten_patterns() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for src in [
+        "module.exports = { a: 1 };\n",
+        "exports.a = 1;\n",
+        "/** @typedef {{ a: number }} T */\n/** @param {T} t */\nexport function f(t) {}\n",
+        "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = 2; } }\n",
+        "export class C {}\nC.count = 1;\n",
+        "export class D { m() { this.v = this.v + 1; } }\n",
+        "export class E { constructor() { this[\"k\"] = 1; } }\n",
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert_eq!(
+            codes(&r),
+            vec![ts_r_emit::dts::TSR_JS_DECLARATIONS],
+            "{src}"
+        );
+        assert!(r.skipped, "{src}");
+        assert_eq!(paths(&r), vec!["/p/out/a.js"], "{src}");
+    }
+    // Patterns that declare nothing are written.
+    for src in [
+        "export function f() { this.x = 1; }\n",
+        "export class F { constructor() { this.constructor = 1; } }\n",
+        "const k = \"k\";\nexport class G { constructor() { this[k] = 1; } }\n",
+        "export class H { static m() {} }\nH.m.x = 1;\n",
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        assert_eq!(paths(&r), vec!["/p/out/a.js", "/p/out/a.d.ts"], "{src}");
+    }
+}

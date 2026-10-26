@@ -978,15 +978,20 @@ fn emit_declarations(ctx: &Ctx, opts: &dts::DtsOptions, i: usize, out: &mut File
     let Some(dts_path) = ctx.rules.dts_output(&f.path) else {
         return;
     };
-    if !f.kind.is_typescript() {
+    let js_refusal = if f.kind.is_typescript() {
+        None
+    } else {
+        dts::js::unsupported(ctx.resolver.checker(), FileId(i as u32))
+    };
+    if let Some((span, why)) = js_refusal {
         out.diagnostics.push(Diagnostic {
             code: dts::TSR_JS_DECLARATIONS,
             category: Category::Error,
             message: format!(
-                "Declaration emit for JavaScript files is not implemented yet (design record 0012); '{dts_path}' was not written."
+                "Declaration emit for this JavaScript file is not implemented yet: it uses {why} (design record 0012); '{dts_path}' was not written."
             ),
             file: FileId(i as u32),
-            span: Span::EMPTY,
+            span,
             related: Vec::new(),
         });
         out.skipped = true;

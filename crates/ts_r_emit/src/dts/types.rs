@@ -63,6 +63,9 @@ impl Emitter<'_, '_> {
 
     fn type_node_inner(&mut self, n: NodeId) {
         let node = *self.ast.node(n);
+        if self.ast.is_jsdoc(n) && !self.is_synth(n) && self.jsdoc_type(n, node) {
+            return;
+        }
         match node {
             Node::KeywordType { kind } => self.w(keyword(kind)),
             Node::TypeRef { name, type_args } => {
@@ -226,6 +229,7 @@ impl Emitter<'_, '_> {
                 // `readonly (readonly T[])`, `keyof (infer U extends C)`.
                 let paren = match *self.ast.node(ty) {
                     Node::TypeOperator { .. } => op == TypeOperatorKind::Readonly,
+                    Node::UnionType { .. } => self.is_jsdoc_nullable(ty),
                     Node::InferType { type_param } => matches!(
                         *self.ast.node(type_param),
                         Node::TypeParam {
@@ -434,13 +438,168 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// A JSDoc `?T` / `T?` (the parser's `T | null` whose `null` is the `?`).
+    fn is_jsdoc_nullable(&self, n: NodeId) -> bool {
+        if !self.ast.is_jsdoc(n) || self.is_synth(n) {
+            return false;
+        }
+        let Node::UnionType { types } = *self.ast.node(n) else {
+            return false;
+        };
+        let &[_, null] = self.ast.list(types) else {
+            return false;
+        };
+        matches!(self.ast.node(null), Node::KeywordType { kind: K::Null }) && self.raw(null) == "?"
+    }
+
+    /// Writes JSDoc type syntax as tsc 7 writes it in declarations (observed): a missing
+    /// type (`?` alone) is `any`, `T=` is `T | undefined`, `function` (also
+    /// `function(...)`) is `Function`, the JSDoc names `String`, `Number`, `Boolean`,
+    /// `BigInt`, `Void`, `Undefined`, `Null` are the primitives, `Object` is `any` without
+    /// `noImplicitAny` and `Object<K, V>` is `Record<K, V>`, `array` / `promise` are
+    /// `any[]` / `Promise<any>`, and a generic type written without its type arguments
+    /// gets `any` for each (`Array` is `any[]`). Returns false for other nodes.
+    fn jsdoc_type(&mut self, n: NodeId, node: Node) -> bool {
+        match node {
+            Node::Missing {} => {
+                self.w("any");
+                true
+            }
+            Node::OptionalType { ty } => {
+                let in_tuple = self
+                    .parents_of_jsdoc(n)
+                    .is_some_and(|p| matches!(self.ast.node(p), Node::TupleType { .. }));
+                if in_tuple {
+                    return false;
+                }
+                // (Also without strictNullChecks, observed.)
+                let start = self.out.len();
+                self.type_node(ty);
+                self.append_undefined(start);
+                true
+            }
+            Node::TypeRef { name, type_args } => {
+                let Node::Ident { name: atom } = *self.ast.node(name) else {
+                    return false;
+                };
+                let text = self.ast.atom(atom).to_owned();
+                let loc = self.loc(name);
+                let local = self.c.resolve_ident(loc, meaning::TYPE);
+                let global = |e: &Self, g: &str| e.c.global_symbol(g, meaning::TYPE);
+                if text == "function" {
+                    self.w("Function");
+                    return true;
+                }
+                let n_args = type_args.map_or(0, |ta| match *self.ast.node(ta) {
+                    Node::TypeArgs { args } => self.ast.list(args).len(),
+                    _ => 0,
+                });
+                let is_global = local.is_none() || local == global(self, &text);
+                let no_implicit_any = self.c.opts.no_implicit_any;
+                if is_global && n_args == 0 {
+                    let prim = match text.as_str() {
+                        "String" => Some("string"),
+                        "Number" => Some("number"),
+                        "Boolean" => Some("boolean"),
+                        "BigInt" => Some("bigint"),
+                        "Void" => Some("void"),
+                        "Undefined" => Some("undefined"),
+                        "Null" => Some("null"),
+                        "Object" if !no_implicit_any => Some("any"),
+                        "array" if !no_implicit_any => Some("any[]"),
+                        "promise" if !no_implicit_any => Some("Promise<any>"),
+                        _ => None,
+                    };
+                    if let Some(p) = prim {
+                        self.w(p);
+                        return true;
+                    }
+                }
+                if is_global && text == "Object" && n_args == 2 {
+                    self.w("Record");
+                    self.type_args(type_args);
+                    return true;
+                }
+                // Missing type arguments of a generic type: `any` each.
+                let Some(sym) = local else {
+                    return false;
+                };
+                let tps = self.ck.local_type_params(sym);
+                if tps.len() <= n_args {
+                    return false;
+                }
+                if tps
+                    .iter()
+                    .any(|&tp| self.ck.type_param_default(tp).is_some())
+                {
+                    self.fail(n, ts_r_checker::typenode::NotNameable::Unresolved);
+                    return true;
+                }
+                self.reference_entity(name, meaning::TYPE);
+                if text == "Array" && n_args == 0 && local == global(self, "Array") {
+                    self.w("any[]");
+                    return true;
+                }
+                self.entity_name(name);
+                self.w("<");
+                let mut first = true;
+                if let Some(ta) = type_args
+                    && let Node::TypeArgs { args } = *self.ast.node(ta)
+                {
+                    for a in self.ast.list(args).to_vec() {
+                        if !first {
+                            self.w(", ");
+                        }
+                        first = false;
+                        self.type_node(a);
+                    }
+                }
+                for _ in n_args..tps.len() {
+                    if !first {
+                        self.w(", ");
+                    }
+                    first = false;
+                    self.w("any");
+                }
+                self.w(">");
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// JSDoc `@param {T=} x`: the parameter's type `T` is followed by `=` in its tag (tsc
+    /// writes `x?: T | undefined`; `[x]` is `x?: T`).
+    fn is_jsdoc_optional_type(&self, t: NodeId) -> bool {
+        if !self.ast.is_jsdoc(t) || self.is_synth(t) {
+            return false;
+        }
+        let end = self.ast.span(t).end as usize;
+        self.src
+            .get(end..)
+            .and_then(|r| r.trim_start().chars().next())
+            == Some('=')
+    }
+
+    /// The parent of a source node.
+    fn parents_of_jsdoc(&self, n: NodeId) -> Option<NodeId> {
+        self.parents.parent(n)
+    }
+
     fn type_list(&mut self, types: NodeList, sep: &str) {
         let types = self.ast.list(types).to_vec();
         for (i, &t) in types.iter().enumerate() {
             if i > 0 {
                 self.w(sep);
             }
-            self.type_node(t);
+            // JSDoc `?T` in a union or intersection is written `(T | null)`.
+            if self.is_jsdoc_nullable(t) {
+                self.w("(");
+                self.type_node(t);
+                self.w(")");
+            } else {
+                self.type_node(t);
+            }
         }
     }
 
@@ -492,7 +651,8 @@ impl Emitter<'_, '_> {
     }
 
     fn ident_text(&mut self, n: NodeId) {
-        if self.is_synth(n) {
+        // Names JSDoc wrote (`@this` makes a `this` parameter) have the span of their tag.
+        if self.is_synth(n) || self.ast.is_jsdoc(n) {
             if let Node::Ident { name } = *self.ast.node(n) {
                 let t = self.ast.atom(name).to_owned();
                 self.w(&t);
@@ -645,8 +805,8 @@ impl Emitter<'_, '_> {
                 self.w("...");
             }
             self.binding_name(pattern);
-            let is_this =
-                matches!(self.ast.node(pattern), Node::Ident { .. }) && self.raw(pattern) == "this";
+            let is_this = matches!(*self.ast.node(pattern), Node::Ident { name } if self.ast.atom(name) == "this")
+                && (self.raw(pattern) == "this" || self.ast.is_jsdoc(pattern));
             let opt_by_init = init.is_some() && last_required.is_none_or(|l| l < i);
             if optional {
                 self.question(pattern);
@@ -663,9 +823,17 @@ impl Emitter<'_, '_> {
                     let start = self.out.len();
                     self.type_node(t);
                     // An optional parameter property is `T | undefined` as its property.
-                    let add_undefined =
-                        add_undefined || (optional && modifiers.intersects(PARAM_PROPERTY));
-                    if add_undefined && !self.is_synth(p) && !self.annotation_includes_undefined(t)
+                    let add_undefined = add_undefined
+                        || (optional && modifiers.intersects(PARAM_PROPERTY))
+                        || (optional && self.is_jsdoc_optional_type(t));
+                    // (A JSDoc type the checker reads as `any`, such as `Array` without
+                    // its type arguments, is still written with `| undefined`.)
+                    let jsdoc_any = self.ast.is_jsdoc(t)
+                        && !self.is_synth(t)
+                        && !matches!(&self.out[start..], "any" | "unknown");
+                    if add_undefined
+                        && !self.is_synth(p)
+                        && (jsdoc_any || !self.annotation_includes_undefined(t))
                     {
                         self.append_undefined(start);
                     }
