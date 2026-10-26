@@ -398,6 +398,7 @@ mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_unreadable_object_destructuring;
 mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_coercion;
@@ -550,6 +551,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_no_unreadable_object_destructuring::RULE,
     &unicorn_consistent_export_decorator_position::RULE,
     &unicorn_no_accessor_recursion::RULE,
     &unicorn_no_anonymous_default_export::RULE,
