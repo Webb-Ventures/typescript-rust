@@ -440,6 +440,7 @@ mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_loop_iterable_mutation;
 mod unicorn_no_magic_array_flat_depth;
+mod unicorn_no_manually_wrapped_comments;
 mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
 mod unicorn_no_named_default;
@@ -735,6 +736,7 @@ pub static ALL: &[&RuleDef] = &[
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
     &unicorn_iteration_fallback_style::RULE,
+    &unicorn_no_manually_wrapped_comments::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_no_unsafe_dom_html::RULE,
     &unicorn_prefer_import_meta_properties::RULE,
