@@ -317,6 +317,49 @@ impl Printer<'_> {
         }
     }
 
+    /// [`Layout::Tsc`]: the comments after the source token `tok` (the first one between
+    /// `from` and `to`) on its line trail it, as tsc writes a statement's keywords and
+    /// parentheses (`if /* c */ ( /* d */x) /* e */ {`).
+    fn token_trailing(&mut self, tok: &str, from: u32, to: u32) {
+        if !self.tsc || from >= to {
+            return;
+        }
+        if let Some(p) = self.token_between(from, to, tok) {
+            self.expr_trailing(p + tok.len() as u32);
+        }
+    }
+
+    /// [`Layout::Tsc`]: `kw (` of statement `id` whose head starts at `head` (the first node
+    /// inside the parentheses, or what follows them), with the comments after each token.
+    fn keyword_paren(&mut self, id: NodeId, kw: &str, head: Option<NodeId>) {
+        self.tok(kw);
+        let orig = self.tsc && !self.is_synthetic(id) && head.is_none_or(|h| !self.is_synthetic(h));
+        let start = self.span(id).start;
+        let to = head.map_or(start, |h| self.span(h).start);
+        if orig {
+            self.token_trailing(kw, start, to);
+        }
+        self.space();
+        self.tok("(");
+        if orig {
+            self.token_trailing("(", start + kw.len() as u32, to);
+        }
+    }
+
+    /// [`Layout::Tsc`]: `)` after the original node ending at `from`, before `to`, with the
+    /// comments after it on its line (`) /* c */ {`).
+    fn close_paren(&mut self, id: NodeId, from: Option<NodeId>, to: NodeId) {
+        self.tok(")");
+        if self.tsc
+            && !self.is_synthetic(id)
+            && !self.is_synthetic(to)
+            && from.is_none_or(|f| !self.is_synthetic(f))
+        {
+            let from = from.map_or(self.span(id).start, |f| self.span(f).end);
+            self.token_trailing(")", from, self.span(to).start);
+        }
+    }
+
     /// Before `catch` / `finally`: tsc puts them on a new line.
     fn space_or_newline(&mut self) {
         if self.tsc {
@@ -368,9 +411,7 @@ impl Printer<'_> {
                 self.semi();
             }
             Node::If { test, cons, alt } => {
-                self.tok("if");
-                self.space();
-                self.tok("(");
+                self.keyword_paren(id, "if", Some(test));
                 self.expr(test, Prec::Lowest);
                 // Comments before the `)` stay there (`a // ||\n    // b\n)`).
                 if self.tsc
@@ -381,7 +422,7 @@ impl Printer<'_> {
                 {
                     self.expr_leading(p);
                 }
-                self.tok(")");
+                self.close_paren(id, Some(test), cons);
                 // `if (a) if (b) x; else y` must keep the else on the inner if.
                 let wrap = alt.is_some() && self.ends_with_dangling_if(cons);
                 if wrap {
@@ -397,9 +438,13 @@ impl Printer<'_> {
                     self.embedded(cons);
                 }
                 if let Some(alt) = alt {
+                    let mut else_at = None;
                     if self.tsc {
                         // tsc: `}` and `else` on separate lines, the comments before `else`
-                        // in between.
+                        // in between (those on the `}` line trail it).
+                        if !self.is_synthetic(id) && !self.is_synthetic(cons) {
+                            self.expr_trailing(self.span(cons).end);
+                        }
                         self.newline();
                         if !self.is_synthetic(id)
                             && !self.is_synthetic(cons)
@@ -411,6 +456,7 @@ impl Printer<'_> {
                             )
                         {
                             self.expr_leading(p);
+                            else_at = Some(p);
                         }
                     } else if self.kind(cons) == NodeKind::Block || wrap {
                         self.space();
@@ -418,6 +464,9 @@ impl Printer<'_> {
                         self.newline();
                     }
                     self.tok("else");
+                    if let Some(p) = else_at {
+                        self.expr_trailing(p + 4);
+                    }
                     if self.kind(alt) == NodeKind::If {
                         self.hard_space();
                         self.statement(alt);
@@ -432,9 +481,8 @@ impl Printer<'_> {
                 update,
                 body,
             } => {
-                self.tok("for");
-                self.space();
-                self.tok("(");
+                let head = init.or(test).or(update).unwrap_or(body);
+                self.keyword_paren(id, "for", Some(head));
                 if let Some(init) = init {
                     let saved = self.no_in;
                     self.no_in = true;
@@ -462,13 +510,11 @@ impl Printer<'_> {
                     self.space();
                     self.expr(update, Prec::Lowest);
                 }
-                self.tok(")");
+                self.close_paren(id, update.or(test).or(init), body);
                 self.embedded(body);
             }
             Node::ForIn { left, right, body } => {
-                self.tok("for");
-                self.space();
-                self.tok("(");
+                self.keyword_paren(id, "for", Some(left));
                 self.for_head_left(left, false, false);
                 // An empty list (`for (let in x)`, error recovery) keeps the space after its
                 // keyword: tsc writes `let  in x`.
@@ -479,7 +525,7 @@ impl Printer<'_> {
                 self.tok("in");
                 self.hard_space();
                 self.expr(right, Prec::Lowest);
-                self.tok(")");
+                self.close_paren(id, Some(right), body);
                 self.embedded(body);
             }
             Node::ForOf {
@@ -488,31 +534,35 @@ impl Printer<'_> {
                 right,
                 body,
             } => {
-                self.tok("for");
                 if is_await {
+                    self.tok("for");
                     self.hard_space();
                     self.tok("await");
+                    self.space();
+                    self.tok("(");
+                } else {
+                    self.keyword_paren(id, "for", Some(left));
                 }
-                self.space();
-                self.tok("(");
                 self.for_head_left(left, true, is_await);
                 self.hard_space();
                 self.tok("of");
                 self.hard_space();
                 self.expr(right, Prec::Assign);
-                self.tok(")");
+                self.close_paren(id, Some(right), body);
                 self.embedded(body);
             }
             Node::While { test, body } => {
-                self.tok("while");
-                self.space();
-                self.tok("(");
+                self.keyword_paren(id, "while", Some(test));
                 self.expr(test, Prec::Lowest);
-                self.tok(")");
+                self.close_paren(id, Some(test), body);
                 self.embedded(body);
             }
             Node::DoWhile { body, test } => {
                 self.tok("do");
+                let orig = self.tsc && !self.is_synthetic(id) && !self.is_synthetic(body);
+                if orig && self.kind(body) == NodeKind::Block {
+                    self.token_trailing("do", self.span(id).start, self.span(body).start);
+                }
                 if self.tsc && self.kind(body) != NodeKind::Block {
                     // tsc: `do\n    x();\nwhile (y);`
                     self.indent();
@@ -523,6 +573,9 @@ impl Printer<'_> {
                 } else if self.kind(body) == NodeKind::Block {
                     self.space();
                     self.block(body);
+                    if orig {
+                        self.expr_trailing(self.span(body).end);
+                    }
                     self.space();
                 } else {
                     self.hard_space();
@@ -533,8 +586,18 @@ impl Printer<'_> {
                     self.newline();
                 }
                 self.tok("while");
-                self.space();
-                self.tok("(");
+                if orig && !self.is_synthetic(test) {
+                    let (from, to) = (self.span(body).end, self.span(test).start);
+                    self.token_trailing("while", from, to);
+                    self.space();
+                    self.tok("(");
+                    if let Some(p) = self.token_between(from, to, "while") {
+                        self.token_trailing("(", p + 5, to);
+                    }
+                } else {
+                    self.space();
+                    self.tok("(");
+                }
                 self.expr(test, Prec::Lowest);
                 self.tok(")");
                 self.semi();
@@ -560,14 +623,33 @@ impl Printer<'_> {
                     "continue"
                 });
                 if let Some(label) = label {
+                    let orig = self.tsc && !self.is_synthetic(id) && !self.is_synthetic(label);
+                    if orig {
+                        let kw = if matches!(n, Node::Break { .. }) {
+                            "break"
+                        } else {
+                            "continue"
+                        };
+                        self.token_trailing(kw, self.span(id).start, self.span(label).start);
+                    }
                     self.hard_space();
                     self.ident(label);
+                    if orig {
+                        self.expr_trailing(self.span(label).end);
+                    }
                 }
                 self.semi();
             }
             Node::Labeled { label, body } => {
                 self.ident(label);
+                let orig = self.tsc && !self.is_synthetic(label) && !self.is_synthetic(body);
+                if orig {
+                    self.expr_trailing(self.span(label).end);
+                }
                 self.tok(":");
+                if orig {
+                    self.token_trailing(":", self.span(label).end, self.span(body).start);
+                }
                 if self.kind(body) == NodeKind::Block {
                     self.space();
                     self.block(body);
@@ -577,11 +659,15 @@ impl Printer<'_> {
                 }
             }
             Node::Switch { disc, cases } => {
-                self.tok("switch");
-                self.space();
-                self.tok("(");
+                self.keyword_paren(id, "switch", Some(disc));
                 self.expr(disc, Prec::Lowest);
                 self.tok(")");
+                if self.tsc && !self.is_synthetic(id) && !self.is_synthetic(disc) {
+                    let from = self.span(disc).end;
+                    if let Some(p) = self.token_between(from, self.span(id).end, ")") {
+                        self.expr_trailing(p + 1);
+                    }
+                }
                 self.space();
                 let case_list = self.ast.list(cases).to_vec();
                 // tsc maps the case block's braces.
@@ -614,18 +700,30 @@ impl Printer<'_> {
                     if !self.is_synthetic(c) {
                         self.leading_comments(cspan.start);
                     }
-                    self.newline();
+                    // A block comment the clause follows on its line stays there.
+                    if !(self.tsc && self.after_inline_comment()) {
+                        self.newline();
+                    }
                     self.map_node(c);
                     self.map_start(c);
                     if let Node::SwitchCase { test, body } = self.node(c) {
                         match test {
                             Some(t) => {
                                 self.tok("case");
+                                if self.tsc && !self.is_synthetic(c) && !self.is_synthetic(t) {
+                                    self.token_trailing("case", cspan.start, self.span(t).start);
+                                }
                                 self.hard_space();
                                 self.expr(t, Prec::Lowest);
                                 self.tok(":");
                             }
-                            None => self.tok("default:"),
+                            None => {
+                                self.tok("default");
+                                if self.tsc && !self.is_synthetic(c) {
+                                    self.token_trailing("default", cspan.start, cspan.end);
+                                }
+                                self.tok(":");
+                            }
                         }
                         let stmts = self.ast.list(body).to_vec();
                         if self.tsc && !self.is_synthetic(c) {
@@ -670,8 +768,17 @@ impl Printer<'_> {
                 finalizer,
             } => {
                 self.tok("try");
+                let orig = self.tsc && !self.is_synthetic(id) && !self.is_synthetic(block);
+                if orig {
+                    self.token_trailing("try", self.span(id).start, self.span(block).start);
+                }
                 self.space();
                 self.block(block);
+                // Comments after a block's `}` on its line trail it (`} /* c */\ncatch`).
+                let mut prev = orig.then(|| self.span(block).end);
+                if let Some(p) = prev {
+                    self.expr_trailing(p);
+                }
                 if let Some(h) = handler
                     && let Node::CatchClause {
                         param,
@@ -683,22 +790,45 @@ impl Printer<'_> {
                     self.map_node(h);
                     self.map_start(h);
                     self.tok("catch");
+                    let orig = orig && !self.is_synthetic(h) && !self.is_synthetic(body);
+                    let hs = self.span(h).start;
+                    if orig {
+                        let to = param.map_or(self.span(body).start, |p| self.span(p).start);
+                        self.token_trailing("catch", hs, to);
+                    }
                     if let Some(p) = param {
                         self.space();
                         self.tok("(");
+                        let orig = orig && !self.is_synthetic(p);
+                        if orig {
+                            self.token_trailing("(", hs + 5, self.span(p).start);
+                        }
                         self.pattern(p);
                         if let Some(t) = type_ann {
                             self.type_annotation(t);
                         }
                         self.tok(")");
+                        if orig {
+                            let from = type_ann.map_or(self.span(p).end, |t| self.span(t).end);
+                            self.token_trailing(")", from, self.span(body).start);
+                        }
                     }
                     self.space();
                     self.block(body);
+                    prev = orig.then(|| self.span(body).end);
+                    if let Some(p) = prev {
+                        self.expr_trailing(p);
+                    }
                     self.map_end(h);
                 }
                 if let Some(f) = finalizer {
                     self.space_or_newline();
                     self.tok("finally");
+                    if let Some(p) = prev
+                        && !self.is_synthetic(f)
+                    {
+                        self.token_trailing("finally", p, self.span(f).start);
+                    }
                     self.space();
                     self.block(f);
                 }
@@ -708,11 +838,9 @@ impl Printer<'_> {
                 self.semi();
             }
             Node::With { obj, body } => {
-                self.tok("with");
-                self.space();
-                self.tok("(");
+                self.keyword_paren(id, "with", Some(obj));
                 self.expr(obj, Prec::Lowest);
-                self.tok(")");
+                self.close_paren(id, Some(obj), body);
                 self.embedded(body);
             }
             Node::VarDecl { .. } => self.var_decl(id, true),

@@ -268,3 +268,10 @@ fn decorator_metadata_rules() {
 fn moved_comments() {
     check("moved_comments");
 }
+
+/// Comments after a statement's keywords, `(`, `)` and blocks' `}` trail them on their line
+/// (`if /* c */ ( /* d */x) /* e */ {`), as tsc writes those tokens.
+#[test]
+fn statement_comments() {
+    check("statement_comments");
+}
