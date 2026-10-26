@@ -309,6 +309,7 @@ mod unicorn_ast;
 mod unicorn_catch_error_name;
 mod unicorn_conditions;
 mod unicorn_consistent_assert;
+mod unicorn_consistent_boolean_name;
 mod unicorn_consistent_class_member_order;
 mod unicorn_consistent_compound_words;
 mod unicorn_consistent_date_clone;
@@ -1127,6 +1128,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_compound_words::RULE,
     &unicorn_prefer_single_replace::RULE,
     &unicorn_name_replacements::RULE,
+    &unicorn_consistent_boolean_name::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
