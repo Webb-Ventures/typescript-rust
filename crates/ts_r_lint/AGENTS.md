@@ -961,3 +961,14 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   `known_non_collection_length` and `has_shape_property_check` with
   `explicit-length-check`. The compared value goes through `static_value_control_flow`,
   so a `let` reassigned before the comparison is not a constant.
+- **`globalThis` members** (`no-unnecessary-global-this`, from `unicorn:
+  rules/no-unnecessary-global-this.js`). The name must be an available global
+  (`Ctx::global_available`: configured or `/* global */`, not shadowed) and not a reserved
+  word. A computed key is evaluated without looking up names (literals, plain templates,
+  `+`), as `getPropertyName` does with no scope. Existence checks (logical operands,
+  `== null`/`=== undefined`, boolean contexts) are kept: a bare missing global throws.
+- **Trim before a prefix test** (`no-unnecessary-string-trim`, from `unicorn:
+  rules/no-unnecessary-string-trim.js`). The search string's whitespace test uses
+  JavaScript's `\s` set (`unicorn_ast::is_js_space`), not Rust's `char::is_whitespace`.
+  zod's `z.string()` is recognised by its import: a runtime `{z}` (or `{"z" as x}`) or
+  namespace import from `"zod"` exactly.
