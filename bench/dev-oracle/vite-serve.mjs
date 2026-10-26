@@ -2,8 +2,19 @@
 // merged under the test defaults: polling watcher, VITE_INLINE=inline-serve) on a fixed
 // port, and prints `Local: <url>` once listening. Usage: node vite-serve.mjs <root> <port>
 // [config]: a variant spec's `vite.config-<variant>.js` instead of the root's config.
+// Vite is imported from TS_R_BENCH_MODULES (run.mjs's `--modules`), else bench/node_modules.
 
-import { createServer, createLogger, loadConfigFromFile, mergeConfig } from 'vite'
+import fs from 'node:fs'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const modules = process.env.TS_R_BENCH_MODULES ?? path.resolve(import.meta.dirname, '../node_modules')
+const vitePkg = path.join(modules, 'vite')
+const exp = JSON.parse(fs.readFileSync(path.join(vitePkg, 'package.json'), 'utf8')).exports?.['.']
+const entry = typeof exp === 'string' ? exp : (exp?.import?.default ?? exp?.import ?? exp?.default)
+const { createServer, createLogger, loadConfigFromFile, mergeConfig } = await import(
+  typeof entry === 'string' ? pathToFileURL(path.join(vitePkg, entry)).href : 'vite'
+)
 
 const [root, port, configFile] = process.argv.slice(2)
 process.env.VITE_INLINE = 'inline-serve'
