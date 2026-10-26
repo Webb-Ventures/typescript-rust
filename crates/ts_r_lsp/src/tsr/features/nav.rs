@@ -544,6 +544,12 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
     else {
         return Vec::new();
     };
+    if scope == Scope::Project {
+        let files: Vec<FileId> = project_files(cx).collect();
+        if let Some(refs) = super::constructor_refs::constructor_references(cx, ck, &files, n) {
+            return refs;
+        }
+    }
     let Some(target) = Target::at(ck, Loc::new(cx.file, n)) else {
         return Vec::new();
     };

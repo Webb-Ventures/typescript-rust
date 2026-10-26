@@ -1862,6 +1862,41 @@ fn completion_definition_locations_and_unclosed_scopes() {
     c.shutdown();
 }
 
+/// At the start of an enum member's name the token before decides: after `,` nothing, but
+/// a JSDoc comment in between lifts that (tsc reads a token inside the comment).
+#[test]
+fn completion_at_enum_member_start_after_jsdoc() {
+    if !libs_present() {
+        return;
+    }
+    let (src, marks) = marked(
+        "enum Colors {\n    /** blue */\n    ¦Cornflower,\n    ¦Pink\n}\nvar x = Colors.Pink;\n",
+    );
+    let env = Env::new(
+        "complete-enum-jsdoc",
+        &[("tsconfig.json", TSCONFIG), ("src/e.ts", src.as_str())],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/e.ts");
+    let u = env.uri("src/e.ts");
+    let after_doc = result(
+        &mut c,
+        "textDocument/completion",
+        at(&u, marks[0].0, marks[0].1),
+    );
+    assert!(
+        completion_labels(&after_doc).iter().any(|l| l == "Colors"),
+        "{after_doc}"
+    );
+    let after_comma = result(
+        &mut c,
+        "textDocument/completion",
+        at(&u, marks[1].0, marks[1].1),
+    );
+    assert!(completion_labels(&after_comma).is_empty(), "{after_comma}");
+    c.shutdown();
+}
+
 /// A CommonJS JavaScript file has `module` and `exports` in scope.
 #[test]
 fn completion_commonjs_locals() {
@@ -2174,6 +2209,48 @@ fn references_through_optional_objects() {
     };
     // The declaration, both accesses and the outer destructuring key; not the inner key.
     assert_eq!(refs(1, 5), vec![(1, 4), (4, 2), (4, 8), (5, 13)]);
+    c.shutdown();
+}
+
+/// References on a `constructor` keyword: its overloads, `new` of the class and of derived
+/// classes without their own constructor, `new this()` in static members and `super(...)`
+/// in derived constructors; not a variable holding the class or a class that implements it.
+#[test]
+fn references_on_a_constructor() {
+    if !libs_present() {
+        return;
+    }
+    let (src, marks) = marked(
+        "class A {\n    ¦constructor(s: string);\n    ¦constructor(s?: string) {}\n    static f() { return new ¦this(\"\"); }\n}\nclass B extends A {}\nclass C extends B {\n    constructor() { ¦super(\"\"); }\n}\nclass E implements A {\n    constructor() {}\n}\nnew ¦A(\"a\");\nnew ¦B(\"b\");\nnew C();\nconst D = A;\nnew D(\"d\");\n",
+    );
+    let env = Env::new(
+        "refs-constructor",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", src.as_str())],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let u = env.uri("src/c.ts");
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": u}, "position": {"line": marks[0].0, "character": marks[0].1},
+               "context": {"includeDeclaration": true}}),
+    );
+    let mut got: Vec<(u32, u32)> = r
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|l| {
+                    (
+                        l["range"]["start"]["line"].as_u64().unwrap() as u32,
+                        l["range"]["start"]["character"].as_u64().unwrap() as u32,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    got.sort();
+    assert_eq!(got, marks);
     c.shutdown();
 }
 

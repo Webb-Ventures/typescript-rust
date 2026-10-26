@@ -670,7 +670,7 @@ fn members(d: &Doc<'_>, n: NodeId) -> Vec<NodeId> {
 }
 
 /// `constructor` keywords of the class's constructors.
-fn constructors(d: &Doc<'_>, ctor: NodeId) -> Vec<(u32, u32)> {
+pub fn constructors(d: &Doc<'_>, ctor: NodeId) -> Vec<(u32, u32)> {
     let Some(class) = d.parent(ctor) else {
         return Vec::new();
     };

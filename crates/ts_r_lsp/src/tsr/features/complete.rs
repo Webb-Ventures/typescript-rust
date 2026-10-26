@@ -256,7 +256,7 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
         return (Context::None, prefix);
     }
     // A name being written (`var |`, `function f(|`, `import * as |`): nothing, or keywords.
-    match super::definitions::definition_spot(c, file, word_node, ws) {
+    match super::definitions::definition_spot(c, file, word_node, ws, ws < offset) {
         Some(super::definitions::Spot::Nothing) => return (Context::None, prefix),
         Some(super::definitions::Spot::Keywords(k)) => return (Context::Keywords(k), prefix),
         None => {}

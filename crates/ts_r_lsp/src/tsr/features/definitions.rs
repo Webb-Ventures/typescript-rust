@@ -16,6 +16,8 @@
 //!   modifiers. After a parameter's name with no comma yet: nothing.
 //! - After `catch (`, in an enum body after `{` or `,`, in an array binding pattern after
 //!   `[` or `,`: nothing.
+//! - A JSDoc comment between the token and the cursor lifts all of this (tsc reads a token
+//!   inside the comment).
 //! - `import |`, `import type |`, `import * as |`, `{ a as | }` in an import or export, and
 //!   `import { | }` with no module after it: nothing.
 
@@ -38,18 +40,24 @@ pub enum Spot {
     Keywords(&'static [&'static str]),
 }
 
-/// Whether the word starting at `word` (empty or not) is a name being declared.
+/// Whether the word starting at `word` (empty or not) is a name being declared. `typed`: the
+/// cursor is past the word's start (at the start of an existing name, the token before the
+/// name decides, as for an empty word).
 pub fn definition_spot(
     c: &Checker<'_>,
     file: FileId,
     word_node: NodeId,
     word: u32,
+    typed: bool,
 ) -> Option<Spot> {
     let ast = c.ast(file);
     let text = c.file(file).text.as_str();
     let parents = c.file(file).parents();
     // A word already typed: the node it is.
-    if matches!(ast.node(word_node), Node::Ident { .. }) && ast.span(word_node).start == word {
+    if typed
+        && matches!(ast.node(word_node), Node::Ident { .. })
+        && ast.span(word_node).start == word
+    {
         let p = parents.parent(word_node)?;
         return match *ast.node(p) {
             Node::ImportDefaultSpecifier { local }
@@ -82,6 +90,14 @@ pub fn definition_spot(
         };
     }
     let (tok_at, tok) = token_before(ast, text, word)?;
+    // A JSDoc comment right before the cursor is what tsc reads as the token before it, and
+    // that blocks nothing (observed: `{ /** doc */ |Name` in an enum gets the list).
+    if text
+        .get(tok_at as usize + tok.len()..word as usize)
+        .is_some_and(|between| between.contains("/**"))
+    {
+        return None;
+    }
     let holder = node_covering(ast, tok_at)?;
     let before = token_before(ast, text, tok_at).map(|(_, t)| t);
     match tok {

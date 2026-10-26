@@ -5,6 +5,7 @@
 pub mod actions;
 mod class_items;
 mod complete;
+mod constructor_refs;
 mod definitions;
 mod expected;
 mod hover;
