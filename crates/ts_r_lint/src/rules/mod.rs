@@ -281,6 +281,10 @@ mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
 mod unicorn_catch_error_name;
+mod unicorn_consistent_date_clone;
+mod unicorn_consistent_function_scoping;
+mod unicorn_consistent_template_literal_escape;
+mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
@@ -651,6 +655,10 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_check_values::RULE,
     // eslint-plugin-unicorn
     &unicorn_catch_error_name::RULE,
+    &unicorn_consistent_date_clone::RULE,
+    &unicorn_consistent_function_scoping::RULE,
+    &unicorn_consistent_template_literal_escape::RULE,
+    &unicorn_consistent_tuple_labels::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_error_message::RULE,
     &unicorn_escape_case::RULE,

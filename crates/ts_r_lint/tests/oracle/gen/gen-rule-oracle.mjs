@@ -367,6 +367,7 @@ function observe(ruleId, isTs, testerConfig, c) {
         ...(unicornPlugin ? { unicorn: unicornPlugin } : {}),
       },
       languageOptions,
+      linterOptions: { reportUnusedDisableDirectives: 'off' },
       settings: c.settings || {},
       rules: { [ruleId]: ['error', ...c.options] },
     },
