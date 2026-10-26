@@ -1805,6 +1805,14 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   by equality, `switch` or `[...].includes`/`indexOf`/`lastIndexOf`/`new Set([...]).has`
   with a scheme-like static string not in `lowercase:` form; fixed inside the quotes unless
   another `case` already has that protocol.
+- **no-incorrect-query-selector**: `qsa(...)[0]`/`.at(0)`/`.item(0)` (first-match, fixed),
+  `querySelectorAll("#id")` (id-selector), a `querySelectorAll()` result or `const` used as a
+  control-flow test (length-check, sharing explicit-length-check's `boolean_ancestor` and
+  `is_control_flow_test`), and nullish comparisons of both queries.
+- **no-unsafe-buffer-conversion**: `new <TypedArray>(v.buffer...)`, `Buffer.from(v.buffer...)`
+  (prefer-spread's `is_buffer_reference`) and `v.buffer.slice(...)` without the view's
+  `byteOffset`/`byteLength` (or with a known wrong one); no type information, so every
+  view counts. The suggestion needs no `?.`, no comment and a side-effect-free view.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1822,4 +1830,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
 `no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`, `no-invalid-integrity.js`, `prefer-scoped-selector.js`,
 `prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`,
-`no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`.
+`no-url-in-search-params.js`, `no-invalid-url-protocol-comparison.js`,
+`no-incorrect-query-selector.js`, `no-unsafe-buffer-conversion.js`, `shared/buffer-reference.js`.

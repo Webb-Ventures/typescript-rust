@@ -380,7 +380,7 @@ mod unicorn_no_for_loop;
 mod unicorn_no_global_object_property_assignment;
 mod unicorn_no_immediate_mutation;
 mod unicorn_no_impossible_length_comparison;
-mod unicorn_no_incomplete_accessor_override;
+mod unicorn_no_incorrect_query_selector;
 mod unicorn_no_incorrect_template_string_interpolation;
 mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
@@ -442,6 +442,7 @@ mod unicorn_no_unnecessary_string_trim;
 mod unicorn_no_unreadable_array_destructuring;
 mod unicorn_no_unreadable_for_of_expression;
 mod unicorn_no_unreadable_iife;
+mod unicorn_no_unsafe_buffer_conversion;
 mod unicorn_no_unsafe_sqlite_interpolation;
 mod unicorn_no_unsafe_string_replacement;
 mod unicorn_no_url_in_search_params;
@@ -1012,7 +1013,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_error_property_assignment::RULE,
     &unicorn_no_exports_in_scripts::RULE,
     &unicorn_no_global_object_property_assignment::RULE,
-    &unicorn_no_immediate_mutation::RULE,
+    &unicorn_no_incorrect_query_selector::RULE,
     &unicorn_no_ineffective_csp_directives::RULE,
     &unicorn_no_empty_file::RULE,
     &unicorn_no_for_each::RULE,
@@ -1072,6 +1073,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_unnecessary_string_trim::RULE,
     &unicorn_no_unreadable_for_of_expression::RULE,
     &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_unsafe_buffer_conversion::RULE,
     &unicorn_no_unsafe_sqlite_interpolation::RULE,
     &unicorn_no_unsafe_string_replacement::RULE,
     &unicorn_no_url_in_search_params::RULE,

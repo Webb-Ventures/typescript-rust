@@ -443,7 +443,7 @@ fn buffer_import(cx: &Ctx<'_, '_>, id: NodeId) -> Option<Decl> {
     matches!(ast.atom(value), "buffer" | "node:buffer").then_some(*decl)
 }
 
-fn is_buffer_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_buffer_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let ast = cx.ast();
     let id = unwrap_ts(ast, id);
     match *ast.node(id) {

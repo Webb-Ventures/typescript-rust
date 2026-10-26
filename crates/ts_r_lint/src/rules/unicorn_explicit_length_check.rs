@@ -194,7 +194,7 @@ fn is_boolean_call_argument(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
 
 /// `getBooleanAncestor`: the outermost `!` / `Boolean()` around `node`, and whether an odd
 /// number of `!` was crossed.
-fn boolean_ancestor(cx: &Ctx<'_, '_>, mut node: NodeId) -> (NodeId, bool) {
+pub(crate) fn boolean_ancestor(cx: &Ctx<'_, '_>, mut node: NodeId) -> (NodeId, bool) {
     let mut negative = false;
     for _ in 0..10_000 {
         if is_not_argument(cx, node) {
@@ -227,7 +227,7 @@ fn is_boolean_expression(cx: &Ctx<'_, '_>, node: NodeId, depth: u32) -> bool {
     }
 }
 
-fn is_control_flow_test(cx: &Ctx<'_, '_>, node: NodeId, depth: u32) -> bool {
+pub(crate) fn is_control_flow_test(cx: &Ctx<'_, '_>, node: NodeId, depth: u32) -> bool {
     if depth > 1000 {
         return false;
     }
