@@ -302,6 +302,7 @@ mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_canvas_to_image;
+mod unicorn_no_confusing_array_with;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
 mod unicorn_no_document_cookie;
@@ -312,6 +313,7 @@ mod unicorn_no_ineffective_csp_directives;
 mod unicorn_no_instanceof_builtins;
 mod unicorn_no_invalid_fetch_options;
 mod unicorn_no_invalid_remove_event_listener;
+mod unicorn_no_late_current_target_access;
 mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_magic_array_flat_depth;
@@ -323,6 +325,7 @@ mod unicorn_no_new_array;
 mod unicorn_no_null;
 mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_this_assignment;
+mod unicorn_no_this_outside_of_class;
 mod unicorn_no_transition_all;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_undeclared_class_members;
@@ -348,6 +351,7 @@ mod unicorn_prefer_array_last_methods;
 mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_event_target;
+mod unicorn_prefer_flat_math_min_max;
 mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_identifier_import_export_specifiers;
@@ -706,6 +710,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_canvas_to_image::RULE,
+    &unicorn_no_confusing_array_with::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
     &unicorn_no_document_cookie::RULE,
@@ -718,6 +723,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
+    &unicorn_no_late_current_target_access::RULE,
     &unicorn_no_leading_empty_lines::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_magic_array_flat_depth::RULE,
@@ -729,6 +735,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_null::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
     &unicorn_no_this_assignment::RULE,
+    &unicorn_no_this_outside_of_class::RULE,
     &unicorn_no_transition_all::RULE,
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_undeclared_class_members::RULE,
@@ -756,6 +763,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_at::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_event_target::RULE,
+    &unicorn_prefer_flat_math_min_max::RULE,
     &unicorn_prefer_global_number_constants::RULE,
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,

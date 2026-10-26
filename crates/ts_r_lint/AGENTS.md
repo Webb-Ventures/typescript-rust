@@ -652,8 +652,9 @@ their output, not translated.
 
 `no-asterisk-prefix-in-documentation-comments`, `no-canvas-to-image`, `no-transition-all`,
 `no-ineffective-csp-directives`, `prefer-array-last-methods`, `prefer-then-catch`,
-`prefer-object-destructuring-defaults`, `no-undeclared-class-members` (each at 100% of its
-oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
+`prefer-object-destructuring-defaults`, `no-undeclared-class-members`,
+`prefer-flat-math-min-max`, `no-this-outside-of-class`, `no-confusing-array-with`,
+`no-late-current-target-access` (each at 100% of its oracle). Helpers these rules share are in `rules/unicorn_util_h2.rs`: `skip_awaits`, `direct_or_single_use_const` (an expression, or
 the initialiser of the plain `const` it names when that is declared once before the use and
 read only there; the declaration's initialising write is one of its two references) and
 `decode_jsx_entities` (JSX attribute strings with `&#45;`, `&#x2D;` and the HTML 4 names
@@ -724,13 +725,42 @@ template chunks and JSX text blanked; a tab when the winner is not spaces or the
   `<indent>x;` at the start of the line of the first member or the comment just before it,
   unless that is the `{` line; the indent is the whitespace before the first member, or the
   class line's indent plus `indent_unit`.
+- **prefer-flat-math-min-max** reports the outermost plain `Math.min(...)`/`Math.max(...)`
+  (`Math` an identifier, parentheses transparent) with an argument that is the same method's
+  call, and not itself an argument of one. The fix writes the callee text (without its
+  parentheses) and every argument of the flattened nest with its parentheses, and spaces a
+  glued keyword (`return(Math.max)(...)`); a comment outside the callee and the kept
+  arguments cancels it.
+- **no-this-outside-of-class** walks up from `this` past arrows: the first non-arrow function
+  decides (a class method's value, or a function with a `this` parameter, is allowed); before
+  that, a static block or a class field's value allows it. Object-literal `MethodDef`s are
+  functions here, so their `this` is reported. `this` named by a `typeof` type query
+  (through qualified names) is skipped.
+- **no-confusing-array-with** reports `.with` of a plain `x.with(i, ...)` with a non-spread
+  first argument that is a number literal under any `+`/`-` signs and TS wrappers whose
+  truncation is negative (`negative-index`), or `x.length` of the same reference
+  (`length-index`), unless `should_skip_known_non_array_receiver` says the receiver isn't an
+  array.
+- **no-late-current-target-access** checks `<name>.currentTarget` (object an identifier
+  through TS wrappers; `e`, `event`, `evt` or `[a-z][A-Za-z0-9]*Event`) whose binding has a
+  parameter declaration, unless the type guesser says it is not an event (an `EVENT`
+  `Checker` with the DOM event interfaces and React's event names, definitions preferred).
+  Inside a function nested in the declaring one it is `in-nested-function`; in the handler
+  itself it is `after-suspension` when an `await`, `yield` or `for await` of the handler
+  (not of nested functions) ends before the access starts (ESLint marks them on exit), or
+  when the access is in a loop part that repeats (`for` test/update/body, `for-in`/`for-of`
+  except the iterated expression, `while`, `do`) and that loop contains a suspension point.
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/`:
 `no-asterisk-prefix-in-documentation-comments.js`, `no-canvas-to-image.js`,
 `no-transition-all.js`, `no-ineffective-csp-directives.js`, `prefer-array-last-methods.js`,
 `prefer-then-catch.js`, `fix/remove-method-call.js`, `fix/replace-member-expression-property.js`,
 `fix/remove-argument.js`, `prefer-object-destructuring-defaults.js`,
-`no-undeclared-class-members.js`, `shared/class-this.js`, `utils/get-line-start.js`,
+`no-undeclared-class-members.js`, `shared/class-this.js`, `prefer-flat-math-min-max.js`,
+`no-this-outside-of-class.js`, `ast/is-in-type-query.js`, `no-confusing-array-with.js`,
+`utils/numeric.js`, `utils/comparison.js`, `no-late-current-target-access.js`,
+`shared/late-event-handler.js`, `utils/is-event.js`, `utils/contains-suspension-point.js`,
+`utils/get-enclosing-function.js`, `utils/get-line-start.js`,
 `utils/reindent-text.js`, `utils/types.js`, `utils/comments.js`, `utils/get-references.js`,
 `utils/get-indent-string.js`, `utils/get-indent-unit.js`, `utils/get-line-indent.js`;
 @eslint-community/eslint-utils 4.10.1 `hasSideEffect`; detect-indent 7.0.2 `index.js`. The JSX entity names are the HTML 4 list plus `apos` (what espree's

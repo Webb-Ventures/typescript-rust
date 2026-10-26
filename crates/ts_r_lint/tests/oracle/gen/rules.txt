@@ -308,3 +308,7 @@ unicorn/prefer-array-last-methods
 unicorn/prefer-then-catch
 unicorn/prefer-object-destructuring-defaults
 unicorn/no-undeclared-class-members
+unicorn/prefer-flat-math-min-max
+unicorn/no-this-outside-of-class
+unicorn/no-confusing-array-with
+unicorn/no-late-current-target-access

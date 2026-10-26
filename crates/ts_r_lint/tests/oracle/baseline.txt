@@ -291,6 +291,7 @@ unicorn/no-async-promise-finally 39/39
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-canvas-to-image 41/41
+unicorn/no-confusing-array-with 49/49
 unicorn/no-console-spaces 86/86
 unicorn/no-constant-zero-expression 52/52
 unicorn/no-document-cookie 21/21
@@ -301,6 +302,7 @@ unicorn/no-ineffective-csp-directives 40/40
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-fetch-options 70/70
 unicorn/no-invalid-remove-event-listener 42/42
+unicorn/no-late-current-target-access 49/49
 unicorn/no-leading-empty-lines 28/28
 unicorn/no-lonely-if 20/20
 unicorn/no-magic-array-flat-depth 27/27
@@ -312,6 +314,7 @@ unicorn/no-new-array 111/111
 unicorn/no-null 94/94
 unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-this-assignment 23/23
+unicorn/no-this-outside-of-class 48/48
 unicorn/no-transition-all 41/41
 unicorn/no-typeof-undefined 100/100
 unicorn/no-undeclared-class-members 46/46
@@ -337,6 +340,7 @@ unicorn/prefer-array-last-methods 43/43
 unicorn/prefer-blob-reading-methods 12/12
 unicorn/prefer-date-now 61/61
 unicorn/prefer-event-target 46/46
+unicorn/prefer-flat-math-min-max 47/47
 unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
 unicorn/prefer-identifier-import-export-specifiers 56/56
