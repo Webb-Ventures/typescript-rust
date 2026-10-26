@@ -206,6 +206,21 @@ pub struct ParsedJson {
     pub root: Option<Value>,
     /// Syntax diagnostics, anchored in `file`.
     pub diagnostics: Vec<ConfigDiagnostic>,
+    /// Spans of the TS1328 diagnostics that a BigInt value (`123n`) got on its own.
+    bigint_values: Vec<(u32, u32)>,
+}
+
+impl ParsedJson {
+    /// The diagnostics except the TS1328 that each BigInt value (`[123n]`) gets. tsc reports
+    /// a BigInt as a value JSON can't hold (as any expression); the bundler names it the way
+    /// esbuild does (`Unexpected "123n" in JSON`) and finds it itself, so it reads the other
+    /// errors from here. A BigInt inside a larger expression (`1n + 2`) is part of that
+    /// expression's TS1328, which stays.
+    pub fn errors_except_bigints(&self) -> impl Iterator<Item = &ConfigDiagnostic> {
+        self.diagnostics.iter().filter(|d| {
+            !(d.code == 1328 && d.span.is_some_and(|s| self.bigint_values.contains(&s)))
+        })
+    }
 }
 
 /// How deep values, operators and parentheses may nest before the parser stops descending
@@ -324,7 +339,8 @@ struct Parser<'a> {
     /// Conversion errors (TS1327, TS1328, TS1136 for a non-JSON tree): not deduplicated
     /// against parse errors. Dropped again when the value they are in turns out to be part of
     /// a larger expression, which is reported once as a whole.
-    conv: Vec<ConfigDiagnostic>,
+    /// Each with whether it is the TS1328 of a BigInt value on its own.
+    conv: Vec<(ConfigDiagnostic, bool)>,
     // current token
     tok: Tok,
     tok_start: usize,
@@ -424,11 +440,21 @@ fn is_ident_part(c: char) -> bool {
 impl<'a> Parser<'a> {
     fn finish(self, root: Option<Value>) -> ParsedJson {
         let mut diagnostics = self.diags;
-        diagnostics.extend(self.conv);
+        let bigint_values = self
+            .conv
+            .iter()
+            .filter(|(_, bigint)| *bigint)
+            .filter_map(|(d, _)| d.span)
+            .collect();
+        diagnostics.extend(self.conv.into_iter().map(|(d, _)| d));
         // Stable: parse errors before conversion errors at the same position.
         diagnostics.sort_by_key(|d| d.span.map(|s| s.0));
         diagnostics.dedup();
-        ParsedJson { root, diagnostics }
+        ParsedJson {
+            root,
+            diagnostics,
+            bigint_values,
+        }
     }
 
     fn error_at(&mut self, start: usize, end: usize, code: u32, msg: &str) {
@@ -463,8 +489,10 @@ impl<'a> Parser<'a> {
     }
 
     fn conv_at(&mut self, start: u32, end: u32, code: u32, msg: &str) {
-        self.conv
-            .push(ConfigDiagnostic::at(code, msg, self.file, (start, end)));
+        self.conv.push((
+            ConfigDiagnostic::at(code, msg, self.file, (start, end)),
+            false,
+        ));
     }
 
     fn char_at(&self, pos: usize) -> Option<char> {
@@ -1284,7 +1312,13 @@ impl<'a> Parser<'a> {
                 full_start,
             };
         }
-        self.invalid_from(start, full_start, mark)
+        // `-123n` is still a BigInt value on its own (for [`ParsedJson::errors_except_bigints`]).
+        let negative_bigint = op == "-" && self.conv.len() == mark + 1 && self.conv[mark].1;
+        let v = self.invalid_from(start, full_start, mark);
+        if negative_bigint && let Some(last) = self.conv.last_mut() {
+            last.1 = true;
+        }
+        v
     }
 
     fn parse_postfix(&mut self) -> Value {
@@ -1380,7 +1414,15 @@ impl<'a> Parser<'a> {
             Tok::Ident { name, .. } if name == "true" => literal(self, ValueKind::Bool(true)),
             Tok::Ident { name, .. } if name == "false" => literal(self, ValueKind::Bool(false)),
             Tok::Ident { name, .. } if name == "null" => literal(self, ValueKind::Null),
-            Tok::Num { .. } | Tok::Ident { .. } | Tok::Template => {
+            Tok::Num { bigint: true, .. } => {
+                self.next();
+                let v = self.invalid_from(start, full_start, mark);
+                if let Some(last) = self.conv.last_mut() {
+                    last.1 = true;
+                }
+                v
+            }
+            Tok::Ident { .. } | Tok::Template => {
                 self.next();
                 self.invalid_from(start, full_start, mark)
             }
@@ -1834,6 +1876,33 @@ mod tests {
         assert_eq!(at(r#"{"a": 1x}"#), [(1351, 7), (1136, 7)]);
         // A lone `#` is an invalid character that still names a key.
         assert_eq!(at("{ # }"), [(1127, 2), (1327, 2), (1005, 4), (1328, 4)]);
+    }
+
+    #[test]
+    fn bigint_values_can_be_told_apart() {
+        let codes = |src: &str| -> (Vec<u32>, Vec<u32>) {
+            let p = parse(src, "d.json");
+            (
+                p.diagnostics.iter().map(|d| d.code).collect(),
+                p.errors_except_bigints().map(|d| d.code).collect(),
+            )
+        };
+        // tsc's TS1328 stays in `diagnostics`; only it is left out of the other errors.
+        assert_eq!(
+            codes(r#"{ "ok": "12n", "bad": [123n] }"#),
+            (vec![1328], vec![])
+        );
+        assert_eq!(
+            codes(r#"{ "a": -1n, "b": 0x1n }"#),
+            (vec![1328, 1328], vec![])
+        );
+        // In a larger expression, or next to another error, the other errors remain.
+        assert_eq!(codes(r#"{ "a": 1n + 2 }"#), (vec![1328], vec![1328]));
+        assert_eq!(
+            codes(r#"{ "a": 1n, "b": x }"#),
+            (vec![1328, 1328], vec![1328])
+        );
+        assert_eq!(codes(r#"{ "a": 1n "b": 2 }"#).1, vec![1005]);
     }
 
     #[test]

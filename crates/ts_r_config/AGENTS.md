@@ -87,6 +87,11 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   after "'{' expected."; tokens after the root are TS1012 once and parsed too; the first
   object literal is the config. A bad escape keeps its text (`"\u12"`). Number options are
   truncated to integers, saturating (`1.5` is 1), as tsc 7 stores them.
+  A BigInt value (`123n`, `-1n`) is one of those TS1328s, but `ParsedJson::errors_except_bigints`
+  leaves it out: ts_r_bundler reads JSON errors from there and reports a BigInt in esbuild's
+  words itself (`Unexpected "123n" in JSON`). Fixture outputs must not depend on where the
+  checkout is: an absolute path in an input becomes a `../../..` path in showConfig (and has
+  no drive on Windows), which the oracle refuses.
 - **Two kinds of config diagnostics.** `diagnostics` are parse errors (JSON, unknown option
   TS5023, wrong type TS5024, bad value TS6046); tsc still checks the program after them.
   `option_diagnostics()` (`verify.rs`) and `emit_overwrite_diagnostics()` (TS5055) are tsc's

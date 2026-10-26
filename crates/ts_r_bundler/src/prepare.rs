@@ -129,7 +129,7 @@ pub fn load(
             let text = read_text()?;
             let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
             let parsed = jsonc::parse(text, path);
-            if let Some(d) = parsed.diagnostics.first() {
+            if let Some(d) = parsed.errors_except_bigints().next() {
                 return Err(format!("{path}: invalid JSON: {}", d.message));
             }
             if let Some(lit) = json_bigint(text) {

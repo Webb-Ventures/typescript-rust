@@ -1,1 +1,1 @@
-{ "compilerOptions": { "outDir": "/* x" } }
+{ "compilerOptions": { "reactNamespace": "/* x" } }

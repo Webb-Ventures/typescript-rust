@@ -1,11 +1,8 @@
 {
     "compilerOptions": {
-        "outDir": "../../../../../../../../../../* x"
+        "reactNamespace": "/* x"
     },
     "files": [
         "./a.ts"
-    ],
-    "exclude": [
-        "/* x"
     ]
 }

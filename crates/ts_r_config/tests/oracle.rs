@@ -154,6 +154,15 @@ fn fixtures_match_tsc_show_config() {
                 ));
                 continue;
             };
+            // An expected output that climbs four directories up depends on where the
+            // checkout is (an absolute path made relative), and on Windows, where `/x` has
+            // no drive: such an input can't be a fixture.
+            if want_show.contains("../../../../") {
+                failures.push(format!(
+                    "{fixture}/{cfg_name}: the expected showConfig depends on the checkout's location"
+                ));
+                continue;
+            }
             let parsed = load_tsconfig(&fs, &path::combine(&fixture, &cfg_name));
             let got_show = show_config(&parsed).replace(&fixture, PLACEHOLDER);
             if got_show.trim_end() != want_show.trim_end() {

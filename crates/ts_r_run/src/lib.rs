@@ -653,11 +653,8 @@ fn run_eval(cli: &Cli, ev: &Eval) -> i32 {
         Some(compile::Format::Cjs) => "cts",
         None => "ts",
     };
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let path = cwd
-        .join(format!("{name}.{ext}"))
-        .to_string_lossy()
-        .into_owned();
+    // The working directory as every other path here is written (`/` separators).
+    let path = absolute(&format!("{name}.{ext}"));
     let compiled = {
         let project = Project::load(&path, cli.tsconfig.as_deref());
         if !project.config_errors.is_empty() {
@@ -926,6 +923,11 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(a, args("--import /h/hooks.mjs --print 1; a"));
+        // The preload as the code passes it (a `file:///D:/...` URL on Windows).
+        let preload = import_specifier(Path::new("/h/hooks.mjs"))
+            .to_string_lossy()
+            .into_owned();
+        let want = ["--import", &preload, "--print", "1;", "a"];
+        assert_eq!(a, want);
     }
 }
