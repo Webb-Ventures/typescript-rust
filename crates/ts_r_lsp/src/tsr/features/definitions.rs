@@ -18,8 +18,12 @@
 //!   `[` or `,`: nothing.
 //! - A JSDoc comment between the token and the cursor lifts all of this (tsc reads a token
 //!   inside the comment).
-//! - `import |`, `import type |`, `import * as |`, `{ a as | }` in an import or export, and
-//!   `import { | }` with no module after it: nothing.
+//! - `import type |`, `import * as |` and `{ a as | }` in an import or export: nothing.
+//!   The name right after `import` (`import |`, `import f|`, `import f| =`) and a name in
+//!   `import { | }` with no module after it: only `type` (nothing in JavaScript or in
+//!   `import type { | }`). After a whole import clause with
+//!   no module yet (`import {} |`, `import * as ns |`, `import D |`): only `from`
+//!   (`importStatementCompletions*`).
 
 use super::position::{node_covering, token_before};
 use ts_r_ast::{MethodKind, Node, NodeId};
@@ -28,6 +32,12 @@ use ts_r_diagnostics::FileId;
 
 /// The modifiers a constructor parameter may start with.
 pub const PARAMETER_KEYWORDS: &[&str] = &["override", "private", "protected", "public", "readonly"];
+
+/// `type`, offered where an import's names start.
+const TYPE_KEYWORD: &[&str] = &["type"];
+
+/// `from`, offered after an import clause with no module.
+const FROM_KEYWORD: &[&str] = &["from"];
 
 /// Levels walked up from the token at most.
 const MAX_UP: usize = 64;
@@ -53,6 +63,10 @@ pub fn definition_spot(
     let ast = c.ast(file);
     let text = c.file(file).text.as_str();
     let parents = c.file(file).parents();
+    let ts = ast.source_kind.is_typescript();
+    if let Some(spot) = import_keyword_spot(c, file, word) {
+        return Some(spot);
+    }
     // A word already typed: the node it is.
     if typed
         && matches!(ast.node(word_node), Node::Ident { .. })
@@ -73,7 +87,20 @@ pub fn definition_spot(
                 let decl = parents.parent(p)?;
                 let sourced = matches!(*ast.node(decl), Node::ImportDecl { source, .. }
                     if ast.span(source).end > ast.span(source).start);
-                (imported.is_some() || !sourced).then_some(Spot::Nothing)
+                let type_only = matches!(
+                    *ast.node(decl),
+                    Node::ImportDecl {
+                        type_only: true,
+                        ..
+                    }
+                );
+                if imported.is_some() || (!sourced && (type_only || !ts)) {
+                    Some(Spot::Nothing)
+                } else if !sourced {
+                    Some(Spot::Keywords(TYPE_KEYWORD))
+                } else {
+                    None
+                }
             }
             Node::EnumMember { name, .. } if name == word_node => Some(Spot::Nothing),
             Node::ArrayPattern { .. } | Node::Rest { .. } if in_declaration_pattern(c, file, p) => {
@@ -127,14 +154,6 @@ pub fn definition_spot(
         }
         "*" if before == Some("function") => return Some(Spot::Nothing),
         "infer" if matches!(ast.node(holder), Node::InferType { .. }) => {
-            return Some(Spot::Nothing);
-        }
-        "import"
-            if matches!(
-                ast.node(holder),
-                Node::ImportDecl { .. } | Node::ImportEquals { .. }
-            ) =>
-        {
             return Some(Spot::Nothing);
         }
         "as" if matches!(
@@ -203,6 +222,47 @@ pub fn definition_spot(
         }
     }
     None
+}
+
+/// The keyword-only spots of an import declaration (see the module docs): after `import`,
+/// `type`; after a whole clause of an import with no module, `from`.
+fn import_keyword_spot(c: &Checker<'_>, file: FileId, word: u32) -> Option<Spot> {
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let (tok_at, tok) = token_before(ast, text, word)?;
+    let holder = node_covering(ast, tok_at)?;
+    let decl = ancestors(c, file, holder).take(6).find(|&n| {
+        matches!(
+            ast.node(n),
+            Node::ImportDecl { .. } | Node::ImportEquals { .. }
+        )
+    })?;
+    if tok == "import" && ast.span(decl).start == tok_at {
+        // `import type` is TypeScript only.
+        return Some(if ast.source_kind.is_typescript() {
+            Spot::Keywords(TYPE_KEYWORD)
+        } else {
+            Spot::Nothing
+        });
+    }
+    let Node::ImportDecl { source, .. } = *ast.node(decl) else {
+        return None;
+    };
+    if ast.span(source).end > ast.span(source).start {
+        return None;
+    }
+    let parents = c.file(file).parents();
+    let clause_end = tok == "}"
+        || (matches!(ast.node(holder), Node::Ident { .. })
+            && ast.span(holder).start == tok_at
+            && parents.parent(holder).is_some_and(|p| {
+                matches!(
+                    *ast.node(p),
+                    Node::ImportDefaultSpecifier { local } | Node::ImportNamespaceSpecifier { local }
+                        if local == holder
+                )
+            }));
+    clause_end.then_some(Spot::Keywords(FROM_KEYWORD))
 }
 
 /// Whether the `,` or `<` at `at` belongs to the type parameter list `n` itself.

@@ -123,6 +123,8 @@ enum Context {
     String { lit: NodeId },
     /// Inside a comment: only `/// <reference path="|"` offers anything.
     Reference,
+    /// After `import("m").A.` in a type: what `m`'s `A` exports.
+    ImportTypeMember { node: NodeId, dot: u32 },
     /// Inside a JSDoc comment (`jsdoc_items.rs`).
     JsDoc(super::jsdoc_items::Spot),
     /// A name being declared that may start with a keyword (a constructor parameter).
@@ -219,6 +221,17 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     if !number && d > 0 && b[d - 1] == b'.' && !(d > 1 && b[d - 2] == b'.') {
         let dot = (d - 1) as u32;
         let mut cur = node_at(ast, dot + 1);
+        // `import("m").|` and `import("m").A.|` in a type.
+        let mut up = cur;
+        for _ in 0..8 {
+            let Some(n) = up else { break };
+            if let Node::ImportType { arg, .. } = *ast.node(n)
+                && ast.span(arg).end <= dot
+            {
+                return (Context::ImportTypeMember { node: n, dot }, prefix);
+            }
+            up = c.file(file).parents().parent(n);
+        }
         for _ in 0..4 {
             let Some(n) = cur else { break };
             match *ast.node(n) {
@@ -526,7 +539,20 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         Context::ImportClause { decl, after_type } => {
             let Some(names) = import_clause_names(c, cx.file, decl, ws_of(c, cx.file, offset))
             else {
-                return Value::Null;
+                // No module (yet): only `type` may start a name (TypeScript, not in
+                // `import type { | }`).
+                let type_only = matches!(
+                    c.node(Loc::new(cx.file, decl)),
+                    Node::ImportDecl {
+                        type_only: true,
+                        ..
+                    }
+                );
+                if after_type || type_only || !c.ast(cx.file).source_kind.is_typescript() {
+                    return Value::Null;
+                }
+                items.push(json!({"label": "type", "kind": 14, "sortText": SORT_KEYWORD}));
+                return json!({"isIncomplete": false, "items": items});
             };
             if names.is_empty() {
                 return Value::Null;
@@ -599,6 +625,12 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             }
             for (label, kind) in found {
                 items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
+            }
+        }
+        Context::ImportTypeMember { node, dot } => {
+            for (name, s) in import_type_members(ck, cx.file, node, dot) {
+                items
+                    .push(json!({"label": name, "kind": item_kind(c, s), "sortText": SORT_MEMBER}));
             }
         }
         Context::JsDoc(spot) => {
@@ -743,6 +775,13 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                     mark_optional(&mut item, &name);
                 }
                 items.push(item);
+            }
+            if !qualified {
+                let have: HashSet<String> = items
+                    .iter()
+                    .filter_map(|i| i["label"].as_str().map(str::to_string))
+                    .collect();
+                items.extend(awaited_member_items(ck, cx.file, obj, offset, &have));
             }
         }
         Context::JsxAttrs { opening } => {
@@ -920,6 +959,179 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         }
     }
     json!({"isIncomplete": incomplete, "items": items})
+}
+
+/// In an async function, `p.|` of a promise also lists the awaited value's members (not
+/// already listed), each written `(await p).m` over `p.` (`;(await p).m` at the start of a
+/// statement that would otherwise continue the previous line; an `await` right before `p`
+/// is taken into the edit instead of doubled). Observed on tsc 7's `completionOfAwaitPromise*`.
+fn awaited_member_items(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    obj: NodeId,
+    offset: u32,
+    have: &HashSet<String>,
+) -> Vec<Value> {
+    let c = ck.c;
+    let l = Loc::new(file, obj);
+    let ast = c.ast(file);
+    let Some(func) = ck.containing_function(l) else {
+        return Vec::new();
+    };
+    if !ts_r_checker::nodes::fn_parts(ast, func.node)
+        .is_some_and(|p| p.flags.contains(ts_r_ast::FnFlags::ASYNC))
+    {
+        return Vec::new();
+    }
+    let t = ck.check_expr(l);
+    let awaited = ck.awaited_type(t);
+    if awaited == t || ck.store().is_error(awaited) {
+        return Vec::new();
+    }
+    let a = ck.apparent_type(awaited);
+    let mut props: Vec<(String, SymId)> = ck
+        .properties_of(a)
+        .into_iter()
+        .map(|(n, s)| (ck.store().str(n).to_string(), s))
+        .filter(|(n, _)| !n.starts_with("__@") && !n.starts_with('#') && !have.contains(n))
+        .collect();
+    if props.is_empty() {
+        return Vec::new();
+    }
+    props.sort_by(|x, y| x.0.cmp(&y.0));
+    let text = c.file(file).text.as_str();
+    let parents = c.file(file).parents();
+    let sp = ast.span(obj);
+    let expr = text.get(sp.start as usize..sp.end as usize).unwrap_or("");
+    // The edit starts at the expression, or at an `await` applied to the member access.
+    let member = parents.parent(obj);
+    let mut start = sp.start;
+    let mut outer = member.unwrap_or(obj);
+    if let Some(m) = member
+        && let Some(p) = parents.parent(m)
+        && matches!(ast.node(p), Node::Await { .. })
+    {
+        start = ast.span(p).start;
+        outer = p;
+    }
+    // `;` when the expression starts a statement right after a line without one.
+    let starts_statement = parents.parent(outer).is_some_and(|p| {
+        matches!(ast.node(p), Node::ExprStmt { .. }) && ast.span(p).start == start
+    });
+    let semi = starts_statement
+        && super::position::token_before(ast, text, start)
+            .is_some_and(|(_, t)| !matches!(t, ";" | "{" | "}"));
+    let lines = LspLines::new(text);
+    let range = lines.range(text, start, offset);
+    props
+        .into_iter()
+        .map(|(name, s)| {
+            let access = if is_identifier_name(&name) {
+                format!(".{name}")
+            } else {
+                format!("[{}]", serde_json::to_string(&name).unwrap_or_default())
+            };
+            let insert = format!("{}(await {expr}){access}", if semi { ";" } else { "" });
+            json!({
+                "label": name,
+                "kind": item_kind(c, s),
+                "sortText": SORT_MEMBER,
+                "filterText": insert,
+                "insertText": insert,
+                "textEdit": {"range": range, "newText": insert},
+            })
+        })
+        .collect()
+}
+
+/// What `import("m").A.B.|` (the names before `dot`) offers: with `typeof`, the members
+/// of that value; otherwise the exports that lead to a type.
+fn import_type_members(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    node: NodeId,
+    dot: u32,
+) -> Vec<(String, SymId)> {
+    let c = ck.c;
+    let ast = c.ast(file);
+    let Node::ImportType {
+        is_typeof,
+        arg,
+        qualifier,
+        ..
+    } = *ast.node(node)
+    else {
+        return Vec::new();
+    };
+    let lit = match *ast.node(arg) {
+        Node::TypeRef { name, .. } => name,
+        _ => arg,
+    };
+    let bound = &c.file(file).bound;
+    let Some(ri) = bound
+        .module_requests
+        .iter()
+        .position(|r| r.node == lit || r.node == arg)
+    else {
+        return Vec::new();
+    };
+    let target = c.link.module_target(file, ri as u32);
+    let Some(mut s) = c.module_target_symbol(target) else {
+        return Vec::new();
+    };
+    // The qualifier's names written before the dot, outermost first.
+    let mut names = Vec::new();
+    let mut q = qualifier;
+    for _ in 0..256 {
+        let Some(n) = q else { break };
+        match *ast.node(n) {
+            Node::QualifiedName { left, right } => {
+                names.push(right);
+                q = Some(left);
+            }
+            _ => {
+                names.push(n);
+                q = None;
+            }
+        }
+    }
+    names.reverse();
+    for n in names {
+        if ast.span(n).end > dot || ast.span(n).start == ast.span(n).end {
+            break;
+        }
+        let Some(text) = super::locate::name_text(ast, n) else {
+            return Vec::new();
+        };
+        let Some((_, x)) = c.exports_of(s).into_iter().find(|(m, _)| m == text) else {
+            return Vec::new();
+        };
+        s = c.resolve_alias(x).unwrap_or(x);
+    }
+    let mut out: Vec<(String, SymId)> = if is_typeof {
+        let t = ck.type_of_symbol(s);
+        let a = ck.apparent_type(t);
+        let props = ck.properties_of(a);
+        let store = ck.store();
+        props
+            .into_iter()
+            .map(|(n, p)| (store.str(n).to_string(), p))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|(n, p)| {
+                !n.starts_with("__@")
+                    && super::class_items::member_visible(ck, *p, n, Loc::new(file, node))
+            })
+            .collect()
+    } else {
+        c.exports_of(s)
+            .into_iter()
+            .filter(|(n, x)| n != "export=" && type_referable(c, *x))
+            .collect()
+    };
+    out.retain(|(n, _)| is_identifier_name(n));
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 /// Type keywords offered where a type is written.

@@ -1675,6 +1675,53 @@ fn completion_in_object_literals_of_generic_calls() {
     c.shutdown();
 }
 
+/// A promise's awaited members in an async function (written `(await p).m`), `type` after
+/// `import` and `from` after a clause with no module, and `import("m").A.|` in types.
+#[test]
+fn completion_awaited_members_import_keywords_and_import_types() {
+    if !libs_present() {
+        return;
+    }
+    let m = "export namespace NS { export interface I {} export const v = 1; }\n";
+    let text = "async function f(p: Promise<string>) {\n  p.\n}\n\
+                type A = import(\"./m.js\").NS.;\n\
+                type B = typeof import(\"./m.js\").NS.;\n\
+                import {} \n";
+    let env = Env::new(
+        "complete-await-import",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/m.ts", m),
+            ("src/c.ts", text),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let r = result(&mut c, "textDocument/completion", at(&uc, 1, 4));
+    let items = r["items"].as_array().cloned().unwrap_or_default();
+    assert!(items.iter().any(|i| i["label"] == "then"), "{r}");
+    let trim = items.iter().find(|i| i["label"] == "trim").expect("trim");
+    assert_eq!(trim["insertText"], "(await p).trim");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 29)));
+    assert_eq!(l, ["I"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 36)));
+    assert_eq!(l, ["v"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 5, 10)));
+    assert_eq!(l, ["from"]);
+    c.shutdown();
+}
+
 /// Review fixes for import clauses and type positions: a `}` in a comment does not close the
 /// clause, an unterminated quoted name before the cursor does not panic, and modules that
 /// re-export each other as namespaces are searched once each for a type.
