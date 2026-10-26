@@ -299,3 +299,4 @@ unicorn/prefer-type-error
 jsdoc/valid-types
 jsdoc/check-types
 jsdoc/no-undefined-types
+jsdoc/check-values

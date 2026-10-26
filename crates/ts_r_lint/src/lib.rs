@@ -22,6 +22,7 @@ pub mod lib_globals_generated;
 pub mod output;
 pub mod project;
 pub mod regex;
+pub mod regex_exec;
 pub mod registry;
 pub mod rule;
 pub mod rules;

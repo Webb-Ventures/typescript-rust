@@ -135,19 +135,23 @@ fn is_doc_comment(text: &str) -> bool {
 }
 
 /// The local names an `import` statement written in a `@import` tag binds: the default,
-/// the named imports (by local name) and the namespace. `None` when it isn't an import
-/// with a `from "..."` clause.
-fn import_names(stmt: &str) -> Option<Vec<String>> {
+/// the named imports (by local name) and the namespace; none for a side-effect import.
+/// `None` when it isn't an import ending in a quoted module name.
+pub(super) fn import_names(stmt: &str) -> Option<Vec<String>> {
     let rest = stmt.strip_prefix("import")?;
-    if !rest.starts_with(char::is_whitespace) && !rest.starts_with(['{', '*']) {
+    if !rest.starts_with(|c: char| c.is_whitespace() || matches!(c, '{' | '*' | '"' | '\'')) {
         return None;
     }
-    let (clause, source) = rest.rsplit_once("from")?;
-    let source = source.trim().trim_end_matches(';').trim();
-    let quoted = source.len() >= 2
-        && ((source.starts_with('"') && source.ends_with('"'))
-            || (source.starts_with('\'') && source.ends_with('\'')));
-    if !quoted {
+    let rest = rest.trim();
+    let rest = rest.strip_suffix(';').unwrap_or(rest).trim_end();
+    let q = rest.chars().last().filter(|c| matches!(c, '"' | '\''))?;
+    let open = rest[..rest.len() - 1].rfind(q)?;
+    let before = rest[..open].trim_end();
+    if before.is_empty() {
+        return Some(Vec::new());
+    }
+    let clause = before.strip_suffix("from")?;
+    if !clause.ends_with(|c: char| c.is_whitespace() || c == '}') {
         return None;
     }
     let mut clause = clause.trim();
@@ -198,6 +202,21 @@ fn import_names(stmt: &str) -> Option<Vec<String>> {
         return None;
     }
     Some(names)
+}
+
+/// The `import ...` statement a `@import` tag stands for.
+pub(super) fn import_statement(t: &crate::jsdoc::Tag) -> String {
+    let type_part = if t.typ.is_empty() {
+        String::new()
+    } else {
+        format!("{{{}}} ", t.typ)
+    };
+    let stmt = if t.description.is_empty() {
+        format!("import {type_part}{}", t.name)
+    } else {
+        format!("import {type_part}{} {}", t.name, t.description)
+    };
+    stmt.trim().to_owned()
 }
 
 /// The `@template` names a block declares.
@@ -356,17 +375,7 @@ impl NoUndefinedTypes {
         if mode == "typescript" {
             for b in &blocks {
                 for t in b.tags.iter().filter(|t| t.tag == "import") {
-                    let type_part = if t.typ.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{{{}}} ", t.typ)
-                    };
-                    let stmt = if t.description.is_empty() {
-                        format!("import {type_part}{}", t.name)
-                    } else {
-                        format!("import {type_part}{} {}", t.name, t.description)
-                    };
-                    if let Some(names) = import_names(stmt.trim()) {
+                    if let Some(names) = import_names(&import_statement(t)) {
                         f.import_tags
                             .extend(names.into_iter().filter(|n| !n.is_empty()));
                     }
@@ -844,6 +853,9 @@ mod tests {
             n("import {Linter} from \"eslint\""),
             Some(vec!["Linter".into()])
         );
+        assert_eq!(n("import X from \"./from\";"), Some(vec!["X".into()]));
+        assert_eq!(n("import \"side-effect\""), Some(vec![]));
+        assert_eq!(n("import {A} from"), None);
         assert_eq!(n("import Bad"), None);
         assert_eq!(n("import"), None);
     }

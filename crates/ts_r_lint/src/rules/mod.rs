@@ -21,6 +21,7 @@ mod jsdoc_check_alignment;
 mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
 mod jsdoc_check_types;
+mod jsdoc_check_values;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
 mod jsdoc_implements_on_classes;
@@ -676,6 +677,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
+    &jsdoc_check_values::RULE,
     // eslint-plugin-unicorn
     &unicorn_consistent_assert::RULE,
     &unicorn_consistent_class_member_order::RULE,
