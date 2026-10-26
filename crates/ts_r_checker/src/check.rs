@@ -5213,8 +5213,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// unknown ? X : never`; expect-type's `UsefulKeys`, array-flatten's `PickValue`,
     /// type-fest's `VariablePartOfArray<T>[number]`).
     fn mapped_under_implied_constraints(&mut self, obj: Loc, o: TypeId) -> TypeId {
-        if self.mapped_info(o).is_none()
-            && !self.store().flags(o).contains(TypeFlags::CONDITIONAL)
+        if self.mapped_info(o).is_none() && !self.store().flags(o).contains(TypeFlags::CONDITIONAL)
         {
             return o;
         }
@@ -9622,44 +9621,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         diags: Vec<Diagnostic>,
     ) -> Vec<Diagnostic> {
         let sf = self.c.file(file);
-        let ast = &sf.ast;
-        let text = sf.text.as_str();
-        // (line of the directive, span, is_expect, used)
-        let mut directives: Vec<(u32, Span, bool, bool)> = Vec::new();
-        let lines = sf.lines();
-        for c in &ast.comments {
-            let body = c.span.text(text);
-            // A line comment is read after its slashes (`/// @ts-ignore` too); a block
-            // comment only on its last line, after leading blanks and any run of `/` and
-            // `*`, and the directive spans that last line (tsc: scanner.go,
-            // processCommentDirective).
-            let (inner, start) = match c.kind {
-                CommentKind::Line => (body.trim_start_matches('/'), c.span.start),
-                _ => {
-                    let last = body
-                        .char_indices()
-                        .rev()
-                        .find(|&(_, ch)| matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
-                        .map_or(0, |(i, ch)| i + ch.len_utf8());
-                    let line = body[last..]
-                        .trim_start_matches([' ', '\t'])
-                        .trim_start_matches(['/', '*']);
-                    (line, c.span.start + last as u32)
-                }
-            };
-            let inner = inner.trim_start_matches([' ', '\t']);
-            // A prefix is enough: `// @ts-ignore-line` and `@ts-expect-errors` are directives
-            // too (tsc 7, observed).
-            let is_expect = inner.starts_with("@ts-expect-error");
-            let is_ignore = inner.starts_with("@ts-ignore");
-            if !is_expect && !is_ignore {
-                continue;
-            }
-            let line = lines.line_of(c.span.end.saturating_sub(1));
-            directives.push((line, Span::new(start, c.span.end), is_expect, false));
-        }
+        let mut directives = comment_directives(sf);
         if directives.is_empty() {
             return diags;
+        }
+        let lines = sf.lines();
+        // Program-level merge errors in this file (a duplicate global member) are reported
+        // apart from the file's check, but a directive above them is used all the same.
+        for d in &self.c.link.diagnostics {
+            if d.file == file
+                && d.is_error()
+                && let Some(i) = directive_for_line(sf, lines.line_of(d.span.start), &directives)
+            {
+                directives[i].3 = true;
+            }
         }
         let mut out = Vec::with_capacity(diags.len());
         for d in diags {
@@ -9668,7 +9643,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 continue;
             }
             let line = lines.line_of(d.span.start);
-            if let Some(i) = self.directive_for_line(file, line, &directives) {
+            if let Some(i) = directive_for_line(sf, line, &directives) {
                 directives[i].3 = true;
                 continue;
             }
@@ -9688,36 +9663,86 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         out
     }
+}
 
-    /// The directive governing `line`: on the closest preceding line, skipping blank lines
-    /// and comment-only lines.
-    fn directive_for_line(
-        &self,
-        file: FileId,
-        line: u32,
-        directives: &[(u32, Span, bool, bool)],
-    ) -> Option<usize> {
-        let sf = self.c.file(file);
-        let lines = sf.lines();
-        let text = sf.text.as_str();
-        let mut l = line;
-        for _ in 0..1000 {
-            if l == 0 {
-                return None;
+/// Whether an error at `d` in `sf` sits under a `// @ts-ignore` or `// @ts-expect-error`
+/// directive (for diagnostics reported outside a file's check, such as program merges).
+pub fn suppressed_by_directive(sf: &crate::program::SourceFile, d: &Diagnostic) -> bool {
+    if !d.is_error() {
+        return false;
+    }
+    let directives = comment_directives(sf);
+    !directives.is_empty()
+        && directive_for_line(sf, sf.lines().line_of(d.span.start), &directives).is_some()
+}
+
+/// The `@ts-ignore` / `@ts-expect-error` comments of `sf`: (line of the directive, span,
+/// is_expect, used).
+fn comment_directives(sf: &crate::program::SourceFile) -> Vec<(u32, Span, bool, bool)> {
+    let ast = &sf.ast;
+    let text = sf.text.as_str();
+    let mut directives: Vec<(u32, Span, bool, bool)> = Vec::new();
+    let lines = sf.lines();
+    for c in &ast.comments {
+        let body = c.span.text(text);
+        // A line comment is read after its slashes (`/// @ts-ignore` too); a block
+        // comment only on its last line, after leading blanks and any run of `/` and
+        // `*`, and the directive spans that last line (tsc: scanner.go,
+        // processCommentDirective).
+        let (inner, start) = match c.kind {
+            CommentKind::Line => (body.trim_start_matches('/'), c.span.start),
+            _ => {
+                let last = body
+                    .char_indices()
+                    .rev()
+                    .find(|&(_, ch)| matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
+                    .map_or(0, |(i, ch)| i + ch.len_utf8());
+                let line = body[last..]
+                    .trim_start_matches([' ', '\t'])
+                    .trim_start_matches(['/', '*']);
+                (line, c.span.start + last as u32)
             }
-            l -= 1;
-            if let Some(i) = directives.iter().position(|d| d.0 == l) {
-                return Some(i);
-            }
-            let span = lines.line_span(l)?;
-            let t = span.text(text).trim();
-            if t.is_empty() || t.starts_with("//") || (t.starts_with("/*") && t.ends_with("*/")) {
-                continue;
-            }
+        };
+        let inner = inner.trim_start_matches([' ', '\t']);
+        // A prefix is enough: `// @ts-ignore-line` and `@ts-expect-errors` are directives
+        // too (tsc 7, observed).
+        let is_expect = inner.starts_with("@ts-expect-error");
+        let is_ignore = inner.starts_with("@ts-ignore");
+        if !is_expect && !is_ignore {
+            continue;
+        }
+        let line = lines.line_of(c.span.end.saturating_sub(1));
+        directives.push((line, Span::new(start, c.span.end), is_expect, false));
+    }
+    directives
+}
+
+/// The directive governing `line`: on the closest preceding line, skipping blank lines
+/// and comment-only lines.
+fn directive_for_line(
+    sf: &crate::program::SourceFile,
+    line: u32,
+    directives: &[(u32, Span, bool, bool)],
+) -> Option<usize> {
+    let lines = sf.lines();
+    let text = sf.text.as_str();
+    let mut l = line;
+    for _ in 0..1000 {
+        if l == 0 {
             return None;
         }
-        None
+        l -= 1;
+        if let Some(i) = directives.iter().position(|d| d.0 == l) {
+            return Some(i);
+        }
+        let span = lines.line_span(l)?;
+        let t = span.text(text).trim();
+        if t.is_empty() || t.starts_with("//") || (t.starts_with("/*") && t.ends_with("*/")) {
+            continue;
+        }
+        return None;
     }
+    None
 }
 
 /// The `this.<name>` / `this[<key>]` targets a constructor body assigns (outside nested

@@ -613,7 +613,10 @@ Files, by layer:
 - Walk and driver: `check.rs` (statements, classes, type references, modifiers, imports,
   `@ts-ignore`/`@ts-expect-error`, matched as prefixes: `// @ts-ignore-line` is one; they
   cover a checked JavaScript file's JSDoc syntax errors too, which tsc 7 reports with the
-  semantic errors: `tsc: tsc/internal/compiler/program.go`),
+  semantic errors: `tsc: tsc/internal/compiler/program.go`; they also hide the program's
+  link (merge) errors on their line, such as a duplicate `declare global` member, and such a
+  hit counts as the directive's use, so no TS2578: `driver::link_diagnostic_reported`,
+  `check::suppressed_by_directive`),
   `driver.rs` (threads, ordering).
 - A property missing on a global lib type that a later lib adds is TS2550 naming that lib
   (`lib_hint.rs`: `[].at` without es2022). The table holds the container/member pairs

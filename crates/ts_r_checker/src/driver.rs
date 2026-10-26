@@ -62,6 +62,17 @@ pub fn should_check(program: &ProgramFiles, i: usize) -> bool {
     !f.has_ts_nocheck()
 }
 
+/// Whether program-level (link) diagnostic `d` is reported: its file is checked, and no
+/// `// @ts-ignore` or `// @ts-expect-error` directive governs its line (tsc applies the
+/// directives to every semantic error of a file, merge errors included: @colors/colors
+/// ignores its `bold` member of the global `String`).
+pub fn link_diagnostic_reported(program: &ProgramFiles, d: &Diagnostic) -> bool {
+    let f = d.file.0 as usize;
+    f < program.files.len()
+        && should_check(program, f)
+        && !crate::check::suppressed_by_directive(&program.files[f], d)
+}
+
 /// A "plain" JavaScript file: JavaScript without `checkJs` set either way, `// @ts-check` or
 /// `// @ts-nocheck`, outside `node_modules`. tsc 7 checks it but reports only
 /// [`PLAIN_JS_CODES`] (observed).
@@ -274,8 +285,7 @@ fn check_program_impl<'a>(
     };
     out.extend(missing_global_type_diagnostics(&checker));
     for d in &checker.link.diagnostics {
-        let f = d.file.0 as usize;
-        if f < program.files.len() && should_check(program, f) {
+        if link_diagnostic_reported(program, d) {
             out.push(d.clone());
         }
     }
