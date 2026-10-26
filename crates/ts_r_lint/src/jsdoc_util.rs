@@ -1717,7 +1717,9 @@ pub fn structured_tags<'a>(cx: &Ctx<'_, 'a>) -> Option<&'a Map<String, Value>> {
 /// `rewireByParsedType`: tag `ti`'s type becomes `typ` (which may span lines), keeping its
 /// name and description lines, and the block's lines are rebuilt from its tags. The first
 /// type line stays on the tag's line; later ones get `indent` + one space and a `*`
-/// delimiter; `spacing` goes inside the braces.
+/// delimiter; `spacing` goes inside the braces. When a multiline type becomes one line, only
+/// the name moves up from the type's closing line: a description on that line is dropped,
+/// as eslint-plugin-jsdoc 63.3.3 drops it.
 pub fn rewire_type(b: &mut Block, ti: usize, typ: &str, indent: &str, spacing: &str) {
     let Some(&first_line) = b.tags[ti].source.first() else {
         return;

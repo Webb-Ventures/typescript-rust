@@ -2920,6 +2920,85 @@ prefer-includes-over-repeated-comparisons,no-unnecessary-polyfills}.js`,
 browserslist 4.29.4: `index.js` and `parse.js` (the node, browser version, range and
 comparison queries, and how clauses combine).
 
+## jsdoc rules (round 8, h1)
+
+Thirteen opt-in eslint-plugin-jsdoc rules (63.3.3), each at 100% of its oracle cases:
+`check-indentation` (29/29), `check-line-alignment` (97/97), `check-syntax` (4/4),
+`check-template-names` (49/49), `convert-to-jsdoc-comments` (29/29), `informative-docs`
+(64/64), `lines-before-block` (34/34), `match-description` (90/90), `match-name` (23/23),
+`no-bad-blocks` (22/22), `normalize-see-links` (125/125), `prefer-import-tag` (51/51) and
+`require-description` (60/60). All are `NO_PRESET`, `Category::Style`; oxlint names none
+of them. What we learned, in our words:
+
+- **Shared pieces.** `Item`/`Doc` carry `last_index`, the index of the context entry that
+  selected the block (the plugin's `info.lastIndex`; `match-name` reads its `match` entry
+  from it). `jsdoc_util::avoid_docs` is the plugin's `avoidDocs`: replaced docs,
+  `exemptedBy`, and (through `SpecialMethods`) constructors (with `@class`/`@constructor`),
+  getters and setters. `is_js_ws`/`js_trim` are JavaScript's `trim` set.
+  `jsdoc_tree::inline_tags` now gives each inline tag's start and form (`prefix`, `pipe`,
+  `space`, `plain`).
+- **Regex matcher (`regex.rs`).** `is_match_flags` honours `s` (dot matches line breaks)
+  and `m` (`^`/`$` at line breaks); `regex_string_matches` uses it. The emoji properties of
+  strings (`\p{RGI_Emoji}` and friends) match one code point from the emoji blocks or a
+  sequence's last code point (VS16, keycap, tag end), not "alphabetic"; that is what
+  `match-description`'s default pattern (its last class holds `\p{RGI_Emoji}`) needs.
+- **Reporting quirks kept.** `check-indentation` with `allowIndentedSections` reports one
+  line below the offending line except on the first line. `check-line-alignment`'s
+  `"never"` fix clears the content after a spacer it leaves empty, and its `setTag` cuts
+  the tag to one line, so a tag reported for spacing is not checked for wrap indent; only
+  one wrap-indent problem is reported per block. `informative-docs` never treats the main
+  description as already reported by a tag (the plugin compares with a `line` field the
+  tags don't have). `match-description` reports the main description on the comment's
+  second line. `match-name` without `match` reports the missing option per function block.
+- **`check-indentation`.** Fenced code (from a "* ```" line to the line before the next
+  fence, tag or comment end) and `excludeTags` content (to the next tag or the end) are
+  blanked first, keeping the line count, by a hand-written scan instead of the plugin's
+  regexes.
+- **`check-line-alignment` `"always"`.** The block is rebuilt (comment-parser's align
+  transform with the plugin's changes): widths over the lines of the `tags` option and the
+  untagged lines after them, the type column folded into the name column when no tag has
+  a type (a missing maximum is `-Infinity`, so its spacing comes out empty), wrap indent
+  plus a list item's extra depth, and the result compared with the comment text.
+- **`convert-to-jsdoc-comments`.** Three listener lists over the ESTree view in traversal
+  order; a key in a later list replaces it in an earlier one. The comment before is the
+  token just before the reduced node (or its decorator) within `minLines`/`maxLines`; the
+  comment after is on the node's last line, past one `;` or `,`. Once any "before" comment
+  is found, the "after" check of `contextsBeforeAndAfter` stops for the rest of the file.
+- **`informative-docs`.** Without the `are-docs-informative` source we went by the tests:
+  words are runs of letters and digits split at lower-to-upper case changes and
+  lowercased; a description is uninformative when it has words and every one is a name
+  word, an alias of one or a useless word.
+- **`prefer-import-tag`.** The path after `import('m')` is collected outermost step first;
+  the fix replaces the outermost path node with the new name plus the kept steps. The
+  typedef search shares its path queue and skipped names across typedefs, as the plugin's
+  does. After a fix, the walk skips the rest of the replaced node. `@import` statements are
+  parsed by a small hand-written parser. A new `@import` goes where ESLint 10 puts it: after
+  the first line break and its indent when the file has code, else at the start (taking
+  the place of a leading line break). Module names become identifiers with each invalid
+  character written as `$`, its code point less 26 in base 36, `$` (read off the expected
+  outputs, e.g. `@` is `$12$`).
+- **`normalize-see-links`.** The plugin's link regexes are hand-written scans. Markdown and
+  prefix links need a `[` not after a backslash; a pipe link's label takes back one space
+  when it would otherwise be empty. A failed attempt resumes where its label stopped, so
+  the scans stay linear. Code spans pair a backtick run with the next run of the same
+  length. `URL.canParse` is approximated: an `http:`/`https:` URL needs a host without the
+  forbidden host characters and a port up to 65535.
+
+Read to understand (not ported), eslint-plugin-jsdoc 63.3.3:
+`src/rules/{checkSyntax,requireDescription,noBadBlocks,matchName,linesBeforeBlock,
+checkTemplateNames,checkIndentation,informativeDocs,matchDescription,checkLineAlignment,
+convertToJsdocComments,preferImportTag,normalizeSeeLinks}.js`, `src/alignTransform.js`,
+`src/iterateJsdoc.js` (`avoidDocs`, `getDescription`, `setTagDescription`, `setTag`,
+`reportJSDoc`, `stringify`, `forEachPreferredTag`, the `lastIndex` of `matchContext` and
+`iterateAllJsdocs`), and `src/jsdocUtils.js` (`exemptSpeciaMethods`,
+`isConstructor`/`isGetter`/`isSetter`, `getPreferredTagName`, `enforcedContexts`,
+`getContextObject`, `splitTopLevelCommas`, `parseClosureTemplateTag`, `getTags`,
+`getTagDescription`, `getRegexFromString`, `getIndent`, `getTagsByType`,
+`tagMightHaveTypePosition`, `isNameOrNamepathDefiningTag`). The behaviour of
+`@es-joy/jsdoccomment` (`getNonJsdocComment`, `getFollowingComment`), `are-docs-informative`,
+`parse-imports-exports` and `to-valid-identifier` was taken from the tests, not their
+source.
+
 ## eslint-plugin-unicorn and jsdoc rules (round 8, h2)
 
 Each rule at 100% of its oracle cases: `unicorn/string-content` 70/70, `jsdoc/require-tags`
