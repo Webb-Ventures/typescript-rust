@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 use ts_r_lsp::client::{Dialect, ScriptedClient, did_open_params, initialize_params};
 
 const BIN: &str = env!("CARGO_BIN_EXE_ts-r-lsp");
-const T: Duration = Duration::from_secs(10);
+/// How long to wait for an event. Generous: a loaded CI runner can take seconds to start a
+/// daemon and its backend, and a passing test never waits this long.
+const T: Duration = Duration::from_secs(30);
 
 struct Env {
     dir: PathBuf,
@@ -404,7 +406,10 @@ fn native_lsp_backend_is_shared_and_requests_are_multiplexed() {
     let mut b = env.lsp("B", json!({}));
     env.open(&mut a, "a.ts");
     env.open(&mut b, "a.ts");
+    // The two opens race (separate connections): whichever reaches the daemon second gets
+    // the backend's last diagnostics, so both windows see them.
     diagnostics_for(&mut a, &env.uri("a.ts"), "const a = 1;");
+    diagnostics_for(&mut b, &env.uri("a.ts"), "const a = 1;");
     let (pa, _) = parse_fake(&hover(&mut a, &env.uri("a.ts")));
     let (pb, _) = parse_fake(&hover(&mut b, &env.uri("a.ts")));
     assert_eq!(pa, pb);
@@ -426,6 +431,20 @@ fn native_lsp_backend_is_shared_and_requests_are_multiplexed() {
     let r = ts.call("configure", json!({}), Duration::from_secs(5));
     assert!(r.is_none_or(|r| r["success"] == true));
     ts.kill();
+    a.shutdown();
+    b.shutdown();
+}
+
+#[test]
+fn a_window_opening_a_file_the_native_backend_has_gets_its_diagnostics() {
+    let env = Env::new("native-late", 7);
+    let mut a = env.lsp("A", json!({}));
+    env.open(&mut a, "a.ts");
+    diagnostics_for(&mut a, &env.uri("a.ts"), "const a = 1;");
+    // B's open sends nothing to the backend (same text), so nothing new is published.
+    let mut b = env.lsp("B", json!({}));
+    env.open(&mut b, "a.ts");
+    diagnostics_for(&mut b, &env.uri("a.ts"), "const a = 1;");
     a.shutdown();
     b.shutdown();
 }
@@ -480,10 +499,12 @@ fn lsp_front_reconnects_when_the_daemon_dies() {
     let _ = env
         .cmd(&["stop", "--root", &env.proj.to_string_lossy()])
         .output();
-    let s = env.wait_status("new daemon", |s| {
-        s["daemonPid"] != old && s["clients"].as_array().is_some_and(|c| c.len() == 1)
+    // The front replays its documents after it reconnects: wait for them too.
+    env.wait_status("new daemon with the replayed document", |s| {
+        s["daemonPid"] != old
+            && s["clients"].as_array().is_some_and(|c| c.len() == 1)
+            && s["slots"][0]["openDocs"] == 1
     });
-    assert_eq!(s["slots"][0]["openDocs"], 1);
     let (_, text) = parse_fake(&hover(&mut a, &env.uri("a.ts")));
     assert_eq!(text, "/*kept*/const a = 1;\n");
     a.shutdown();

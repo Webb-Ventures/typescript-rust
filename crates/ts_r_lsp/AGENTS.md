@@ -63,6 +63,9 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   clean window viewing a file another window has dirty sees the dirty text (by design).
 - **Ordering:** a client's messages reach its backend in order; responses go only to the
   requester (ids remapped per slot); diagnostics only to clients whose text matches the backend.
+  A window that opens a file the backend already has (no sync op is sent) gets the backend's
+  last diagnostics for it: tsserver's cached `geterr` results, or an LSP backend's last push
+  (`Slot::pushed`, kept with the mirror version it arrived at and dropped on close).
 - **Backends restart transparently** (budget, crash, idle stop): documents are replayed,
   in-flight requests fail with `ContentModified`/`RequestFailed`, never hang. Crash restarts
   are limited to 3 per 60 s.
@@ -865,6 +868,11 @@ scripts/limit.sh -- node crates/ts_r_lsp/tests/oracle/actions.js <typescript/lib
 TS_R_LSP_PARITY=off scripts/limit.sh -- node crates/ts_r_lsp/tests/oracle/organize-corpus.js \
   target/release/ts-r-lsp <typescript/lib dir> <root> [--from N] [--max N] [--show N]
 ```
+
+`tests/daemon.rs` waits on events (a message, a status predicate) with a 30 s deadline, never
+on a fixed sleep before an assertion: messages from two windows reach the daemon in no
+defined order, and a loaded CI runner can take seconds to start a daemon. The front retries
+connecting for 20 s (an old daemon may hold its lock that long while it exits).
 
 Action fixtures (`tests/fixtures/actions/<name>.txt`, verbs and directives documented at the
 top of `tests/actions.rs`): verbs `refactor`, `fix`, `fixAll`, `organizeImports`, `rename`,
