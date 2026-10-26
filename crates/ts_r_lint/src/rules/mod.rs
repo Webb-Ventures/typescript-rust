@@ -330,6 +330,7 @@ mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
 mod unicorn_filename_case;
 mod unicorn_import_style;
+mod unicorn_isolated_functions;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
@@ -1149,6 +1150,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_single_replace::RULE,
     &unicorn_name_replacements::RULE,
     &unicorn_consistent_boolean_name::RULE,
+    &unicorn_isolated_functions::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];
