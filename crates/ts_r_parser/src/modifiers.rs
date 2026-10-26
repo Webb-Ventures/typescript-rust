@@ -142,7 +142,18 @@ impl<'a> Parser<'a> {
             // `static export as namespace N;` is a namespace export with a misplaced
             // modifier (umd-errors), not `export` as a modifier; so is `accessor export
             // default x` an export assignment (autoAccessorDisallowedModifiers).
+            // `export type {}` / `export type * from` after modifiers is an export
+            // declaration (`declare export type {} from "m"`), not `export` modifying a type
+            // alias (tsc 7 and typescript-estree parse it so; the checker reports the
+            // modifier).
             ModCtx::Statement => {
+                if flag == Modifiers::EXPORT && k == T::Type {
+                    return self.lookahead(|p| {
+                        p.bump();
+                        p.bump();
+                        !matches!(p.kind(), T::LBrace | T::Star)
+                    });
+                }
                 k.is_identifier_or_keyword()
                     && !(flag == Modifiers::EXPORT && matches!(k, T::As | T::Default))
             }

@@ -487,7 +487,9 @@ impl<'a> Parser<'a> {
                 T::Semi => return None,
                 T::Var => Some(VarKind::Var),
                 T::Const => Some(VarKind::Const),
-                T::Let if p.is_let_declaration() => Some(VarKind::Let),
+                // `for (let in x)` is an empty `let` list in tsc 7 (TS1123, then the `for-in`;
+                // panicForInEmptyDeclarationList), not the name `let`.
+                T::Let if p.is_let_declaration() || p.peek_kind() == T::In => Some(VarKind::Let),
                 T::Using if p.is_using_declaration_in_for() => Some(VarKind::Using),
                 T::Await if p.is_await_using_declaration() => Some(VarKind::AwaitUsing),
                 _ => None,

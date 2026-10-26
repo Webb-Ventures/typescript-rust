@@ -455,6 +455,11 @@ impl Printer<'_> {
                 self.space();
                 self.tok("(");
                 self.for_head_left(left, false, false);
+                // An empty list (`for (let in x)`, error recovery) keeps the space after its
+                // keyword: tsc writes `let  in x`.
+                if matches!(self.node(left), Node::VarDecl { decls, .. } if decls.is_empty()) {
+                    self.space();
+                }
                 self.hard_space();
                 self.tok("in");
                 self.hard_space();
@@ -1057,10 +1062,12 @@ impl Printer<'_> {
             NodeKind::VarDecl => self.var_decl(left, false),
             _ => {
                 // `for (let of x)` / `for (async of x)` are ambiguous; parenthesize
-                // (`for await (async of x)` is not).
+                // (`for await (async of x)` is not). tsc prints a source `for (async of x)`
+                // as written (a grammar error, TS1106; parserForOfStatement22).
                 let paren = self.starts_with_let(left)
                     || (is_of
                         && !is_await
+                        && (!self.tsc || self.is_synthetic(left))
                         && matches!(self.node(left), Node::Ident { name } if self.ast.atom(name) == "async"));
                 if paren {
                     self.tok("(");

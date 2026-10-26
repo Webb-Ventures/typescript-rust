@@ -668,3 +668,21 @@ fn adjacent_jsx_elements_print_as_tsc_does() {
         "var x = (<a></a>, <b></b>);\n<X a=<b />, <c />/>;\nlet y = (, a);\n"
     );
 }
+
+#[test]
+fn invalid_for_heads_print_as_tsc_does() {
+    // tsc 7 prints a source `for (async of x)` as written (TS1106, parserForOfStatement22)
+    // and keeps the space after the keyword of an empty `let` list (TS1123,
+    // panicForInEmptyDeclarationList).
+    let src = "for (async of [1]) {}\nfor (let in x) {}\n";
+    let r = ts_r_parser::parse(src, SourceKind::Ts);
+    let out = print_as(
+        &r.ast,
+        src,
+        &opts(Layout::Tsc),
+        &PrintHints::default(),
+        Syntax::JavaScript,
+    )
+    .code;
+    assert_eq!(out, "for (async of [1]) { }\nfor (let  in x) { }\n");
+}
