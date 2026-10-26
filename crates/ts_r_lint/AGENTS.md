@@ -1904,6 +1904,26 @@ A second batch adds six more, also at 100% of their oracle cases: `isolated-func
   boolean context or boolean operands; operands with side effects other than
   `Array.isArray`-like static checks make it a suggestion. A return/throw argument with a
   line break after `!` gets parentheses. Comments inside withhold the fix.
+- **no-declarations-before-early-exit** (105/105), **no-useless-else** (127/127),
+  **prefer-else-if** (128/128) share `unicorn_conditions::always_exits`, a structural
+  stand-in for upstream's code-path tracking (`trackBranchExits` + `isBranchExit`):
+  `return`/`throw`/`break`/`continue`, an always-evaluated global `process.exit(..)` (not
+  behind `&&`/`||`/`??` or `?:` unless a literal decides, not past an optional chain), a
+  block with an exiting statement, an `if` whose branches both exit (a literal test picks
+  one), `try` whose `finally` exits or whose block and handler both exit (the handler can't
+  run when the block reaches `process.exit` with nothing throwable before it), a `switch`
+  with a `default` whose cases all fall into an exit with no `break` out (a `process.exit`
+  case test only needs the cases before it), loops with a literal truthy test and no
+  `break` to them, a `do` whose test exits, and labeled statements. Dead code (after an
+  exit, under a literal test) is ignored when looking for jumps. An `if` after an exiting
+  sibling is dead and never a guard. no-declarations-before-early-exit scans each block and
+  the program (not `case` lists) for a `let`/`const` (not `declare`/`export`) before the
+  first guard (exactly one branch exits) and only used after it; no-useless-else reports
+  the `else` keyword of `if`s in statement lists and moves the alternate out unless that
+  would change meaning (block-scoped declarations, multiline strings/templates/JSX
+  attribute strings, ASI hazards at either end, code or comments after it on its line,
+  comments between the branches); prefer-else-if joins adjacent `if` chains comparing one
+  static reference to disjoint values, keyed by type and value.
 - `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
   (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
   identifier searches, joining fixes, `global_value_available` (type-only bindings
@@ -1911,7 +1931,8 @@ A second batch adds six more, also at 100% of their oracle cases: `isolated-func
   `reindent_text` (`reindentText`), `indent_if_line_start`, `outermost_ts_wrapper`,
   `logical_child_text` (`getLogicalExpressionChildText`), `comment_next_to`/`comment_before`/
   `comment_after`, `has_multiline_token`, `is_block_scoped_declaration`, the early-exit
-  pieces, `short_body_problem` and `is_boolean_expression`.
+  pieces, `short_body_problem`, `is_boolean_expression`, `is_process_exit_call`,
+  `expression_exits` and `always_exits`.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
 `logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
@@ -1924,7 +1945,7 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assig
 `prefer-continue.js`, `prefer-early-return.js`, `no-unnecessary-boolean-comparison.js`,
 `prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`,
 `no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`,
-`prefer-simplified-conditions.js`;
+`prefer-simplified-conditions.js`, `no-declarations-before-early-exit.js`, `prefer-else-if.js`;
 `rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
 `should-add-parentheses-to-await-expression-argument.js`,
 `should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,

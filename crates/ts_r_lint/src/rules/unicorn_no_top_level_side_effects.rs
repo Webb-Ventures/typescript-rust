@@ -177,7 +177,7 @@ fn is_global_target(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
 }
 
 /// `getAssignmentTargets`: the identifiers and members an assignment target writes.
-fn assignment_targets(ast: &Ast, id: NodeId, out: &mut Vec<NodeId>, depth: u32) {
+pub(crate) fn assignment_targets(ast: &Ast, id: NodeId, out: &mut Vec<NodeId>, depth: u32) {
     if depth > 200 {
         return;
     }

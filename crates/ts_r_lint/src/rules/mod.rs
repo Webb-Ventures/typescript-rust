@@ -364,6 +364,7 @@ mod unicorn_no_confusing_array_splice;
 mod unicorn_no_confusing_array_with;
 mod unicorn_no_console_spaces;
 mod unicorn_no_constant_zero_expression;
+mod unicorn_no_declarations_before_early_exit;
 mod unicorn_no_document_cookie;
 mod unicorn_no_double_comparison;
 mod unicorn_no_duplicate_if_branches;
@@ -450,6 +451,7 @@ mod unicorn_no_useless_compound_assignment;
 mod unicorn_no_useless_concat;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_delete_check;
+mod unicorn_no_useless_else;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_fallback_in_spread;
 mod unicorn_no_useless_iterator_to_array;
@@ -499,7 +501,8 @@ mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
 mod unicorn_prefer_dom_node_text_content;
-mod unicorn_prefer_escaped_irregular_whitespace;
+mod unicorn_prefer_early_return;
+mod unicorn_prefer_else_if;
 mod unicorn_prefer_event_target;
 mod unicorn_prefer_export_from;
 mod unicorn_prefer_flat_math_min_max;
@@ -989,6 +992,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_collection_bracket_access::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_constant_zero_expression::RULE,
+    &unicorn_no_declarations_before_early_exit::RULE,
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_double_comparison::RULE,
     &unicorn_no_duplicate_logical_operands::RULE,
@@ -1063,6 +1067,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_concat::RULE,
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_delete_check::RULE,
+    &unicorn_no_useless_else::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_iterator_to_array::RULE,
     &unicorn_no_useless_override::RULE,
@@ -1101,6 +1106,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_direct_iteration::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
     &unicorn_prefer_early_return::RULE,
+    &unicorn_prefer_else_if::RULE,
     &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_flat_math_min_max::RULE,
     &unicorn_prefer_export_from::RULE,

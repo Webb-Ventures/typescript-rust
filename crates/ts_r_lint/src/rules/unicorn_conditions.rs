@@ -947,3 +947,496 @@ fn boolean_function_reference(cx: &Ctx<'_, '_>, callee: NodeId, depth: u32) -> b
     };
     boolean_expression(cx, result, depth + 1)
 }
+
+/// `process.exit(..)` on the global `process`, not optional or computed.
+pub(crate) fn is_process_exit_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let ast = cx.ast();
+    let Node::Call {
+        callee,
+        optional: false,
+        ..
+    } = *ast.node(unwrap_ts_and_parens(ast, id))
+    else {
+        return false;
+    };
+    let Node::Member {
+        obj,
+        optional: false,
+        prop,
+    } = *ast.node(unwrap_ts_and_parens(ast, callee))
+    else {
+        return false;
+    };
+    let obj = skip_parens(ast, obj);
+    ident_name(ast, obj) == Some("process")
+        && ident_name(ast, prop) == Some("exit")
+        && global_value_available(cx, obj, "process")
+}
+
+/// A literal whose truthiness is known: `Some(truthy)`.
+fn literal_truthiness(ast: &Ast, id: NodeId) -> Option<bool> {
+    match ast.node(skip_parens(ast, id)) {
+        Node::BoolLit { value } => Some(*value),
+        Node::NullLit {} => Some(false),
+        Node::NumberLit { value } => {
+            let v = value.get();
+            Some(v != 0.0 && !v.is_nan())
+        }
+        Node::StringLit { value } => Some(!ast.atom(*value).is_empty()),
+        Node::BigIntLit { value } => Some(
+            !ast.atom(*value)
+                .trim_start_matches(['0', 'x', 'X', 'o', 'O', 'b', 'B'])
+                .is_empty(),
+        ),
+        Node::RegexLit { .. } => Some(true),
+        _ => None,
+    }
+}
+
+/// What a jump search looks for: `break`s (and, with `continue`, `continue`s) that land on
+/// one statement: unlabeled ones outside any nested loop (or `switch`, for `break`), or
+/// ones naming `label`.
+#[derive(Clone, Copy)]
+struct JumpTarget<'l> {
+    label: Option<&'l str>,
+    unlabeled: bool,
+    with_continue: bool,
+}
+
+/// A jump to `t` under `id`, ignoring dead code (branches of a literal `if` test that
+/// never run, statements after one that always exits) and nested functions.
+fn jumps_to(
+    cx: &Ctx<'_, '_>,
+    id: NodeId,
+    t: JumpTarget<'_>,
+    in_breakable: bool,
+    in_loop: bool,
+    depth: u32,
+) -> bool {
+    if depth > 500 {
+        return true;
+    }
+    let ast = cx.ast();
+    let next = depth + 1;
+    let list = |stmts: &[NodeId], in_breakable: bool, in_loop: bool| {
+        for &s in stmts {
+            if jumps_to(cx, s, t, in_breakable, in_loop, next) {
+                return true;
+            }
+            if exits(cx, s, next) {
+                return false;
+            }
+        }
+        false
+    };
+    let named = |label: Option<NodeId>| {
+        t.label.is_some() && label.and_then(|l| ident_name(ast, l)) == t.label
+    };
+    match *ast.node(id) {
+        Node::Break { label: None } => t.unlabeled && !in_breakable,
+        Node::Continue { label: None } => t.unlabeled && t.with_continue && !in_loop,
+        Node::Break { label } => named(label),
+        Node::Continue { label } => t.with_continue && named(label),
+        Node::Block { stmts } => list(ast.list(stmts), in_breakable, in_loop),
+        Node::If { test, cons, alt } => match literal_truthiness(ast, test) {
+            Some(true) => jumps_to(cx, cons, t, in_breakable, in_loop, next),
+            Some(false) => alt.is_some_and(|a| jumps_to(cx, a, t, in_breakable, in_loop, next)),
+            None => {
+                jumps_to(cx, cons, t, in_breakable, in_loop, next)
+                    || alt.is_some_and(|a| jumps_to(cx, a, t, in_breakable, in_loop, next))
+            }
+        },
+        Node::For { body, .. }
+        | Node::ForIn { body, .. }
+        | Node::ForOf { body, .. }
+        | Node::While { body, .. }
+        | Node::DoWhile { body, .. } => jumps_to(cx, body, t, true, true, next),
+        Node::Switch { cases, .. } => ast.list(cases).iter().any(|&c| match *ast.node(c) {
+            Node::SwitchCase { body, .. } => list(ast.list(body), true, in_loop),
+            _ => false,
+        }),
+        Node::Labeled { body, .. } | Node::With { body, .. } => {
+            jumps_to(cx, body, t, in_breakable, in_loop, next)
+        }
+        Node::Try {
+            block,
+            handler,
+            finalizer,
+        } => {
+            jumps_to(cx, block, t, in_breakable, in_loop, next)
+                || handler.is_some_and(|h| match *ast.node(h) {
+                    Node::CatchClause { body, .. } => {
+                        jumps_to(cx, body, t, in_breakable, in_loop, next)
+                    }
+                    _ => false,
+                })
+                || finalizer.is_some_and(|f| jumps_to(cx, f, t, in_breakable, in_loop, next))
+        }
+        _ => false,
+    }
+}
+
+/// The labels directly on `stmt` (`a: b: while (..)`).
+fn own_labels<'a>(cx: &Ctx<'a, '_>, stmt: NodeId) -> Vec<&'a str> {
+    let ast = cx.ast();
+    let mut out = Vec::new();
+    let mut cur = stmt;
+    while let Some(p) = cx.parent(cur) {
+        let Node::Labeled { label, .. } = *ast.node(p) else {
+            break;
+        };
+        out.extend(ident_name(ast, label));
+        cur = p;
+    }
+    out
+}
+
+/// A `break` (or, with `with_continue`, a `continue`) under `body` targets `stmt`.
+fn targets(cx: &Ctx<'_, '_>, stmt: NodeId, body: NodeId, with_continue: bool, depth: u32) -> bool {
+    let unlabeled = JumpTarget {
+        label: None,
+        unlabeled: true,
+        with_continue,
+    };
+    jumps_to(cx, body, unlabeled, false, false, depth)
+        || own_labels(cx, stmt).into_iter().any(|l| {
+            let t = JumpTarget {
+                label: Some(l),
+                unlabeled: false,
+                with_continue,
+            };
+            jumps_to(cx, body, t, false, false, depth)
+        })
+}
+
+/// A global `process.exit(..)` is always evaluated in `id` (not behind a short circuit,
+/// an optional chain or one side of `?:`, unless a literal decides it).
+pub(crate) fn expression_exits(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    expr_exits(cx, id, 0)
+}
+
+fn expr_exits(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    if depth > 500 {
+        return false;
+    }
+    let ast = cx.ast();
+    let next = depth + 1;
+    let id = unwrap_ts_and_parens(ast, id);
+    let any = |list: ts_r_ast::NodeList| ast.list(list).iter().any(|&e| expr_exits(cx, e, next));
+    match *ast.node(id) {
+        Node::Call { callee, args, .. } => {
+            is_process_exit_call(cx, id)
+                || expr_exits(cx, callee, next)
+                || (!has_optional_chain_element(ast, id) && any(args))
+        }
+        Node::New { callee, args, .. } => expr_exits(cx, callee, next) || any(args),
+        Node::Member { obj, .. } => expr_exits(cx, obj, next),
+        Node::Index { obj, index, .. } => {
+            expr_exits(cx, obj, next)
+                || (!has_optional_chain_element(ast, id) && expr_exits(cx, index, next))
+        }
+        Node::TaggedTemplate { tag, quasi, .. } => {
+            expr_exits(cx, tag, next) || expr_exits(cx, quasi, next)
+        }
+        Node::TemplateLit { parts } | Node::Seq { exprs: parts } => any(parts),
+        Node::ArrayLit { elements } => any(elements),
+        Node::ObjectLit { props } => ast.list(props).iter().any(|&p| match *ast.node(p) {
+            Node::Property { key, value, .. } => {
+                expr_exits(cx, key, next) || expr_exits(cx, value, next)
+            }
+            Node::Spread { arg } => expr_exits(cx, arg, next),
+            _ => false,
+        }),
+        Node::Spread { arg }
+        | Node::Unary { arg, .. }
+        | Node::Await { arg }
+        | Node::Update { arg, .. } => expr_exits(cx, arg, next),
+        Node::Binary { left, op, right } => {
+            if expr_exits(cx, left, next) {
+                return true;
+            }
+            let right_runs = match op {
+                BinaryOp::LogicalAnd => literal_truthiness(ast, left) == Some(true),
+                BinaryOp::LogicalOr => literal_truthiness(ast, left) == Some(false),
+                BinaryOp::Coalesce => matches!(ast.node(skip_parens(ast, left)), Node::NullLit {}),
+                _ => true,
+            };
+            right_runs && expr_exits(cx, right, next)
+        }
+        Node::Assign { left, op, right } => {
+            let target = match *ast.node(left) {
+                Node::Member { obj, .. } => expr_exits(cx, obj, next),
+                Node::Index { obj, index, .. } => {
+                    expr_exits(cx, obj, next) || expr_exits(cx, index, next)
+                }
+                _ => false,
+            };
+            target
+                || (!matches!(
+                    op,
+                    AssignOp::AndAssign | AssignOp::OrAssign | AssignOp::CoalesceAssign
+                ) && expr_exits(cx, right, next))
+        }
+        Node::Conditional { test, cons, alt } => {
+            expr_exits(cx, test, next)
+                || match literal_truthiness(ast, test) {
+                    Some(true) => expr_exits(cx, cons, next),
+                    Some(false) => expr_exits(cx, alt, next),
+                    None => expr_exits(cx, cons, next) && expr_exits(cx, alt, next),
+                }
+        }
+        _ => false,
+    }
+}
+
+/// `id` can't throw: a literal, `this`, a declared local name, or `!`/`typeof`/`void`/`-`
+/// of one, and `?:` of those.
+fn expr_cannot_throw(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    if depth > 100 {
+        return false;
+    }
+    let ast = cx.ast();
+    let id = unwrap_ts_and_parens(ast, id);
+    match *ast.node(id) {
+        Node::NullLit {}
+        | Node::BoolLit { .. }
+        | Node::NumberLit { .. }
+        | Node::StringLit { .. }
+        | Node::BigIntLit { .. }
+        | Node::RegexLit { .. }
+        | Node::This {} => true,
+        Node::TemplateLit { parts } => ast.list(parts).len() <= 1,
+        Node::Ident { .. } => {
+            let sem = cx.semantic();
+            sem.reference_at(id)
+                .and_then(|r| sem.reference(r).symbol())
+                .is_some_and(|s| {
+                    sem.symbol(s).decls.first().is_some_and(|d| {
+                        matches!(
+                            d.kind,
+                            crate::semantic::DeclKind::Param
+                                | crate::semantic::DeclKind::Var
+                                | crate::semantic::DeclKind::Function
+                        )
+                    })
+                })
+        }
+        Node::Unary {
+            op: UnaryOp::Not | UnaryOp::TypeOf | UnaryOp::Void,
+            arg,
+        } => expr_cannot_throw(cx, arg, depth + 1),
+        Node::Conditional { test, cons, alt } => {
+            expr_cannot_throw(cx, test, depth + 1)
+                && expr_cannot_throw(cx, cons, depth + 1)
+                && expr_cannot_throw(cx, alt, depth + 1)
+        }
+        _ => false,
+    }
+}
+
+/// `id` reaches a global `process.exit(..)` without anything before it that could throw,
+/// so a `catch` around it never runs.
+fn exits_without_throwing(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    if depth > 100 {
+        return false;
+    }
+    let ast = cx.ast();
+    let next = depth + 1;
+    let expr = |e: NodeId| -> bool {
+        let e = unwrap_ts_and_parens(ast, e);
+        match *ast.node(e) {
+            Node::Call { args, .. } if is_process_exit_call(cx, e) => ast
+                .list(args)
+                .iter()
+                .all(|&a| expr_cannot_throw(cx, a, next)),
+            Node::Conditional { test, cons, alt } => {
+                expr_cannot_throw(cx, test, next)
+                    && exits_without_throwing_expr(cx, cons, next)
+                    && exits_without_throwing_expr(cx, alt, next)
+            }
+            _ => false,
+        }
+    };
+    match *ast.node(id) {
+        Node::ExprStmt { expr: e } => expr(e),
+        Node::Block { stmts } => {
+            for &s in ast.list(stmts) {
+                if exits_without_throwing(cx, s, next) {
+                    return true;
+                }
+                if !matches!(ast.node(s), Node::Empty {}) {
+                    return false;
+                }
+            }
+            false
+        }
+        Node::If {
+            test,
+            cons,
+            alt: Some(alt),
+        } => {
+            expr_cannot_throw(cx, test, next)
+                && exits_without_throwing(cx, cons, next)
+                && exits_without_throwing(cx, alt, next)
+        }
+        _ => false,
+    }
+}
+
+fn exits_without_throwing_expr(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    let ast = cx.ast();
+    let id = unwrap_ts_and_parens(ast, id);
+    match *ast.node(id) {
+        Node::Call { args, .. } if is_process_exit_call(cx, id) => ast
+            .list(args)
+            .iter()
+            .all(|&a| expr_cannot_throw(cx, a, depth + 1)),
+        Node::Conditional { test, cons, alt } if depth < 100 => {
+            expr_cannot_throw(cx, test, depth + 1)
+                && exits_without_throwing_expr(cx, cons, depth + 1)
+                && exits_without_throwing_expr(cx, alt, depth + 1)
+        }
+        _ => false,
+    }
+}
+
+/// `branchAlwaysExits` (code-path analysis, structurally): control never falls out of
+/// `stmt` to what follows it. `return`, `throw`, `break`, `continue` and an always-evaluated
+/// global `process.exit(..)` exit; a block exits when one of its statements does; an `if`
+/// when both branches do (a literal test picks one); `try` when its `finally` does, or its
+/// block does and the handler does too (or can't run: the block reaches `process.exit`
+/// without anything that could throw); a `switch` with a `default` when every case falls
+/// into an exit and none breaks out; a loop with a literal truthy test (or a `do` whose
+/// body exits, or whose test exits) with no `break` to it; a labeled statement whose body
+/// exits without a `break` to the label. Dead code (after an exit, or under a literal test)
+/// is ignored.
+pub(crate) fn always_exits(cx: &Ctx<'_, '_>, stmt: NodeId) -> bool {
+    exits(cx, stmt, 0)
+}
+
+fn exits(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> bool {
+    if depth > 500 {
+        return false;
+    }
+    let ast = cx.ast();
+    let next = depth + 1;
+    match *ast.node(id) {
+        Node::Return { .. } | Node::Throw { .. } | Node::Break { .. } | Node::Continue { .. } => {
+            true
+        }
+        Node::ExprStmt { expr } => expr_exits(cx, expr, next),
+        Node::VarDecl { decls, .. } => ast.list(decls).iter().any(|&d| match *ast.node(d) {
+            Node::VarDeclarator { init: Some(i), .. } => expr_exits(cx, i, next),
+            _ => false,
+        }),
+        Node::Block { stmts } => ast.list(stmts).iter().any(|&s| exits(cx, s, next)),
+        Node::If { test, cons, alt } => {
+            expr_exits(cx, test, next)
+                || match literal_truthiness(ast, test) {
+                    Some(true) => exits(cx, cons, next),
+                    Some(false) => alt.is_some_and(|a| exits(cx, a, next)),
+                    None => alt.is_some_and(|a| exits(cx, cons, next) && exits(cx, a, next)),
+                }
+        }
+        Node::Try {
+            block,
+            handler,
+            finalizer,
+        } => {
+            finalizer.is_some_and(|f| exits(cx, f, next))
+                || (exits(cx, block, next)
+                    && handler.is_none_or(|h| match *ast.node(h) {
+                        Node::CatchClause { body, .. } => {
+                            exits(cx, body, next) || exits_without_throwing(cx, block, next)
+                        }
+                        _ => false,
+                    }))
+        }
+        Node::Switch { disc, cases } => {
+            if expr_exits(cx, disc, next) {
+                return true;
+            }
+            let cases = ast.list(cases);
+            let mut has_default = false;
+            let mut exit_test = None;
+            let mut parts = Vec::new();
+            for (i, &c) in cases.iter().enumerate() {
+                if let Node::SwitchCase { test, body } = *ast.node(c) {
+                    has_default |= test.is_none();
+                    if exit_test.is_none() && test.is_some_and(|t| expr_exits(cx, t, next)) {
+                        exit_test = Some(i);
+                    }
+                    parts.push(body);
+                }
+            }
+            let mut case_exits = vec![false; parts.len()];
+            let mut falls_into_exit = false;
+            let breaks = JumpTarget {
+                label: None,
+                unlabeled: true,
+                with_continue: false,
+            };
+            for (i, &body) in parts.iter().enumerate().rev() {
+                let stmts = ast.list(body);
+                let mut broke = false;
+                for &s in stmts {
+                    if jumps_to(cx, s, breaks, false, false, next) {
+                        broke = true;
+                        break;
+                    }
+                    if exits(cx, s, next) {
+                        break;
+                    }
+                }
+                if broke {
+                    falls_into_exit = false;
+                } else {
+                    falls_into_exit = falls_into_exit || stmts.iter().any(|&s| exits(cx, s, next));
+                }
+                case_exits[i] = falls_into_exit;
+            }
+            match exit_test {
+                Some(first) => case_exits[..first].iter().all(|&e| e),
+                None => has_default && case_exits.iter().all(|&e| e),
+            }
+        }
+        Node::While { test, body } => {
+            expr_exits(cx, test, next)
+                || (literal_truthiness(ast, test) == Some(true)
+                    && !targets(cx, id, body, false, next))
+        }
+        Node::For {
+            init, test, body, ..
+        } => {
+            init.is_some_and(|i| {
+                if ast.node(i).is_statement() {
+                    exits(cx, i, next)
+                } else {
+                    expr_exits(cx, i, next)
+                }
+            }) || test.is_some_and(|t| expr_exits(cx, t, next))
+                || (test.is_none_or(|t| literal_truthiness(ast, t) == Some(true))
+                    && !targets(cx, id, body, false, next))
+        }
+        Node::DoWhile { body, test } => {
+            if targets(cx, id, body, false, next) {
+                return false;
+            }
+            if literal_truthiness(ast, test) == Some(true) || expr_exits(cx, test, next) {
+                return true;
+            }
+            exits(cx, body, next) && !targets(cx, id, body, true, next)
+        }
+        Node::ForIn { right, .. } | Node::ForOf { right, .. } => expr_exits(cx, right, next),
+        Node::Labeled { label, body } => {
+            let t = JumpTarget {
+                label: ident_name(ast, label),
+                unlabeled: false,
+                with_continue: false,
+            };
+            exits(cx, body, next) && !jumps_to(cx, body, t, false, false, next)
+        }
+        Node::With { obj, body } => expr_exits(cx, obj, next) || exits(cx, body, next),
+        _ => false,
+    }
+}
