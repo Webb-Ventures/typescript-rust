@@ -301,3 +301,8 @@ unicorn/no-unnecessary-slice-end
 unicorn/no-unnecessary-array-splice-count
 unicorn/no-array-reverse
 unicorn/no-array-sort
+unicorn/no-useless-continue
+unicorn/no-array-concat-in-loop
+unicorn/no-duplicate-set-values
+unicorn/no-optional-chaining-on-undeclared-variable
+unicorn/prefer-response-static-json

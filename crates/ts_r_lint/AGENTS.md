@@ -620,6 +620,13 @@ parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_
 - **no-async-promise-finally** uses type information only to skip a receiver known not to
   be a promise (every non-nullable union member lacks a callable `then`); `any`/`unknown`
   stay reported.
+- **remove_statements** (`unicorn_ast.rs`, `removeStatement`): removes statements with their
+  own lines when nothing else shares them, or writes `;` when the previous token would
+  otherwise run into the next statement (no-useless-continue).
+- **no-useless-continue**, **no-array-concat-in-loop**, **no-duplicate-set-values**,
+  **no-optional-chaining-on-undeclared-variable** (scopes walked outwards; type-only
+  declarations and imports don't declare a runtime name), **prefer-response-static-json**:
+  see each file's header.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
 `no-await-in-promise-methods.js`, `consistent-date-clone.js`,
@@ -638,7 +645,11 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-re
 `no-async-promise-finally.js`, `utils/is-promise-type.js`, `utils/types.js`,
 `shared/no-unnecessary-length-or-infinity-rule.js`, `no-unnecessary-slice-end.js`,
 `no-unnecessary-array-splice-count.js`, `utils/contains-node.js`,
-`shared/no-array-mutate-rule.js`, `utils/is-node-value-not-function.js`.
+`shared/no-array-mutate-rule.js`, `utils/is-node-value-not-function.js`,
+`no-useless-continue.js`, `fix/remove-statement.js`, `utils/needs-semicolon.js`,
+`no-array-concat-in-loop.js`, `shared/array-concat-in-loop.js`, `no-duplicate-set-values.js`,
+`utils/get-duplicate-array-elements.js`, `no-optional-chaining-on-undeclared-variable.js`,
+`utils/imports.js`, `prefer-response-static-json.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:

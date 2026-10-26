@@ -478,6 +478,63 @@ pub(crate) fn contains_node(ast: &Ast, root: NodeId, pred: impl Fn(&Node) -> boo
     f.found
 }
 
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
+/// The fix removing the statements `first..=last` (`removeStatement`): when the token
+/// before would then continue into what follows, they become `;`; otherwise, when nothing
+/// but spaces shares their lines, the whole lines go (with the line break before them, or
+/// after them on the first line). `preserve_semicolon` keeps the last statement's `;`.
+pub(crate) fn remove_statements(
+    cx: &Ctx<'_, '_>,
+    first: NodeId,
+    last: NodeId,
+    preserve_semicolon: bool,
+) -> Fix {
+    let src = cx.src();
+    let start0 = cx.span(first).start;
+    let last_span = cx.span(last);
+    if super::unicorn_text::needs_semicolon(cx, start0, "(") {
+        return Fix::replace(Span::new(start0, last_span.end), ";");
+    }
+    let mut end = last_span.end;
+    if preserve_semicolon && src[..end as usize].ends_with(';') {
+        end = skip_trivia_backward(cx.ast(), src, end as usize - 1) as u32;
+    }
+    let mut start = start0;
+    let line_start = src[..start as usize]
+        .rfind(is_line_break)
+        .map_or(0, |i| i + src[i..].chars().next().map_or(1, char::len_utf8));
+    let line_end = src[end as usize..]
+        .find(is_line_break)
+        .map_or(src.len(), |i| end as usize + i);
+    let blank = |t: &str| t.chars().all(is_js_space);
+    if blank(&src[line_start..start as usize]) && blank(&src[end as usize..line_end]) {
+        end = line_end as u32;
+        start = line_start as u32;
+        if start == 0 {
+            let rest = &src[end as usize..];
+            end += if rest.starts_with("\r\n") {
+                2
+            } else {
+                rest.chars().next().map_or(0, |c| c.len_utf8() as u32)
+            };
+        } else {
+            let before = &src[..start as usize];
+            start -= if before.ends_with("\r\n") {
+                2
+            } else {
+                before
+                    .chars()
+                    .next_back()
+                    .map_or(0, |c| c.len_utf8() as u32)
+            };
+        }
+    }
+    Fix::replace(Span::new(start, end), "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -273,6 +273,7 @@ unicorn/error-message 106/106
 unicorn/escape-case 198/198
 unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
+unicorn/no-array-concat-in-loop 33/33
 unicorn/no-array-reverse 28/28
 unicorn/no-array-sort 76/76
 unicorn/no-async-promise-finally 39/39
@@ -280,6 +281,7 @@ unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
 unicorn/no-document-cookie 21/21
+unicorn/no-duplicate-set-values 40/40
 unicorn/no-exports-in-scripts 22/22
 unicorn/no-instanceof-builtins 175/175
 unicorn/no-invalid-remove-event-listener 42/42
@@ -291,6 +293,7 @@ unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
 unicorn/no-null 94/94
+unicorn/no-optional-chaining-on-undeclared-variable 38/38
 unicorn/no-this-assignment 23/23
 unicorn/no-typeof-undefined 100/100
 unicorn/no-unnecessary-array-flat-depth 20/20
@@ -298,6 +301,7 @@ unicorn/no-unnecessary-array-splice-count 78/78
 unicorn/no-unnecessary-await 63/66
 unicorn/no-unnecessary-slice-end 39/39
 unicorn/no-unreadable-iife 14/14
+unicorn/no-useless-continue 43/43
 unicorn/no-useless-error-capture-stack-trace 53/53
 unicorn/no-useless-re-export 22/22
 unicorn/no-xor-as-exponentiation 34/34
@@ -311,6 +315,9 @@ unicorn/prefer-includes 243/247
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-properties 474/474
 unicorn/prefer-optional-catch-binding 25/25
+unicorn/prefer-response-static-json 39/39
+unicorn/prefer-short-escape-sequences 28/28
+unicorn/prefer-string-repeat 79/79
 unicorn/prefer-string-trim-start-end 23/23
 unicorn/prefer-type-error 112/112
 unicorn/text-encoding-identifier-case 101/101
