@@ -12,7 +12,9 @@
 //!   annotation; a function initializer's type has the variable's expandos).
 //! - Every property declaration merged into a symbol (interface/interface or class/interface
 //!   merges) after the first must have a type identical to the first: TS2717 at the later
-//!   declaration's name. Optional declarations include `undefined`.
+//!   declaration's name. Optional declarations include `undefined`. The first is the first
+//!   across files too: a lib's `interface Array<T> { length: number }` against a project's
+//!   `length: string`, one file's interface against another's.
 //! - Property declarations of one instance member (class/interface merges, a parameter
 //!   property beside a declared property) must agree on `private`, `protected`, `readonly`,
 //!   `static`, `abstract`, `async` and `?` (`public` does not count): TS2687 at the first
@@ -121,7 +123,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return;
         }
-        let decls = self.c.decls(sym);
+        let mut decls = self.c.decls(sym);
+        // Declarations of the member in other declarations of its interface or class (another
+        // file's, a lib's `interface Array<T> { length: number }`) have their own member
+        // tables, so their own symbols: the first of all is the one compared.
+        let merged = self.merged_member_decls(here);
+        if merged.len() > decls.len() && merged.contains(&here) {
+            decls = merged;
+        }
         let Some(&first) = decls.first() else {
             return;
         };
