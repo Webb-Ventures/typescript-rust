@@ -296,3 +296,8 @@ unicorn/prefer-string-trim-start-end
 unicorn/prefer-number-properties
 unicorn/error-message
 unicorn/prefer-includes
+unicorn/no-async-promise-finally
+unicorn/no-unnecessary-slice-end
+unicorn/no-unnecessary-array-splice-count
+unicorn/no-array-reverse
+unicorn/no-array-sort

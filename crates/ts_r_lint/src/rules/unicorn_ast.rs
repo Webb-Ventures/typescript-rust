@@ -458,6 +458,26 @@ pub(crate) fn is_left_hand_side(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
     }
 }
 
+/// Some node in the subtree under `root` (itself included) satisfies `pred`.
+pub(crate) fn contains_node(ast: &Ast, root: NodeId, pred: impl Fn(&Node) -> bool) -> bool {
+    struct Find<F> {
+        pred: F,
+        found: bool,
+    }
+    impl<F: Fn(&Node) -> bool> ts_r_ast::visit::Visitor for Find<F> {
+        fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
+            if (self.pred)(ast.node(id)) {
+                self.found = true;
+                return ts_r_ast::visit::Walk::Stop;
+            }
+            ts_r_ast::visit::Walk::Continue
+        }
+    }
+    let mut f = Find { pred, found: false };
+    ts_r_ast::visit::walk(ast, root, &mut f);
+    f.found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

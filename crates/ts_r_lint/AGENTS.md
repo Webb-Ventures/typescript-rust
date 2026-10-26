@@ -554,6 +554,91 @@ typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visi
 - Fixes that rewrite import/export lists build a list of `(Span, String)` edits and fold them
   into one `Fix` (see `ts_consistent_type_imports.rs`); keep edits non-overlapping.
 
+## eslint-plugin-unicorn rules (round 5, lead)
+
+`prefer-blob-reading-methods`, `consistent-date-clone`, `no-invalid-remove-event-listener`,
+`prefer-structured-clone`, `prefer-event-target`, `no-useless-error-capture-stack-trace`,
+`no-negation-in-equality-check`, `no-exports-in-scripts`, `consistent-tuple-labels`,
+`no-leading-empty-lines`, `prefer-add-event-listener-options` (each at 100% of its oracle), `no-await-in-promise-methods`
+(110 of 111) and `no-unnecessary-await` (63 of 66): their last cases need the parser's
+module goal, see below. Shared call shapes are
+in `rules/unicorn_ast.rs`: `method_call` (a call of `obj.name` with an identifier property,
+parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_.cloneDeep`,
+`new.target.x`, `this.y`), `call_tokens` (a call's `(`, `)` and trailing `,`),
+`would_remove_comments` (a comment in the replaced range but outside every kept range) and
+`skip_spaces` (JavaScript's `\s`).
+
+- **no-await-in-promise-methods** walks up from each `await` to an array that is the single
+  argument of `Promise.all/allSettled/any/race`, stopping at a function or an outer `await`;
+  only an `await` that is the element itself gets the "Remove `await`" suggestion. Open:
+  `Promise.all([\n await\n promise])` in a `.js` module is a parse error for us, because the
+  parser treats top-level `await` before a line break as a name unless the file has
+  `import`/`export`; ESLint (sourceType `module`) always reads the operator. Requested from
+  the parser owner (a forced module-goal parse option for `engine::parse_for_lint`).
+- **consistent-date-clone** reports `.getTime()` in `new Date(x.getTime())` from the method
+  name to the end of the call; the fix deletes from the end of the receiver's parentheses to
+  the end of the member, and from the end of the parenthesized callee to the end of the call.
+- **no-unnecessary-await** fixes only an `await` that is the last thing its function or
+  module evaluates (`is_last_evaluated`: the end of an arrow body, function body or
+  program, through `if` arms, declarations, `return`/`throw` and expression statements).
+  Open: 3 cases (`await +x`, `await\n[]` at the top level of a `.js` module) parse as
+  `await` the name for the same module-goal reason as above.
+- **no-negation-in-equality-check** and the fix helpers it shares with
+  `no-typeof-undefined` (`keyword_argument_parent`, `start_needs_parens`) and
+  `no-instanceof-builtins` (`starts_continued_statement`).
+- **no-useless-error-capture-stack-trace**: the nearest function or class around the call
+  must be the constructor of a class whose `extends` is a global built-in error;
+  `new.target`, `this.constructor` and the class's own single-declaration name count as
+  the class.
+- **prefer-event-target**: `EventEmitter` as superclass or `new` callee, unless declared by
+  an import of (or a `const` destructuring / `.EventEmitter` of `require`/`await import`
+  of) `@angular/core` or `eventemitter3`.
+- **no-exports-in-scripts** (a `#!` first line), **consistent-tuple-labels**,
+  **no-leading-empty-lines**, **prefer-add-event-listener-options**: see each file's header.
+- **A leading BOM** is stripped before linting, by the CLI (`project::lint_one`) and by the
+  oracle harness, which puts it back in front of fixed output; `gen-rule-oracle.mjs` applies
+  fix ranges to the BOM-less text the same way (ESLint's ranges index text without it).
+- **prefer-structured-clone**'s JSON suggestion deletes `JSON.stringify` with each
+  parenthesis around it, the inner call's `(`, `)` and trailing comma; the clone-function
+  form replaces the callee inside its parentheses.
+- **prefer-global-this**, **no-named-default**: see each file's header.
+- **prefer-string-repeat** skips literals the syntax needs (`unicorn_ast::is_string_literal_required`:
+  non-computed keys and any key of an abstract member or signature, module sources and
+  specifiers, import attributes, JSX attribute values, enum members, module names,
+  `require` references, any child of a type) and `expect(x).toMatchInlineSnapshot(lit)`.
+- **remove_argument** (`unicorn_ast.rs`) removes one call argument with its parentheses
+  and one comma, keeping comments in the removed range (no-unnecessary-array-flat-depth).
+- **no-magic-array-flat-depth** ignores a disable/enable directive in the argument list;
+  any other comment there explains the depth and silences it.
+- **no-unnecessary-array-flat-depth**, **consistent-template-literal-escape**,
+  **no-break-in-nested-loop**, **no-useless-re-export**, **prefer-global-number-constants**
+  (`is_left_hand_side` in `unicorn_ast.rs`), **max-nested-calls**,
+  **prefer-short-escape-sequences**: see each file's header.
+- **no-unnecessary-slice-end** and **no-unnecessary-array-splice-count** share
+  `unicorn_length_or_infinity.rs`; **no-array-reverse** and **no-array-sort** share
+  `unicorn_array_mutate.rs`. `contains_node` (`unicorn_ast.rs`) walks a subtree.
+- **no-async-promise-finally** uses type information only to skip a receiver known not to
+  be a promise (every non-nullable union member lacks a callable `then`); `any`/`unknown`
+  stay reported.
+
+Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
+`no-await-in-promise-methods.js`, `consistent-date-clone.js`,
+`no-invalid-remove-event-listener.js`, `prefer-structured-clone.js`, `ast/is-method-call.js`,
+`ast/call-or-new-expression.js`, `utils/is-node-matches.js`, `utils/comments.js`,
+`fix/remove-method-call.js`, `fix/remove-spaces-after.js`, `no-unnecessary-await.js`,
+`no-negation-in-equality-check.js`, `no-useless-error-capture-stack-trace.js`,
+`prefer-event-target.js`, `no-exports-in-scripts.js`, `consistent-tuple-labels.js`,
+`no-leading-empty-lines.js`, `prefer-add-event-listener-options.js`, `utils/needs-semicolon.js`,
+`fix/add-parentheses-to-return-or-throw-expression.js`, `prefer-global-this.js`,
+`no-named-default.js`, `prefer-string-repeat.js`, `utils/is-string-literal-required.js`,
+`no-unnecessary-array-flat-depth.js`, `no-magic-array-flat-depth.js`, `fix/remove-argument.js`,
+`utils/comments.js`, `utils/eslint-directive.js`, `consistent-template-literal-escape.js`,
+`no-break-in-nested-loop.js`, `no-useless-re-export.js`, `prefer-global-number-constants.js`,
+`utils/is-left-hand-side.js`, `max-nested-calls.js`, `prefer-short-escape-sequences.js`,
+`no-async-promise-finally.js`, `utils/is-promise-type.js`, `utils/types.js`,
+`shared/no-unnecessary-length-or-infinity-rule.js`, `no-unnecessary-slice-end.js`,
+`no-unnecessary-array-splice-count.js`, `utils/contains-node.js`,
+`shared/no-array-mutate-rule.js`, `utils/is-node-value-not-function.js`.
 ## eslint-plugin-unicorn type guessing (round 5)
 
 Read to understand (not ported), eslint-plugin-unicorn 79.0.0 `rules/utils/`:

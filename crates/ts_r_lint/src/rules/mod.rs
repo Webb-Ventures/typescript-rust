@@ -274,6 +274,7 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_array_mutate;
 mod unicorn_ast;
 mod unicorn_consistent_date_clone;
 mod unicorn_consistent_template_literal_escape;
@@ -281,8 +282,12 @@ mod unicorn_consistent_tuple_labels;
 mod unicorn_empty_brace_spaces;
 mod unicorn_error_message;
 mod unicorn_escape_case;
+mod unicorn_length_or_infinity;
 mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
+mod unicorn_no_array_reverse;
+mod unicorn_no_array_sort;
+mod unicorn_no_async_promise_finally;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_console_spaces;
@@ -301,7 +306,9 @@ mod unicorn_no_null;
 mod unicorn_no_this_assignment;
 mod unicorn_no_typeof_undefined;
 mod unicorn_no_unnecessary_array_flat_depth;
+mod unicorn_no_unnecessary_array_splice_count;
 mod unicorn_no_unnecessary_await;
+mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unreadable_iife;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_re_export;
@@ -316,7 +323,10 @@ mod unicorn_prefer_includes;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_properties;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_short_escape_sequences;
+mod unicorn_prefer_string_repeat;
 mod unicorn_prefer_string_trim_start_end;
+mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
 mod unicorn_static;
 mod unicorn_text;
@@ -632,6 +642,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_escape_case::RULE,
     &unicorn_max_nested_calls::RULE,
     &unicorn_new_for_builtins::RULE,
+    &unicorn_no_array_reverse::RULE,
+    &unicorn_no_array_sort::RULE,
+    &unicorn_no_async_promise_finally::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_console_spaces::RULE,
@@ -650,7 +663,9 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_typeof_undefined::RULE,
     &unicorn_no_unnecessary_array_flat_depth::RULE,
+    &unicorn_no_unnecessary_array_splice_count::RULE,
     &unicorn_no_unnecessary_await::RULE,
+    &unicorn_no_unnecessary_slice_end::RULE,
     &unicorn_no_unreadable_iife::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_re_export::RULE,

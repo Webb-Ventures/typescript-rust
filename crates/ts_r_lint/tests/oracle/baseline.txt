@@ -273,6 +273,9 @@ unicorn/error-message 106/106
 unicorn/escape-case 198/198
 unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
+unicorn/no-array-reverse 28/28
+unicorn/no-array-sort 76/76
+unicorn/no-async-promise-finally 39/39
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
@@ -291,7 +294,9 @@ unicorn/no-null 94/94
 unicorn/no-this-assignment 23/23
 unicorn/no-typeof-undefined 100/100
 unicorn/no-unnecessary-array-flat-depth 20/20
+unicorn/no-unnecessary-array-splice-count 78/78
 unicorn/no-unnecessary-await 63/66
+unicorn/no-unnecessary-slice-end 39/39
 unicorn/no-unreadable-iife 14/14
 unicorn/no-useless-error-capture-stack-trace 53/53
 unicorn/no-useless-re-export 22/22
