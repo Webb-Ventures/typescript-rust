@@ -458,16 +458,15 @@ fn check_descriptor(cx: &mut Ctx<'_, '_>, node: NodeId, checked: &mut FxHashSet<
                         .then(|| writeable_suggestion(cx, *field))
                         .flatten();
                 let span = key_span(cx, field.key);
-                let mut r = cx
+                let r = cx
                     .report(
                         span,
                         format!("Unknown property descriptor field `{shown}`."),
                     )
                     .id("unknown-field");
                 if let Some(fix) = suggestion {
-                    r = r.suggest("rename-writeable", "Rename `writeable` to `writable`.", fix);
+                    r.suggest("rename-writeable", "Rename `writeable` to `writable`.", fix);
                 }
-                drop(r);
                 continue;
             }
         };
