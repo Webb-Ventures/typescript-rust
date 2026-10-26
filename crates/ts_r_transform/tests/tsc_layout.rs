@@ -298,3 +298,11 @@ fn ambient_merges() {
 fn jsx_source_lines() {
     check("jsx_source_lines");
 }
+
+/// A class expression that starts a statement once a type around it is erased
+/// (`<T>class C {}`, `(class C {} as T)`) is not parenthesized, as tsc prints it; source
+/// parentheses stay. Decorators with no declaration after them print nothing.
+#[test]
+fn bare_class_statements() {
+    check("bare_class_statements");
+}

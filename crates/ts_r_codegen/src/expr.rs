@@ -60,7 +60,11 @@ pub(crate) fn binary_prec(op: BinaryOp) -> Prec {
 enum Leftmost {
     Brace,
     Function,
-    Class,
+    /// `original`: a source class expression ([`Layout::Tsc`](crate::Layout::Tsc)). One
+    /// only starts a statement once a type around it is erased.
+    Class {
+        original: bool,
+    },
     Let,
     Other,
 }
@@ -1624,7 +1628,9 @@ impl Printer<'_> {
                 Node::FunctionExpr { .. } => return Leftmost::Function,
                 Node::ClassExpr { decorators, .. } => {
                     return if decorators.is_empty() {
-                        Leftmost::Class
+                        Leftmost::Class {
+                            original: self.tsc && !self.is_synthetic(id),
+                        }
                     } else {
                         Leftmost::Other
                     };
@@ -1672,7 +1678,11 @@ impl Printer<'_> {
     pub(crate) fn starts_ambiguously(&self, id: NodeId, statement: bool) -> bool {
         match self.leftmost(id) {
             Leftmost::Brace => statement,
-            Leftmost::Function | Leftmost::Class => {
+            // tsc parenthesizes only an object literal or a function at a statement's
+            // start once a type is erased: `<T>class C {}` and `(class C {} as T)` print
+            // `class C {\n};` (source parentheses without a type stay).
+            Leftmost::Class { original: true } if statement => false,
+            Leftmost::Function | Leftmost::Class { .. } => {
                 // `export default function () {}` is a declaration; only wrap when the
                 // function/class is not the whole expression.
                 statement

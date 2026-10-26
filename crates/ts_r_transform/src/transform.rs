@@ -849,6 +849,14 @@ impl<'a> Tx<'a> {
                 self.set(id, Node::Block { stmts: l });
                 out.push(id);
             }
+            // Decorators with no declaration after them (`{ @g<T> class C {} }`): tsc's
+            // missing declaration prints nothing.
+            Node::ExprStmt { expr }
+                if matches!(self.n(expr), Node::Missing {})
+                    && self.src.as_bytes().get(self.span(id).start as usize) == Some(&b'@') =>
+            {
+                self.erase(id);
+            }
             Node::ExprStmt { expr } => {
                 let mut e = expr;
                 while let Node::Paren { expr } = self.n(e) {
