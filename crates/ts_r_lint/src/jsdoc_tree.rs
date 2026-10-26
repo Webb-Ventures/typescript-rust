@@ -213,6 +213,43 @@ fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
     prefixed
 }
 
+/// An inline tag (`{@link Foo text}`) as `parseInlineTags` gives it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineTag {
+    pub tag: String,
+    pub namepath_or_url: String,
+    pub text: String,
+}
+
+fn owned_inline(desc: &str) -> Vec<InlineTag> {
+    inline_tags(desc)
+        .into_iter()
+        .map(|t| InlineTag {
+            tag: t.tag.to_owned(),
+            namepath_or_url: t.namepath.to_owned(),
+            text: t.text.to_owned(),
+        })
+        .collect()
+}
+
+/// The inline tags of a block's own description (its lines before the first tag).
+pub fn block_inline_tags(block: &Block) -> Vec<InlineTag> {
+    let desc: Vec<&str> = block
+        .source
+        .iter()
+        .map(|&i| &block.lines[i].tokens)
+        .take_while(|t| t.tag.is_empty())
+        .map(|t| t.description.trim())
+        .filter(|d| !d.is_empty())
+        .collect();
+    owned_inline(&desc.join(" "))
+}
+
+/// The inline tags of a tag's description.
+pub fn tag_inline_tags(block: &Block, tag: usize) -> Vec<InlineTag> {
+    owned_inline(&block.tags[tag].description)
+}
+
 impl JsdocTree {
     pub fn build(block: &Block) -> JsdocTree {
         let mut tree = JsdocTree { nodes: Vec::new() };

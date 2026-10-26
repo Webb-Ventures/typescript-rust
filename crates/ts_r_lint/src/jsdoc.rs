@@ -171,6 +171,8 @@ pub struct Tag {
     pub description: String,
     /// Indexes into [`Block::lines`].
     pub source: Vec<usize>,
+    /// comment-parser's critical problems (`unpaired brackets`, `empty name`, ...).
+    pub problems: Vec<&'static str>,
 }
 
 /// A parsed `/** ... */` block. `lines` is an arena: the block's lines, in order, are
@@ -392,6 +394,7 @@ fn parse_spec(lines: &mut [Line], source: Vec<usize>) -> Tag {
         typ: String::new(),
         description: String::new(),
         source,
+        problems: Vec::new(),
     };
     // Tag.
     {
@@ -519,6 +522,7 @@ fn tokenize_type(lines: &mut [Line], spec: &mut Tag) -> bool {
         return true;
     }
     if curlies != 0 {
+        spec.problems.push("unpaired curlies");
         return false;
     }
     let offset = lines[parts[0].0].tokens.post_delimiter.len();
@@ -613,6 +617,7 @@ fn tokenize_name(lines: &mut [Line], spec: &mut Tag) -> bool {
         name.push(ch);
     }
     if brackets != 0 {
+        spec.problems.push("unpaired brackets");
         return false;
     }
     let token = name.clone();
@@ -625,22 +630,34 @@ fn tokenize_name(lines: &mut [Line], spec: &mut Tag) -> bool {
         let rest: Vec<&str> = parts.collect();
         let default = (!rest.is_empty()).then(|| rest.join("=").trim().to_owned());
         if name.is_empty() {
+            spec.problems.push("empty name");
             return false;
         }
-        if let Some(d) = &default
-            && (d.is_empty() || (!is_quoted(d) && find_eq(d).is_some()))
-        {
-            return false;
+        if let Some(d) = &default {
+            if d.is_empty() {
+                spec.problems.push("empty default value");
+                return false;
+            }
+            if !is_quoted(d) && find_eq(d).is_some() {
+                spec.problems.push("invalid default value syntax");
+                return false;
+            }
         }
     }
     if !optional && let Some(eq) = find_eq(&name) {
         let pre = name[..eq].trim().to_owned();
         let post = name[eq + 1..].trim().to_owned();
-        if pre.is_empty() || post.is_empty() {
+        if pre.is_empty() {
+            spec.problems.push("empty name");
+            return false;
+        }
+        if post.is_empty() {
+            spec.problems.push("empty default value");
             return false;
         }
         if identifier_eq_prefix(&name) {
             if !is_quoted(&post) && find_eq(&post).is_some() {
+                spec.problems.push("invalid default value syntax");
                 return false;
             }
             name = pre;
@@ -2050,6 +2067,21 @@ mod tests {
         let b = Block::parse("/**\n * @param {string foo Desc\n */");
         assert_eq!(b.tags[0].name, "");
         assert_eq!(b.tags[0].description, "");
+    }
+
+    #[test]
+    fn critical_problems_are_recorded() {
+        let problem = |text: &str| Block::parse(text).tags[0].problems.clone();
+        assert_eq!(problem("/** @param {string foo */"), ["unpaired curlies"]);
+        assert_eq!(problem("/** @param [foo */"), ["unpaired brackets"]);
+        assert_eq!(problem("/** @param [] */"), ["empty name"]);
+        assert_eq!(problem("/** @param [foo=] */"), ["empty default value"]);
+        assert_eq!(
+            problem("/** @param [foo=a=b] */"),
+            ["invalid default value syntax"]
+        );
+        assert_eq!(problem("/** @param =x */"), ["empty name"]);
+        assert!(problem("/** @param [foo=1] */").is_empty());
     }
 
     #[test]

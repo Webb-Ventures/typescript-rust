@@ -296,16 +296,4 @@ unicorn/new-for-builtins
 unicorn/throw-new-error
 unicorn/no-new-array
 unicorn/prefer-type-error
-unicorn/prefer-string-trim-start-end
-unicorn/prefer-number-properties
-unicorn/error-message
-unicorn/prefer-includes
-unicorn/prefer-string-slice
-unicorn/prefer-math-min-max
-unicorn/explicit-length-check
-unicorn/prefer-at
-unicorn/prefer-string-starts-ends-with
-unicorn/prefer-string-replace-all
-unicorn/prefer-regexp-test
-unicorn/prefer-spread
-unicorn/prefer-array-from-range
+jsdoc/valid-types

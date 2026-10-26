@@ -59,7 +59,7 @@ mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
 mod jsdoc_tag_lines;
-mod jsdoc_ts_no_empty_object_type;
+mod jsdoc_valid_types;
 mod max_depth;
 mod max_nested_callbacks;
 mod max_params;
@@ -672,7 +672,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
-    &jsdoc_ts_no_empty_object_type::RULE,
+    &jsdoc_valid_types::RULE,
     // eslint-plugin-unicorn
     &unicorn_consistent_assert::RULE,
     &unicorn_consistent_class_member_order::RULE,
