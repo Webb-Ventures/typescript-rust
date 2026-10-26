@@ -4512,7 +4512,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if let Some(ts_r_types::ObjectKind::Declared { sym, .. }) =
                     self.store().object_of(target).map(|o| o.kind)
                 {
-                    if sym == bs {
+                    // `export default class B` has an export symbol (what an import's
+                    // type names) besides the local one its declaration binds.
+                    if sym == bs || self.c.decls(sym).contains(&base) {
                         return true;
                     }
                     stack.push(sym);

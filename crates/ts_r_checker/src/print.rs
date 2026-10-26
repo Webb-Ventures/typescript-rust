@@ -633,6 +633,24 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// variable it initializes (`const A = class {}` prints `A`), else `(Anonymous class)`.
     pub(crate) fn sym_display_name(&self, sym: SymId) -> String {
         let name = self.c.sym_name(sym);
+        // The export symbol of `export default class C` prints as the declaration names it
+        // (`C`), except after a module path (`import("./c").default`).
+        if name == "default"
+            && !(self.print_qualified && self.print_module_qualified)
+            && let Some(d) = self.c.first_decl(sym)
+        {
+            let ast = self.c.ast(d.file);
+            let named = match *ast.node(d.node) {
+                Node::ClassDecl { name, .. } | Node::FunctionDecl { name, .. } => name,
+                Node::Interface { name, .. } => Some(name),
+                _ => None,
+            };
+            if let Some(n) = named
+                && let Node::Ident { name } = *ast.node(n)
+            {
+                return ast.atom(name).to_owned();
+            }
+        }
         if name != "__class" {
             return name.to_owned();
         }
