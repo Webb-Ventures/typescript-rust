@@ -1301,13 +1301,7 @@ impl Lower<'_, '_> {
             *s = ns;
             done.push(name);
         }
-        if !replaced.is_empty() {
-            for (n, _) in self.tx.moved_comments.iter_mut() {
-                if let Some(&r) = replaced.get(n) {
-                    *n = r;
-                }
-            }
-        }
+        self.tx.moved_remap.extend(replaced);
         for &m in priv_fields {
             let Node::PropertyDef { key, value, .. } = self.n(m) else {
                 continue;

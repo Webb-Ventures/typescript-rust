@@ -122,3 +122,20 @@ console.log(ds[0].get(), ds[1].get());
         );
     }
 }
+
+/// Lowering many classes with private fields and moved initializers stays linear: a
+/// statement replaced by `_C_x.set(this, v)` is remapped once, not by a scan per class.
+#[test]
+fn many_private_classes_are_linear() {
+    let src: String = (0..20_000)
+        .map(|i| format!("class C{i} {{ #x = 0; y = 1; }}\n"))
+        .collect();
+    let opts = TransformOptions::from_json(
+        r#"{"target":"es2015","module":"esnext","useDefineForClassFields":false}"#,
+        "many.ts",
+    );
+    let start = std::time::Instant::now();
+    let out = transpile("many.ts", &src, &opts, &CodegenOptions::default()).code;
+    assert!(out.contains("_C19999_x = new WeakMap();"));
+    assert!(start.elapsed().as_secs() < 10, "took {:?}", start.elapsed());
+}

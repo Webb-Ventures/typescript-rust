@@ -128,6 +128,8 @@ pub(crate) struct Tx<'a> {
     /// Statements standing for source nodes moved elsewhere
     /// ([`crate::TransformResult::moved_comments`]).
     pub moved_comments: Vec<(NodeId, Span)>,
+    /// `moved_comments` statements later replaced (old → new), applied once at the end.
+    pub moved_remap: FxHashMap<NodeId, NodeId>,
     /// Where synthesized statements' trailing comments start
     /// ([`crate::TransformResult::trail_from`]).
     pub trail_from: Vec<(NodeId, u32)>,
@@ -209,6 +211,7 @@ pub(crate) fn run(
         no_detached_comments: false,
         map_ranges: Vec::new(),
         moved_comments: Vec::new(),
+        moved_remap: FxHashMap::default(),
         trail_from: Vec::new(),
     };
     let using = crate::downlevel::using_needing_lowering(&*tx.ast, opts.target);
@@ -270,6 +273,11 @@ pub(crate) fn run(
         },
         moved_comments: {
             let mut r = tx.moved_comments;
+            for (n, _) in r.iter_mut() {
+                if let Some(&to) = tx.moved_remap.get(n) {
+                    *n = to;
+                }
+            }
             r.sort_by_key(|&(n, _)| n);
             r.dedup_by_key(|&mut (n, _)| n);
             r
