@@ -178,6 +178,7 @@ mod radix;
 mod require_yield;
 mod symbol_description;
 mod this_binding;
+mod ts_array_type;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
 mod ts_consistent_type_imports;
@@ -425,6 +426,7 @@ pub static ALL: &[&RuleDef] = &[
     &preserve_caught_error::RULE,
     &radix::RULE,
     &require_yield::RULE,
+    &ts_array_type::RULE,
     &ts_await_thenable::RULE,
     &ts_ban_ts_comment::RULE,
     &ts_consistent_type_imports::RULE,
