@@ -259,40 +259,56 @@ fn remove_all(s: &str, form: Form) -> String {
     out
 }
 
+/// The first of `stops` or a line break at or after `from`. `memo` keeps the last answer,
+/// which still holds for any later `from` up to it, so rising `from`s scan the text once.
+fn next_stop(
+    s: &str,
+    from: usize,
+    stops: &[char],
+    memo: &mut Option<(usize, Option<usize>)>,
+) -> Option<usize> {
+    if let Some((f, r)) = *memo
+        && f <= from
+        && r.is_none_or(|r| r >= from)
+    {
+        return r;
+    }
+    let r = s[from..]
+        .find(|c: char| stops.contains(&c) || is_nl(c))
+        .map(|o| from + o);
+    *memo = Some((from, r));
+    r
+}
+
 /// The `…AttemptRegex` tests: something left that still looks like a link.
 fn looks_like_link(s: &str) -> bool {
+    let (mut bracket, mut paren, mut brace, mut pipe) = (None, None, None, None);
     // From `from`, the text up to the first of `stops` or a line break reaches `close`,
     // or runs to the end of the text.
-    let closes = |from: usize, stops: &[char], close: char| {
-        let seg_end = s[from..]
-            .find(|c: char| stops.contains(&c) || is_nl(c))
-            .map(|o| from + o);
-        match seg_end {
-            None => true,
-            Some(e) => s[e..].starts_with(close),
-        }
+    let closes = |from: usize, close: char, memo: &mut _| match next_stop(s, from, &[close], memo) {
+        None => true,
+        Some(e) => s[e..].starts_with(close),
     };
     for (at, _) in s.match_indices('[') {
         if !not_escaped(s, at) {
             continue;
         }
-        let close = s[at + 1..].find([']', '\r', '\n']).map(|o| at + 1 + o);
+        let close = next_stop(s, at + 1, &[']'], &mut bracket);
         let Some(close) = close.filter(|&c| s[c..].starts_with(']')) else {
             continue;
         };
-        if s[close..].starts_with("](") && closes(close + 2, &[')'], ')') {
+        if s[close..].starts_with("](") && closes(close + 2, ')', &mut paren) {
             return true;
         }
-        if s[close..].starts_with("]{@link") && closes(close + "]{@link".len(), &['}'], '}') {
+        if s[close..].starts_with("]{@link") && closes(close + "]{@link".len(), '}', &mut brace) {
             return true;
         }
     }
     s.match_indices("{@link").any(|(at, _)| {
         let from = at + "{@link".len();
-        let seg_end = s[from..]
-            .find(['}', '\r', '\n'])
-            .map_or(s.len(), |o| from + o);
-        s[from..seg_end].contains('|') && closes(from, &['}'], '}')
+        // A `|` before the first `}` or line break.
+        let bar = next_stop(s, from, &['|', '}'], &mut pipe);
+        bar.is_some_and(|b| s[b..].starts_with('|')) && closes(from, '}', &mut brace)
     })
 }
 
@@ -722,6 +738,15 @@ mod tests {
         let p = "{@link x|".repeat(5_000);
         assert!(find_all(&p, Form::Pipe).is_empty());
         assert!(code_spans(&"`".repeat(10_000)).is_empty());
+        let t = std::time::Instant::now();
+        assert!(!looks_like_link(&format!("{}\n", "[".repeat(200_000))));
+        assert!(!looks_like_link(&format!("{}\n", "[](".repeat(100_000))));
+        assert!(!looks_like_link(&format!("{}\n", "{@link".repeat(100_000))));
+        assert!(!looks_like_link(&format!(
+            "{}\n",
+            "{@link|".repeat(100_000)
+        )));
+        assert!(t.elapsed().as_secs() < 5, "{:?}", t.elapsed());
     }
 
     #[test]
