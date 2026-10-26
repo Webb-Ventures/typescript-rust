@@ -581,6 +581,7 @@ fn unused_diag(comment: Span, message: String, severity: Severity, fix: Fix) -> 
         fix: Some(fix),
         suggestions: Vec::new(),
         fatal: false,
+        loc: None,
     }
 }
 

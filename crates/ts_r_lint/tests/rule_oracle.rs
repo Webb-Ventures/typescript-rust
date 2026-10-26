@@ -246,8 +246,8 @@ fn run_case(reg: &'static Registry, rule: &str, case: &Value) -> Result<(), Stri
         .iter()
         .filter(|d| d.rule == Some(rule_static(reg, rule)))
         .map(|d| {
-            let (l, c) = pos.line_col(d.span.start);
-            let (el, ec) = pos.line_col(d.span.end);
+            let (l, c) = pos.start_of(d);
+            let (el, ec) = pos.end_of(d);
             Msg {
                 line: l as u64,
                 column: c as u64,

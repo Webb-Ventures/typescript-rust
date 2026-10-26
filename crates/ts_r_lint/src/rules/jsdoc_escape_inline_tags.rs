@@ -394,6 +394,7 @@ impl Rule for EscapeInlineTags {
             entries: Vec::new(),
             all: true,
             plain_any: false,
+            additive: false,
         };
         jsdoc::for_each_doc(cx, &settings, &contexts, |cx, f, doc| {
             self.check(cx, f, doc)

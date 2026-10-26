@@ -17,6 +17,7 @@ mod getter_return;
 mod guard_for_in;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
+mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
@@ -25,17 +26,20 @@ mod jsdoc_multiline_blocks;
 mod jsdoc_no_blank_block_descriptions;
 mod jsdoc_no_blank_blocks;
 mod jsdoc_no_defaults;
+mod jsdoc_no_missing_syntax;
 mod jsdoc_no_multi_asterisks;
 mod jsdoc_no_restricted_syntax;
 mod jsdoc_no_types;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
+mod jsdoc_require_asterisk_prefix;
 mod jsdoc_require_hyphen_before_param_description;
 mod jsdoc_require_next_description;
 mod jsdoc_require_next_type;
 mod jsdoc_require_param_description;
 mod jsdoc_require_param_name;
 mod jsdoc_require_param_type;
+mod jsdoc_require_property;
 mod jsdoc_require_property_description;
 mod jsdoc_require_property_name;
 mod jsdoc_require_property_type;
@@ -497,6 +501,7 @@ pub static ALL: &[&RuleDef] = &[
     &yoda::RULE,
     &jsdoc_check_access::RULE,
     &jsdoc_check_alignment::RULE,
+    &jsdoc_check_param_names::RULE,
     &jsdoc_check_property_names::RULE,
     &jsdoc_empty_tags::RULE,
     &jsdoc_escape_inline_tags::RULE,
@@ -505,17 +510,20 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_no_blank_block_descriptions::RULE,
     &jsdoc_no_blank_blocks::RULE,
     &jsdoc_no_defaults::RULE,
+    &jsdoc_no_missing_syntax::RULE,
     &jsdoc_no_multi_asterisks::RULE,
     &jsdoc_no_restricted_syntax::RULE,
     &jsdoc_no_types::RULE,
     &jsdoc_reject_any_type::RULE,
     &jsdoc_reject_function_type::RULE,
+    &jsdoc_require_asterisk_prefix::RULE,
     &jsdoc_require_hyphen_before_param_description::RULE,
     &jsdoc_require_next_description::RULE,
     &jsdoc_require_next_type::RULE,
     &jsdoc_require_param_description::RULE,
     &jsdoc_require_param_name::RULE,
     &jsdoc_require_param_type::RULE,
+    &jsdoc_require_property::RULE,
     &jsdoc_require_property_description::RULE,
     &jsdoc_require_property_name::RULE,
     &jsdoc_require_property_type::RULE,

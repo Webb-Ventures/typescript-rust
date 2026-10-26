@@ -248,3 +248,7 @@ no-restricted-properties
 no-restricted-globals
 yoda
 no-useless-rename
+jsdoc/no-missing-syntax
+jsdoc/require-property
+jsdoc/require-asterisk-prefix
+jsdoc/check-param-names

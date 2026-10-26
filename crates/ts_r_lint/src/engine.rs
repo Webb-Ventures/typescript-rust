@@ -278,6 +278,7 @@ pub fn lint_parsed(
                 fix: None,
                 suggestions: Vec::new(),
                 fatal: true,
+                loc: None,
             }],
             ..FileResult::default()
         };
@@ -336,6 +337,7 @@ pub fn lint_parsed(
                         fix: None,
                         suggestions: Vec::new(),
                         fatal: false,
+                        loc: None,
                     });
                 }
             }
@@ -397,6 +399,7 @@ pub fn lint_parsed(
             fix: None,
             suggestions: Vec::new(),
             fatal: false,
+            loc: None,
         });
     }
     sort_diagnostics(&mut diags);

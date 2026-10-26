@@ -133,6 +133,31 @@ pub struct Diagnostic {
     pub suggestions: Vec<Suggestion>,
     /// A parse error (ESLint's `fatal: true`).
     pub fatal: bool,
+    /// Where the report is shown, when a rule gives ESLint a `loc` that `span` can't say (a
+    /// column past the end of a line); `None` shows `span`.
+    pub loc: Option<Loc>,
+}
+
+/// An explicit report location, as ESLint prints it: 1-based lines and 1-based UTF-16
+/// columns. A column may lie past the end of its line (ESLint doesn't clamp a rule's `loc`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Loc {
+    pub line: u32,
+    pub column: u32,
+    pub end_line: u32,
+    pub end_column: u32,
+}
+
+impl Loc {
+    /// An empty location at `line`:`column`.
+    pub fn at(line: u32, column: u32) -> Loc {
+        Loc {
+            line,
+            column,
+            end_line: line,
+            end_column: column,
+        }
+    }
 }
 
 impl Diagnostic {

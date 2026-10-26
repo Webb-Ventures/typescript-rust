@@ -84,6 +84,55 @@ impl Settings {
     }
 }
 
+/// The error the plugin raises for contradictory `settings.jsdoc.structuredTags` (a tag
+/// whose `name` or `type` is `false` but `required`), in entry order.
+pub fn structured_tags_error(cx: &Ctx<'_, '_>) -> Option<&'static str> {
+    let tags = cx
+        .env()
+        .settings
+        .get("jsdoc")?
+        .get("structuredTags")?
+        .as_object()?;
+    for v in tags.values() {
+        let off = |k: &str| v.get(k) == Some(&Value::Bool(false));
+        let required = |k: &str| {
+            v.get("required")
+                .and_then(Value::as_array)
+                .is_some_and(|r| r.iter().any(|x| x.as_str() == Some(k)))
+        };
+        if required("name") && off("name") {
+            return Some("Cannot add \"name\" to `require` with the tag's `name` set to `false`");
+        }
+        if required("type") && off("type") {
+            return Some("Cannot add \"type\" to `require` with the tag's `type` set to `false`");
+        }
+        if required("typeOrNameRequired") && off("name") {
+            return Some(
+                "Cannot add \"typeOrNameRequired\" to `require` with the tag's `name` set to `false`",
+            );
+        }
+        if required("typeOrNameRequired") && off("type") {
+            return Some(
+                "Cannot add \"typeOrNameRequired\" to `require` with the tag's `type` set to `false`",
+            );
+        }
+    }
+    None
+}
+
+/// Whether the jsdoc settings load; if not, reports the problem at 1:2 (as the plugin does
+/// once per rule, which then checks nothing).
+pub fn settings_load(cx: &mut Ctx<'_, '_>) -> bool {
+    match structured_tags_error(cx) {
+        None => true,
+        Some(msg) => {
+            cx.report(Span::at(0), msg)
+                .loc(crate::diagnostic::Loc::at(1, 2));
+            false
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Block model (the `comment-parser` tokens).
 
@@ -1172,6 +1221,9 @@ pub struct Contexts {
     pub all: bool,
     /// A plain `"any"` entry: every block is checked once, whatever the `comment` filters.
     pub plain_any: bool,
+    /// The plugin's `matchContext` under object `any` entries: every block is checked once
+    /// per entry whose `comment` matches it (or that has none), not just the first.
+    pub additive: bool,
 }
 
 pub const DEFAULT_CONTEXTS: &[&str] = &[
@@ -1259,6 +1311,7 @@ impl Contexts {
             entries,
             all,
             plain_any,
+            additive: false,
         })
     }
 
@@ -1340,18 +1393,32 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
     // A plain `any` checks every block whatever the other entries say.
     let filtered =
         contexts.all && !contexts.plain_any && contexts.entries.iter().any(|e| e.comment.is_some());
-    let via = |c: usize| -> Result<Option<&str>, ()> {
+    // With `additive` (and no plain `any`), a block is checked once through every entry
+    // without a `comment` or whose `comment` matches it.
+    let additive = contexts.all && !contexts.plain_any && contexts.additive;
+    let via = |c: usize| -> Vec<Option<&str>> {
+        if additive {
+            return contexts
+                .entries
+                .iter()
+                .filter_map(|e| match &e.comment {
+                    None => Some(None),
+                    Some(sel) if comment_matches(finder, c, sel) => Some(Some(sel.raw.as_str())),
+                    Some(_) => None,
+                })
+                .collect();
+        }
         if !filtered {
-            return Ok(None);
+            return vec![None];
         }
         for e in &contexts.entries {
             match &e.comment {
-                None => return Ok(None),
-                Some(sel) if comment_matches(finder, c, sel) => return Ok(Some(&sel.raw)),
+                None => return vec![None],
+                Some(sel) if comment_matches(finder, c, sel) => return vec![Some(&sel.raw)],
                 Some(_) => {}
             }
         }
-        Err(())
+        Vec::new()
     };
     let ast = finder.ast;
     let mut out = Vec::new();
@@ -1371,13 +1438,14 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                         && !claimed[c]
                     {
                         claimed[c] = true;
-                        let Ok(comment) = via(c) else { continue };
-                        out.push(Item {
-                            target: Some(t),
-                            comment: c,
-                            context: contexts.found(finder, tree, Some(t), comment),
-                            info_comment: comment.map(str::to_owned),
-                        });
+                        for comment in via(c) {
+                            out.push(Item {
+                                target: Some(t),
+                                comment: c,
+                                context: contexts.found(finder, tree, Some(t), comment),
+                                info_comment: comment.map(str::to_owned),
+                            });
+                        }
                     }
                 } else {
                     let ty = finder.es_type(t);
@@ -1407,13 +1475,14 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
         for (i, c) in ast.comments.iter().enumerate() {
             if !claimed[i] && c.kind == CommentKind::Block && is_jsdoc_text(c.span.text(finder.src))
             {
-                let Ok(comment) = via(i) else { continue };
-                out.push(Item {
-                    target: None,
-                    comment: i,
-                    context: contexts.found(finder, tree, None, comment),
-                    info_comment: comment.map(str::to_owned),
-                });
+                for comment in via(i) {
+                    out.push(Item {
+                        target: None,
+                        comment: i,
+                        context: contexts.found(finder, tree, None, comment),
+                        info_comment: comment.map(str::to_owned),
+                    });
+                }
             }
         }
     }
@@ -1575,6 +1644,26 @@ impl Doc {
         Span::new(at, at)
     }
 
+    /// Where the plugin's `report` puts a `jsdocLoc` of `{ line: rel, column }`: that line of
+    /// the comment, at column 0 or, given `column`, the comment's own column plus it (which
+    /// may lie past the end of the line). The span is the line's start.
+    pub fn report_at(
+        &self,
+        finder: &Finder<'_>,
+        rel: i64,
+        column: Option<u32>,
+    ) -> (Span, crate::diagnostic::Loc) {
+        let line = (i64::from(self.line) + rel).max(0) as u32 + 1;
+        let col = match column {
+            Some(c) => self.indent.chars().count() as u32 + c,
+            None => 0,
+        };
+        (
+            self.line_span(finder, rel),
+            crate::diagnostic::Loc::at(line, col + 1),
+        )
+    }
+
     /// Replaces the whole comment with the current block.
     pub fn fix(&self) -> crate::diagnostic::Fix {
         crate::diagnostic::Fix::replace(self.comment, self.block.stringify())
@@ -1611,6 +1700,9 @@ pub fn for_each_doc(
     contexts: &Contexts,
     mut f: impl FnMut(&mut Ctx<'_, '_>, &Finder<'_>, &mut Doc),
 ) {
+    if !settings_load(cx) {
+        return;
+    }
     let file = cx.file;
     let finder = Finder {
         ast: file.ast,

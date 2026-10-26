@@ -70,6 +70,10 @@ Files:
   of a 4-byte character means "between its UTF-16 surrogates" (regex rules without `u`
   report code units there); `output::Positions` maps it to the low surrogate's column and
   the LSP rounds it down to the character.
+- **An explicit location wins where positions are printed.** `Diagnostic::loc` (ESLint's
+  1-based line and column, possibly past the end of a line) is what `output::Positions::
+  start_of`/`end_of` give every format and the oracle; `None` shows the span. Rules set it
+  only when the span can't say ESLint's position.
 - **Rules are stateless.** `Rule` objects are shared across threads and files; per-file state
   lives in locals of `run_file`, or is derived from `cx.file.parents` / `cx.semantic()`.
 - **One walk per file.** Rules register node kinds in `kinds()` / `exit_kinds()`; whole-file
@@ -261,14 +265,34 @@ Round 3 adds 32 more rules (`src/rules/jsdoc_*.rs`; shared helpers in `src/jsdoc
 `empty-tags`, `implements-on-classes`, `multiline-blocks`, `no-blank-blocks`,
 `no-blank-block-descriptions`, `no-defaults`, `no-multi-asterisks`, `no-types`,
 `reject-any-type`, `reject-function-type`, `require-hyphen-before-param-description`,
-`tag-lines`. `check-param-names`, `require-property` and `require-asterisk-prefix` were
-written but left out: each misses one case on a report position (below). What we learned:
+`tag-lines`. Round 4 adds `check-param-names`, `require-property`,
+`require-asterisk-prefix` and `no-missing-syntax`, which needed explicit report locations.
+What we learned:
 
 - **Report positions.** A report given a comment-relative line lands at column 0 of that
-  line; one given only `column: 0` lands at the comment's own column. ESLint can report a
-  column past the end of an empty line (`1:2` on an empty first line, `5:9` on a blank line);
-  a byte span can't say that, so rules whose tests need it wait for an explicit report
-  location on `Diagnostic`.
+  line; one given a line and `column: 0` lands at the comment's own column on that line.
+  ESLint doesn't clamp a rule's `loc`: it can report past the end of a line (`1:2` on an
+  empty first line, `5:9` on a blank line) or past the end of the comment. A byte span can't
+  say that, so such reports set `Diagnostic::loc` (`Report::loc`, `Doc::report_at`); the
+  span still decides directives, sorting and the editor range. Rules that report at a fixed
+  `1:2` (missing options, contradictory `structuredTags`) do the same.
+- **Settings errors.** `settings.jsdoc.structuredTags` with a tag `required` to have a
+  `name` or `type` it sets to `false` makes every rule report the plugin's error once at
+  `1:2` and check nothing (`jsdoc::settings_load`, called by the block iterators).
+- **check-param-names** pairs the `n`th undotted `@param` with the `n`th parameter
+  (skipping a leading `this` unless the tag is named `this`); the first problem stops the
+  block. A destructured root (or a parameter typed with a type literal) expects every
+  flattened property path under the tag's name; a missing one is reported on the line
+  before the first tag whose path doesn't start with it, counted from the root tag's line
+  (so it can land past the comment). Properties of a tag whose type isn't object-like
+  (`checkTypesPattern`, a `/re/flags` string) and rest properties (unless
+  `checkRestProperty`) aren't required. In the "names to be" message a destructured
+  parameter shows the tag at its position and a rest parameter `...name`.
+- **no-missing-syntax** counts blocks per (context, `comment`) they were found through and
+  reports the first entry short of its `minimum` at `1:2`. Its iteration is additive (the
+  plugin's `matchContext`): under object `any` entries every block is visited once per
+  entry whose `comment` matches it (`Contexts::additive`). A string entry is checked with
+  an empty comment while its blocks are counted with none, so it always reports.
 - **Fixes on one block accumulate.** A rule that reports several times on a block mutates the
   same parsed block each time and every fix rewrites the whole comment, so the fixes overlap
   and only the first in source order is applied per pass (tag-lines shows both mutations in a
@@ -295,7 +319,6 @@ written but left out: each misses one case on a report position (below). What we
   a string whose selector matches the node, or an object whose `context` matches the node (or
   is missing or `any`) and whose `comment` is that same selector; the first such entry gives
   the message (`message`, or `Syntax is restricted: {{context}}` plus ` with {{comment}}`).
-  `jsdoc/no-missing-syntax` is not done: it reports at `1:2` on an empty first line.
 
 Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc.js`
 (iterateAllJsdocs, findContext), `src/jsdocUtils.js` (getContextObject),
@@ -306,6 +329,9 @@ requirePropertyName,checkAccess,emptyTags,implementsOnClasses,noDefaults,noTypes
 checkAlignment,noMultiAsterisks,noBlankBlocks,noBlankBlockDescriptions,
 requireHyphenBeforeParamDescription,multilineBlocks,requireThrows,requireYields,
 requireYieldsCheck,requireReturnsCheck,checkPropertyNames,tagLines,noRestrictedSyntax}.js`,
+and for round 4 `src/rules/{checkParamNames,requireProperty,requireAsteriskPrefix,
+noMissingSyntax}.js` and `src/jsdocUtils.js` (`getFunctionParameterNames`,
+`overrideTagStructure`, `getRegexFromString`),
 `src/buildRejectOrPreferRuleDefinition.js`, `src/buildForbidRuleDefinition.js`,
 `src/getDefaultTagStructureForMode.js`, `src/index-cjs.js`; `@es-joy/jsdoccomment`
 `src/jsdoccomment.js` (getReducedASTNode, getTSFunctionComment), `src/parseComment.js`,
