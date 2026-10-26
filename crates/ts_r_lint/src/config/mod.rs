@@ -46,6 +46,8 @@ pub struct LanguagePartial {
     pub jsx_fragment_name: Option<Option<String>>,
     pub emit_decorator_metadata: Option<bool>,
     pub experimental_decorators: Option<bool>,
+    /// `parserOptions.isolatedDeclarations`.
+    pub isolated_declarations: Option<bool>,
     /// `parserOptions.lib` (TypeScript lib names).
     pub lib: Option<Vec<String>>,
     /// `parserOptions.project`: `Some(None)` when off (`false`/`null`), `Some(Some(paths))`
@@ -404,6 +406,9 @@ impl ConfigFile {
             if let Some(v) = o.language.experimental_decorators {
                 lang.experimental_decorators = Some(v);
             }
+            if let Some(v) = o.language.isolated_declarations {
+                lang.isolated_declarations = Some(v);
+            }
             if let Some(v) = &o.language.lib {
                 lang.lib = Some(v.clone());
             }
@@ -466,6 +471,7 @@ impl ConfigFile {
             decorator_metadata: typescript
                 && lang.emit_decorator_metadata == Some(true)
                 && lang.experimental_decorators == Some(true),
+            isolated_declarations: lang.isolated_declarations.unwrap_or(false),
             settings: Arc::new(Value::Object(settings)),
             lib: None,
             project_lib: None,
@@ -829,6 +835,9 @@ fn language_from_json(lo: &serde_json::Map<String, Value>) -> LanguagePartial {
         }
         if let Some(Value::Bool(b)) = po.get("experimentalDecorators") {
             l.experimental_decorators = Some(*b);
+        }
+        if let Some(Value::Bool(b)) = po.get("isolatedDeclarations") {
+            l.isolated_declarations = Some(*b);
         }
         if let Some(Value::Array(a)) = po.get("lib") {
             l.lib = Some(

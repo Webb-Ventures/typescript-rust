@@ -74,7 +74,7 @@ const ser = (o) => {
       sourceType: lo.sourceType,
       globals: safe(lo.globals),
       parser: lo.parser ? String((lo.parser.meta && lo.parser.meta.name) || lo.parser.name || '<custom>') : undefined,
-      parserOptions: po ? { ecmaFeatures: safe(po.ecmaFeatures), jsxPragma: po.jsxPragma, jsxFragmentName: po.jsxFragmentName, emitDecoratorMetadata: po.emitDecoratorMetadata, experimentalDecorators: po.experimentalDecorators, lib: Array.isArray(po.lib) ? strs(po.lib) : undefined, project: project(po.project), projectService: service(po.projectService), tsconfigRootDir: typeof po.tsconfigRootDir === 'string' ? po.tsconfigRootDir : po.tsconfigRootDir instanceof URL ? fileURLToPath(po.tsconfigRootDir) : undefined } : undefined,
+      parserOptions: po ? { ecmaFeatures: safe(po.ecmaFeatures), jsxPragma: po.jsxPragma, jsxFragmentName: po.jsxFragmentName, emitDecoratorMetadata: po.emitDecoratorMetadata, experimentalDecorators: po.experimentalDecorators, isolatedDeclarations: po.isolatedDeclarations, lib: Array.isArray(po.lib) ? strs(po.lib) : undefined, project: project(po.project), projectService: service(po.projectService), tsconfigRootDir: typeof po.tsconfigRootDir === 'string' ? po.tsconfigRootDir : po.tsconfigRootDir instanceof URL ? fileURLToPath(po.tsconfigRootDir) : undefined } : undefined,
     };
   }
   if (o.linterOptions) out.linterOptions = safe(o.linterOptions);

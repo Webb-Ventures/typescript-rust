@@ -289,7 +289,7 @@ function mergeLo(a = {}, b = {}) {
 // typescript-eslint parser options that change scope analysis.
 function pickParserOptions(po = {}) {
   const out = {};
-  for (const k of ['jsxPragma', 'jsxFragmentName', 'emitDecoratorMetadata', 'experimentalDecorators', 'lib']) {
+  for (const k of ['jsxPragma', 'jsxFragmentName', 'emitDecoratorMetadata', 'experimentalDecorators', 'isolatedDeclarations', 'lib']) {
     if (po[k] !== undefined) out[k] = po[k];
   }
   return Object.keys(out).length ? out : undefined;

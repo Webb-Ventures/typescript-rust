@@ -125,6 +125,8 @@ pub struct LintEnv {
     /// `emitDecoratorMetadata` and `experimentalDecorators` are both on: decorated classes
     /// reference their parameter and property types as values.
     pub decorator_metadata: bool,
+    /// `parserOptions.isolatedDeclarations` (read by rules, not by the parser).
+    pub isolated_declarations: bool,
     /// The config's `settings` object.
     pub settings: Arc<serde_json::Value>,
     /// TypeScript lib globals typescript-eslint's scope analysis defines (`None` unless the
@@ -156,6 +158,7 @@ impl Default for LintEnv {
             implied_strict: false,
             jsx_fragment_name: None,
             decorator_metadata: false,
+            isolated_declarations: false,
             settings: Arc::new(serde_json::Value::Null),
             lib: None,
             project_lib: None,

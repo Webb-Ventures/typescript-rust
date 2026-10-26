@@ -264,3 +264,4 @@ unicorn/no-console-spaces
 @typescript-eslint/array-type
 @typescript-eslint/consistent-indexed-object-style
 @typescript-eslint/prefer-function-type
+@typescript-eslint/consistent-generic-constructors

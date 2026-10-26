@@ -181,6 +181,7 @@ mod this_binding;
 mod ts_array_type;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
+mod ts_consistent_generic_constructors;
 mod ts_consistent_indexed_object_style;
 mod ts_consistent_type_imports;
 mod ts_dot_notation;
@@ -431,6 +432,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_array_type::RULE,
     &ts_await_thenable::RULE,
     &ts_ban_ts_comment::RULE,
+    &ts_consistent_generic_constructors::RULE,
     &ts_consistent_indexed_object_style::RULE,
     &ts_consistent_type_imports::RULE,
     &ts_dot_notation::RULE,
