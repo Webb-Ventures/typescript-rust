@@ -3270,3 +3270,25 @@ fn misplaced_type_predicate_is_kept_next_to_syntax_errors() {
     assert!(r.grammar.iter().any(|d| d.code == 1228));
     assert!(r.syntax_errors().iter().all(|d| d.code != 1228));
 }
+
+/// `super` followed by none of `(`, `.`, `[` is TS1034 and, as in tsc, a member access whose
+/// name is parsed there: `super;` is `super.;` (missing name), `super x` is `super.x`.
+#[test]
+fn bare_super_is_a_member_access() {
+    for (src, members) in [
+        ("class A extends B { m() { super; } }", 1),
+        ("class A extends B { m() { super x; } }", 1),
+    ] {
+        let r = parse(src, SourceKind::Ts);
+        assert!(
+            r.diagnostics.iter().any(|d| d.code == 1034),
+            "{src}: {:?}",
+            r.diagnostics
+        );
+        let n = (1..r.ast.nodes.len() as u32)
+            .filter_map(ts_r_ast::NodeId::from_raw)
+            .filter(|&id| r.ast.kind(id) == NodeKind::Member)
+            .count();
+        assert_eq!(n, members, "{src}\n{}", r.ast.dump());
+    }
+}

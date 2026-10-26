@@ -992,7 +992,8 @@ impl<'a> Parser<'a> {
     }
 
     /// `super`, which must be followed by `(`, `.` or `[`: anything else is TS1034 at the
-    /// next token (`super;`, `super?.x`). Type arguments after it are parsed and dropped,
+    /// next token (`super;`, `super?.x`), and a member access whose name is parsed there
+    /// (missing unless a name follows). Type arguments after it are parsed and dropped,
     /// TS2754 on them (parserSuperExpression2, taggedTemplatesWithTypeArguments2).
     fn parse_super(&mut self, start: u32) -> NodeId {
         self.bump();
@@ -1013,7 +1014,19 @@ impl<'a> Parser<'a> {
             }
         }
         if !matches!(self.kind(), T::LParen | T::Dot | T::LBracket) {
+            // As tsc: the missing `.` is reported and the name after it parsed, so the
+            // expression is a member access (`super;` is `super.;`, `` super `t` `` is
+            // `` super. `t` ``, `super x` is `super.x`).
             self.error(messages::SUPER_MUST_BE_FOLLOWED);
+            let prop = self.parse_member_name();
+            return self.finish_node(
+                start,
+                Node::Member {
+                    obj: node,
+                    optional: false,
+                    prop,
+                },
+            );
         }
         node
     }
