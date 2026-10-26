@@ -359,6 +359,7 @@ mod unicorn_id_match;
 mod unicorn_import_style;
 mod unicorn_isolated_functions;
 mod unicorn_iter;
+mod unicorn_iteration_fallback_style;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
@@ -733,6 +734,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_iteration_fallback_style::RULE,
     &unicorn_no_repeated_call_wrappers::RULE,
     &unicorn_no_unsafe_dom_html::RULE,
     &unicorn_prefer_import_meta_properties::RULE,
