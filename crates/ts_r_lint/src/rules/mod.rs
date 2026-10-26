@@ -506,6 +506,7 @@ mod unicorn_prefer_direct_iteration;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
+mod unicorn_prefer_dom_node_replace_children;
 mod unicorn_prefer_dom_node_text_content;
 mod unicorn_prefer_early_return;
 mod unicorn_prefer_else_if;
@@ -1129,8 +1130,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_direct_iteration::RULE,
     &unicorn_prefer_dom_node_html_methods::RULE,
-    &unicorn_prefer_early_return::RULE,
-    &unicorn_prefer_else_if::RULE,
+    &unicorn_prefer_dom_node_replace_children::RULE,
     &unicorn_prefer_event_target::RULE,
     &unicorn_prefer_flat_math_min_max::RULE,
     &unicorn_prefer_export_from::RULE,

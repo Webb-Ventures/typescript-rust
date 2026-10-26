@@ -1890,6 +1890,21 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   suggestion. `unicorn_abort::abort_reference_from` and `is_same_binding` are the shared
   pieces.
 
+- `prefer-dom-node-replace-children` (`unicorn_prefer_dom_node_replace_children.rs`):
+  `x.innerHTML = ""` (static key whose computed form has no side effects, empty string or
+  template), `while (x.firstChild) x.removeChild(x.firstChild)` (or `lastChild`), and
+  `x.replaceChildren(); x.append/prepend(…)` as consecutive statements. The receiver is
+  skipped when it can't be a node, has an optional link anywhere, is known not to be a DOM
+  node, or not a `ParentNode` (`prefer-modern-dom-apis`' `REPLACE_CHILDREN_RECEIVER`, now
+  `pub(crate)`). For `innerHTML`, `Document`/`DocumentFragment`/`ParentNode` are excluded too,
+  as are the global `document` (`window.document`-style, `const` aliases), a
+  `createElement("template")` / `createElementNS(<HTML or unknown namespace>, "template")`
+  result (an unknown tag counts when its expression reads a possibly mutated member) and
+  possible `HTMLTemplateElement`s. Messages quote the receiver as written at its own place, and
+  the fix as written at the statement. Replace-and-add is a suggestion when an argument is not
+  a non-regex literal or substitution-free template, the receiver has getter side effects, or
+  it may be a document; with a comment inside the first call there is no fix.
+
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
 `utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
@@ -1914,4 +1929,6 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `prefer-https.js`, `prefer-temporal-conversion.js`,
 `no-unnecessary-fetch-options.js`, `fix/remove-argument.js`, `fix/remove-object-property.js`,
 `utils/get-static-value.js`, `prefer-abort-signal-any.js`,
-`utils/is-array.js`.
+`utils/is-array.js`, `prefer-dom-node-replace-children.js`,
+`utils/should-report-replace-children-receiver.js`, `utils/is-dom-node.js`,
+`utils/is-node-value-not-dom-node.js`.

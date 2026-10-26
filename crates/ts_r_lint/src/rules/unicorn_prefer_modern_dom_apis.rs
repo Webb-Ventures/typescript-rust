@@ -39,14 +39,14 @@ pub static RULE: RuleDef = RuleDef {
 #[derive(Debug, Default)]
 struct PreferModernDomApis;
 
-fn is_window_global(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_window_global(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     ["globalThis", "self", "window"]
         .iter()
         .any(|n| cx.is_global_ref(id, n))
 }
 
 /// The syntax-only receiver check of unicorn's `shouldReportReplaceChildrenReceiver`.
-static REPLACE_CHILDREN_RECEIVER: Checker = Checker {
+pub(crate) static REPLACE_CHILDREN_RECEIVER: Checker = Checker {
     class_syntax: true,
     target_names: &[
         "Document",
