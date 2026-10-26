@@ -3543,9 +3543,11 @@ fn references_through_import_type_qualifiers() {
     assert_eq!(refs_at(&mut c, &ub, 1, 23), n);
     let u = vec![s("a.ts", 1, 33), s("b.ts", 1, 25)];
     assert_eq!(refs_at(&mut c, &ub, 1, 25), u);
-    // The specifier of a qualified import type is a reference to the export, not the
-    // module.
-    assert_eq!(refs_at(&mut c, &ub, 0, 18), Vec::new());
+    // The specifier of a qualified import type is a module reference too (as in tsc 7).
+    assert_eq!(
+        refs_at(&mut c, &ub, 0, 18),
+        vec![s("b.ts", 0, 17), s("b.ts", 1, 17)]
+    );
     c.shutdown();
 }
 
@@ -3676,5 +3678,35 @@ fn hover_on_this_parameters_types_and_type_queries() {
     assert!(hover_text(&mut c, &u, 4, 5).contains("(parameter) this: R"));
     assert!(hover_text(&mut c, &u, 5, 25).contains("this: this"));
     assert!(hover_text(&mut c, &u, 7, 22).contains("(parameter) this: void"));
+    c.shutdown();
+}
+
+const MC_A: &str = "export class C {}\n";
+const MC_B: &str = "/* copyright */\n/// <reference path=\"./a.ts\" />\nimport { C } /* from */ from \"./a\";\nconst t: import(\"./a\").C = new C();\n";
+
+#[test]
+fn module_references_past_comments() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navmc",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", MC_A),
+            ("src/b.ts", MC_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    // A directive after a block comment, the `from` keyword and a qualified import type's
+    // specifier all refer to the module; a `from` inside a comment is no keyword.
+    let module = vec![s("b.ts", 1, 21), s("b.ts", 2, 30), s("b.ts", 3, 17)];
+    for (line, ch) in [(1, 23), (2, 25), (3, 18)] {
+        assert_eq!(refs_at(&mut c, &ub, line, ch), module, "at {line}:{ch}");
+    }
+    assert_eq!(refs_at(&mut c, &ub, 2, 17), Vec::new());
     c.shutdown();
 }

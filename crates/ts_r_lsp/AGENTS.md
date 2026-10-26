@@ -552,8 +552,10 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
 - **Module references** (`module_refs.rs`): a module specifier, an ambient module's name, a
   `/// <reference path>` or `module` of `module.exports` finds every specifier resolving to
   the same module, the reference paths naming the file, the ambient declarations' names and
-  the file's own `module.exports` heads; not a qualified import type's specifier (it names
-  the export), not for a script (strings then). Names in an import type's qualifier
+  the file's own `module.exports` heads (an import type's specifier counts, qualified or
+  not, except a qualified one when searching from a `module.exports` head; directives are
+  read past block comments), not for a script (strings then); a keyword's word inside a
+  comment finds nothing. Names in an import type's qualifier
   (`import("./a").N.T`) resolve through the module's exports.
 - **Rename through specifiers** (`rename_alias.rs`, tsc's prefix and suffix text): a
   name-keeping specifier (`import { x }`, `export { x }`, `export { x } from`) is where a

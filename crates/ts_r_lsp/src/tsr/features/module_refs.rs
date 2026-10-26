@@ -11,9 +11,11 @@
 //! module's declarations, and, in a CommonJS JavaScript file that is the module, the
 //! `module` of each `module.exports`. A reference covers the text between the quotes.
 //!
-//! The specifier of an import type with a qualifier (`import("./a").T`) refers to the
-//! export, not the module. A script named by a specifier has no module references (its
-//! literal is found as a string, [`super::string_refs`]).
+//! The specifier of an import type is one too, with or without a qualifier, except when
+//! searching from `module` of `module.exports`: a qualified one (`import("./a").T`) is
+//! then left out (observed on tsc 7.0.2, `findAllRefs_importType_js`). A script named by
+//! a specifier has no module references (its literal is found as a string,
+//! [`super::string_refs`]).
 
 use ts_r_ast::{Ast, Node, NodeId};
 use ts_r_binder::program::ModuleTarget;
@@ -63,15 +65,7 @@ pub(super) fn module_at(c: &Checker<'_>, file: FileId, offset: u32) -> Option<Mo
     if let Some(lit) = lit {
         return literal_module(c, file, lit);
     }
-    // `module` of `module.exports` in a CommonJS file stands for the file's module.
-    if let Some(n) = super::locate::ident_at(ast, offset)
-        && c.file(file).is_commonjs_module()
-        && let Some(p) = c.file(file).parents().parent(n)
-        && let Node::Member { obj, prop, .. } = *ast.node(p)
-        && obj == n
-        && matches!(*ast.node(n), Node::Ident { name } if ast.atom(name) == "module")
-        && matches!(*ast.node(prop), Node::Ident { name } if ast.atom(name) == "exports")
-    {
+    if exports_head(c, file, offset) {
         return Some(ModuleTarget::File(file));
     }
     reference_paths(c, file)
@@ -79,6 +73,25 @@ pub(super) fn module_at(c: &Checker<'_>, file: FileId, offset: u32) -> Option<Mo
         .find(|&(s, e, _)| s <= offset && offset <= e)
         .and_then(|(_, _, f)| f)
         .and_then(|f| is_module(c, ModuleTarget::File(f)))
+}
+
+/// Whether `offset` is on `module` of `module.exports` in a CommonJS file (it stands for
+/// the file's module).
+pub(super) fn exports_head(c: &Checker<'_>, file: FileId, offset: u32) -> bool {
+    let ast = c.ast(file);
+    let Some(n) = super::locate::ident_at(ast, offset) else {
+        return false;
+    };
+    let is_exports = |p: NodeId| match *ast.node(p) {
+        Node::Member { obj, prop, .. } => {
+            obj == n
+                && matches!(*ast.node(prop), Node::Ident { name } if ast.atom(name) == "exports")
+        }
+        _ => false,
+    };
+    c.file(file).is_commonjs_module()
+        && matches!(*ast.node(n), Node::Ident { name } if ast.atom(name) == "module")
+        && c.file(file).parents().parent(n).is_some_and(is_exports)
 }
 
 /// `t` when it is a module: an ambient module, or a file that is an ES or CommonJS module
@@ -96,11 +109,12 @@ fn is_module(c: &Checker<'_>, t: ModuleTarget) -> Option<ModuleTarget> {
 }
 
 /// The spans in `files` that refer to module `target` (see the module docs), in file order
-/// then source order.
+/// then source order; `qualified`: whether qualified import types count.
 pub(super) fn module_references(
     c: &Checker<'_>,
     files: &[FileId],
     target: ModuleTarget,
+    qualified: bool,
 ) -> Vec<(FileId, u32, u32)> {
     let mut out = Vec::new();
     for &f in files {
@@ -108,7 +122,9 @@ pub(super) fn module_references(
         let first = out.len();
         let parents = c.file(f).parents();
         for (i, r) in c.bound(f).module_requests.iter().enumerate() {
-            if c.link.module_target(f, i as u32) == target && !names_export(ast, parents, r.node) {
+            if c.link.module_target(f, i as u32) == target
+                && (qualified || !names_export(ast, parents, r.node))
+            {
                 let (s, e) = inner_span(ast, r.node);
                 out.push((f, s, e));
             }
@@ -215,6 +231,14 @@ fn reference_paths(c: &Checker<'_>, file: FileId) -> Vec<(u32, u32, Option<FileI
         let indent = line.len() - trimmed.len();
         if trimmed.trim().is_empty() {
             pos = end;
+            continue;
+        }
+        // A block comment is skipped as a whole (it may span lines).
+        if trimmed.starts_with("/*") {
+            let Some(close) = text[pos + indent..].find("*/") else {
+                break;
+            };
+            pos += indent + close + 2;
             continue;
         }
         if !trimmed.starts_with("//") {

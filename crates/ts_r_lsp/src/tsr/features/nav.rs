@@ -1105,7 +1105,8 @@ fn references_with(
                 Scope::File => vec![cx.file],
                 Scope::Project => project_files(cx).collect(),
             };
-            return super::module_refs::module_references(c, &files, m)
+            let qualified = !super::module_refs::exports_head(c, cx.file, offset);
+            return super::module_refs::module_references(c, &files, m, qualified)
                 .into_iter()
                 .map(|(file, start, end)| Ref {
                     file,
@@ -1748,6 +1749,7 @@ pub fn rename(
         .and_then(|n| super::rename_alias::rename_symbol(ck, Loc::new(cx.file, n), false));
     let mut lc = LinesCache::default();
     let mut changes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut idents = super::rename_alias::Idents::new();
     for r in refs {
         let f = c.file(r.file);
         let old = &f.text[r.start as usize..r.end as usize];
@@ -1758,7 +1760,14 @@ pub fn rename(
         let decor = match renamed {
             Some(s) => {
                 let variable = r.shorthand == Some(ShorthandSide::Variable);
-                match super::rename_alias::decor(ck, s, r.file, (r.start, r.end), variable) {
+                match super::rename_alias::decor(
+                    ck,
+                    &mut idents,
+                    s,
+                    r.file,
+                    (r.start, r.end),
+                    variable,
+                ) {
                     Some(d) => d,
                     None => continue,
                 }

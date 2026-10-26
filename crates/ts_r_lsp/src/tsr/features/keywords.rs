@@ -1055,6 +1055,11 @@ pub fn keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
 /// reference's (last) name, an array type's element.
 pub fn reference_keyword(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
     let w = d.word_at(offset)?;
+    // A word inside a comment is not a keyword.
+    let i = d.ast.comments.partition_point(|c| c.span.end < w.1);
+    if d.ast.comments.get(i).is_some_and(|c| c.span.start <= w.0) {
+        return None;
+    }
     let word = d.word(w);
     if word != "default"
         && let Some(n) = keyword_name(d, offset)

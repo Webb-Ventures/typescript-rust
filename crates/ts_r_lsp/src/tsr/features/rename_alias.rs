@@ -22,11 +22,12 @@
 //! import specifier and `E` a name-keeping export specifier written at that name (the
 //! suffix case). Every other name the search found through aliases is left alone.
 
-use ts_r_ast::Node;
+use ts_r_ast::{Node, NodeId};
 use ts_r_checker::{Checker, Ck, Loc};
+use ts_r_diagnostics::FileId;
 use ts_r_types::SymId;
 
-use super::locate::{meaning_at, node_at};
+use super::locate::meaning_at;
 
 /// How one occurrence is renamed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -52,7 +53,7 @@ fn keeping_spec(c: &Checker<'_>, s: SymId) -> Option<(Spec, Loc)> {
     if !super::aliases::is_alias(c, s) {
         return None;
     }
-    let same = |a: ts_r_ast::NodeId, b: ts_r_ast::NodeId, f| {
+    let same = |a: NodeId, b: NodeId, f| {
         super::locate::name_text(c.ast(f), a)
             .is_some_and(|t| super::locate::name_text(c.ast(f), b) == Some(t))
     };
@@ -88,24 +89,36 @@ fn is_spec_name(c: &Checker<'_>, spec: Loc, l: Loc) -> bool {
     spec.file == l.file && c.parent(l) == Some(spec)
 }
 
+/// The identifiers of each file by span, built once per file for one rename.
+pub(super) type Idents = std::collections::HashMap<FileId, Vec<(u32, u32, NodeId)>>;
+
 /// How the name at `[start, end)` of `file` is renamed when renaming `r`; `None` when it
 /// is left alone. Names that are not identifiers, or whose symbol is not on an alias chain
 /// with `r` (inherited members, contextual properties), are renamed as found.
 pub(super) fn decor(
     ck: &mut Ck<'_, '_>,
+    idents: &mut Idents,
     r: SymId,
-    file: ts_r_diagnostics::FileId,
+    file: FileId,
     (start, end): (u32, u32),
     variable: bool,
 ) -> Option<Decor> {
     let c = ck.c;
     let ast = c.ast(file);
-    let Some(n) = node_at(ast, start).filter(|&n| {
-        let s = ast.span(n);
-        s.start == start && s.end == end && matches!(ast.node(n), Node::Ident { .. })
-    }) else {
+    let ids = idents.entry(file).or_insert_with(|| {
+        let parents = c.file(file).parents();
+        let mut v: Vec<_> = (1..=ast.node_count() as u32)
+            .filter_map(NodeId::from_raw)
+            .filter(|&n| matches!(ast.node(n), Node::Ident { .. }) && parents.parent(n).is_some())
+            .map(|n| (ast.span(n).start, ast.span(n).end, n))
+            .collect();
+        v.sort_unstable();
+        v
+    });
+    let Ok(i) = ids.binary_search_by_key(&(start, end), |&(s, e, _)| (s, e)) else {
         return Some(Decor::Plain);
     };
+    let n = ids[i].2;
     let l = Loc::new(file, n);
     let Some(s) = rename_symbol(ck, l, variable) else {
         return Some(Decor::Plain);
