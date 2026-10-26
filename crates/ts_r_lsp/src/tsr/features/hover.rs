@@ -14,6 +14,19 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
     let c = cx.checker;
     let ast = c.ast(cx.file);
     let text = c.file(cx.file).text.as_str();
+    // A name in a doc comment's `{@link}`, `@see` or `@throws` path: its declaration.
+    if ident_at(ast, offset).is_none()
+        && let Some((start, end, s)) = super::doc_links::at(ck, cx.file, offset)
+    {
+        let s = c.resolve_alias(s).unwrap_or(s);
+        let Some(d) = c.first_decl(s) else {
+            return Value::Null;
+        };
+        let name = ts_r_binder::decl_name_node(c.ast(d.file), d.node).unwrap_or(d.node);
+        let display = super::quick_info::quick_info(ck, s, Loc::new(d.file, name), true);
+        let doc = super::doc_source::documentation(ck, s, None);
+        return contents(lines, text, &display, &doc, start, end);
+    }
     let Some(n) = ident_at(ast, offset).or_else(|| node_at(ast, offset)) else {
         return Value::Null;
     };
@@ -102,15 +115,20 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         }
         _ => return Value::Null,
     };
-    let display = super::multiline::multiline_objects(&display);
+    contents(lines, text, &display, &doc, span.start, span.end)
+}
+
+/// The hover reply: `display` as a code block, then `doc`, for the span `start..end`.
+fn contents(lines: &LspLines, text: &str, display: &str, doc: &str, start: u32, end: u32) -> Value {
+    let display = super::multiline::multiline_objects(display);
     let mut value = format!("```typescript\n{display}\n```");
     if !doc.is_empty() {
         value.push('\n');
-        value.push_str(&doc);
+        value.push_str(doc);
     }
     json!({
         "contents": {"kind": "markdown", "value": value},
-        "range": lines.range(text, span.start, span.end),
+        "range": lines.range(text, start, end),
     })
 }
 

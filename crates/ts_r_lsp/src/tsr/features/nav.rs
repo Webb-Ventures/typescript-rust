@@ -77,7 +77,11 @@ pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         return keyword_target(cx, ck, &d, t);
     }
     let Some(n) = ident_at(ast, offset) else {
-        return Value::Null;
+        // A name in a doc comment's `{@link}`, `@see` or `@throws` path.
+        return match super::doc_links::at(ck, cx.file, offset) {
+            Some((_, _, s)) => decl_locations(cx, c.decls(c.resolve_alias(s).unwrap_or(s))),
+            None => Value::Null,
+        };
     };
     if let Some(decls) = literal_member_definition(cx, ck, n) {
         return decl_locations(cx, decls);
@@ -1079,7 +1083,9 @@ fn references_with(
         .or_else(|| ident_at(c.ast(cx.file), offset))
         .or_else(|| literal_key_at(cx, offset))
     else {
-        return Vec::new();
+        // A name in a doc comment's `{@link}`, `@see` or `@throws` path stands for its
+        // declaration.
+        return link_references(cx, ck, offset, scope, rename).unwrap_or_default();
     };
     if scope == Scope::Project {
         let files: Vec<FileId> = project_files(cx).collect();
@@ -1231,6 +1237,9 @@ fn scan_target(
                 shorthand: None,
             });
         }
+        if text.contains('@') {
+            link_refs(ck, f, target, &mut out);
+        }
         out[first..].sort_by_key(|r| r.start);
     }
     for d in target.decls.iter().copied().collect::<Vec<_>>() {
@@ -1250,6 +1259,54 @@ fn scan_target(
     out.sort_by_key(|r| (r.file.0, r.start));
     out.dedup_by_key(|r| (r.file.0, r.start));
     out
+}
+
+/// The names in file `f`'s doc comment paths ([`super::doc_links`]) that refer to `target`.
+fn link_refs(ck: &mut Ck<'_, '_>, f: FileId, target: &mut Target, out: &mut Vec<Ref>) {
+    let c = ck.c;
+    let text = c.file(f).text.as_str();
+    for link in super::doc_links::links_in(c, f) {
+        let named: Vec<bool> = link
+            .segs
+            .iter()
+            .map(|&(s, e)| target.has_name(&text[s as usize..e as usize]))
+            .collect();
+        if !named.contains(&true) {
+            continue;
+        }
+        let syms = super::doc_links::resolve(ck, f, &link);
+        for ((&(start, end), sym), named) in link.segs.iter().zip(syms).zip(named) {
+            if named && sym.is_some_and(|s| target.matches(ck, s)) {
+                out.push(Ref {
+                    file: f,
+                    start,
+                    end,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                });
+            }
+        }
+    }
+}
+
+/// References from a name in a doc comment path at `offset`: those of the declaration it
+/// refers to (`None` when the offset is on no such name).
+fn link_references(
+    cx: &Ctx<'_, '_>,
+    ck: &mut Ck<'_, '_>,
+    offset: u32,
+    scope: Scope,
+    rename: bool,
+) -> Option<Vec<Ref>> {
+    let (_, _, s) = super::doc_links::at(ck, cx.file, offset)?;
+    let c = ck.c;
+    let s = c.resolve_alias(s).unwrap_or(s);
+    let d = c.first_decl(s)?;
+    let name = ts_r_binder::decl_name_node(c.ast(d.file), d.node)?;
+    let mut target = Target::at(ck, Loc::new(d.file, name), rename)?;
+    collect_alias_names(cx, &mut target, scope, rename);
+    Some(scan_target(cx, ck, &mut target, scope))
 }
 
 /// Fills [`Target::alias_names`] (not for a rename: renaming `a` keeps `{ a as b }`'s `b`).
@@ -1468,7 +1525,17 @@ pub fn prepare_rename(
     let ast = c.ast(cx.file);
     let text = c.file(cx.file).text.as_str();
     let Some(n) = ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) else {
-        return Ok(Value::Null);
+        // A name in a doc comment path renames its declaration.
+        let Some((start, end, s)) = super::doc_links::at(ck, cx.file, offset) else {
+            return Ok(Value::Null);
+        };
+        if let Some(why) = rename_blocker(ck, s) {
+            return Err((codes::REQUEST_FAILED, why.to_string()));
+        }
+        return Ok(json!({
+            "range": lines.range(text, start, end),
+            "placeholder": &text[start as usize..end as usize],
+        }));
     };
     if !is_label(cx, offset) {
         let m = meaning_at(ck, Loc::new(cx.file, n));
@@ -1494,19 +1561,30 @@ pub fn rename(
 ) -> Result<Value, (i64, String)> {
     let c = cx.checker;
     let ast = c.ast(cx.file);
-    let Some(n) = ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) else {
-        return Ok(Value::Null);
-    };
-    if !is_label(cx, offset) {
-        let m = meaning_at(ck, Loc::new(cx.file, n));
-        let Some(s) = m.primary.or(m.shorthand) else {
-            return Ok(Value::Null);
-        };
-        if let Some(why) = rename_blocker(ck, s) {
-            return Err((codes::REQUEST_FAILED, why.to_string()));
+    let on_this = match ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) {
+        Some(n) => {
+            if !is_label(cx, offset) {
+                let m = meaning_at(ck, Loc::new(cx.file, n));
+                let Some(s) = m.primary.or(m.shorthand) else {
+                    return Ok(Value::Null);
+                };
+                if let Some(why) = rename_blocker(ck, s) {
+                    return Err((codes::REQUEST_FAILED, why.to_string()));
+                }
+            }
+            ast.span(n).text(c.file(cx.file).text.as_str()) == "this"
         }
-    }
-    let on_this = ast.span(n).text(c.file(cx.file).text.as_str()) == "this";
+        // A name in a doc comment path renames its declaration.
+        None => {
+            let Some((_, _, s)) = super::doc_links::at(ck, cx.file, offset) else {
+                return Ok(Value::Null);
+            };
+            if let Some(why) = rename_blocker(ck, s) {
+                return Err((codes::REQUEST_FAILED, why.to_string()));
+            }
+            false
+        }
+    };
     let refs = references_with(cx, ck, offset, Scope::Project, true);
     let mut lc = LinesCache::default();
     let mut changes: BTreeMap<String, Vec<Value>> = BTreeMap::new();

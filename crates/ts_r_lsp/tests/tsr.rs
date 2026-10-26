@@ -3143,3 +3143,82 @@ fn definitions_of_calls_literals_and_ambient_modules() {
     assert_eq!(spans(&mut c, 16, 38), vec![k(16, 11, 16, 15)]);
     c.shutdown();
 }
+
+const DOC_LINKS: &str = "class C {
+    m() {}
+    /** {@link m} @see {C.prototype.m} {@link C#m} */
+    p() {}
+}
+enum E {
+    /** {@link Foo} */
+    Foo,
+}
+interface Foo { x: E.Foo }
+/** @throws {C} {@link C.
+";
+
+#[test]
+fn references_rename_hover_and_definition_in_doc_comment_links() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navlinks",
+        &[("tsconfig.json", TSCONFIG), ("src/l.ts", DOC_LINKS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/l.ts");
+    let u = env.uri("src/l.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let starts = |v: &Value| -> Vec<(u64, u64)> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        starts(&r)
+    };
+    // A bare member name, `C.prototype.m` and `C#m` all name the method, from the
+    // declaration or from a link.
+    let m = vec![(1, 4), (2, 15), (2, 36), (2, 48)];
+    assert_eq!(refs(&mut c, 1, 4), m);
+    assert_eq!(refs(&mut c, 2, 15), m);
+    // The class, in links and in an unterminated comment's `@throws` and `{@link C.`.
+    assert_eq!(
+        refs(&mut c, 0, 6),
+        vec![(0, 6), (2, 24), (2, 46), (10, 13), (10, 23)]
+    );
+    // In an enum, a link names the member before an outer type of the same name.
+    assert_eq!(refs(&mut c, 6, 15), vec![(6, 15), (7, 4), (9, 21)]);
+    assert!(hover_text(&mut c, &u, 2, 15).contains("(method) C.m(): void"));
+    let d = result(&mut c, "textDocument/definition", at(&u, 2, 48));
+    assert_eq!(starts(&d), vec![(1, 4)], "{d}");
+    let e = result(
+        &mut c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": u}, "position": {"line": 2, "character": 36}, "newName": "k"}),
+    );
+    let mut lines: Vec<u64> = e["changes"][u.as_str()]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    lines.sort();
+    assert_eq!(lines, vec![1, 2, 2, 2], "{e}");
+    c.shutdown();
+}

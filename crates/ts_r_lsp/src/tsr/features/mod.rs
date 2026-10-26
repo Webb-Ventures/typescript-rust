@@ -8,6 +8,7 @@ mod class_items;
 mod complete;
 mod constructor_refs;
 mod definitions;
+mod doc_links;
 mod doc_source;
 mod expected;
 mod generic_context;
