@@ -2638,6 +2638,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return self.union(&parts);
             }
         }
+        // A numeric-named property is read before the index signature (`[m]:
+        // RegExpMatchArray` takes `0: string`, not `string | undefined` under
+        // noUncheckedIndexedAccess; tsc: getIndexedAccessType looks the literal key up as a
+        // property first).
+        if s.flags(t).contains(TypeFlags::OBJECT)
+            && let Some(p) = self.property_of_type(t, &idx.to_string())
+        {
+            return self.type_of_symbol(p);
+        }
         if let Some(e) = self.element_type_of_array_like(t) {
             if self.c.opts.no_unchecked_indexed_access {
                 return self.add_undefined(e);

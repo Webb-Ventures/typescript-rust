@@ -1,0 +1,7 @@
+a.ts(3,51): error TS2411: Property '1' of type '"b" | undefined' is not assignable to 'number' index type 'string'.
+a.ts(7,7): error TS2322: Type '"b" | undefined' is not assignable to type '"b"'.
+  Type 'undefined' is not assignable to type '"b"'.
+a.ts(8,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+a.ts(12,7): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
