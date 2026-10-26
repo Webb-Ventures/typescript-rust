@@ -146,26 +146,24 @@ Files:
   one each file gets a fresh real-disk host. Never `std::fs` in a rule. Cached data holds
   no timestamps; cache keys include a hash of the file's `import/*` settings.
 
-## Status (v1 lint round 6, `wip/v1-lint6`)
+## Status (v1 lint round 7, `wip/v1-lint7`)
 
-- 650 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 352
-  eslint-plugin-unicorn, 21 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  73,072 / 73,093 cases. The non-type-aware cases are 66,170 / 66,173 and the type-aware
-  cases 6,902 / 6,920 (2026-10-27); the 18 type-aware failures are a subset of the 46 listed
-  in design record 0006. The 3 others are on rules added this round:
-  import/no-import-module-exports 13/14 (its entry-point exemption reads a `package.json`
-  the oracle doesn't mount), unicorn/prefer-await 109/110 (`promise.then(await => await)` in
-  a `.ts` file is a parser error in ts_r_parser) and unicorn/require-proxy-trap-boolean-return
-  166/167 (a `case process.exit(1):` test after `default`). unicorn/require-module-specifiers
-  is 68/68 since emit6's parser fix. `tests/oracle/baseline.txt` has the per-rule counts.
-  Every rule of ESLint's, typescript-eslint's and eslint-plugin-jsdoc's recommended presets
-  is implemented; unicorn's `recommended` has 335 of 338 (missing:
-  no-multiple-promise-resolver-calls, no-unnecessary-polyfills, which needs core-js-compat
-  and browserslist data, and prefer-includes-over-repeated-comparisons, whose `.ts` cases need
-  typed oracle data), plus 17 of its opt-in rules (352 of its 376 live rules).
-  eslint-plugin-import has 21 of 46: the ones that need no module resolution (the oracle has
-  no fixture file tree, so default, export, named, namespace, no-cycle, no-unresolved,
-  order, ... are not implemented).
+- 680 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 367
+  eslint-plugin-unicorn, 36 eslint-plugin-import), 51 of them type-aware. Rule oracle:
+  75,282 / 75,305 cases. The non-type-aware cases are 68,288 / 68,293 and the type-aware
+  cases 6,994 / 7,012 (2026-10-27); the 18 type-aware failures are a subset of the 46 listed
+  in design record 0006. The 5 others: import/no-unresolved 77/80 (3 cases need the
+  uppercase absolute path of the machine that recorded them), import/default 22/23 (its
+  `FooES7` case needs espree's ecmaVersion parse error) and unicorn/no-repeated-call-wrappers
+  107/108 (`this?.#x()` is a parse error in ts_r_parser). unicorn/prefer-await is 110/110
+  since emit7's parser fix. `tests/oracle/baseline.txt` has the per-rule counts.
+  Every rule of ESLint's, typescript-eslint's, eslint-plugin-jsdoc's and
+  eslint-plugin-unicorn's recommended presets is implemented (unicorn: 338 of 338, plus 29
+  of its opt-in rules: 367 of its 376 live rules). eslint-plugin-import has 36 of 46,
+  `import/recommended` included; import/order (82 oracle cases) is the one with oracle data
+  still missing, and no-extraneous-dependencies, no-unused-modules,
+  no-relative-parent-imports, enforce-node-protocol-usage, group-exports, no-default-export,
+  no-named-export, imports-first and unambiguous have none yet.
 - private-app against ESLint with every configured rule (round 3 run): all 23 projects
   pass the parity gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.

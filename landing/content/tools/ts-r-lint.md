@@ -13,14 +13,15 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 ## What works today
 
-- 650 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
+- 680 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
   typescript-eslint 8.71 `recommended` and `strict` rules and a few more, 48
-  eslint-plugin-jsdoc rules, 352 eslint-plugin-unicorn rules (335 of the 338 in its
-  `recommended` set) and 21 eslint-plugin-import rules. 51 of them are type-aware
+  eslint-plugin-jsdoc rules, 367 eslint-plugin-unicorn rules (all 338 of its
+  `recommended` set) and 36 eslint-plugin-import rules (all of `import/recommended`,
+  resolving modules as its default Node resolver does). 51 of them are type-aware
   and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
 - The published ESLint, typescript-eslint, eslint-plugin-jsdoc, eslint-plugin-unicorn and
-  eslint-plugin-import tests for those rules: 73,072 of 73,093 cases match (66,170 of 66,173 for
-  rules without types, 6,902 of 6,920 for type-aware rules).
+  eslint-plugin-import tests for those rules: 75,282 of 75,305 cases match (68,288 of 68,293 for
+  rules without types, 6,994 of 7,012 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
 - `eslint-disable` comments and `/* eslint */` inline config, with reports of unused disable

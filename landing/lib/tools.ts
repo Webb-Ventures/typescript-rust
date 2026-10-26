@@ -149,15 +149,15 @@ Usage: ts-r-dev [root] [options]
     intro:
       'ts-r-lint runs ESLint-compatible rules over JavaScript and TypeScript. It reads the config you already have, reports in ESLint’s formats and exits with ESLint’s codes, so it can stand in for eslint in scripts and CI when your config only uses the rules it has.',
     works: [
-      '650 rules: all 64 of ESLint 10’s recommended set and 70 more core rules, typescript-eslint’s recommended and strict rules, 48 jsdoc rules, 352 unicorn rules and 21 import rules; 51 are type-aware, on ts-r’s own checker',
-      '73,072 of 73,093 cases of the published ESLint, typescript-eslint, eslint-plugin-jsdoc, eslint-plugin-unicorn and eslint-plugin-import tests for those rules match',
+      '680 rules: all 64 of ESLint 10’s recommended set and 70 more core rules, typescript-eslint’s recommended and strict rules, 48 jsdoc rules, 367 unicorn rules and 36 import rules; 51 are type-aware, on ts-r’s own checker',
+      '75,282 of 75,305 cases of the published ESLint, typescript-eslint, eslint-plugin-jsdoc, eslint-plugin-unicorn and eslint-plugin-import tests for those rules match',
       'ESLint flat config, .oxlintrc.json and biome.json',
       '--fix, eslint-disable comments and inline config, with unused-disable reports',
       'Output as stylish, json, sarif or GitHub Actions annotations',
     ],
     notYet: [
       'Type-aware rules only where ts-r-check matches your tsc on the project; elsewhere they are skipped and listed on stderr',
-      'No ESLint plugins other than typescript-eslint, apart from 48 jsdoc, 352 unicorn and 21 import rules',
+      'No ESLint plugins other than typescript-eslint, apart from 48 jsdoc, 367 unicorn and 36 import rules',
     ],
     usage: `ts-r-lint [options] [paths...]
 
