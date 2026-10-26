@@ -307,3 +307,4 @@ unicorn/prefer-negative-index
 unicorn/prefer-add-event-listener
 unicorn/prefer-set-size
 unicorn/prefer-array-index-of
+unicorn/prefer-array-some

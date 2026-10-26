@@ -348,6 +348,7 @@ mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
 mod unicorn_prefer_add_event_listener;
 mod unicorn_prefer_array_index_of;
+mod unicorn_prefer_array_some;
 mod unicorn_prefer_code_point;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_dom_node_append;
@@ -744,6 +745,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_numeric_separators_style::RULE,
     &unicorn_prefer_add_event_listener::RULE,
     &unicorn_prefer_array_index_of::RULE,
+    &unicorn_prefer_array_some::RULE,
     &unicorn_prefer_code_point::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_dom_node_append::RULE,

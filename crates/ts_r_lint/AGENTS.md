@@ -638,6 +638,22 @@ member reads don't count). What we learned, in our words:
   parenthesized and the callback wasn't); a suggestion when `v` has side effects; nothing
   with a comment in the callback. `simple_array_search` is shared (prefer-includes's
   `some` form uses the same shape).
+- **prefer-array-some** (373/377): `find`/`findLast` (1–2 arguments, nothing optional, no
+  type arguments) compared with `undefined`/`null`, used for truthiness
+  (`is_boolean_context`: `!`, `Boolean()`, control-flow tests, through `&&`/`||` only, not
+  TS wrappers), or stored in a lone unannotated, unexported `const` whose reads are all
+  boolean uses (only `Boolean(x)` when the receiver isn't known to be indexed): always a
+  suggestion. `findIndex`/`findLastIndex` against `-1`/`0`: fixed by deleting from just
+  after the token or comment before the operator and adding `!` for `===`/`==`/`<`
+  (parenthesized as a member object, callee, tag, superclass or `**` base; no fix after a
+  line comment or with a comment inside); `findLastIndex` only fixes side-effect-free
+  inline callbacks. `filter(f).length > 0`/`!== 0` (raw `0`; not `$x`, not a non-function
+  argument): fixed for side-effect-free callbacks, else suggested. The 4 failures are
+  `x < 0 as any ** 2`: ESLint's TypeScript 5 parser accepts it, tsc 7 (and our parser)
+  report TS1005.
+- `has_side_effect` now delegates to `unicorn_static::has_side_effect` (eslint-utils does
+  not count tagged templates; `has_possible_side_effect` adds tagged templates and
+  spreads anywhere, like unicorn).
 - Shared parenthesization helpers in `unicorn_util_h5.rs`: `expression_start_needs_parens`
   (a `{`/`class`/`function`/`async function`/`let [` start moved to a statement, arrow
   body, `export default` or `for` init), `member_object_needs_parens` /
@@ -649,7 +665,7 @@ member reads don't count). What we learned, in our words:
 Read to understand (not ported), eslint-plugin-unicorn `rules/`:
 `require-number-to-fixed-digits-argument.js`, `prefer-math-trunc.js`,
 `prefer-code-point.js`, `prefer-reflect-apply.js`, `prefer-prototype-methods.js`,
-`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
-get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside}.js`;
+`prefer-native-coercion-functions.js`, `prefer-dom-node-append.js`, `prefer-negative-index.js`, `prefer-add-event-listener.js`, `prefer-set-size.js`, `prefer-array-index-of.js`, `prefer-array-some.js`, `shared/simple-array-search-rule.js`, `shared/dom-events.js`, `shared/negative-index.js`, `utils/{comments,get-expression-text,get-call-argument-text,
+get-call-expression-arguments-text,has-optional-chain-element,function-body,is-value-not-usable,is-node-value-not-dom-node,is-same-reference,comparison,is-node-value-not-function,should-add-parentheses-to-member-expression-object,should-add-parentheses-to-expression-statement-expression,needs-semicolon,is-left-hand-side,is-in-unparenthesized-new-expression-callee,should-add-parentheses-to-new-expression-callee,is-new-expression-with-parentheses,is-function-self-used-inside,boolean,is-logical-expression,is-side-effect-free-function,has-possible-side-effect,should-add-parentheses-to-unary-expression-replacement}.js`, `fix/replace-member-expression-property.js`, `ast/{is-method-call,call-or-new-expression,is-member-expression}.js`;
 `@eslint-community/eslint-utils` (`hasSideEffect`, `getFunctionNameWithKind`,
 `getFunctionHeadLocation`, `ReferenceTracker`).

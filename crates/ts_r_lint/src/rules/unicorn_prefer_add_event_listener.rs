@@ -21,7 +21,8 @@
 use super::prelude::*;
 use super::unicorn_util::{parenthesized_span, skip_wrappers, space_around_keyword, with_edits};
 use super::unicorn_util_h5::{
-    is_parenthesized, is_same_reference, member_object_text, static_string, would_remove_comments,
+    is_parenthesized, is_same_reference, is_value_not_function, member_object_text, static_string,
+    would_remove_comments,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -414,39 +415,4 @@ fn returns_value(ast: &ts_r_ast::Ast, id: NodeId, depth: u32) -> bool {
         found = found || returns_value(ast, c, depth + 1);
     });
     found
-}
-
-/// unicorn's `isNodeValueNotFunction`.
-fn is_value_not_function(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
-    match *ast.node(id) {
-        Node::ArrayLit { .. }
-        | Node::ClassExpr { .. }
-        | Node::StringLit { .. }
-        | Node::NumberLit { .. }
-        | Node::BigIntLit { .. }
-        | Node::BoolLit { .. }
-        | Node::NullLit {}
-        | Node::RegexLit { .. }
-        | Node::ObjectLit { .. }
-        | Node::TemplateLit { .. }
-        | Node::Unary { .. }
-        | Node::Update { .. }
-        | Node::Assign { .. }
-        | Node::Await { .. }
-        | Node::New { .. }
-        | Node::TaggedTemplate { .. }
-        | Node::This {} => true,
-        Node::Binary { op, .. } => !matches!(
-            op,
-            BinaryOp::LogicalOr | BinaryOp::LogicalAnd | BinaryOp::Coalesce
-        ),
-        Node::Call {
-            callee, optional, ..
-        } => {
-            let bind = matches!(*ast.node(skip_parens(ast, callee)),
-                Node::Member { prop, optional: false, .. } if ident_name(ast, prop) == Some("bind"));
-            optional || !bind
-        }
-        _ => ident_name(ast, id) == Some("undefined"),
-    }
 }

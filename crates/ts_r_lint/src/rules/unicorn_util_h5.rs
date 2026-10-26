@@ -102,42 +102,183 @@ pub(crate) fn is_number_literal(cx: &Ctx<'_, '_>, id: NodeId, value: f64) -> boo
     matches!(*cx.node(skip_parens(cx.ast(), id)), Node::NumberLit { value: v } if v.get() == value)
 }
 
-/// `@eslint-community/eslint-utils`' `hasSideEffect` with default options: calls, `new`,
-/// assignments, updates, `delete`, `await`, `yield`, `import()` and tagged templates have
-/// side effects; reading members does not.
+/// `@eslint-community/eslint-utils`' `hasSideEffect` with default options (calls, `new`,
+/// writes, `await`, `yield`, `import()`, `delete`; member reads and nested functions
+/// don't count), from the shared engine in `unicorn_static`.
 pub(crate) fn has_side_effect(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
-    fn walk(ast: &ts_r_ast::Ast, id: NodeId, depth: u32) -> bool {
-        if depth > 200 {
-            return true;
-        }
-        match ast.node(id) {
-            Node::Call { .. }
-            | Node::New { .. }
-            | Node::Assign { .. }
-            | Node::Update { .. }
-            | Node::Await { .. }
-            | Node::Yield { .. }
-            | Node::ImportCall { .. }
-            | Node::TaggedTemplate { .. }
-            | Node::Unary {
-                op: UnaryOp::Delete,
-                ..
-            } => true,
-            Node::FunctionExpr { .. } | Node::Arrow { .. } | Node::ClassExpr { .. } => false,
-            n => {
-                let mut found = false;
-                n.for_each_child(ast, &mut |c| {
-                    if !found {
-                        found = walk(ast, c, depth + 1);
-                    }
-                });
-                found
-            }
-        }
-    }
-    walk(cx.ast(), id, 0)
+    super::unicorn_static::has_side_effect(cx.ast(), id)
 }
 
+/// unicorn's `hasPossibleSideEffect`: [`has_side_effect`], or a tagged template or spread
+/// anywhere inside (even in nested functions).
+pub(crate) fn has_possible_side_effect(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    fn contains(ast: &ts_r_ast::Ast, id: NodeId, depth: u32) -> bool {
+        if depth > 500 {
+            return true;
+        }
+        if matches!(
+            ast.node(id),
+            Node::TaggedTemplate { .. } | Node::Spread { .. }
+        ) {
+            return true;
+        }
+        let mut found = false;
+        ast.for_each_child(id, |c| found = found || contains(ast, c, depth + 1));
+        found
+    }
+    has_side_effect(cx, id) || contains(cx.ast(), id, 0)
+}
+
+/// unicorn's `isSideEffectFreeFunction`: an inline arrow or function expression whose
+/// parameters and body have no possible side effect.
+pub(crate) fn is_side_effect_free_function(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let ast = cx.ast();
+    let id = skip_parens(ast, id);
+    let (params, body) = match *ast.node(id) {
+        Node::Arrow { params, body, .. } => (params, Some(body)),
+        Node::FunctionExpr { params, body, .. } => (params, body),
+        _ => return false,
+    };
+    ast.list(params)
+        .iter()
+        .chain(body.as_ref())
+        .all(|&c| !has_possible_side_effect(cx, c))
+}
+
+/// A call `obj.name(...)` in unicorn's `isMethodCall` sense: not an optional call, a
+/// non-computed member (parentheses around the callee are looked through), `name` one of
+/// `names`, an argument count in `min..=max`, and no spread among the first `max`
+/// arguments when `max` is given. `optional_member: false` also rejects `obj?.name`.
+pub(crate) fn method_call_of<'a>(
+    ast: &'a ts_r_ast::Ast,
+    id: NodeId,
+    names: &[&str],
+    min: usize,
+    max: Option<usize>,
+    optional_member: Option<bool>,
+) -> Option<(NodeId, NodeId, &'a [NodeId])> {
+    let Node::Call {
+        callee,
+        optional: false,
+        args,
+        ..
+    } = *ast.node(id)
+    else {
+        return None;
+    };
+    let Node::Member {
+        obj,
+        prop,
+        optional,
+    } = *ast.node(skip_parens(ast, callee))
+    else {
+        return None;
+    };
+    if optional_member == Some(false) && optional {
+        return None;
+    }
+    let name = ident_name(ast, prop)?;
+    if !names.contains(&name) {
+        return None;
+    }
+    let args = ast.list(args);
+    if args.len() < min || max.is_some_and(|m| args.len() > m) {
+        return None;
+    }
+    if let Some(m) = max
+        && args
+            .iter()
+            .take(m)
+            .any(|&a| matches!(ast.node(a), Node::Spread { .. }))
+    {
+        return None;
+    }
+    Some((obj, prop, args))
+}
+
+/// The parent of `id` through parentheses, and the outermost parenthesized form of `id`
+/// (the node the parent holds).
+pub(crate) fn parent_through_parens(cx: &Ctx<'_, '_>, id: NodeId) -> Option<(NodeId, NodeId)> {
+    let mut cur = id;
+    for _ in 0..10_000 {
+        let p = cx.parent(cur)?;
+        if matches!(cx.node(p), Node::Paren { .. }) {
+            cur = p;
+            continue;
+        }
+        return Some((p, cur));
+    }
+    None
+}
+
+/// unicorn's `isGlobalBooleanCall`: `Boolean(x)` with one non-spread argument, not an
+/// optional call, `Boolean` not declared in scope.
+pub(crate) fn is_global_boolean_call(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let ast = cx.ast();
+    let Node::Call {
+        callee,
+        optional: false,
+        args,
+        ..
+    } = *ast.node(id)
+    else {
+        return false;
+    };
+    let &[arg] = ast.list(args) else {
+        return false;
+    };
+    if ident_name(ast, callee) != Some("Boolean") || matches!(ast.node(arg), Node::Spread { .. }) {
+        return false;
+    }
+    let sem = cx.semantic();
+    sem.symbol_of_ident(callee)
+        .is_none_or(|s| sem.symbol(s).decls.is_empty())
+}
+
+fn is_logical(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Binary {
+            op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
+            ..
+        }
+    )
+}
+
+/// unicorn's `isBooleanContext`: `id`'s value is only used for its truthiness: the operand
+/// of `!`, the argument of `Boolean(...)`, or a control-flow test (`if`, `?:`, `while`,
+/// `do-while`, `for`), through `&&` / `||` operands (TS wrappers are not looked through).
+pub(crate) fn is_boolean_context(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let mut cur = id;
+    for _ in 0..10_000 {
+        if is_global_boolean_call(cx, cur) {
+            return true;
+        }
+        let Some((parent, held)) = parent_through_parens(cx, cur) else {
+            return false;
+        };
+        match *cx.node(parent) {
+            Node::Unary {
+                op: UnaryOp::Not, ..
+            } => return true,
+            Node::Call { .. } if is_global_boolean_call(cx, parent) => {
+                return cx.ast().list(match *cx.node(parent) {
+                    Node::Call { args, .. } => args,
+                    _ => return false,
+                })[0]
+                    == held;
+            }
+            Node::If { test, .. }
+            | Node::Conditional { test, .. }
+            | Node::While { test, .. }
+            | Node::DoWhile { test, .. } => return test == held,
+            Node::For { test, .. } => return test == Some(held),
+            ref n if is_logical(n) => cur = parent,
+            _ => return false,
+        }
+    }
+    false
+}
 /// An optional link (`?.`) in the chain `id` ends, not cut off by parentheses (TS
 /// wrappers without parentheses are looked through): `a?.b` yes, `(a?.b)` no.
 pub(crate) fn has_unparenthesized_optional_chain(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
@@ -917,4 +1058,42 @@ pub(crate) fn is_left_hand_side(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
         }
     }
     false
+}
+
+/// unicorn's `isNodeValueNotFunction`: literals, arrays, objects, classes, templates,
+/// unary/update/arithmetic expressions, assignments, `await`, `new`, tagged templates,
+/// `this`, `undefined` and calls other than `.bind(...)` can't (or most likely don't)
+/// produce a function.
+pub(crate) fn is_value_not_function(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
+    match *ast.node(id) {
+        Node::ArrayLit { .. }
+        | Node::ClassExpr { .. }
+        | Node::StringLit { .. }
+        | Node::NumberLit { .. }
+        | Node::BigIntLit { .. }
+        | Node::BoolLit { .. }
+        | Node::NullLit {}
+        | Node::RegexLit { .. }
+        | Node::ObjectLit { .. }
+        | Node::TemplateLit { .. }
+        | Node::Unary { .. }
+        | Node::Update { .. }
+        | Node::Assign { .. }
+        | Node::Await { .. }
+        | Node::New { .. }
+        | Node::TaggedTemplate { .. }
+        | Node::This {} => true,
+        Node::Binary { op, .. } => !matches!(
+            op,
+            BinaryOp::LogicalOr | BinaryOp::LogicalAnd | BinaryOp::Coalesce
+        ),
+        Node::Call {
+            callee, optional, ..
+        } => {
+            let bind = matches!(*ast.node(skip_parens(ast, callee)),
+                Node::Member { prop, optional: false, .. } if ident_name(ast, prop) == Some("bind"));
+            optional || !bind
+        }
+        _ => ident_name(ast, id) == Some("undefined"),
+    }
 }
