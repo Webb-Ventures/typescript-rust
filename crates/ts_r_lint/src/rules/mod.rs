@@ -291,10 +291,7 @@ mod unicorn_explicit_timer_delay;
 mod unicorn_length_or_infinity;
 mod unicorn_max_nested_calls;
 mod unicorn_new_for_builtins;
-mod unicorn_no_array_concat_in_loop;
-mod unicorn_no_array_reverse;
-mod unicorn_no_array_sort;
-mod unicorn_no_async_promise_finally;
+mod unicorn_no_array_from_fill;
 mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_break_in_nested_loop;
 mod unicorn_no_console_spaces;
@@ -326,6 +323,7 @@ mod unicorn_no_useless_boolean_cast;
 mod unicorn_no_useless_continue;
 mod unicorn_no_useless_error_capture_stack_trace;
 mod unicorn_no_useless_re_export;
+mod unicorn_no_useless_recursion;
 mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
@@ -673,10 +671,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_explicit_timer_delay::RULE,
     &unicorn_max_nested_calls::RULE,
     &unicorn_new_for_builtins::RULE,
-    &unicorn_no_array_concat_in_loop::RULE,
-    &unicorn_no_array_reverse::RULE,
-    &unicorn_no_array_sort::RULE,
-    &unicorn_no_async_promise_finally::RULE,
+    &unicorn_no_array_from_fill::RULE,
     &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_break_in_nested_loop::RULE,
     &unicorn_no_console_spaces::RULE,
@@ -708,6 +703,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_continue::RULE,
     &unicorn_no_useless_error_capture_stack_trace::RULE,
     &unicorn_no_useless_re_export::RULE,
+    &unicorn_no_useless_recursion::RULE,
     &unicorn_no_xor_as_exponentiation::RULE,
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,

@@ -279,10 +279,7 @@ unicorn/escape-case 198/198
 unicorn/explicit-timer-delay 60/60
 unicorn/max-nested-calls 26/26
 unicorn/new-for-builtins 366/366
-unicorn/no-array-concat-in-loop 33/33
-unicorn/no-array-reverse 28/28
-unicorn/no-array-sort 76/76
-unicorn/no-async-promise-finally 39/39
+unicorn/no-array-from-fill 30/30
 unicorn/no-await-in-promise-methods 110/111
 unicorn/no-break-in-nested-loop 24/24
 unicorn/no-console-spaces 86/86
@@ -314,6 +311,7 @@ unicorn/no-useless-boolean-cast 61/61
 unicorn/no-useless-continue 43/43
 unicorn/no-useless-error-capture-stack-trace 53/53
 unicorn/no-useless-re-export 22/22
+unicorn/no-useless-recursion 29/29
 unicorn/no-xor-as-exponentiation 34/34
 unicorn/no-zero-fractions 193/193
 unicorn/number-literal-case 60/60
