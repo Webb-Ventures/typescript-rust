@@ -9,6 +9,7 @@ pub mod locate;
 mod nav;
 mod outline;
 mod signature;
+mod strings;
 
 use super::convert::LspLines;
 use crate::jsonrpc::codes;

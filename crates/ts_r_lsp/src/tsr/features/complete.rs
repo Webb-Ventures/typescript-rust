@@ -105,7 +105,11 @@ enum Context {
         types_only: bool,
         values_only: bool,
     },
-    /// Inside a comment or a string: nothing.
+    /// Inside a string literal: the literals, property names or module paths it may hold.
+    String { lit: NodeId },
+    /// Inside a comment: only `/// <reference path="|"` offers anything.
+    Reference,
+    /// Nothing.
     None,
 }
 
@@ -130,13 +134,19 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     let (ws, prefix) = word_before(text, offset);
     let prefix = prefix.to_string();
     if in_comment(ast, offset) {
-        return (Context::None, prefix);
+        return (Context::Reference, prefix);
+    }
+    if let Some(lit) = super::strings::literal_at(ck, file, offset) {
+        return (Context::String { lit }, prefix);
     }
     let node = node_at(ast, offset);
     if let Some(n) = node
         && matches!(
             ast.node(n),
-            Node::StringLit { .. } | Node::TemplateLit { .. } | Node::RegexLit { .. }
+            Node::StringLit { .. }
+                | Node::TemplateLit { .. }
+                | Node::RegexLit { .. }
+                | Node::Directive { .. }
         )
         && ast.span(n).start < offset
         && offset < ast.span(n).end
@@ -282,6 +292,26 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let mut incomplete = false;
     match ctx {
         Context::None => {}
+        Context::String { lit } => {
+            let template = super::strings::is_template(c.ast(cx.file), lit);
+            let found = super::strings::string_items(cx, ck, lit, offset).unwrap_or_default();
+            if found.is_empty() {
+                return Value::Null;
+            }
+            for (label, kind) in found {
+                let label = super::strings::escape_label(&label, template);
+                items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
+            }
+        }
+        Context::Reference => {
+            let found = super::strings::reference_items(cx, ck, offset).unwrap_or_default();
+            if found.is_empty() {
+                return Value::Null;
+            }
+            for (label, kind) in found {
+                items.push(json!({"label": label, "kind": kind, "sortText": SORT_LOCAL}));
+            }
+        }
         Context::Member { obj, qualified } => {
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
                 if !is_identifier_name(&name) {
@@ -602,7 +632,7 @@ fn auto_imports(
 
 /// Whether relative imports in `path` must name the output extension: an ES module under
 /// `node16`/`nodenext` resolution (TS2835 otherwise).
-fn needs_js_extension(options: &CompilerOptions, path: &str) -> bool {
+pub(super) fn needs_js_extension(options: &CompilerOptions, path: &str) -> bool {
     if !matches!(
         options.effective().resolution_algorithm(),
         ModuleResolution::Node16 | ModuleResolution::NodeNext
@@ -615,14 +645,14 @@ fn needs_js_extension(options: &CompilerOptions, path: &str) -> bool {
 }
 
 /// How the current file writes imports (quotes, semicolons, extensions).
-struct ImportStyle {
+pub(super) struct ImportStyle {
     quote: char,
     semi: bool,
-    js_ext: bool,
+    pub(super) js_ext: bool,
 }
 
 impl ImportStyle {
-    fn of(c: &Checker<'_>, file: FileId) -> ImportStyle {
+    pub(super) fn of(c: &Checker<'_>, file: FileId) -> ImportStyle {
         let f = c.file(file);
         let ast = &f.ast;
         let mut st = ImportStyle {

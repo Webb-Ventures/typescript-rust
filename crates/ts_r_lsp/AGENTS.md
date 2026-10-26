@@ -244,6 +244,39 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   Project"): every config is read again and every reported input that is not open is re-read
   from disk.
 
+## String completions (`tsr/features/strings.rs`)
+
+Rules learned from `tsc: src/services/stringCompletions.ts` (v7.0.2), written in our own
+terms. The fourslash tests are the oracle.
+
+- A position is inside a string when it is past the opening quote of a string literal, a
+  no-substitution template or a template part (`${` parts belong to their template), and
+  before the closing quote; an unterminated literal runs to its end. A `"use strict"`
+  directive is a string too. Comments win over strings.
+- What is listed depends on the literal's parent: module specifiers (`import`/`export ...
+  from`, `import x = require()`, `import()`, `require()`, `import("x")` types) list files and
+  packages; `o["|"]` and `"|" in o` list the object type's property names (no `__@` symbols,
+  no `#private`); the other side of `===`/`!==`/`==`/`!=` lists its string literals; an object
+  literal key lists the contextual type's properties not written yet; a `case` lists the
+  discriminant's literals not used by another case; a call or `new` argument lists the
+  literals of that parameter in every candidate signature (a rest parameter's element type
+  too); type positions list the literal members of an indexed access's key, the other union
+  members, or the constraint of the type parameter a type argument fills. Anywhere else, the
+  contextual type's string literals. Nothing found answers `null`, as tsc does.
+- Labels are escaped as they would be written in the literal: `\\`, `\n`, `\r`, `\t`, and `"`
+  (even in single quotes); in a template, `` ` `` instead of `"`.
+- Module specifiers: a relative fragment (or a rooted one when there are no `paths`) lists the
+  directory part of the fragment under the importing file's directory (the importing file and
+  `@types` left out; folders as folders). Names follow the file's import style: no extension
+  (bundler/classic), or `.js`/`.mjs`/`.cjs`/`.jsx` (ES modules under `node16`/`nodenext`, or
+  a file that already writes extensions); `.js` files only with `allowJs`, `.json` only with
+  `resolveJsonModule`, other extensions only when an ambient `declare module "*.ext"`
+  exists. A bare fragment lists `paths` keys without `*`, ambient module names, type roots'
+  packages (`@types/a__b` as `@a/b`, filtered by `types`), then the dependencies of every
+  package.json above the file, or, if none, what the ancestor `node_modules` hold.
+- `/// <reference path="|` lists files with their names as on disk; `types="|` lists type
+  roots' packages. Directory listings stop at 2000 entries and 64 ancestors.
+
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
 Design record [0007](../../docs/design/0007-sound-mode.md), "Reporting". All of it lives in

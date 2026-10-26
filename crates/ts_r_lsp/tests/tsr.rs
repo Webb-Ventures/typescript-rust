@@ -1195,6 +1195,45 @@ fn completion_function_members_and_arguments() {
     c.shutdown();
 }
 
+/// Inside a string literal the list comes from what the string can be: the literal union a
+/// parameter takes, the keys of an indexed object, and files for a module specifier.
+#[test]
+fn completion_in_string_literals() {
+    if !libs_present() {
+        return;
+    }
+    let text = "declare function f(m: \"get\" | \"put\"): void;\nf(\"\");\nconst o = { alpha: 1, \"b c\": 2 };\no[\"\"];\nimport {} from \"./\";\n";
+    let env = Env::new(
+        "complete-strings",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/c.ts", text),
+            ("src/other.ts", "export {};\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 1, 3)));
+    assert_eq!(l, ["get", "put"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 3)));
+    assert_eq!(l, ["alpha", "b c"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 18)));
+    assert!(l.iter().any(|x| x.starts_with("other")), "{l:?}");
+    assert!(!l.iter().any(|x| x.starts_with('c')), "{l:?}");
+    c.shutdown();
+}
+
 /// Signature help shows a generic call's instantiated signature, constructors without
 /// `new`, and tagged templates (the template text is argument 0).
 #[test]
