@@ -404,6 +404,7 @@ unicorn/no-useless-override 84/84
 unicorn/no-useless-promise-resolve-reject 121/121
 unicorn/no-useless-re-export 22/22
 unicorn/no-useless-recursion 29/29
+unicorn/no-useless-set-construction 313/313
 unicorn/no-useless-spread 283/283
 unicorn/no-useless-switch-case 34/34
 unicorn/no-useless-template-literals 89/89

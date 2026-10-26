@@ -458,6 +458,7 @@ mod unicorn_no_useless_override;
 mod unicorn_no_useless_promise_resolve_reject;
 mod unicorn_no_useless_re_export;
 mod unicorn_no_useless_recursion;
+mod unicorn_no_useless_set_construction;
 mod unicorn_no_useless_spread;
 mod unicorn_no_useless_switch_case;
 mod unicorn_no_useless_template_literals;
@@ -1065,6 +1066,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_useless_fallback_in_spread::RULE,
     &unicorn_no_useless_length_check::RULE,
     &unicorn_no_useless_promise_resolve_reject::RULE,
+    &unicorn_no_useless_set_construction::RULE,
     &unicorn_no_useless_spread::RULE,
     &unicorn_no_useless_switch_case::RULE,
     &unicorn_no_useless_undefined::RULE,
