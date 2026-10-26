@@ -395,10 +395,14 @@ Files:
     the previous token to `<>`. A closing tag that names the direct parent
     (`<a><b>x</a>`) is the parent's, and the child is TS17008. A fragment closed by a
     named tag (`<>x</a>`) is TS17015 and ends after `</`; in children the rest is read
-    again as JSX text. A bad attribute value is TS1145; the first `attr={}` of an
-    element is a deferred TS17000. A token that cannot start an attribute gets the list
-    recovery (`List::JsxAttributes`), and a tag that then lacks `>` is `'/' expected.`
-    and has no children (in children, the rest is read again as JSX text). A conflict
+    again as JSX text. A bad attribute value is TS1145 and, as in tsc, the attribute has
+    no value (`value: None`, the token is left for the attribute list); the first
+    `attr={}` of an element is a deferred TS17000. A child `{expr` without its `}` is
+    `'}' expected.` and the children go on from the end of the expression, read again as
+    JSX text (`<a>{"s";}</a>` has the text `;}`, TS1381). A token that cannot start an
+    attribute gets the list recovery (`List::JsxAttributes`), and a tag that then lacks
+    `>` is `'/' expected.`, self-closing (`self_closing: true`, as tsc builds it) and has
+    no children (in children, the rest is read again as JSX text). A conflict
     marker in children is TS1185 plus `'</' expected.` over the marker line. Adjacent
     elements outside children (`<a/><b/>`, not under a prefix operator) are TS2657 and a
     `Seq` led by a zero-width `Missing` (tsc's synthesized comma: no TS2695).

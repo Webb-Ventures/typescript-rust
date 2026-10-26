@@ -88,7 +88,12 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
   - JSX: `<div />` without attributes, `<div id="x"/>` with. An expression container
     (attribute value or child, not a spread) indents its contents one level; a multi-line
     comment in an empty container is re-indented from the writer's indent (each line keeps
-    its own indent past the source line's).
+    its own indent past the source line's). An empty container without comments prints
+    nothing (`<a>{}</a>` is `<a></a>`, `b={}` is `b=`), and an element without a closing
+    tag that is not self-closing gets tsc's missing one, `</>` (`<a><b>x</a>` is
+    `<a><b>x</></a>`).
+  - A binary expression whose left operand is missing (a statement starting at `* 2`)
+    keeps the space before the operator even at a line start (` * 2;`).
   - Synthesized layout comes from the transform (`PrintHints::single_line` / `multi_line`,
     sorted node ids): blocks and embedded statements tsc builds on one line (`get x() {
     return this.#x; }`, `static { _classThis = this; }`, `get: function () { return m.x; }`,

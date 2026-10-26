@@ -149,13 +149,15 @@ impl<'a> Parser<'a> {
             self.lx.seek(self.prev_end);
             self.lx.next_jsx_child();
         }
+        // Without the `>` the tag is read as self-closing, as tsc does (`<a b="c;` prints
+        // `<a b="c;/>`).
         let opening = self.finish_node(
             start,
             Node::JsxOpening {
                 name,
                 type_args,
                 attrs,
-                self_closing: false,
+                self_closing: !ok,
             },
         );
         if !ok {
@@ -294,6 +296,15 @@ impl<'a> Parser<'a> {
                 self.bump_jsx_child()
             } else {
                 self.bump()
+            }
+        } else if in_children {
+            // As tsc: the container ends here and the children go on from the token after
+            // the expression, read again as JSX text (`<a>{"s";}</a>` has the text `;}`,
+            // TS1381 at its `}`).
+            self.expect_closing(T::RBrace, T::LBrace, open);
+            if !self.at(T::Eof) {
+                self.lx.seek(self.prev_end);
+                self.lx.next_jsx_child();
             }
         } else {
             self.expect_closing(T::RBrace, T::LBrace, open);
@@ -435,7 +446,7 @@ impl<'a> Parser<'a> {
                     let value = if self.at(T::Eq) {
                         self.prev_end = self.tok().end;
                         self.lx.next_jsx_attribute_value();
-                        Some(self.parse_jsx_attribute_value())
+                        self.parse_jsx_attribute_value()
                     } else {
                         None
                     };
@@ -471,7 +482,10 @@ impl<'a> Parser<'a> {
         self.finish_list(mark)
     }
 
-    fn parse_jsx_attribute_value(&mut self) -> NodeId {
+    /// The value after `=`. None when it is missing (`<a b= />`, `<a b=c />`): the error,
+    /// and, as in tsc, an attribute without a value (`<a b />`, `b: true`); the token is
+    /// left for the attribute list.
+    fn parse_jsx_attribute_value(&mut self) -> Option<NodeId> {
         let start = self.start();
         match self.kind() {
             T::String => {
@@ -479,13 +493,13 @@ impl<'a> Parser<'a> {
                 let inner = Span::new(tok.start + 1, tok.end.saturating_sub(1).max(tok.start + 1));
                 let value = self.ast.intern(inner.text(self.src));
                 self.bump();
-                self.finish_node(start, Node::StringLit { value })
+                Some(self.finish_node(start, Node::StringLit { value }))
             }
-            T::LBrace => self.parse_jsx_expression_container(false),
-            T::Lt => self.parse_jsx_element_or_fragment(false),
+            T::LBrace => Some(self.parse_jsx_expression_container(false)),
+            T::Lt => Some(self.parse_jsx_element_or_fragment(false)),
             _ => {
                 self.error(messages::JSX_ATTRIBUTE_VALUE_EXPECTED);
-                self.missing()
+                None
             }
         }
     }

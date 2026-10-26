@@ -768,7 +768,18 @@ impl Printer<'_> {
             self.expr(left, p);
         }
         let (before, after) = self.op_breaks(left, right, op.as_str());
-        let mut breaks = self.break_or_space(before);
+        // A missing left operand (`a < 0 as T * 2` stops before `*`: the next statement is
+        // `<missing> * 2`) prints nothing, and tsc keeps the space after it: ` * 2;`.
+        let missing_left = self.tsc
+            && !before
+            && matches!(self.node(left), Node::Missing {})
+            && self.span(left).is_empty();
+        let mut breaks = if missing_left {
+            self.space_at_line_start();
+            0
+        } else {
+            self.break_or_space(before)
+        };
         // The operator's own comments: `/* c */ in /* d */`.
         let op_pos = (self.tsc && !self.is_synthetic(left) && !self.is_synthetic(right))
             .then(|| self.token_between(self.span(left).end, self.span(right).start, op.as_str()))
@@ -1717,6 +1728,10 @@ impl Printer<'_> {
                     self.raw_append("</");
                     self.jsx_name(name);
                     self.raw_append(">");
+                } else if self.tsc && !self.jsx_self_closing(opening) {
+                    // An unclosed element: tsc prints its missing closing tag, `</>`
+                    // (`<a><b>x</a>` is `<a><b>x</></a>`).
+                    self.raw_append("</>");
                 }
             }
             Node::JsxFragment { children } => {
@@ -1730,6 +1745,16 @@ impl Printer<'_> {
         }
     }
 
+    fn jsx_self_closing(&self, opening: NodeId) -> bool {
+        matches!(
+            self.node(opening),
+            Node::JsxOpening {
+                self_closing: true,
+                ..
+            }
+        )
+    }
+
     fn jsx_child(&mut self, id: NodeId) {
         match self.node(id) {
             Node::JsxText {} => {
@@ -1737,6 +1762,16 @@ impl Printer<'_> {
                 self.raw_append(raw);
             }
             Node::JsxExprContainer { expr } => {
+                // tsc prints an empty container only for its comments: `<a>{}</a>` is
+                // `<a></a>`, `b={}` is `b=` (a syntax error the source already had).
+                if self.tsc
+                    && expr.is_none()
+                    && (!self.opts.comments
+                        || self.is_synthetic(id)
+                        || self.ast.comments_in(self.span(id)).is_empty())
+                {
+                    return;
+                }
                 self.raw_append("{");
                 if let Some(e) = expr {
                     // tsc indents what an expression container breaks onto later lines one
