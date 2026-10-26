@@ -831,6 +831,13 @@ pub struct Ck<'c, 'a> {
     /// With `print_qualified`, also name the module a type comes from
     /// (`import("a").F`): only to tell apart two relation operands that print alike.
     pub(crate) print_module_qualified: bool,
+    /// Editor printing (`PrintMode::omit_optional_undefined`): a `?` parameter or
+    /// property prints without the `undefined` its optionality adds (`c?: () => string`).
+    pub(crate) print_omit_optional_undefined: bool,
+    /// Editor printing (`PrintMode::via_aliases`): with `print_scope`, a type that is not
+    /// in scope by its own name is named through an import alias that reaches it or one
+    /// of its namespaces (`a<a<string>>` for `import a = require("./a")`, `d.C`).
+    pub(crate) print_via_aliases: bool,
     /// Types printed so far by the outermost `print_type` call (a budget against nested
     /// generic instantiations that double at each level).
     pub(crate) print_nodes: u32,
@@ -952,6 +959,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             print_scope: None,
             print_qualified: false,
             print_module_qualified: false,
+            print_omit_optional_undefined: false,
+            print_via_aliases: false,
             print_nodes: 0,
             compound_assigned: FxHashMap::default(),
             reverse_mapping: Vec::new(),

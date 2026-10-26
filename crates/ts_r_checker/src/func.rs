@@ -1552,6 +1552,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             return None;
         }
         let parts = fn_parts(ast, func.node)?;
+        // A function expression with its own type parameters is not context sensitive: its
+        // unannotated parameters get no contextual type, not even as an IIFE (`<S>(x) =>
+        // x` against `<T>(x: T) => T` leaves `x` implicitly `any`; tsc: ast/utilities.go
+        // HasContextSensitiveParameters, checker.go getContextuallyTypedParameterType).
+        if parts.type_params.is_some()
+            && matches!(
+                ast.node(func.node),
+                Node::FunctionExpr { .. } | Node::Arrow { .. }
+            )
+        {
+            return None;
+        }
         let params: Vec<NodeId> = ast
             .list(parts.params)
             .iter()

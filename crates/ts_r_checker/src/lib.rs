@@ -82,6 +82,7 @@ pub use driver::{
     check_program_with, should_check, sort_and_dedup,
 };
 pub use layers::Layer;
+pub use print::PrintMode;
 pub use program::{
     LibStore, ModeResolutions, ProgramFiles, SourceCache, SourceFile, load_program,
     load_program_cached, load_program_with_references,

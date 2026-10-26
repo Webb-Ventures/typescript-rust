@@ -25,7 +25,11 @@ result.diagnostics; result.error_count();
 // lower level: let checker = Checker::new(&program); let mut ck = Ck::new(&checker, file);
 // ck.check_source_file(file); ck.check_expr(loc); ck.is_assignable(s, t); ck.type_to_string(t)
 // editor queries (ts_r_lsp): ck.type_to_string_at(t, scope) (`m1.m2.c`, qualified from
-// scope), ck.jsx_props_type(opening), ck.pattern_parent_type(pattern)
+// scope), ck.signature_to_string_at(sig, kind, arrow, scope),
+// ck.type_to_string_with(t, PrintMode::quick_info(scope)) and
+// ck.signature_to_string_with(sig, kind, arrow, mode) (PrintMode: scope, `?` members without
+// the added `| undefined`, names through import aliases), ck.jsx_props_type(opening),
+// ck.pattern_parent_type(pattern)
 ```
 
 Files, by layer:
@@ -245,6 +249,10 @@ Files, by layer:
   expression body is a context-sensitive function is context sensitive itself, and fixes
   what the returned function's contextual parameters mention (`() => a => a.foo` against
   `() => (a: T) => void` fixes `T`, widened: tsc `hasContextSensitiveReturnExpression`).
+  A function expression with its own type parameters is never context sensitive, and its
+  unannotated parameters get no contextual type, as an IIFE too (`<S>(x) => x` against
+  `<T>(x: T) => T` is TS7006, `x: any`; tsc: ast/utilities.go
+  HasContextSensitiveParameters; `generic_function_expression_params`).
   A computed entity-name key in a signature's binding pattern prints as written
   (`({ [foo.bar]: c }: {}) => any`). A type parameter source
   (a class's `this`) infers to an object target through its constraint (`infer.rs`).
@@ -1043,6 +1051,14 @@ Files, by layer:
   Under `print_qualified`, `Ck::print_scope` (set only by declaration checks) still drops
   the namespaces that enclose the error location. `Ck::type_to_string_at` sets both for
   editor hovers, where tsc qualifies names from the hovered location (`m1.m2.c`).
+  `PrintMode` (`print.rs`) holds the editor-only printing switches, which diagnostics never
+  set: `scope` (as `type_to_string_at`), `omit_optional_undefined` (`c?: () => string`,
+  `{ a?: number; }`: tsc's quick info reuses the written annotation, so an annotation that
+  spells `undefined` keeps it) and `via_aliases` (`Ck::print_via_aliases`: a type not in
+  scope by its own name is named through an import alias in scope that resolves to it or
+  to one of its namespaces, the nearest first: `a<a<string>>` for `import a =
+  require("./a")` of `export = Foo`, `d.C<number>` for `import d = M.N`; tsc:
+  checker.go getAccessibleSymbolChain). Tests: `tests/instantiation_queries.rs`.
 - **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
   declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
   the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
