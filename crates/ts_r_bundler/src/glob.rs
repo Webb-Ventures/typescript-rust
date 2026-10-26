@@ -121,6 +121,10 @@ impl Pattern {
     }
 }
 
+/// The virtual directory of `ts_r_guard::vfs::GuardFs` (`ts-r-build` wraps the bundler's
+/// file system in it; this crate does not depend on that one).
+const GUARD_DIR: &str = ".ts-r-guard";
+
 /// Collects the files below `base` (the absolute form of [`Pattern::dir`]) that match, as
 /// `prefix` + their relative path (`./src/a.js`). Reads at most `max_depth` levels and
 /// `max_entries` directories and files; returns `false` when a limit cut the walk short
@@ -144,6 +148,11 @@ pub fn walk(
     let mut stack = vec![(base.to_owned(), String::new(), 0usize)];
     while let Some((dir, rel, depth)) = stack.pop() {
         for e in fs.read_dir(&dir) {
+            // `ts-r-build`'s `parse<T>` validators are virtual modules in a directory that
+            // mirrors the project (`ts_r_guard::vfs::VDIR`): not files a pattern names.
+            if e.name == GUARD_DIR {
+                continue;
+            }
             seen += 1;
             if seen > max_entries {
                 return false;
@@ -231,6 +240,11 @@ mod tests {
             3,
             &mut Vec::new()
         ));
+        // A `parse<T>` build's virtual validator directory is not walked.
+        fs.add_file("/p/src/.ts-r-guard/x.js/T.js", "");
+        let mut out = Vec::new();
+        assert!(walk(&fs, "/p/src", "./src/", &deep, 64, 100, &mut out));
+        assert_eq!(out.len(), 2, "{out:?}");
         // Without `**` the pattern's own depth bounds the walk: not an error.
         let flat = Pattern::parse("./src/*.js");
         let mut out = Vec::new();
