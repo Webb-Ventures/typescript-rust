@@ -328,7 +328,7 @@ mod unicorn_escape_case;
 mod unicorn_expiring_todo_comments;
 mod unicorn_explicit_length_check;
 mod unicorn_explicit_timer_delay;
-mod unicorn_iter;
+mod unicorn_html;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
@@ -405,8 +405,7 @@ mod unicorn_no_negated_condition;
 mod unicorn_no_negation_in_equality_check;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
-mod unicorn_no_non_function_verb_prefix;
-mod unicorn_no_nonstandard_builtin_properties;
+mod unicorn_no_new_buffer;
 mod unicorn_no_null;
 mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_object_methods_with_collections;
@@ -527,6 +526,7 @@ mod unicorn_prefer_math_min_max;
 mod unicorn_prefer_math_trunc;
 mod unicorn_prefer_minimal_ternary;
 mod unicorn_prefer_modern_dom_apis;
+mod unicorn_prefer_modern_math_apis;
 mod unicorn_prefer_module;
 mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_negative_index;
@@ -576,7 +576,7 @@ mod unicorn_prefer_top_level_await;
 mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
 mod unicorn_prefer_unary_minus;
-mod unicorn_prefer_unicode_code_point_escapes;
+mod unicorn_relative_url_style;
 mod unicorn_require_array_join_separator;
 mod unicorn_require_array_sort_compare;
 mod unicorn_require_css_escape;
@@ -594,6 +594,7 @@ mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
 mod unicorn_try_complexity;
 mod unicorn_types;
+mod unicorn_url;
 mod unicorn_util;
 mod use_isnan;
 mod valid_typeof;
@@ -1028,6 +1029,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
+    &unicorn_no_new_buffer::RULE,
     &unicorn_no_null::RULE,
     &unicorn_no_object_methods_with_collections::RULE,
     &unicorn_no_optional_chaining_on_undeclared_variable::RULE,
@@ -1125,7 +1127,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_logical_operator_over_ternary::RULE,
     &unicorn_prefer_math_abs::RULE,
     &unicorn_prefer_math_min_max::RULE,
-    &unicorn_prefer_minimal_ternary::RULE,
+    &unicorn_prefer_modern_math_apis::RULE,
     &unicorn_prefer_module::RULE,
     &unicorn_prefer_math_constants::RULE,
     &unicorn_prefer_node_protocol::RULE,
@@ -1161,7 +1163,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_then_catch::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,
-    &unicorn_prefer_while_loop_condition::RULE,
+    &unicorn_relative_url_style::RULE,
     &unicorn_require_array_sort_compare::RULE,
     &unicorn_require_css_escape::RULE,
     &unicorn_prefer_type_literal_last::RULE,

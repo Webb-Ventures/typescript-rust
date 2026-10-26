@@ -1708,260 +1708,28 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-invalid-well-kn
   predicate (`x is T`, not `asserts`) is a boolean annotation. "TypeScript" for the
   `Boolean()` exemption is the file extension or the TS parser.
 
-## eslint-plugin-unicorn rules (round 6, h1)
+## eslint-plugin-unicorn rules (round 6, h4)
 
-Fifteen rules, each at 100% of its oracle cases: `no-abusive-eslint-disable`,
-`filename-case`, `import-style`, `template-indent`, `expiring-todo-comments`,
-`prefer-bigint-literals`, `no-useless-template-literals`,
-`prefer-escaped-irregular-whitespace`, `prefer-unicode-code-point-escapes`,
-`prefer-literal-ascii`, `single-line-block-comment-style`, `no-non-function-verb-prefix`,
-`consistent-compound-words`, `prefer-single-replace`, `name-replacements` and
-`consistent-boolean-name`.
+Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its oracle, all
+`NO_PRESET`. What we learned, in our words (each file's header has the details):
 
-A second batch adds six more, also at 100% of their oracle cases: `isolated-functions`,
-`no-unsafe-property-key`, `no-unnecessary-parameters`, `no-unused-builtin-method-return`,
-`no-nonstandard-builtin-properties` and `no-unsafe-json-serialization`.
+- **no-new-buffer**: the method comes from the first argument (`is_number` means `alloc`;
+  arrays, templates, a static string encoding or a static string/array value mean
+  `from`); `alloc` with extra arguments is only a suggestion, and none when a comment or a
+  side effect would be dropped.
+- **relative-url-style**: JavaScript `new URL(a, b)` / `URL.canParse` / `URL.parse` and JSX
+  `href`/`src`/... attributes (CSS, HTML and Markdown need other languages). A `./` is added
+  or removed only when the URL resolves the same with and without it against the static
+  base or three default bases; `unicorn_url.rs` is the small WHATWG resolver that decides
+  (special schemes, dot segments, `?`/`#`/empty inputs, `file` drive letters).
+  `unicorn_html.rs` decodes HTML attribute character references (numeric ones as the HTML
+  parser does; names only from the JSX table, anything else is "can't say") and splits
+  `srcset` candidates.
+- **prefer-modern-math-apis**: `Math.log(x) * Math.LOG10E`-style products and quotients and
+  `Math.sqrt` of a `+` tree of squares. Fixed only when the result provably can't change
+  (the value is unused, or the static operands make both forms exact), else suggested.
 
-- **no-single-promise-in-promise-methods**: awaited `race` (and awaited `all` as a
-  statement) is fixed to `await x`; other awaited `all`s only through `const [v] = await
-  Promise.all([x])` / `(await Promise.all([x]))[0]`; `any` and non-awaited calls get the
-  unwrap and `Promise.resolve(..)` suggestions. An assignment target `[v]` is an `ArrayLit`.
-- **prefer-while-loop-condition**: an infinite loop starting with `if (c) break;` and no
-  other unlabeled `break` for it becomes `while (!c)`; not when `c` reads a lexical binding
-  declared in the body, nor for a labeled loop.
-- **prefer-boolean-return**: `if (x) return true; [else] return false;` becomes
-  `return x;` / `return !x;`, wrapping a non-boolean test in `Boolean(..)` (reported without
-  a fix when a value binding shadows `Boolean`; a type alias doesn't). A chain of flat guards
-  returning the same boolean is left alone.
-- **no-redundant-comparison**: within an outermost `&&` chain, strict (in)equalities between
-  two references form equality classes; a predicate on a class member implied by another
-  (same operator and value, or static numeric bounds) is redundant, and so is `b !== k`
-  after `a === k && a !== b`. Any side effect or tagged template between the first and last
-  analyzed operand stops it; a removal that could run getters or conversions is a
-  suggestion.
-- **no-negated-comparison**: `!(a === b)` -> `a !== b` for the four equality operators only
-  (a negated relational comparison also rejects `NaN`, so it stays). The parentheses go
-  unless the parent is an operator that needs the group (a logical expression isn't one:
-  ESTree has no `BinaryExpression` there). `return`/`throw` whose argument starts on a later
-  line than the `!` get the argument parenthesized; a `yield` like that gets no fix.
-  `checkLogicalExpressions` applies De Morgan to chains of equalities only.
-- **no-chained-comparison**: `a < b < c` and friends; an equality against a boolean
-  (`isBoolean`, typed or inferred) is skipped. The `a < b && b < c` suggestion needs both
-  operators of the same kind, a plain middle without side effects, and a spot where the
-  `&&` can't be captured by an operator around it.
-- **no-invalid-character-comparison**: one character of a provable string (`charAt`/`at`
-  with at most one argument, `s[k]` with a numeric literal or canonical index string)
-  compared for equality with a static string longer than one UTF-16 unit.
-- **no-computed-property-existence-check**: `object[key]` in a truthiness position (looked
-  at from its outermost TS wrapper) and `key in object` with a non-static key; boolean-typed
-  accesses and `Map`/`Set`/`WeakMap`/`WeakSet`/string receivers are skipped. The
-  `Object.hasOwn()` suggestion needs a plain access (no wrapper, no optional link, no
-  `super`) and, for `in`, names or `this` on both sides.
-- **no-useless-delete-check**: `if (k in o) delete o[k]` on a known object (static object
-  value, object-like `const` initializer, or an `object`/function/constructor type
-  annotation) is a suggestion; `if (m.has(k)) m.delete(k)` on a `const` from a global
-  collection constructor is a fix. Keys match as the same reference that can't need a
-  repeated coercion, or as equal static keys; test operands must be free of side effects
-  with getters counted.
-- **prefer-await**: every `.then/.catch/.finally` call (static computed names included) not
-  discarded with `void`; there is no type information, so no receiver is known not to be a
-  promise. The async-IIFE suggestion follows the plugin's indentation rules (first body
-  line, else one level deeper than the nearest line-starting ancestor, else the file's
-  indent unit). 109/110: `promise.then(await => await)` in a `.ts` file is a parse error in
-  ts_r_parser (`await` as an arrow parameter outside a module), not a rule gap.
-- **no-error-property-assignment**: assignments to `message`, `name`, `cause`, `stack` (and
-  `Object.assign(err, {..})` with the global `Object`) on a `const`/`let` freshly bound to
-  `new <builtin Error>(..)` in the same statement list, before anything else could have
-  seen the error. A walker keeps one frame per Program, block, static block and `case`
-  body; bare blocks are transparent, functions are boundaries, and a reassignment,
-  destructuring, loop or update of the name clears it. Computed keys count only when
-  static without reading any binding.
-- **no-using-resource-escape**: a `using`/`await using` resource that leaves its scope by
-  being returned, exported (`export default`, `export =`, local `export {}` specifiers,
-  exported `const` initializers) or captured by a returned or exported function. Type
-  references, `typeof` queries and type-only member keys aren't uses; a name bound only
-  as a type alias, interface or type parameter isn't a value. Files without a `using`
-  declaration are skipped before the walk.
-- **prefer-aggregate-error**: an `if` whose only statement throws `new Error(..)` (the
-  global, at most two plain arguments) and whose `&&` operands hold exactly one positive
-  length check on an `*errors`/`*ErrorList`-style array name. The evidence is the binding's
-  annotation only (no type information): arrays, tuples, `Array<>`/`ReadonlyArray<>` of
-  builtin errors not declared in the file, through `readonly`, union (all) and
-  intersection (any), and type aliases resolved in the scope that declares them, with a
-  cycle guard. A local `AggregateError` value blocks the report.
-- **no-subtraction-comparison**: `a - b <op> 0` and `0 <op> a - b` become `a <op> b`
-  (ordering mirrored when `0` is on the left). A fix for `<`/`>` when both operands are
-  numbers, for the other operators when both are finite static numbers; a suggestion
-  otherwise; nothing when a comment sits outside the operands.
-- **prefer-simple-condition-first**: in an outermost `&&`/`||` condition chain (looked at
-  from its outermost TS wrapper), a simple operand after a complex one, unless a
-  `typeof x` undefined-guard earlier in the chain protects that name. The fix moves every
-  simple operand first when the complex operands it passes are themselves `?:` of simple
-  parts; otherwise the `/unsafe` message without a fix.
-- **no-useless-logical-operand**: in an outermost `&&`/`||` chain (operands flattened
-  through parentheses), a leading absorbing literal is the whole value and identity
-  literals drop out; the last one stays when the chain's value is more than a condition and
-  the other operands aren't known booleans (`x satisfies boolean` counts as one). Chains
-  that are called, tagged or deleted are skipped, and so is a lone string left in a
-  directive prologue. One remaining operand goes through `replaceNodeWithExpression`'s
-  parenthesization (`unicorn_no_useless_coercion::replace_with_expression`).
-- **prefer-continue** and **prefer-early-return** share the early-exit rewrite in
-  `unicorn_conditions.rs` (`shared/early-exit.js`): the loop or function body's last
-  statement, an `if` without `else` holding more than `maximumStatements` statements
-  (for loops, not one that already ends in an exit), becomes `if (<negated>) { exit; }`, a
-  blank line and the unwrapped body. No fix for non-`let`/`const` block declarations, a
-  multi-line string or template piece, a comment outside the condition and body, a
-  multi-line unbraced body, a line comment that would swallow a token after `}`, or moved
-  `let`/`const` names that the test reads (unless bound inside it), a direct `eval` in the
-  test, a body with other statements, or (functions) a clash with the function's own
-  scope (parameters, `var`s, `arguments`; not a function expression's name). A comment
-  right after the `if` turns prefer-early-return's fix into a suggestion and drops
-  prefer-continue's. Relational tests also get an operator-flipping suggestion. With
-  `checkShortBodies`, the last bare `continue;`/`return;` guard (not part of a guard
-  chain) followed by, or with an `else` of, 1 to `maximumStatements` statements is
-  reported instead, its fix wrapping that body in the negated condition; the fix carries
-  an empty edit at the owner's start so other fixes in that body wait a pass.
-- Not done: **prefer-includes-over-repeated-comparisons**. Its `.ts` cases were recorded
-  with a TypeScript program (loose `==` needs both sides typed string or number, a union
-  receiver is skipped) but the rule oracle lints them without type information, so they
-  can't match.
-- **no-unnecessary-boolean-comparison** (432/432): `x === true`/`x !== false` become `x`,
-  `x === false`/`x !== true` become `!x` (`getNegatedExpressionText`), when `x` is a known
-  boolean: `isBoolean`, a `satisfies`/`as`/`<T>` of a boolean type (or `satisfies`/`as`
-  `any`/`unknown` of a boolean), or a call of a stable local function (a declaration, a
-  named function expression, or a `const` arrow/function never reassigned, without a
-  type annotation) whose one return, expression body or return type is boolean. A JSDoc
-  type or return annotation turns the function check off; an optional chain is never a
-  known boolean, and a `yield` inside makes the value unknown. No fix when a comment sits
-  outside the operand (`is_boolean_expression` in `unicorn_conditions.rs`).
-- **prefer-combined-guards** (337/337): an `if` guard (no `else`, body ending in
-  `return`/`throw`/`break`/`continue` or a global, non-optional `process.exit()`) right
-  after another with the same exit kind and text (parentheses aside) joins it with `||`.
-  Bodies have equal length and equal text before the exit, without tagged templates;
-  without `checkMultiStatementBodies` a body is one statement, without
-  `checkCompoundConditions` both tests are plain (no `&&`/`??`/`?:`/assignment/sequence/
-  arrow/`yield`; `||` of plain ones, not under `!`/`await`). With the TypeScript parser
-  and no type information the exit must mention no reference, `this`, `super` or JSX name
-  and the body is one statement (narrowing could differ); we treat the TS parser as never
-  having full type information. The fix keeps the second body after the closing `)` and
-  is withheld for a comment in the range or right before the first guard.
-- **prefer-hoisting-branch-code** (107/107): the statements every branch of a complete
-  `if`/`else if`/`else` chain of blocks starts or ends with (same tokens and shape, a
-  final `;` aside; `ast_util::same_tokens`) are reported, as long as each branch keeps one
-  of its own. The move is withheld for block-scoped declarations, multi-line tokens, an
-  `if` outside a statement list, comments that would be dropped or detached, and shared
-  code that uses a branch's own lexical binding (or trails past a `using`). Trailing code
-  is a fix; leading code is a fix only for side-effect-free expression statements after
-  side-effect-free tests, else a suggestion. Hoisted text is reindented from the
-  statement's to the `if`'s indent (the whitespace before it on its line).
-- **prefer-smaller-scope** (222/222): a `let`/`const x = <literal>` right before an `if`
-  whose consequent or alternate block holds every reference (no function, class, static
-  block or `with` between) moves into that block; a `let x;` written once by a plain
-  `x = ..;` in a block holding every reference, not read before it, becomes `const x = ..`
-  there; a `type T` whose type (and `export`) references share a block moves to its first
-  non-directive statement. Exported (`export {x}`, an `export` modifier, `/* exported */`
-  in the global scope), `declare`, variance-annotated and `with`/direct-`eval` code is
-  skipped. The alias fix is withheld when `T` is also a value, is recursive, is shadowed
-  in the block, or the alias holds a value reference, `typeof`, `this`, a reserved word
-  (the `reserved-identifiers` list), a multi-line token, or a name that resolves
-  differently from the block's scope. The reported span includes the type annotation.
-- **no-top-level-side-effects** (1015/1015): only in files with a runtime export (not
-  `export type`/`interface`/`declare`, `export {}`, specifiers that are all type-only, a
-  default export of a type-only name, or `export =`) and no hashbang. Module evaluation
-  is everything outside functions and non-static field initializers. A global mutation
-  (`global-mutation`) writes a configured/built-in/comment global or a member chain on
-  one (ESLint's `isGlobalReference`: unresolved names don't count) by assignment
-  (through destructuring), `for (x.y of/in ..)`, update, `delete`, or the mutating
-  `Object`/`Reflect` methods with a global first argument (`Reflect.set` only with three
-  plain arguments). With `checkUnknownCalls`, calls, `new`, tagged templates and
-  `import()` are reported unless `/* #__PURE__ */`-annotated (through comments and their
-  own parentheses, or on the outermost TS wrapper), the callee of an annotated call,
-  inside a global mutation, or a call of a known pure export (the built-in table plus
-  `allow`, matched by import source and export name or member path, also through a
-  `const {name} = import` destructuring). Reports mark their invocation ancestors, so
-  only the innermost problem shows. The rule walks the file itself in `run_file` to get
-  ESLint's enter/exit order.
-- **prefer-logical-operator-over-ternary** (424/424): one branch a boolean constant (a
-  literal through `!`/`satisfies`, `as const` and matching literal-type assertions, or a
-  same-function `const` alias of one declared before) and the other known boolean becomes
-  `||`/`&&` (test negated, or coerced with `Boolean()` when not known boolean), fixed
-  only outside TypeScript (parser and file name); a nullish test whose reference is the
-  other branch suggests `??`; `undefined` against a plain member of the reference
-  suggests `?.` (not when called, tagged or deleted); `a ? a : b` and `!b ? a : b`
-  suggest `??` and `||`. `isSameNode` and `getNullishTest` are private copies here.
-  `isBoolean` gives up on a `const` alias chain 256 deep (upstream overflows its stack
-  and returns false), treats a binding annotated with a type parameter as not boolean,
-  and counts calls of a binding annotated with a function type returning `boolean`.
-- **prefer-simplified-conditions** (386/386): `!(a && b)` is De Morgan-rewritten when
-  the negated operands weigh less than the original (each `!`, `!=` and `!==` weighs one;
-  a double negation of a boolean, or in a control-flow test, drops; an equality flips;
-  `negatedConditions: "expand"` always rewrites); not inside another negation. Absorption
-  (`a || (a && b)` is `a`) needs a plain replacement (name, literal, `this`, static
-  string); dropping the other side needs it to be a literal or a parameter/function/`var`
-  name (or a negation of one) and a boolean context or two booleans; no fix in a
-  reference context. Factoring a common first term (`a && b || a && c`) needs simple,
-  chain-free operands (names, literals, calls, plain members, `!`, `===`/`!==`) and a
-  boolean context or boolean operands; operands with side effects other than
-  `Array.isArray`-like static checks make it a suggestion. A return/throw argument with a
-  line break after `!` gets parentheses. Comments inside withhold the fix.
-- **no-declarations-before-early-exit** (105/105), **no-useless-else** (127/127),
-  **prefer-else-if** (128/128) share `unicorn_conditions::always_exits`, a structural
-  stand-in for upstream's code-path tracking (`trackBranchExits` + `isBranchExit`):
-  `return`/`throw`/`break`/`continue`, an always-evaluated global `process.exit(..)` (not
-  behind `&&`/`||`/`??` or `?:` unless a literal decides, not past an optional chain), a
-  block with an exiting statement, an `if` whose branches both exit (a literal test picks
-  one), `try` whose `finally` exits or whose block and handler both exit (the handler can't
-  run when the block reaches `process.exit` with nothing throwable before it), a `switch`
-  with a `default` whose cases all fall into an exit with no `break` out (a `process.exit`
-  case test only needs the cases before it), loops with a literal truthy test and no
-  `break` to them, a `do` whose test exits, and labeled statements. Dead code (after an
-  exit, under a literal test) is ignored when looking for jumps. An `if` after an exiting
-  sibling is dead and never a guard. no-declarations-before-early-exit scans each block and
-  the program (not `case` lists) for a `let`/`const` (not `declare`/`export`) before the
-  first guard (exactly one branch exits) and only used after it; no-useless-else reports
-  the `else` keyword of `if`s in statement lists and moves the alternate out unless that
-  would change meaning (block-scoped declarations, multiline strings/templates/JSX
-  attribute strings, ASI hazards at either end, code or comments after it on its line,
-  comments between the branches); prefer-else-if joins adjacent `if` chains comparing one
-  static reference to disjoint values, keyed by type and value.
-- `rules/unicorn_conditions.rs` holds the shared pieces: negated condition text
-  (`getNegatedExpressionText`), unary-operand parenthesization, unlabeled-`break` and
-  identifier searches, joining fixes, `global_value_available` (type-only bindings
-  don't shadow a global value), optional-chain and TS-wrapper unwrapping,
-  `reindent_text` (`reindentText`), `indent_if_line_start`, `outermost_ts_wrapper`,
-  `logical_child_text` (`getLogicalExpressionChildText`), `comment_next_to`/`comment_before`/
-  `comment_after`, `has_multiline_token`, `is_block_scoped_declaration`, the early-exit
-  pieces, `short_body_problem`, `is_boolean_expression`, `is_process_exit_call`,
-  `expression_exits` and `always_exits`.
-
-Read to understand (not ported), eslint-plugin-unicorn `rules/`: `operator-assignment.js`,
-`logical-assignment-operators.js`, `no-single-promise-in-promise-methods.js`,
-`prefer-while-loop-condition.js`, `prefer-boolean-return.js`, `no-redundant-comparison.js`,
-`no-negated-comparison.js`, `no-chained-comparison.js`, `no-invalid-character-comparison.js`,
-`no-computed-property-existence-check.js`, `no-useless-delete-check.js`, `prefer-await.js`, `no-error-property-assignment.js`,
-`no-using-resource-escape.js`, `no-useless-else.js`, `prefer-aggregate-error.js`,
-`no-subtraction-comparison.js`, `prefer-simple-condition-first.js`,
-`prefer-includes-over-repeated-comparisons.js`, `no-useless-logical-operand.js`,
-`prefer-continue.js`, `prefer-early-return.js`, `no-unnecessary-boolean-comparison.js`,
-`prefer-combined-guards.js`, `prefer-hoisting-branch-code.js`, `prefer-smaller-scope.js`,
-`no-top-level-side-effects.js`, `prefer-logical-operator-over-ternary.js`,
-`prefer-simplified-conditions.js`, `no-declarations-before-early-exit.js`, `prefer-else-if.js`;
-`rules/utils/`: `get-precedence.js`, `is-left-hand-side.js`,
-`should-add-parentheses-to-await-expression-argument.js`,
-`should-add-parentheses-to-unary-expression.js`, `get-negated-expression-text.js`,
-`comments.js`, `comparison.js`, `is-logical-expression.js`,
-`get-unparenthesized-keyword-argument-parent.js`, `boolean.js`, `unwrap-typescript-expression.js`,
-`has-optional-chain-element.js`, `get-const-variable-initializer.js`, `single-statement.js`,
-`is-same-reference.js`, `is-promise-type.js`, `is-call-expression-value-discarded-with-void.js`,
-`contains-suspension-point.js`, `get-references.js`, `get-indent-string.js`, `get-indent-unit.js`,
-`get-line-indent.js`, `reindent-text.js`, `get-assignment-targets.js`, `member-expression.js`,
-`is-branch-exit.js`, `track-branch-exits.js`, `is-array.js`, `is-global-identifier.js`,
-`type-helpers.js`, `types.js`, `should-add-parentheses-to-logical-expression-child.js`,
-`is-boolean.js`, `is-reference-context.js`, `get-unwrapped-branch-text.js`, `block-scope.js`, `function-body.js`, `get-sibling-node.js`, `is-same-statement.js`, `get-references.js`;
-`rules/ast/is-reference-identifier.js`, `rules/ast/is-direct-eval-call.js`; `rules/utils/imports.js`,
-`rules/utils/get-member-access-operator-range.js`; ESLint's `SourceCode#isGlobalReference`; the `reserved-identifiers` package's list;
-`rules/ast/is-in-directive-prologue.js`; `rules/fix/replace-node-with-expression.js`; `rules/fix/remove-statement.js`,
-`add-parentheses-to-return-or-throw-expression.js`, `remove-parentheses.js`;
-`rules/shared/nullish-check.js`, `builtin-errors.js`, `early-exit.js`,
-`short-body-conditional.js`. ESLint docs for `operator-assignment` and
-`logical-assignment-operators`.
+Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
+`relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
+`utils/get-const-variable-initializer.js`, `utils/get-primitive-literal-value.js`,
+`fix/replace-node-or-token-and-spaces-before.js`, `fix/remove-parentheses.js`.

@@ -358,7 +358,7 @@ unicorn/no-negated-condition 134/134
 unicorn/no-negation-in-equality-check 34/34
 unicorn/no-nested-ternary 20/20
 unicorn/no-new-array 111/111
-unicorn/no-non-function-verb-prefix 125/125
+unicorn/no-new-buffer 82/82
 unicorn/no-null 94/94
 unicorn/no-object-as-default-parameter 62/62
 unicorn/no-object-methods-with-collections 78/78
@@ -466,6 +466,7 @@ unicorn/prefer-math-constants 66/66
 unicorn/prefer-math-min-max 140/140
 unicorn/prefer-math-trunc 142/142
 unicorn/prefer-modern-dom-apis 142/142
+unicorn/prefer-modern-math-apis 436/436
 unicorn/prefer-module 152/152
 unicorn/prefer-native-coercion-functions 110/110
 unicorn/prefer-negative-index 167/167
@@ -510,7 +511,7 @@ unicorn/prefer-top-level-await 228/228
 unicorn/prefer-type-error 112/112
 unicorn/prefer-type-literal-last 37/37
 unicorn/prefer-unary-minus 71/71
-unicorn/prefer-unicode-code-point-escapes 79/79
+unicorn/relative-url-style 422/422
 unicorn/require-array-join-separator 80/80
 unicorn/require-array-sort-compare 64/64
 unicorn/require-css-escape 54/54
