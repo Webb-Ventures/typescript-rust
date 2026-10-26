@@ -50,8 +50,8 @@ A speed below 1× means ts-r is slower.
 diagnostics differ from tsc's, ts-r-lint runs without type information (its parity gate).
 ² ts-r-build leaves out excalidraw's 61 locale chunks (template-literal `import()` isn't
 bundled yet), which flatters its times.
-³ On 24 Oct 2026 (`087afc9`) ts-r-check matched tsc exactly on tRPC and TypeORM; it reported
-2 extra diagnostics on Playwright and 6 extra and 5 missing (of about 21,900) on RxJS. Times
+³ On 26 Oct 2026 (`687b025`) ts-r-check matched tsc exactly on tRPC, TypeORM and Playwright;
+on RxJS it reported none extra and 5 missing (of about 21,900). Times
 will move as it grows.
 ⁴ Like-for-like: tRPC's ESLint config limited to the rules ts-r-lint implements, the same file
 for both tools, `lint-trpc-same-rules` in `bench/scenarios.toml` (2026-10-18). Both report 0
@@ -110,7 +110,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Area | Result |
 |---|---|
 | Type checker vs tsc's conformance suite (exact diagnostics) | 97.0% of 12,750 compared test variants |
-| Public projects with exactly tsc's diagnostics (tRPC, date-fns, TypeORM, Playwright, RxJS, React Compiler) | 3 of 6: Playwright 2 extra; RxJS 6 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
+| Public projects with exactly tsc's diagnostics (tRPC, date-fns, TypeORM, Playwright, RxJS, React Compiler) | 4 of 6: RxJS 0 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
 | Lint rule oracle (ESLint + typescript-eslint test cases) | 15,495 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,898 / 6,920) |
 | Lint on TypeORM without types, every configured rule, vs ESLint | 2,174 of ESLint's 7,392 problems match, 2 only ts-r-lint; most of the 5,218 missed (4,928) are jsdoc plugin rules |

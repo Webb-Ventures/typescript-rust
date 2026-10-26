@@ -106,8 +106,8 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 97.0% exact (all diagnostics and chains); 191 variants with a diagnostic tsc does not report, 10 of them in tests where tsc reports nothing |
-| Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | 3 of 6 match exactly; Playwright 2 extra; RxJS 6 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
+| tsc's conformance baselines, 12,750 compared test variants | 97.0% exact (all diagnostics and chains); 186 variants with a diagnostic tsc does not report, 10 of them in tests where tsc reports nothing |
+| Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | 4 of 6 match exactly; RxJS 0 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
 | Ecosystem check stage | 652 packages pass, 57 fail (92.0%) |
 
 Most extra diagnostics in the ecosystem run are TS2344, TS2536, TS2417 and TS2716. Some of
@@ -140,8 +140,8 @@ at commit 9c3a371, median of 5, peak memory of one run):
 
 With its saved history and nothing changed, ts-r-check took 23 to 126 ms on those projects.
 These repos don't type-check cleanly under TypeScript 7. ts-r-check reports exactly tsc's
-diagnostics on tRPC, date-fns and TypeORM, 2 extra on Playwright, and 6 extra and 5 missing of
-about 21,900 on RxJS (2026-10-24, `087afc9`). ts-r also skips work it doesn't implement yet, so
+diagnostics on tRPC, date-fns, TypeORM and Playwright, and none extra and 5 missing of about
+21,900 on RxJS (2026-10-26, `687b025`). ts-r also skips work it doesn't implement yet, so
 these numbers will move as the checker grows.
 
 Method and commits: [check on Linux](/benchmarks/#check-linux),
