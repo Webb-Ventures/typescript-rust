@@ -335,7 +335,7 @@ unicorn/prefer-global-number-constants 22/22
 unicorn/prefer-global-this 154/154
 unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 243/247
-unicorn/prefer-location-assign 54/54
+unicorn/prefer-math-min-max 140/140
 unicorn/prefer-node-protocol 80/80
 unicorn/prefer-number-coercion 60/60
 unicorn/prefer-number-properties 474/474

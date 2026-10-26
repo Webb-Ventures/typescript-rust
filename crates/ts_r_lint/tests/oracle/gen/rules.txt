@@ -301,3 +301,4 @@ unicorn/prefer-number-properties
 unicorn/error-message
 unicorn/prefer-includes
 unicorn/prefer-string-slice
+unicorn/prefer-math-min-max

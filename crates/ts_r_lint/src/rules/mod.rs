@@ -347,7 +347,7 @@ mod unicorn_prefer_global_number_constants;
 mod unicorn_prefer_global_this;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
-mod unicorn_prefer_location_assign;
+mod unicorn_prefer_math_min_max;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_properties;
@@ -740,7 +740,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_global_this::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
-    &unicorn_prefer_location_assign::RULE,
+    &unicorn_prefer_math_min_max::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_number_coercion::RULE,
     &unicorn_prefer_number_properties::RULE,

@@ -3349,8 +3349,28 @@ pub(crate) static BIGINT: Checker = Checker {
     ..Checker::DEFAULT
 };
 
+/// `BigInt` with `treatMixedUnionAsTarget` (a union with any bigint member counts).
+pub(crate) static BIGINT_MIXED_UNION: Checker = Checker {
+    mixed_union_target: true,
+    ..BIGINT_BASE
+};
+
+const BIGINT_BASE: Checker = Checker {
+    target_names: &["bigint"],
+    target_calls: &["BigInt"],
+    target_node: Some(bigint_node),
+    target_annotation: Some(bigint_annotation),
+    static_type: Some(bigint_static_type),
+    ..Checker::DEFAULT
+};
+
 /// `isBigInt`.
 pub(crate) fn is_bigint(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    is_bigint_with(cx, id, &BIGINT)
+}
+
+/// `isBigInt` with a checker variant (`BIGINT_MIXED_UNION`).
+pub(crate) fn is_bigint_with(cx: &Ctx<'_, '_>, id: NodeId, checker: &Checker) -> bool {
     let ast = cx.ast();
     let id = skip_parens(ast, id);
     if let Node::Satisfies { ty, .. } = *ast.node(id)
@@ -3358,7 +3378,7 @@ pub(crate) fn is_bigint(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     {
         return true;
     }
-    if BIGINT.is_target(cx, id) {
+    if checker.is_target(cx, id) {
         return true;
     }
     matches!(
