@@ -470,6 +470,7 @@ mod unicorn_prefer_add_event_listener_options;
 mod unicorn_prefer_array_find;
 mod unicorn_prefer_array_flat;
 mod unicorn_prefer_array_flat_map;
+mod unicorn_prefer_array_from_async;
 mod unicorn_prefer_array_from_map;
 mod unicorn_prefer_array_from_range;
 mod unicorn_prefer_array_index_of;
@@ -502,6 +503,7 @@ mod unicorn_prefer_global_this;
 mod unicorn_prefer_identifier_import_export_specifiers;
 mod unicorn_prefer_includes;
 mod unicorn_prefer_iterable_in_constructor;
+mod unicorn_prefer_iterator_helpers;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_iterator_to_array_at_end;
 mod unicorn_prefer_iterator_zip;
@@ -1065,6 +1067,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_operator_assignment::RULE,
     &unicorn_prefer_add_event_listener_options::RULE,
     &unicorn_prefer_array_find::RULE,
+    &unicorn_prefer_array_from_async::RULE,
     &unicorn_prefer_array_from_map::RULE,
     &unicorn_prefer_array_from_range::RULE,
     &unicorn_prefer_array_iterable_methods::RULE,
@@ -1090,6 +1093,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,
+    &unicorn_prefer_iterator_helpers::RULE,
     &unicorn_prefer_iterator_to_array::RULE,
     &unicorn_prefer_iterator_to_array_at_end::RULE,
     &unicorn_prefer_iterator_zip::RULE,

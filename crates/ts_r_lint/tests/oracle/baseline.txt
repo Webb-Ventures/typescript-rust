@@ -414,6 +414,7 @@ unicorn/prefer-add-event-listener-options 26/26
 unicorn/prefer-array-find 411/411
 unicorn/prefer-array-flat 330/330
 unicorn/prefer-array-flat-map 114/114
+unicorn/prefer-array-from-async 131/131
 unicorn/prefer-array-from-map 99/99
 unicorn/prefer-array-from-range 90/90
 unicorn/prefer-array-index-of 158/158
@@ -445,6 +446,7 @@ unicorn/prefer-global-this 154/154
 unicorn/prefer-identifier-import-export-specifiers 56/56
 unicorn/prefer-includes 247/247
 unicorn/prefer-iterable-in-constructor 76/76
+unicorn/prefer-iterator-helpers 138/138
 unicorn/prefer-iterator-to-array 61/61
 unicorn/prefer-iterator-to-array-at-end 74/74
 unicorn/prefer-iterator-zip 107/107
