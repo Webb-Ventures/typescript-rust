@@ -73,6 +73,9 @@ pub struct HotInfo {
     pub asset_urls: Vec<ImportRecord>,
     /// `import.meta.glob(...)` calls.
     pub globs: Vec<GlobCall>,
+    /// `import(expr)` whose argument is neither a string nor a template literal: the
+    /// argument's span. The server wraps it to add `?import` at runtime, like Vite.
+    pub dynamic_exprs: Vec<(u32, u32)>,
 }
 
 /// One `import.meta.glob(...)` call: `start..end` is the whole call expression,
@@ -100,6 +103,28 @@ pub struct ModuleScan {
     /// `default`, or the imported names (not the local ones). A side-effect import or a
     /// re-export (`export ... from`) binds nothing.
     pub bindings: Vec<(u32, Vec<String>)>,
+    /// `` import(`head${...}`) ``: the static head of a template literal with substitutions
+    /// (the text between the backtick and the first `${`), unless a `@vite-ignore` comment
+    /// precedes it. The server resolves an aliased head (`@/`, `#sub/`).
+    pub template_heads: Vec<(u32, u32)>,
+}
+
+/// Whether a dynamic import of the template text `raw` asks for a file the server only
+/// serves as a module with `?import` (Vite's `isExplicitImportRequired`): one whose path
+/// (query and hash removed) has an extension that is neither a script's nor a stylesheet's.
+fn needs_import_query(raw: &[u8]) -> bool {
+    let Ok(raw) = std::str::from_utf8(raw) else {
+        return false;
+    };
+    let path = raw.split(['?', '#']).next().unwrap_or(raw);
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let Some((_, ext)) = name.rsplit_once('.').filter(|(stem, _)| !stem.is_empty()) else {
+        return false;
+    };
+    const STYLES: &[&str] = &[
+        "css", "less", "sass", "scss", "styl", "stylus", "pcss", "postcss", "sss",
+    ];
+    !crate::transform::is_script_extension(ext) && !STYLES.contains(&ext)
 }
 
 /// Scans `code` for imports and hot-API usage.
@@ -121,6 +146,8 @@ pub fn scan_hot(code: &str) -> HotInfo {
     if !code.contains("import.meta")
         && !code.contains("import .meta")
         && !code.contains("process.env.NODE_ENV")
+        && !code.contains("import(")
+        && !code.contains("import (")
     {
         return HotInfo::default();
     }
@@ -307,6 +334,22 @@ impl Scanner<'_> {
                     if matches!(self.peek(r), b')' | b',') {
                         self.record(q, end, ImportKind::Dynamic);
                         self.bind(q, vec!["*".to_owned()]);
+                    }
+                } else if !matches!(self.peek(q), b'`' | b')' | 0) {
+                    if let Some(end) = self.argument_end(q) {
+                        self.out.hot.dynamic_exprs.push((q as u32, end as u32));
+                    }
+                } else if self.peek(q) == b'`' {
+                    let ignored = self.src[p + 1..q]
+                        .windows(b"@vite-ignore".len())
+                        .any(|w| w == b"@vite-ignore");
+                    if !ignored && let Some(end) = self.template_head_end(q + 1) {
+                        self.out.template_heads.push((q as u32 + 1, end as u32));
+                    }
+                    if let Some(end) = self.template_end(q)
+                        && needs_import_query(&self.src[q + 1..end - 1])
+                    {
+                        self.out.hot.dynamic_exprs.push((q as u32, end as u32));
                     }
                 }
                 // Let the main loop lex the arguments.
@@ -1021,6 +1064,77 @@ impl Scanner<'_> {
         self.src.len()
     }
 
+    /// The end of the call argument starting at `from` (before a top-level `,` or `)`,
+    /// trailing whitespace trimmed); strings, templates and comments are skipped.
+    fn argument_end(&self, from: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut p = from;
+        let mut last = from;
+        while p < self.src.len() {
+            let q = self.skip_trivia(p);
+            match self.peek(q) {
+                0 => return None,
+                b',' | b')' if depth == 0 => return (last > from).then_some(last),
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                b'"' | b'\'' => {
+                    p = self.string_end(q);
+                    last = p;
+                    continue;
+                }
+                b'`' => {
+                    let mut i = q + 1;
+                    while i < self.src.len() && self.src[i] != b'`' {
+                        i += if self.src[i] == b'\\' { 2 } else { 1 };
+                    }
+                    p = (i + 1).min(self.src.len());
+                    last = p;
+                    continue;
+                }
+                _ => {}
+            }
+            p = q + 1;
+            last = p;
+        }
+        None
+    }
+
+    /// The end (after the closing backtick) of the template literal at `from`, with
+    /// substitutions skipped by counting braces.
+    fn template_end(&self, from: usize) -> Option<usize> {
+        let mut i = from + 1;
+        let mut depth = 0usize;
+        while i < self.src.len() {
+            match self.src[i] {
+                b'\\' => i += 1,
+                b'`' if depth == 0 => return Some(i + 1),
+                b'$' if depth == 0 && self.peek(i + 1) == b'{' => {
+                    depth = 1;
+                    i += 1;
+                }
+                b'{' if depth > 0 => depth += 1,
+                b'}' if depth > 0 => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Where the first `${` of the template text starting at `from` is, if it has one.
+    fn template_head_end(&self, from: usize) -> Option<usize> {
+        let mut i = from;
+        while i < self.src.len() {
+            match self.src[i] {
+                b'\\' => i += 2,
+                b'`' => return None,
+                b'$' if self.peek(i + 1) == b'{' => return Some(i),
+                _ => i += 1,
+            }
+        }
+        None
+    }
+
     /// Scans template literal text (after a backtick or a closing `}` of a substitution).
     fn template(&mut self) {
         while self.pos < self.src.len() {
@@ -1214,6 +1328,37 @@ const o = { import: 1 };
     fn regex_after_keyword_and_brace() {
         let code = "function f() { return /\"/.test(x) }\nimport a from './a.js';\nif (x) {}\n/'/.test(y); import b from './b.js'";
         assert_eq!(specs(code), vec![s("./a.js", Static), s("./b.js", Static)]);
+    }
+
+    #[test]
+    fn dynamic_import_expressions() {
+        let code = "import(/*@vite-ignore*/ view ); import(a.b[c](\")\"), { with: {} }); import('./x.js'); import(`./${y}`); import(";
+        let exprs: Vec<&str> = scan(code)
+            .hot
+            .dynamic_exprs
+            .iter()
+            .map(|&(s, e)| &code[s as usize..e as usize])
+            .collect();
+        assert_eq!(exprs, vec!["view", "a.b[c](\")\")"]);
+        let code = "import(`../files/${v}.json`); import(`./${v}.js`); import(`./${v}.js?raw`); import(`./${v}.css`); import(`./${`a`}.svg`)";
+        let exprs: Vec<&str> = scan(code)
+            .hot
+            .dynamic_exprs
+            .iter()
+            .map(|&(s, e)| &code[s as usize..e as usize])
+            .collect();
+        assert_eq!(exprs, vec!["`../files/${v}.json`", "`./${`a`}.svg`"]);
+    }
+
+    #[test]
+    fn template_dynamic_import_heads() {
+        let code = "import(`@/${a}.js`); import(/* @vite-ignore */ `#x/${b}`); import(`./${c}`); import(`plain`); import(`a\\${x}`)";
+        let heads: Vec<&str> = scan(code)
+            .template_heads
+            .iter()
+            .map(|&(s, e)| &code[s as usize..e as usize])
+            .collect();
+        assert_eq!(heads, vec!["@/", "./"]);
     }
 
     #[test]

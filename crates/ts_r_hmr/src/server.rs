@@ -1126,6 +1126,9 @@ fn route(shared: &Shared, req: &Request) -> Response {
     if let Some(rest) = path.strip_prefix("/@ts-r/up/") {
         return serve_up(shared, req, rest);
     }
+    if path == crate::wasm::HELPER_URL {
+        return js_response(req, crate::wasm::helper());
+    }
     if let Some(rest) = path.strip_prefix("/@id/") {
         // Only ids the graph knows (a module imported them), like `/@fs/`.
         let file = PathBuf::from(plugins::id_from_url_path(rest));
@@ -1489,6 +1492,18 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         return serve_html(shared, req, file);
     }
     let url = url_path.to_owned();
+    // `?worker` / `?sharedworker`: a module constructing the worker (or its URL).
+    if let Some(constructor) = crate::worker::wrapper_constructor(&req.query) {
+        ensure_asset(shared, file, &url);
+        let worker_url = shared.public_url(&crate::worker::file_url(
+            &http::encode_uri(&url),
+            &req.query,
+        ));
+        return js_response(
+            req,
+            crate::worker::wrapper_module(constructor, &worker_url, &req.query),
+        );
+    }
     let as_script =
         req.has_query("import") || req.header("sec-fetch-dest").is_some_and(|d| d == "script");
     // `?raw`, and CSS `?inline`: the text.
@@ -1511,6 +1526,29 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
             }
             Err(_) => Response::text(404, "Not found"),
         };
+    }
+    // Wasm: `?init` exports an instantiating function; a direct import (or the instance
+    // module behind one) is a glue module of the wasm's imports and exports.
+    if ext == "wasm" && !req.has_query("url") {
+        if req.has_query("init") {
+            ensure_asset(shared, file, &url);
+            let wasm_url = asset_export_url(shared, file, &url, "");
+            return js_response(req, crate::wasm::init_module(&wasm_url));
+        }
+        let instance = req.has_query("vite-wasm-instance");
+        if as_script || instance {
+            ensure_asset(shared, file, &url);
+            let glue_url = match instance {
+                true => format!("{url}?vite-wasm-instance"),
+                false => format!("{url}?wasm-module"),
+            };
+            return serve_script(
+                shared,
+                req,
+                &crate::wasm::glue_file(file, instance),
+                &glue_url,
+            );
+        }
     }
     let asset_import =
         as_script && !is_module_ext(shared, file, &ext) && ext != "css" && ext != "json";
@@ -1546,7 +1584,12 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
             }
             Err(_) => Response::text(404, "Not found"),
         },
-        _ if is_module_ext(shared, file, &ext) => serve_script(shared, req, file, &url),
+        _ if is_module_ext(shared, file, &ext) => {
+            match crate::worker::env_prelude(&req.query, &shared.public_url("/@vite/env")) {
+                Some(prelude) => serve_script_with(shared, req, file, &url, &prelude),
+                None => serve_script(shared, req, file, &url),
+            }
+        }
         _ if crate::transform::is_script_extension(&ext) => error_response(
             shared,
             ModuleError {
@@ -1686,6 +1729,17 @@ pub(crate) fn set_hash_only(n: &mut crate::graph::ModuleNode, hash: Key) {
 }
 
 fn serve_script(shared: &Shared, req: &Request, file: &Path, url: &str) -> Response {
+    serve_script_with(shared, req, file, url, "")
+}
+
+/// [`serve_script`] with `extra` run before the module's code (a worker's env import).
+fn serve_script_with(
+    shared: &Shared,
+    req: &Request,
+    file: &Path,
+    url: &str,
+    extra: &str,
+) -> Response {
     let id = {
         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let id = g.ensure(file, url, ModuleKind::Script);
@@ -1696,7 +1750,9 @@ fn serve_script(shared: &Shared, req: &Request, file: &Path, url: &str) -> Respo
     };
     let source = match module_source(shared, file, url) {
         Ok(b) => b,
-        Err(message) if plugins::is_plugin_url(url) => {
+        Err(message)
+            if plugins::is_plugin_url(url) || crate::wasm::split_glue_file(file).is_some() =>
+        {
             shared
                 .graph
                 .lock()
@@ -1742,7 +1798,7 @@ fn serve_script(shared: &Shared, req: &Request, file: &Path, url: &str) -> Respo
         },
     };
     crate::hmr::clear_error_for(shared, url);
-    js_response(req, render_script(shared, id, &prepared))
+    js_response(req, render_script(shared, id, &prepared, extra))
 }
 
 /// Transforms (through the cache), scans hot usage, resolves imports and updates the graph.
@@ -1871,6 +1927,10 @@ pub(crate) fn prepare_script(
         hot = scan::scan_hot(&output.code);
         glob_watches = expanded.watches;
     }
+    if let Some(rewritten) = resolve_template_heads(shared, &output, real) {
+        output = rewritten;
+        hot = scan::scan_hot(&output.code);
+    }
     {
         let mut w = shared
             .glob_watches
@@ -1990,6 +2050,81 @@ pub(crate) fn prepare_script(
     node.prepared = Some(Arc::clone(&prepared));
     node.errored = false;
     Ok((prepared, pruned))
+}
+
+/// `` import(`@/${name}.js`) ``: the template's head resolved through `resolve.alias` or
+/// package `imports` (`#sub/`) to a URL, so the browser can load the variable import as
+/// written. Vite turns such imports into a glob over the matching files
+/// (`vite: packages/vite/src/node/plugins/dynamicImportVars.ts`); with the head resolved,
+/// the browser fetches the same files. Relative, absolute and URL heads stay as they are.
+fn resolve_template_heads(
+    shared: &Shared,
+    output: &TransformOutput,
+    real: &Path,
+) -> Option<Arc<TransformOutput>> {
+    let code = &output.code;
+    if !code.contains('`') || !code.contains("import") {
+        return None;
+    }
+    let heads = scan::scan(code).template_heads;
+    if heads.is_empty() {
+        return None;
+    }
+    let importer_id = crate::paths::id(real);
+    let mut texts = Vec::new();
+    for (start, end) in heads {
+        let head = code.get(start as usize..end as usize)?;
+        if head.is_empty() || head.starts_with(['.', '/']) || head.contains(':') {
+            continue;
+        }
+        let target = match head.starts_with('#') {
+            true => crate::glob::subpath_import(head, real),
+            false => alias_rewrite(shared, head, &importer_id).filter(|r| r != head),
+        };
+        let Some(target) = target else { continue };
+        let trimmed = target.trim_end_matches('/');
+        let p = Path::new(trimmed);
+        let url = if p.is_absolute() && (p.exists() || p.parent().is_some_and(Path::exists)) {
+            let mut u = url_for_file(&shared.root, &normalize(p));
+            if target.ends_with('/') && !u.ends_with('/') {
+                u.push('/');
+            }
+            shared.public_url(&u)
+        } else if target.starts_with('/') {
+            shared.public_url(&target)
+        } else {
+            continue;
+        };
+        texts.push((start as usize, end as usize, literal_body(&url, b'`')));
+    }
+    if texts.is_empty() {
+        return None;
+    }
+    let edits: Vec<crate::sourcemap::TextEdit<'_>> = texts
+        .iter()
+        .map(|(start, end, text)| crate::sourcemap::TextEdit {
+            start: *start,
+            end: *end,
+            text,
+        })
+        .collect();
+    let mut out = String::with_capacity(code.len());
+    let mut at = 0;
+    for e in &edits {
+        out.push_str(&code[at..e.start]);
+        out.push_str(e.text);
+        at = e.end;
+    }
+    out.push_str(&code[at..]);
+    let map = output
+        .map
+        .as_deref()
+        .map(|m| crate::sourcemap::shift_for_edits(m, code, "", &edits));
+    Some(Arc::new(TransformOutput {
+        imports: scan::scan(&out).imports,
+        code: out,
+        map,
+    }))
 }
 
 /// What a module accepts and binds, for partial accept (`import.meta.hot.acceptExports`,
@@ -2203,7 +2338,8 @@ fn resolve_target(shared: &Shared, specifier: &str, importer: &Path) -> Result<P
     if matches!(
         path,
         "/@ts-r/client" | "/@vite/client" | "/@ts-r/env" | "/@vite/env"
-    ) {
+    ) || path == crate::wasm::HELPER_URL
+    {
         return Ok(Pending::Url(shared.public_url(specifier)));
     }
     let fs_form = absolute_as_fs(&shared.root, specifier);
@@ -2371,6 +2507,15 @@ const KNOWN_ASSETS: &[&str] = &[
 /// module: a query the server doesn't know (`?react`), or a file that is neither a script,
 /// CSS, JSON nor a known asset (`.md`, `.yaml`, `.vue`) nor `included` by `assetsInclude`.
 fn is_plugin_import(path: &Path, kind: ModuleKind, spec_query: &str, included: bool) -> bool {
+    // The server's own worker and wasm modules take any other parameters along.
+    let own = |k: &str| http::query_param(spec_query, k).is_some();
+    if ["worker", "sharedworker", "worker_file"]
+        .into_iter()
+        .any(own)
+        || (ext_of(path) == "wasm" && ["init", "vite-wasm-instance"].into_iter().any(own))
+    {
+        return false;
+    }
     let unknown_query = spec_query
         .split('&')
         .filter(|p| !p.is_empty())
@@ -2635,6 +2780,11 @@ pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<V
             .map(|s| s.as_bytes().to_vec())
             .ok_or_else(|| format!("{page_url} has no inline module script {n}"));
     }
+    if let Some((wasm, instance)) = crate::wasm::split_glue_file(file) {
+        let wasm_url = url_for_file(&shared.root, &wasm);
+        let wasm_url = asset_export_url(shared, &wasm, &wasm_url, "");
+        return crate::wasm::glue_source(&wasm, instance, &wasm_url).map(String::into_bytes);
+    }
     if !plugins::is_plugin_url(url) {
         return fs::read(file).map_err(|e| format!("{}: {e}", file.display()));
     }
@@ -2789,7 +2939,7 @@ pub(crate) fn accepted_url(url: &str, query: &str) -> String {
 }
 
 /// Renders a prepared module for the browser with the graph's current timestamps.
-pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared) -> String {
+pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: &str) -> String {
     // Dependency URLs first: they may wait for (or trigger) a dependency batch, so not
     // under the graph lock.
     let dep_urls: HashMap<&str, String> = p
@@ -2839,7 +2989,27 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared) -> Stri
             text,
         });
     }
-    let mut prelude = String::new();
+    let mut prelude = extra.to_owned();
+    // `import(expr)`: `?import` added at runtime (Vite's `injectQuery`), so a variable
+    // import gets the module an explicit import of the same file would.
+    if !p.hot.dynamic_exprs.is_empty() && !extra.starts_with("importScripts") {
+        prelude.push_str(&format!(
+            "import {{ injectQuery as __vite__injectQuery }} from {};",
+            render::js_string(&shared.client_url())
+        ));
+        for &(start, end) in &p.hot.dynamic_exprs {
+            edits.push(render::Edit {
+                start,
+                end: start,
+                text: "__vite__injectQuery(".to_owned(),
+            });
+            edits.push(render::Edit {
+                start: end,
+                end,
+                text: ", 'import')".to_owned(),
+            });
+        }
+    }
     if p.hot.uses_hot {
         prelude.push_str(&render::hot_prelude_at(
             &shared.client_url(),

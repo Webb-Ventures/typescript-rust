@@ -45,8 +45,10 @@ pub mod sourcemap;
 pub mod testutil;
 pub mod timing;
 pub mod transform;
+pub mod wasm;
 /// The file watcher lives in `ts_r_watch` (shared with `ts-r-check --watch`).
 pub use ts_r_watch as watch;
+pub mod worker;
 pub mod ws;
 
 pub use graph::{Boundary, FullReload, ModuleGraph, ModuleId, ModuleKind, Propagation};

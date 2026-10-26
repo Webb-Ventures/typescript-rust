@@ -43,6 +43,8 @@ are cached by content hash. Change `cache_id` when output for the same input can
 | `env.rs` | `.env` files, `envPrefix`, `import.meta.env` prelude, `define`, HTML `%VAR%` |
 | `assets.rs` | asset URLs, `?url`/`?raw`/`?inline`, JSON named exports, public-dir imports |
 | `glob.rs` | `import.meta.glob` expansion and the patterns a module watches |
+| `wasm.rs` | `.wasm` imports: bounded import/export section reader, `?init` / direct-import / instance modules, the wasm helper |
+| `worker.rs` | `?worker` / `?sharedworker` wrapper modules, worker file URLs, the worker env prelude |
 | `proxy.rs` | `server.proxy`: rule matching, streamed HTTP forwarding, WebSocket tunnels |
 | `cors.rs` | `server.cors`: preflights and response headers; `js_regex` (JS regex source → `regex-lite`) |
 | `sourcemap.rs` | VLQ, map composition (plugin chain), column shifting for render-time edits |
@@ -311,6 +313,29 @@ are cached by content hash. Change `cache_id` when output for the same input can
   text); the file behind an id with a query is a watch dependency, so editing it re-loads and
   hot-updates the module. `/@id/` serves only ids the graph knows. Plugin `transform` maps
   are composed (see source maps above).
+- **Wasm** (`wasm.rs`, `vite: packages/vite/src/node/plugins/wasm.ts`; the direct-import
+  behaviour from the wasm playground's specs): `x.wasm?init` exports a function
+  `opts => init(opts, url)` that instantiates the file with the given imports (the helper at
+  `/@id/__x00__vite/wasm-helper.js` streams it when the response is `application/wasm`,
+  decodes `data:` URLs, and passes the js-string builtins compile options). A plain
+  `import { f } from './x.wasm'` (ESM integration) reads the binary's import and export
+  sections (bounded LEB reads; `wasm:js-string` builtins skipped), imports each import
+  module, instantiates with top-level await and exports the instance's exports; exported
+  globals unwrap `.value`, served through a `?vite-wasm-instance` module so a wasm file that
+  imports another wasm's globals shares one instance. The glue is a graph module
+  (`<file>?wasm-module.js` / `?wasm-instance.js`) so its imports hot-update like a script's.
+  `?url` and a plain fetch serve the binary.
+- **Workers** (`worker.rs`, `vite: packages/vite/src/node/plugins/worker.ts`): `?worker` /
+  `?sharedworker` imports export a function constructing `Worker`/`SharedWorker` on the file's
+  URL with `worker_file&type=module` first in the query and the import's other parameters
+  after it (`&url` exports the URL; `&inline` means nothing in dev). A `worker_file` request
+  serves the script with `/@vite/env` run first (`importScripts` for `type=classic`).
+- **Dynamic imports** (`vite: packages/vite/src/node/plugins/importAnalysis.ts`,
+  `dynamicImportVars.ts`): a non-literal `import(expr)` argument, and a template whose text
+  names neither a script nor CSS (`` `./${x}.json` ``), is wrapped as
+  `__vite__injectQuery(arg, 'import')` (client export) so the request gets `?import` at run
+  time. A template's head that is an alias or a `#subpath` import is resolved to its URL
+  (`` `@/${x}.js` `` → `` `/src/${x}.js` ``); relative heads are left for the browser.
 - **`/abs/path` specifiers** that name a file system path (inside the root, or whose
   root-relative directory doesn't exist) resolve as `/@fs/abs/path` (`resolve.alias` and plugins
   produce them).
@@ -434,7 +459,9 @@ wrapper ~0.6, browser ~2.4).
 - Dep scan: only `<script type="module" src>` in `index.html` (no inline module scripts, no
   multi-page `build.rollupOptions.input`); imports behind non-literal `import(expr)` are found
   only on request (re-batch + reload).
-- Non-literal dynamic `import(expr)` isn't rewritten (bare specifiers in it fail); an HTML
+- Non-literal dynamic `import(expr)` only gets `?import` at run time (bare specifiers in it
+  fail; Vite's `import.meta.glob` expansion of `` `./${x}.js` `` isn't done, the browser
+  resolves it relative to the module); an HTML
   change reloads the page but doesn't invalidate its inline proxy modules by themselves; in app
   (source) CSS, CSS modules (`.module.css`) and preprocessor `@import`s (`.scss`, ...) aren't
   handled. Dependency CSS isn't watched (only linked packages).
