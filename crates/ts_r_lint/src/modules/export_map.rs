@@ -949,3 +949,31 @@ fn tomdoc(src: &str, comments: &[ts_r_ast::Comment]) -> Option<Doc> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maybe_module_scan() {
+        assert!(maybe_module("import x from 'y'"));
+        assert!(maybe_module("a();\nexport {a}"));
+        assert!(maybe_module("foo(import('x'))"));
+        assert!(maybe_module("}export *"));
+        assert!(!maybe_module("const imports = 1; // export"));
+        assert!(!maybe_module("module.exports = {}"));
+        assert!(!maybe_module("x.import = 1"));
+        assert!(!maybe_module("// ü export\u{2028}"));
+        assert!(!maybe_module(""));
+    }
+
+    #[test]
+    fn jsdoc_tags() {
+        let d =
+            parse_jsdoc("*\n * Old.\n * @deprecated use ü instead\n *   of this\n * @param x\n ");
+        assert_eq!(d.tag("deprecated"), Some("use ü instead\nof this"));
+        assert_eq!(d.tag("param"), Some("x"));
+        assert_eq!(d.tag("returns"), None);
+        assert!(parse_jsdoc("@").tag("").is_some());
+    }
+}

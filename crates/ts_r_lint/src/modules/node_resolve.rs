@@ -230,3 +230,66 @@ fn is_truthy(v: &Value) -> bool {
         _ => true,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ts_r_config::MemoryFs;
+
+    fn fs() -> MemoryFs {
+        let mut fs = MemoryFs::new();
+        fs.add_file("/p/a.js", "")
+            .add_file("/p/b.json", "{}")
+            .add_file("/p/dir/index.mjs", "")
+            .add_file("/p/node_modules/m/package.json", r#"{"main": "lib/main"}"#)
+            .add_file("/p/node_modules/m/lib/main.js", "")
+            .add_file(
+                "/p/node_modules/nomain/package.json",
+                r#"{"main": "missing.js"}"#,
+            )
+            .add_file("/p/node_modules/nomain/index.js", "")
+            .add_file(
+                "/p/node_modules/badmain/package.json",
+                r#"{"main": "missing.js"}"#,
+            )
+            .add_file("/p/node_modules/@s/x/index.js", "")
+            .add_file("/p/src/x.js", "");
+        fs
+    }
+
+    fn res(spec: &str, from: &str) -> Option<String> {
+        let opts = NodeOptions::from_config(&Value::Null);
+        match resolve(&fs(), spec, from, &opts, "/p") {
+            Resolved::File(f) => Some(f.to_string()),
+            Resolved::Core => Some("<core>".into()),
+            Resolved::NotFound => None,
+        }
+    }
+
+    #[test]
+    fn node_algorithm() {
+        assert_eq!(res("./a", "/p").as_deref(), Some("/p/a.js"));
+        assert_eq!(res("./b", "/p").as_deref(), Some("/p/b.json"));
+        assert_eq!(res("./dir", "/p").as_deref(), Some("/p/dir/index.mjs"));
+        assert_eq!(res("../a", "/p/src").as_deref(), Some("/p/a.js"));
+        assert_eq!(
+            res("m", "/p/src").as_deref(),
+            Some("/p/node_modules/m/lib/main.js")
+        );
+        assert_eq!(
+            res("@s/x", "/p").as_deref(),
+            Some("/p/node_modules/@s/x/index.js")
+        );
+        // A `main` that leads nowhere falls back to `index`, else fails the resolution.
+        assert_eq!(
+            res("nomain", "/p").as_deref(),
+            Some("/p/node_modules/nomain/index.js")
+        );
+        assert_eq!(res("badmain", "/p"), None);
+        assert_eq!(res("fs", "/p").as_deref(), Some("<core>"));
+        assert_eq!(res("node:fs", "/p").as_deref(), Some("<core>"));
+        assert_eq!(res("./a.js/", "/p"), None);
+        // The importing directory must exist.
+        assert_eq!(res("./a", "/nowhere"), None);
+    }
+}

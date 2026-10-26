@@ -140,6 +140,11 @@ Files:
   defined. Configured globals satisfy both. `builtinGlobals` counts every lib global
   variable (`LintEnv::is_builtin_global`). Core `no-undef` reports unresolved type
   references too.
+- **Rules read other files only through `LintEnv.modules`** (a `modules::ModuleHost`: a
+  `FileSystem` plus resolution, export-map and `package.json` caches shared by the files of
+  one run; `ResolveOptions.modules` sets it, `LintOptions::new` uses the real disk). Without
+  one each file gets a fresh real-disk host. Never `std::fs` in a rule. Cached data holds
+  no timestamps; cache keys include a hash of the file's `import/*` settings.
 
 ## Status (v1 lint round 6, `wip/v1-lint6`)
 
@@ -2700,3 +2705,75 @@ no-invalid-file-input-accept,no-missing-local-resource}.js`;
 `rules/utils/get-line-indent.js`, `rules/fix/replace-string-raw.js`,
 `rules/ast/call-or-new-expression.js`, `rules/ast/literal.js`, `rules/ast/is-method-call.js`,
 `rules/ast/is-member-expression.js`, `rules/utils/matches-name-constraint.js`.
+
+## eslint-plugin-import rules (round 7)
+
+15 more rules, the ones that resolve modules and read other files: no-unresolved, named,
+default, namespace, export, no-named-as-default, no-named-as-default-member (with
+no-duplicates, all of `import/recommended`), no-deprecated, no-self-import,
+no-relative-packages, no-useless-path-segments, no-cycle, extensions, no-internal-modules
+and no-restricted-paths; 36 of the 46 rules in all. Left: order (82 oracle cases),
+no-extraneous-dependencies, no-unused-modules, no-relative-parent-imports,
+enforce-node-protocol-usage, group-exports, no-default-export, no-named-export,
+imports-first and unambiguous (the last eight have no oracle data yet).
+
+**The module host** (`src/modules/`):
+
+- `mod.rs`: `ModuleHost`, `ModCtx` (the linted file's view: normalized path, cwd, parsed
+  `import/*` settings, a once-per-rule error set), `Resolved {Core, File, NotFound}`.
+  Resolvers come from `import/resolver` (`node`, the default, with `import/resolve` as its
+  options); any other resolver name fails to load, which the rules report once per rule
+  and file at 1:1 as `Resolve error: unable to load resolver "x".`. `import/ignore`
+  regexes and `import/extensions` (default `.js`, `.mjs`, `.cjs`, plus the
+  `import/parsers` extensions) decide which files get export maps.
+- `node_resolve.rs`: the default resolver's algorithm (see its header): extensions `.mjs`,
+  `.js`, `.json`, `.node`; a `main` that leads nowhere fails the whole lookup; `module` and
+  `jsnext:main` never apply; `package.json` is parsed without stripping a BOM (the
+  `package.json` the plugin itself reads, for `no-relative-packages` and entry points, is
+  stripped).
+- `export_map.rs`: a file's exports, re-exports, `export *` dependencies, imports (for
+  no-cycle), parse errors and doc comments. A file is only mapped when a quick scan says it
+  may be a module (`import`/`export` at a statement start, or `import(`) and it parses as
+  one; a file with `import()` but no module syntax gets an empty "ambiguous" map. JSDoc
+  (`/** */`, default) or TomDoc (`import/docstyle`) comments give `@deprecated`. Lookups
+  through `export *` chains stop at `MAX_DEPTH` (64) and on cycles.
+- `import_type.rs`: the kind of a specifier (`internal-regex`, absolute, builtin, parent,
+  index, sibling, external, internal, unknown; see its header).
+- `minimatch.rs`: minimatch 3's `makeRe` (no-internal-modules matches through the regex,
+  where `a/**/**` needs two slashes). Other globs use `config::glob`.
+
+**Rules, in our words** (each file's header has the details):
+
+- no-cycle: the linted file's strongly connected component of value imports on disk
+  (iterative Tarjan) gates both the import and the walk; the walk is breadth first and
+  shares one visited set across the file's imports, so a later import may miss a cycle the
+  plugin would also miss. Side-effect imports and type-only declarations are skipped.
+- no-useless-path-segments: posix-normalized specifiers that resolve to the same file,
+  `/index` under `noUselessIndex`, and extra `..` segments compared with the relative path
+  to the resolved file. no-relative-packages: the nearest `package.json` with a `name`
+  (unnamed ones pass the search upward).
+- extensions: the extension comes from the resolved file; `never` only reports when the
+  path without it resolves to the same file (two unresolved paths count as the same).
+- no-restricted-paths: `basePath` defaults to the cwd; glob vs plain is is-glob's strict
+  check.
+
+**Testing.** The plugin's `tests/files` (and `tests/index.js`) are vendored in
+`tests/oracle/import-fixtures/` (its `.gitignore` re-includes `node_modules`; the
+`eslint-import-resolver-foo` symlink is a copy). The rule oracle mounts them in a
+case-insensitive `MemoryFs` at `/import` (cwd `/import`) and lints import cases as
+`/import/tests/files/<filename>`. 3 no-unresolved cases need the uppercase absolute path of
+the machine that recorded them, and import/default's `FooES7` case needs espree's
+ecmaVersion parse error. `tests/import_modules.rs` covers long and cyclic graphs (3,000
+modules), self-referential packages and re-exports, malformed `package.json` and non-ASCII
+paths.
+
+Upstream files read (eslint-plugin-import 2.32.0 and its eslint-module-utils): utils
+`resolve.js`, `ignore.js`, `ModuleCache.js`, `moduleVisitor.js`, `unambiguous.js`,
+`parse.js`, `readPkgUp.js`, `pkgUp.js`; `resolvers/node/index.js`; resolve 2.0.0-next
+`lib/sync.js`, `lib/node-modules-paths.js`; `src/exportMap/*`, `src/core/importType.js`,
+`src/core/packagePath.js`, `src/scc.js`; `src/rules/{no-unresolved, named, default,
+namespace, export, no-named-as-default, no-named-as-default-member, no-deprecated,
+no-import-module-exports, no-unassigned-import, no-self-import, no-relative-packages,
+no-useless-path-segments, no-cycle, extensions, no-internal-modules,
+no-restricted-paths}.js`; minimatch 3.1 `makeRe` (observed output) and is-glob's strict
+check.
