@@ -303,6 +303,7 @@ mod unicorn_no_new_array;
 mod unicorn_no_null;
 mod unicorn_no_object_as_default_parameter;
 mod unicorn_no_process_exit;
+mod unicorn_no_thenable;
 mod unicorn_no_this_assignment;
 mod unicorn_no_this_outside_of_class;
 mod unicorn_no_transition_all;
@@ -672,6 +673,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_null::RULE,
     &unicorn_no_object_as_default_parameter::RULE,
     &unicorn_no_process_exit::RULE,
+    &unicorn_no_thenable::RULE,
     &unicorn_no_this_assignment::RULE,
     &unicorn_no_this_outside_of_class::RULE,
     &unicorn_no_transition_all::RULE,

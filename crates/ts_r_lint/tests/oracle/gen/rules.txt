@@ -306,3 +306,4 @@ unicorn/no-empty-file
 unicorn/no-negated-condition
 unicorn/prefer-module
 unicorn/no-await-expression-member
+unicorn/no-thenable
