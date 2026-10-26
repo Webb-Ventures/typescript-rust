@@ -13,11 +13,12 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 ## What works today
 
-- 158 rules: all 64 rules of ESLint 10's `recommended` set, the typescript-eslint 8.71
-  `recommended` and `strict` rules, three eslint-plugin-jsdoc rules and a few more. 51 of them
-  are type-aware and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
-- The published ESLint, typescript-eslint and eslint-plugin-jsdoc tests for those rules: 15,746 of
-  15,766 cases match (8,846 of 8,846 for rules without types, 6,900 of 6,920 for type-aware rules).
+- 248 rules: all 64 rules of ESLint 10's `recommended` set and 66 more core rules, the
+  typescript-eslint 8.71 `recommended` and `strict` rules and a few more, and 36
+  eslint-plugin-jsdoc rules. 51 of them are type-aware and get their types from ts-r's own
+  checker. `ts-r-lint --list-rules` prints them.
+- The published ESLint, typescript-eslint and eslint-plugin-jsdoc tests for those rules: 18,892 of
+  18,912 cases match (11,992 of 11,992 for rules without types, 6,900 of 6,920 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
 - `eslint-disable` comments and `/* eslint */` inline config, with reports of unused disable
@@ -29,8 +30,8 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 - Type-aware rules run only on a tsconfig project where ts-r-check reports the same
   diagnostics as your tsc. Elsewhere they are skipped, and listed on stderr with the reason.
-- No ESLint plugins other than typescript-eslint, apart from three eslint-plugin-jsdoc rules
-  (`require-param-description`, `require-returns`, `escape-inline-tags`). Rules from other plugins are skipped and
+- No ESLint plugins other than typescript-eslint, apart from 36 eslint-plugin-jsdoc rules
+  (`ts-r-lint --list-rules` names them). Rules from other plugins are skipped and
   listed as "plugin not implemented".
 
 Design record: [0006 lint](../../../docs/design/0006-lint.md).

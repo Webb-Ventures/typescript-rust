@@ -137,8 +137,9 @@ Files:
 
 ## Status (v1 lint round 3, `wip/v1-lint3`)
 
-- 158 rules, 51 of them type-aware. Rule oracle: 15,746 / 15,766 cases. The non-type-aware
-  cases are 8,846 / 8,846 and the type-aware cases 6,900 / 6,920 (2026-10-26); the 20
+- 248 rules (130 core ESLint, 82 typescript-eslint, 36 eslint-plugin-jsdoc), 51 of them
+  type-aware. Rule oracle: 18,892 / 18,912 cases. The non-type-aware cases are
+  11,992 / 11,992 and the type-aware cases 6,900 / 6,920 (2026-10-26); the 20
   type-aware failures are a subset of the 46 listed in design record 0006
   (`tests/oracle/baseline.txt` has the current per-rule counts).
 - private-app against ESLint with every configured rule: all 23 projects pass the parity
