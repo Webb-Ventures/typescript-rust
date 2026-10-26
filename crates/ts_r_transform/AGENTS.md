@@ -196,7 +196,9 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example oracle -- --bless crates/ts_r_transform/tests/fixtures`
   (`--stored` compares against the stored files without tsc).
 - tsc's emit baselines (upstream checkout in `target/upstream/typescript`):
-  `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE]`.
+  `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
+  (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
+  supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
   Last run (2026-10-24, parity/binder-emit): 1,673 match, 61 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
   syntax errors are skipped); `--filter esDecorators`: 119 match, 21 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see

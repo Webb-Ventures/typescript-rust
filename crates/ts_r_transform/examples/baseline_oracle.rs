@@ -3,14 +3,15 @@
 //!
 //! ```text
 //! scripts/limit.sh --mem-mb 4096 --time-s 600 -- cargo run --release -p ts_r_transform \
-//!   --example baseline_oracle -- [--upstream DIR] [--show N] [--filter S] [--list FILE]
+//!   --example baseline_oracle -- [--upstream DIR] [--show N] [--filter S] [--list FILE] [--dump DIR]
 //! ```
 //!
 //! Each baseline holds the test's input files followed by tsc's outputs. Options come from
 //! the test case's `// @option: value` lines, with the variant in the baseline's file name
 //! (`name(target=esnext).js`) taking precedence. Tests ts-r does not cover are skipped:
 //! targets below ES2022, `outFile`, AMD/System/UMD modules, `noEmit`, files with syntax
-//! errors, and JavaScript inputs.
+//! errors, and JavaScript inputs. `--dump DIR` writes each mismatch's normalized outputs
+//! (`<test>__<file>.ours.js`, `.tsc.js`) for diffing.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -128,12 +129,24 @@ fn split_case(src: &str, case_path: &str) -> Vec<(String, String)> {
             .and_then(|r| r.strip_prefix('@'))
             .and_then(|r| r.split_once(':'))
             .filter(|(k, _)| k.trim().eq_ignore_ascii_case("filename"));
+        // The harness drops every `// @name: value` line from the file's text.
+        let option = t.strip_prefix("//").map(str::trim_start).is_some_and(|r| {
+            r.strip_prefix('@')
+                .and_then(|r| r.split_once(':'))
+                .is_some_and(|(k, _)| {
+                    let k = k.trim_end();
+                    !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+        });
         if let Some((_, v)) = directive {
             if let Some(c) = current.take() {
                 out.push(c);
             }
             let name = v.trim().to_owned();
             current = Some((name, String::new()));
+            continue;
+        }
+        if option {
             continue;
         }
         match current.as_mut() {
@@ -194,6 +207,7 @@ fn main() {
     let mut show = 20usize;
     let mut filter: Option<String> = None;
     let mut list: Option<PathBuf> = None;
+    let mut dump: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -201,6 +215,7 @@ fn main() {
             "--show" => show = args.next().and_then(|s| s.parse().ok()).unwrap_or(20),
             "--filter" => filter = args.next(),
             "--list" => list = args.next().map(PathBuf::from),
+            "--dump" => dump = args.next().map(PathBuf::from),
             _ => {}
         }
     }
@@ -279,56 +294,118 @@ fn main() {
             continue;
         }
         let files = split_case(&case_src, case_path);
+        // A `tsconfig.json` in the test supplies the options the `// @` lines don't.
+        let tsconfig = files
+            .iter()
+            .find(|(n, _)| base(n) == "tsconfig.json")
+            .map(|(_, t)| t.as_str());
+        let options_for = |name: &str, cjs: bool| -> TransformOptions {
+            match tsconfig {
+                None => TransformOptions::from_json_format(&json, name, cjs),
+                Some(t) => {
+                    let mut fs = ts_r_config::MemoryFs::new();
+                    fs.add_file("/test/tsconfig.json", t);
+                    let config = format!(
+                        "{{\"extends\": \"./tsconfig.json\", \"compilerOptions\": {json}, \"files\": []}}"
+                    );
+                    fs.add_file("/test/oracle.json", &config);
+                    let parsed = ts_r_config::load_tsconfig(&fs, "/test/oracle.json");
+                    TransformOptions::from_compiler_options(&parsed.options, name, cjs)
+                }
+            }
+        };
+        if tsconfig.is_some() && options_for("a.ts", false).target < ScriptTarget::ES2022 {
+            skipped_tests += 1;
+            continue;
+        }
         let secs = sections(&baseline);
-        let mut used = vec![false; files.len()];
-        for out in secs.iter().filter(|s| is_js_output(&s.name)) {
+        let outs: Vec<&Section> = secs.iter().filter(|s| is_js_output(&s.name)).collect();
+        let candidates_of = |out: &Section| -> Vec<usize> {
             let out_stem = base(stem(&out.name));
-            let candidates: Vec<usize> = (0..files.len())
-                .filter(|&i| !used[i] && is_ts_input(&files[i].0))
+            (0..files.len())
+                .filter(|&i| is_ts_input(&files[i].0))
                 .filter(|&i| {
                     base(stem(&files[i].0)) == out_stem && ext_matches(&files[i].0, &out.name)
                 })
-                .collect();
-            if candidates.is_empty() {
-                skipped_files += 1;
-                continue;
-            }
-            let mut first_diff: Option<(usize, String)> = None;
-            let mut matched = false;
-            let mut errors = false;
-            for &i in &candidates {
-                let (name, text) = &files[i];
-                let cjs = is_cjs_file(name, &files);
-                let opts = TransformOptions::from_json_format(&json, name, cjs);
-                let result = transpile(name, text, &opts, &CodegenOptions::default());
-                if result.has_errors() {
-                    errors = true;
+                .collect()
+        };
+        // Each input's output, transpiled once (`None`: it has errors).
+        let mut results: Vec<Option<Option<String>>> = vec![None; files.len()];
+        let mut result_of = |i: usize| -> Option<String> {
+            results[i]
+                .get_or_insert_with(|| {
+                    let (name, text) = &files[i];
+                    let cjs = is_cjs_file(name, &files);
+                    let result = transpile(name, text, &options_for(name, cjs), &CodegenOptions::default());
+                    (!result.has_errors()).then_some(result.code)
+                })
+                .clone()
+        };
+        // Outputs are named by base name only, so `a/index.js` and `index.js` collide:
+        // first pair every output with an input it matches, then report the rest against
+        // the first input left.
+        let mut used = vec![false; files.len()];
+        let mut matched = vec![false; outs.len()];
+        for (o, out) in outs.iter().enumerate() {
+            for i in candidates_of(out) {
+                if used[i] {
                     continue;
                 }
-                match support::compare(&result.code, &out.text) {
-                    None => {
-                        used[i] = true;
-                        matched = true;
-                        break;
-                    }
-                    Some(d) => {
-                        if first_diff.is_none() {
-                            first_diff = Some((i, d));
-                        }
-                    }
+                if let Some(code) = result_of(i)
+                    && support::compare(&code, &out.text).is_none()
+                {
+                    used[i] = true;
+                    matched[o] = true;
+                    ok += 1;
+                    break;
                 }
             }
-            if matched {
-                ok += 1;
-            } else if let Some((i, diff)) = first_diff {
+        }
+        for (o, out) in outs.iter().enumerate() {
+            if matched[o] {
+                continue;
+            }
+            let mut reported = false;
+            let mut errors = false;
+            for i in candidates_of(out) {
+                if used[i] {
+                    continue;
+                }
+                let Some(code) = result_of(i) else {
+                    errors = true;
+                    continue;
+                };
+                let Some(diff) = support::compare(&code, &out.text) else {
+                    continue;
+                };
                 used[i] = true;
+                reported = true;
                 bad += 1;
-                mismatches.push_str(&format!("{file_name}\t{}\n", files[i].0));
+                let name = &files[i].0;
+                mismatches.push_str(&format!("{file_name}\t{name}\n"));
                 if shown < show {
                     shown += 1;
-                    println!("MISMATCH {file_name} [{}] {json}\n{diff}", files[i].0);
+                    println!("MISMATCH {file_name} [{name}] {json}\n{diff}");
                 }
-            } else if errors {
+                if let Some(dir) = &dump {
+                    let key = format!(
+                        "{}__{}",
+                        stem(file_name),
+                        base(stem(name)).replace(['/', '.'], "_")
+                    );
+                    let _ = std::fs::create_dir_all(dir);
+                    let _ = std::fs::write(
+                        dir.join(format!("{key}.ours.js")),
+                        support::normalize(&code).1,
+                    );
+                    let _ = std::fs::write(
+                        dir.join(format!("{key}.tsc.js")),
+                        support::normalize(&out.text).1,
+                    );
+                }
+                break;
+            }
+            if !reported && (errors || candidates_of(out).is_empty()) {
                 skipped_files += 1;
             }
         }
