@@ -350,3 +350,4 @@ unicorn/prefer-switch
 unicorn/no-useless-undefined
 unicorn/no-useless-spread
 unicorn/no-for-each
+unicorn/no-array-reduce
