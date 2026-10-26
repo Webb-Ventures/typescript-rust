@@ -389,7 +389,7 @@ mod unicorn_no_invalid_boolean_attribute_value;
 mod unicorn_no_invalid_character_comparison;
 mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
-mod unicorn_no_invalid_property_descriptor;
+mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_invalid_temporal_arithmetic;
 mod unicorn_no_invalid_well_known_symbol_methods;
@@ -552,7 +552,7 @@ mod unicorn_prefer_queue_microtask;
 mod unicorn_prefer_reflect_apply;
 mod unicorn_prefer_regexp_test;
 mod unicorn_prefer_response_static_json;
-mod unicorn_prefer_set_has;
+mod unicorn_prefer_scoped_selector;
 mod unicorn_prefer_set_methods;
 mod unicorn_prefer_set_size;
 mod unicorn_prefer_short_arrow_method;
@@ -582,6 +582,7 @@ mod unicorn_prefer_type_error;
 mod unicorn_prefer_type_literal_last;
 mod unicorn_prefer_unary_minus;
 mod unicorn_prefer_url_can_parse;
+mod unicorn_prefer_url_href;
 mod unicorn_prefer_url_search_parameters;
 mod unicorn_relative_url_style;
 mod unicorn_require_array_join_separator;
@@ -602,6 +603,7 @@ mod unicorn_throw_new_error;
 mod unicorn_try_complexity;
 mod unicorn_types;
 mod unicorn_url;
+mod unicorn_url_type;
 mod unicorn_util;
 mod use_isnan;
 mod valid_typeof;
@@ -1020,6 +1022,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_instanceof_builtins::RULE,
     &unicorn_no_invalid_character_comparison::RULE,
     &unicorn_no_invalid_fetch_options::RULE,
+    &unicorn_no_invalid_integrity::RULE,
     &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_invalid_temporal_arithmetic::RULE,
     &unicorn_no_late_current_target_access::RULE,
@@ -1151,7 +1154,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_promise_try::RULE,
     &unicorn_prefer_queue_microtask::RULE,
     &unicorn_prefer_response_static_json::RULE,
-    &unicorn_prefer_set_has::RULE,
+    &unicorn_prefer_scoped_selector::RULE,
     &unicorn_prefer_set_methods::RULE,
     &unicorn_prefer_promise_with_resolvers::RULE,
     &unicorn_prefer_short_escape_sequences::RULE,
@@ -1176,6 +1179,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_type_error::RULE,
     &unicorn_prefer_unary_minus::RULE,
     &unicorn_prefer_url_can_parse::RULE,
+    &unicorn_prefer_url_href::RULE,
     &unicorn_prefer_url_search_parameters::RULE,
     &unicorn_relative_url_style::RULE,
     &unicorn_require_array_sort_compare::RULE,

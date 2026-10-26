@@ -1782,6 +1782,20 @@ Rules from eslint-plugin-unicorn 79.0.0's recommended set, each at 100% of its o
   names `context`/`ctx`. Functions passed to the global `requestAnimationFrame`/
   `setInterval`, called in loops, or called (transitively) from those are repeated; two
   builders and a consumer in a repeated draw are reported. No fix.
+- **no-invalid-integrity**: the last `integrity` prop of a native JSX `<script>`/`<link>`
+  (no spread after it; string with entities decoded, or a control-flow static string) is
+  split on HTML whitespace; recognized entries (`sha256`/`sha384`/`sha512`/`ed25519`) must
+  be `alg-base64[=|==][?printable-options]` with 43/64/86/43 base64 characters (either
+  alphabet); each bad entry is reported, and metadata without a recognized one once.
+- **prefer-scoped-selector**: element `querySelector(All)` with one static selector, not on
+  `document`, a non-element root or a non-node value: branches are split CSS-tokenizer
+  style (strings, comments, escapes, nested groups), and a branch with a top-level
+  combinator but no `:scope` token is reported; one branch suggests a `:scope ` prefix.
+- **prefer-url-href**: `<url>.toString()` and global `String(<url>)` for a syntactically
+  known native URL (`rules/unicorn_url_type.rs`: global or `url`-module `URL` constructor,
+  `const` initializers, annotations through local aliases, return types; annotations of
+  parameters and return types don't see types declared in the function body). Fixed to
+  `.href` only for a fresh `new URL(...)`, without lost comments.
 
 Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.js`,
 `relative-url-style.js`, `shared/get-srcset-candidates.js`, `prefer-modern-math-apis.js`,
@@ -1797,4 +1811,5 @@ Read to understand (not ported), eslint-plugin-unicorn `rules/`: `no-new-buffer.
 `utils/is-global-identifier.js`, `utils/function-body.js`, `prefer-url-search-parameters.js`,
 `ast/call-or-new-expression.js`, `prefer-number-is-safe-integer.js`, `prefer-url-can-parse.js`,
 `require-passive-events.js`, `prefer-toggle-attribute.js`, `utils/has-optional-chain-element.js`,
-`no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`.
+`no-prevent-default-in-passive-listener.js`, `prefer-path2d.js`, `no-invalid-integrity.js`, `prefer-scoped-selector.js`,
+`prefer-url-href.js`, `utils/is-url.js`, `utils/scope.js`, `utils/imports.js`.

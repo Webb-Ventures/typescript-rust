@@ -25,7 +25,7 @@ pub(crate) fn next_statement(cx: &Ctx<'_, '_>, stmt: NodeId) -> Option<NodeId> {
 }
 
 /// A declaration that only names a type (`type`, `interface`, `import type`, `{type X}`).
-fn is_type_only_decl(ast: &Ast, kind: DeclKind, node: NodeId, parent: NodeId) -> bool {
+pub(crate) fn is_type_only_decl(ast: &Ast, kind: DeclKind, node: NodeId, parent: NodeId) -> bool {
     match kind {
         DeclKind::TypeAlias | DeclKind::Interface | DeclKind::TypeParam => true,
         DeclKind::ImportNamed | DeclKind::ImportDefault | DeclKind::ImportNamespace => {
