@@ -3204,6 +3204,12 @@ Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7
   was inferred as, not `U` (tsc's getContextualTypeForArgumentAtIndex reads the resolved
   signature). The context an argument was first checked with only applies while the call
   infers (`tests/editor_queries.rs`).
+- Flow walks of a reference without a property path (`this`, `x`) are cached at the
+  assignment node they start from (`assignment_cache_key`, keyed like label entries), and
+  an assignment with more property accesses than the reference is skipped before its key
+  is built, so `this.p0 = 0; this.p1 = 0; ...` (each reading `this`) checks in linear time:
+  64,000 statements in 0.13 s, from 2.8 s for 32,000 (`bounded.rs`,
+  `many_this_assignments_walk_flow_linearly`).
 
 ## Levels (`layers.rs`, design record 0005)
 

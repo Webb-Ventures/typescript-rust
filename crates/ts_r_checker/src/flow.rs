@@ -75,6 +75,10 @@ struct Walk {
 /// Cache key of a flow type at a label: (file, flow node, reference hash, declared, initial).
 pub(crate) type FlowKey = (u32, u32, u64, TypeId, TypeId);
 
+/// Mixed into the reference hash of assignment-node cache entries, which hold the result
+/// of a walk starting at the assignment (label entries hold the type at the label).
+const ASSIGNMENT_CACHE_SALT: u64 = 0x9e37_79b9_7f4a_7c15;
+
 mod facts {
     pub const STRING: u16 = 1;
     pub const NUMBER: u16 = 2;
@@ -1176,9 +1180,42 @@ impl<'c, 'a> Ck<'c, 'a> {
             return w.declared;
         }
         self.flow_depth += 1;
+        // Walks of a plain reference (`this`, `x`) from an assignment are cached there, so
+        // a later walk passing that assignment stops: straight-line code of many
+        // unrelated assignments (`this.p0 = 0; this.p1 = 0; ...`, each reading `this`)
+        // stays linear. Keyed like the label cache.
+        let key = self.assignment_cache_key(w, start);
+        if let Some(k) = key
+            && let Some(t) = self.flow_cached(&k)
+        {
+            self.flow_depth -= 1;
+            return t;
+        }
         let t = self.walk_flow_inner(w, start);
+        if let Some(k) = key {
+            self.flow_store(k, t);
+        }
         self.flow_depth -= 1;
         t
+    }
+
+    /// The cache key of a walk from `flow` when it is an assignment node and the walk is
+    /// for a reference without property path that does not cross functions.
+    fn assignment_cache_key(&self, w: &Walk, flow: FlowId) -> Option<FlowKey> {
+        if !w.key.path.is_empty() || w.cross_functions {
+            return None;
+        }
+        let node = self.c.bound(w.file).flow.nodes.get(flow.index())?;
+        if node.kind != FlowKind::Assignment {
+            return None;
+        }
+        Some((
+            w.file.0,
+            flow.0,
+            w.hash ^ ASSIGNMENT_CACHE_SALT,
+            w.declared,
+            w.initial,
+        ))
     }
 
     fn walk_flow_inner(&mut self, w: &Walk, start: FlowId) -> TypeId {
@@ -1216,6 +1253,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return w.initial;
                 }
                 FlowKind::Assignment => {
+                    if flow != start
+                        && let Some(k) = self.assignment_cache_key(w, flow)
+                        && let Some(t) = self.flow_cached(&k)
+                    {
+                        return t;
+                    }
                     let Some(target) = node.node else {
                         flow = FlowId(node.a);
                         continue;
@@ -1560,6 +1603,24 @@ impl<'c, 'a> Ck<'c, 'a> {
             return AssignEffect::None;
         }
         let ast = self.ast(target.file);
+        // A target with more property accesses than the reference neither is it nor a
+        // prefix of it (`this.p = 0` against `this`): skip without building its key, so a
+        // walk back over many such assignments stays cheap per step.
+        let mut accesses = 0usize;
+        let mut n = target.node;
+        for _ in 0..64 {
+            match *ast.node(n) {
+                Node::Member { obj, .. } | Node::Index { obj, .. } => {
+                    accesses += 1;
+                    n = obj;
+                }
+                Node::Paren { expr } | Node::NonNull { expr } => n = expr,
+                _ => break,
+            }
+        }
+        if accesses > w.key.path.len() {
+            return AssignEffect::None;
+        }
         // Quick filter by the root name.
         match self.root_name(target) {
             Some(n) if n == w.root_name => {}
