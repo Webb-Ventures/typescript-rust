@@ -142,9 +142,12 @@ Files:
   references too.
 - **Rules read other files only through `LintEnv.modules`** (a `modules::ModuleHost`: a
   `FileSystem` plus resolution, export-map and `package.json` caches shared by the files of
-  one run; `ResolveOptions.modules` sets it, `LintOptions::new` uses the real disk). Without
-  one each file gets a fresh real-disk host. Never `std::fs` in a rule. Cached data holds
-  no timestamps; cache keys include a hash of the file's `import/*` settings.
+  one run; `ResolveOptions.modules` sets it). The caches never invalidate, so a host must
+  not outlive a run: `lint_paths` makes one per call (`ResolveOptions::for_run`) unless the
+  caller passed one, and `LintOptions::new` leaves it `None`, so the editor's jobs (which
+  keep their `LintOptions` and configs for the session) get a fresh real-disk host per
+  file. Never `std::fs` in a rule. Cached data holds no timestamps; cache keys include a
+  hash of the file's `import/*` settings.
 
 ## Status (v1 lint round 7, `wip/v1-lint7`)
 

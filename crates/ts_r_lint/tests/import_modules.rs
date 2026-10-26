@@ -405,3 +405,80 @@ fn export_star_diamonds_are_walked_once() {
     assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
     assert!(m.contains(&"nope not found in './d0l'".to_owned()), "{m:?}");
 }
+
+/// A fresh directory under the system temp dir, removed on drop.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> TempDir {
+        let d = std::env::temp_dir().join(format!("ts-r-import-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).expect("temp dir");
+        TempDir(d)
+    }
+    fn write(&self, name: &str, text: &str) {
+        std::fs::write(self.0.join(name), text).expect("write");
+    }
+    fn path(&self, name: &str) -> String {
+        self.0.join(name).to_string_lossy().replace('\\', "/")
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn editor_jobs_see_edits_to_imported_files() {
+    // The editor keeps one `LintOptions` and one loaded config for the whole session and
+    // lints a file again after another file changes.
+    let dir = TempDir::new("editor");
+    dir.write("b.js", "export const x = 1;\n");
+    let opts = ts_r_lint::project::LintOptions::new(dir.0.clone());
+    let config = serde_json::json!([{
+        "files": ["**/*.js"],
+        "rules": { "import/named": ["error"] },
+    }]);
+    let objs = objects_from_eslint_json(&config, Registry::global()).expect("config");
+    let cfg = ConfigFile::new(ConfigKind::Eslint, None, dir.0.clone(), objs);
+    let code = "import { x } from './b';\n";
+    let lint = || {
+        let fc = cfg.file_config("a.js", &opts.resolve).expect("file config");
+        lint_source(&dir.path("a.js"), code, &fc, &NoTypeInfo, FileKey(0))
+            .diagnostics
+            .into_iter()
+            .map(|d| d.message)
+            .collect::<Vec<_>>()
+    };
+    assert!(lint().is_empty());
+    dir.write("b.js", "export const y = 1;\n");
+    assert_eq!(lint(), ["x not found in './b'"]);
+}
+
+#[test]
+fn each_cli_run_reads_the_files_again() {
+    let dir = TempDir::new("cli");
+    dir.write(
+        ".oxlintrc.json",
+        r#"{ "plugins": ["import"], "rules": { "import/named": "error" } }"#,
+    );
+    dir.write("a.js", "import { x } from './b';\n");
+    dir.write("b.js", "export const x = 1;\n");
+    let mut opts = ts_r_lint::project::LintOptions::new(dir.0.clone());
+    opts.threads = 1;
+    let messages = |opts: &ts_r_lint::project::LintOptions| {
+        let run = ts_r_lint::project::lint_paths(opts).expect("run");
+        run.reports
+            .iter()
+            .flat_map(|r| r.result.diagnostics.iter())
+            .filter(|d| d.rule == Some("import/named"))
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>()
+    };
+    let first = messages(&opts);
+    assert!(first.is_empty(), "{first:?}");
+    dir.write("b.js", "export const y = 1;\n");
+    assert_eq!(messages(&opts), ["x not found in './b'"]);
+}

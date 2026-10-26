@@ -59,7 +59,10 @@ impl LintOptions {
             warn_ignored: true,
             resolve: ResolveOptions {
                 cwd: Some(cwd_str),
-                modules: Some(crate::modules::ModuleHost::real()),
+                // No long-lived host: `lint_paths` makes one per run, and anything else
+                // (the editor's jobs) gets a fresh one per file, so no export map outlives
+                // an edit.
+                modules: None,
                 ..ResolveOptions::new()
             },
             node: NodeOptions::default(),
@@ -526,7 +529,9 @@ pub fn lint_paths(opts: &LintOptions) -> Result<LintRun, String> {
         explicit_cfg.as_ref().map(|_| cwd.as_path()),
     )?;
 
-    // 3. Resolve per-file configs; drop ignored files.
+    // 3. Resolve per-file configs; drop ignored files. The files of one run share one
+    // module host (resolutions and export maps), unless the caller passed its own.
+    let resolve = opts.resolve.for_run();
     let mut work: Vec<WorkItem> = Vec::new();
     let mut work_cfg: Vec<String> = Vec::new();
     let mut last_name = String::new();
@@ -547,7 +552,7 @@ pub fn lint_paths(opts: &LintOptions) -> Result<LintRun, String> {
                 continue;
             }
         };
-        match cfg.file_config(&rel, &opts.resolve) {
+        match cfg.file_config(&rel, &resolve) {
             Ok(fc) => work.push((c.path.clone(), Some(fc), None)),
             Err(NotLinted::Ignored) => {
                 if c.explicit && opts.warn_ignored {
@@ -680,8 +685,10 @@ pub fn lint_paths(opts: &LintOptions) -> Result<LintRun, String> {
         }
         run.notes.extend(cfg.notes());
     }
-    if let Ok(n) = opts.resolve.notes.lock() {
-        run.notes.extend(n.iter().cloned());
+    for notes in [&opts.resolve.notes, &resolve.notes] {
+        if let Ok(n) = notes.lock() {
+            run.notes.extend(n.iter().cloned());
+        }
     }
     run.notes.sort();
     run.notes.dedup();

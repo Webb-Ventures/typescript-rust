@@ -617,6 +617,25 @@ impl ResolveOptions {
             modules: None,
         }
     }
+    /// The options for one `lint_paths` run: the same settings, a fresh note list and, when
+    /// none was given, a module host shared by the run's files only.
+    pub fn for_run(&self) -> ResolveOptions {
+        ResolveOptions {
+            registry: self.registry,
+            quiet: self.quiet,
+            types_available: self.types_available,
+            no_inline_config: self.no_inline_config,
+            report_unused_override: self.report_unused_override,
+            only_rules: self.only_rules.clone(),
+            notes: Mutex::new(Vec::new()),
+            cwd: self.cwd.clone(),
+            modules: Some(
+                self.modules
+                    .clone()
+                    .unwrap_or_else(crate::modules::ModuleHost::real),
+            ),
+        }
+    }
     fn note(&self, s: String) {
         if let Ok(mut n) = self.notes.lock()
             && !n.contains(&s)
