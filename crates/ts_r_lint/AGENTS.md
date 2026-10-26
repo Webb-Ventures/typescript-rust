@@ -555,3 +555,34 @@ typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visi
   `pub(crate)` or add `pub(crate) fn create_ts`, and keep the `ts_*` module to its `RuleDef`.
 - Fixes that rewrite import/export lists build a list of `(Span, String)` edits and fold them
   into one `Fix` (see `ts_consistent_type_imports.rs`); keep edits non-overlapping.
+
+## eslint-plugin-unicorn rules (round 5, lead)
+
+`prefer-blob-reading-methods`, `consistent-date-clone`, `no-invalid-remove-event-listener`,
+`prefer-structured-clone` (each at 100% of its oracle) and `no-await-in-promise-methods`
+(110 of 111: the last case needs the parser's module goal, see below). Shared call shapes are
+in `rules/unicorn_ast.rs`: `method_call` (a call of `obj.name` with an identifier property,
+parentheses transparent as in ESTree), `promise_method_call`, `matches_path` (`_.cloneDeep`,
+`new.target.x`, `this.y`), `call_tokens` (a call's `(`, `)` and trailing `,`),
+`would_remove_comments` (a comment in the replaced range but outside every kept range) and
+`skip_spaces` (JavaScript's `\s`).
+
+- **no-await-in-promise-methods** walks up from each `await` to an array that is the single
+  argument of `Promise.all/allSettled/any/race`, stopping at a function or an outer `await`;
+  only an `await` that is the element itself gets the "Remove `await`" suggestion. Open:
+  `Promise.all([\n await\n promise])` in a `.js` module is a parse error for us, because the
+  parser treats top-level `await` before a line break as a name unless the file has
+  `import`/`export`; ESLint (sourceType `module`) always reads the operator. Requested from
+  the parser owner (a forced module-goal parse option for `engine::parse_for_lint`).
+- **consistent-date-clone** reports `.getTime()` in `new Date(x.getTime())` from the method
+  name to the end of the call; the fix deletes from the end of the receiver's parentheses to
+  the end of the member, and from the end of the parenthesized callee to the end of the call.
+- **prefer-structured-clone**'s JSON suggestion deletes `JSON.stringify` with each
+  parenthesis around it, the inner call's `(`, `)` and trailing comma; the clone-function
+  form replaces the callee inside its parentheses.
+
+Read to understand (not ported), eslint-plugin-unicorn `rules/`: `prefer-blob-reading-methods.js`,
+`no-await-in-promise-methods.js`, `consistent-date-clone.js`,
+`no-invalid-remove-event-listener.js`, `prefer-structured-clone.js`, `ast/is-method-call.js`,
+`ast/call-or-new-expression.js`, `utils/is-node-matches.js`, `utils/comments.js`,
+`fix/remove-method-call.js`, `fix/remove-spaces-after.js`.

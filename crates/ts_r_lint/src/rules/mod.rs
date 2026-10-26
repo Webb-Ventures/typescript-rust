@@ -274,12 +274,16 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_ast;
+mod unicorn_consistent_date_clone;
 mod unicorn_empty_brace_spaces;
 mod unicorn_escape_case;
 mod unicorn_new_for_builtins;
+mod unicorn_no_await_in_promise_methods;
 mod unicorn_no_console_spaces;
 mod unicorn_no_document_cookie;
 mod unicorn_no_instanceof_builtins;
+mod unicorn_no_invalid_remove_event_listener;
 mod unicorn_no_lonely_if;
 mod unicorn_no_nested_ternary;
 mod unicorn_no_new_array;
@@ -291,9 +295,11 @@ mod unicorn_no_xor_as_exponentiation;
 mod unicorn_no_zero_fractions;
 mod unicorn_number_literal_case;
 mod unicorn_numeric_separators_style;
+mod unicorn_prefer_blob_reading_methods;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_type_error;
 mod unicorn_text_encoding_identifier_case;
 mod unicorn_throw_new_error;
@@ -598,12 +604,15 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
     // eslint-plugin-unicorn
+    &unicorn_consistent_date_clone::RULE,
     &unicorn_empty_brace_spaces::RULE,
     &unicorn_escape_case::RULE,
     &unicorn_new_for_builtins::RULE,
+    &unicorn_no_await_in_promise_methods::RULE,
     &unicorn_no_console_spaces::RULE,
     &unicorn_no_document_cookie::RULE,
     &unicorn_no_instanceof_builtins::RULE,
+    &unicorn_no_invalid_remove_event_listener::RULE,
     &unicorn_no_lonely_if::RULE,
     &unicorn_no_nested_ternary::RULE,
     &unicorn_no_new_array::RULE,
@@ -615,9 +624,11 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_zero_fractions::RULE,
     &unicorn_number_literal_case::RULE,
     &unicorn_numeric_separators_style::RULE,
+    &unicorn_prefer_blob_reading_methods::RULE,
     &unicorn_prefer_date_now::RULE,
     &unicorn_prefer_node_protocol::RULE,
     &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_structured_clone::RULE,
     &unicorn_prefer_type_error::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,

@@ -292,3 +292,8 @@ unicorn/new-for-builtins
 unicorn/throw-new-error
 unicorn/no-new-array
 unicorn/prefer-type-error
+unicorn/prefer-blob-reading-methods
+unicorn/no-await-in-promise-methods
+unicorn/consistent-date-clone
+unicorn/no-invalid-remove-event-listener
+unicorn/prefer-structured-clone
