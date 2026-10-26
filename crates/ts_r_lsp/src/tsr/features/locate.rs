@@ -287,6 +287,10 @@ fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
     {
         return one(private_member(ck, l, name));
     }
+    // The first name of an import type's qualifier: an export of the module.
+    if let Some(s) = import_type_head(ck, l) {
+        return one(Some(s));
+    }
     match *ast.node(p) {
         Node::Member { obj, prop, .. } if prop == l.node => {
             let t = ck.check_expr(Loc::new(l.file, obj));
@@ -394,11 +398,54 @@ fn private_member(ck: &Ck<'_, '_>, l: Loc, name: &str) -> Option<SymId> {
     None
 }
 
+/// The export `l` names when it is the first name of the qualifier of `import("m").A.B`
+/// (`A`): the module's export of that name (`None` for any other name).
+fn import_type_head(ck: &Ck<'_, '_>, l: Loc) -> Option<SymId> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    let parents = c.file(l.file).parents();
+    let name = name_text(ast, l.node)?;
+    // Up through the qualified names whose leftmost name is `l`.
+    let mut n = l.node;
+    let mut it = None;
+    for _ in 0..256 {
+        let p = parents.parent(n)?;
+        match *ast.node(p) {
+            Node::QualifiedName { left, .. } if left == n => n = p,
+            Node::ImportType {
+                qualifier: Some(q), ..
+            } if q == n => {
+                it = Some(p);
+                break;
+            }
+            _ => return None,
+        }
+    }
+    let it = it?;
+    let Node::ImportType { arg, .. } = *ast.node(it) else {
+        return None;
+    };
+    let lit = match *ast.node(arg) {
+        Node::TypeRef { name, .. } => name,
+        _ => arg,
+    };
+    let ri = c
+        .bound(l.file)
+        .module_requests
+        .iter()
+        .position(|r| r.node == lit || r.node == arg)?;
+    let target = c.link.module_target(l.file, ri as u32);
+    let &first = c.link.module_symbols(target).first()?;
+    let m = c.sym_ref(first);
+    c.export_of(m, name)
+}
+
 /// The symbol of an entity name (`A` or `A.B`), for qualified names.
 pub fn entity_symbol(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
     let ast = ck.c.ast(l.file);
     match *ast.node(l.node) {
         Node::QualifiedName { right, .. } => meaning_at(ck, Loc::new(l.file, right)).primary,
+        Node::Ident { .. } if import_type_head(ck, l).is_some() => import_type_head(ck, l),
         Node::Ident { .. } => {
             let c = ck.c;
             c.resolve_ident(l, meaning::NAMESPACE)

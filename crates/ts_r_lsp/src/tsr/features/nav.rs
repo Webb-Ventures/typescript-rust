@@ -5,6 +5,7 @@ use super::locate::{
     Meaning, ident_at, key_text, literal_key, literal_key_span, literal_keys_in, meaning_at,
     name_text, names_in, node_at,
 };
+use super::rename_alias::Decor;
 use super::{Ctx, LinesCache, LspLines, decl_span};
 use crate::jsonrpc::codes;
 use serde_json::{Value, json};
@@ -26,7 +27,18 @@ pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         let spec = ast.atom(value);
         if let Some(target) = module_specifier_target(cx, n, spec) {
             let mut lc = LinesCache::default();
-            return json!([lc.location(c, target, 0, 0)]);
+            // An import type names the module's symbol, shown as the whole file; other
+            // specifiers name the file, shown at its start.
+            let parents = c.file(cx.file).parents();
+            let in_import_type = std::iter::successors(parents.parent(n), |&p| parents.parent(p))
+                .take(2)
+                .any(|p| matches!(ast.node(p), Node::ImportType { .. }));
+            let end = if in_import_type {
+                c.file(target).text.len() as u32
+            } else {
+                0
+            };
+            return json!([lc.location(c, target, 0, end)]);
         }
         // A specifier naming an ambient module (`declare module "x"`), or that name itself.
         let names_module = c
@@ -1072,8 +1084,40 @@ fn references_with(
     // For find-all-references, a modifier or declaration keyword stands for the declared
     // name; document highlights on such a keyword are the keyword's own (or none).
     let keyword_name = (scope == Scope::Project)
-        .then(|| keywords::keyword_name(&Doc::new(c, cx.file), offset))
+        .then(|| {
+            let d = Doc::new(c, cx.file);
+            if rename {
+                keywords::keyword_name(&d, offset)
+            } else {
+                keywords::reference_keyword(&d, offset)
+            }
+        })
         .flatten();
+    // A module specifier (also as a keyword's operand: `from`, `require`), an ambient
+    // module's name or a `/// <reference path>`: the references of the module.
+    if !rename {
+        let module = match keyword_name {
+            Some(n) => super::module_refs::literal_module(c, cx.file, n),
+            None => super::module_refs::module_at(c, cx.file, offset),
+        };
+        if let Some(m) = module {
+            let files: Vec<FileId> = match scope {
+                Scope::File => vec![cx.file],
+                Scope::Project => project_files(cx).collect(),
+            };
+            return super::module_refs::module_references(c, &files, m)
+                .into_iter()
+                .map(|(file, start, end)| Ref {
+                    file,
+                    start,
+                    end,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                })
+                .collect();
+        }
+    }
     if keyword_name.is_none()
         && let Some((decl, ks, ke)) = super::aliases::default_keyword_at(c, cx.file, offset)
     {
@@ -1578,6 +1622,29 @@ fn is_label(cx: &Ctx<'_, '_>, offset: u32) -> bool {
     )
 }
 
+/// The name a rename at `offset` starts from: the name or literal key there, else the
+/// declared name a declaration keyword or modifier stands for (`class C`, `get x`).
+fn rename_name_at(cx: &Ctx<'_, '_>, offset: u32) -> Option<NodeId> {
+    let ast = cx.checker.ast(cx.file);
+    ident_at(ast, offset)
+        .or_else(|| literal_key_at(cx, offset))
+        .or_else(|| keywords::keyword_name(&Doc::new(cx.checker, cx.file), offset))
+}
+
+/// Whether `n` is `default` in an import or export specifier (`export { a as default }`,
+/// `import { default as b }`), which cannot be renamed.
+fn is_default_specifier_name(cx: &Ctx<'_, '_>, n: NodeId) -> bool {
+    let c = cx.checker;
+    let ast = c.ast(cx.file);
+    name_text(ast, n) == Some("default")
+        && c.file(cx.file).parents().parent(n).is_some_and(|p| {
+            matches!(
+                ast.node(p),
+                Node::ImportSpecifier { .. } | Node::ExportSpecifier { .. }
+            )
+        })
+}
+
 pub fn prepare_rename(
     cx: &Ctx<'_, '_>,
     ck: &mut Ck<'_, '_>,
@@ -1587,7 +1654,11 @@ pub fn prepare_rename(
     let c = cx.checker;
     let ast = c.ast(cx.file);
     let text = c.file(cx.file).text.as_str();
-    let Some(n) = ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) else {
+    let n = rename_name_at(cx, offset);
+    if n.is_some_and(|n| is_default_specifier_name(cx, n)) {
+        return Ok(Value::Null);
+    }
+    let Some(n) = n else {
         // A string literal that names no symbol renames the literals of its type.
         if let Some(lit) = string_literal_at(cx, offset) {
             if !super::string_refs::renamable(ck, Loc::new(cx.file, lit)) {
@@ -1635,7 +1706,8 @@ pub fn rename(
 ) -> Result<Value, (i64, String)> {
     let c = cx.checker;
     let ast = c.ast(cx.file);
-    let on_this = match ident_at(ast, offset).or_else(|| literal_key_at(cx, offset)) {
+    let on_this = match rename_name_at(cx, offset) {
+        Some(n) if is_default_specifier_name(cx, n) => return Ok(Value::Null),
         Some(n) => {
             if !is_label(cx, offset) && !is_jsx_attr_name(c, Loc::new(cx.file, n)) {
                 let m = meaning_at(ck, Loc::new(cx.file, n));
@@ -1670,6 +1742,10 @@ pub fn rename(
         }
     };
     let refs = references_with(cx, ck, offset, Scope::Project, true);
+    // The symbol renamed before aliases are followed: name-keeping specifiers stop the
+    // rename there ([`super::rename_alias`]).
+    let renamed = rename_name_at(cx, offset)
+        .and_then(|n| super::rename_alias::rename_symbol(ck, Loc::new(cx.file, n), false));
     let mut lc = LinesCache::default();
     let mut changes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for r in refs {
@@ -1679,7 +1755,19 @@ pub fn rename(
         if old == "this" && !on_this {
             continue;
         }
+        let decor = match renamed {
+            Some(s) => {
+                let variable = r.shorthand == Some(ShorthandSide::Variable);
+                match super::rename_alias::decor(ck, s, r.file, (r.start, r.end), variable) {
+                    Some(d) => d,
+                    None => continue,
+                }
+            }
+            None => Decor::Plain,
+        };
         let new_text = match r.shorthand {
+            None if decor == Decor::Prefix => format!("{old} as {new_name}"),
+            None if decor == Decor::Suffix => format!("{new_name} as {old}"),
             // `{ x }` -> `{ x: y }` when the variable is renamed, `{ y: x }` for the property.
             Some(ShorthandSide::Variable) => format!("{old}: {new_name}"),
             Some(ShorthandSide::Property) => format!("{new_name}: {old}"),

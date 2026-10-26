@@ -119,7 +119,8 @@ pub fn location_meaning(ck: &Ck<'_, '_>, l: Loc) -> u8 {
             _ => {}
         }
     }
-    // Namespace qualifiers: `A` of `A.B.T` in a type or of `A.B` in `implements A.B`.
+    // Namespace qualifiers: `A` of `A.B.T` in a type (an import type's qualifier too) or
+    // of `A.B` in `implements A.B`.
     if matches!(*c.node(p), Node::QualifiedName { left, .. } if left == l.node) {
         let mut root = p;
         while let Some(q) = c.parent(root)
@@ -127,9 +128,16 @@ pub fn location_meaning(ck: &Ck<'_, '_>, l: Loc) -> u8 {
         {
             root = q;
         }
-        if c.parent(root)
-            .is_some_and(|r| matches!(c.node(r), Node::TypeRef { .. }))
-        {
+        if c.parent(root).is_some_and(|r| match *c.node(r) {
+            Node::TypeRef { .. } => true,
+            // `import("m").A.T`: `A` names a namespace too.
+            Node::ImportType {
+                is_typeof: false,
+                qualifier: Some(q),
+                ..
+            } => q == root.node,
+            _ => false,
+        }) {
             return meaning::NAMESPACE;
         }
     }

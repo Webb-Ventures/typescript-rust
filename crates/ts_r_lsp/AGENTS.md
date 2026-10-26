@@ -526,6 +526,28 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   definition of the declared name. A variable statement's modifier goes nowhere.
   Find-all-references on such a keyword (`keyword_name`) lists the declared name's
   references; document highlights on it do not move to the name (`const` alone has none).
+- **References from other keywords** (`reference_keyword`, from tsc 7's answers to
+  `referencesFor{Statement,Expression,Type,Declaration}Keywords`): a statement, expression or
+  type keyword stands for its operand's name: `import`/`type`/`export` of a declaration with
+  one specifier that specifier (`* as n`'s `n`), `from` and `require` the module specifier,
+  `as` the name it introduces, `export =`/`export default` the expression, `new`/`void`/
+  `typeof`/`delete`/`await`/`yield` the operand, `in`/`instanceof` the right side, `as`/
+  `satisfies` the type, `extends`/`implements` with one type that type, a type parameter's
+  `extends` its constraint, `infer` and a mapped `in` the type parameter, `keyof`/
+  `readonly`/`unique` the operand. Rename uses only the declaration keywords (`class C`,
+  `get x`), and `default` of `export { a as default }` / `import { default as b }` cannot be
+  renamed.
+- **Module references** (`module_refs.rs`): a module specifier, an ambient module's name, a
+  `/// <reference path>` or `module` of `module.exports` finds every specifier resolving to
+  the same module, the reference paths naming the file, the ambient declarations' names and
+  the file's own `module.exports` heads; not a qualified import type's specifier (it names
+  the export), not for a script (strings then). Names in an import type's qualifier
+  (`import("./a").N.T`) resolve through the module's exports.
+- **Rename through specifiers** (`rename_alias.rs`, tsc's prefix and suffix text): a
+  name-keeping specifier (`import { x }`, `export { x }`, `export { x } from`) is where a
+  rename stops: renaming at it (or at an import's use) gives `x as new` and follows only
+  that alias; renaming the symbol gives an export of it `new as x`, and renames an import of
+  it only when the symbol is exported by its own name.
 - **Property names in destructuring and literals** (`locate.rs`): a key of an object literal
   used as an assignment target (`({ a: x } = o)`, `for ({ a } of xs)`, `[{ a }] = xs`,
   nested) means the property of the type it takes apart, as does a binding key in

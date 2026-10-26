@@ -3392,3 +3392,214 @@ fn references_of_intrinsic_tags_and_jsx_attributes() {
     assert_eq!(refs(&mut c, 4, 24), vec![(4, 24)]);
     c.shutdown();
 }
+
+/// `(file, line, character)` of each location in a references answer, sorted.
+fn ref_names(r: &Value) -> Vec<(String, u64, u64)> {
+    let mut v: Vec<(String, u64, u64)> = r
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|l| {
+            let uri = l["uri"].as_str().unwrap_or("");
+            let file = uri.rsplit('/').next().unwrap_or("").to_string();
+            let s = &l["range"]["start"];
+            (
+                file,
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn refs_at(c: &mut ScriptedClient, uri: &str, line: u32, ch: u32) -> Vec<(String, u64, u64)> {
+    let r = result(
+        c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch},
+               "context": {"includeDeclaration": true}}),
+    );
+    ref_names(&r)
+}
+
+/// `(file, line, character, newText)` of each edit in a rename answer, sorted.
+fn rename_edits(
+    c: &mut ScriptedClient,
+    uri: &str,
+    line: u32,
+    ch: u32,
+) -> Vec<(String, u64, u64, String)> {
+    let e = result(
+        c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch}, "newName": "z"}),
+    );
+    let mut v = Vec::new();
+    if let Some(m) = e["changes"].as_object() {
+        for (u, edits) in m {
+            let file = u.rsplit('/').next().unwrap_or("").to_string();
+            for t in edits.as_array().unwrap() {
+                let s = &t["range"]["start"];
+                v.push((
+                    file.clone(),
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                    t["newText"].as_str().unwrap().to_string(),
+                ));
+            }
+        }
+    }
+    v.sort();
+    v
+}
+
+fn s(f: &str, l: u64, c: u64) -> (String, u64, u64) {
+    (f.to_string(), l, c)
+}
+
+const KW_A: &str = "export class C { static x = 1; }\nexport const a = 1;\n";
+const KW_B: &str = "import { C } from \"./a\";\nimport * as ns from \"./a\";\nnew C();\ndelete C.x;\nlet v: typeof C | undefined;\nfunction f<T extends C>(t: T) { return t instanceof C; }\ntype K = keyof C;\nexport { f };\n";
+
+#[test]
+fn references_from_keywords_and_module_specifiers() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navkw",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", KW_A),
+            ("src/b.ts", KW_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    let class_c = refs_at(&mut c, &ub, 0, 9);
+    assert!(class_c.len() >= 7, "{class_c:?}");
+    // `new`, `typeof`, `instanceof`, `extends` and `keyof` read their operand `C`.
+    for (line, ch) in [(2, 0), (4, 7), (5, 46), (5, 13), (6, 9)] {
+        assert_eq!(refs_at(&mut c, &ub, line, ch), class_c, "at {line}:{ch}");
+    }
+    // `delete C.x` reads the property.
+    assert_eq!(
+        refs_at(&mut c, &ub, 3, 0),
+        vec![s("a.ts", 0, 24), s("b.ts", 3, 9)]
+    );
+    // `import` with one specifier reads it; `from` and a specifier read the module.
+    assert_eq!(refs_at(&mut c, &ub, 0, 0), class_c);
+    let module = vec![s("b.ts", 0, 19), s("b.ts", 1, 21)];
+    assert_eq!(refs_at(&mut c, &ub, 0, 13), module);
+    assert_eq!(refs_at(&mut c, &ub, 1, 23), module);
+    // `as` of `* as ns` reads `ns`; `export` of `export { f }` reads `f`.
+    assert_eq!(refs_at(&mut c, &ub, 1, 9), vec![s("b.ts", 1, 12)]);
+    assert_eq!(
+        refs_at(&mut c, &ub, 7, 0),
+        vec![s("b.ts", 5, 9), s("b.ts", 7, 9)]
+    );
+    // Rename on a declaration keyword renames the declared name.
+    let e = rename_edits(&mut c, &ub, 5, 0);
+    assert_eq!(e.len(), 2, "{e:?}");
+    c.shutdown();
+}
+
+const IT_A: &str = "export type T = number;\nexport namespace N { export type U = string; }\n";
+const IT_B: &str =
+    "const x: import(\"./a\").T = 0;\nconst y: import(\"./a\").N.U = \"\";\nexport { x, y };\n";
+
+#[test]
+fn references_through_import_type_qualifiers() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navit",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", IT_A),
+            ("src/b.ts", IT_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let ua = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    let t = vec![s("a.ts", 0, 12), s("b.ts", 0, 23)];
+    assert_eq!(refs_at(&mut c, &ua, 0, 12), t);
+    assert_eq!(refs_at(&mut c, &ub, 0, 23), t);
+    let n = vec![s("a.ts", 1, 17), s("b.ts", 1, 23)];
+    assert_eq!(refs_at(&mut c, &ub, 1, 23), n);
+    let u = vec![s("a.ts", 1, 33), s("b.ts", 1, 25)];
+    assert_eq!(refs_at(&mut c, &ub, 1, 25), u);
+    // The specifier of a qualified import type is a reference to the export, not the
+    // module.
+    assert_eq!(refs_at(&mut c, &ub, 0, 18), Vec::new());
+    c.shutdown();
+}
+
+const RN_A: &str = "var x = 1;\nexport { x };\nexport { x as y };\nexport const w = 2;\n";
+const RN_B: &str = "import { x, w } from \"./a\";\nx; w;\nexport { w };\n";
+
+#[test]
+fn rename_stops_at_name_keeping_specifiers() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navrn",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", RN_A),
+            ("src/b.ts", RN_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ua = env.uri("src/a.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    let e = |f: &str, l, c: u64, t: &str| (f.to_string(), l, c, t.to_string());
+    // The declaration keeps the name it is exported under.
+    assert_eq!(
+        rename_edits(&mut c, &ua, 0, 4),
+        vec![
+            e("a.ts", 0, 4, "z"),
+            e("a.ts", 1, 9, "z as x"),
+            e("a.ts", 2, 9, "z")
+        ]
+    );
+    // The export specifier renames the export and its importers.
+    assert_eq!(
+        rename_edits(&mut c, &ua, 1, 9),
+        vec![
+            e("a.ts", 1, 9, "x as z"),
+            e("b.ts", 0, 9, "z"),
+            e("b.ts", 1, 0, "z")
+        ]
+    );
+    // An import renames only the local name.
+    assert_eq!(
+        rename_edits(&mut c, &ub, 1, 0),
+        vec![e("b.ts", 0, 9, "x as z"), e("b.ts", 1, 0, "z")]
+    );
+    // A declaration exported by its own name renames the imports; a re-export keeps it.
+    assert_eq!(
+        rename_edits(&mut c, &ua, 3, 13),
+        vec![
+            e("a.ts", 3, 13, "z"),
+            e("b.ts", 0, 12, "z"),
+            e("b.ts", 1, 3, "z"),
+            e("b.ts", 2, 9, "z as w")
+        ]
+    );
+    c.shutdown();
+}
