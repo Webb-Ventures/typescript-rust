@@ -1212,10 +1212,25 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some((
             w.file.0,
             flow.0,
-            w.hash ^ ASSIGNMENT_CACHE_SALT,
+            w.hash ^ ASSIGNMENT_CACHE_SALT ^ self.reduce_salt(),
             w.declared,
             w.initial,
         ))
+    }
+
+    /// Mixed into label and assignment cache keys: the active `finally` restrictions
+    /// change which antecedents a walk follows (0 without any).
+    fn reduce_salt(&self) -> u64 {
+        let mut h = 0u64;
+        for (target, allowed) in &self.flow_reduce {
+            for f in std::iter::once(target).chain(allowed) {
+                h = (h ^ u64::from(f.0))
+                    .wrapping_mul(0x0100_0000_01b3)
+                    .rotate_left(5);
+            }
+            h = h.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        }
+        h
     }
 
     fn walk_flow_inner(&mut self, w: &Walk, start: FlowId) -> TypeId {
@@ -1358,7 +1373,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return self.narrow_switch(w, t, sl, start, end);
                 }
                 FlowKind::BranchLabel => {
-                    let key: FlowKey = (file.0, flow.0, w.hash, w.declared, w.initial);
+                    let key: FlowKey = (
+                        file.0,
+                        flow.0,
+                        w.hash ^ self.reduce_salt(),
+                        w.declared,
+                        w.initial,
+                    );
                     if let Some(t) = self.flow_cached(&key) {
                         return t;
                     }
