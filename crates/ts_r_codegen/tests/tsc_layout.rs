@@ -143,3 +143,11 @@ fn missing_operand() {
 fn clause_comments() {
     check("clause_comments", SourceKind::Ts, "js");
 }
+
+/// Comments on the lines before an element access's `[` and `]` and a parenthesized
+/// expression's `)` lead those tokens (tsc 7.0.2, elementAccessExpressionInternalComments,
+/// parenthesizedExpressionInternalComments).
+#[test]
+fn access_comments() {
+    check("access_comments", SourceKind::Ts, "js");
+}
