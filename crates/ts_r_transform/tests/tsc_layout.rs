@@ -378,3 +378,14 @@ fn cjs_removed_directive() {
 fn escaped_names() {
     check("escaped_names");
 }
+
+/// With useDefineForClassFields, an escaped parameter property's key is its decoded name.
+#[test]
+fn escaped_param_define() {
+    check("escaped_param_define");
+}
+
+#[test]
+fn escaped_param_es2022() {
+    check("escaped_param_es2022");
+}
