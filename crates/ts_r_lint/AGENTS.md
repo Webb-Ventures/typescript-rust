@@ -3140,23 +3140,31 @@ Read to understand (not ported): typescript-eslint 8.71.1
 `no-unused-private-class-members.ts`, `src/util/class-scope-analyzer/*`; ESLint 10.12.0
 `lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
 
-- `prefer-destructuring` / `@typescript-eslint/prefer-destructuring` (one implementation,
-  `ts` flag): the option matrix is `[declarator, assignment] x [array, object]`; ESLint reads
-  a per-node object with missing kinds off, typescript-eslint merges its own defaults (missing
-  kinds on), so both matrices are kept. `a?.b` is a chain, never reported. `using`
-  declarations are skipped. The ts rule skips annotated declarations unless
-  `enforceForDeclarationWithTypeAnnotation`, fixes only unannotated identifiers, and treats
-  `x[0]` on a non-iterable, non-any type as an object access (reported only with
-  `enforceForRenamedProperties`). The fix (`const {a} = o`) is dropped when it would lose a
-  comment.
-- `array-callback-return`: the callback is found by walking up through `&&`, `||`, `??`,
-  `?:` and `return` in a function that is itself called right away, to a call of a known
-  array method (argument 0), `*Array.from` (argument 1) or `Array.fromAsync` (argument 1, async
-  callbacks too). Generators are skipped. Every `return` in the callback counts, reachable or
-  not; "missing at the end" uses the CFG exit's reachability. `forEach` with `checkForEach`
-  reports value returns and expression bodies, with `wrapBraces` / `prependVoid` suggestions
-  (`allowVoid` accepts `void x`).
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
+`no-use-before-define.js`, `no-param-reassign.js`, `no-underscore-dangle.js`, `camelcase.js`,
+`no-loop-func.js`, `block-scoped-var.js`, `vars-on-top.js`, `utils/ast-utils.js`
+(`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
+`no-use-before-define.ts`.
 
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.js`,
-`lib/rules/array-callback-return.js`; typescript-eslint 8.71.1
-`packages/eslint-plugin/src/rules/prefer-destructuring.ts`.
+### Round 10, h1 second batch
+
+- **`no-invalid-this`** (604/604) and **`@typescript-eslint/no-invalid-this`** (91/91) share
+  `no_invalid_this.rs`. `is_default_this_binding` honours a `@this` JSDoc tag and
+  `capIsConstructor`; `this_binding::is_strict` is never true before ES5 (ESLint's scope
+  analysis has no strict mode there).
+- **`class-methods-use-this`** (164/164) and the ts variant (119/119) share
+  `class_methods_use_this.rs`. A field's function is named and located like a method
+  ("method 'x'", from the field to the `(`); an `accessor` field is not (ESTree has
+  `AccessorProperty`).
+- **`init-declarations`** (81/81), ts (77/77): ts reports a declarator without an
+  initializer at its name only.
+- **`no-magic-numbers`** (205/205), ts (79/79): ESTree parents skip `Paren`/`ParenType`; a
+  literal is a `TSLiteralType` when its parent is a type node or a type slot.
+- **`new-cap`** (146/146).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
+`class-methods-use-this.js`, `init-declarations.js`, `no-magic-numbers.js`, `new-cap.js`,
+`utils/ast-utils.js` (`isDefaultThisBinding`, `hasJSDocThisTag`, `getFunctionNameWithKind`,
+`getFunctionHeadLoc`, `getStaticPropertyName`); typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
+`init-declarations.ts`, `no-magic-numbers.ts`.

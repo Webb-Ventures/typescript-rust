@@ -5,6 +5,7 @@
 @typescript-eslint/ban-ts-comment 114/114
 @typescript-eslint/ban-tslint-comment 13/13
 @typescript-eslint/class-literal-property-style 53/53
+@typescript-eslint/class-methods-use-this 119/119
 @typescript-eslint/consistent-generic-constructors 81/81
 @typescript-eslint/consistent-indexed-object-style 112/112
 @typescript-eslint/consistent-return 30/30
@@ -13,9 +14,7 @@
 @typescript-eslint/consistent-type-imports 381/381
 @typescript-eslint/default-param-last 87/87
 @typescript-eslint/dot-notation 63/63
-@typescript-eslint/explicit-function-return-type 138/138
-@typescript-eslint/explicit-member-accessibility 63/63
-@typescript-eslint/explicit-module-boundary-types 154/154
+@typescript-eslint/init-declarations 77/77
 @typescript-eslint/max-params 23/23
 @typescript-eslint/method-signature-style 62/62
 @typescript-eslint/no-array-constructor 33/33
@@ -38,7 +37,9 @@
 @typescript-eslint/no-generated-empty-object-type 27/27
 @typescript-eslint/no-implied-eval 70/70
 @typescript-eslint/no-inferrable-types 99/99
+@typescript-eslint/no-invalid-this 91/91
 @typescript-eslint/no-invalid-void-type 96/96
+@typescript-eslint/no-magic-numbers 79/79
 @typescript-eslint/no-meaningless-void-operator 43/43
 @typescript-eslint/no-misused-new 19/19
 @typescript-eslint/no-misused-promises 248/248
@@ -106,7 +107,11 @@
 @typescript-eslint/unbound-method 217/218
 @typescript-eslint/unified-signatures 115/115
 @typescript-eslint/use-unknown-in-catch-callback-variable 57/57
-array-callback-return 230/230
+arrow-body-style 87/87
+block-scoped-var 106/106
+camelcase 204/204
+class-methods-use-this 164/164
+consistent-return 47/47
 constructor-super 82/82
 curly 218/218
 default-case 23/23
@@ -164,6 +169,7 @@ import/no-webpack-loader-syntax 19/19
 import/order 168/168
 import/prefer-default-export 38/38
 import/unambiguous 11/11
+init-declarations 81/81
 jsdoc/check-access 18/18
 jsdoc/check-alignment 20/20
 jsdoc/check-indentation 29/29
@@ -241,6 +247,7 @@ jsdoc/valid-types 137/137
 max-depth 28/28
 max-nested-callbacks 32/32
 max-params 59/59
+new-cap 146/146
 no-alert 42/42
 no-array-constructor 142/142
 no-async-promise-executor 11/11
@@ -284,6 +291,7 @@ no-global-assign 16/16
 no-implied-eval 66/66
 no-import-assign 116/116
 no-invalid-regexp 112/112
+no-invalid-this 604/604
 no-irregular-whitespace 280/280
 no-iterator 9/9
 no-label-var 5/5
@@ -292,6 +300,7 @@ no-lone-blocks 48/48
 no-lonely-if 17/17
 no-loop-func 96/96
 no-loss-of-precision 141/141
+no-magic-numbers 205/205
 no-misleading-character-class 189/189
 no-multi-assign 31/31
 no-multi-str 7/7

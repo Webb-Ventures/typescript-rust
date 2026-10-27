@@ -64,6 +64,10 @@ fn prologue(ast: &Ast, f: NodeId) -> &[NodeId] {
 /// True when the code at `node` is strict mode code.
 pub(crate) fn is_strict(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
     let env = cx.env();
+    // ESLint's scope analysis has no strict mode before ES5.
+    if crate::globals::normalize_ecma_version(env.ecma_version) == 3 {
+        return false;
+    }
     if env.source_type == SourceType::Module || env.implied_strict {
         return true;
     }
