@@ -157,7 +157,9 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   resolves the innermost class declaring the name. Storage is hoisted into the ES2022 `var`:
   `_C_instances` first, the alias when static code or a static private needs it, then the
   storage in member order with an `accessor`'s storage (`*_accessor_storage`, unless the TC39
-  decorator transform made it: `Tx::decorator_storages`) last. A private class evaluated in
+  decorator transform made it: `Tx::decorator_storages`; a decorated instance one with public
+  accessors is last too) last. `this` in a decorated static `accessor #x`'s descriptor
+  functions is the class alias (`Tx::static_descriptor_fns`, observed). A private class evaluated in
   a loop gets an arrow IIFE with its own storage and alias temporaries; a declaration becomes
   a `let` initialized by that IIFE. Outer `await` / `yield` in its evaluation and `super` in
   extracted private methods stay native and are refused with TSR2003. The `WeakMap`s and `WeakSet`
