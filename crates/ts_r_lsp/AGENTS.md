@@ -1122,7 +1122,7 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 2136 of 2513 tests at c22bc8b, lists the rest by cause:
+- Features (the fourslash oracle, 2175 of 2513 tests at ef3e4a7, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
   or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
@@ -1131,10 +1131,9 @@ features stay on ts-r (hover p50 0.12 ms).
   re-export to the declaration the way tsc does from some imports (`import boom from
   "./d"` where `d` re-exports a renamed default), nor from `import T = require` to the
   module's `export = T`.
-  Completions: no accessibility filtering after `.` (private members are listed),
-  auto-imports only from the project's own (non-`node_modules`) modules and never
-  `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no
-  JSDoc `@overload`.
+  Completions: auto-imports only from the project's own (non-`node_modules`) modules and
+  never `default` exports. Signature help: no `... N more ...` truncation, no JSDoc
+  `@overload`.
 - Input watching is per directory and add-only (directories stay watched after their files
   leave the program); a project inside a directory named `target` is not watched;
   `node_modules` changes (installs) need "Reload Project" or a restart.

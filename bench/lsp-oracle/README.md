@@ -42,23 +42,23 @@ every skip reason.
 
 ## Results
 
-c22bc8b (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**2136 of 2513 compared tests pass (85.0%)**; 8254 of 8950 queries agree.
+ef3e4a7 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2175 of 2513 compared tests pass (86.5%)**; 8324 of 8949 queries agree.
 3806 of the 6319 test files are skipped (3698 verify no compared feature, 160 get no answer
-from either server). Re-measured after checker round 8 with no ts-r-lsp change (2131 at
-91f3b08): the checker's changes fixed five tests. Two tests tsc timed out on
-(`completionForStringLiteralNonrelativeImport16`, `pathCompletionsTypesVersionsWildcard1`)
-were rerun with `--filter` and counted.
+from either server). Three tests tsc timed out on
+(`completionForStringLiteralNonrelativeImport16`,
+`completionsImport_exportEqualsNamespace_noDuplicate`,
+`pathCompletionsPackageJsonExportsWildcard5`) were rerun with `--filter` and counted.
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 425 | 95 | 18 | 2355 / 2515 |
-| completion | 880 | 143 | 110 | 2568 / 2781 |
-| references | 273 | 72 | 12 | 1259 / 1443 |
-| rename | 161 | 15 | 13 | 504 / 543 |
+| hover | 427 | 93 | 18 | 2358 / 2515 |
+| completion | 890 | 133 | 110 | 2581 / 2780 |
+| references | 292 | 53 | 12 | 1295 / 1443 |
+| rename | 165 | 11 | 13 | 512 / 543 |
 | definition | 140 | 26 | 26 | 489 / 526 |
-| signatureHelp | 138 | 12 | 26 | 639 / 656 |
-| highlights | 106 | 11 | 20 | 388 / 431 |
+| signatureHelp | 140 | 10 | 26 | 643 / 656 |
+| highlights | 108 | 9 | 20 | 394 / 431 |
 | typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
 Remaining failures by cause (example tests in parentheses):
@@ -79,15 +79,12 @@ Remaining failures by cause (example tests in parentheses):
   with odd names (`(typeof Foo)["\t"]`), discriminated contextual unions
   (`quickInfoUnion_discriminated`), `(alias)` on `export as namespace` and JavaScript
   `require` (`quickInfoForUMDModuleAlias`, `jsRequireQuickInfo`).
-- **Highlights (ts_r_lsp)**: members inherited across classes
-  (`documentHighlightAtInheritedProperties5`), `export { x as y }` names
-  (`documentHighlightInExport1`), JSDoc `@typedef`
-  (`jsdocTypedefTagServices`), a few keyword sets (`getOccurrencesConst04`,
-  `getOccurrencesTryCatchFinallyBroken`), JSX tag names.
-- **References and rename (ts_r_lsp)**: JSDoc `@param`, `@template` and `@import`
-  (`findAllRefsJsDocImportTag*`), import types of JavaScript exports and JSDoc typedefs
-  (`findAllRefs_importType_js*`, `findAllRefsTypedef_importType`), CommonJS `require` and
-  `exports.x =` (`findAllRefsCommonJsRequire*`, `renameJsExports0*`), JSX runtime imports
+- **Highlights (ts_r_lsp)**: JSDoc `@typedef` (`jsdocTypedefTagServices`), a few keyword
+  sets (`getOccurrencesConst04`, `getOccurrencesTryCatchFinallyBroken`,
+  `getOccurrencesModifiersNegatives1`), JSX tag names (`findReferencesJSXTagName3`).
+- **References and rename (ts_r_lsp)**: `export =` reached from `import T = require`
+  and `import * as` (`findAllRefsExportEquals`, `findAllRefsImportStarOfExportEquals`,
+  `renameImportOfExportEquals*`), JSX runtime imports
   (`jsxFindAllReferencesOnRuntimeImportWithPaths1`), quoted export names
   (`arbitraryModuleNamespaceIdentifiers_*`), going back up from a
   re-export of a renamed default (`import boom from "./d"`), constructors reached through
@@ -101,13 +98,12 @@ Remaining failures by cause (example tests in parentheses):
   (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers
   (`completionsThisPropertiesInPropertyDeclaration2`) and contextual `this`
   (`memberListOnContextualThis`), import statement snippets (`importStatementCompletions4`),
-  object literals in overloaded calls and partial generic types
-  (`completionListInObjectLiteral7`, `completionsWithOptionalPropertiesGenericPartial2`),
-  protected and private members after `.`, `import("./x").` inside JSDoc braces
-  (`javascriptModulesTypeImport`), exhaustive `case` snippets, shorthand properties in call arguments
+  partial generic types (`completionsWithOptionalPropertiesGenericPartial2`),
+  `import("./x").` inside JSDoc braces
+  (`javascriptModulesTypeImport`), shorthand properties in call arguments
   (`completionPropertyShorthandForObjectLiteral*`), keyword sets by position, auto-import
   details.
-- **Signature help (ts_r_lsp)**: JSX (`tsxSignatureHelp1`, `signatureHelpJSX`), `... N
+- **Signature help (ts_r_lsp)**: JSX callbacks (`signatureHelpJSX`), `... N
   more ...` truncation (`quickInfoCanBeTruncated`), JSDoc `@overload`
   (`quickInfoJsDocTags13`), JavaScript fallbacks (`signatureHelpJSMissingPropertyAccess`),
   contextual generic callbacks (`callback(y3: T)`), the overload order of string literal
@@ -131,3 +127,4 @@ Remaining failures by cause (example tests in parentheses):
 | 682d76b | 2026-10-27 | 2085 | 2516 | 82.9% | JSDoc completions (tag names, `@param` names, types in tag braces, `@import` specifiers and attributes); completions in template holes, object literals of generic calls (the declared parameter type with undecided type parameters at their constraints), awaited promise members, `import` statement keywords and `import("x").` members; references, rename, definition and hover on names in `{@link}`, `@see` and `@throws` paths; references, rename and highlights of string literal types; JSX intrinsic tags and attributes in references, rename, definition and hover |
 | 91f3b08 | 2026-10-27 | 2131 | 2513 | 84.8% | References from keywords and to modules (specifiers, `declare module` names, `/// <reference path>`, `module.exports`), through import-type qualifiers; rename through name-keeping specifiers (`x as y`); completions for labels, none in template text or after a regex or bigint, type parameters out of their own constraints and defaults; hover on `this` parameters and `typeof this` |
 | c22bc8b | 2026-10-27 | 2136 | 2513 | 85.0% | Re-measured after checker round 8 (no ts-r-lsp change) |
+| ef3e4a7 | 2026-10-27 | 2175 | 2513 | 86.5% | References through CommonJS `require` and `exports.x`, import types of JavaScript exports, JSDoc `@param`/`@template`/`@extends` names; signature help in JSX opening tags; completions filter protected members by the instance they are read through, `super.` lists methods, `case` lists what other clauses do not test, object literals of overloaded arrow arguments; parser's missing name after a line-ending `.` (private-name completions) |
