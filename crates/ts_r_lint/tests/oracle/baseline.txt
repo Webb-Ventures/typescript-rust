@@ -113,6 +113,7 @@ accessor-pairs 313/313
 arrow-body-style 87/87
 block-scoped-var 106/106
 camelcase 204/204
+capitalized-comments 178/178
 class-methods-use-this 164/164
 consistent-return 47/47
 constructor-super 82/82
@@ -353,6 +354,7 @@ no-undef 96/96
 no-undef-init 28/28
 no-underscore-dangle 116/116
 no-unexpected-multiline 54/54
+no-unmodified-loop-condition 40/40
 no-unneeded-ternary 45/45
 no-unreachable 70/70
 no-unsafe-finally 30/30
@@ -381,6 +383,8 @@ one-var 296/296
 prefer-arrow-callback 120/120
 prefer-const 136/136
 prefer-destructuring 103/103
+prefer-exponentiation-operator 200/200
+prefer-named-capture-group 57/57
 prefer-numeric-literals 91/91
 prefer-object-has-own 94/94
 prefer-promise-reject-errors 74/74
@@ -390,7 +394,9 @@ prefer-spread 33/33
 prefer-template 88/88
 preserve-caught-error 81/81
 radix 91/91
+require-atomic-updates 63/63
 require-await 39/39
+require-unicode-regexp 78/78
 require-yield 15/15
 sort-imports 61/61
 sort-keys 215/215

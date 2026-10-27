@@ -3226,6 +3226,26 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/one-var.js`,
 `func-name-matching.js`, `no-implicit-coercion.js`, `utils/ast-utils.js`
 (`isPropertyDescriptor`, `canTokensBeAdjacent`, `getStaticPropertyName`).
 
+### Round 10, h1 fourth batch
+
+- **`capitalized-comments`** (178/178): `\p{L}` through the crate's regex engine; inline
+  and consecutive checks look at the nearest non-whitespace text around the comment.
+- **`require-unicode-regexp`** (78/78) and **`prefer-named-capture-group`** (57/57) share
+  `prefer_regex_literals::is_global_regexp`; constant arguments come from
+  `unicorn_static::static_value` (prefer-named-capture-group ignores identifiers, as
+  ESLint evaluates without a scope there).
+- **`require-atomic-updates`** (63/63): one forward pass over the function's CFG in reverse
+  postorder; DFS back edges carry no state (ESLint's segments only merge earlier ones).
+  The CFG evaluates `x += e` as `e` then `x`, so a compound direct update is outdated
+  when `e` itself suspends. Configured globals count as variables.
+- **`no-unmodified-loop-condition`** (40/40).
+- Not done: `jsdoc/imports-as-dependencies` (no oracle data).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/capitalized-comments.js`,
+`require-unicode-regexp.js`, `prefer-named-capture-group.js`, `require-atomic-updates.js`,
+`no-unmodified-loop-condition.js`, `utils/regular-expressions.js`
+(`isValidWithUnicodeFlag`), `shared/string-utils.js`.
+
 ## typescript-eslint and core rules (round 10, h2)
 
 - **`@typescript-eslint/explicit-function-return-type`** (138/138) and
