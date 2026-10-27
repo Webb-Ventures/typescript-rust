@@ -391,7 +391,7 @@ impl Purity<'_> {
         let Some(scopes) = self.scopes else {
             return false;
         };
-        if ast.comments.is_empty() || !src.contains("__NO_SIDE_EFFECTS__") {
+        if ast.comments.is_empty() {
             return false;
         }
         let Node::Ident { .. } = *ast.node(callee) else {
