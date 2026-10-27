@@ -3457,16 +3457,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
                 let mut vals = Vec::new();
+                let mut ro = false;
                 for &m in &members {
                     let mm = self.apparent_type(m);
                     if !self.store().flags(mm).contains(TypeFlags::OBJECT) {
                         return None;
                     }
                     let r = self.resolved_members(mm);
-                    let i = r.index.iter().find(|i| i.key == k)?;
+                    // A key some member lacks is skipped; the shared ones still apply.
+                    let Some(i) = r.index.iter().find(|i| i.key == k) else {
+                        break;
+                    };
                     vals.push(i.value);
-                    readonly |= i.readonly;
+                    ro |= i.readonly;
                 }
+                if vals.len() < members.len() {
+                    continue;
+                }
+                readonly |= ro;
                 types.push(self.union(&vals));
             }
             if types.is_empty() {
