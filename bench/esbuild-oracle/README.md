@@ -29,8 +29,8 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-v1 build7 at dafb1fa (2026-10-27, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**1,046 of 1,066 compared cases pass (98.1%)**; 4 of the 1070 cases are skipped. Of the 20 failures, 14 are
+v1 build10 at 862695d (2026-10-27, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**1,047 of 1,067 compared cases pass (98.1%)**; 3 of the 1070 cases are skipped. Of the 20 failures, 14 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 6 are oracle
 artifacts; no gaps are left. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
@@ -39,7 +39,8 @@ relative paths (`require("./src/" + x)`), names minified CSS local classes like 
 use count, letters by frequency), escapes non-ASCII CSS unless `--charset=utf8`, lowers
 nesting without `:is()`, and has `--pure:N`, `--charset`, `--jsx-side-effects` and
 `NODE_PATH`; an `exports` array stops at its first valid target and bare imports match
-directory-relative `browser` keys. The runner now compares cases with no output path
+directory-relative `browser` keys. Since dafb1fa (1,046 of 1,066): ts-r-build reads entry
+code from stdin (`<stdin>`), so `ErrorMessageCrashStdinIssue2913` is compared and passes. The runner now compares cases with no output path
 (stdout), seeded `Math.random()`, `Defines` with call flags, JSX `SideEffects`/`Fragment`,
 `AbsNodePaths`, `UnsupportedCSSFeatures` (`inline-style`, `is-pseudo-class`),
 `UseDefineForClassFields` and shared Go variables, so 38 more cases are compared.
@@ -48,7 +49,7 @@ directory-relative `browser` keys. The runner now compares cases with no output 
 | --- | ---: | ---: | ---: |
 | bundler_css_test.go | 62 | 0 | 0 |
 | bundler_dce_test.go | 121 | 0 | 0 |
-| bundler_default_test.go | 300 | 1 | 2 |
+| bundler_default_test.go | 301 | 1 | 1 |
 | bundler_glob_test.go | 10 | 0 | 0 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
@@ -107,10 +108,9 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
   minifier picks for a function in a shared chunk (`f` vs `l`), which shows when it is
   printed.
 
-### Skipped (4)
+### Skipped (3)
 
-A Go plugin (`WarningsInsideNodeModules`), code on stdin (`ErrorMessageCrashStdinIssue2913`;
-ts-r-build reads no code from stdin) and Windows paths (2).
+A Go plugin (`WarningsInsideNodeModules`) and Windows paths (2).
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -132,3 +132,4 @@ ts-r-build reads no code from stdin) and Windows paths (2).
 | v1 build5 at af89821: `--keep-names`; runner maps `KeepNames` | 1070 | 964 | 938 | 26 | 106 | 97.3% |
 | v1 build6 at c0449fb: `--mangle-props` / `--mangle-quoted` / `--reserve-props`, `--inject`, path externals, CSS nesting lowering, `calc()` folding, more CSS module names, `define` in enums and JSX factories; runner maps those options | 1070 | 1028 | 1002 | 26 | 42 | 97.5% |
 | v1 build7 at dafb1fa: glob `require`/`import()`, esbuild's minified CSS names, ASCII CSS output, nesting without `:is()`, `--pure`, `--charset`, `NODE_PATH`, `exports` arrays and `browser` keys as esbuild; runner compares stdout, seeded `Math.random()` and more options | 1070 | 1066 | 1046 | 20 | 4 | 98.1% |
+| v1 build10 at 862695d: entry code from stdin; data-loader imports as ES modules, unused function/class expression names dropped (sizes, not counts) | 1070 | 1067 | 1047 | 20 | 3 | 98.1% |

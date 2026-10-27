@@ -42,12 +42,13 @@ Full runs use `--jobs 1`: two playgrounds at once got Chrome killed at its
 
 ## Results
 
-dafb1fa (2026-10-27, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
+862695d (2026-10-27, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
 `--jobs 1`, `--modules` naming a shared install):
-**512 of 512 compared tests pass (100.0%)**; 97 tests are skipped, unchanged since c0449fb. Of the 97: 74 are build-only
+**515 of 515 compared tests pass (100.0%)**; 94 tests are skipped. Of the 94: 74 are build-only
 (`runIf(false)` in serve), 8 assert on the dev server's terminal output, 4 use Vite's server
-object, 4 are `test.skip` in the spec and 7 failed against Vite in the run; none of them is
-a ts-r-dev gap. Since
+object, 4 are `test.skip` in the spec and 4 failed against Vite in the run; none of them is
+a ts-r-dev gap. Since dafb1fa (512 of 512): css-codesplit's first three tests passed against
+Vite in this run (a Vite-side flake, below) and pass on ts-r-dev. Since
 b5d9371 (509 of 509, 100 skipped): the shim has `text=` selectors and
 `page.frame(name).content()`, so html's "invalid > should reload when fixed" and
 proxy-bypass's `async-proxy-bypass` are compared and pass, and `wasm > should work when
@@ -62,7 +63,7 @@ What made them pass in ts-r-dev: `--config`, `new Worker(new URL(...))` URLs wit
 `worker_file&type=...`, classic workers, `build.assetsInlineLimit` as a function,
 `optimizeDeps.exclude`, an encoded base in the server URL, `srcset` URLs with spaces, `t=` on
 asset URLs after a hot update and `html.cspNonce` (`crates/ts_r_hmr/AGENTS.md`).
-Earlier runs: 512 of 512 at c0449fb; 509 of 509 at b5d9371; 322 of 322 at 2bd07f1; 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322
+Earlier runs: 512 of 512 at dafb1fa and c0449fb; 509 of 509 at b5d9371; 322 of 322 at 2bd07f1; 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322
 at e07eafa; 202 of 322 at 58a940e; 101 of 254 at 8c14f29, with an older harness that loaded
 fewer specs.
 
@@ -74,7 +75,7 @@ fewer specs.
 | build-old | 3 | 3 | 0 |
 | chunk-importmap | 10 | 10 | 2 |
 | csp | 9 | 9 | 0 |
-| css-codesplit | 1 | 1 | 13 |
+| css-codesplit | 4 | 4 | 10 |
 | css-codesplit-cjs | 0 | 0 | 3 |
 | css-lightningcss | 9 | 9 | 4 |
 | css-lightningcss-root | 1 | 1 | 0 |
