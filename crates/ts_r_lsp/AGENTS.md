@@ -631,6 +631,19 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   default a` / `export = a` stand for the specifier's immediate target. From the `default`
   keyword: the keyword, the export's imports and their uses; an anonymous default export's
   keyword is its declaration.
+- **CommonJS** (tsc 7's answers on `findAllRefsCommonJsRequire*`, `renameJsExports0*`):
+  `const { a } = require("m")` reads the export `a` (and, for `module.exports = { a }`, the
+  variable `a`), searched both ways; `const A = require("m")` is found from what
+  `module.exports` holds (also by its constructor), not the other way. An `exports.a`
+  property is never found through `m.a` or `{ a }`, only at its declaration. An export
+  assigned a class or function (`module.exports.D = class D {}`) is that class.
+- **Import types**: `import("m").A` of a CommonJS module reads its `exports.A` or its
+  JSDoc `@typedef A`; `import("m")` as a type is a reference to the module's `export =`
+  (not in a rename). From a module specifier whose module has `export = N`, also the
+  references of `N` and the `export` keyword.
+- **JSDoc**: names in `@extends`/`@implements` and `this.x`'s `@type` count (their types
+  hang off no node: `locate::names_with_tag_types`); a `@template T` name is not listed,
+  only the uses of `T`.
 - **Shorthands and private names**: references (not rename) from `{ x }` or `const { x } =
   o` cover the variable and the property; `#x` resolves lexically to the innermost class
   declaring it; computed literal keys (`["a"]`, `` [`a`] ``) and string enum member names
@@ -644,7 +657,8 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   by constructors (arrows in between allowed, not other functions or methods) of classes
   extending one of them. `implements` does not count.
 - **Doc comment paths** (`doc_links.rs`): each name of a `{@link A.B#c}` (also
-  `{@linkcode}`, `{@linkplain}`), `@see A` / `@see {A}` and `@throws {A}` path counts as a
+  `{@linkcode}`, `{@linkplain}`), `@see A` / `@see {A}` and `@throws {A}` path, and each
+  `@param x` name (not `x.y`, not an `@overload`'s: those up to its `@returns`), counts as a
   reference, and references, rename, definition and hover may start on one. After a `#` a
   `.` ends the path. The first name resolves at the documented node (in a function, its
   body's scope; for a property typed by a function type, that type's parameters), else as a
@@ -1106,8 +1120,8 @@ features stay on ts-r (hover p50 0.12 ms).
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); references do not go back up from a
   re-export to the declaration the way tsc does from some imports (`import boom from
-  "./d"` where `d` re-exports a renamed default), nor through JSDoc `@param`/`@import`,
-  `require` or import types of JavaScript exports.
+  "./d"` where `d` re-exports a renamed default), nor from `import T = require` to the
+  module's `export = T`.
   Completions: no accessibility filtering after `.` (private members are listed),
   auto-imports only from the project's own (non-`node_modules`) modules and never
   `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no

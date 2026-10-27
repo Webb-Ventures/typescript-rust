@@ -13,7 +13,7 @@
 
 use ts_r_ast::{Modifiers, Node, NodeId};
 use ts_r_binder::SymbolFlags;
-use ts_r_checker::{Checker, Loc};
+use ts_r_checker::{Checker, Ck, Loc};
 use ts_r_diagnostics::FileId;
 use ts_r_types::SymId;
 
@@ -252,4 +252,101 @@ pub fn default_keyword_of(c: &Checker<'_>, d: Loc) -> Option<(u32, u32)> {
     let i = head.find("default")?;
     let s = sp.start + i as u32;
     Some((s, s + 7))
+}
+
+/// What a JavaScript variable bound by `require` stands for (tsc treats it as an import):
+/// the declaration of what `const x = require("m")` returns (the module's `module.exports`
+/// value, when that is a declared class, function or object), or the export `a` that
+/// `const { a } = require("m")` reads. `destructured` picks the second form, else the first.
+pub fn require_target(ck: &mut Ck<'_, '_>, s: SymId, destructured: bool) -> Option<SymId> {
+    let c = ck.c;
+    let d = c.value_decl(s)?;
+    if !c.file(d.file).is_js() {
+        return None;
+    }
+    let ast = c.ast(d.file);
+    let is_require = |e: NodeId| {
+        matches!(*ast.node(e), Node::Call { callee, .. }
+            if matches!(ast.node(callee), Node::Ident { name } if ast.atom(*name) == "require"))
+    };
+    let p = match c.node(d) {
+        Node::VarDeclarator { .. } | Node::BindingProperty { .. } => d,
+        _ => c.parent(d)?,
+    };
+    match *c.node(p) {
+        Node::VarDeclarator {
+            name,
+            init: Some(i),
+            ..
+        } if !destructured && matches!(ast.node(name), Node::Ident { .. }) && is_require(i) => {
+            let t = ck.check_expr(Loc::new(d.file, i));
+            super::nav::type_symbol(ck, t).filter(|&t| t != s)
+        }
+        Node::BindingProperty {
+            key, value: None, ..
+        } if destructured => {
+            let pattern = c.parent(p)?;
+            let holder = c.parent(pattern)?;
+            let Node::VarDeclarator { init: Some(i), .. } = *c.node(holder) else {
+                return None;
+            };
+            if !is_require(i) {
+                return None;
+            }
+            let name = super::locate::name_text(ast, key)?.to_string();
+            super::locate::binding_property(ck, p, &name)
+        }
+        _ => None,
+    }
+}
+
+/// Whether `s` is a CommonJS export property (`exports.a = ..`, `module.exports.a = ..`).
+/// tsc finds no reference to one through a `require`d module (`m.a`, `const { a }`).
+pub fn is_commonjs_export(c: &Checker<'_>, s: SymId) -> bool {
+    let Some(d) = c.value_decl(s) else {
+        return false;
+    };
+    if !c.file(d.file).is_js() {
+        return false;
+    }
+    let ast = c.ast(d.file);
+    let member = match c.node(d) {
+        Node::Member { .. } => d.node,
+        _ => match c.parent(d) {
+            Some(p) => p.node,
+            None => return false,
+        },
+    };
+    let Node::Member { obj, .. } = *ast.node(member) else {
+        return false;
+    };
+    let ident =
+        |n: NodeId, t: &str| matches!(ast.node(n), Node::Ident { name } if ast.atom(*name) == t);
+    ident(obj, "exports")
+        || matches!(*ast.node(obj), Node::Member { obj: o, prop, .. } if ident(o, "module") && ident(prop, "exports"))
+}
+
+/// The class or function a CommonJS export stands for: `module.exports.D = class D {}`
+/// (the export `D`), `module.exports = class C {}` (the module's `export=`).
+pub fn commonjs_value(c: &Checker<'_>, s: SymId) -> Option<SymId> {
+    let d = c.value_decl(s)?;
+    if !c.file(d.file).is_js() {
+        return None;
+    }
+    let assign = match c.node(d) {
+        Node::Assign { .. } => d,
+        _ => c.parent(d)?,
+    };
+    let Node::Assign { right, .. } = *c.node(assign) else {
+        return None;
+    };
+    let ast = c.ast(d.file);
+    let mut v = right;
+    while let Node::Paren { expr } = *ast.node(v) {
+        v = expr;
+    }
+    match ast.node(v) {
+        Node::ClassExpr { .. } | Node::FunctionExpr { .. } => c.sym_of_decl(Loc::new(d.file, v)),
+        _ => None,
+    }
 }

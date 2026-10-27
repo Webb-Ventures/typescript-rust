@@ -1,7 +1,8 @@
 //! From a byte offset to a node, and from a name to the symbols it means.
 
 use ts_r_ast::{AssignOp, Ast, HeritageKind, Node, NodeId};
-use ts_r_binder::{decl_name_node, meaning};
+use ts_r_binder::program::ModuleTarget;
+use ts_r_binder::{SymbolFlags, decl_name_node, meaning};
 use ts_r_checker::{Ck, Loc};
 use ts_r_types::{SymId, TypeId};
 
@@ -437,7 +438,26 @@ fn import_type_head(ck: &Ck<'_, '_>, l: Loc) -> Option<SymId> {
     let target = c.link.module_target(l.file, ri as u32);
     let &first = c.link.module_symbols(target).first()?;
     let m = c.sym_ref(first);
-    c.export_of(m, name)
+    c.export_of(m, name).or_else(|| {
+        // A CommonJS JavaScript module: its `exports.x` (also beside a `module.exports =`)
+        // and its JSDoc `@typedef`s and `@callback`s.
+        let ModuleTarget::File(f) = target else {
+            return None;
+        };
+        let sf = c.file(f);
+        if !sf.is_commonjs_module() {
+            return None;
+        }
+        let b = &sf.bound;
+        if let Some(x) = b.lookup_str(&sf.ast, b.symbol(b.file_symbol).exports, name) {
+            return Some(c.sym(f, x));
+        }
+        let x = b.lookup_str(&sf.ast, b.scopes.first()?.locals, name)?;
+        let s = c.sym(f, x);
+        c.sym_flags(s)
+            .intersects(SymbolFlags::TYPE_ALIAS)
+            .then_some(s)
+    })
 }
 
 /// The symbol of an entity name (`A` or `A.B`), for qualified names.
@@ -716,16 +736,34 @@ pub fn is_expression_name(ck: &Ck<'_, '_>, l: Loc) -> bool {
 
 /// Every name node in a file, in source order.
 pub fn names_in(ast: &Ast) -> Vec<NodeId> {
-    struct V(Vec<NodeId>);
-    impl ts_r_ast::visit::Visitor for V {
-        fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
-            if is_name(ast, id) {
-                self.0.push(id);
-            }
-            ts_r_ast::visit::Walk::Continue
+    let mut v = NameV(Vec::new());
+    ts_r_ast::visit::walk(ast, ast.root, &mut v);
+    v.0
+}
+
+struct NameV(Vec<NodeId>);
+impl ts_r_ast::visit::Visitor for NameV {
+    fn enter(&mut self, ast: &Ast, id: NodeId) -> ts_r_ast::visit::Walk {
+        if is_name(ast, id) {
+            self.0.push(id);
+        }
+        ts_r_ast::visit::Walk::Continue
+    }
+}
+
+/// [`names_in`] plus the names in JSDoc tag types that hang off no node of the tree
+/// (`@extends`, `@implements`, `@type` of `this.x = ..`), in no particular order.
+pub fn names_with_tag_types(ast: &Ast) -> Vec<NodeId> {
+    let mut v = NameV(names_in(ast));
+    let n = v.0.len();
+    for t in &ast.jsdoc_tags {
+        if let Some(ty) = t.ty {
+            ts_r_ast::visit::walk(ast, ty, &mut v);
         }
     }
-    let mut v = V(Vec::new());
-    ts_r_ast::visit::walk(ast, ast.root, &mut v);
+    if v.0.len() > n {
+        v.0.sort_unstable_by_key(|id| id.index());
+        v.0.dedup();
+    }
     v.0
 }

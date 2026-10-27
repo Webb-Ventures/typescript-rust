@@ -3710,3 +3710,126 @@ fn module_references_past_comments() {
     assert_eq!(refs_at(&mut c, &ub, 2, 17), Vec::new());
     c.shutdown();
 }
+
+const JS_CONFIG: &str = r#"{"compilerOptions": {"allowJs": true, "module": "nodenext", "target": "es2022", "noEmit": true}, "include": ["src"]}"#;
+
+#[test]
+fn references_through_commonjs_require() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navcjs",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            ("src/a.js", "function f() { }\nmodule.exports = { f };\n"),
+            ("src/b.js", "const { f } = require('./a');\nf;\n"),
+            (
+                "src/c.js",
+                "class A {\n  constructor() { }\n}\nmodule.exports = A;\n",
+            ),
+            ("src/d.js", "const A = require('./c');\nnew A;\nA.g;\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/a.js", "src/b.js", "src/c.js", "src/d.js"] {
+        env.open(&mut c, f);
+    }
+    let (ub, uc, ud) = (
+        env.uri("src/b.js"),
+        env.uri("src/c.js"),
+        env.uri("src/d.js"),
+    );
+    let _ = diags_for(&mut c, &ud, |_| true);
+    // A destructured `require` reads the module's export (and the variable it holds).
+    assert_eq!(
+        refs_at(&mut c, &ub, 1, 0),
+        vec![
+            s("a.js", 0, 9),
+            s("a.js", 1, 19),
+            s("b.js", 0, 8),
+            s("b.js", 1, 0)
+        ]
+    );
+    // `const A = require(..)` is found from the class, not the class from it.
+    assert_eq!(
+        refs_at(&mut c, &uc, 0, 6),
+        vec![
+            s("c.js", 0, 6),
+            s("c.js", 3, 17),
+            s("d.js", 0, 6),
+            s("d.js", 1, 4),
+            s("d.js", 2, 0)
+        ]
+    );
+    assert_eq!(refs_at(&mut c, &ud, 1, 4).len(), 3);
+    assert_eq!(
+        refs_at(&mut c, &uc, 1, 2),
+        vec![s("c.js", 1, 2), s("d.js", 1, 4)]
+    );
+    c.shutdown();
+}
+
+#[test]
+fn references_in_jsdoc_extends_tags() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navext",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            (
+                "src/a.js",
+                "export class C {}\n/** @extends C */\nexport class P extends C {}\n/** @augments {C} */\nexport class Q extends C {}\n",
+            ),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.js");
+    let ua = env.uri("src/a.js");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let all = vec![
+        s("a.js", 0, 13),
+        s("a.js", 1, 13),
+        s("a.js", 2, 23),
+        s("a.js", 3, 15),
+        s("a.js", 4, 23),
+    ];
+    assert_eq!(refs_at(&mut c, &ua, 0, 13), all);
+    assert_eq!(refs_at(&mut c, &ua, 1, 13), all);
+    c.shutdown();
+}
+
+#[test]
+fn references_in_jsdoc_param_and_template_tags() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navparam",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            (
+                "src/a.js",
+                "/**\n * @overload\n * @param {number} x\n * @returns {number}\n *\n * @param {unknown} x\n * @param {Object} o\n * @param {string} o.x\n */\nexport function f(x, o) { return x; }\n/**\n * @template T\n * @return {T}\n */\nexport function g() {}\n",
+            ),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.js");
+    let ua = env.uri("src/a.js");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    // The function's own `@param x`, not the overload's.
+    let x = vec![s("a.js", 5, 20), s("a.js", 9, 18), s("a.js", 9, 33)];
+    assert_eq!(refs_at(&mut c, &ua, 9, 18), x);
+    assert_eq!(refs_at(&mut c, &ua, 5, 20), x);
+    // `o.x` is not a reference to `o`.
+    assert_eq!(
+        refs_at(&mut c, &ua, 9, 21),
+        vec![s("a.js", 6, 19), s("a.js", 9, 21)]
+    );
+    // A use of a `@template` type lists no `@template` name.
+    assert_eq!(refs_at(&mut c, &ua, 12, 12), vec![s("a.js", 12, 12)]);
+    c.shutdown();
+}

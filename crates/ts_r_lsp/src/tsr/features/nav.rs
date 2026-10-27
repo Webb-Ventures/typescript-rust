@@ -3,7 +3,7 @@
 use super::keywords::{self, Doc, Special};
 use super::locate::{
     Meaning, ident_at, key_text, literal_key, literal_key_span, literal_keys_in, meaning_at,
-    name_text, names_in, node_at,
+    name_text, names_with_tag_types, node_at,
 };
 use super::rename_alias::Decor;
 use super::{Ctx, LinesCache, LspLines, decl_span};
@@ -943,6 +943,13 @@ impl Target {
             return Some(Target::of_alias(ck, l, name, start, rename));
         }
         let s = c.resolve_alias(start).unwrap_or(start);
+        // `const { a } = require("m")`: also the module's export `a` (and, for a shorthand
+        // `module.exports = { a }`, the variable it holds).
+        let required = (!rename)
+            .then(|| super::aliases::require_target(ck, s, true))
+            .flatten()
+            .map(|t| c.resolve_alias(t).unwrap_or(t));
+        let also = also.or(required);
         let own = c.decls(s);
         let meaning = if rename {
             ts_r_binder::meaning::ALL
@@ -955,6 +962,21 @@ impl Target {
             let a = c.resolve_alias(a).unwrap_or(a);
             decls.extend(c.decls(a));
             syms.push(a);
+        }
+        if let Some(v) = super::aliases::commonjs_value(c, s) {
+            decls.extend(c.decls(v));
+            syms.push(v);
+        }
+        if let Some(r) = required {
+            for d in c.decls(r) {
+                if let Node::ShorthandProp { name, .. } = *c.node(d)
+                    && let Some(v) =
+                        c.resolve_ident(Loc::new(d.file, name), ts_r_binder::meaning::VALUE)
+                {
+                    decls.extend(c.decls(v));
+                    syms.push(v);
+                }
+            }
         }
         // A contextually typed literal's property is one with the property it implements.
         if let Some(p) = m.contextual
@@ -1020,9 +1042,20 @@ impl Target {
             return super::aliases::is_alias(c, s)
                 && super::aliases::chain(c, s).contains(&self.syms[0]);
         }
-        let s = c.resolve_alias(s).unwrap_or(s);
+        let mut s = c.resolve_alias(s).unwrap_or(s);
         if self.syms.contains(&s) {
             return true;
+        }
+        if let Some(t) = super::aliases::commonjs_value(c, s)
+            && self.syms.contains(&t)
+        {
+            return true;
+        }
+        if let Some(t) = super::aliases::require_target(ck, s, false) {
+            s = c.resolve_alias(t).unwrap_or(t);
+            if self.syms.contains(&s) {
+                return true;
+            }
         }
         if !self.decls.is_empty() && c.decls(s).iter().any(|d| self.decls.contains(d)) {
             return true;
@@ -1106,7 +1139,7 @@ fn references_with(
                 Scope::Project => project_files(cx).collect(),
             };
             let qualified = !super::module_refs::exports_head(c, cx.file, offset);
-            return super::module_refs::module_references(c, &files, m, qualified)
+            let mut out: Vec<Ref> = super::module_refs::module_references(c, &files, m, qualified)
                 .into_iter()
                 .map(|(file, start, end)| Ref {
                     file,
@@ -1117,6 +1150,35 @@ fn references_with(
                     shorthand: None,
                 })
                 .collect();
+            // A module whose `export = N` names a declaration: also the references of `N`
+            // and the `export` keyword.
+            let export_equals = c
+                .link
+                .module_symbols(m)
+                .first()
+                .and_then(|&s| c.export_of(c.sym_ref(s), "export="))
+                .and_then(|e| c.decls(e).into_iter().next());
+            if scope == Scope::Project
+                && let Some(d) = export_equals
+                && let Node::ExportAssignment { expr } = *c.node(d)
+                && matches!(c.ast(d.file).node(expr), Node::Ident { .. })
+                && let Some(mut target) = Target::at(ck, Loc::new(d.file, expr), false)
+            {
+                target.meaning = ts_r_binder::meaning::ALL;
+                out.extend(scan_target(cx, ck, &mut target, scope));
+                let start = c.ast(d.file).span(d.node).start;
+                out.push(Ref {
+                    file: d.file,
+                    start,
+                    end: start + 6,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                });
+                out.sort_by_key(|r| (r.file.0, r.start));
+                out.dedup_by_key(|r| (r.file.0, r.start));
+            }
+            return out;
         }
     }
     if keyword_name.is_none()
@@ -1159,6 +1221,26 @@ fn references_with(
     };
     collect_alias_names(cx, &mut target, scope, rename);
     let mut out = scan_target(cx, ck, &mut target, scope);
+    // `import("m")` as a type names the module's `export =`.
+    if !rename && target.meaning & ts_r_binder::meaning::TYPE != 0 {
+        let files: Vec<FileId> = match scope {
+            Scope::File => vec![cx.file],
+            Scope::Project => project_files(cx).collect(),
+        };
+        for (file, start, end, s) in super::module_refs::export_equals_types(c, &files) {
+            if target.matches(ck, s) {
+                out.push(Ref {
+                    file,
+                    start,
+                    end,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                });
+            }
+        }
+        out.sort_by_key(|r| (r.file.0, r.start));
+    }
     // On a class's name, `this` in its static methods and accessors is the class too.
     let on_class_name = c.parent(Loc::new(cx.file, n)).is_some_and(|p| {
         matches!(c.node(p), Node::ClassDecl { name: Some(x), .. } | Node::ClassExpr { name: Some(x), .. } if *x == n)
@@ -1220,7 +1302,7 @@ fn scan_target(
     for f in files {
         let ast = c.ast(f);
         let first = out.len();
-        for id in names_in(ast) {
+        for id in names_with_tag_types(ast) {
             if !name_text(ast, id).is_some_and(|t| target.has_name(t)) {
                 continue;
             }
@@ -1242,10 +1324,36 @@ fn scan_target(
             {
                 primary = Some(t);
             }
-            let p = primary.is_some_and(|s| target.matches(ck, s))
-                || contextual.is_some_and(|s| target.matches(ck, s));
-            let v = shorthand.is_some_and(|s| target.matches(ck, s));
+            // A CommonJS export is not read through a `require`d module (`m.a`, `{ a }`)
+            // except at its own declaration.
+            let access = c.parent(l).is_some_and(|p| {
+                matches!(
+                    c.node(p),
+                    Node::Member { .. } | Node::BindingProperty { .. }
+                )
+            });
+            let mut hit = |s: SymId| {
+                target.matches(ck, s)
+                    && (!access
+                        || !super::aliases::is_commonjs_export(c, s)
+                        || c.decls(s).iter().any(|d| {
+                            d.file == f && {
+                                let sp = c.ast(f).span(d.node);
+                                sp.start <= ast.span(id).start && ast.span(id).end <= sp.end
+                            }
+                        }))
+            };
+            let p = primary.is_some_and(&mut hit) || contextual.is_some_and(&mut hit);
+            let v = shorthand.is_some_and(&mut hit);
             if !p && !v {
+                continue;
+            }
+            // tsc 7 lists no `@template T` name, only the uses of `T`.
+            if is_decl
+                && c.parent(l).is_some_and(|tp| {
+                    matches!(c.node(tp), Node::TypeParam { .. }) && ast.is_jsdoc(tp.node)
+                })
+            {
                 continue;
             }
             let side = match (shorthand.is_some(), p, v) {
@@ -1459,6 +1567,30 @@ fn default_keyword_references(
     };
     collect_alias_names(cx, &mut target, scope, rename);
     let mut out = scan_target(cx, ck, &mut target, scope);
+    let mut imports = Vec::new();
+    // `import("m")` as a type names the module's `export =`.
+    if !rename && target.meaning & ts_r_binder::meaning::TYPE != 0 {
+        let files: Vec<FileId> = match scope {
+            Scope::File => vec![cx.file],
+            Scope::Project => project_files(cx).collect(),
+        };
+        for (file, start, end, s) in super::module_refs::export_equals_types(c, &files) {
+            if target.matches(ck, s) {
+                imports.push(Ref {
+                    file,
+                    start,
+                    end,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                });
+            }
+        }
+    }
+    if !imports.is_empty() {
+        out.extend(imports);
+        out.sort_by_key(|r| (r.file.0, r.start));
+    }
     out.push(Ref {
         file: cx.file,
         start: keyword.0,
