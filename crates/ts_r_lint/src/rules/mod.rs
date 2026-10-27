@@ -12,7 +12,9 @@ mod arrow_body_style;
 mod block_scoped_var;
 mod camelcase;
 mod class_methods_use_this;
+mod complexity;
 mod consistent_return;
+mod consistent_this;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -22,6 +24,7 @@ mod dot_notation;
 mod eqeqeq;
 mod for_direction;
 mod func_names;
+mod func_style;
 mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
@@ -148,9 +151,13 @@ mod jsdoc_ts_prefer_function_type;
 mod jsdoc_type_formatting;
 mod jsdoc_valid_types;
 mod logical_assignment_operators;
+mod max_classes_per_file;
 mod max_depth;
+mod max_lines;
+mod max_lines_per_function;
 mod max_nested_callbacks;
 mod max_params;
+mod max_statements;
 mod new_cap;
 mod no_alert;
 mod no_array_constructor;
@@ -189,11 +196,13 @@ mod no_ex_assign;
 mod no_extend_native;
 mod no_extra_bind;
 mod no_extra_boolean_cast;
+mod no_extra_label;
 mod no_fallthrough;
 mod no_func_assign;
 mod no_global_assign;
 mod no_implied_eval;
 mod no_import_assign;
+mod no_inline_comments;
 mod no_invalid_regexp;
 mod no_invalid_this;
 mod no_irregular_whitespace;
@@ -241,11 +250,13 @@ mod no_shadow;
 mod no_shadow_restricted_names;
 mod no_sparse_arrays;
 mod no_template_curly_in_string;
+mod no_ternary;
 mod no_this_before_super;
 mod no_throw_literal;
 mod no_unassigned_vars;
 mod no_undef;
 mod no_undef_init;
+mod no_undefined;
 mod no_underscore_dangle;
 mod no_unexpected_multiline;
 mod no_unneeded_ternary;
@@ -271,6 +282,7 @@ mod no_useless_rename;
 mod no_useless_return;
 mod no_var;
 mod no_void;
+mod no_warning_comments;
 mod no_with;
 mod object_shorthand;
 mod operator_assignment;
@@ -817,9 +829,11 @@ pub(crate) mod prelude {
 pub static ALL: &[&RuleDef] = &[
     &arrow_body_style::RULE,
     &consistent_return::RULE,
+    &consistent_this::RULE,
     &block_scoped_var::RULE,
     &camelcase::RULE,
     &class_methods_use_this::RULE,
+    &complexity::RULE,
     &constructor_super::RULE,
     &curly::RULE,
     &default_case::RULE,
@@ -829,6 +843,7 @@ pub static ALL: &[&RuleDef] = &[
     &eqeqeq::RULE,
     &for_direction::RULE,
     &func_names::RULE,
+    &func_style::RULE,
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
@@ -917,8 +932,11 @@ pub static ALL: &[&RuleDef] = &[
     &import_named::RULE,
     &import_no_unresolved::RULE,
     &max_depth::RULE,
+    &max_lines::RULE,
+    &max_lines_per_function::RULE,
     &max_nested_callbacks::RULE,
     &max_params::RULE,
+    &max_statements::RULE,
     &new_cap::RULE,
     &no_alert::RULE,
     &no_array_constructor::RULE,
@@ -958,11 +976,13 @@ pub static ALL: &[&RuleDef] = &[
     &no_extend_native::RULE,
     &no_extra_bind::RULE,
     &no_extra_boolean_cast::RULE,
+    &no_extra_label::RULE,
     &no_fallthrough::RULE,
     &no_func_assign::RULE,
     &no_global_assign::RULE,
     &no_implied_eval::RULE,
     &no_import_assign::RULE,
+    &no_inline_comments::RULE,
     &no_invalid_regexp::RULE,
     &no_invalid_this::RULE,
     &no_irregular_whitespace::RULE,
@@ -1009,11 +1029,13 @@ pub static ALL: &[&RuleDef] = &[
     &no_shadow_restricted_names::RULE,
     &no_sparse_arrays::RULE,
     &no_template_curly_in_string::RULE,
+    &no_ternary::RULE,
     &no_this_before_super::RULE,
     &no_throw_literal::RULE,
     &no_unassigned_vars::RULE,
     &no_undef::RULE,
     &no_undef_init::RULE,
+    &no_undefined::RULE,
     &no_underscore_dangle::RULE,
     &no_unexpected_multiline::RULE,
     &no_unneeded_ternary::RULE,
@@ -1039,6 +1061,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_useless_return::RULE,
     &no_var::RULE,
     &no_void::RULE,
+    &no_warning_comments::RULE,
     &no_with::RULE,
     &object_shorthand::RULE,
     &operator_assignment::RULE,
@@ -1228,6 +1251,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_type_formatting::RULE,
     &jsdoc_valid_types::RULE,
     &logical_assignment_operators::RULE,
+    &max_classes_per_file::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
