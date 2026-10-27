@@ -303,6 +303,8 @@ mod preserve_caught_error;
 mod radix;
 mod require_await;
 mod require_yield;
+mod sort_imports;
+mod sort_keys;
 mod symbol_description;
 mod this_binding;
 mod ts_adjacent_overload_signatures;
@@ -1084,6 +1086,8 @@ pub static ALL: &[&RuleDef] = &[
     &radix::RULE,
     &require_await::RULE,
     &require_yield::RULE,
+    &sort_imports::RULE,
+    &sort_keys::RULE,
     &ts_array_type::RULE,
     &ts_adjacent_overload_signatures::RULE,
     &ts_await_thenable::RULE,

@@ -3166,6 +3166,17 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.
   duplicates unless they could not be merged: namespace with named, `export *` with anything
   but `export *` or a side effect, and (both `type`) default with named.
   `allowSeparateTypeImports` compares only type with type and value with value.
+- `sort-imports`: one running "previous declaration" over every import in the file (top level
+  and `declare module` blocks), reset by a blank line with `allowSeparatedGroups`. A syntax
+  missing from `memberSyntaxSortOrder` ranks -1, as `indexOf` does. The member fix keeps the
+  text between members in place and is dropped when a comment sits between the braces.
+- `sort-keys`: per object literal (not assignment patterns); a spread or (with
+  `ignoreComputedKeys`) a computed key restarts the order. Names follow
+  `getStaticPropertyName`, plus `[ident]` as `ident`. Natural order ranks `-`, punctuation,
+  digits, upper case, lower case (ASCII), and compares digit runs that don't start with `0`
+  by value. A blank line counts only in whitespace outside comments.
 
 Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
-`lib/rules/no-duplicate-imports.js`; node-ignore's README for the `group` semantics.
+`lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`.
+The `group` matching follows gitignore as node-ignore applies it, and natural order follows
+the behaviour of the `natural-compare` package; neither package's source was read.
