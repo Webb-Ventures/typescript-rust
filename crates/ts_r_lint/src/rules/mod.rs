@@ -22,6 +22,7 @@ mod default_param_last;
 mod dot_notation;
 mod eqeqeq;
 mod for_direction;
+mod func_name_matching;
 mod func_names;
 mod func_style;
 mod getter_return;
@@ -856,6 +857,7 @@ pub static ALL: &[&RuleDef] = &[
     &dot_notation::RULE,
     &eqeqeq::RULE,
     &for_direction::RULE,
+    &func_name_matching::RULE,
     &func_names::RULE,
     &func_style::RULE,
     &getter_return::RULE,
