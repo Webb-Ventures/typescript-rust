@@ -1266,10 +1266,15 @@ impl Printer<'_> {
                 && !last_hole
                 && !self.is_synthetic(last)
                 && self.has_newline_between(self.span(last).end, close_pos));
+        // An object's `;` separator (a syntax error, `{ a; }`) counts as a comma (observed).
         let trailing_comma = orig
             && !last_hole
             && !self.is_synthetic(last)
-            && self.has_comma_between(self.span(last).end, close_pos);
+            && (self.has_comma_between(self.span(last).end, close_pos)
+                || (object
+                    && self
+                        .token_between(self.span(last).end, close_pos + 1, ";")
+                        .is_some()));
         // Binding patterns stay on one line and add no indentation (a class in a computed
         // key keeps the outer level); literals indent their elements.
         let indented = !pattern || nl_open;

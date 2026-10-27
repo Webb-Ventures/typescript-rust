@@ -119,7 +119,8 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
     `* /*3*/ as`, `export /*2*/ default`). Comments on the lines before an element
     access's `[` or `]`, or a parenthesized expression's `)`, lead that token (`x\n// c\n/*d*/ [`).
     A synthesized block whose hinted range is a source block (a namespace IIFE's body) keeps
-    the comments before that block's `}`.
+    the comments before that block's `}`. A `;` after an object literal's last member (a
+    recovered separator, `{ a; }`) is a trailing comma (`{ a, }`).
   - Comments after erased code on its last line are dropped with it (`declare function
     f(); // c`). A synthesized statement whose source-map start is not past the next original
     statement of its list stands in for an original one: the comments before that start lead

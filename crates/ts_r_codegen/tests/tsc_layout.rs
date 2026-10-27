@@ -151,3 +151,10 @@ fn clause_comments() {
 fn access_comments() {
     check("access_comments", SourceKind::Ts, "js");
 }
+
+/// A `;` between object literal members is recovered as a `,`, the last one too
+/// (tsc 7.0.2, incompleteObjectLiteral1, objectLiteralWithSemicolons5).
+#[test]
+fn object_semicolons() {
+    check_recovered("object_semicolons", SourceKind::Ts, "js");
+}
