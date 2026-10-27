@@ -31,7 +31,7 @@ enum Order {
 }
 
 #[derive(Debug, Default)]
-struct GroupedAccessorPairs {
+pub(crate) struct GroupedAccessorPairs {
     order: Order,
     ts_types: bool,
 }
@@ -54,13 +54,13 @@ impl FromOptions for GroupedAccessorPairs {
 }
 
 /// An accessor's key, as the rule compares them.
-enum Key<'a> {
+pub(crate) enum Key<'a> {
     Name(Cow<'a, str>),
     /// Compared by tokens: a computed key's expression, or a private name.
     Tokens(NodeId),
 }
 
-fn same_key(ast: &Ast, src: &str, a: &Key<'_>, b: &Key<'_>) -> bool {
+pub(crate) fn same_key(ast: &Ast, src: &str, a: &Key<'_>, b: &Key<'_>) -> bool {
     match (a, b) {
         (Key::Name(x), Key::Name(y)) => x == y,
         (Key::Tokens(x), Key::Tokens(y)) => match (ast.node(*x), ast.node(*y)) {
@@ -72,12 +72,12 @@ fn same_key(ast: &Ast, src: &str, a: &Key<'_>, b: &Key<'_>) -> bool {
     }
 }
 
-fn key_of<'a>(ast: &'a Ast, src: &'a str, key: NodeId) -> Key<'a> {
+pub(crate) fn key_of<'a>(ast: &'a Ast, src: &'a str, key: NodeId) -> Key<'a> {
     match *ast.node(key) {
         Node::PrivateName { .. } => Key::Tokens(key),
         Node::ComputedKey { expr } => match static_value_string(ast, src, expr) {
             Some(n) => Key::Name(n),
-            None => Key::Tokens(expr),
+            None => Key::Tokens(skip_parens(ast, expr)),
         },
         _ => match key_name(ast, src, key) {
             Some(n) => Key::Name(n),
@@ -134,10 +134,10 @@ impl GroupedAccessorPairs {
             };
             let (former, latter) = if get < set { (get, set) } else { (set, get) };
             let (former, latter) = (members[former], members[latter]);
-            let names = |cx: &Ctx<'_, '_>| (self.name(cx, former), self.name(cx, latter));
+            let names = |cx: &Ctx<'_, '_>| (Self::name(cx, former), Self::name(cx, latter));
             if get.abs_diff(set) > 1 {
                 let (f, l) = names(cx);
-                let span = self.head(cx, latter);
+                let span = Self::head(cx, latter);
                 cx.report(
                     span,
                     format!("Accessor pair {f} and {l} should be grouped."),
@@ -147,7 +147,7 @@ impl GroupedAccessorPairs {
                 || (self.order == Order::SetFirst && get < set)
             {
                 let (f, l) = names(cx);
-                let span = self.head(cx, latter);
+                let span = Self::head(cx, latter);
                 cx.report(span, format!("Expected {l} to be before {f}."))
                     .id("invalidOrder");
             }
@@ -155,7 +155,7 @@ impl GroupedAccessorPairs {
     }
 
     /// `getFunctionNameWithKind` of an accessor member.
-    fn name(&self, cx: &Ctx<'_, '_>, member: NodeId) -> String {
+    pub(crate) fn name(cx: &Ctx<'_, '_>, member: NodeId) -> String {
         let ast = cx.ast();
         match *ast.node(member) {
             Node::MethodDef { value, .. } => {
@@ -178,7 +178,7 @@ impl GroupedAccessorPairs {
     }
 
     /// `getFunctionHeadLoc`: from the member's start to its parameters' `(`.
-    fn head(&self, cx: &Ctx<'_, '_>, member: NodeId) -> Span {
+    pub(crate) fn head(cx: &Ctx<'_, '_>, member: NodeId) -> Span {
         let ast = cx.ast();
         match *ast.node(member) {
             Node::MethodDef { value, .. } => {
@@ -197,7 +197,7 @@ impl GroupedAccessorPairs {
     }
 }
 
-fn method_accessor(
+pub(crate) fn method_accessor(
     ast: &Ast,
     m: NodeId,
     want_static: Option<bool>,

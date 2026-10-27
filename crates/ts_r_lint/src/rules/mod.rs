@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
-mod array_callback_return;
+mod accessor_pairs;
 mod arrow_body_style;
 mod block_scoped_var;
 mod camelcase;
@@ -838,6 +838,7 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
+    &accessor_pairs::RULE,
     &arrow_body_style::RULE,
     &consistent_return::RULE,
     &consistent_this::RULE,
