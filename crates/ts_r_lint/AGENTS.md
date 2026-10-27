@@ -153,10 +153,9 @@ Files:
 
 - 718 rules (134 core ESLint, 95 typescript-eslint, 74 eslint-plugin-jsdoc, 369
   eslint-plugin-unicorn, 46 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  77,170 / 77,196 cases. The non-type-aware cases are 70,160 / 70,184 and the type-aware
-  cases 7,010 / 7,012 (2026-10-27); the 2 type-aware failures are `unbound-method` on an
-  `Array` subclass's statics and `prefer-optional-chain` on `(undefined && foo ?? {})`,
-  which needs TS5076 as a grammar error (design record 0006). The 24 others: import/no-unresolved 77/80 (3 cases need the
+  77,171 / 77,196 cases. The non-type-aware cases are 70,160 / 70,184 and the type-aware
+  cases 7,011 / 7,012 (2026-10-27); the type-aware failure is `unbound-method` on an
+  `Array` subclass's statics (design record 0006). The 24 others: import/no-unresolved 77/80 (3 cases need the
   uppercase absolute path of the machine that recorded them), import/default 22/23 (its
   `FooES7` case needs espree's ecmaVersion parse error) and import/no-unused-modules 111/131
   (the 20 cases depend on state upstream's tests leave behind from earlier cases; linting

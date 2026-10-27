@@ -78,7 +78,7 @@
 @typescript-eslint/prefer-literal-enum-member 33/33
 @typescript-eslint/prefer-namespace-keyword 8/8
 @typescript-eslint/prefer-nullish-coalescing 620/620
-@typescript-eslint/prefer-optional-chain 1116/1117
+@typescript-eslint/prefer-optional-chain 1117/1117
 @typescript-eslint/prefer-promise-reject-errors 162/162
 @typescript-eslint/prefer-reduce-type-parameter 31/31
 @typescript-eslint/prefer-regexp-exec 37/37
