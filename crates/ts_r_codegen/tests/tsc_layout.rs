@@ -136,3 +136,10 @@ fn jsx_recovery() {
 fn missing_operand() {
     check_recovered("missing_operand", SourceKind::Ts, "js");
 }
+
+/// Comments between the tokens of import and export clauses stay where they are written
+/// (tsc 7.0.2, importExportInternalComments).
+#[test]
+fn clause_comments() {
+    check("clause_comments", SourceKind::Ts, "js");
+}
