@@ -134,6 +134,7 @@ mod jsdoc_ts_method_signature_style;
 mod jsdoc_ts_no_empty_object_type;
 mod jsdoc_ts_no_unnecessary_template_expression;
 mod jsdoc_ts_prefer_function_type;
+mod jsdoc_type_formatting;
 mod jsdoc_valid_types;
 mod max_depth;
 mod max_nested_callbacks;
@@ -1135,6 +1136,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_ts_no_empty_object_type::RULE,
     &jsdoc_ts_no_unnecessary_template_expression::RULE,
     &jsdoc_ts_prefer_function_type::RULE,
+    &jsdoc_type_formatting::RULE,
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,

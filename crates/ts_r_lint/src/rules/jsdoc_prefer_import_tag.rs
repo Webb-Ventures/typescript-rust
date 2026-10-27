@@ -261,6 +261,7 @@ fn subtree_string(t: &TypeTree, id: Id) -> String {
     TypeTree {
         nodes: t.nodes.clone(),
         root: id,
+        meta: Vec::new(),
     }
     .stringify()
 }
