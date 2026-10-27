@@ -67,7 +67,9 @@ Files, by layer:
   nested `node_modules`) is `NotNameable::NotPortable` (TS2883), never a deep import; an
   anonymous class type with private or protected members is `PrivateMember` (TS4094, every
   member), and with `TypeNodeCx::report_unnameable` a recursive type whose only name is
-  another module's unexported alias is `CannotBeNamed` (TS4023), as is a unique-symbol
+  another module's unexported alias is `CannotBeNamed` (TS4023), as is a class or
+  interface another module declares without exporting it (`unnameable_declared`; not
+  inlined), and a unique-symbol
   property key another module declares that the file cannot name (named by the first name
   of its chain: `Foo` for `Foo.sym`); a mapped type's property
   keyed by a unique symbol is `NonSerializableProperty` (TS4118).

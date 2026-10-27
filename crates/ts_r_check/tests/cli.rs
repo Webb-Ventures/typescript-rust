@@ -16,7 +16,11 @@ ts_r_testing::cap_memory!();
 const PLACEHOLDER: &str = "${FIXTURE}";
 
 /// Fixtures whose program is checked (no option error stops it), so they need the libs.
-const NEEDS_LIBS: &[&str] = &["config-parse-errors-sorted", "js-type-syntax"];
+const NEEDS_LIBS: &[&str] = &[
+    "config-parse-errors-sorted",
+    "js-type-syntax",
+    "js-unexported-type-cannot-be-named",
+];
 
 fn fixtures() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");

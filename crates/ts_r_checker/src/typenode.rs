@@ -2051,7 +2051,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     None => match unportable_since(before, cx) {
                         Some(e) => Err(e),
-                        None => self.structure_node(t, cx),
+                        None => match self
+                            .unnameable_declared(sym, cx)
+                            .filter(|_| cx.report_unnameable)
+                        {
+                            Some(e) => Err(e),
+                            None => self.structure_node(t, cx),
+                        },
                     },
                 }
             }
@@ -2097,7 +2103,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     None => match unportable_since(before, cx) {
                         Some(e) => Err(e),
-                        None => self.structure_node(t, cx),
+                        None => match self
+                            .unnameable_declared(sym, cx)
+                            .filter(|_| cx.report_unnameable)
+                        {
+                            Some(e) => Err(e),
+                            None => self.structure_node(t, cx),
+                        },
                     },
                 }
             }
@@ -2311,13 +2323,27 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// module (observed: TS4023 rather than `/*elided*/ any`).
     fn unnameable_alias(&self, t: TypeId, cx: &TypeNodeCx) -> Option<NotNameable> {
         let info = self.store().alias_of(t)?;
-        let d = self.c.first_decl(info.sym)?;
+        self.unnameable_declared(info.sym, cx)
+    }
+
+    /// The error for a type declared by `sym`, unexported, in another module: TS4023 on a
+    /// variable rather than its structure inlined (observed).
+    fn unnameable_declared(&self, sym: SymId, cx: &TypeNodeCx) -> Option<NotNameable> {
+        let d = self.c.first_decl(sym)?;
         if d.file == cx.enclosing.file || !self.c.file(d.file).bound.is_module {
+            return None;
+        }
+        let module = self.c.sym(d.file, self.c.bound(d.file).file_symbol);
+        let exported = self.c.exports_of(module).into_iter().any(|(_, e)| {
+            let r = self.c.resolve_alias(e).unwrap_or(e);
+            r == sym || self.c.first_decl(r) == Some(d)
+        });
+        if exported {
             return None;
         }
         let path = &self.c.file(d.file).path;
         Some(NotNameable::CannotBeNamed {
-            name: self.c.sym_name(info.sym).to_owned(),
+            name: self.c.sym_name(sym).to_owned(),
             module: format!("\"{}\"", crate::print::strip_ts_ext(path)),
         })
     }
