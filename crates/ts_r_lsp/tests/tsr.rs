@@ -3833,3 +3833,89 @@ fn references_in_jsdoc_param_and_template_tags() {
     assert_eq!(refs_at(&mut c, &ua, 12, 12), vec![s("a.js", 12, 12)]);
     c.shutdown();
 }
+
+#[test]
+fn signature_help_in_jsx_opening_tags() {
+    if !libs_present() {
+        return;
+    }
+    let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
+    let text = "declare namespace JSX {\n  interface Element {}\n}\n\
+                declare function Foo(props: { size: number }): JSX.Element;\n\
+                const a = <Foo size={1} />;\n\
+                const b = <Foo ";
+    let env = Env::new(
+        "sigjsx",
+        &[("tsconfig.json", tsconfig), ("src/c.tsx", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.tsx");
+    let u = env.uri("src/c.tsx");
+    let label = |s: &Value| s["signatures"][0]["label"].as_str().map(str::to_string);
+    let want = Some("Foo(props: { size: number; }): JSX.Element".to_string());
+    // After the name, in a closed tag and at the end of one left open.
+    let s = result(&mut c, "textDocument/signatureHelp", at(&u, 4, 15));
+    assert_eq!(label(&s), want, "{s}");
+    let s = result(&mut c, "textDocument/signatureHelp", at(&u, 5, 15));
+    assert_eq!(label(&s), want, "{s}");
+    // Not on the tag name.
+    let s = result(&mut c, "textDocument/signatureHelp", at(&u, 4, 12));
+    assert!(s.is_null(), "{s}");
+    c.shutdown();
+}
+
+/// Switch cases less the values other clauses test, `case|`, protected members through the
+/// base, `super.` methods and an object literal an overloaded arrow argument returns.
+#[test]
+fn completion_in_switch_cases_protected_members_and_overloaded_arrows() {
+    if !libs_present() {
+        return;
+    }
+    let text = "declare const n: 1 | 2;\n\
+                switch (n) { case 1: break; case  }\n\
+                switch (n) { case }\n\
+                enum E { A, B }\n\
+                declare const e: E;\n\
+                switch (e) { case E.A: break; case E. }\n\
+                class B { protected p = 1; m() {} }\n\
+                class D extends B { f(b: B, d: D) {\n\
+                b.;\n\
+                d.;\n\
+                super.;\n\
+                } }\n\
+                type Foo = { foo: boolean };\n\
+                declare function f(shape: Foo): any;\n\
+                declare function f(shape: () => Foo): any;\n\
+                f(() => ({  }));\n";
+    let env = Env::new(
+        "complete-switch-protected",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let u = env.uri("src/c.ts");
+    let mut labels = |line, ch| -> Vec<String> {
+        let r = result(&mut c, "textDocument/completion", at(&u, line, ch));
+        let mut l: Vec<String> = r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i["sortText"].as_str().unwrap_or("") < "15")
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        l.sort();
+        l
+    };
+    let l = labels(1, 33);
+    assert!(l.contains(&"2".into()) && !l.contains(&"1".into()), "{l:?}");
+    let l = labels(2, 17);
+    assert!(l.contains(&"1".into()) && l.contains(&"2".into()), "{l:?}");
+    assert_eq!(labels(5, 37), ["B"]);
+    assert_eq!(labels(8, 2), ["m"]);
+    assert_eq!(labels(9, 2), ["f", "m", "p"]);
+    assert_eq!(labels(10, 6), ["m"]);
+    assert_eq!(labels(15, 11), ["foo"]);
+    c.shutdown();
+}

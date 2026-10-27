@@ -371,7 +371,9 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   `3n`, never enum members) come from the expected type: a property's or tuple element's
   expected type in such a literal; in an expression, the contextual type (every signature's
   parameter at a call argument, the declared type after `=`, the other side of `===`, the
-  switched value after `case`). Strings take the quote of the file's first import.
+  switched value after `case` or on the `case|` keyword, less the values other clauses
+  test; `case E.|` drops those enum members too). Strings take the quote of the file's
+  first import.
 - Definition locations (`definitions.rs`): where a new name is being written (`var |`,
   `class |`, `function f(|`, a declaration's `<|`, `catch (|`, an enum body after `{`/`,`,
   `[|` of an array pattern, `import |`, `{ a as | }`) nothing is offered; a constructor's
@@ -392,7 +394,12 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   (`10| + 1` gets one).
 - Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
   a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
-  dot; after `?.` private names are not offered. A value whose type is a promise also
+  dot; after `?.` private names are not offered. Outside its class a protected instance
+  member is read only through an instance of the deriving class (`this`, `super` or a
+  `D` inside `D`); `super.|` in instance code lists methods only. An object literal that
+  is an arrow argument's body with no contextual members (an unresolved overload) takes
+  the union of the return types of the parameter's call signatures across the overloads.
+  A value whose type is a promise also
   lists the awaited type's members, each inserting `(await x).m` and replacing from the
   value's start (inside async functions and at the top of a module). `import("./m").|` in
   a type lists the module's exports (types, and namespaces holding them).
@@ -702,6 +709,8 @@ module docs give them in full:
   elements take `name_i`, duplicates `_1`, `_2`. Labels print in quick-info mode, string
   literal annotations as written, `?` parameters without the added `undefined`.
 - A private or protected constructor used outside its class gets no help.
+- JSX: after an opening tag's name (an identifier) and before its `>`/`/>`, or anywhere
+  after the name of a tag left open, the tag's call signatures, argument 0 active.
 
 ## Sound mode (M6, `tsr/project/sound.rs`)
 

@@ -541,9 +541,24 @@ pub fn member_visible(ck: &mut Ck<'_, '_>, s: SymId, name: &str, at: Loc) -> boo
         let Some(owner_sym) = c.sym_of_decl(owner) else {
             return false;
         };
+        // Outside the owner, a protected member is read through an instance of the
+        // deriving class (`this`, `super` or a `D` in `D`), not of the base.
+        let through = match c.ast(at.file).node(at.node) {
+            _ if m.contains(Modifiers::STATIC) => None,
+            Node::Super {} | Node::This {} | Node::ImportType { .. } => None,
+            _ => {
+                let t = ck.check_expr(at);
+                Some(ck.class_symbol_of_instance(t))
+            }
+        };
         let derives = classes.iter().any(|&k| {
-            c.sym_of_decl(Loc::new(at.file, k))
-                .is_some_and(|ks| derives_from(ck, ks, owner_sym, 0))
+            c.sym_of_decl(Loc::new(at.file, k)).is_some_and(|ks| {
+                derives_from(ck, ks, owner_sym, 0)
+                    && match through {
+                        None => true,
+                        Some(o) => o.is_some_and(|o| derives_from(ck, o, ks, 0)),
+                    }
+            })
         });
         if !derives {
             return false;

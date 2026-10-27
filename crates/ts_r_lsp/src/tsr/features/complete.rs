@@ -15,7 +15,7 @@ use ts_r_checker::{Checker, Ck, Loc};
 use ts_r_config::{CompilerOptions, ModuleResolution, RealFs};
 use ts_r_diagnostics::FileId;
 use ts_r_resolver::{ModuleFormat, Resolver, ResolverOptions};
-use ts_r_types::{SymId, TypeFlags, TypeId};
+use ts_r_types::{SymId, TypeFlags, TypeId, TypeKind};
 
 /// Sort groups (tsserver's: locals before globals before auto-imports).
 const SORT_LOCAL: &str = "11";
@@ -917,8 +917,28 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 d >= 2 && b[d - 2] == b'?'
             };
             let in_type = qualified && qualified_in_type(c, Loc::new(cx.file, obj));
+            // `case E.|`: not the enum members other clauses already test.
+            let parents = c.file(cx.file).parents();
+            let used = match parents
+                .parent(obj)
+                .and_then(|m| Some((m, parents.parent(m)?)))
+            {
+                Some((m, k)) if matches!(*c.ast(cx.file).node(k), Node::SwitchCase { test: Some(t), .. } if t == m) => {
+                    match parents.parent(k) {
+                        Some(sw) => super::expected::case_values(ck, cx.file, sw, k),
+                        None => Vec::new(),
+                    }
+                }
+                _ => Vec::new(),
+            };
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
                 if in_type && !type_referable(c, s) {
+                    continue;
+                }
+                if !used.is_empty()
+                    && c.sym_flags(s).intersects(SymbolFlags::ENUM_MEMBER)
+                    && used.contains(&ck.enum_member_type(s, false))
+                {
                     continue;
                 }
                 let plain = is_identifier_name(&name) || is_private_name(&name);
@@ -1795,8 +1815,12 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
         .collect();
     // Private and protected members only where they may be read
     // (`tsc: tsc/internal/ls/completions.go`, the property-access validity filter).
+    // `super.` in instance code reads methods only.
+    let on_super = matches!(c.ast(obj.file).node(obj.node), Node::Super {})
+        && ck.signatures_of(a, SigKind::Construct).is_empty();
     let mut out: Vec<(String, SymId)> = named
         .into_iter()
+        .filter(|(_, s)| !on_super || c.sym_flags(*s).intersects(SymbolFlags::METHOD))
         .filter(|(n, s)| super::class_items::member_visible(ck, *s, n, obj))
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1929,6 +1953,36 @@ fn object_items(
         }
         at = p;
         ct = ck.contextual_type(Loc::new(file, p));
+    }
+    // `f(() => ({ | }))` of an overloaded `f` that did not resolve: what the arrow argument
+    // returns in each candidate signature.
+    let no_props = match ct {
+        Some(t) => object_props(ck, t).is_empty(),
+        None => true,
+    };
+    if no_props
+        && let Some(arrow) = parents.parent(at)
+        && matches!(*ast.node(arrow), Node::Arrow { body, .. } if body == at)
+        && let Some(call) = parents.parent(arrow)
+        && let Node::Call { callee, args, .. } = *ast.node(call)
+        && let Some(i) = ast.list(args).iter().position(|&a| a == arrow)
+        && let Some(p) =
+            super::expected::argument_type(ck, Loc::new(file, callee), SigKind::Call, i)
+    {
+        let members = match ck.store().kind(p) {
+            TypeKind::Union { list, .. } => ck.store().list_items(list).to_vec(),
+            _ => vec![p],
+        };
+        let mut rets: Vec<TypeId> = Vec::new();
+        for m in members {
+            let a = ck.apparent_type(m);
+            for s in ck.signatures_of(a, SigKind::Call) {
+                rets.push(ck.return_type_of(s));
+            }
+        }
+        if !rets.is_empty() {
+            ct = Some(ck.union(&rets));
+        }
     }
     // A literal in a generic call also offers what the declared parameter allows beyond
     // what was inferred from it (`generic_context.rs`).

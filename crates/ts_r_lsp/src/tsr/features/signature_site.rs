@@ -47,6 +47,8 @@ pub enum SiteKind {
     /// A function, arrow, method (its function expression) or parenthesized expression
     /// whose contextual type gives the signature.
     Contextual { node: NodeId },
+    /// The attributes of a JSX opening tag (`<C |`): the tag's signatures.
+    Jsx { opening: NodeId, name: NodeId },
 }
 
 pub struct Site {
@@ -64,8 +66,9 @@ pub fn sites_at(ck: &mut Ck<'_, '_>, file: FileId, offset: u32) -> Vec<Site> {
     let call = call_site(ck, file, offset);
     let ctx = contextual_site(ck, file, offset);
     let targs = type_args_site(ck, file, offset);
+    let jsx = jsx_site(ck, file, offset);
     // A call before a type argument list with the same opener: the call's.
-    let mut out: Vec<Site> = [call, ctx, targs].into_iter().flatten().collect();
+    let mut out: Vec<Site> = [call, ctx, targs, jsx].into_iter().flatten().collect();
     out.sort_by(|a, b| b.open.cmp(&a.open));
     out
 }
@@ -216,6 +219,53 @@ fn call_site_from(
                     open,
                 });
             }
+        }
+        cur = parents.parent(n);
+    }
+    None
+}
+
+/// The JSX opening tag whose attributes hold `offset` (after the tag name, before its `>`
+/// or `/>`, or anywhere after the name in a tag left open).
+fn jsx_site(ck: &mut Ck<'_, '_>, file: FileId, offset: u32) -> Option<Site> {
+    let c = ck.c;
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let parents = c.file(file).parents();
+    let before = token_before(ast, text, offset).and_then(|(t, _)| node_at(ast, t));
+    let opening = [node_at(ast, offset), before]
+        .into_iter()
+        .flatten()
+        .find_map(|n| jsx_opening_above(ast, parents, n))?;
+    let Node::JsxOpening {
+        name, self_closing, ..
+    } = *ast.node(opening)
+    else {
+        return None;
+    };
+    let sp = ast.span(opening);
+    let closed = text.as_bytes().get((sp.end as usize).checked_sub(1)?) == Some(&b'>');
+    let end = match (closed, self_closing) {
+        (false, _) => text.len() as u32 + 1,
+        (true, false) => sp.end - 1,
+        (true, true) => sp.end.saturating_sub(2),
+    };
+    let name_end = ast.span(name).end;
+    (name_end <= offset && offset < end).then_some(Site {
+        kind: SiteKind::Jsx { opening, name },
+        index: 0,
+        count: 1,
+        open: name_end,
+    })
+}
+
+/// The JSX opening tag holding `n` (within a few levels).
+fn jsx_opening_above(ast: &Ast, parents: &ts_r_ast::ParentMap, n: NodeId) -> Option<NodeId> {
+    let mut cur = Some(n);
+    for _ in 0..64 {
+        let n = cur?;
+        if matches!(ast.node(n), Node::JsxOpening { .. }) {
+            return Some(n);
         }
         cur = parents.parent(n);
     }
