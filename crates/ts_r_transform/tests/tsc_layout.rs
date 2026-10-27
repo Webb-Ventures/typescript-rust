@@ -360,3 +360,9 @@ fn cjs_jsx_create_element() {
 fn async_arrow_parens() {
     check("async_arrow_parens");
 }
+
+/// A rest element's and a catch variable's initializers (errors) are written as tsc does.
+#[test]
+fn error_initializers() {
+    check("error_initializers");
+}

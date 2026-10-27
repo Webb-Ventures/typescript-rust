@@ -372,7 +372,8 @@ Files:
     statement level: `'export' expected` at `default`, then the declaration.
   - Deferred (checker) grammar errors: TS1009 for `extends C, {`, TS1029 for
     `@dec default class {}`, TS1246/TS1247 for an interface / type literal property
-    initializer (at the initializer), TS1197 at a catch variable's initializer, TS1113 for
+    initializer (at the initializer), TS1197 at a catch variable's initializer (kept as an
+    `AssignPattern` param for emit), TS1113 for
     the first extra `default` of a switch, TS18016 for a private name as an object literal
     or type member key outside a class (not for `a.#x`, which the checker handles).
   - `await`/`yield` in type position are type names, even where they are operators.
@@ -391,8 +392,8 @@ Files:
     (`is_type_member_start`; a modifier keyword is one only before a name), so `var x: T`
     and `a = 1` are TS1131 and end the list where a statement can start.
   - A token that cannot start an array binding element is TS1181 and ends the pattern.
-  - A rest binding element's initializer (`[...x = a]`) is parsed and dropped, with a
-    deferred TS1186 at the `=`; `{ ...a: b }` binds `b`, with a deferred TS2566 at it. A
+  - A rest binding element's initializer (`[...x = a]`) is kept as `Rest { arg:
+    AssignPattern }` for emit, with a deferred TS1186 at the `=`; `{ ...a: b }` binds `b`, with a deferred TS2566 at it. A
     rest element that more elements follow is a deferred TS2462 at its target (at the
     `...x` spread in an assignment pattern; tsc: `grammarchecks.go`, checkGrammarBindingElement).
   - `export type` is a stray `export` (TS1128) unless `{`, `*` or a name on the same line
