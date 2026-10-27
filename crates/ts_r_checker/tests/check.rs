@@ -1177,3 +1177,36 @@ class F { #q = 1; }
         ]
     );
 }
+
+/// A function with no `return` at all needs one unless its type is `any`, exactly
+/// `undefined` or includes `void` (`undefined | number` is not exempt), and a member
+/// access with a missing name (`undefined.`) still checks its object (expected from tsc
+/// 7.0.2 and its test harness, which reports semantic errors through syntax errors).
+#[test]
+fn no_return_needs_exempt_type_and_missing_member_name_checks_object() {
+    let Some(out) = check(
+        STRICT,
+        "function f1(): undefined | number { }\n\
+         function f2(): undefined { }\n\
+         function f3(): void | number { }\n\
+         function f4(): any { }\n\
+         function f5(): number | undefined { if (Math.random()) throw 1; }\n",
+    ) else {
+        return;
+    };
+    let msg = "A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.";
+    assert_eq!(
+        out,
+        vec![format!("1:16 TS2355: {msg}"), format!("5:16 TS2355: {msg}")]
+    );
+    let Some(out) = check_through("a.ts", STRICT, "function f(): void { undefined. }\n") else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "1:22 TS18050: The value 'undefined' cannot be used here.",
+            "1:33 TS1003: Identifier expected."
+        ]
+    );
+}

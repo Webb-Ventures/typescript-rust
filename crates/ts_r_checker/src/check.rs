@@ -2754,7 +2754,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let implicit_returns =
             self.c.opts.no_implicit_returns && !self.exempt_from_implicit_returns(target);
         if returns.is_empty() {
-            if unknown || !accepts_undefined || implicit_returns {
+            // No `return` at all: only `any`, exactly `undefined` and types including
+            // `void` are exempt (`undefined | number` is not; tsc: checker.go,
+            // checkAllCodePathsInNonVoidFunctionReturnOrThrow).
+            if !self.exempt_from_implicit_returns(target) {
                 self.error_span(rl.file, rspan, dg::A_FUNCTION_WHOSE_DECLARED_TYPE_IS_NEITHER_UNDEFINED_VOID_NOR_ANY_MUST_RETURN_A_V_2355, &[]);
             }
         } else if self.c.opts.strict_null_checks && !accepts_undefined {
