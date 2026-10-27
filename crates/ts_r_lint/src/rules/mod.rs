@@ -267,6 +267,7 @@ mod no_undef_init;
 mod no_undefined;
 mod no_underscore_dangle;
 mod no_unexpected_multiline;
+mod no_unmodified_loop_condition;
 mod no_unneeded_ternary;
 mod no_unreachable;
 mod no_unreachable_loop;
@@ -1065,6 +1066,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_undefined::RULE,
     &no_underscore_dangle::RULE,
     &no_unexpected_multiline::RULE,
+    &no_unmodified_loop_condition::RULE,
     &no_unneeded_ternary::RULE,
     &no_unreachable::RULE,
     &no_unreachable_loop::RULE,
