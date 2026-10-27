@@ -42,17 +42,16 @@ every skip reason.
 
 ## Results
 
-ef3e4a7 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**2175 of 2513 compared tests pass (86.5%)**; 8324 of 8949 queries agree.
+49b91eb (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2179 of 2513 compared tests pass (86.7%)**; 8331 of 8949 queries agree.
 3806 of the 6319 test files are skipped (3698 verify no compared feature, 160 get no answer
-from either server). Three tests tsc timed out on
-(`completionForStringLiteralNonrelativeImport16`,
-`completionsImport_exportEqualsNamespace_noDuplicate`,
-`pathCompletionsPackageJsonExportsWildcard5`) were rerun with `--filter` and counted.
+from either server). Two tests tsc timed out on
+(`completionForStringLiteralNonrelativeImport16`, `pathCompletionsPackageJsonExportsWildcard7`)
+were rerun with `--filter` and counted.
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 427 | 93 | 18 | 2358 / 2515 |
+| hover | 431 | 89 | 18 | 2365 / 2515 |
 | completion | 890 | 133 | 110 | 2581 / 2780 |
 | references | 292 | 53 | 12 | 1295 / 1443 |
 | rename | 165 | 11 | 13 | 512 / 543 |
@@ -128,3 +127,4 @@ Remaining failures by cause (example tests in parentheses):
 | 91f3b08 | 2026-10-27 | 2131 | 2513 | 84.8% | References from keywords and to modules (specifiers, `declare module` names, `/// <reference path>`, `module.exports`), through import-type qualifiers; rename through name-keeping specifiers (`x as y`); completions for labels, none in template text or after a regex or bigint, type parameters out of their own constraints and defaults; hover on `this` parameters and `typeof this` |
 | c22bc8b | 2026-10-27 | 2136 | 2513 | 85.0% | Re-measured after checker round 8 (no ts-r-lsp change) |
 | ef3e4a7 | 2026-10-27 | 2175 | 2513 | 86.5% | References through CommonJS `require` and `exports.x`, import types of JavaScript exports, JSDoc `@param`/`@template`/`@extends` names; signature help in JSX opening tags; completions filter protected members by the instance they are read through, `super.` lists methods, `case` lists what other clauses do not test, object literals of overloaded arrow arguments; parser's missing name after a line-ending `.` (private-name completions) |
+| 49b91eb | 2026-10-27 | 2179 | 2513 | 86.7% | Re-measured after checker round 9 (no ts-r-lsp change) |
