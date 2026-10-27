@@ -1213,10 +1213,22 @@ impl<'a> Doc<'a> {
 
     fn templates_in(&mut self, raw: &[RawTag], names: &[&str], nested: &[bool]) -> Vec<NodeId> {
         // `@template` tags anywhere in a comment with a typedef belong to its first typedef,
-        // except those among a typedef's or callback's own tags.
+        // except those among a typedef's or callback's own tags. Each `@overload` scans
+        // and builds them again, so the scan and each copy are charged against the budget.
         let mut out = Vec::new();
+        let Some(first) = raw.first() else {
+            return out;
+        };
+        if !self.spend_desugar_work(raw.len(), Span::new(first.at, first.end)) {
+            return out;
+        }
         for (k, &r) in raw.iter().enumerate() {
             if names[k] == "template" && !nested.get(k).copied().unwrap_or(false) {
+                if !self
+                    .spend_desugar_work(r.end.saturating_sub(r.at) as usize, Span::new(r.at, r.end))
+                {
+                    break;
+                }
                 out.extend(self.template(r));
             }
         }
@@ -3033,6 +3045,19 @@ mod tests {
         d.comment(docs[0], true);
         assert!(d.p.halted);
         assert!(d.diags.iter().any(|d| d.code == 99003));
+    }
+
+    #[test]
+    fn overload_templates_are_bounded() {
+        let n = 2_000;
+        let src = format!(
+            "/**\n{}{} */\nfunction f() {{}}",
+            " * @template T\n".repeat(n),
+            " * @overload\n".repeat(n)
+        );
+        let (ast, d) = run(&src);
+        assert!(ast.node_count() < src.len() * 8, "{}", ast.node_count());
+        assert!(d.iter().any(|d| d.code == 99003));
     }
 
     #[test]
