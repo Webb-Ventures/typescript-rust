@@ -918,6 +918,23 @@ fn javascript_commonjs_named_exports_and_require_are_written() {
     }
 }
 
+/// A nested write, or an export named by a reserved word, is not written through a local.
+#[test]
+fn javascript_commonjs_exports_not_written_wrongly() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, bad) in [
+        (
+            "const x = 1;\nexports.x = x;\nfunction mutate() { exports.x = 'later'; }\nexports.mutate = mutate;\n",
+            "export { x }",
+        ),
+        ("exports.class = 1;\n", "var class"),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        let d = r.outputs.iter().find(|o| o.path == "/p/out/a.d.ts");
+        assert!(d.is_none_or(|d| !d.text.contains(bad)), "{src}: {d:?}");
+    }
+}
+
 /// A `@property` description is trimmed of the blank lines around it, however many there
 /// are (by index, not by shifting the lines; expectation from tsc 7.0.2 with 5 blank lines).
 #[test]

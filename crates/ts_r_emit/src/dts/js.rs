@@ -251,6 +251,11 @@ pub(super) fn commonjs_named_exports(c: &Checker, file: FileId) -> Option<Vec<Na
     if assigned.is_empty() {
         return None;
     }
+    let mut counts: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
+    for &(name, _, _) in &assigned {
+        *counts.entry(name).or_default() += 1;
+    }
+    let targets: rustc_hash::FxHashSet<NodeId> = assigned.iter().map(|a| a.1).collect();
     for raw in 1..=ast.node_count() as u32 {
         let Some(n) = NodeId::from_raw(raw) else {
             continue;
@@ -287,16 +292,23 @@ pub(super) fn commonjs_named_exports(c: &Checker, file: FileId) -> Option<Vec<Na
             access = parents.parent(access)?;
         }
         let name = export_name(access)?;
-        if !assigned.iter().any(|&(a, t, _)| t == access || a == name) {
+        // Reads of an assigned name are fine; a write must be one of the top-level ones.
+        let write = parents.parent(access).is_some_and(|p| match *ast.node(p) {
+            Node::Assign { left, .. } => left == access,
+            Node::Update { .. } => true,
+            _ => false,
+        });
+        if !targets.contains(&access) && (write || !counts.contains_key(name)) {
             return None;
         }
     }
     let mut out: Vec<NamedExport> = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
     for &(name, target, value) in &assigned {
-        if out.iter().any(|e| e.0 == name) {
+        if !seen.insert(name) {
             continue;
         }
-        let once = assigned.iter().filter(|a| a.0 == name).count() == 1;
+        let once = counts[name] == 1;
         let value = super::skip_parens(ast, value);
         let local = matches!(ast.node(value), Node::Ident { .. })
             && c.resolve_ident(Loc { file, node: value }, meaning::VALUE)
@@ -304,7 +316,8 @@ pub(super) fn commonjs_named_exports(c: &Checker, file: FileId) -> Option<Vec<Na
         let alias = (once && local).then_some(value);
         // Not seen written: `exports.default = v` of a name, and names that are not
         // identifiers through a constant.
-        let identifier = ts_r_checker::typenode::is_identifier_text(name);
+        let identifier =
+            ts_r_checker::typenode::is_identifier_text(name) && !RESERVED.contains(&name);
         if (name == "default" && alias.is_some())
             || (!identifier && name != "default" && alias.is_none())
             || c.sym_of_decl(Loc { file, node: target }).is_none()
@@ -315,6 +328,58 @@ pub(super) fn commonjs_named_exports(c: &Checker, file: FileId) -> Option<Vec<Na
     }
     Some(out)
 }
+
+/// Words a `.d.ts` module can't declare as a variable name.
+const RESERVED: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "implements",
+    "interface",
+    "let",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "static",
+    "yield",
+    "await",
+    "arguments",
+    "eval",
+];
 
 /// `ty` (a `@callback`'s function type) has a rest parameter.
 fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {
