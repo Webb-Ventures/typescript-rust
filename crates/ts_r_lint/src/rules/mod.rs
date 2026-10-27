@@ -203,6 +203,7 @@ mod no_global_assign;
 mod no_implied_eval;
 mod no_import_assign;
 mod no_inline_comments;
+mod no_inner_declarations;
 mod no_invalid_regexp;
 mod no_invalid_this;
 mod no_irregular_whitespace;
@@ -983,6 +984,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_implied_eval::RULE,
     &no_import_assign::RULE,
     &no_inline_comments::RULE,
+    &no_inner_declarations::RULE,
     &no_invalid_regexp::RULE,
     &no_invalid_this::RULE,
     &no_irregular_whitespace::RULE,
