@@ -225,6 +225,7 @@ mod no_self_assign;
 mod no_self_compare;
 mod no_sequences;
 mod no_setter_return;
+mod no_shadow;
 mod no_shadow_restricted_names;
 mod no_sparse_arrays;
 mod no_template_curly_in_string;
@@ -243,6 +244,7 @@ mod no_unused_expressions;
 mod no_unused_labels;
 mod no_unused_private_class_members;
 mod no_unused_vars;
+mod no_use_before_define;
 mod no_useless_assignment;
 mod no_useless_backreference;
 mod no_useless_call;
@@ -319,6 +321,7 @@ mod ts_no_non_null_assertion;
 mod ts_no_redeclare;
 mod ts_no_redundant_type_constituents;
 mod ts_no_require_imports;
+mod ts_no_shadow;
 mod ts_no_this_alias;
 mod ts_no_unnecessary_boolean_literal_compare;
 mod ts_no_unnecessary_condition;
@@ -340,6 +343,7 @@ mod ts_no_unsafe_return;
 mod ts_no_unsafe_unary_minus;
 mod ts_no_unused_expressions;
 mod ts_no_unused_vars;
+mod ts_no_use_before_define;
 mod ts_no_useless_constructor;
 mod ts_no_useless_default_assignment;
 mod ts_no_wrapper_object_types;
@@ -964,6 +968,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_self_compare::RULE,
     &no_sequences::RULE,
     &no_setter_return::RULE,
+    &no_shadow::RULE,
     &no_shadow_restricted_names::RULE,
     &no_sparse_arrays::RULE,
     &no_template_curly_in_string::RULE,
@@ -982,6 +987,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_unused_labels::RULE,
     &no_unused_private_class_members::RULE,
     &no_unused_vars::RULE,
+    &no_use_before_define::RULE,
     &no_useless_assignment::RULE,
     &no_useless_backreference::RULE,
     &no_useless_call::RULE,
@@ -1056,6 +1062,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_redeclare::RULE,
     &ts_no_redundant_type_constituents::RULE,
     &ts_no_require_imports::RULE,
+    &ts_no_shadow::RULE,
     &ts_no_this_alias::RULE,
     &ts_no_unnecessary_boolean_literal_compare::RULE,
     &ts_no_unnecessary_condition::RULE,
@@ -1077,6 +1084,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_unsafe_unary_minus::RULE,
     &ts_no_unused_expressions::RULE,
     &ts_no_unused_vars::RULE,
+    &ts_no_use_before_define::RULE,
     &ts_no_useless_constructor::RULE,
     &ts_no_useless_default_assignment::RULE,
     &ts_no_wrapper_object_types::RULE,
