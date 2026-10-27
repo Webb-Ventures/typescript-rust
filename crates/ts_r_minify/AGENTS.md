@@ -47,7 +47,11 @@ children are remapped once, which keeps memory linear in the number of renamed k
 ## Invariants
 
 - **Never changes behaviour** of code that does not use `eval`, `with` or `Function.prototype.toString`.
-  Scopes containing direct `eval` or `with` keep every name in reach.
+  Scopes containing direct `eval` or `with` keep every name in reach. One exception, as
+  esbuild: compression drops function and class expression names nothing references, which
+  changes their `.name` (`CompressOptions::names`, off when `--keep-names` runs after it).
+- Purity: a computed key that is a well-known symbol (`[Symbol.iterator]`) is pure, as in
+  esbuild; `[Symbol.foo]` is not.
 - **Stable mangling**: names are assigned scope by scope, most-referenced binding first (ties
   by declaration order), restarting the sequence in every scope. The same input gives the
   same output, and the bundler fixes module-scope names, so an edit in one module does not

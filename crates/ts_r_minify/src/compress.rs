@@ -38,6 +38,9 @@ pub struct CompressOptions {
     pub booleans: bool,
     /// Join statements into sequences and conditionals.
     pub join: bool,
+    /// Drop function and class expression names nothing references, as esbuild does (off
+    /// when `--keep-names` runs after compression).
+    pub names: bool,
 }
 
 impl Default for CompressOptions {
@@ -45,6 +48,7 @@ impl Default for CompressOptions {
         CompressOptions {
             booleans: true,
             join: true,
+            names: true,
         }
     }
 }
@@ -252,6 +256,19 @@ impl Compressor<'_> {
     }
 
     fn node(&mut self, ast: &mut Ast, id: NodeId) {
+        if let Node::FunctionExpr { name: Some(n), .. } | Node::ClassExpr { name: Some(n), .. } =
+            *ast.node(id)
+            && self.opts.names
+            && !self.scopes.has_direct_eval
+            && !self.scopes.has_with
+            && self
+                .scopes
+                .symbol_of(n)
+                .is_some_and(|s| self.scopes.symbol(s).refs == 0)
+            && let Node::FunctionExpr { name, .. } | Node::ClassExpr { name, .. } = ast.node_mut(id)
+        {
+            *name = None;
+        }
         match *ast.node(id) {
             Node::Program { stmts } => {
                 let new = self.stmt_list(ast, stmts, true);
@@ -1517,6 +1534,10 @@ mod tests {
             "function f(){return g(),1;var q;function k(){}}"
         );
         assert_eq!(run("if (a) { if (b) c(); } else d();"), "a?b&&c():d();");
+        assert_eq!(
+            run("x = function f(a) {}; y = function g() { g; }; z = class C {};"),
+            "x=function(a){},y=function g(){},z=class{};"
+        );
     }
 
     #[test]

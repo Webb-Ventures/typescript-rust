@@ -146,7 +146,12 @@ pub fn minify_ast_keep_names(
         scopes = Scopes::analyze(ast, strict);
     }
     if opts.syntax {
-        compress::compress(ast, src, &scopes, &compress::CompressOptions::default());
+        let names = keep_names.is_none();
+        let opts = compress::CompressOptions {
+            names,
+            ..Default::default()
+        };
+        compress::compress(ast, src, &scopes, &opts);
     }
     if opts.identifiers {
         let scopes = Scopes::analyze(ast, strict);

@@ -250,9 +250,49 @@ impl Purity<'_> {
 
     fn key(&self, key: NodeId, d: u32) -> bool {
         match *self.ast.node(key) {
-            Node::ComputedKey { expr } => self.primitive_pure(expr, d),
+            Node::ComputedKey { expr } => {
+                self.primitive_pure(expr, d) || self.well_known_symbol(expr)
+            }
             _ => true,
         }
+    }
+
+    /// `Symbol.iterator` and the other well-known symbols: keys that can't call user code,
+    /// as esbuild treats them.
+    fn well_known_symbol(&self, id: NodeId) -> bool {
+        let ast = self.ast;
+        let Node::Member {
+            obj,
+            prop,
+            optional: false,
+        } = *ast.node(id)
+        else {
+            return false;
+        };
+        let (Node::Ident { name: o }, Node::Ident { name: p }) = (*ast.node(obj), *ast.node(prop))
+        else {
+            return false;
+        };
+        ast.atom(o) == "Symbol"
+            && self.is_global(obj)
+            && matches!(
+                ast.atom(p),
+                "asyncDispose"
+                    | "asyncIterator"
+                    | "dispose"
+                    | "hasInstance"
+                    | "isConcatSpreadable"
+                    | "iterator"
+                    | "match"
+                    | "matchAll"
+                    | "replace"
+                    | "search"
+                    | "species"
+                    | "split"
+                    | "toPrimitive"
+                    | "toStringTag"
+                    | "unscopables"
+            )
     }
 
     fn class(
@@ -665,6 +705,9 @@ mod tests {
             ),
             [true, true, false, true, true, false, false, true]
         );
+        let src = "class A { [Symbol.iterator]() {} } let o = { get [Symbol.toStringTag]() {} }; \
+                   class B { [Symbol.foo]() {} } class C { [Symbol?.iterator]() {} }";
+        assert_eq!(pure_stmts(src), [true, true, false, false]);
     }
 
     #[test]
