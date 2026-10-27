@@ -112,6 +112,8 @@ are cached by content hash. Change `cache_id` when output for the same input can
   across I/O or transforms).
 - **Same content = no update.** A change whose BLAKE3 equals the prepared hash (touch, double
   write, late duplicate event) sends nothing, unless the module is in an error state.
+  A changed file that reads empty is re-read once its mtime moves (at most 100 ms), so a save
+  seen between its truncate and its write doesn't reload the page (Vite's `readModifiedFile`).
 - **Files untouched since the watch started are not changes.** FSEvents (macOS) replays writes
   made just before its stream started; they used to reach `handleHotUpdate` and update modules
   the browser hadn't fetched yet (never prepared, so the hash check can't catch them). For

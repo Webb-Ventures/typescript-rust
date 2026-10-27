@@ -306,9 +306,26 @@ fn handle_change(
         g.node(id).url.clone()
     };
     server::forget_load(shared, Some(path));
-    let Ok(source) = server::module_source(shared, path, &own_url) else {
+    let Ok(mut source) = server::module_source(shared, path, &own_url) else {
         return;
     };
+    if source.is_empty() {
+        // Truncated but not yet written (a save that truncates, then writes): wait up to
+        // 100 ms for the write, as Vite does (`vite: packages/vite/src/node/server/hmr.ts`,
+        // `readModifiedFile`).
+        let mtime = || fs::metadata(path).and_then(|m| m.modified()).ok();
+        let before = mtime();
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(10));
+            if mtime() != before {
+                break;
+            }
+        }
+        let Ok(again) = server::module_source(shared, path, &own_url) else {
+            return;
+        };
+        source = again;
+    }
     let hash = Key::of(&source);
     timing.read += t.elapsed();
 
