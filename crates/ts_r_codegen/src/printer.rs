@@ -802,14 +802,25 @@ impl<'a> Printer<'a> {
         (e.end > from).then_some(e.end)
     }
 
-    /// The first erased range at or after `pos` is an import (`import ...`, elided).
+    /// The first erased range at or after `pos` is an import (`import ...`, elided) or a
+    /// statement the module transform removed (`export {}`, `export var x;` under
+    /// CommonJS): its triple-slash directives go with it (observed, nodeResolution4).
     fn erased_import_after(&self, pos: u32) -> bool {
         let erased = self.hints.erased;
         let i = erased.partition_point(|s| s.start < pos);
         erased.get(i).is_some_and(|e| {
             let text = self.src.get(e.start as usize..).unwrap_or("");
-            text.strip_prefix("import")
-                .is_some_and(|rest| !rest.bytes().next().is_some_and(is_word_byte))
+            fn word<'t>(t: &'t str, w: &str) -> Option<&'t str> {
+                t.strip_prefix(w)
+                    .filter(|rest| !rest.bytes().next().is_some_and(is_word_byte))
+                    .map(str::trim_start)
+            }
+            word(text, "import").is_some()
+                || word(text, "export").is_some_and(|rest| {
+                    rest.starts_with('{')
+                        || word(rest, "var").is_some()
+                        || word(rest, "let").is_some()
+                })
         })
     }
 
@@ -1491,6 +1502,7 @@ impl<'a> Printer<'a> {
         }
         if self.tsc
             && let Some(end) = self.triple_slash_run_end()
+            && !self.erased_import_after(end)
             && let [only] = stmts[prologue..]
             && self.is_synthetic(only)
             && matches!(self.node(only), Node::ExportNamed { source: None, specifiers, .. }

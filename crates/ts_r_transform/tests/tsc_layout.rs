@@ -366,3 +366,9 @@ fn async_arrow_parens() {
 fn error_initializers() {
     check("error_initializers");
 }
+
+/// A triple-slash directive leading `export var y;`, which CommonJS removes, goes with it.
+#[test]
+fn cjs_removed_directive() {
+    check("cjs_removed_directive");
+}
