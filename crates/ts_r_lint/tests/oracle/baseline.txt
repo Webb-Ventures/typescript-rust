@@ -109,6 +109,7 @@
 @typescript-eslint/unbound-method 217/218
 @typescript-eslint/unified-signatures 115/115
 @typescript-eslint/use-unknown-in-catch-callback-variable 57/57
+accessor-pairs 313/313
 arrow-body-style 87/87
 block-scoped-var 106/106
 camelcase 204/204
@@ -122,6 +123,7 @@ default-param-last 96/96
 dot-notation 69/69
 eqeqeq 77/77
 for-direction 100/100
+func-name-matching 192/193
 func-names 109/109
 getter-return 81/81
 grouped-accessor-pairs 150/150
@@ -291,6 +293,8 @@ no-extra-boolean-cast 507/507
 no-fallthrough 87/87
 no-func-assign 15/15
 no-global-assign 16/16
+no-implicit-coercion 141/141
+no-implicit-globals 227/227
 no-implied-eval 66/66
 no-import-assign 116/116
 no-invalid-regexp 112/112
@@ -373,12 +377,14 @@ no-var 75/75
 no-void 12/12
 no-with 2/2
 object-shorthand 293/293
+one-var 296/296
 prefer-arrow-callback 120/120
 prefer-const 136/136
 prefer-destructuring 103/103
 prefer-numeric-literals 91/91
 prefer-object-has-own 94/94
 prefer-promise-reject-errors 74/74
+prefer-regex-literals 251/251
 prefer-rest-params 11/11
 prefer-spread 33/33
 prefer-template 88/88

@@ -3152,60 +3152,32 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.
 
 ## Core and typescript-eslint rules (round 10, h2, part 2)
 
-- `no-restricted-imports`: `paths` match the trimmed source exactly (`import x = require()`
-  sources are not trimmed). `patterns` `group`s follow node-ignore: case-insensitive unless
-  `caseSensitive`, a pattern without an inner `/` matches at any depth, a parent directory
-  that matches ignores everything below it, the last matching rule wins and `!` un-ignores;
-  each rule is a `config::glob::Glob`. `regex`, `importNamePattern` and
-  `allowImportNamePattern` run on `regex_exec` with the `u` flag (`iu` for `regex` unless
-  case-sensitive) and print as `/source/u`. Named reports go on the specifier; `export *`
-  reports go on the declaration's second token. `allowTypeImports` skips declarations whose
-  every specifier is `type` (or `import type`), and single `type` specifiers.
-- `no-duplicate-imports`: declarations are reduced to a shape (default, named, namespace,
-  `export *`, side effect, from the first named or namespace specifier) and two of them are
-  duplicates unless they could not be merged: namespace with named, `export *` with anything
-  but `export *` or a side effect, and (both `type`) default with named.
-  `allowSeparateTypeImports` compares only type with type and value with value.
-- `sort-imports`: one running "previous declaration" over every import in the file (top level
-  and `declare module` blocks), reset by a blank line with `allowSeparatedGroups`. A syntax
-  missing from `memberSyntaxSortOrder` ranks -1, as `indexOf` does. The member fix keeps the
-  text between members in place and is dropped when a comment sits between the braces.
-- `sort-keys`: per object literal (not assignment patterns); a spread or (with
-  `ignoreComputedKeys`) a computed key restarts the order. Names follow
-  `getStaticPropertyName`, plus `[ident]` as `ident`. Natural order ranks `-`, punctuation,
-  digits, upper case, lower case (ASCII), and compares digit runs that don't start with `0`
-  by value. A blank line counts only in whitespace outside comments.
-- `no-restricted-exports`: names come from export specifiers (the exported side), `export *
-  as`, and exported function (with a body), class and variable declarations (every bound
-  identifier). The pattern never matches `default`. `default` is restricted per
-  `restrictDefaultExports`: `direct` (`export default ...`), `named` (`export { x as default
-  }`), `defaultFrom` / `namedFrom` (re-exports, by the local name), `namespaceFrom`
-  (`export * as default from`).
-- `@typescript-eslint/strict-boolean-expressions`: no visited-node set. Each root (`if`,
-  loop and `?:` tests, the `!` operand, an `asserts x` argument, a `&&`/`||` that no
-  enclosing root reaches) walks down its `&&`/`||` chain: left operands are conditions, right
-  ones only when the whole chain is. Union members are reduced to variants (nullish, boolean,
-  truthy boolean, string, truthy string, number, truthy number, enum, object, any, never)
-  and the variant set picks the message. Array predicates (`filter`, `find`, `some`, ... on
-  arrays and tuples) check the callback's return types. Suggestions wrap the operand or, under
-  `!`, the negation, with operand parentheses for non-primary operands, outer parentheses
-  for a weak parent, and a leading `;` when the statement before has none.
-- `@typescript-eslint/member-ordering`: a member's candidate groups go from most to least
-  specific (`{access}-decorated-{kind}`, `{access}-{scope}-{kind}`, `{scope}-{kind}`,
-  `{access}-{kind}`, `{kind}`, with `readonly-*` also trying the plain kind), and its rank is
-  the first `memberTypes` entry naming one of them. Methods without a body (overloads) rank
-  -1 and are skipped; an unknown member kind ranks last. An object `default` config is merged
-  onto the default `memberTypes`; other configs are not. Alphabetical checks run within each
-  group, or (after a group-order report) within runs of adjacent same-rank members, where
-  typescript-eslint never adds the list's last member. A member is not reported out of order
-  when its initializer reads `this.x` of an initialized member it would move above.
-  `optionalityOrder` first checks the optional/required split, then orders each side.
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
+`class-methods-use-this.js`, `init-declarations.js`, `no-magic-numbers.js`, `new-cap.js`,
+`utils/ast-utils.js` (`isDefaultThisBinding`, `hasJSDocThisTag`, `getFunctionNameWithKind`,
+`getFunctionHeadLoc`, `getStaticPropertyName`); typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
+`init-declarations.ts`, `no-magic-numbers.ts`.
 
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
-`lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,
-`lib/rules/no-restricted-exports.js`; typescript-eslint 8.71.1
-`packages/eslint-plugin/src/rules/strict-boolean-expressions.ts`, `member-ordering.ts`,
-`src/util/getWrappingFixer.ts`, `assertionFunctionUtils.ts`,
-`isArrayMethodCallWithPredicate.ts`, `misc.ts`.
-The `group` matching follows gitignore as node-ignore applies it, and natural order follows
-the behaviour of the `natural-compare` package; neither package's source was read.
+### Round 10, h1 third batch
+
+- **`one-var`** (296/296): one pass over the file's declarations in source order, with a
+  per-scope record (`var`: nearest function, Program or static block; the rest: nearest
+  block, `for` or `switch`).
+- **`accessor-pairs`** (313/313) reuses `grouped_accessor_pairs`' key grouping, names and
+  head ranges, and `no_setter_return::is_descriptor`. Computed token keys skip parentheses.
+- **`prefer-regex-literals`** (251/251): global `RegExp` (or `globalThis.RegExp`, ...)
+  calls with static strings; suggestions escape line terminators and `/` through the regex
+  parser's character nodes. Modifier groups need ES2025. `regex.rs` now rejects `&&&` in
+  `v` classes.
+- **`no-implicit-globals`** (227/227): script global-scope declarations, unresolved plain
+  writes in sloppy code, and writes to read-only globals; `/* exported */` and writable
+  globals are exempt.
+- **`func-name-matching`** (192/193). Not done: `'ᢅ'` is an identifier to Rust's
+  `is_alphabetic` but not to esutils' older Unicode tables (1 case).
+- **`no-implicit-coercion`** (141/141).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/one-var.js`,
+`accessor-pairs.js`, `prefer-regex-literals.js`, `no-implicit-globals.js`,
+`func-name-matching.js`, `no-implicit-coercion.js`, `utils/ast-utils.js`
+(`isPropertyDescriptor`, `canTokensBeAdjacent`, `getStaticPropertyName`).
