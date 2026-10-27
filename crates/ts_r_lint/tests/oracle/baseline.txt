@@ -77,6 +77,7 @@
 @typescript-eslint/no-unsafe-function-type 8/8
 @typescript-eslint/no-unsafe-member-access 36/36
 @typescript-eslint/no-unsafe-return 62/62
+@typescript-eslint/no-unsafe-type-assertion 102/102
 @typescript-eslint/no-unsafe-unary-minus 23/23
 @typescript-eslint/no-unused-expressions 38/38
 @typescript-eslint/no-unused-private-class-members 99/99
@@ -101,10 +102,12 @@
 @typescript-eslint/prefer-nullish-coalescing 620/620
 @typescript-eslint/prefer-optional-chain 1117/1117
 @typescript-eslint/prefer-promise-reject-errors 162/162
+@typescript-eslint/prefer-readonly 162/162
 @typescript-eslint/prefer-reduce-type-parameter 31/31
 @typescript-eslint/prefer-regexp-exec 37/37
 @typescript-eslint/prefer-return-this-type 21/21
 @typescript-eslint/prefer-string-starts-ends-with 133/133
+@typescript-eslint/promise-function-async 54/54
 @typescript-eslint/related-getter-setter-pairs 23/23
 @typescript-eslint/require-array-sort-compare 42/42
 @typescript-eslint/require-await 87/87

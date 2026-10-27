@@ -3367,10 +3367,23 @@ the behaviour of the `natural-compare` package; neither package's source was rea
   new on `TypeInfo`) so its extra properties are not excess ones. When the target is a type
   parameter, the message depends on its constraint chain: the chain ends with no
   declaration (`V extends T`, `T` bare), or the original type is assignable to the constraint.
+- `@typescript-eslint/prefer-readonly`: each class is analysed on entry by its own walk,
+  which skips nested classes (they get their own walk). Candidates are non-`readonly`,
+  non-`accessor` private fields (or `#` fields) and private parameter properties, keyed by
+  name (identifier, string, number, numeric or `Symbol.x` computed key). A write is an
+  assignment to the member access, `delete`, `++`/`--`, or being a target of a destructuring
+  `=` through object and array literals and spreads. A parenthesized access is not a write,
+  as upstream. A write on the instance directly in the constructor (not in a function
+  inside it) doesn't count. The object's type relates to the class through its symbol or
+  bases (`typeof C` is the class side), the first union member, or intersection members.
+  The fix adds `: T` when the constructor writes a field whose literal initializer would
+  narrow it. For an enum type, `T` must name the same type from the field's scope (a block's
+  type alias is read from its type node). `type_symbol` now returns the symbol of `typeof C`,
+  `typeof f` and `typeof N` types (`typed/ck_types.rs`).
 
 Read to understand (not ported): typescript-eslint 8.71.1
 `packages/eslint-plugin/src/rules/require-array-sort-compare.ts`, `prefer-enum-initializers.ts`,
 `no-useless-empty-export.ts`, `no-import-type-side-effects.ts`, `no-restricted-types.ts`,
 `no-unnecessary-parameter-property-assignment.ts`, `no-unnecessary-qualifier.ts`,
 `consistent-type-exports.ts`, `promise-function-async.ts`, `no-unsafe-type-assertion.ts`,
-and `src/util/misc.ts` (formatWordList).
+`prefer-readonly.ts`, `src/util/getMemberHeadLoc.ts`, and `src/util/misc.ts` (formatWordList).

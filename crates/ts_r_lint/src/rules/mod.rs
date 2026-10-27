@@ -424,6 +424,7 @@ mod ts_prefer_namespace_keyword;
 mod ts_prefer_nullish_coalescing;
 mod ts_prefer_optional_chain;
 mod ts_prefer_promise_reject_errors;
+mod ts_prefer_readonly;
 mod ts_prefer_reduce_type_parameter;
 mod ts_prefer_regexp_exec;
 mod ts_prefer_return_this_type;
@@ -1234,6 +1235,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_nullish_coalescing::RULE,
     &ts_prefer_optional_chain::RULE,
     &ts_prefer_promise_reject_errors::RULE,
+    &ts_prefer_readonly::RULE,
     &ts_require_await::RULE,
     &ts_restrict_plus_operands::RULE,
     &ts_restrict_template_expressions::RULE,
