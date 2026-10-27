@@ -511,7 +511,8 @@ Files:
     attributes, which declaration emit writes as `{ with: {} }` (tsc's recovered node).
 - **Invalid syntax gets tsc's code** even where the tree stays as parsed: TS1209 (`new a?.b()`),
   TS17006/TS17007 (`-a ** b`, `<T>a ** b`). tsc reports these as syntax errors. TS5076
-  (`??` mixed with `||`/`&&`), TS1106 (`for (async of x)`, not where `await` is an
+  (`??` mixed with `||`/`&&`) is a deferred grammar error (`ParseResult::grammar`, so
+  typescript-eslint-style parses accept it; build tools still fail on it). TS1106 (`for (async of x)`, not where `await` is an
   operator, as in an async function), TS1497 (a decorator that is not an
   identifier/member chain, optionally called once, or parenthesised) and TS18007 (`{a, b}`
   in JSX) come from tsc's grammar check, which reports them next to semantic errors. We

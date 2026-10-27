@@ -3071,8 +3071,11 @@ fn tsc_syntax_errors_keep_lenient() {
     check("let t = `\\01`; const a;", &[1487], &[1487]);
     check("const a;", &[], &[]);
     // A private name in an optional chain (TS18030): ESTree parsers accept `this?.#x()`.
-    // `&&` mixed with `??` stays a syntax error everywhere (tsc and ESTree parsers).
-    check("let x = (undefined && foo ?? {});", &[5076], &[5076]);
+    // `&&` mixed with `??` is tsc's grammar error (typescript-eslint parses it).
+    check("let x = (undefined && foo ?? {});", &[], &[]);
+    let r = parse("(undefined && foo ?? {}).bar;", SourceKind::Ts);
+    assert_eq!(codes(&r.diagnostics), [5076]);
+    assert_eq!(codes(&r.grammar), [5076]);
     let private = "class C { #x() {} f() { this?.#x(); this?.a.#x; } }";
     check(private, &[], &[18030, 18030]);
     let js = parse(private, SourceKind::Js);

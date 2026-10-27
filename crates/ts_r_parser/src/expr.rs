@@ -778,7 +778,8 @@ impl<'a> Parser<'a> {
 
     /// `??` mixed with `||` or `&&` without parentheses: TS5076 at the inner operation, the
     /// operators named in source order. tsc 7 reports this from its grammar check (next to
-    /// semantic errors); we report it here so tools see the file as invalid.
+    /// semantic errors), and typescript-eslint parses it: a grammar error (esbuild rejects
+    /// it, `ts_r_transform::build_errors`).
     fn check_mixed_coalesce(&mut self, op: BinaryOp, left: NodeId, right: NodeId) {
         let logical = |o: BinaryOp| matches!(o, BinaryOp::LogicalOr | BinaryOp::LogicalAnd);
         let clash = |inner: BinaryOp| {
@@ -794,7 +795,7 @@ impl<'a> Parser<'a> {
             {
                 let (first, second) = if is_left { (inner, op) } else { (op, inner) };
                 let span = self.ast.span(side);
-                self.grammar_error_at(
+                self.deferred_grammar_error_at(
                     messages::MIXED_COALESCE,
                     span,
                     &[first.as_str(), second.as_str()],
