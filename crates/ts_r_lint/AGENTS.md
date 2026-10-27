@@ -3380,10 +3380,26 @@ the behaviour of the `natural-compare` package; neither package's source was rea
   narrow it. For an enum type, `T` must name the same type from the field's scope (a block's
   type alias is read from its type node). `type_symbol` now returns the symbol of `typeof C`,
   `typeof f` and `typeof N` types (`typed/ck_types.rs`).
+- `@typescript-eslint/strict-void-return`: expressions are checked against their contextual
+  type (array elements, arrow expression bodies, assigned values, JSX attribute values,
+  object property values, `return` and variable initializers). A call or `new` argument is
+  also checked against the callbacks its parameter types allow across every signature: some
+  `void` with the rest nullish or `any` counts as void. Class fields and methods are checked
+  against the member of the same name on the base class's instance type (`extends`) or the
+  implemented type (`implements`). A computed key goes by its literal type there. An
+  accessor's own type is its property's. A function counts as void when every return type
+  member is `void`, `never` or `undefined` (and `any` with `allowReturnAny`). Otherwise the
+  report and suggestions depend on its form: a non-function value (`nonVoidFunc`), a
+  generator, an async function (add `void` or wrap the body in an async IIFE, removing
+  `async` and making a written return type `void`), an expression body (`void` added through the shared
+  `wrapping_fix` of strict-boolean-expressions), a non-`void` return annotation, or each
+  `return value` found through blocks, branches, loops, `switch` and `try`.
 
 Read to understand (not ported): typescript-eslint 8.71.1
 `packages/eslint-plugin/src/rules/require-array-sort-compare.ts`, `prefer-enum-initializers.ts`,
 `no-useless-empty-export.ts`, `no-import-type-side-effects.ts`, `no-restricted-types.ts`,
 `no-unnecessary-parameter-property-assignment.ts`, `no-unnecessary-qualifier.ts`,
 `consistent-type-exports.ts`, `promise-function-async.ts`, `no-unsafe-type-assertion.ts`,
-`prefer-readonly.ts`, `src/util/getMemberHeadLoc.ts`, and `src/util/misc.ts` (formatWordList).
+`prefer-readonly.ts`, `strict-void-return.ts`, `src/util/getMemberHeadLoc.ts`,
+`src/util/getBaseTypesOfClassMember.ts`, `src/util/walkStatements.ts`, and `src/util/misc.ts`
+(formatWordList).

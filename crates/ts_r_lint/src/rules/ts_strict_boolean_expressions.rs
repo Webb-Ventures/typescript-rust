@@ -323,7 +323,7 @@ fn has_weak_parent(cx: &Ctx<'_, '_>, node: NodeId) -> bool {
 }
 
 /// Replaces `node` with `wrap(inner)`, adding the parentheses either side needs.
-fn wrapping_fix(cx: &Ctx<'_, '_>, node: NodeId, inner: NodeId, wrap: &str) -> Fix {
+pub(crate) fn wrapping_fix(cx: &Ctx<'_, '_>, node: NodeId, inner: NodeId, wrap: &str) -> Fix {
     let ast = cx.ast();
     let src = cx.src();
     let mut code = cx.span(inner).text(src).to_owned();
