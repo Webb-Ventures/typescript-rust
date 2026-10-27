@@ -21,7 +21,7 @@ enum CountThis {
 }
 
 #[derive(Debug, Default)]
-struct MaxParams {
+pub(crate) struct MaxParams {
     max: u64,
     count_this: CountThis,
 }

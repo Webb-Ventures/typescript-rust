@@ -10,7 +10,9 @@
 @typescript-eslint/consistent-type-assertions 185/185
 @typescript-eslint/consistent-type-definitions 33/33
 @typescript-eslint/consistent-type-imports 381/381
+@typescript-eslint/default-param-last 87/87
 @typescript-eslint/dot-notation 63/63
+@typescript-eslint/max-params 23/23
 @typescript-eslint/no-array-constructor 33/33
 @typescript-eslint/no-array-delete 31/31
 @typescript-eslint/no-base-to-string 317/317
@@ -98,6 +100,7 @@ constructor-super 82/82
 default-case 23/23
 default-case-last 37/37
 default-param-last 96/96
+dot-notation 69/69
 eqeqeq 77/77
 for-direction 100/100
 getter-return 81/81
@@ -265,6 +268,7 @@ no-extra-boolean-cast 507/507
 no-fallthrough 87/87
 no-func-assign 15/15
 no-global-assign 16/16
+no-implied-eval 66/66
 no-import-assign 116/116
 no-invalid-regexp 112/112
 no-irregular-whitespace 280/280
@@ -338,10 +342,12 @@ no-with 2/2
 prefer-const 136/136
 prefer-numeric-literals 91/91
 prefer-object-has-own 94/94
+prefer-promise-reject-errors 74/74
 prefer-rest-params 11/11
 prefer-spread 33/33
 preserve-caught-error 81/81
 radix 91/91
+require-await 39/39
 require-yield 15/15
 symbol-description 8/8
 unicorn/better-dom-traversing 175/175

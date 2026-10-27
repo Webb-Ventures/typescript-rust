@@ -11,6 +11,7 @@ mod constructor_super;
 mod default_case;
 mod default_case_last;
 mod default_param_last;
+mod dot_notation;
 mod eqeqeq;
 mod for_direction;
 mod getter_return;
@@ -179,6 +180,7 @@ mod no_extra_boolean_cast;
 mod no_fallthrough;
 mod no_func_assign;
 mod no_global_assign;
+mod no_implied_eval;
 mod no_import_assign;
 mod no_invalid_regexp;
 mod no_irregular_whitespace;
@@ -252,10 +254,12 @@ mod no_with;
 mod prefer_const;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
+mod prefer_promise_reject_errors;
 mod prefer_rest_params;
 mod prefer_spread;
 mod preserve_caught_error;
 mod radix;
+mod require_await;
 mod require_yield;
 mod symbol_description;
 mod this_binding;
@@ -270,7 +274,9 @@ mod ts_consistent_indexed_object_style;
 mod ts_consistent_type_assertions;
 mod ts_consistent_type_definitions;
 mod ts_consistent_type_imports;
+mod ts_default_param_last;
 mod ts_dot_notation;
+mod ts_max_params;
 mod ts_no_array_constructor;
 mod ts_no_array_delete;
 mod ts_no_base_to_string;
@@ -773,6 +779,7 @@ pub static ALL: &[&RuleDef] = &[
     &default_case::RULE,
     &default_case_last::RULE,
     &default_param_last::RULE,
+    &dot_notation::RULE,
     &eqeqeq::RULE,
     &for_direction::RULE,
     &getter_return::RULE,
@@ -904,6 +911,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_fallthrough::RULE,
     &no_func_assign::RULE,
     &no_global_assign::RULE,
+    &no_implied_eval::RULE,
     &no_import_assign::RULE,
     &no_invalid_regexp::RULE,
     &no_irregular_whitespace::RULE,
@@ -976,10 +984,12 @@ pub static ALL: &[&RuleDef] = &[
     &prefer_const::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
+    &prefer_promise_reject_errors::RULE,
     &prefer_rest_params::RULE,
     &prefer_spread::RULE,
     &preserve_caught_error::RULE,
     &radix::RULE,
+    &require_await::RULE,
     &require_yield::RULE,
     &ts_array_type::RULE,
     &ts_adjacent_overload_signatures::RULE,
@@ -992,7 +1002,9 @@ pub static ALL: &[&RuleDef] = &[
     &ts_class_literal_property_style::RULE,
     &ts_consistent_type_definitions::RULE,
     &ts_consistent_type_imports::RULE,
+    &ts_default_param_last::RULE,
     &ts_dot_notation::RULE,
+    &ts_max_params::RULE,
     &ts_no_array_constructor::RULE,
     &ts_no_base_to_string::RULE,
     &ts_no_array_delete::RULE,

@@ -17,7 +17,7 @@ pub static RULE: RuleDef = RuleDef {
 struct NoThrowLiteral;
 
 /// True when evaluating `id` might produce an `Error` object.
-fn could_be_error(ast: &Ast, id: NodeId, depth: u32) -> bool {
+pub(crate) fn could_be_error(ast: &Ast, id: NodeId, depth: u32) -> bool {
     if depth > 500 {
         return true;
     }

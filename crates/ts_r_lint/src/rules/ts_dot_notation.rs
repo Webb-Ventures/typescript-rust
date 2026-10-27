@@ -18,7 +18,7 @@ pub static RULE: RuleDef = RuleDef {
 };
 
 #[derive(Debug)]
-struct DotNotation {
+pub(crate) struct DotNotation {
     allow_keywords: bool,
     allow_pattern: Option<String>,
     allow_private: bool,
@@ -142,6 +142,7 @@ impl DotNotation {
     ) {
         let ast = cx.ast();
         let src = cx.src();
+        let index = skip_parens(ast, index);
         let (key, shown) = match *cx.node(index) {
             Node::StringLit { value } => {
                 let v = ast.atom(value);
@@ -156,7 +157,7 @@ impl DotNotation {
                     return;
                 };
                 let v = ast.atom(cooked);
-                (v.to_owned(), json_string(v))
+                (v.to_owned(), cx.span(index).text(src).to_owned())
             }
             Node::NullLit {} | Node::BoolLit { .. } => {
                 let t = cx.span(index).text(src).to_owned();
@@ -195,7 +196,7 @@ impl DotNotation {
             if !optional {
                 // `5['a']` -> `5 .a`.
                 if let Node::NumberLit { .. } = *cx.node(skip_parens(ast, obj))
-                    && cx.span(obj).text(src).bytes().all(|b| b.is_ascii_digit())
+                    && is_decimal_integer(cx.span(obj).text(src))
                     && cx.span(obj).end as usize == open
                 {
                     text.push(' ');
@@ -203,6 +204,10 @@ impl DotNotation {
                 text.push('.');
             }
             text.push_str(&key);
+            // `a['b']in c` -> `a.b in c`.
+            if src[end as usize..].starts_with(|c: char| c == '$' || ts_r_lexer::is_id_part(c)) {
+                text.push(' ');
+            }
             Some(Fix::replace(Span::new(open as u32, end), text))
         };
         cx.report_node(
@@ -229,7 +234,8 @@ impl DotNotation {
             .iter()
             .any(|c| c.span.start >= start && c.span.end <= end);
         let is_let = ident_name(ast, skip_parens(ast, obj)) == Some("let")
-            && matches!(cx.node(obj), Node::Ident { .. });
+            && matches!(cx.node(obj), Node::Ident { .. })
+            && !src[start as usize..].starts_with("?.");
         let fix = if has_comment || is_let {
             None
         } else {
@@ -292,6 +298,26 @@ impl DotNotation {
 }
 
 /// `JSON.stringify` of a string.
+/// A decimal integer literal (`5`, `08`, `5_000`; not `01` or `1.5`): `5.a` would not parse.
+fn is_decimal_integer(raw: &str) -> bool {
+    let b = raw.as_bytes();
+    match b {
+        [b'0'] => true,
+        [b'0', rest @ ..] => {
+            let i = rest.iter().position(|c| !matches!(c, b'0'..=b'7'));
+            i.is_some_and(|i| {
+                matches!(rest[i], b'8' | b'9') && rest[i..].iter().all(u8::is_ascii_digit)
+            })
+        }
+        [b'1'..=b'9', rest @ ..] => {
+            !rest.ends_with(b"_")
+                && !rest.windows(2).any(|w| w == b"__")
+                && rest.iter().all(|c| c.is_ascii_digit() || *c == b'_')
+        }
+        _ => false,
+    }
+}
+
 fn json_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| format!("\"{s}\""))
 }
