@@ -3113,3 +3113,50 @@ fn a_bigint_define_value_is_a_bigint_literal() {
     let r = run_build(&fs, o);
     assert!(file(&r, "/proj/out/main.js").contains("console.log(1n);"));
 }
+
+/// esbuild 0.28.2 (observed): an array or object define is one `var` per module, after the
+/// directives, named apart from the module's own names; BigInts may appear inside.
+#[test]
+fn array_and_object_defines_are_hoisted() {
+    let fs = project(&[(
+        "main.js",
+        "'use strict';\nconsole.log(y.a, x === x);\nlet define_x_default;\n",
+    )]);
+    let mut o = opts(&["main.js"]);
+    o.bundle = false;
+    o.format = None;
+    o.define = vec![
+        ("y".into(), "{'a': 2n,}".into()),
+        ("x".into(), "[1n, -0]".into()),
+    ];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/main.js");
+    assert!(
+        js.contains("'use strict';\nvar define_x_default2 = [1n, -0];\nvar define_y_default = { a: 2n };\nconsole.log(define_y_default.a, define_x_default2 === define_x_default2);"),
+        "{js}"
+    );
+}
+
+#[test]
+fn invalid_define_values_are_errors_as_in_esbuild() {
+    use ts_r_bundler::prepare::Defines;
+    for v in [
+        "-1n",
+        "[-1n]",
+        "01",
+        "0x10",
+        ".5",
+        "{a:1}",
+        "[1,,2]",
+        "[x]",
+        "\"\\x41\"",
+        "'\\''",
+    ] {
+        let mut o = opts(&["main.js"]);
+        o.define = vec![("x".into(), v.into())];
+        assert_eq!(
+            Defines::from_options(&o).unwrap_err(),
+            format!("Invalid define value (must be an entity name or JS literal): {v}")
+        );
+    }
+}

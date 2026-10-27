@@ -81,6 +81,12 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 - **`define` keys** (`prepare.rs` `apply_defines`) match `a.b`, `a?.b` and `a["b"]` alike,
   and may start at `import.meta`; a write keeps its target unless the value is a name
   (`d = 0` with `d=ident` becomes `ident = 0`), as in esbuild.
+  Values are an entity name or a literal in esbuild's grammar (`Literal`: JSON with comments,
+  trailing commas and `'` strings, plus unsigned decimal BigInts). An array or object is
+  hoisted to `var define_<key>_default` (sorted, after the directives, numbered apart from
+  the module's names) and every use, writes included, names it, as esbuild 0.28.2 does.
+  esbuild shares one `var` across a bundle (an injected `<define:x>` module); ts-r adds one
+  per module that uses it, so identity holds within a module only.
 - **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
   esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
 - **`alias` runs before everything else in resolution** (`resolve.rs` `alias`): only package
