@@ -320,8 +320,13 @@ pub fn is_commonjs_export(c: &Checker<'_>, s: SymId) -> bool {
     let Node::Member { obj, .. } = *ast.node(member) else {
         return false;
     };
-    let ident =
-        |n: NodeId, t: &str| matches!(ast.node(n), Node::Ident { name } if ast.atom(*name) == t);
+    // A root the file declares (`function exports() {}`) is not the module object, as in
+    // the binder's `bind_commonjs_exports`.
+    let resolved = &c.bound(d.file).refs.resolved;
+    let ident = |n: NodeId, t: &str| {
+        matches!(ast.node(n), Node::Ident { name } if ast.atom(*name) == t)
+            && resolved.binary_search_by_key(&n, |&(r, _)| r).is_err()
+    };
     ident(obj, "exports")
         || matches!(*ast.node(obj), Node::Member { obj: o, prop, .. } if ident(o, "module") && ident(prop, "exports"))
 }

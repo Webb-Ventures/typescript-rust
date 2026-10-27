@@ -171,7 +171,7 @@ pub(super) fn export_equals_types(
 ) -> Vec<(FileId, u32, u32, SymId)> {
     let mut out = Vec::new();
     for &f in files {
-        if !c.file(f).text.contains("import(") {
+        if !c.file(f).text.contains("import") {
             continue;
         }
         let ast = c.ast(f);

@@ -124,6 +124,8 @@ pub(super) fn links_in(c: &Checker<'_>, f: FileId) -> Vec<Link> {
                                 break;
                             }
                         }
+                        // Tags inside the type are not tags; an unclosed one ends the scan.
+                        p = p.max(q);
                         q = skip_blanks(b, q, body_end);
                     }
                     if q < body_end && b[q] == b'[' {

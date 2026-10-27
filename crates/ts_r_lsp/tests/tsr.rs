@@ -3919,3 +3919,40 @@ fn completion_in_switch_cases_protected_members_and_overloaded_arrows() {
     assert_eq!(labels(15, 11), ["foo"]);
     c.shutdown();
 }
+
+/// A file-declared `exports` is not the module object; spaces before an import type's `(`;
+/// unclosed `@param {` types do not rescan the comment.
+#[test]
+fn references_declared_exports_spaced_import_type_unclosed_param() {
+    if !libs_present() {
+        return;
+    }
+    let params = " * @param {\n".repeat(20_000);
+    let env = Env::new(
+        "navreview",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            (
+                "src/a.js",
+                "function f() {\n  function exports() {}\n  exports.x = 1;\n  exports.x;\n}\n",
+            ),
+            ("src/c.ts", "class A {}\nexport = A;\n"),
+            ("src/d.ts", "type B = import (\"./c\");\n"),
+            ("src/e.ts", &format!("/**\n{params} */\nlet x = 1;\nx;\n")),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/a.js", "src/c.ts", "src/e.ts"] {
+        env.open(&mut c, f);
+    }
+    let ua = env.uri("src/a.js");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    assert_eq!(
+        refs_at(&mut c, &ua, 2, 10),
+        vec![s("a.js", 2, 10), s("a.js", 3, 10)]
+    );
+    let uc = env.uri("src/c.ts");
+    assert!(refs_at(&mut c, &uc, 0, 6).iter().any(|r| r.0 == "d.ts"));
+    let ue = env.uri("src/e.ts");
+    assert_eq!(refs_at(&mut c, &ue, 20_002, 0).len(), 2);
+}
