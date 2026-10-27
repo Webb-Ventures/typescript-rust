@@ -456,9 +456,7 @@ fn module_var(tx: &mut Tx, source: NodeId) -> Atom {
             '_'
         });
     }
-    if id.is_empty() {
-        id.push('_');
-    }
+    // An empty base (`"./"`) gives `_1` (observed, exportStarNotElided).
     tx.fresh(&id, true)
 }
 

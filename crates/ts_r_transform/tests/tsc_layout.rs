@@ -348,3 +348,9 @@ fn enum_numeric_names() {
 fn cjs_default_reexport() {
     check("cjs_default_reexport");
 }
+
+/// Automatic JSX under CommonJS: `createElement`'s require comes before the runtime's.
+#[test]
+fn cjs_jsx_create_element() {
+    check("cjs_jsx_create_element");
+}

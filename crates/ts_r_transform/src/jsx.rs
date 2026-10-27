@@ -32,6 +32,8 @@ pub(crate) struct State {
     /// CommonJS: the runtime module variables.
     runtime_module: Option<Atom>,
     react_module: Option<Atom>,
+    /// Whether the runtime was in use when the first key-after-spread element started.
+    runtime_before_create: Option<bool>,
     file_name_var: Option<Atom>,
     /// Scope of the element being lowered (classic factory names resolve there).
     scope: Option<u32>,
@@ -158,22 +160,31 @@ pub(crate) fn finish(tx: &mut Tx) -> Vec<NodeId> {
         }
     );
     let mut imports = std::mem::take(&mut tx.jsx.runtime_imports);
+    // tsc asks for `createElement` before an element's children and for the runtime after
+    // them, and writes the imports in the reverse of that order (observed: `createElement`
+    // first only when the runtime was in use before the first key-after-spread element).
+    let create_first = tx.jsx.runtime_before_create == Some(true);
+    let mut react = None;
     if tx.opts.is_cjs() {
+        if let Some(m) = tx.jsx.react_module {
+            react = Some(require_decl(tx, m, &source));
+        }
         if let Some(m) = tx.jsx.runtime_module {
             out.push(require_decl(tx, m, &runtime_path));
         }
-        if let Some(m) = tx.jsx.react_module {
-            out.push(require_decl(tx, m, &source));
-        }
     } else {
+        if let Some(a) = tx.jsx.create_element {
+            react = Some(import_decl(tx, &[("createElement", a)], &source));
+        }
         if !imports.is_empty() {
             imports.sort_by(|a, b| a.0.cmp(b.0));
             let specs: Vec<(&str, Atom)> = imports.iter().map(|&(n, a)| (n, a)).collect();
             out.push(import_decl(tx, &specs, &runtime_path));
         }
-        if let Some(a) = tx.jsx.create_element {
-            out.push(import_decl(tx, &[("createElement", a)], &source));
-        }
+    }
+    if let Some(r) = react {
+        let at = if create_first { 0 } else { out.len() };
+        out.insert(at, r);
     }
     if let Some(f) = tx.jsx.file_name_var {
         let name = tx.ident_atom(f, 0);
@@ -364,6 +375,10 @@ pub(crate) fn jsx(tx: &mut Tx, id: NodeId) {
     let element_child = children
         .iter()
         .any(|&c| matches!(tx.n(c), Node::JsxElement { .. } | Node::JsxFragment { .. }));
+    if tx.jsx.runtime_before_create.is_none() && key_after_spread(tx, &attrs) {
+        let used = tx.jsx.runtime_module.is_some() || !tx.jsx.runtime_imports.is_empty();
+        tx.jsx.runtime_before_create = Some(used);
+    }
     let kids = children_exprs(tx, &children);
     tx.jsx.scope = tx.sc.jsx_scope.get(&id).copied();
     let call = match m {
@@ -719,6 +734,19 @@ fn sets_proto(tx: &Tx, props: ts_r_ast::NodeList) -> bool {
     })
 }
 
+/// A `key` attribute after a spread one: the element is a `createElement` call.
+fn key_after_spread(tx: &Tx, attrs: &[NodeId]) -> bool {
+    let mut seen_spread = false;
+    for &a in attrs {
+        match tx.n(a) {
+            Node::JsxSpreadAttr { .. } => seen_spread = true,
+            Node::JsxAttr { name, .. } if tx.name(name) == "key" && seen_spread => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn automatic(
     tx: &mut Tx,
     tag: Option<NodeId>,
@@ -728,18 +756,7 @@ fn automatic(
     dev: bool,
 ) -> NodeId {
     // `key` after a spread attribute: createElement semantics.
-    let mut seen_spread = false;
-    let mut key_after_spread = false;
-    for &a in attrs {
-        match tx.n(a) {
-            Node::JsxSpreadAttr { .. } => seen_spread = true,
-            Node::JsxAttr { name, .. } if tx.name(name) == "key" && seen_spread => {
-                key_after_spread = true;
-            }
-            _ => {}
-        }
-    }
-    if key_after_spread {
+    if key_after_spread(tx, attrs) {
         let callee = create_element_fn(tx, at);
         let ty = match tag {
             Some(t) => tag_expr(tx, t),
