@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use ts_r_ast::{Ast, FieldDump, MethodKind, Node, NodeId, NodeKind, ParentMap};
+use ts_r_ast::{Ast, FieldDump, MethodKind, Modifiers, Node, NodeId, NodeKind, ParentMap};
 use ts_r_span::Span;
 
 /// Strips `Paren` wrappers.
@@ -490,7 +490,9 @@ pub fn function_head_span(ast: &Ast, src: &str, parents: &ParentMap, f: NodeId) 
     {
         // `{ key: function () {} }` / `{ key: () => {} }`: from the key to the `(`.
         let start = ast.span(p).start;
-        if let Some(paren) = paren_after(src, start, span.end) {
+        if let Some(paren) =
+            arrow_param_start(ast, src, f).or_else(|| paren_after(src, start, span.end))
+        {
             return Span::new(start, paren);
         }
     }
@@ -507,10 +509,9 @@ pub fn function_head_span(ast: &Ast, src: &str, parents: &ParentMap, f: NodeId) 
         _ => {
             let parent = parents.parent(f);
             if let Some(p) = parent
-                && matches!(
-                    ast.node(p),
-                    Node::MethodDef { .. } | Node::PropertyDef { .. }
-                )
+                && (matches!(ast.node(p), Node::MethodDef { .. })
+                    || matches!(*ast.node(p), Node::PropertyDef { modifiers, .. }
+                        if !modifiers.contains(Modifiers::ACCESSOR)))
             {
                 // From the start of the method (or key) to the `(` of its parameters,
                 // which follows the key (a computed key can hold parentheses).
@@ -544,6 +545,37 @@ pub fn function_head_span(ast: &Ast, src: &str, parents: &ParentMap, f: NodeId) 
             Span::new(start, paren)
         }
     }
+}
+
+/// [`function_head_span`] as ESLint core and typescript-eslint compute it, where an arrow
+/// that is a class field's value (`x = () => {}`) spans from the member to its `(` (or its
+/// bare parameter); eslint-utils (unicorn) gives the `=>` there.
+pub fn member_function_head_span(ast: &Ast, src: &str, parents: &ParentMap, f: NodeId) -> Span {
+    let span = ast.span(f);
+    // `x = () => {}` in a class: from the member to the `(` (or the bare parameter).
+    if let Some(p) = parents.parent(f)
+        && matches!(*ast.node(p), Node::PropertyDef { value: Some(v), modifiers, .. }
+            if skip_parens(ast, v) == f && !modifiers.contains(Modifiers::ACCESSOR))
+        && matches!(ast.node(f), Node::Arrow { .. })
+    {
+        let start = ast.span(p).start;
+        let open = arrow_param_start(ast, src, f)
+            .or_else(|| paren_after(src, span.start, span.end))
+            .unwrap_or(span.start);
+        return Span::new(start, open);
+    }
+    function_head_span(ast, src, parents, f)
+}
+
+/// The start of an arrow's only parameter when it has no parentheses (`x => x`).
+fn arrow_param_start(ast: &Ast, src: &str, f: NodeId) -> Option<u32> {
+    let Node::Arrow { params, .. } = *ast.node(f) else {
+        return None;
+    };
+    let [p] = ast.list(params) else { return None };
+    let start = ast.span(*p).start;
+    let before = skip_trivia_backward(ast, src, start as usize);
+    (src.as_bytes().get(before.wrapping_sub(1)) != Some(&b'(')).then_some(start)
 }
 
 fn paren_after(src: &str, from: u32, to: u32) -> Option<u32> {

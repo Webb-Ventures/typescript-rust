@@ -3101,38 +3101,21 @@ and its `rules/utils/` helpers; eslint-plugin-jsdoc 63.3.3 `src/rules/typeFormat
 `src/rules/checkExamples.js`; jsdoc-type-pratt-parser 8.0.0 `dist/index.cjs` (object
 parslet and stringify rules).
 
-## Core and typescript-eslint rules (round 10, h1)
+## typescript-eslint and core rules (round 10, h2)
 
-Scope rules over `cx.semantic()`; each runs once per file in `run_file`.
+- **`@typescript-eslint/explicit-function-return-type`** (138/138) and
+  **`explicit-module-boundary-types`** (154/154) share the typed-context and higher-order
+  helpers in `ts_explicit_function_return_type.rs` (ESTree parents skip `Paren`; bodyless
+  functions are ESTree's `TSDeclareFunction` / `TSEmptyBodyFunctionExpression` and skipped,
+  except bodyless exported class methods). The boundary rule walks the file once: export
+  nodes are followed into declarations, classes, objects and same-scope writes of exported
+  names, then functions returned (at every level) by a checked function are checked.
+  `member_function_head_span` puts a class field's arrow from the member start (ESLint and
+  typescript-eslint); `function_head_span` keeps the arrow token there, as eslint-utils does
+  for unicorn. Accessor fields are not `PropertyDefinition`s for head locations.
 
-- **`no-shadow`** (360/363) and **`@typescript-eslint/no-shadow`** (238/239) share
-  `no_shadow.rs`; `cx.rule_name()` picks the variant (ts: `hoist` defaults to
-  `functions-and-types`, enum shadows are `noEnumShadow`, type-import and static-generic
-  exemptions are narrower). Every non-global scope's symbols are looked up from the parent
-  scope; a missing or `/* global */` binding is a global (only with `builtinGlobals`).
-  Reports and "declared at" positions use ESTree's identifier range, which includes a
-  parameter's or declarator's type annotation (`no_shadow::name_span`). Not done: a `.d.ts`
-  without imports or exports is a script, so its top-level `function f(): void;` doesn't
-  shadow a configured global (4 cases).
-- **`no-use-before-define`** (353/354) and **`@typescript-eslint/no-use-before-define`**
-  (127/127) share `no_use_before_define.rs`; the two upstream rules differ (core: "separate
-  execution context" through static initializers, class-name ranges; ts: outer-scope options,
-  type references, named exports, which typescript-eslint also counts as type references).
-  Not done: `"use strict"; a(); { function a() {} }` (1 case: the block function resolves at
-  the top level in ESLint's scope analysis).
-- **`no-param-reassign`** (78/78): writes to a symbol whose first declaration is a
-  parameter; with `props`, member writes, updates, `delete` and `for-in/of` targets.
-- **`no-underscore-dangle`** (116/116), **`camelcase`** (204/204): syntactic checks plus the
-  references of declared, configured-global and undeclared names; camelcase skips call
-  arguments, default values, `import()` option keys and (with `ignoreDestructuring`) names
-  that repeat their key, and reports once per start position.
-- **`no-loop-func`** (96/96): a function scope's "through" references are worked out once
-  per file (each reference walks up to its binding's scope). Plain IIFEs in a loop count as
-  the loop's own code unless they name themselves.
-- **`block-scoped-var`** (106/106), **`vars-on-top`** (61/61).
-
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
-`no-use-before-define.js`, `no-param-reassign.js`, `no-underscore-dangle.js`, `camelcase.js`,
-`no-loop-func.js`, `block-scoped-var.js`, `vars-on-top.js`, `utils/ast-utils.js`
-(`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
-`no-use-before-define.ts`.
+Read to understand (not ported): typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/explicit-function-return-type.ts`,
+`explicit-module-boundary-types.ts`, `src/util/explicitReturnTypeUtils.ts`,
+`getFunctionHeadLoc.ts`, `hasOverloadSignatures.ts`; ESLint 10.12.0
+`lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
