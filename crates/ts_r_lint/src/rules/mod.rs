@@ -7,8 +7,10 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
+mod arrow_body_style;
 mod block_scoped_var;
 mod camelcase;
+mod consistent_return;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -240,6 +242,7 @@ mod no_underscore_dangle;
 mod no_unexpected_multiline;
 mod no_unneeded_ternary;
 mod no_unreachable;
+mod no_unreachable_loop;
 mod no_unsafe_finally;
 mod no_unsafe_negation;
 mod no_unsafe_optional_chaining;
@@ -264,6 +267,7 @@ mod no_with;
 mod object_shorthand;
 mod prefer_arrow_callback;
 mod prefer_const;
+mod prefer_exponentiation_operator;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
 mod prefer_promise_reject_errors;
@@ -987,6 +991,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_unexpected_multiline::RULE,
     &no_unneeded_ternary::RULE,
     &no_unreachable::RULE,
+    &no_unreachable_loop::RULE,
     &no_unsafe_finally::RULE,
     &no_unsafe_negation::RULE,
     &no_unsafe_optional_chaining::RULE,
@@ -1011,6 +1016,7 @@ pub static ALL: &[&RuleDef] = &[
     &object_shorthand::RULE,
     &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
+    &prefer_exponentiation_operator::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
     &prefer_promise_reject_errors::RULE,

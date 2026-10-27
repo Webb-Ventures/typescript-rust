@@ -16,6 +16,20 @@ use ts_r_ast::{AssignOp, Ast, BinaryOp, Node, NodeId, NodeKind};
 
 pub type BlockId = u32;
 
+#[derive(Debug, Clone, Copy)]
+pub struct LoopBlocks {
+    pub node: NodeId,
+    pub target: BlockId,
+    pub body: BlockId,
+    pub range: (BlockId, BlockId),
+}
+
+impl LoopBlocks {
+    pub fn contains(&self, b: BlockId) -> bool {
+        b == self.body || (self.range.0..self.range.1).contains(&b)
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Block {
     pub events: Vec<NodeId>,
@@ -34,6 +48,10 @@ pub struct Cfg {
     pub case_ends: Vec<(NodeId, BlockId)>,
     /// `try` statements with the block at the end of their `try` block (normal completion).
     pub try_ends: Vec<(NodeId, BlockId)>,
+    /// Loops: the statement, the block an iteration loops back to (the test, update or
+    /// next-value step), and the body's blocks (its first block and the range of blocks
+    /// made while building it).
+    pub loops: Vec<LoopBlocks>,
     reachable: Vec<bool>,
 }
 
@@ -259,6 +277,7 @@ struct Builder<'a> {
     /// While building the abrupt copy of a `finally`: the jump-target depth at its start.
     abrupt_floor: Option<usize>,
     try_ends: Vec<(NodeId, BlockId)>,
+    loops: Vec<LoopBlocks>,
 }
 
 /// A literal test that is always truthy (`while (true)`).
@@ -347,6 +366,7 @@ impl<'a> Builder<'a> {
             static_fields: false,
             abrupt_floor: None,
             try_ends: Vec::new(),
+            loops: Vec::new(),
         };
         b.cur = b.new_block();
         b.exit = b.new_block();
@@ -394,8 +414,19 @@ impl<'a> Builder<'a> {
             ret: self.ret,
             case_ends: self.case_ends,
             try_ends: self.try_ends,
+            loops: self.loops,
             reachable,
         }
+    }
+
+    fn record_loop(&mut self, node: NodeId, target: BlockId, body: BlockId, lo: BlockId) {
+        let hi = self.blocks.len() as BlockId;
+        self.loops.push(LoopBlocks {
+            node,
+            target,
+            body,
+            range: (lo, hi),
+        });
     }
 
     fn new_block(&mut self) -> BlockId {
@@ -953,7 +984,9 @@ impl<'a> Builder<'a> {
                 }
                 self.push_jump(labels, after, Some(head), true);
                 self.cur = body_b;
+                let lo = self.blocks.len() as BlockId;
                 self.stmt(body);
+                self.record_loop(id, head, body_b, lo);
                 self.edge(self.cur, head);
                 self.jumps.pop();
                 self.cur = after;
@@ -964,7 +997,9 @@ impl<'a> Builder<'a> {
                 self.edge(self.cur, body_b);
                 self.push_jump(labels, after, Some(test_b), true);
                 self.cur = body_b;
+                let lo = self.blocks.len() as BlockId;
                 self.stmt(body);
+                self.record_loop(id, test_b, body_b, lo);
                 self.edge(self.cur, test_b);
                 self.jumps.pop();
                 self.cur = test_b;
@@ -1004,7 +1039,9 @@ impl<'a> Builder<'a> {
                 }
                 self.push_jump(labels, after, Some(upd), true);
                 self.cur = body_b;
+                let lo = self.blocks.len() as BlockId;
                 self.stmt(body);
+                self.record_loop(id, upd, body_b, lo);
                 self.edge(self.cur, upd);
                 self.jumps.pop();
                 self.cur = upd;
@@ -1024,12 +1061,14 @@ impl<'a> Builder<'a> {
                 self.edge(head, after);
                 self.push_jump(labels, after, Some(head), true);
                 self.cur = body_b;
+                let lo = self.blocks.len() as BlockId;
                 if matches!(ast.node(left), Node::VarDecl { .. }) {
                     self.stmt(left);
                 } else {
                     self.target(left);
                 }
                 self.stmt(body);
+                self.record_loop(id, head, body_b, lo);
                 self.edge(self.cur, head);
                 self.jumps.pop();
                 self.cur = after;
