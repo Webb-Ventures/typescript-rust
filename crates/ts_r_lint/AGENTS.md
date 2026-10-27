@@ -3100,3 +3100,39 @@ Read to understand (not ported): eslint-plugin-unicorn 79.0.0 `rules/comment-con
 and its `rules/utils/` helpers; eslint-plugin-jsdoc 63.3.3 `src/rules/typeFormatting.js`,
 `src/rules/checkExamples.js`; jsdoc-type-pratt-parser 8.0.0 `dist/index.cjs` (object
 parslet and stringify rules).
+
+## Core and typescript-eslint rules (round 10, h1)
+
+Scope rules over `cx.semantic()`; each runs once per file in `run_file`.
+
+- **`no-shadow`** (360/363) and **`@typescript-eslint/no-shadow`** (238/239) share
+  `no_shadow.rs`; `cx.rule_name()` picks the variant (ts: `hoist` defaults to
+  `functions-and-types`, enum shadows are `noEnumShadow`, type-import and static-generic
+  exemptions are narrower). Every non-global scope's symbols are looked up from the parent
+  scope; a missing or `/* global */` binding is a global (only with `builtinGlobals`).
+  Reports and "declared at" positions use ESTree's identifier range, which includes a
+  parameter's or declarator's type annotation (`no_shadow::name_span`). Not done: a `.d.ts`
+  without imports or exports is a script, so its top-level `function f(): void;` doesn't
+  shadow a configured global (4 cases).
+- **`no-use-before-define`** (353/354) and **`@typescript-eslint/no-use-before-define`**
+  (127/127) share `no_use_before_define.rs`; the two upstream rules differ (core: "separate
+  execution context" through static initializers, class-name ranges; ts: outer-scope options,
+  type references, named exports, which typescript-eslint also counts as type references).
+  Not done: `"use strict"; a(); { function a() {} }` (1 case: the block function resolves at
+  the top level in ESLint's scope analysis).
+- **`no-param-reassign`** (78/78): writes to a symbol whose first declaration is a
+  parameter; with `props`, member writes, updates, `delete` and `for-in/of` targets.
+- **`no-underscore-dangle`** (116/116), **`camelcase`** (204/204): syntactic checks plus the
+  references of declared, configured-global and undeclared names; camelcase skips call
+  arguments, default values, `import()` option keys and (with `ignoreDestructuring`) names
+  that repeat their key, and reports once per start position.
+- **`no-loop-func`** (96/96): a function scope's "through" references are worked out once
+  per file (each reference walks up to its binding's scope). Plain IIFEs in a loop count as
+  the loop's own code unless they name themselves.
+- **`block-scoped-var`** (106/106), **`vars-on-top`** (61/61).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
+`no-use-before-define.js`, `no-param-reassign.js`, `no-underscore-dangle.js`, `camelcase.js`,
+`no-loop-func.js`, `block-scoped-var.js`, `vars-on-top.js`, `utils/ast-utils.js`
+(`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
+`no-use-before-define.ts`.

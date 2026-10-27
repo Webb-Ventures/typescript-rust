@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
+mod block_scoped_var;
 mod camelcase;
 mod constructor_super;
 mod curly;
@@ -192,6 +193,7 @@ mod no_label_var;
 mod no_labels;
 mod no_lone_blocks;
 mod no_lonely_if;
+mod no_loop_func;
 mod no_loss_of_precision;
 mod no_misleading_character_class;
 mod no_multi_assign;
@@ -761,6 +763,7 @@ mod unicorn_url_type;
 mod unicorn_util;
 mod use_isnan;
 mod valid_typeof;
+mod vars_on_top;
 mod yoda;
 
 /// Everything a rule module usually needs: `use super::prelude::*;`.
@@ -789,6 +792,7 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
+    &block_scoped_var::RULE,
     &camelcase::RULE,
     &constructor_super::RULE,
     &curly::RULE,
@@ -937,6 +941,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_labels::RULE,
     &no_lone_blocks::RULE,
     &no_lonely_if::RULE,
+    &no_loop_func::RULE,
     &no_loss_of_precision::RULE,
     &no_misleading_character_class::RULE,
     &no_multi_assign::RULE,
@@ -1119,6 +1124,7 @@ pub static ALL: &[&RuleDef] = &[
     &symbol_description::RULE,
     &use_isnan::RULE,
     &valid_typeof::RULE,
+    &vars_on_top::RULE,
     &yoda::RULE,
     &jsdoc_check_access::RULE,
     &jsdoc_check_alignment::RULE,

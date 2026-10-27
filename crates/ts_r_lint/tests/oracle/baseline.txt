@@ -47,6 +47,7 @@
 @typescript-eslint/no-redeclare 52/52
 @typescript-eslint/no-redundant-type-constituents 104/104
 @typescript-eslint/no-require-imports 46/46
+@typescript-eslint/no-shadow 238/239
 @typescript-eslint/no-this-alias 10/10
 @typescript-eslint/no-unnecessary-boolean-literal-compare 72/72
 @typescript-eslint/no-unnecessary-condition 318/318
@@ -68,6 +69,7 @@
 @typescript-eslint/no-unsafe-unary-minus 23/23
 @typescript-eslint/no-unused-expressions 38/38
 @typescript-eslint/no-unused-vars 587/587
+@typescript-eslint/no-use-before-define 127/127
 @typescript-eslint/no-useless-constructor 41/41
 @typescript-eslint/no-useless-default-assignment 91/91
 @typescript-eslint/no-wrapper-object-types 58/58
@@ -97,8 +99,8 @@
 @typescript-eslint/unbound-method 217/218
 @typescript-eslint/unified-signatures 115/115
 @typescript-eslint/use-unknown-in-catch-callback-variable 57/57
-arrow-body-style 87/87
-consistent-return 47/47
+block-scoped-var 106/106
+camelcase 204/204
 constructor-super 82/82
 curly 218/218
 default-case 23/23
@@ -282,6 +284,7 @@ no-label-var 5/5
 no-labels 29/29
 no-lone-blocks 48/48
 no-lonely-if 17/17
+no-loop-func 96/96
 no-loss-of-precision 141/141
 no-misleading-character-class 189/189
 no-multi-assign 31/31
@@ -299,6 +302,7 @@ no-obj-calls 122/122
 no-object-constructor 56/56
 no-octal 17/17
 no-octal-escape 94/94
+no-param-reassign 78/78
 no-plusplus 23/23
 no-promise-executor-return 126/126
 no-proto 9/9
@@ -314,6 +318,7 @@ no-self-assign 85/85
 no-self-compare 21/21
 no-sequences 42/42
 no-setter-return 164/164
+no-shadow 360/363
 no-shadow-restricted-names 44/44
 no-sparse-arrays 6/6
 no-template-curly-in-string 22/22
@@ -322,6 +327,7 @@ no-throw-literal 42/42
 no-unassigned-vars 23/23
 no-undef 96/96
 no-undef-init 28/28
+no-underscore-dangle 116/116
 no-unexpected-multiline 54/54
 no-unneeded-ternary 45/45
 no-unreachable 70/70
@@ -332,6 +338,7 @@ no-unused-expressions 118/118
 no-unused-labels 35/35
 no-unused-private-class-members 61/61
 no-unused-vars 468/468
+no-use-before-define 353/354
 no-useless-assignment 121/121
 no-useless-backreference 190/190
 no-useless-call 44/44
@@ -730,4 +737,5 @@ unicorn/throw-new-error 86/86
 unicorn/try-complexity 34/34
 use-isnan 234/234
 valid-typeof 54/54
+vars-on-top 61/61
 yoda 156/156
