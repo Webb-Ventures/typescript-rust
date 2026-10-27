@@ -106,6 +106,7 @@ impl Expr {
                         type_args: None,
                         arg,
                         options: None,
+                        rest: ts_r_ast::NodeList::EMPTY,
                     },
                     ts_r_ast::Span::new(at, at),
                 )

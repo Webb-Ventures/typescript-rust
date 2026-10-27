@@ -321,3 +321,30 @@ fn es_decorator_static_accessor() {
 fn namespace_end_comments() {
     check("namespace_end_comments");
 }
+
+/// CommonJS `import()`: each non-literal call names its parameter `s`, an empty call is
+/// `require()`, and arguments past the second are dropped.
+#[test]
+fn cjs_import_call() {
+    check("cjs_import_call");
+}
+
+/// `import()` keeps a third argument and later ones (TS1450, a message).
+#[test]
+fn import_call_rest() {
+    check("import_call_rest");
+}
+
+/// Numeric and bigint enum member names are written as literals, a private name as nothing,
+/// and a missing member not at all.
+#[test]
+fn enum_numeric_names() {
+    check("enum_numeric_names");
+}
+
+/// CommonJS: a re-exported default import is assigned (`exports.b = t1_1.default;`), and
+/// `{ default as f2 }` beside a default import is a getter of `.default`.
+#[test]
+fn cjs_default_reexport() {
+    check("cjs_default_reexport");
+}

@@ -298,8 +298,8 @@ Files:
   (bundler, linter, the ecosystem parse stage) must not fail on them. The checker still
   reports `grammar` for checked files. TypeScript files keep them in both lists.
 - **Import calls take an argument list.** `import(...)` parses its arguments like a call:
-  the first is the specifier, the second the options, later ones are parsed and dropped
-  (tsc's TS1450 for them, and for `import()`, is a checker message). A spread argument is
+  the first is the specifier, the second the options, later ones go to `ImportCall::rest`
+  (printed by emit; tsc's TS1450 for them, and for `import()`, is a checker message). A spread argument is
   TS1325, deferred. A trailing comma (`import(x,)`, `import(x, {},)`) is not the parser's:
   the checker reports TS1009 below the modules that take import attributes
   (tsc: grammarchecks.go checkGrammarImportCallExpression). `import` followed by neither `(` nor `.`

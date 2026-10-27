@@ -638,6 +638,7 @@ impl Printer<'_> {
                 type_args,
                 arg,
                 options,
+                rest,
             } => {
                 self.map_node(id);
                 self.tok(match phase {
@@ -665,6 +666,11 @@ impl Printer<'_> {
                     self.tok(",");
                     self.space();
                     self.expr(o, Prec::Assign);
+                }
+                for r in self.ast.list(rest).to_vec() {
+                    self.tok(",");
+                    self.space();
+                    self.expr(r, Prec::Assign);
                 }
                 self.no_in = saved;
                 self.tok(")");

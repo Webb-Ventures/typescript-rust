@@ -1626,6 +1626,7 @@ impl<'a> Tx<'a> {
                 type_args,
                 arg,
                 options,
+                rest,
             } => {
                 if type_args.is_some() {
                     self.erase_opt(type_args);
@@ -1636,12 +1637,16 @@ impl<'a> Tx<'a> {
                             type_args: None,
                             arg,
                             options,
+                            rest,
                         },
                     );
                 }
                 self.expr(arg);
                 if let Some(o) = options {
                     self.expr(o);
+                }
+                for r in self.items(rest) {
+                    self.expr(r);
                 }
                 self.rewrite_dynamic_specifier(arg);
                 if self.opts.is_cjs() && !self.opts.node_module {

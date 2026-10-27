@@ -558,15 +558,18 @@ pub(crate) fn import_decl(tx: &mut Tx, id: NodeId, kept: &[NodeId], out: &mut Ve
             tx.cjs.imports.insert(b, ImportRef::Default { module });
         }
         for (local, imp) in &named {
-            if let (Some(imp), Some(&b)) = (imp, tx.sc.decl_of.get(local)) {
-                tx.cjs.imports.insert(
-                    b,
-                    ImportRef::Named {
-                        module,
-                        name: imp.clone(),
-                    },
-                );
-            }
+            let Some(&b) = tx.sc.decl_of.get(local) else {
+                continue;
+            };
+            // `{ default as x }` next to a default import reads `.default` too.
+            let r = match imp {
+                Some(imp) => ImportRef::Named {
+                    module,
+                    name: imp.clone(),
+                },
+                None => ImportRef::Default { module },
+            };
+            tx.cjs.imports.insert(b, r);
         }
     }
     let mut ds = Vec::new();
@@ -631,7 +634,13 @@ pub(crate) fn import_decl(tx: &mut Tx, id: NodeId, kept: &[NodeId], out: &mut Ve
                 let value = import_value(tx, b, local, at);
                 let spec = tx.span(s);
                 tx.map_range(value, spec);
-                export_getter(tx, &n, value, at)
+                // A default import is assigned (`exports.b = m_1.default;`; observed,
+                // exportsAndImports4), a named one forwarded through a getter.
+                if matches!(tx.n(s), Node::ImportDefaultSpecifier { .. }) {
+                    export_assign(tx, &n, value, at)
+                } else {
+                    export_getter(tx, &n, value, at)
+                }
             };
             out.push(g);
         }
@@ -1225,13 +1234,19 @@ pub(crate) fn import_call(tx: &mut Tx, id: NodeId) {
     }
     let at = tx.at(id);
     let promise = tx.dotted("Promise.resolve", at);
-    let literal = tx.kind(arg) == NodeKind::StringLit;
+    let literal = matches!(tx.kind(arg), NodeKind::StringLit | NodeKind::Missing);
     let (resolved, param, req_arg) = if literal {
         let r = tx.call(promise, &[], at);
         (r, None, arg)
     } else {
-        // Promise.resolve(`${arg}`).then(s => __importStar(require(s)))
-        let s = tx.fresh("s", false);
+        // Promise.resolve(`${arg}`).then(s => __importStar(require(s))); every call reuses
+        // `s` unless the file declares it (tsc 7.0.2, dynamicImportEvaluateSpecifier).
+        let s = tx.ast.intern("s");
+        let s = if tx.sc.names.contains(&s) {
+            tx.fresh("s", true)
+        } else {
+            s
+        };
         let empty = tx.ast.intern("");
         let e1 = tx.mk(
             Node::TemplateElement {
@@ -1256,7 +1271,12 @@ pub(crate) fn import_call(tx: &mut Tx, id: NodeId) {
         (r, Some(p), a)
     };
     let r = tx.ident("require", at);
-    let req = tx.call(r, &[req_arg], at);
+    let req_args: &[NodeId] = if tx.kind(req_arg) == NodeKind::Missing {
+        &[]
+    } else {
+        &[req_arg]
+    };
+    let req = tx.call(r, req_args, at);
     let body = helper_call(tx, Helper::ImportStar, req, at);
     let params: Vec<NodeId> = param.into_iter().collect();
     let arrow = tx.arrow_expr(&params, body, at);

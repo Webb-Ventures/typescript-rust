@@ -517,6 +517,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 options,
                 phase,
                 type_args,
+                ..
             } => {
                 // `import<T>` is TS1326 (from the parser), and its type arguments are still
                 // resolved (importWithTypeArguments: TS2304 for `T`).

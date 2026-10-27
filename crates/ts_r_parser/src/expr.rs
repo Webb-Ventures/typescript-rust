@@ -1075,6 +1075,7 @@ impl<'a> Parser<'a> {
                         type_args,
                         arg,
                         options: None,
+                        rest: NodeList::EMPTY,
                     },
                 )
             };
@@ -1129,12 +1130,13 @@ impl<'a> Parser<'a> {
                     type_args,
                     arg,
                     options: None,
+                    rest: NodeList::EMPTY,
                 },
             );
         }
         // An argument list as in a call (importAssertion1, plainJSGrammarErrors): the
-        // checker's rules are grammar errors here. A third argument and later ones are
-        // dropped (tsc: TS1450, a message, not an error).
+        // checker's rules are grammar errors here. A third argument and later ones go to
+        // `rest`, which emit prints (tsc: TS1450, a message, not an error).
         let (args, _) = self.with_ctx(0, NESTED_CLEAR, |p| {
             p.parse_delimited(List::ArgumentExpressions, |p| {
                 let s = p.start();
@@ -1153,6 +1155,8 @@ impl<'a> Parser<'a> {
         let list = self.ast.list(args);
         let arg = list.first().copied();
         let options = list.get(1).copied();
+        let rest = list.get(2..).filter(|r| !r.is_empty()).map(<[_]>::to_vec);
+        let rest = rest.map_or(NodeList::EMPTY, |r| self.ast.add_list(&r));
         // A trailing comma (`import(x,)`) is the checker's TS1009: it depends on `module`.
         let arg = arg.unwrap_or_else(|| {
             let pos = self.prev_end.saturating_sub(1);
@@ -1165,6 +1169,7 @@ impl<'a> Parser<'a> {
                 type_args,
                 arg,
                 options,
+                rest,
             },
         )
     }
