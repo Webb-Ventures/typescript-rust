@@ -246,6 +246,14 @@ impl Printer<'_> {
         self.statement_list(list);
         if !self.is_synthetic(id) {
             self.leading_comments(span.end.saturating_sub(1));
+        } else if self.tsc {
+            // A synthesized block standing for a source block (a namespace IIFE's body)
+            // keeps the comments before that block's `}`.
+            if let Some(r) = self.hinted_range(id)
+                && self.src.as_bytes().get(r.start as usize) == Some(&b'{')
+            {
+                self.leading_comments(r.end.saturating_sub(1));
+            }
         }
         self.dedent();
         if !(self.tsc && self.after_inline_comment()) {

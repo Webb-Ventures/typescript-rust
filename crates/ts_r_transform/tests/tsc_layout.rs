@@ -314,3 +314,10 @@ fn bare_class_statements() {
 fn es_decorator_static_accessor() {
     check("es_decorator_static_accessor");
 }
+
+/// The comments before a namespace body's `}` stay at the end of its IIFE's body (tsc 7.0.2,
+/// commentInNamespaceDeclarationWithIdentifierPathName).
+#[test]
+fn namespace_end_comments() {
+    check("namespace_end_comments");
+}

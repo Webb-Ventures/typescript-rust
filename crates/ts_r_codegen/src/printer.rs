@@ -559,6 +559,13 @@ impl<'a> Printer<'a> {
 
     /// [`Printer::tsc_maps`]: the source range `id` maps to, if any: a transform's range
     /// ([`crate::PrintHints::map_ranges`]) first, else an original node's span.
+    /// The source range the transform gave synthesized node `id` (with or without maps).
+    pub(crate) fn hinted_range(&self, id: NodeId) -> Option<Span> {
+        let ranges = self.hints.map_ranges;
+        let i = ranges.binary_search_by_key(&id, |&(n, _)| n).ok()?;
+        Some(ranges[i].1)
+    }
+
     pub(crate) fn map_range_of(&self, id: NodeId) -> Option<Span> {
         if !self.tsc_maps {
             return None;
