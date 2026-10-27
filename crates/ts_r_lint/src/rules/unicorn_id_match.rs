@@ -93,7 +93,7 @@ fn inside_object_pattern(t: &EsTree<'_>, n: u32) -> bool {
 }
 
 /// A reference to a configured (or `/* global */`) variable not declared in the file.
-fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let sem = cx.semantic();
     match sem.reference_at(id).map(|r| sem.reference(r).resolution) {
         Some(Resolution::Global) => true,
@@ -104,7 +104,7 @@ fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
 
 /// ESLint's `isImportAttributeKey`: a key of an import attribute, or of the options object
 /// of a dynamic `import()` (at any depth through property values).
-fn is_import_attribute_key(t: &EsTree<'_>, n: u32) -> bool {
+pub(crate) fn is_import_attribute_key(t: &EsTree<'_>, n: u32) -> bool {
     let mut n = n;
     for _ in 0..1000 {
         let Some(parent) = t.parent(n) else {

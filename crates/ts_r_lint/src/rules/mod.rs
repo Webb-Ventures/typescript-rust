@@ -27,6 +27,8 @@ mod func_style;
 mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
+mod id_denylist;
+mod id_length;
 mod id_match;
 mod import_consistent_type_specifier_style;
 mod import_default;
@@ -306,6 +308,8 @@ mod require_await;
 mod require_yield;
 mod sort_imports;
 mod sort_keys;
+mod sort_vars;
+mod strict;
 mod symbol_description;
 mod this_binding;
 mod ts_adjacent_overload_signatures;
@@ -854,6 +858,8 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &id_denylist::RULE,
+    &id_length::RULE,
     &id_match::RULE,
     &unicorn_iteration_fallback_style::RULE,
     &unicorn_no_invalid_file_input_accept::RULE,
@@ -1092,6 +1098,8 @@ pub static ALL: &[&RuleDef] = &[
     &require_yield::RULE,
     &sort_imports::RULE,
     &sort_keys::RULE,
+    &sort_vars::RULE,
+    &strict::RULE,
     &ts_array_type::RULE,
     &ts_adjacent_overload_signatures::RULE,
     &ts_await_thenable::RULE,
