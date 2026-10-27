@@ -346,6 +346,7 @@ symbol-description 8/8
 unicorn/better-dom-traversing 175/175
 unicorn/catch-error-name 120/120
 unicorn/class-reference-in-static-methods 133/133
+unicorn/comment-content 145/145
 unicorn/consistent-arrow-return-style 78/78
 unicorn/consistent-assert 31/31
 unicorn/consistent-boolean-name 2033/2033

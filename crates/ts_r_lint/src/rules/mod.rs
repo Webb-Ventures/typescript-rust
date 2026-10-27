@@ -359,6 +359,7 @@ mod unicorn_ast;
 mod unicorn_better_dom_traversing;
 mod unicorn_catch_error_name;
 mod unicorn_class_reference_in_static_methods;
+mod unicorn_comment_content;
 mod unicorn_conditions;
 mod unicorn_consistent_arrow_return_style;
 mod unicorn_consistent_assert;
@@ -1164,6 +1165,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_json_file_read::RULE,
     &unicorn_consistent_optional_chaining::RULE,
     &unicorn_catch_error_name::RULE,
+    &unicorn_comment_content::RULE,
     &unicorn_consistent_function_scoping::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,
