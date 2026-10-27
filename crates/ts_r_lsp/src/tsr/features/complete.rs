@@ -1641,9 +1641,14 @@ fn import_clause_names(
         let t = c.resolve_alias(names[i].1).unwrap_or(names[i].1);
         names = c.exports_of(t);
         if c.has_meaning(t, meaning::VALUE) {
+            // A namespace's exports are its type's properties too: each name once.
+            let mut seen: HashSet<String> = names.iter().map(|(n, _)| n.clone()).collect();
             let ty = ck.type_of_symbol(t);
             for (n, p) in ck.properties_of(ty) {
-                names.push((ck.store().str(n).to_string(), p));
+                let n = ck.store().str(n).to_string();
+                if seen.insert(n.clone()) {
+                    names.push((n, p));
+                }
             }
         }
     }

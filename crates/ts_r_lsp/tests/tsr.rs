@@ -2411,6 +2411,36 @@ fn completion_expected_types_and_literals() {
     c.shutdown();
 }
 
+/// Named imports from an `export =` namespace list each of its exports once.
+#[test]
+fn completion_named_imports_of_export_equals_are_unique() {
+    if !libs_present() {
+        return;
+    }
+    let (b, m) = marked("import { ¦ } from \"./a\";\n");
+    let env = Env::new(
+        "complete-xeq",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            (
+                "src/a.ts",
+                "namespace N { export const x = 1; }\nexport = N;\n",
+            ),
+            ("src/b.ts", &b),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/b.ts");
+    let u = env.uri("src/b.ts");
+    let l = completion_labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&u, m[0].0, m[0].1),
+    ));
+    assert_eq!(l.iter().filter(|x| *x == "x").count(), 1, "{l:?}");
+    c.shutdown();
+}
+
 /// Names being declared get no list (a constructor parameter only its modifiers); an
 /// unclosed function's names are in scope at the end of the file, except the parameter being
 /// written and the later ones.
