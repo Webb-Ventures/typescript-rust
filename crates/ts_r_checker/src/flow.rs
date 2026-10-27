@@ -261,7 +261,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return self.c.sym_of_decl(p);
         }
-        let s = self.c.resolve_ident(l, meaning::VALUE)?;
+        // CommonJS `exports` and `module` (`exports.x`, `module.exports.x` narrow by their
+        // assignments): the module.
+        let Some(s) = self.c.resolve_ident(l, meaning::VALUE) else {
+            let b = self.c.bound(l.file);
+            let name = crate::nodes::ident_text(self.ast(l.file), l.node);
+            return (b.commonjs
+                && self.c.file(l.file).is_js()
+                && matches!(name, Some("exports" | "module")))
+            .then(|| self.c.sym(l.file, b.file_symbol));
+        };
         if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
             return self.c.resolve_alias(s).or(Some(s));
         }

@@ -224,6 +224,26 @@ impl<'c, 'a> Ck<'c, 'a> {
             | Node::Continue { .. } => {}
             Node::ExprStmt { expr } => {
                 self.check_expr(at(expr));
+                // `x.k = void 0` only ever assigned `undefined` (JavaScript): TS7008.
+                if let Node::Assign {
+                    left,
+                    op: ts_r_ast::AssignOp::Assign,
+                    ..
+                } = *ast.node(expr)
+                    && self.c.opts.no_implicit_any
+                    && let Node::Member { obj, prop, .. } = *ast.node(left)
+                    && !matches!(ast.node(obj), Node::This {})
+                    && let Some(s) = self.c.sym_of_decl(at(left))
+                    && self.c.value_decl(s) == Some(at(left))
+                    && self.type_of_symbol(s) == TypeId::IMPLICIT_ANY
+                    && let Some(name) = crate::nodes::ident_text(ast, prop)
+                {
+                    self.error(
+                        at(expr),
+                        dg::MEMBER_0_IMPLICITLY_HAS_AN_1_TYPE_7008,
+                        &[name, "any"],
+                    );
+                }
             }
             Node::If { test, cons, alt } => {
                 self.check_truthiness_expr(at(test));

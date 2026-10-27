@@ -1180,7 +1180,13 @@ Files, by layer:
     object (`commonjs_require_type`), `any` when unresolved or not a module; TS2307 and
     TS2591 apply to its specifier, TS7016 does not. `var m = require("m")` is not widened.
   - The binder declares `exports.x = v`/`module.exports.x = v` as exports (expando-typed:
-    the union of the widened assigned values, `undefined` ones dropped, `any` alone;
+    the union of the regular types of the rightmost assigned values, literals kept
+    (`exports.y = exports.x = void 0; exports.x = 1` is `1`), a first `undefined` of several
+    dropped, then widened; `undefined` alone is `IMPLICIT_ANY`, TS7008 at the assignment
+    under noImplicitAny, as for other JavaScript expandos; tsc: checker.go,
+    getAssignmentDeclarationInitializerType. References to `exports.x` and
+    `module.exports.x` narrow by assignment: undeclared `exports`/`module` root at the
+    module symbol in `flow.rs`;
     `Object.defineProperty(exports, "x", d)` is `d`'s widened `value`, its `get` method's
     return type or its `set` method's parameter type, `define_property_type`) and
     `module.exports = v` as `export=` (the value's type, unwidened; the first assignment's

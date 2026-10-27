@@ -32,7 +32,8 @@ diagnostics in tsc's format. Root rules:
   project's source; ECMAScript/CommonJS format under `node16`/`nodenext`). `Imported via`
   keeps the specifier's quote and adds `with packageId` for bare specifiers that resolve
   into a package (resolved again with `ts_r_resolver`). `--listFilesOnly` loads the program
-  and lists it, nothing checked or written, exit 0. `--diagnostics` /
+  and lists it, nothing checked or written: only the config's diagnostics and syntax errors
+  (option errors without syntax errors) are printed first; exit 1 with an error, else 0. `--diagnostics` /
   `--extendedDiagnostics` print counts and the time to stderr.
 - `--traceResolution` (or `traceResolution` in the config) prints tsc 7's resolution log
   before the diagnostics, for every program built (`src/trace.rs`): the program's

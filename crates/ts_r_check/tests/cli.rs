@@ -646,6 +646,20 @@ fn list_and_explain_files() {
     let (out, code) = ts_r_check_args(&dir, &["--pretty", "false", "--listFilesOnly"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.lines().any(|l| l == a), "{out}");
+
+    // Config diagnostics are still reported, before the list (tsc 7.0.2): exit 1.
+    std::fs::write(
+        dir.join("tsconfig.json"),
+        "{ \"compilerOptions\": { \"strict\": } }\n",
+    )
+    .unwrap();
+    let (out, code) = ts_r_check_args(&dir, &["--pretty", "false", "--listFilesOnly"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.starts_with("tsconfig.json(1,33): error TS5024: "),
+        "{out}"
+    );
+    assert!(out.contains("tsconfig.json(1,34): error TS1109: "), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
