@@ -290,7 +290,7 @@ mod no_void;
 mod no_warning_comments;
 mod no_with;
 mod object_shorthand;
-mod operator_assignment;
+mod one_var;
 mod prefer_arrow_callback;
 mod prefer_const;
 mod prefer_destructuring;
@@ -1081,7 +1081,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_warning_comments::RULE,
     &no_with::RULE,
     &object_shorthand::RULE,
-    &operator_assignment::RULE,
+    &one_var::RULE,
     &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
     &prefer_destructuring::RULE,
