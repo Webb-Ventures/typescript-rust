@@ -8,6 +8,10 @@ use serde_json::Value;
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
 mod array_callback_return;
+mod arrow_body_style;
+mod block_scoped_var;
+mod camelcase;
+mod consistent_return;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -20,6 +24,7 @@ mod func_names;
 mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
+mod id_match;
 mod import_consistent_type_specifier_style;
 mod import_default;
 mod import_dynamic_import_chunkname;
@@ -140,6 +145,7 @@ mod jsdoc_ts_no_unnecessary_template_expression;
 mod jsdoc_ts_prefer_function_type;
 mod jsdoc_type_formatting;
 mod jsdoc_valid_types;
+mod logical_assignment_operators;
 mod max_depth;
 mod max_nested_callbacks;
 mod max_params;
@@ -262,11 +268,14 @@ mod no_var;
 mod no_void;
 mod no_with;
 mod object_shorthand;
+mod operator_assignment;
 mod prefer_arrow_callback;
 mod prefer_const;
 mod prefer_destructuring;
+mod prefer_exponentiation_operator;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
+mod prefer_object_spread;
 mod prefer_promise_reject_errors;
 mod prefer_rest_params;
 mod prefer_spread;
@@ -813,6 +822,7 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &id_match::RULE,
     &unicorn_iteration_fallback_style::RULE,
     &unicorn_no_invalid_file_input_accept::RULE,
     &unicorn_no_manually_wrapped_comments::RULE,
@@ -1017,11 +1027,13 @@ pub static ALL: &[&RuleDef] = &[
     &no_void::RULE,
     &no_with::RULE,
     &object_shorthand::RULE,
+    &operator_assignment::RULE,
     &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
     &prefer_destructuring::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
+    &prefer_object_spread::RULE,
     &prefer_promise_reject_errors::RULE,
     &prefer_rest_params::RULE,
     &prefer_spread::RULE,
@@ -1200,6 +1212,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_ts_prefer_function_type::RULE,
     &jsdoc_type_formatting::RULE,
     &jsdoc_valid_types::RULE,
+    &logical_assignment_operators::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
