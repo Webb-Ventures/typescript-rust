@@ -151,6 +151,7 @@ mod logical_assignment_operators;
 mod max_depth;
 mod max_nested_callbacks;
 mod max_params;
+mod new_cap;
 mod no_alert;
 mod no_array_constructor;
 mod no_async_promise_executor;
@@ -918,6 +919,7 @@ pub static ALL: &[&RuleDef] = &[
     &max_depth::RULE,
     &max_nested_callbacks::RULE,
     &max_params::RULE,
+    &new_cap::RULE,
     &no_alert::RULE,
     &no_array_constructor::RULE,
     &no_async_promise_executor::RULE,
