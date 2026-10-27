@@ -1125,7 +1125,10 @@ fn an_open_package_file_belongs_to_the_project_importing_it() {
                 "export declare function a(): void;\n",
             ),
             ("src/b.ts", "import { a } from \"a\";\na();\n"),
-            ("node_modules/c/index.d.ts", "export declare const c: number;\n"),
+            (
+                "node_modules/c/index.d.ts",
+                "export declare const c: number;\n",
+            ),
         ],
     );
     let mut c = env.lsp("w1");
@@ -2652,7 +2655,7 @@ fn hover_quick_info_lines() {
     if !libs_present() {
         return;
     }
-    let src = "namespace N {\n    export function f(x: number): void;\n    export function f(x: string): void;\n    export function f(x: any) {}\n}\nclass G<T> {\n    accessor a = 1;\n    m<U>(u: U, t: T): U { return u; }\n    constructor(x?: number) {}\n    \"lit\"() {}\n}\nconst v = new G<string>();\nv.m(1, \"a\");\nN.f(1);\nN.f;\nv[\"lit\"]();\nfunction opt(c?: () => string) {}\nexport default class {}\n";
+    let src = "namespace N {\n    export function f(x: number): void;\n    export function f(x: string): void;\n    export function f(x: any) {}\n}\nclass G<T> {\n    accessor a = 1;\n    m<U>(u: U, t: T): U { return u; }\n    constructor(x?: number) {}\n    \"lit\"() {}\n}\nconst v = new G<string>();\nv.m(1, \"a\");\nN.f(1);\nN.f;\nv[\"lit\"]();\nfunction opt(c?: () => string) {}\nexport default class {}\nfunction ar() { return arguments; }\nopt(undefined);\nconst pt = { get gx() { return 1; } };\npt.gx;\n";
     let env = Env::new(
         "hover-quick-info",
         &[("tsconfig.json", TSCONFIG), ("src/q.ts", src)],
@@ -2673,6 +2676,9 @@ fn hover_quick_info_lines() {
     );
     assert_eq!(h("v.m(1", 2), "(method) G<string>.m<1>(u: 1, t: string): 1");
     assert_eq!(h("accessor a", 9), "(accessor) G<T>.a: number");
+    assert_eq!(h("pt.gx", 3), "(accessor) gx: number");
+    assert_eq!(h("arguments;", 2), "(property) arguments: IArguments");
+    assert_eq!(h("undefined);", 2), "(property) undefined: undefined");
     assert_eq!(
         h("m<U>", 2),
         "(type parameter) U in G<T>.m<U>(u: U, t: T): U"
@@ -4022,7 +4028,7 @@ fn signature_help_in_jsx_opening_tags() {
     let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
     let text = "declare namespace JSX {\n  interface Element {}\n}\n\
                 declare function Foo(props: { size: number }): JSX.Element;\n\
-                const a = <Foo size={1} />;\n\
+                const a = <Foo size={1} />; <div></div>;\n\
                 const b = <Foo ";
     let env = Env::new(
         "sigjsx",
@@ -4041,6 +4047,11 @@ fn signature_help_in_jsx_opening_tags() {
     // Not on the tag name.
     let s = result(&mut c, "textDocument/signatureHelp", at(&u, 4, 12));
     assert!(s.is_null(), "{s}");
+    // An intrinsic tag JSX.IntrinsicElements doesn't declare: `any`, on both tags.
+    for ch in [30, 36] {
+        let h = result(&mut c, "textDocument/hover", at(&u, 4, ch));
+        assert!(h.to_string().contains("```typescript\\nany\\n```"), "{h}");
+    }
     c.shutdown();
 }
 

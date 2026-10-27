@@ -77,6 +77,22 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
                         "range": lines.range(text, span.start, span.end),
                     });
                 }
+                let name = name_text(ast, n).unwrap_or("");
+                // An unresolved intrinsic JSX tag: `any`.
+                if let Some(p) = c.parent(l)
+                    && let Node::JsxOpening { name: t, .. } | Node::JsxClosing { name: t } =
+                        *c.node(p)
+                    && t == n
+                    && name.starts_with(|ch: char| ch.is_ascii_lowercase())
+                {
+                    return contents(lines, text, "any", "", span.start, span.end);
+                }
+                // `arguments` in a function and the global `undefined`: tsc shows a property.
+                if matches!(name, "arguments" | "undefined") {
+                    let t = ck.check_expr(l);
+                    let display = format!("(property) {name}: {}", ck.type_to_string(t));
+                    return contents(lines, text, &display, "", span.start, span.end);
+                }
                 return Value::Null;
             };
             let display =

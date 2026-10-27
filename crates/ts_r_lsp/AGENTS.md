@@ -437,10 +437,12 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
 - The location's meaning (value, type or namespace position; a declaration name is all
   three) picks which of a merged symbol's meanings get a line; when none match, all are
   shown. Each meaning is its own line: `(local) var`, `(property)`, `(accessor)` (also
-  `accessor` fields), `(method)`, `function`, `constructor`, `class`/`(local class)`/
+  `accessor` fields and object literal getters and setters), `(method)`, `function`, `constructor`, `class`/`(local class)`/
   `abstract class`, `interface`, `enum`/`const enum`, `(enum member) E.m = 0`,
   `namespace`/`module`, `(type parameter) T in C<T>`/`in f<T>(x: T): void`/
   `in type A<T>`, `type A<T> = <body>`.
+  With no symbol: `(property) arguments: IArguments`, `(property) undefined: undefined`,
+  and `any` on an intrinsic JSX tag `JSX.IntrinsicElements` does not declare.
 - A type alias's body is its declared type printed with `PrintMode::quick_info_alias`
   (tsc's `InTypeAlias`: the outermost type without its own alias), so `type B = Exclude<A,
   "a">` shows the union it makes and a JSDoc `@typedef`/`@callback` its object or function
@@ -1142,7 +1144,7 @@ features stay on ts-r (hover p50 0.12 ms).
   dependency levels are found again by content.
 - Features (the fourslash oracle, 2200 of 2513 tests at 12ed8c6, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
-  or meta-property hovers (`arguments`, `new`); it
+  or meta-property hovers (`new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); references do not go back up from a
