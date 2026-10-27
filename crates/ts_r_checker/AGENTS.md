@@ -1195,8 +1195,10 @@ Files, by layer:
   - The binder declares `exports.x = v`/`module.exports.x = v` as exports (expando-typed:
     the union of the regular types of the rightmost assigned values, literals kept
     (`exports.y = exports.x = void 0; exports.x = 1` is `1`), a first `undefined` of several
-    dropped, then widened; `undefined` alone is `IMPLICIT_ANY`, TS7008 at the assignment
-    under noImplicitAny, as for other JavaScript expandos; tsc: checker.go,
+    dropped, then widened; `undefined`, `void 0` or `null` alone is `IMPLICIT_ANY`, TS7008
+    at each assignment of a chain under noImplicitAny, as for other JavaScript expandos,
+    except that a value that is the `undefined` identifier itself under strictNullChecks
+    is `undefined` (observed); tsc: checker.go,
     getAssignmentDeclarationInitializerType. References to `exports.x` and
     `module.exports.x` narrow by assignment: undeclared `exports`/`module` root at the
     module symbol in `flow.rs`;
