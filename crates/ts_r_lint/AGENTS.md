@@ -3190,11 +3190,22 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.
   arrays and tuples) check the callback's return types. Suggestions wrap the operand or, under
   `!`, the negation, with operand parentheses for non-primary operands, outer parentheses
   for a weak parent, and a leading `;` when the statement before has none.
+- `@typescript-eslint/member-ordering`: a member's candidate groups go from most to least
+  specific (`{access}-decorated-{kind}`, `{access}-{scope}-{kind}`, `{scope}-{kind}`,
+  `{access}-{kind}`, `{kind}`, with `readonly-*` also trying the plain kind), and its rank is
+  the first `memberTypes` entry naming one of them. Methods without a body (overloads) rank
+  -1 and are skipped; an unknown member kind ranks last. An object `default` config is merged
+  onto the default `memberTypes`; other configs are not. Alphabetical checks run within each
+  group, or (after a group-order report) within runs of adjacent same-rank members, where
+  typescript-eslint never adds the list's last member. A member is not reported out of order
+  when its initializer reads `this.x` of an initialized member it would move above.
+  `optionalityOrder` first checks the optional/required split, then orders each side.
 
 Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
 `lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,
 `lib/rules/no-restricted-exports.js`; typescript-eslint 8.71.1
-`packages/eslint-plugin/src/rules/strict-boolean-expressions.ts`, `src/util/getWrappingFixer.ts`,
-`assertionFunctionUtils.ts`, `isArrayMethodCallWithPredicate.ts`.
+`packages/eslint-plugin/src/rules/strict-boolean-expressions.ts`, `member-ordering.ts`,
+`src/util/getWrappingFixer.ts`, `assertionFunctionUtils.ts`,
+`isArrayMethodCallWithPredicate.ts`, `misc.ts`.
 The `group` matching follows gitignore as node-ignore applies it, and natural order follows
 the behaviour of the `natural-compare` package; neither package's source was read.

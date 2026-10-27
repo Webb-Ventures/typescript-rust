@@ -325,6 +325,7 @@ mod ts_default_param_last;
 mod ts_dot_notation;
 mod ts_init_declarations;
 mod ts_max_params;
+mod ts_member_ordering;
 mod ts_method_signature_style;
 mod ts_no_array_constructor;
 mod ts_no_array_delete;
@@ -1108,6 +1109,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_dot_notation::RULE,
     &ts_init_declarations::RULE,
     &ts_max_params::RULE,
+    &ts_member_ordering::RULE,
     &ts_method_signature_style::RULE,
     &ts_no_array_constructor::RULE,
     &ts_no_base_to_string::RULE,

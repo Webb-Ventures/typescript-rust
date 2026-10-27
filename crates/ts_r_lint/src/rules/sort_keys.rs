@@ -58,7 +58,7 @@ fn natural_rank(c: char) -> u32 {
 }
 
 /// Natural order: runs of digits starting with 1-9 compare by their numeric value.
-fn natural_cmp(a: &str, b: &str) -> Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> Ordering {
     if a == b {
         return Ordering::Equal;
     }

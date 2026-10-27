@@ -16,6 +16,7 @@
 @typescript-eslint/dot-notation 63/63
 @typescript-eslint/init-declarations 77/77
 @typescript-eslint/max-params 23/23
+@typescript-eslint/member-ordering 205/205
 @typescript-eslint/method-signature-style 62/62
 @typescript-eslint/no-array-constructor 33/33
 @typescript-eslint/no-array-delete 31/31
@@ -102,6 +103,7 @@
 @typescript-eslint/restrict-plus-operands 119/119
 @typescript-eslint/restrict-template-expressions 86/86
 @typescript-eslint/return-await 103/103
+@typescript-eslint/strict-boolean-expressions 217/217
 @typescript-eslint/switch-exhaustiveness-check 113/113
 @typescript-eslint/triple-slash-reference 21/21
 @typescript-eslint/unbound-method 217/218
@@ -273,6 +275,7 @@ no-dupe-class-members 78/78
 no-dupe-else-if 89/89
 no-dupe-keys 50/50
 no-duplicate-case 29/29
+no-duplicate-imports 85/85
 no-else-return 91/91
 no-empty 35/35
 no-empty-character-class 42/42
@@ -324,7 +327,9 @@ no-proto 9/9
 no-prototype-builtins 47/47
 no-redeclare 71/71
 no-regex-spaces 73/73
+no-restricted-exports 183/183
 no-restricted-globals 136/136
+no-restricted-imports 263/263
 no-restricted-properties 89/89
 no-restricted-syntax 34/34
 no-return-assign 30/30
@@ -381,6 +386,8 @@ preserve-caught-error 81/81
 radix 91/91
 require-await 39/39
 require-yield 15/15
+sort-imports 61/61
+sort-keys 215/215
 symbol-description 8/8
 unicorn/better-dom-traversing 175/175
 unicorn/catch-error-name 120/120
