@@ -72,6 +72,7 @@
 @typescript-eslint/no-unsafe-return 62/62
 @typescript-eslint/no-unsafe-unary-minus 23/23
 @typescript-eslint/no-unused-expressions 38/38
+@typescript-eslint/no-unused-private-class-members 99/99
 @typescript-eslint/no-unused-vars 587/587
 @typescript-eslint/no-use-before-define 127/127
 @typescript-eslint/no-useless-constructor 41/41
@@ -79,6 +80,7 @@
 @typescript-eslint/no-wrapper-object-types 58/58
 @typescript-eslint/non-nullable-type-assertion-style 26/26
 @typescript-eslint/only-throw-error 89/89
+@typescript-eslint/parameter-properties 63/63
 @typescript-eslint/prefer-as-const 46/46
 @typescript-eslint/prefer-find 47/47
 @typescript-eslint/prefer-for-of 70/70

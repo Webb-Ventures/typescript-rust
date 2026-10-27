@@ -353,6 +353,7 @@ mod ts_no_unsafe_member_access;
 mod ts_no_unsafe_return;
 mod ts_no_unsafe_unary_minus;
 mod ts_no_unused_expressions;
+mod ts_no_unused_private_class_members;
 mod ts_no_unused_vars;
 mod ts_no_use_before_define;
 mod ts_no_useless_constructor;
@@ -360,6 +361,7 @@ mod ts_no_useless_default_assignment;
 mod ts_no_wrapper_object_types;
 mod ts_non_nullable_type_assertion_style;
 mod ts_only_throw_error;
+mod ts_parameter_properties;
 mod ts_prefer_as_const;
 mod ts_prefer_find;
 mod ts_prefer_for_of;
@@ -1104,6 +1106,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_unsafe_return::RULE,
     &ts_no_unsafe_unary_minus::RULE,
     &ts_no_unused_expressions::RULE,
+    &ts_no_unused_private_class_members::RULE,
     &ts_no_unused_vars::RULE,
     &ts_no_use_before_define::RULE,
     &ts_no_useless_constructor::RULE,
@@ -1111,6 +1114,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_wrapper_object_types::RULE,
     &ts_non_nullable_type_assertion_style::RULE,
     &ts_only_throw_error::RULE,
+    &ts_parameter_properties::RULE,
     &ts_prefer_as_const::RULE,
     &ts_prefer_find::RULE,
     &ts_prefer_function_type::RULE,

@@ -3121,10 +3121,21 @@ parslet and stringify rules).
   literal: method signatures are grouped by written key once (linear), so overloads become one
   `(..) => .. & (..) => ..` property. No fix inside a namespace or when the return type
   mentions `this`; `readonly` properties get a suggestion instead of a fix.
+- **`@typescript-eslint/parameter-properties`** (63/63). `parameter-property` mode works per
+  class: an uninitialized plain field, a plain constructor parameter and a leading
+  `this.x = x` statement of one name, with the same annotation text from its `:`.
+- **`@typescript-eslint/no-unused-private-class-members`** (99/99), its own analysis
+  (not the core rule's): one walk with a stack of `this` frames (class, class methods and
+  field functions, static blocks, functions whose `this` parameter names an enclosing
+  class). Reads count via `this.x`, `this.#x`, `#x in o`, `Class.x` for statics, an
+  unreassigned `const self = this`, parameters typed `Foo` / `typeof Foo`, and destructuring
+  `this`. A later member with the same key replaces the earlier one. Field initializers that
+  aren't functions see `this` as the instance, statics too (as upstream does).
 
 Read to understand (not ported): typescript-eslint 8.71.1
 `packages/eslint-plugin/src/rules/explicit-function-return-type.ts`,
 `explicit-module-boundary-types.ts`, `src/util/explicitReturnTypeUtils.ts`,
 `getFunctionHeadLoc.ts`, `hasOverloadSignatures.ts`, `explicit-member-accessibility.ts`,
-`getMemberHeadLoc.ts`, `method-signature-style.ts`; ESLint 10.12.0
+`getMemberHeadLoc.ts`, `method-signature-style.ts`, `parameter-properties.ts`,
+`no-unused-private-class-members.ts`, `src/util/class-scope-analyzer/*`; ESLint 10.12.0
 `lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
