@@ -26,6 +26,9 @@ pub struct Printer<'a> {
     gen_col: u32,
     // Comment state: comments starting before `comment_cursor` are consumed.
     comment_cursor: u32,
+    /// tsc without comments: legal comments are kept only before this offset (the file's
+    /// detached comments).
+    pinned_end: u32,
     /// Output length right after a leading block comment that stays on its line.
     inline_comment_end: usize,
     /// Layout::Tsc: end of the original statement being printed (0 outside one, or inside a
@@ -95,6 +98,7 @@ impl<'a> Printer<'a> {
             gen_line: 0,
             gen_col: 0,
             comment_cursor: 0,
+            pinned_end: u32::MAX,
             inline_comment_end: usize::MAX,
             stmt_end: 0,
             params_paren: None,
@@ -772,7 +776,9 @@ impl<'a> Printer<'a> {
             return false;
         }
         if is_legal_comment(text) {
-            return true;
+            // tsc's `removeComments` keeps only the pinned comments at the top of the file
+            // (pinnedComments1, doNotEmitPinnedCommentNotOnTopOfFile).
+            return self.opts.comments || c.span.end <= self.pinned_end;
         }
         if !self.opts.comments {
             return false;
@@ -1490,6 +1496,9 @@ impl<'a> Printer<'a> {
                 self.statement_in_list(s);
                 prologue += 1;
             }
+        }
+        if self.tsc && !self.opts.comments {
+            self.pinned_end = self.detached_comments_end().unwrap_or(0);
         }
         if self.tsc
             && !self.hints.no_detached_comments

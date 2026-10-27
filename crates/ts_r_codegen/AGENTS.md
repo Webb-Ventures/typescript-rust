@@ -54,7 +54,8 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
   plain arrow parameter bare (`x=>x`). Pending `;`/space are resolved by the next token, and
   source-map segments recorded meanwhile wait for it.
 - **Comments**: readable keeps statement-level comments; compact keeps legal and
-  annotation comments; nothing inside `PrintHints::erased` is printed.
+  annotation comments; nothing inside `PrintHints::erased` is printed. `Layout::Tsc` without
+  comments (`removeComments`) keeps legal comments only in the file's detached top comments.
 - **`Layout::Tsc`** aims at byte equality with tsc 7's JavaScript emit (record 0012,
   "Equivalence gate"). Every rule is observed tsc 7 output (tsc's emitter may be read to
   understand a rule, never translated);
