@@ -96,7 +96,9 @@
 @typescript-eslint/unbound-method 217/218
 @typescript-eslint/unified-signatures 115/115
 @typescript-eslint/use-unknown-in-catch-callback-variable 57/57
+arrow-body-style 87/87
 constructor-super 82/82
+curly 218/218
 default-case 23/23
 default-case-last 37/37
 default-param-last 96/96
@@ -339,12 +341,15 @@ no-useless-rename 162/162
 no-var 75/75
 no-void 12/12
 no-with 2/2
+object-shorthand 293/293
+prefer-arrow-callback 120/120
 prefer-const 136/136
 prefer-numeric-literals 91/91
 prefer-object-has-own 94/94
 prefer-promise-reject-errors 74/74
 prefer-rest-params 11/11
 prefer-spread 33/33
+prefer-template 88/88
 preserve-caught-error 81/81
 radix 91/91
 require-await 39/39

@@ -7,7 +7,9 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
+mod arrow_body_style;
 mod constructor_super;
+mod curly;
 mod default_case;
 mod default_case_last;
 mod default_param_last;
@@ -251,12 +253,15 @@ mod no_useless_rename;
 mod no_var;
 mod no_void;
 mod no_with;
+mod object_shorthand;
+mod prefer_arrow_callback;
 mod prefer_const;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
 mod prefer_promise_reject_errors;
 mod prefer_rest_params;
 mod prefer_spread;
+mod prefer_template;
 mod preserve_caught_error;
 mod radix;
 mod require_await;
@@ -775,7 +780,9 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
+    &arrow_body_style::RULE,
     &constructor_super::RULE,
+    &curly::RULE,
     &default_case::RULE,
     &default_case_last::RULE,
     &default_param_last::RULE,
@@ -981,12 +988,15 @@ pub static ALL: &[&RuleDef] = &[
     &no_var::RULE,
     &no_void::RULE,
     &no_with::RULE,
+    &object_shorthand::RULE,
+    &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
     &prefer_promise_reject_errors::RULE,
     &prefer_rest_params::RULE,
     &prefer_spread::RULE,
+    &prefer_template::RULE,
     &preserve_caught_error::RULE,
     &radix::RULE,
     &require_await::RULE,

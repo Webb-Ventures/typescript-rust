@@ -1088,6 +1088,7 @@ pub fn stmt_continuable(ast: &Ast, src: &str, stmt: NodeId) -> bool {
         Node::VarDecl { decls, .. } => ast.list(decls).last().is_some_and(|&d| {
             matches!(*ast.node(d), Node::VarDeclarator { init: Some(i), .. } if expr_continuable(ast, i))
         }),
+        Node::Directive { .. } => true,
         _ => false,
     }
 }
