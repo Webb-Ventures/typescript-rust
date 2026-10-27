@@ -359,6 +359,7 @@ mod ts_no_floating_promises;
 mod ts_no_for_in_array;
 mod ts_no_generated_empty_object_type;
 mod ts_no_implied_eval;
+mod ts_no_import_type_side_effects;
 mod ts_no_inferrable_types;
 mod ts_no_invalid_this;
 mod ts_no_invalid_void_type;
@@ -375,10 +376,12 @@ mod ts_no_non_null_assertion;
 mod ts_no_redeclare;
 mod ts_no_redundant_type_constituents;
 mod ts_no_require_imports;
+mod ts_no_restricted_types;
 mod ts_no_shadow;
 mod ts_no_this_alias;
 mod ts_no_unnecessary_boolean_literal_compare;
 mod ts_no_unnecessary_condition;
+mod ts_no_unnecessary_parameter_property_assignment;
 mod ts_no_unnecessary_template_expression;
 mod ts_no_unnecessary_type_arguments;
 mod ts_no_unnecessary_type_assertion;
@@ -401,12 +404,14 @@ mod ts_no_unused_vars;
 mod ts_no_use_before_define;
 mod ts_no_useless_constructor;
 mod ts_no_useless_default_assignment;
+mod ts_no_useless_empty_export;
 mod ts_no_wrapper_object_types;
 mod ts_non_nullable_type_assertion_style;
 mod ts_only_throw_error;
 mod ts_parameter_properties;
 mod ts_prefer_as_const;
 mod ts_prefer_destructuring;
+mod ts_prefer_enum_initializers;
 mod ts_prefer_find;
 mod ts_prefer_for_of;
 mod ts_prefer_function_type;
@@ -421,6 +426,7 @@ mod ts_prefer_regexp_exec;
 mod ts_prefer_return_this_type;
 mod ts_prefer_string_starts_ends_with;
 mod ts_related_getter_setter_pairs;
+mod ts_require_array_sort_compare;
 mod ts_require_await;
 mod ts_restrict_plus_operands;
 mod ts_restrict_template_expressions;
@@ -1159,6 +1165,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_for_in_array::RULE,
     &ts_no_generated_empty_object_type::RULE,
     &ts_no_implied_eval::RULE,
+    &ts_no_import_type_side_effects::RULE,
     &ts_no_inferrable_types::RULE,
     &ts_no_invalid_this::RULE,
     &ts_no_invalid_void_type::RULE,
@@ -1175,10 +1182,12 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_redeclare::RULE,
     &ts_no_redundant_type_constituents::RULE,
     &ts_no_require_imports::RULE,
+    &ts_no_restricted_types::RULE,
     &ts_no_shadow::RULE,
     &ts_no_this_alias::RULE,
     &ts_no_unnecessary_boolean_literal_compare::RULE,
     &ts_no_unnecessary_condition::RULE,
+    &ts_no_unnecessary_parameter_property_assignment::RULE,
     &ts_no_unnecessary_type_assertion::RULE,
     &ts_no_unnecessary_template_expression::RULE,
     &ts_no_unnecessary_type_arguments::RULE,
@@ -1201,12 +1210,14 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_use_before_define::RULE,
     &ts_no_useless_constructor::RULE,
     &ts_no_useless_default_assignment::RULE,
+    &ts_no_useless_empty_export::RULE,
     &ts_no_wrapper_object_types::RULE,
     &ts_non_nullable_type_assertion_style::RULE,
     &ts_only_throw_error::RULE,
     &ts_parameter_properties::RULE,
     &ts_prefer_as_const::RULE,
     &ts_prefer_destructuring::RULE,
+    &ts_prefer_enum_initializers::RULE,
     &ts_prefer_find::RULE,
     &ts_prefer_function_type::RULE,
     &ts_prefer_for_of::RULE,
@@ -1225,6 +1236,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_return_this_type::RULE,
     &ts_prefer_string_starts_ends_with::RULE,
     &ts_related_getter_setter_pairs::RULE,
+    &ts_require_array_sort_compare::RULE,
     &ts_return_await::RULE,
     &ts_strict_boolean_expressions::RULE,
     &ts_triple_slash_reference::RULE,

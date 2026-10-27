@@ -3304,25 +3304,36 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
 `packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
 `init-declarations.ts`, `no-magic-numbers.ts`.
 
-### Round 10, h1 third batch
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
+`lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,
+`lib/rules/no-restricted-exports.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/strict-boolean-expressions.ts`, `member-ordering.ts`,
+`src/util/getWrappingFixer.ts`, `assertionFunctionUtils.ts`,
+`isArrayMethodCallWithPredicate.ts`, `misc.ts`.
+The `group` matching follows gitignore as node-ignore applies it, and natural order follows
+the behaviour of the `natural-compare` package; neither package's source was read.
 
-- **`one-var`** (296/296): one pass over the file's declarations in source order, with a
-  per-scope record (`var`: nearest function, Program or static block; the rest: nearest
-  block, `for` or `switch`).
-- **`accessor-pairs`** (313/313) reuses `grouped_accessor_pairs`' key grouping, names and
-  head ranges, and `no_setter_return::is_descriptor`. Computed token keys skip parentheses.
-- **`prefer-regex-literals`** (251/251): global `RegExp` (or `globalThis.RegExp`, ...)
-  calls with static strings; suggestions escape line terminators and `/` through the regex
-  parser's character nodes. Modifier groups need ES2025. `regex.rs` now rejects `&&&` in
-  `v` classes.
-- **`no-implicit-globals`** (227/227): script global-scope declarations, unresolved plain
-  writes in sloppy code, and writes to read-only globals; `/* exported */` and writable
-  globals are exempt.
-- **`func-name-matching`** (192/193). Not done: `'ᢅ'` is an identifier to Rust's
-  `is_alphabetic` but not to esutils' older Unicode tables (1 case).
-- **`no-implicit-coercion`** (141/141).
+## typescript-eslint rules (round 10, h2, part 3)
 
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/one-var.js`,
-`accessor-pairs.js`, `prefer-regex-literals.js`, `no-implicit-globals.js`,
-`func-name-matching.js`, `no-implicit-coercion.js`, `utils/ast-utils.js`
-(`isPropertyDescriptor`, `canTokensBeAdjacent`, `getStaticPropertyName`).
+- `@typescript-eslint/require-array-sort-compare`: its own rule, not the unicorn one (that
+  one is untyped and reports on the method name). Reports zero-argument `sort()` /
+  `toSorted()` calls when every union member of the constrained receiver type is an array.
+  `ignoreStringArrays` (default on) skips arrays and tuples whose type arguments all print
+  as `string`, through constraints, unions and intersections.
+- `@typescript-eslint/prefer-enum-initializers`: suggestions `= i`, `= i + 1` and
+  `= 'name'`, where the name is the member's source text.
+- `@typescript-eslint/no-useless-empty-export`: only the program's own statements count
+  (upstream's `TSModuleDeclaration` check never applies, because its body is a block, not a
+  list). Declaration files are skipped.
+- `@typescript-eslint/no-import-type-side-effects`: the fix deletes each `type ` up to the
+  imported name and inserts ` type` after `import`.
+- `@typescript-eslint/no-restricted-types`: keys are compared with whitespace removed.
+  Keywords (not `any`) match by keyword; references, `implements` entries and interface
+  `extends` entries match by name, and by their full text when they have type arguments;
+  `{}` and `[]` match when empty. An empty message or `fixWith` counts as none.
+- `@typescript-eslint/no-unnecessary-parameter-property-assignment`: within each class,
+  takes the constructor's assignments in source order: directly in its body, or in an arrow
+  called in place there. Nested functions and classes are skipped. A `this.x = x` (with
+  `=`, `&&=`, `||=` or `??=`, through `as` and `!`) is reported when `x` is a parameter
+  property and neither the parameter nor `this.x` was assigned earlier in the constructor,
+  and no field initializer assigns `this.x`.
