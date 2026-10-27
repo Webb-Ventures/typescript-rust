@@ -296,7 +296,7 @@ impl NoUnnecessaryTypeAssertion {
                 }
                 Fix::delete(Span::new(from as u32, span.end))
             }
-            Node::TypeAssertion { ty, .. } => {
+            Node::TypeAssertion { ty, expr } => {
                 let close = skip_trivia_forward(src, cx.span(ty).end as usize);
                 let close = if src.as_bytes().get(close) == Some(&b'>') {
                     close + 1
@@ -304,7 +304,8 @@ impl NoUnnecessaryTypeAssertion {
                     cx.span(skip_parens(ast, inner)).start as usize
                 };
                 let head = Span::new(span.start, close as u32);
-                if wrap {
+                // `<T>({...})` keeps its own parentheses.
+                if wrap && !matches!(cx.node(expr), Node::Paren { .. }) {
                     Fix::replace(head, "(").and(Span::new(span.end, span.end), ")")
                 } else {
                     Fix::delete(head)
@@ -637,7 +638,9 @@ fn receiver(cx: &Ctx<'_, '_>, node: NodeId, declarations: bool, depth: u32) -> O
                 .find(|&a| is_function(cx.node(a).kind()))?;
             declared_return(cx, f)
         }
-        Node::Arrow { body, .. } if body == cur => declared_return(cx, p),
+        Node::Arrow { body, .. } if body == cur => {
+            declared_return(cx, p).or_else(|| literal_in_callback(cx, node, p))
+        }
         Node::JsxExprContainer { .. } => {
             let attr = cx.parent(p)?;
             let Node::JsxAttr { name, .. } = *cx.node(attr) else {
@@ -647,6 +650,44 @@ fn receiver(cx: &Ctx<'_, '_>, node: NodeId, declarations: bool, depth: u32) -> O
         }
         _ => None,
     }
+}
+
+/// An asserted literal returned by an arrow passed to a call (`[].map(() => <T>{...})`) is
+/// received by the arrow's contextual return type, as instantiated by the call; other
+/// expressions in that generic context are not (`mapDefined(() => b as A)`, observed).
+fn literal_in_callback(cx: &Ctx<'_, '_>, node: NodeId, arrow: NodeId) -> Option<Ty> {
+    let ast = cx.ast();
+    let (Node::As { expr, .. } | Node::TypeAssertion { expr, .. }) = *cx.node(node) else {
+        return None;
+    };
+    let literal = matches!(
+        cx.node(skip_parens(ast, expr)),
+        Node::ObjectLit { .. }
+            | Node::NullLit {}
+            | Node::BoolLit { .. }
+            | Node::NumberLit { .. }
+            | Node::BigIntLit { .. }
+            | Node::StringLit { .. }
+            | Node::RegexLit { .. }
+            | Node::ClassExpr { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::JsxElement { .. }
+    );
+    let mut cur = arrow;
+    let mut p = cx.parent(cur)?;
+    while matches!(cx.node(p), Node::Paren { .. }) {
+        cur = p;
+        p = cx.parent(cur)?;
+    }
+    let in_call = match *cx.node(p) {
+        Node::Call { args, .. } | Node::New { args, .. } => ast.list(args).contains(&cur),
+        _ => false,
+    };
+    if !(literal && in_call) {
+        return None;
+    }
+    cx.types().contextual_type(node)
 }
 
 fn declared_return(cx: &Ctx<'_, '_>, f: NodeId) -> Option<Ty> {

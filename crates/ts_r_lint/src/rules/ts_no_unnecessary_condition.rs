@@ -27,6 +27,7 @@ enum LoopMode {
 struct NoUnnecessaryCondition {
     loops: LoopMode,
     check_predicates: bool,
+    allow_without_strict_null_checks: bool,
 }
 
 impl FromOptions for NoUnnecessaryCondition {
@@ -41,6 +42,11 @@ impl FromOptions for NoUnnecessaryCondition {
         Ok(NoUnnecessaryCondition {
             loops,
             check_predicates: bool_field(o, "checkTypePredicates", false),
+            allow_without_strict_null_checks: bool_field(
+                o,
+                "allowRuleToRunWithoutStrictNullChecksIKnowWhatIAmDoing",
+                false,
+            ),
         })
     }
 }
@@ -77,6 +83,7 @@ enum Truth {
 impl Rule for NoUnnecessaryCondition {
     fn kinds(&self) -> &'static [NodeKind] {
         &[
+            NodeKind::Program,
             NodeKind::If,
             NodeKind::While,
             NodeKind::DoWhile,
@@ -93,6 +100,11 @@ impl Rule for NoUnnecessaryCondition {
 
     fn enter(&self, node: NodeId, cx: &mut Ctx<'_, '_>) {
         match *cx.node(node) {
+            Node::Program { .. } => {
+                if !self.allow_without_strict_null_checks && !cx.types().strict_null_checks() {
+                    crate::type_util::report_no_strict_null_checks(cx);
+                }
+            }
             Node::If { test, .. } | Node::Conditional { test, .. } => {
                 self.check_condition(cx, test, 0, true);
             }
@@ -942,6 +954,7 @@ fn property_type(ti: &dyn TypeInfo, t: Ty, key: &str) -> Option<Ty> {
         return Some(v);
     }
     ti.index_type(t, false)
+        .or_else(|| ti.name_index_type(t, key))
 }
 
 /// `o[k]` the left side of `??` may be missing at run time (observed): the key is not a
@@ -986,6 +999,10 @@ fn via_index_signature(cx: &Ctx<'_, '_>, n: NodeId) -> bool {
     let ast = cx.ast();
     let n = skip_parens(ast, n);
     let unchecked = cx.types().option("noUncheckedIndexedAccess") == Some(true);
+    // Outside a chain, the read's own (narrowed) type says whether it may be missing.
+    if !short_circuits(ast, n) {
+        return false;
+    }
     let obj = match *ast.node(n) {
         Node::Member { obj, .. } if unchecked => obj,
         Node::Index { obj, .. } if unchecked || short_circuits(ast, n) => obj,
@@ -1005,7 +1022,10 @@ fn via_index_signature(cx: &Ctx<'_, '_>, n: NodeId) -> bool {
                 continue;
             }
             let numeric = k.parse::<f64>().is_ok();
-            if ti.index_type(p, false).is_some() || (numeric && ti.index_type(p, true).is_some()) {
+            if ti.index_type(p, false).is_some()
+                || (numeric && ti.index_type(p, true).is_some())
+                || ti.name_index_type(p, k).is_some()
+            {
                 return true;
             }
         }
@@ -1109,6 +1129,7 @@ fn check_type_predicate(cx: &mut Ctx<'_, '_>, call: NodeId) {
             NoUnnecessaryCondition {
                 loops: LoopMode::Never,
                 check_predicates: true,
+                allow_without_strict_null_checks: true,
             }
             .check_condition(cx, arg, 0, true);
         }

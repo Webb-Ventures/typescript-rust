@@ -542,3 +542,14 @@ pub fn is_string_like_type(ti: &dyn TypeInfo, t: Ty) -> bool {
     }
     go(ti, t, 0)
 }
+
+/// Reports `noStrictNullCheck` once per file, at ESLint's line 0, column 1 (a location before
+/// the first line, which typescript-eslint gives this whole-file report).
+pub fn report_no_strict_null_checks(cx: &mut Ctx<'_, '_>) {
+    cx.report(
+        ts_r_span::Span::new(0, 0),
+        "This rule requires the `strictNullChecks` compiler option to be turned on to function correctly.",
+    )
+    .id("noStrictNullCheck")
+    .loc(crate::diagnostic::Loc::at(0, 1));
+}
