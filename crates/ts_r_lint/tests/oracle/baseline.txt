@@ -115,6 +115,7 @@
 @typescript-eslint/restrict-template-expressions 86/86
 @typescript-eslint/return-await 103/103
 @typescript-eslint/strict-boolean-expressions 217/217
+@typescript-eslint/strict-void-return 221/221
 @typescript-eslint/switch-exhaustiveness-check 113/113
 @typescript-eslint/triple-slash-reference 21/21
 @typescript-eslint/unbound-method 218/218
