@@ -11,6 +11,7 @@ mod accessor_pairs;
 mod arrow_body_style;
 mod block_scoped_var;
 mod camelcase;
+mod capitalized_comments;
 mod class_methods_use_this;
 mod complexity;
 mod consistent_return;
@@ -851,6 +852,8 @@ pub static ALL: &[&RuleDef] = &[
     &consistent_this::RULE,
     &block_scoped_var::RULE,
     &camelcase::RULE,
+    &capitalized_comments::RULE,
+    &array_callback_return::RULE,
     &class_methods_use_this::RULE,
     &complexity::RULE,
     &constructor_super::RULE,
