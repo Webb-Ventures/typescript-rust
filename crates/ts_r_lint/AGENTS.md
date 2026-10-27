@@ -3146,25 +3146,26 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
 (`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
 `no-use-before-define.ts`.
 
-### Round 10, h1 second batch
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.js`,
+`lib/rules/array-callback-return.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/prefer-destructuring.ts`.
 
-- **`no-invalid-this`** (604/604) and **`@typescript-eslint/no-invalid-this`** (91/91) share
-  `no_invalid_this.rs`. `is_default_this_binding` honours a `@this` JSDoc tag and
-  `capIsConstructor`; `this_binding::is_strict` is never true before ES5 (ESLint's scope
-  analysis has no strict mode there).
-- **`class-methods-use-this`** (164/164) and the ts variant (119/119) share
-  `class_methods_use_this.rs`. A field's function is named and located like a method
-  ("method 'x'", from the field to the `(`); an `accessor` field is not (ESTree has
-  `AccessorProperty`).
-- **`init-declarations`** (81/81), ts (77/77): ts reports a declarator without an
-  initializer at its name only.
-- **`no-magic-numbers`** (205/205), ts (79/79): ESTree parents skip `Paren`/`ParenType`; a
-  literal is a `TSLiteralType` when its parent is a type node or a type slot.
-- **`new-cap`** (146/146).
+## Core and typescript-eslint rules (round 10, h2, part 2)
 
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
-`class-methods-use-this.js`, `init-declarations.js`, `no-magic-numbers.js`, `new-cap.js`,
-`utils/ast-utils.js` (`isDefaultThisBinding`, `hasJSDocThisTag`, `getFunctionNameWithKind`,
-`getFunctionHeadLoc`, `getStaticPropertyName`); typescript-eslint 8.71.1
-`packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
-`init-declarations.ts`, `no-magic-numbers.ts`.
+- `no-restricted-imports`: `paths` match the trimmed source exactly (`import x = require()`
+  sources are not trimmed). `patterns` `group`s follow node-ignore: case-insensitive unless
+  `caseSensitive`, a pattern without an inner `/` matches at any depth, a parent directory
+  that matches ignores everything below it, the last matching rule wins and `!` un-ignores;
+  each rule is a `config::glob::Glob`. `regex`, `importNamePattern` and
+  `allowImportNamePattern` run on `regex_exec` with the `u` flag (`iu` for `regex` unless
+  case-sensitive) and print as `/source/u`. Named reports go on the specifier; `export *`
+  reports go on the declaration's second token. `allowTypeImports` skips declarations whose
+  every specifier is `type` (or `import type`), and single `type` specifiers.
+- `no-duplicate-imports`: declarations are reduced to a shape (default, named, namespace,
+  `export *`, side effect, from the first named or namespace specifier) and two of them are
+  duplicates unless they could not be merged: namespace with named, `export *` with anything
+  but `export *` or a side effect, and (both `type`) default with named.
+  `allowSeparateTypeImports` compares only type with type and value with value.
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
+`lib/rules/no-duplicate-imports.js`; node-ignore's README for the `group` semantics.

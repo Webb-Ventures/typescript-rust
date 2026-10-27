@@ -14,7 +14,6 @@ mod camelcase;
 mod class_methods_use_this;
 mod complexity;
 mod consistent_return;
-mod consistent_this;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -184,6 +183,7 @@ mod no_dupe_class_members;
 mod no_dupe_else_if;
 mod no_dupe_keys;
 mod no_duplicate_case;
+mod no_duplicate_imports;
 mod no_else_return;
 mod no_empty;
 mod no_empty_character_class;
@@ -239,6 +239,7 @@ mod no_prototype_builtins;
 mod no_redeclare;
 mod no_regex_spaces;
 mod no_restricted_globals;
+mod no_restricted_imports;
 mod no_restricted_properties;
 mod no_restricted_syntax;
 mod no_return_assign;
@@ -965,6 +966,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_dupe_else_if::RULE,
     &no_dupe_keys::RULE,
     &no_duplicate_case::RULE,
+    &no_duplicate_imports::RULE,
     &no_else_return::RULE,
     &no_empty::RULE,
     &no_empty_character_class::RULE,
@@ -1020,6 +1022,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_redeclare::RULE,
     &no_regex_spaces::RULE,
     &no_restricted_globals::RULE,
+    &no_restricted_imports::RULE,
     &no_restricted_properties::RULE,
     &no_return_assign::RULE,
     &no_script_url::RULE,
