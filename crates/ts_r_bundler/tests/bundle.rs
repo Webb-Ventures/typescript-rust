@@ -3157,6 +3157,35 @@ fn array_and_object_defines_are_hoisted() {
 }
 
 #[test]
+fn hoisted_define_names_avoid_path_define_roots() {
+    let fs = project(&[("main.js", "console.log(Y, X);\n")]);
+    let mut o = opts(&["main.js"]);
+    o.bundle = false;
+    o.format = None;
+    o.define = vec![
+        ("X".into(), "{}".into()),
+        ("Y".into(), "define_X_default".into()),
+    ];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/main.js");
+    assert!(
+        js.contains("console.log(define_X_default, define_X_default2);"),
+        "{js}"
+    );
+}
+
+#[test]
+fn define_cache_keys_tell_literals_from_paths() {
+    use ts_r_bundler::prepare::Defines;
+    let key = |v: &str| {
+        let mut o = opts(&["main.js"]);
+        o.define = vec![("x".into(), v.into())];
+        Defines::from_options(&o).unwrap().cache_key()
+    };
+    assert_ne!(key("null"), key("Null"));
+}
+
+#[test]
 fn invalid_define_values_are_errors_as_in_esbuild() {
     use ts_r_bundler::prepare::Defines;
     for v in [

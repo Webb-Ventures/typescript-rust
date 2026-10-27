@@ -495,8 +495,8 @@ impl Defines {
             s.push_str(&k.join("."));
             s.push('=');
             match v {
-                DefineValue::Literal(l) => s.push_str(&format!("{l:?}")),
-                DefineValue::Path(p) => s.push_str(&p.join(".")),
+                DefineValue::Literal(l) => s.push_str(&format!("literal:{l:?}")),
+                DefineValue::Path(p) => s.push_str(&format!("path:{}", p.join("."))),
             }
             s.push('\n');
         }
@@ -925,7 +925,12 @@ fn apply_defines(
                             Node::Ident { name } => Some(ast.atom(name).to_owned()),
                             _ => None,
                         });
-                        names.collect()
+                        // A path-valued define can introduce its root name later in the walk.
+                        let roots = defines.entries.iter().filter_map(|(_, v)| match v {
+                            DefineValue::Path(p) => p.first().cloned(),
+                            DefineValue::Literal(_) => None,
+                        });
+                        names.chain(roots).collect()
                     });
                     // esbuild's name, with a number when the module already uses it.
                     let base = format!("define_{}_default", key.join("_"));
