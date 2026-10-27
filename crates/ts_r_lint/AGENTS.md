@@ -3175,8 +3175,15 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.
   `getStaticPropertyName`, plus `[ident]` as `ident`. Natural order ranks `-`, punctuation,
   digits, upper case, lower case (ASCII), and compares digit runs that don't start with `0`
   by value. A blank line counts only in whitespace outside comments.
+- `no-restricted-exports`: names come from export specifiers (the exported side), `export *
+  as`, and exported function (with a body), class and variable declarations (every bound
+  identifier). The pattern never matches `default`. `default` is restricted per
+  `restrictDefaultExports`: `direct` (`export default ...`), `named` (`export { x as default
+  }`), `defaultFrom` / `namedFrom` (re-exports, by the local name), `namespaceFrom`
+  (`export * as default from`).
 
 Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
-`lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`.
+`lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,
+`lib/rules/no-restricted-exports.js`.
 The `group` matching follows gitignore as node-ignore applies it, and natural order follows
 the behaviour of the `natural-compare` package; neither package's source was read.

@@ -238,6 +238,7 @@ mod no_proto;
 mod no_prototype_builtins;
 mod no_redeclare;
 mod no_regex_spaces;
+mod no_restricted_exports;
 mod no_restricted_globals;
 mod no_restricted_imports;
 mod no_restricted_properties;
@@ -1023,6 +1024,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_prototype_builtins::RULE,
     &no_redeclare::RULE,
     &no_regex_spaces::RULE,
+    &no_restricted_exports::RULE,
     &no_restricted_globals::RULE,
     &no_restricted_imports::RULE,
     &no_restricted_properties::RULE,
