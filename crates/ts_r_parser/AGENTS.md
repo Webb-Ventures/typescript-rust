@@ -509,6 +509,9 @@ Files:
     are a delimited list (`List::ImportAttributes`, TS1478 for a bad entry). An `import()`
     type whose second argument is not an object with `with`/`assert` gets empty
     attributes, which declaration emit writes as `{ with: {} }` (tsc's recovered node).
+  - A `.` that ends a line, followed by a name and then another name or keyword on the
+    same line, gets a missing name (TS1003): `this.\nnew Bar()` is `this.` then `new Bar()`
+    (tsc: tsc/internal/parser/parser.go, parseRightSideOfDot).
 - **Invalid syntax gets tsc's code** even where the tree stays as parsed: TS1209 (`new a?.b()`),
   TS17006/TS17007 (`-a ** b`, `<T>a ** b`). tsc reports these as syntax errors. TS5076
   (`??` mixed with `||`/`&&`) is a deferred grammar error (`ParseResult::grammar`, so

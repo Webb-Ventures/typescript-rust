@@ -3,32 +3,15 @@ ts_r_testing::cap_memory!();
 use ts_r_parser::{parse, ts_r_ast::SourceKind};
 
 #[test]
-fn multiline_members_keep_keyword_operators() {
-    for src in [
-        "const result = obj.\nfoo as number;",
-        "const result = obj.\nfoo satisfies number;",
-        "if (obj.\nfoo in other) {}",
-        "if (obj.\nfoo instanceof Other) {}",
-        "const result = obj.\nnamespace as number;",
-        "const result = obj.\nconst satisfies number;",
-        "if (obj.\nvar in other) {}",
-        "if (obj.\nfunction instanceof Other) {}",
-    ] {
-        let parsed = parse(src, SourceKind::Ts);
-        assert!(
-            parsed.diagnostics.is_empty(),
-            "{src}: {:?}",
-            parsed.diagnostics
-        );
-    }
-}
-
-#[test]
 fn multiline_declarations_keep_missing_member_recovery() {
     for src in [
         "obj.\nvar value = 1;",
         "obj.\nnamespace N {}",
         "obj.\nasync function f() {}",
+        // tsc: a name followed by another name on the same line starts a new statement.
+        "obj.\nfoo as number;",
+        "obj.\nfoo in other;",
+        "obj.\nnew Bar().x;",
     ] {
         let parsed = parse(src, SourceKind::Ts);
         assert_eq!(
