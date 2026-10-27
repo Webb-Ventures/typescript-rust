@@ -854,6 +854,8 @@ pub struct Ck<'c, 'a> {
     pub(crate) print_reuse: bool,
     /// The outermost type of the next print skips its own alias (`PrintMode.in_type_alias`).
     pub(crate) print_skip_alias: bool,
+    /// The next printed type is not reduced (`The intersection 'A & B' was reduced`).
+    pub(crate) print_no_reduction: bool,
     /// Implied types of binding patterns (`type_from_binding_pattern`), computed outside
     /// speculation: an initializer's every property asks for its pattern's type.
     pub(crate) pattern_types: FxHashMap<Loc, TypeId>,
@@ -985,6 +987,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             print_via_aliases: false,
             print_reuse: false,
             print_skip_alias: false,
+            print_no_reduction: false,
             pattern_types: FxHashMap::default(),
             print_nodes: 0,
             compound_assigned: FxHashMap::default(),

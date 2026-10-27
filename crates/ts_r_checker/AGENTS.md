@@ -104,6 +104,11 @@ Files, by layer:
   this); a signature written from a type keeps type parameter defaults, and a `?`
   parameter written from its type says `| undefined`; a type written past
   `MAX_SERIALIZED_LENGTH` (approximate, see its doc) is `NotNameable::TooLong` (TS7056).
+  The printer reduces what it prints, as tsc's node builder does: an intersection emptied
+  by conflicting discriminants is `never`, also through its alias (`print_no_reduction`
+  keeps it for TS18031's own message). Quick info keeps a type predicate's parentheses
+  (`this is (A & this)`), and an object literal property's type keeps a literal its
+  contextual type expects (`widen_for_mutable_location`).
   Known difference: `typeof k` of `const k = 1` keeps the fresh literal here (tsc's is
   regular); narrowing by `case k:` against such discriminants compares `TypeId`s, so
   regularizing it needs the narrowing to compare regular literals first.

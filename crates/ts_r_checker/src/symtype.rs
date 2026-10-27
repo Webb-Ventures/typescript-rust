@@ -737,8 +737,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 None => TypeId::IMPLICIT_ANY,
             },
             Node::Property { value, .. } => {
-                let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, value)));
-                let w = self.widen_literal(t);
+                // Literals the contextual type expects stay (`{ prop: "bar" }` for `"foo"`).
+                let v = Loc::new(d.file, value);
+                let t = self.quietly(|ck| ck.check_expr(v));
+                let w = self.quietly(|ck| ck.widen_for_mutable_location(v, t));
                 self.widened_type(w)
             }
             Node::ShorthandProp { name, .. } => {
