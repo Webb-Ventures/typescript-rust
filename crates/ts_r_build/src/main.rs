@@ -78,13 +78,16 @@ pub(crate) fn guard_fs(cli: &Cli) -> Arc<GuardFs> {
     let wd = &cli.options.working_dir;
     let real = Arc::new(ts_r_config::RealFs::new());
     let fs: Arc<dyn ts_r_config::FileSystem> = if cli.stdin {
-        let mut text = String::new();
-        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text);
+        let mut bytes = Vec::new();
+        if let Err(e) = std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes) {
+            eprintln!("error: could not read <stdin>: {e}");
+            std::process::exit(1);
+        }
         let path = ts_r_config::path::combine(wd, args::STDIN);
         Arc::new(StdinFs {
             inner: real,
             path,
-            text,
+            bytes,
         })
     } else {
         real
@@ -103,19 +106,19 @@ pub(crate) fn guard_fs(cli: &Cli) -> Arc<GuardFs> {
 struct StdinFs {
     inner: Arc<ts_r_config::RealFs>,
     path: String,
-    text: String,
+    bytes: Vec<u8>,
 }
 
 impl ts_r_config::FileSystem for StdinFs {
     fn read_file(&self, p: &str) -> Option<String> {
         if p == self.path {
-            return Some(self.text.clone());
+            return Some(String::from_utf8_lossy(&self.bytes).into_owned());
         }
         self.inner.read_file(p)
     }
     fn read_bytes(&self, p: &str) -> Option<Vec<u8>> {
         if p == self.path {
-            return Some(self.text.clone().into_bytes());
+            return Some(self.bytes.clone());
         }
         self.inner.read_bytes(p)
     }

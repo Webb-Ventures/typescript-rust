@@ -1898,12 +1898,16 @@ fn json_computed_proto_keys_remain_named_exports() {
             ),
             ("data.json", json),
         ]);
-        let r = run_build(&fs, opts(&["entry.js"]));
-        if have_node() {
-            assert_eq!(
-                run_node(&format!("json-named-proto-{i}"), &r, "entry.js"),
-                "123 1 true\n"
-            );
+        for minify in [false, true] {
+            let mut o = opts(&["entry.js"]);
+            o.minify_identifiers = minify;
+            let r = run_build(&fs, o);
+            if have_node() {
+                assert_eq!(
+                    run_node(&format!("json-named-proto-{i}-{minify}"), &r, "entry.js"),
+                    "123 1 true\n"
+                );
+            }
         }
     }
     let fs = project(&[
@@ -3236,4 +3240,18 @@ fn data_imports_are_es_modules_unless_required() {
     }
     assert!(!out.contains("\"b\": 2"), "{out}");
     assert_eq!(out.matches("__tsrCjs(function").count(), 1, "{out}");
+}
+
+/// `--keep-names` keeps a function expression's own name in a bundle with `--minify-syntax`.
+#[test]
+fn keep_names_keeps_function_expression_names_when_compressing() {
+    let fs = project(&[(
+        "main.js",
+        "const q = function named() {};\nconsole.log(q.name);\n",
+    )]);
+    let mut o = opts(&["main.js"]);
+    o.minify_syntax = true;
+    o.keep_names = true;
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/main.js").contains("function named("));
 }

@@ -332,7 +332,13 @@ fn json_esm(text: &str, members: &[jsonc::Member], keys: &[String], opts: &Build
                     slice(m.value.span)
                 ));
             }
-            obj.push_str(&m.key);
+            // A shorthand `__proto__` would become a renamed `__proto__: a`, setting the
+            // prototype instead of an own property.
+            if m.key == "__proto__" {
+                obj.push_str("[\"__proto__\"]: __proto__");
+            } else {
+                obj.push_str(&m.key);
+            }
         } else {
             obj.push_str(&format!("{}: {}", slice(m.key_span), slice(m.value.span)));
         }

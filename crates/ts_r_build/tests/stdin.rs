@@ -31,5 +31,15 @@ fn stdin_entry_resolves_from_the_working_directory() {
     let bad = run("import 'node_modules/fflate';");
     assert!(!bad.status.success());
     assert!(String::from_utf8_lossy(&bad.stderr).contains("<stdin>:1:7"));
+    // Raw bytes reach a binary loader unchanged.
+    std::fs::write(d.join("in.bin"), [0xffu8]).expect("write");
+    let input = std::fs::File::open(d.join("in.bin")).expect("open");
+    let b = ts_r_testing::limited(Path::new(env!("CARGO_BIN_EXE_ts-r-build")), 1024, 60)
+        .args(["--loader=base64", "--no-cache"])
+        .current_dir(&d)
+        .stdin(input)
+        .output()
+        .expect("run ts-r-build");
+    assert!(String::from_utf8_lossy(&b.stdout).contains("/w=="), "{b:?}");
     let _ = std::fs::remove_dir_all(&d);
 }
