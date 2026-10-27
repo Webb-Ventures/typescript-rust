@@ -1375,7 +1375,9 @@ Files, by layer:
 - **Implicit any in JavaScript**: TS7006/TS7019 as in TypeScript; a parameter is exempt only
   when its function has a JSDoc `@type` or follows `@overload` comments (`has_jsdoc_type`).
   An `@overload` comment without `@returns`/`@return` is TS7012 at the tag name
-  (`check_jsdoc_overload_returns`; overload signatures themselves are not modelled). A
+  (`check_jsdoc_overload_returns`). Each `@overload` tag's function type (`JsDocTag::ty`,
+  built by the parser) is one call signature of its function or method, replacing the
+  implementation's (`signature_decls`; constructors are not modelled, nor TS2394). A
   binding-pattern parameter made optional (`{ a }?`, or JSDoc `@param [o]` / `{T=}`) with
   no default in a function with a body is TS2463 at the parameter (`check_param`; tsc:
   tsc/internal/checker/checker.go, checkParameter). JSDoc syntax errors (`SourceFile::jsdoc`) are part of each checked file's `check_files`

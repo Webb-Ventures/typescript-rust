@@ -32,7 +32,8 @@
 //! - `@private`, `@protected`, `@public`, `@readonly`, `@override` on class members:
 //!   the modifiers.
 //! - A comment with `@overload` documents an overload, not the implementation: its
-//!   `@param`/`@returns` are not applied.
+//!   `@param`/`@returns` are not applied. Each `@overload` tag's `ty` is a function type
+//!   of the `@param`s after it and one `@returns`.
 //!
 //! JSDoc type syntax beyond TypeScript's: `*` (any), `?T`/`T?` (`T | null`), `!T`/`T!`
 //! (`T`), `Array.<T>`, a top-level `...T` (rest) and `T=` (optional). The checker maps
@@ -592,8 +593,26 @@ impl<'a> Doc<'a> {
                 }
                 "overload" => {
                     if let Some(h) = record_host {
-                        let ty = self.tag_type(r, false);
-                        self.record(h, JsDocTagKind::Overload, ty, span);
+                        let tpl = self.templates_in(raw, &names, &nested);
+                        let tps = self.type_params_node(&tpl);
+                        // Its tags: the `@param`s (and `@template`/`@this`) after it, then
+                        // one `@returns`.
+                        let mut j = i + 1;
+                        while j < raw.len()
+                            && matches!(
+                                names[j],
+                                "param" | "arg" | "argument" | "template" | "this"
+                            )
+                        {
+                            j += 1;
+                        }
+                        if j < raw.len() && matches!(names[j], "returns" | "return") {
+                            j += 1;
+                        }
+                        let sig = Span::new(r.at + 1, r.end);
+                        let ty =
+                            self.signature_type(&raw[i + 1..j], &names[i + 1..j], sig, r.end, tps);
+                        self.record(h, JsDocTagKind::Overload, Some(ty), span);
                     }
                 }
                 _ => {}
@@ -1452,6 +1471,31 @@ impl<'a> Doc<'a> {
         templates: Vec<NodeId>,
     ) -> Option<NodeId> {
         let name = self.alias_name(r.name_end, r.end)?;
+        let span = Span::new(r.at + 1, r.end);
+        let any_at = self.p.ast.span(name).end;
+        let fty = self.signature_type(rest, names, span, any_at, None);
+        let type_params = self.type_params_node(&templates);
+        Some(self.p.ast.add(
+            Node::TypeAlias {
+                modifiers: Modifiers::NONE,
+                name,
+                type_params,
+                ty: fty,
+            },
+            span,
+        ))
+    }
+
+    /// The function type of a `@callback` or `@overload`: its `@param`, `@returns` and
+    /// `@this` tags (`any` at `any_at` without `@returns`).
+    fn signature_type(
+        &mut self,
+        rest: &[RawTag],
+        names: &[&str],
+        span: Span,
+        any_at: u32,
+        type_params: Option<NodeId>,
+    ) -> NodeId {
         let mut params = Vec::new();
         let mut ret = None;
         let mut this_ty = None;
@@ -1467,7 +1511,6 @@ impl<'a> Doc<'a> {
                 _ => {}
             }
         }
-        let span = Span::new(r.at + 1, r.end);
         let mut nodes = Vec::new();
         // `@this {T}`: a leading `this: T` parameter.
         if let Some(t) = this_ty {
@@ -1519,27 +1562,17 @@ impl<'a> Doc<'a> {
                 Node::KeywordType {
                     kind: KeywordTypeKind::Any,
                 },
-                Span::at(self.p.ast.span(name).end),
+                Span::at(any_at),
             ),
         };
-        let fty = self.p.ast.add(
+        self.p.ast.add(
             Node::FunctionType {
-                type_params: None,
+                type_params,
                 params: params_list,
                 return_type,
             },
             span,
-        );
-        let type_params = self.type_params_node(&templates);
-        Some(self.p.ast.add(
-            Node::TypeAlias {
-                modifiers: Modifiers::NONE,
-                name,
-                type_params,
-                ty: fty,
-            },
-            span,
-        ))
+        )
     }
 
     /// `Object` / `object` (a JSDoc object whose properties come from tags).
@@ -2778,6 +2811,24 @@ mod tests {
         assert!(d.is_empty(), "{d:?}");
         let dump = ast.dump();
         assert!(dump.contains("name=\"this\""), "{dump}");
+    }
+
+    #[test]
+    fn overload_tags_are_typed_as_their_own_signatures() {
+        // Each `@overload` takes the `@param`s after it and one `@returns`.
+        let src = "/**\n * @overload\n * @param {number} a\n * @returns {number}\n * @overload\n * @param {string} a\n * @param {boolean} b\n * @returns {string}\n * @param {unknown} a\n */\nfunction f(a, b) {}\n";
+        let (ast, d) = run(src);
+        assert!(d.is_empty(), "{d:?}");
+        let counts: Vec<usize> = ast
+            .jsdoc_tags
+            .iter()
+            .filter(|t| t.kind == JsDocTagKind::Overload)
+            .map(|t| match t.ty.map(|ty| ast.node(ty)) {
+                Some(&Node::FunctionType { params, .. }) => ast.list(params).len(),
+                _ => usize::MAX,
+            })
+            .collect();
+        assert_eq!(counts, vec![1, 2], "{}", ast.dump());
     }
 
     #[test]

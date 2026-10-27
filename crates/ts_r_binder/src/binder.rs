@@ -2188,8 +2188,10 @@ impl<'a> Binder<'a> {
     fn bind_jsdoc_side_types(&mut self, host: NodeId) {
         let ast = self.ast;
         for t in ast.jsdoc_tags_of(host) {
-            if t.kind == ts_r_ast::JsDocTagKind::Type
-                && let Some(ty) = t.ty
+            if matches!(
+                t.kind,
+                ts_r_ast::JsDocTagKind::Type | ts_r_ast::JsDocTagKind::Overload
+            ) && let Some(ty) = t.ty
             {
                 self.bind_type(ty);
             }

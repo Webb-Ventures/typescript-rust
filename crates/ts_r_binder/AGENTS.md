@@ -115,7 +115,7 @@ texts), `dump.rs`.
   (`declare_this_properties`): a `PROPERTY` with `EXPANDO`, declared by the assignment
   targets (fixture `js_containers.js`).
 - **JSDoc side types.** A JSDoc `@type` of a function, an assignment target, an object
-  literal property or an `export default` is no field of the tree (`Ast::jsdoc_tags`); it is bound where its host is (`bind_jsdoc_side_types`), so
+  literal property or an `export default`, and each `@overload` signature, is no field of the tree (`Ast::jsdoc_tags`); it is bound where its host is (`bind_jsdoc_side_types`), so
   its names and `import("m")` types are resolved like an annotation's (member assignment
   targets included: `bind_member_assignment`).
 - **Static blocks run inline.** A class static block gets its own `FunctionFlow` entry (an

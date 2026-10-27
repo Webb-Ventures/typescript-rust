@@ -102,7 +102,8 @@ Files:
   tsc 7. `@template in out T` takes variance modifiers, `const` and the other modifier
   keywords (the checker reports the misplaced ones; the type parameter's span starts at the
   first modifier);
-  `@callback` reads `@this`. `@enum` types are not read (tsc 7 reports nothing in them).
+  `@callback` reads `@this`. Each `@overload` tag's `JsDocTag::ty` is a function type like a
+  `@callback`'s, of the `@param`s after it and one `@returns`. `@enum` types are not read (tsc 7 reports nothing in them).
   `@template {C}` with no name after the braces is a JSDoc TS1069 at the braces' end (at
   the `}` when `*/` follows with no space; at the next line's first character, the margin
   `*`, when the comment goes on past that line) and declares nothing.
