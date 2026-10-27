@@ -3139,3 +3139,24 @@ Read to understand (not ported): typescript-eslint 8.71.1
 `getMemberHeadLoc.ts`, `method-signature-style.ts`, `parameter-properties.ts`,
 `no-unused-private-class-members.ts`, `src/util/class-scope-analyzer/*`; ESLint 10.12.0
 `lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
+
+- `prefer-destructuring` / `@typescript-eslint/prefer-destructuring` (one implementation,
+  `ts` flag): the option matrix is `[declarator, assignment] x [array, object]`; ESLint reads
+  a per-node object with missing kinds off, typescript-eslint merges its own defaults (missing
+  kinds on), so both matrices are kept. `a?.b` is a chain, never reported. `using`
+  declarations are skipped. The ts rule skips annotated declarations unless
+  `enforceForDeclarationWithTypeAnnotation`, fixes only unannotated identifiers, and treats
+  `x[0]` on a non-iterable, non-any type as an object access (reported only with
+  `enforceForRenamedProperties`). The fix (`const {a} = o`) is dropped when it would lose a
+  comment.
+- `array-callback-return`: the callback is found by walking up through `&&`, `||`, `??`,
+  `?:` and `return` in a function that is itself called right away, to a call of a known
+  array method (argument 0), `*Array.from` (argument 1) or `Array.fromAsync` (argument 1, async
+  callbacks too). Generators are skipped. Every `return` in the callback counts, reachable or
+  not; "missing at the end" uses the CFG exit's reachability. `forEach` with `checkForEach`
+  reports value returns and expression bodies, with `wrapBraces` / `prependVoid` suggestions
+  (`allowVoid` accepts `void x`).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.js`,
+`lib/rules/array-callback-return.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/prefer-destructuring.ts`.

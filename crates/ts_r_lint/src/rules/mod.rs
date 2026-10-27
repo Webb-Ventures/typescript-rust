@@ -7,10 +7,7 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
-mod arrow_body_style;
-mod block_scoped_var;
-mod camelcase;
-mod consistent_return;
+mod array_callback_return;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -267,7 +264,7 @@ mod no_with;
 mod object_shorthand;
 mod prefer_arrow_callback;
 mod prefer_const;
-mod prefer_exponentiation_operator;
+mod prefer_destructuring;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
 mod prefer_promise_reject_errors;
@@ -363,6 +360,7 @@ mod ts_non_nullable_type_assertion_style;
 mod ts_only_throw_error;
 mod ts_parameter_properties;
 mod ts_prefer_as_const;
+mod ts_prefer_destructuring;
 mod ts_prefer_find;
 mod ts_prefer_for_of;
 mod ts_prefer_function_type;
@@ -802,8 +800,7 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
-    &block_scoped_var::RULE,
-    &camelcase::RULE,
+    &array_callback_return::RULE,
     &constructor_super::RULE,
     &curly::RULE,
     &default_case::RULE,
@@ -1022,7 +1019,7 @@ pub static ALL: &[&RuleDef] = &[
     &object_shorthand::RULE,
     &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
-    &prefer_exponentiation_operator::RULE,
+    &prefer_destructuring::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
     &prefer_promise_reject_errors::RULE,
@@ -1116,6 +1113,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_only_throw_error::RULE,
     &ts_parameter_properties::RULE,
     &ts_prefer_as_const::RULE,
+    &ts_prefer_destructuring::RULE,
     &ts_prefer_find::RULE,
     &ts_prefer_function_type::RULE,
     &ts_prefer_for_of::RULE,
