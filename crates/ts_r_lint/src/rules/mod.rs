@@ -299,6 +299,7 @@ mod prefer_numeric_literals;
 mod prefer_object_has_own;
 mod prefer_object_spread;
 mod prefer_promise_reject_errors;
+mod prefer_regex_literals;
 mod prefer_rest_params;
 mod prefer_spread;
 mod prefer_template;
@@ -1090,6 +1091,7 @@ pub static ALL: &[&RuleDef] = &[
     &prefer_object_has_own::RULE,
     &prefer_object_spread::RULE,
     &prefer_promise_reject_errors::RULE,
+    &prefer_regex_literals::RULE,
     &prefer_rest_params::RULE,
     &prefer_spread::RULE,
     &prefer_template::RULE,
