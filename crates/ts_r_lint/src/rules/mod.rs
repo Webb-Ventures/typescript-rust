@@ -11,6 +11,7 @@ mod array_callback_return;
 mod arrow_body_style;
 mod block_scoped_var;
 mod camelcase;
+mod class_methods_use_this;
 mod consistent_return;
 mod constructor_super;
 mod curly;
@@ -192,6 +193,7 @@ mod no_global_assign;
 mod no_implied_eval;
 mod no_import_assign;
 mod no_invalid_regexp;
+mod no_invalid_this;
 mod no_irregular_whitespace;
 mod no_iterator;
 mod no_label_var;
@@ -292,6 +294,7 @@ mod ts_await_thenable;
 mod ts_ban_ts_comment;
 mod ts_ban_tslint_comment;
 mod ts_class_literal_property_style;
+mod ts_class_methods_use_this;
 mod ts_consistent_generic_constructors;
 mod ts_consistent_indexed_object_style;
 mod ts_consistent_return;
@@ -325,6 +328,7 @@ mod ts_no_for_in_array;
 mod ts_no_generated_empty_object_type;
 mod ts_no_implied_eval;
 mod ts_no_inferrable_types;
+mod ts_no_invalid_this;
 mod ts_no_invalid_void_type;
 mod ts_no_meaningless_void_operator;
 mod ts_no_misused_new;
@@ -809,7 +813,11 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
-    &array_callback_return::RULE,
+    &arrow_body_style::RULE,
+    &consistent_return::RULE,
+    &block_scoped_var::RULE,
+    &camelcase::RULE,
+    &class_methods_use_this::RULE,
     &constructor_super::RULE,
     &curly::RULE,
     &default_case::RULE,
@@ -952,6 +960,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_implied_eval::RULE,
     &no_import_assign::RULE,
     &no_invalid_regexp::RULE,
+    &no_invalid_this::RULE,
     &no_irregular_whitespace::RULE,
     &no_iterator::RULE,
     &no_label_var::RULE,
@@ -1052,6 +1061,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_consistent_type_assertions::RULE,
     &ts_ban_tslint_comment::RULE,
     &ts_class_literal_property_style::RULE,
+    &ts_class_methods_use_this::RULE,
     &ts_consistent_type_definitions::RULE,
     &ts_consistent_type_imports::RULE,
     &ts_default_param_last::RULE,
@@ -1081,6 +1091,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_generated_empty_object_type::RULE,
     &ts_no_implied_eval::RULE,
     &ts_no_inferrable_types::RULE,
+    &ts_no_invalid_this::RULE,
     &ts_no_invalid_void_type::RULE,
     &ts_no_meaningless_void_operator::RULE,
     &ts_no_misused_new::RULE,

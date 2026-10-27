@@ -133,11 +133,65 @@ fn upper_function(cx: &Ctx<'_, '_>, id: NodeId) -> Option<NodeId> {
         .find(|&a| is_function(ast.kind(a)))
 }
 
+/// A comment right before `func` (or before the statement or declaration it starts, for a
+/// documented function expression) has a `@this` tag.
+fn has_this_tag(cx: &Ctx<'_, '_>, func: NodeId) -> bool {
+    let ast = cx.ast();
+    let src = cx.src();
+    let tagged = |pos: u32| {
+        let i = ast.comments.partition_point(|c| c.span.end <= pos);
+        let Some(c) = i.checked_sub(1).map(|i| ast.comments[i]) else {
+            return false;
+        };
+        src[c.span.end as usize..pos as usize].trim().is_empty()
+            && c.span.text(src).lines().any(|l| {
+                l.trim_start_matches(['/', '*', ' ', '\t'])
+                    .starts_with("@this")
+            })
+    };
+    if tagged(cx.span(func).start) {
+        return true;
+    }
+    // `/** @this X */ return function () {}`, `/** @this X */ const f = function () {}`.
+    let mut cur = func;
+    for _ in 0..64 {
+        let Some(p) = cx.parent(cur) else {
+            return false;
+        };
+        match *cx.node(p) {
+            Node::Return { .. } | Node::VarDecl { .. } | Node::ExprStmt { .. } => {
+                return tagged(cx.span(p).start);
+            }
+            Node::Call { .. } | Node::New { .. } => return false,
+            _ if p_is_function(ast, p) || cx.node(p).is_statement() => return false,
+            _ => cur = p,
+        }
+    }
+    false
+}
+
+fn p_is_function(ast: &Ast, id: NodeId) -> bool {
+    is_function(ast.kind(id))
+}
+
 /// True when a function called plainly gets the default `this` (the global object in sloppy
 /// code, `undefined` in strict code): not a method, not a constructor-looking function, not
 /// a callback given an explicit `this`.
 pub(crate) fn is_default_this_binding(cx: &Ctx<'_, '_>, func: NodeId) -> bool {
+    is_default_this_binding_with(cx, func, true)
+}
+
+/// [`is_default_this_binding`]; `cap_is_constructor`: a capitalized name makes a constructor.
+pub(crate) fn is_default_this_binding_with(
+    cx: &Ctx<'_, '_>,
+    func: NodeId,
+    cap_is_constructor: bool,
+) -> bool {
     let ast = cx.ast();
+    let starts_with_upper = |n: &str| cap_is_constructor && starts_with_upper(n);
+    if has_this_tag(cx, func) {
+        return false;
+    }
     let src = cx.src();
     let (name, params) = match *ast.node(func) {
         Node::FunctionDecl { name, params, .. } | Node::FunctionExpr { name, params, .. } => {
