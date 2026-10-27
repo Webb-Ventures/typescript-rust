@@ -295,8 +295,10 @@ mod ts_consistent_type_imports;
 mod ts_default_param_last;
 mod ts_dot_notation;
 mod ts_explicit_function_return_type;
+mod ts_explicit_member_accessibility;
 mod ts_explicit_module_boundary_types;
 mod ts_max_params;
+mod ts_method_signature_style;
 mod ts_no_array_constructor;
 mod ts_no_array_delete;
 mod ts_no_base_to_string;
@@ -1044,8 +1046,10 @@ pub static ALL: &[&RuleDef] = &[
     &ts_default_param_last::RULE,
     &ts_dot_notation::RULE,
     &ts_explicit_function_return_type::RULE,
+    &ts_explicit_member_accessibility::RULE,
     &ts_explicit_module_boundary_types::RULE,
     &ts_max_params::RULE,
+    &ts_method_signature_style::RULE,
     &ts_no_array_constructor::RULE,
     &ts_no_base_to_string::RULE,
     &ts_no_array_delete::RULE,

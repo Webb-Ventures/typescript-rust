@@ -14,8 +14,10 @@
 @typescript-eslint/default-param-last 87/87
 @typescript-eslint/dot-notation 63/63
 @typescript-eslint/explicit-function-return-type 138/138
+@typescript-eslint/explicit-member-accessibility 63/63
 @typescript-eslint/explicit-module-boundary-types 154/154
 @typescript-eslint/max-params 23/23
+@typescript-eslint/method-signature-style 62/62
 @typescript-eslint/no-array-constructor 33/33
 @typescript-eslint/no-array-delete 31/31
 @typescript-eslint/no-base-to-string 317/317

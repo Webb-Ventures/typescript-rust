@@ -3113,9 +3113,18 @@ parslet and stringify rules).
   `member_function_head_span` puts a class field's arrow from the member start (ESLint and
   typescript-eslint); `function_head_span` keeps the arrow token there, as eslint-utils does
   for unicorn. Accessor fields are not `PropertyDefinition`s for head locations.
+- **`@typescript-eslint/explicit-member-accessibility`** (63/63). Class members (not
+  `#private` ones) and parameter properties; heads start after decorators, the `public`
+  removal stops at the next token or comment. Member names follow `getNameFromMember`
+  (a computed identifier key is its name).
+- **`@typescript-eslint/method-signature-style`** (62/62). Works per interface or type
+  literal: method signatures are grouped by written key once (linear), so overloads become one
+  `(..) => .. & (..) => ..` property. No fix inside a namespace or when the return type
+  mentions `this`; `readonly` properties get a suggestion instead of a fix.
 
 Read to understand (not ported): typescript-eslint 8.71.1
 `packages/eslint-plugin/src/rules/explicit-function-return-type.ts`,
 `explicit-module-boundary-types.ts`, `src/util/explicitReturnTypeUtils.ts`,
-`getFunctionHeadLoc.ts`, `hasOverloadSignatures.ts`; ESLint 10.12.0
+`getFunctionHeadLoc.ts`, `hasOverloadSignatures.ts`, `explicit-member-accessibility.ts`,
+`getMemberHeadLoc.ts`, `method-signature-style.ts`; ESLint 10.12.0
 `lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
