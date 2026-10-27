@@ -1529,8 +1529,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // A variance measurement keeps its results to itself. Under an intersection
         // target's member only cached successes hold (a deferred check can't fail), and its
-        // own successes are kept apart (they skip checks).
-        let permissive = self.rel.in_target_member;
+        // own successes are kept apart (they skip checks). So are a strict callback's,
+        // which skip `method_callback_fails_strictly`.
+        let permissive = self.rel.in_target_member || self.rel.in_strict_callback;
         if let Some(p) = self.rel.probe.as_ref() {
             if let Some(&r) = p.cache.get(&(s, t, rel))
                 && (r || !permissive)

@@ -1210,3 +1210,27 @@ fn no_return_needs_exempt_type_and_missing_member_name_checks_object() {
         ]
     );
 }
+
+/// A comparison under a strict callback's re-check does not leave its success in the shared
+/// relation cache: `fd = fa` still fails after `t = s` compared `FA` to `FD` (tsc 7.0.2
+/// reports both; the first needs the re-check two levels deep, not done yet).
+#[test]
+fn strict_callback_success_is_not_cached() {
+    let Some(out) = check(
+        STRICT,
+        "interface Animal { animal: void }\n\
+         interface Dog extends Animal { dog: void }\n\
+         type FA = (cb: { m(x: Animal): Animal }[\"m\"]) => void;\n\
+         type FD = (cb: { m(x: Dog): Animal }[\"m\"]) => void;\n\
+         type MA = { m(x: FA): void }[\"m\"];\n\
+         type MD = { m(x: FD): void }[\"m\"];\n\
+         declare let s: (cb: MA) => void;\n\
+         declare let t: (cb: MD) => void;\n\
+         declare let fa: FA, fd: FD;\n\
+         t = s;\n\
+         fd = fa;\n",
+    ) else {
+        return;
+    };
+    assert!(out.iter().any(|d| d.starts_with("11:1 TS2322")), "{out:?}");
+}
