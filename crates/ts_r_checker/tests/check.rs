@@ -1212,8 +1212,8 @@ fn no_return_needs_exempt_type_and_missing_member_name_checks_object() {
 }
 
 /// A comparison under a strict callback's re-check does not leave its success in the shared
-/// relation cache: `fd = fa` still fails after `t = s` compared `FA` to `FD` (tsc 7.0.2
-/// reports both; the first needs the re-check two levels deep, not done yet).
+/// relation cache: `fd = fa` still fails after `t = s` compared `FA` to `FD`, and `t = s`
+/// fails through the re-check two levels deep (tsc 7.0.2 reports both).
 #[test]
 fn strict_callback_success_is_not_cached() {
     let Some(out) = check(
@@ -1232,5 +1232,6 @@ fn strict_callback_success_is_not_cached() {
     ) else {
         return;
     };
+    assert!(out.iter().any(|d| d.starts_with("10:1 TS2322")), "{out:?}");
     assert!(out.iter().any(|d| d.starts_with("11:1 TS2322")), "{out:?}");
 }

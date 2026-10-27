@@ -26,6 +26,8 @@ const MAX_RELATION_DEPTH: u32 = 80;
 const MAX_RELATION_WORK: u32 = 100_000;
 /// Source × target union member pairs above which two unions are not compared.
 const MAX_UNION_PAIRS: usize = 1_000_000;
+/// Nested strict callback re-checks (`method_callback_fails_strictly`) allowed at once.
+const STRICT_CALLBACK_DEPTH: u8 = 3;
 
 /// Error-reporting state of one top-level comparison.
 #[derive(Default, Debug)]
@@ -98,9 +100,9 @@ pub struct RelState {
     /// Target properties the next `properties_related` skips (the discriminants a
     /// discriminated-union relation already compared).
     pub(crate) excluded_props: Vec<StrId>,
-    /// Set while a strict function type's callback parameter is explained by its
-    /// signatures (one level, so recursive callback types terminate).
-    pub(crate) in_strict_callback: bool,
+    /// How many strict callback re-checks are in progress (bounded by
+    /// `STRICT_CALLBACK_DEPTH`, so recursive callback types terminate).
+    pub(crate) in_strict_callback: u8,
     /// One-shot: the next signature comparison is a strict function type's callback,
     /// whose parameters relate contravariantly even when it comes from a method.
     pub(crate) strict_callback_params: bool,
@@ -1531,7 +1533,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         // target's member only cached successes hold (a deferred check can't fail), and its
         // own successes are kept apart (they skip checks). So are a strict callback's,
         // which skip `method_callback_fails_strictly`.
-        let permissive = self.rel.in_target_member || self.rel.in_strict_callback;
+        let permissive = self.rel.in_target_member || self.rel.in_strict_callback > 0;
         if let Some(p) = self.rel.probe.as_ref() {
             if let Some(&r) = p.cache.get(&(s, t, rel))
                 && (r || !permissive)
@@ -4980,13 +4982,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     // signatures too, without a head for the callback types.
                     let strict_callbacks = if target_decl_kind_strict
                         && !callback
-                        && !self.rel.in_strict_callback
+                        && self.rel.in_strict_callback < STRICT_CALLBACK_DEPTH
                         && rel != RelationKind::Identity
                         && !self.declared_param_is_type_param(ssig, i)
                         && !self.declared_param_is_type_param(tsig, i)
                     {
                         self.callback_pair(sp, tp).filter(|&(scb, tcb)| {
-                            self.rel.in_strict_callback = true;
+                            self.rel.in_strict_callback += 1;
                             self.rel.strict_callback_params = true;
                             let ok = self.signature_related_mode(
                                 tcb,
@@ -4996,7 +4998,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 false,
                                 false,
                             );
-                            self.rel.in_strict_callback = false;
+                            self.rel.in_strict_callback -= 1;
                             !ok
                         })
                     } else {
@@ -5005,10 +5007,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                     if let Some((scb, tcb)) = callbacks {
                         self.signature_related_mode(tcb, scb, SigKind::Call, rel, true, true);
                     } else if let Some((scb, tcb)) = strict_callbacks {
-                        self.rel.in_strict_callback = true;
+                        self.rel.in_strict_callback += 1;
                         self.rel.strict_callback_params = true;
                         self.signature_related_mode(tcb, scb, SigKind::Call, rel, true, false);
-                        self.rel.in_strict_callback = false;
+                        self.rel.in_strict_callback -= 1;
                     } else {
                         // Bivariant (method) parameters report the contravariant direction too.
                         self.related_to(tp, sp, rel, true, None);
@@ -5242,7 +5244,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// A strict function type's callback parameter whose source callback comes from a
     /// method (`typeof Foo.f`, `{ f(x: T): U }["f"]`) passed `related_to` bivariantly,
     /// but a callback's parameters relate contravariantly whatever declared it (tsc's
-    /// strict callback mode). Only that case is re-checked, one level deep.
+    /// strict callback mode). Only that case is re-checked, `STRICT_CALLBACK_DEPTH` levels deep.
     #[allow(clippy::too_many_arguments)]
     fn method_callback_fails_strictly(
         &mut self,
@@ -5255,7 +5257,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         callback: bool,
     ) -> bool {
         if callback
-            || self.rel.in_strict_callback
+            || self.rel.in_strict_callback >= STRICT_CALLBACK_DEPTH
             || rel == RelationKind::Identity
             || self.declared_param_is_type_param(ssig, i)
             || self.declared_param_is_type_param(tsig, i)
@@ -5268,10 +5270,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.store().sig(scb).flags.contains(SigFlags::METHOD) {
             return false;
         }
-        self.rel.in_strict_callback = true;
+        self.rel.in_strict_callback += 1;
         self.rel.strict_callback_params = true;
         let ok = self.signature_related_mode(tcb, scb, SigKind::Call, rel, false, false);
-        self.rel.in_strict_callback = false;
+        self.rel.in_strict_callback -= 1;
         !ok
     }
 

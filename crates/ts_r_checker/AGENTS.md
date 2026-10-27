@@ -851,8 +851,8 @@ Files, by layer:
   contravariant (methods either way), and a source `this: void` asks nothing. A callback
   parameter's own parameters are contravariant whatever declared the callback: a method's
   callbacks (`callback`), and a strict function type's callback typed from a method
-  (`typeof Foo.f`, `{ f(x: T): U }["f"]`), re-checked one level deep by
-  `method_callback_fails_strictly` (tsc: checker/relater.go, compareSignaturesRelated).
+  (`typeof Foo.f`, `{ f(x: T): U }["f"]`), re-checked by
+  `method_callback_fails_strictly` up to `STRICT_CALLBACK_DEPTH` (3) nested re-checks (tsc: checker/relater.go, compareSignaturesRelated).
 - **Union call signatures** (`union_signatures`; tsc: `getUnionSignatures` in
   `tsc/internal/checker/checker.go`, `findMatchingSignatures` and `isMatchingSignature` in
   `relater.go`). Every member signature is tried first, single-signature members included:
