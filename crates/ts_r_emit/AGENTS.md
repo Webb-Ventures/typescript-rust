@@ -229,12 +229,13 @@ Latest (2026-10-27, v1 emit round 10, `cargo run --release -p ts_r_check --examp
 emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,101 (97.3%), shape 2,143
 (99.3%; the 16 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18
 bytes-exact outputs with a map baseline (158 of 162 at all targets); all 17,352 outputs:
-16,573 bytes-exact (95.5%; 16,506 at round 9), JS 13,932 / 14,476 (96.2%), below
-ES2022 11,831 / 12,317 (es2015 11,387 / 11,859), `.d.ts` 2,436 / 2,640 (92.3%). Declarations
-(E2): 1,439 / 1,635 baselines have every `.d.ts` bytes-exact (88.0%, gate 85% met); 1,439 of
+16,574 bytes-exact (95.5%; 16,506 at round 9), JS 13,932 / 14,476 (96.2%), below
+ES2022 11,831 / 12,317 (es2015 11,387 / 11,859), `.d.ts` 2,437 / 2,640 (92.3%). Declarations
+(E2): 1,439 / 1,634 baselines have every `.d.ts` bytes-exact (88.1%, gate 85% met); 1,439 of
 1,586 without TSR2006 refusals (90.7%). TSR2006 refuses 53 JavaScript inputs' `.d.ts`.
 Tests with every output bytes-exact: 11,224 of 11,925 (11,161 at round 9). Extra
-outputs: 14 (unchanged).
+outputs: 13 (14 at round 9; checker round 10 reports TS4023 in
+jsDeclarationsTypeReassignmentFromDeclaration2). Measured with checker round 10.
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946
