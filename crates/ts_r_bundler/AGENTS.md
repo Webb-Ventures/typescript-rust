@@ -241,6 +241,9 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 - **`--pure:name`** (`BuildOptions::pure`, `ts_r_minify::purity::Purity::pure_calls`):
   calls of those globals (`a.b` member chains too) are removable when unused, in tree
   shaking only. `--ignore-annotations` ignores them and `sideEffects: false` too.
+- **CommonJS modules are tree-shaken** like ES modules (`link.rs` `include`, `plan.rs`):
+  inside `__tsrCjs()` only statements with side effects and what they use are printed, plus
+  the directives (`"use strict"`), as esbuild does. A direct `eval` keeps everything.
 - **Errors once targets are known** (`bundle.rs` `import_errors`): a stylesheet imported
   from JavaScript with no output path (stdout), and `assert { type: 'json' }` on a file
   another loader loads (`with` sets the loader instead).

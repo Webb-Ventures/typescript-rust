@@ -231,6 +231,25 @@ fn side_effects_false_package_is_dropped() {
     assert!(!code.contains("SIDE_EFFECT"), "{code}");
 }
 
+/// As esbuild: a CommonJS module drops its unused side-effect-free statements, not its
+/// directives.
+#[test]
+fn commonjs_modules_are_tree_shaken() {
+    let fs = project(&[
+        ("entry.js", "console.log(require('./lib.js'));\n"),
+        (
+            "lib.js",
+            "'use strict';\nconst unused = 1;\nfunction f() {}\nexports.x = 1;\n",
+        ),
+    ]);
+    let code = file(&run_build(&fs, opts(&["entry.js"])), "/proj/out/entry.js").to_owned();
+    assert!(code.contains("'use strict';\n    exports.x = 1;"), "{code}");
+    assert!(
+        !code.contains("unused") && !code.contains("function f"),
+        "{code}"
+    );
+}
+
 #[test]
 fn cjs_interop() {
     let fs = project(&[
@@ -2029,7 +2048,7 @@ fn top_level_this_of_a_commonjs_file_is_its_exports() {
         ),
         (
             "lib.js",
-            "this.a = 1;\n(() => { this.b = 2; })();\nfunction f() { return this; }\n",
+            "this.a = 1;\n(() => { this.b = 2; })();\nfunction f() { return this; }\nexports.f = f;\n",
         ),
         ("own.js", "var exports = {};\nthis.c = 3;\n"),
     ]);

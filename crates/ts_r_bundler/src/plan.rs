@@ -1484,11 +1484,7 @@ impl Planner<'_> {
         reserved.sort();
         reserved.dedup();
         chunk_refs.extend(refs);
-        let live = if l.kinds[mi] != Kind::Esm {
-            vec![true; meta.parts.len()]
-        } else {
-            l.live[mi].clone()
-        };
+        let live = l.live[mi].clone();
         // Parts that only import/export are never printed.
         let live = live
             .into_iter()
