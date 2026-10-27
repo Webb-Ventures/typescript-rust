@@ -172,6 +172,19 @@ fn safe_output(cx: &Ctx<'_, '_>, node: NodeId, lit: &str) -> String {
     )
 }
 
+/// `RegExp`, `globalThis.RegExp`, `window["RegExp"]`, ... (the global).
+pub(crate) fn is_global_regexp(cx: &Ctx<'_, '_>, callee: NodeId) -> bool {
+    let ast = cx.ast();
+    let callee = skip_parens(ast, callee);
+    cx.is_global_ref(callee, "RegExp")
+        || member_parts(ast, cx.src(), callee).is_some_and(|(obj, name)| {
+            name == "RegExp"
+                && ["globalThis", "self", "window", "global"]
+                    .iter()
+                    .any(|g| cx.is_global_ref(obj, g))
+        })
+}
+
 impl Rule for PreferRegexLiterals {
     fn kinds(&self) -> &'static [NodeKind] {
         &[NodeKind::New, NodeKind::Call]
@@ -182,15 +195,7 @@ impl Rule for PreferRegexLiterals {
             Node::New { callee, args, .. } | Node::Call { callee, args, .. } => (callee, args),
             _ => return,
         };
-        let callee = skip_parens(ast, callee);
-        let is_regexp = cx.is_global_ref(callee, "RegExp")
-            || member_parts(ast, cx.src(), callee).is_some_and(|(obj, name)| {
-                name == "RegExp"
-                    && ["globalThis", "self", "window", "global"]
-                        .iter()
-                        .any(|g| cx.is_global_ref(obj, g))
-            });
-        if !is_regexp {
+        if !is_global_regexp(cx, callee) {
             return;
         }
         let args: Vec<NodeId> = ast

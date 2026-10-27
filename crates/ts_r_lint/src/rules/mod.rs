@@ -298,6 +298,7 @@ mod prefer_arrow_callback;
 mod prefer_const;
 mod prefer_destructuring;
 mod prefer_exponentiation_operator;
+mod prefer_named_capture_group;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
 mod prefer_object_spread;
@@ -309,6 +310,7 @@ mod prefer_template;
 mod preserve_caught_error;
 mod radix;
 mod require_await;
+mod require_unicode_regexp;
 mod require_yield;
 mod sort_imports;
 mod sort_keys;
@@ -1092,6 +1094,8 @@ pub static ALL: &[&RuleDef] = &[
     &one_var::RULE,
     &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
+    &prefer_exponentiation_operator::RULE,
+    &prefer_named_capture_group::RULE,
     &prefer_destructuring::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
@@ -1104,6 +1108,7 @@ pub static ALL: &[&RuleDef] = &[
     &preserve_caught_error::RULE,
     &radix::RULE,
     &require_await::RULE,
+    &require_unicode_regexp::RULE,
     &require_yield::RULE,
     &sort_imports::RULE,
     &sort_keys::RULE,
