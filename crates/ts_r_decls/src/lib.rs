@@ -29,7 +29,7 @@ use ts_r_binder::{AliasTarget, BindOptions, BoundFile, ImportName, SymbolId, Tab
 use ts_r_cache::{Cache, Key, KeyBuilder};
 
 /// Bump whenever the encoding or the hashing rules change.
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 /// Namespace in the shared cache.
 pub const CACHE_NAMESPACE: &str = "decls";
 const MAGIC: &[u8; 4] = b"TSRD";
@@ -490,15 +490,22 @@ impl<'a> SigHasher<'a> {
         }
         let ast = self.ast;
         let node = *ast.node(id);
-        // Detached JSDoc annotations are part of the signature too.
+        // Detached JSDoc annotations are part of the signature too (`@overload` tags are
+        // call signatures).
         for t in ast.jsdoc_tags_of(id) {
-            if t.kind == ts_r_ast::JsDocTagKind::Type
-                && let Some(ty) = t.ty
+            if matches!(
+                t.kind,
+                ts_r_ast::JsDocTagKind::Type | ts_r_ast::JsDocTagKind::Overload
+            ) && let Some(ty) = t.ty
             {
                 let mut child = false;
                 ast.for_each_child(id, |c| child |= c == ty);
                 if !child {
-                    self.tag("jsdoc-type");
+                    self.tag(if t.kind == ts_r_ast::JsDocTagKind::Type {
+                        "jsdoc-type"
+                    } else {
+                        "jsdoc-overload"
+                    });
                     self.node(ty, depth + 1);
                 }
             }
