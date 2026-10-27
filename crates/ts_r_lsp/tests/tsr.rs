@@ -1150,6 +1150,37 @@ fn an_open_package_file_belongs_to_the_project_importing_it() {
         .filter(|l| l["uri"] == ub.as_str())
         .count();
     assert_eq!(in_b, 2, "{r}");
+    // Dropping the import hands the package file to the inferred project; restoring it
+    // hands it back.
+    let refs_in_b = |c: &mut ScriptedClient| {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": env.uri("node_modules/a/index.d.ts")},
+                   "position": {"line": 0, "character": 24}, "context": {"includeDeclaration": true}}),
+        );
+        let n = r
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["uri"] == ub.as_str())
+            .count();
+        (n, r)
+    };
+    change(&mut c, &ub, 2, range(0, 0, 0, 22), "");
+    let _ = diags_for(&mut c, &ub, |d| !d.is_empty());
+    let (n, r) = refs_in_b(&mut c);
+    assert_eq!(n, 0, "{r}");
+    change(
+        &mut c,
+        &ub,
+        3,
+        range(0, 0, 0, 0),
+        "import { a } from \"a\";",
+    );
+    let _ = diags_for(&mut c, &ub, |d| d.is_empty());
+    let (n, r) = refs_in_b(&mut c);
+    assert_eq!(n, 2, "{r}");
     // A package file the program does not read is answered by the inferred project.
     env.open(&mut c, "node_modules/c/index.d.ts");
     let h = hover_text(&mut c, &env.uri("node_modules/c/index.d.ts"), 0, 21);

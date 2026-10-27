@@ -645,10 +645,11 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   module (`import x = require`, `import * as x`, a default import) under `N`'s own name
   starts the search at `N`; under another name it is a local of its own. The `export` of
   `export = N` renames `N`. Import clauses complete `N`'s exports, and for a value the
-  properties of its type.
+  properties of its type (each name once).
 - **Packages**: `node_modules` files are searched only for a symbol declared in one. An
   open package file no config lists belongs to the nearest config above its
-  `node_modules`, not as a root (it is in the program only when imported). Rename is
+  `node_modules`, not as a root (it is in the program only when imported; the inferred
+  project answers it meanwhile, and the config takes it back once its program reads it). Rename is
   blocked by a lib declaration, or by one in a package other than the file's; an alias
   stands for itself (`tsc: tsc/internal/ls/rename.go`).
 - **Meta properties and odd keywords**: `meta` of `import.meta` finds every `import.meta`,

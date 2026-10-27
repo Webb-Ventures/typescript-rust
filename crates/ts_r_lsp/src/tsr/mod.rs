@@ -110,6 +110,14 @@ impl Shared {
         });
     }
 
+    /// A project reads an open package file it handed to the inferred project again.
+    pub fn reclaim(&self, project: &str, path: &str) {
+        let _ = self.coordinator.send(CMsg::Reclaim {
+            project: project.to_string(),
+            path: path.to_string(),
+        });
+    }
+
     fn cancel(&self, id: &Value) {
         if let Some(k) = IdKey::from_value(id) {
             self.cancelled
@@ -189,6 +197,8 @@ pub enum CMsg {
         path: String,
         request: Option<Value>,
     },
+    /// See [`Shared::reclaim`].
+    Reclaim { project: String, path: String },
     /// Stop.
     Stop,
 }
@@ -426,6 +436,13 @@ impl Server {
                 self.set_owner(&path, INFERRED.to_string());
                 if let Some(r) = request {
                     self.on_lsp(r);
+                }
+            }
+            CMsg::Reclaim { project, path } => {
+                if self.docs.get(&path).is_some_and(|d| d.owner == INFERRED)
+                    && self.owner_of(&path) == project
+                {
+                    self.set_owner(&path, project);
                 }
             }
         }

@@ -121,6 +121,9 @@ pub struct Project {
     overlay: HashMap<String, Arc<str>>,
     /// Open documents this project publishes diagnostics for: path → uri.
     owned: BTreeMap<String, String>,
+    /// Open package files handed to the inferred project; reclaimed when the program reads
+    /// them again.
+    disowned: BTreeSet<String>,
     program: Arc<ProgramFiles>,
     /// Path → index in `program.files`.
     index: HashMap<String, usize>,
@@ -191,6 +194,7 @@ impl Project {
             roots,
             overlay: HashMap::new(),
             owned: BTreeMap::new(),
+            disowned: BTreeSet::new(),
             index: HashMap::new(),
             importers: HashMap::new(),
             api: HashMap::new(),
@@ -718,8 +722,25 @@ impl Project {
             .map(|f| f.path.clone())
             .collect();
         self.shared.report_inputs(&self.key, inputs);
-        for p in self.owned.keys().filter(|p| self.foreign(p)) {
-            self.shared.disown(p, None);
+        let foreign: Vec<String> = self
+            .owned
+            .keys()
+            .filter(|p| self.foreign(p))
+            .cloned()
+            .collect();
+        for p in foreign {
+            self.shared.disown(&p, None);
+            self.disowned.insert(p);
+        }
+        let back: Vec<String> = self
+            .disowned
+            .iter()
+            .filter(|p| self.index.contains_key(*p))
+            .cloned()
+            .collect();
+        for p in back {
+            self.disowned.remove(&p);
+            self.shared.reclaim(&self.key, &p);
         }
         self.stats.loads += 1;
         self.stats.last_load_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -857,6 +878,7 @@ impl Project {
                         let request =
                             json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
                         self.shared.disown(&path, Some(request));
+                        self.disowned.insert(path);
                         continue;
                     }
                     self.answer(program, checker, cks, id, &method, &params, &path);
