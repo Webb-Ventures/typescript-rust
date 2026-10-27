@@ -7,8 +7,7 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
-mod arrow_body_style;
-mod consistent_return;
+mod camelcase;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -210,6 +209,7 @@ mod no_obj_calls;
 mod no_object_constructor;
 mod no_octal;
 mod no_octal_escape;
+mod no_param_reassign;
 mod no_plusplus;
 mod no_promise_executor_return;
 mod no_proto;
@@ -234,6 +234,7 @@ mod no_throw_literal;
 mod no_unassigned_vars;
 mod no_undef;
 mod no_undef_init;
+mod no_underscore_dangle;
 mod no_unexpected_multiline;
 mod no_unneeded_ternary;
 mod no_unreachable;
@@ -788,8 +789,7 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
-    &arrow_body_style::RULE,
-    &consistent_return::RULE,
+    &camelcase::RULE,
     &constructor_super::RULE,
     &curly::RULE,
     &default_case::RULE,
@@ -954,6 +954,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_object_constructor::RULE,
     &no_octal::RULE,
     &no_octal_escape::RULE,
+    &no_param_reassign::RULE,
     &no_plusplus::RULE,
     &no_promise_executor_return::RULE,
     &no_proto::RULE,
@@ -977,6 +978,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_unassigned_vars::RULE,
     &no_undef::RULE,
     &no_undef_init::RULE,
+    &no_underscore_dangle::RULE,
     &no_unexpected_multiline::RULE,
     &no_unneeded_ternary::RULE,
     &no_unreachable::RULE,
