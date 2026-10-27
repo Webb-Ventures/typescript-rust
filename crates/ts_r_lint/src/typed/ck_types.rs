@@ -424,6 +424,10 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
                     _ => None,
                 },
                 ObjectKind::Anonymous { decl, .. } | ObjectKind::Mapped { decl, .. } => {
+                    // `typeof C` of a class, function or namespace is keyed by its symbol.
+                    if decl.0 == u32::MAX {
+                        return Some(ts_r_types::SymId(decl.1)).filter(|s| !s.is_none());
+                    }
                     if decl.0 as usize >= ck.c.file_count() {
                         return None;
                     }

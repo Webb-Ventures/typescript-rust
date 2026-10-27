@@ -262,9 +262,17 @@ impl UnboundMethod {
 
 /// `t` is the type of one of the lib globals whose methods may be passed around.
 fn bound_global(ti: &dyn TypeInfo, t: Ty) -> bool {
+    // typescript-eslint's `isBuiltinSymbolLike`: also through the bases of a class's
+    // declared type, so `typeof Foo` for `class Foo extends Array {}` is `Array`-like.
     let check = |m: Ty| {
         ti.type_symbol(m).is_some_and(|s| {
-            is_lib_symbol(ti, s) && BOUND_GLOBAL_TYPES.contains(&ti.symbol_name(s).as_str())
+            (is_lib_symbol(ti, s) && BOUND_GLOBAL_TYPES.contains(&ti.symbol_name(s).as_str()))
+                || ti.declared_type_of_symbol(s).is_some_and(|d| {
+                    ti.base_types(d).into_iter().any(|b| {
+                        crate::type_util::is_builtin_symbol_like(ti, b, &["Array"])
+                            || crate::type_util::is_builtin_symbol_like(ti, b, BOUND_GLOBAL_TYPES)
+                    })
+                })
         })
     };
     if ti.flags(t).contains(TypeFlags::INTERSECTION) {

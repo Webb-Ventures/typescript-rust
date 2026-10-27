@@ -106,7 +106,7 @@
 @typescript-eslint/strict-boolean-expressions 217/217
 @typescript-eslint/switch-exhaustiveness-check 113/113
 @typescript-eslint/triple-slash-reference 21/21
-@typescript-eslint/unbound-method 217/218
+@typescript-eslint/unbound-method 218/218
 @typescript-eslint/unified-signatures 115/115
 @typescript-eslint/use-unknown-in-catch-callback-variable 57/57
 accessor-pairs 313/313
