@@ -525,8 +525,13 @@ fn tag_expr(tx: &mut Tx, tag: NodeId) -> NodeId {
         }
         Node::JsxMemberExpr { obj, prop } => {
             let o = tag_expr_object(tx, obj);
-            let p = tx.name(prop).to_owned();
-            tx.member(o, &p, at)
+            // The name node itself: an escaped name prints as written (`x.\u0076ideo`).
+            let n = Node::Member {
+                obj: o,
+                optional: false,
+                prop,
+            };
+            tx.mk(n, at)
         }
         _ => tag,
     }
@@ -555,7 +560,16 @@ fn attr_key(tx: &mut Tx, name: NodeId) -> NodeId {
         Node::JsxNamespacedName { ns, name } => format!("{}:{}", tx.name(ns), tx.name(name)),
         _ => tx.name(name).to_owned(),
     };
+    let sp = tx.span(name);
+    let escaped = tx
+        .src
+        .get(sp.start as usize..sp.end as usize)
+        .is_some_and(|r| r.contains('\\'));
     if ts_r_codegen::literals::is_identifier_name(&s) {
+        // An escaped name keeps its source text (`\u0073rc: ""`).
+        if escaped && matches!(tx.n(name), Node::Ident { .. }) {
+            return name;
+        }
         tx.ident(&s, at)
     } else {
         tx.string(&s, at)

@@ -372,3 +372,9 @@ fn error_initializers() {
 fn cjs_removed_directive() {
     check("cjs_removed_directive");
 }
+
+/// Escaped identifiers keep their source text in parameter properties and JSX names.
+#[test]
+fn escaped_names() {
+    check("escaped_names");
+}

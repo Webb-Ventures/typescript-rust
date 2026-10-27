@@ -459,12 +459,15 @@ fn class_body_inner(tx: &mut Tx, id: NodeId) {
                 )
             {
                 if tx.kind(pattern) == NodeKind::Ident {
-                    param_props.push((
-                        tx.name(pattern).to_owned(),
-                        tx.at(prm),
-                        tx.span(pattern),
-                        tx.span(prm).end,
-                    ));
+                    // An escaped name is written as in the source (`this.arg\u0032 =
+                    // arg\u0032`; escapedIdentifiers).
+                    let sp = tx.span(pattern);
+                    let raw = tx.src.get(sp.start as usize..sp.end as usize);
+                    let name = match raw {
+                        Some(r) if r.contains('\\') => r.to_owned(),
+                        _ => tx.name(pattern).to_owned(),
+                    };
+                    param_props.push((name, tx.at(prm), tx.span(pattern), tx.span(prm).end));
                 } else if let Node::FunctionExpr { body: Some(b), .. } = tx.n(value) {
                     // A binding pattern with a modifier (an error) assigns nothing, but tsc
                     // still writes the body over several lines.
