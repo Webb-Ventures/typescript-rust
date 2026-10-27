@@ -202,6 +202,7 @@ mod no_extra_label;
 mod no_fallthrough;
 mod no_func_assign;
 mod no_global_assign;
+mod no_implicit_globals;
 mod no_implied_eval;
 mod no_import_assign;
 mod no_inline_comments;
@@ -996,6 +997,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_fallthrough::RULE,
     &no_func_assign::RULE,
     &no_global_assign::RULE,
+    &no_implicit_globals::RULE,
     &no_implied_eval::RULE,
     &no_import_assign::RULE,
     &no_inline_comments::RULE,
