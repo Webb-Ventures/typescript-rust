@@ -311,6 +311,7 @@ mod prefer_spread;
 mod prefer_template;
 mod preserve_caught_error;
 mod radix;
+mod require_atomic_updates;
 mod require_await;
 mod require_unicode_regexp;
 mod require_yield;
@@ -1112,6 +1113,7 @@ pub static ALL: &[&RuleDef] = &[
     &prefer_template::RULE,
     &preserve_caught_error::RULE,
     &radix::RULE,
+    &require_atomic_updates::RULE,
     &require_await::RULE,
     &require_unicode_regexp::RULE,
     &require_yield::RULE,
