@@ -577,7 +577,12 @@ impl Printer<'_> {
                 optional,
                 index,
             } => {
-                self.member_object(obj);
+                // `1[0]`: a number needs no dot before `[` (tsc keeps it as written).
+                if matches!(self.node(obj), Node::NumberLit { .. }) && self.raw(obj).is_some() {
+                    self.expr(obj, Prec::Call);
+                } else {
+                    self.member_object(obj);
+                }
                 if optional {
                     self.question_dot(obj, self.span(index).start);
                 }
@@ -889,7 +894,15 @@ impl Printer<'_> {
     /// Object of `.`/`[]`: needs member precedence; integer literals need a dot or parens.
     fn member_object(&mut self, id: NodeId) {
         if let Node::NumberLit { value } = self.node(id) {
-            let by_value = self.raw(id).is_some_and(|r| self.strip_separators(r));
+            // tsc writes a legacy octal or leading-zero literal by value: `000.x` → `0..x`.
+            let by_value = self.raw(id).is_some_and(|r| {
+                self.strip_separators(r)
+                    || (self.tsc
+                        && r.len() > 1
+                        && r.starts_with('0')
+                        && r.as_bytes()[1].is_ascii_digit()
+                        && value.get().is_finite())
+            });
             match self.raw(id).filter(|_| !by_value) {
                 Some(raw) => {
                     let plain = raw.bytes().all(|b| b.is_ascii_digit() || b == b'_')
@@ -1086,7 +1099,14 @@ impl Printer<'_> {
                     self.span(id).start as usize,
                     self.span(param).start as usize,
                 );
-                self.src.as_bytes().get(p).is_some_and(|&b| b != b'(')
+                // An async arrow lowered below ES2017 keeps tsc's parentheses (`(v) =>`).
+                let was_async = self.tsc
+                    && self
+                        .src
+                        .get(start..p)
+                        .is_some_and(|s| s.starts_with("async"));
+                !was_async
+                    && self.src.as_bytes().get(p).is_some_and(|&b| b != b'(')
                     && self.src.get(start..p).is_some_and(|s| !s.contains('('))
             }
             _ => false,

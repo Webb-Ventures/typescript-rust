@@ -354,3 +354,9 @@ fn cjs_default_reexport() {
 fn cjs_jsx_create_element() {
     check("cjs_jsx_create_element");
 }
+
+/// A lowered async arrow keeps its lone parameter in parentheses (`(i) => __awaiter(..)`).
+#[test]
+fn async_arrow_parens() {
+    check("async_arrow_parens");
+}
