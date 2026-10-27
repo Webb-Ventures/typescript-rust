@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
 mod arrow_body_style;
+mod consistent_return;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -16,6 +17,7 @@ mod default_param_last;
 mod dot_notation;
 mod eqeqeq;
 mod for_direction;
+mod func_names;
 mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
@@ -250,6 +252,7 @@ mod no_useless_concat;
 mod no_useless_constructor;
 mod no_useless_escape;
 mod no_useless_rename;
+mod no_useless_return;
 mod no_var;
 mod no_void;
 mod no_with;
@@ -276,6 +279,7 @@ mod ts_ban_tslint_comment;
 mod ts_class_literal_property_style;
 mod ts_consistent_generic_constructors;
 mod ts_consistent_indexed_object_style;
+mod ts_consistent_return;
 mod ts_consistent_type_assertions;
 mod ts_consistent_type_definitions;
 mod ts_consistent_type_imports;
@@ -781,6 +785,7 @@ pub(crate) mod prelude {
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
     &arrow_body_style::RULE,
+    &consistent_return::RULE,
     &constructor_super::RULE,
     &curly::RULE,
     &default_case::RULE,
@@ -789,6 +794,7 @@ pub static ALL: &[&RuleDef] = &[
     &dot_notation::RULE,
     &eqeqeq::RULE,
     &for_direction::RULE,
+    &func_names::RULE,
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
@@ -985,6 +991,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_useless_constructor::RULE,
     &no_useless_escape::RULE,
     &no_useless_rename::RULE,
+    &no_useless_return::RULE,
     &no_var::RULE,
     &no_void::RULE,
     &no_with::RULE,
@@ -1007,6 +1014,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_ban_ts_comment::RULE,
     &ts_consistent_generic_constructors::RULE,
     &ts_consistent_indexed_object_style::RULE,
+    &ts_consistent_return::RULE,
     &ts_consistent_type_assertions::RULE,
     &ts_ban_tslint_comment::RULE,
     &ts_class_literal_property_style::RULE,
