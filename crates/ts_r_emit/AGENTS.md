@@ -52,7 +52,8 @@ cost both. It never mutates the checker's AST.
   (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
   declarations of JavaScript inputs that use a pattern tsc declares from and the emitter
   does not write yet (TSR2006 naming it: CommonJS exports other than one top-level
-  `module.exports = v;` (written `export = v;` first, a value
+  `module.exports = v;` (written `export = v;` first, a class or function expression
+  then as a declaration named by it or `_exports`, another value
   that is no entity name through `declare const _exports: T;`) or top-level `exports.x = v;`
   alone (written first: `export { v as x };` for one assignment of a local name, `declare
   const _default: T; export default _default;`, else `export declare var x: T;`), a
