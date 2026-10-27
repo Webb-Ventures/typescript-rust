@@ -1351,7 +1351,7 @@ fn mask_markup(m: &mut Masked<'_>) {
         }
         let end = line_end(text, at);
         let Some(close) = text[at + 1..end].find('>').map(|k| at + 1 + k) else {
-            i = end + 1;
+            i = (end + 1).min(text.len());
             continue;
         };
         let n = name
@@ -1375,7 +1375,7 @@ fn is_path_like(v: &str, s: usize, e: usize) -> bool {
     let next = after(v, e);
     let next2 = next.and_then(|c| after(v, e + c.len_utf8()));
     let before_ext = next == Some('.') && next2.is_some_and(uword);
-    let before_path_ext = next == Some('/') && {
+    let before_path_ext = || {
         let rest = &v[e + 1..];
         let path = &rest[..rest
             .find(|c: char| js_space(c) || "\"'`<>".contains(c))
@@ -1384,12 +1384,13 @@ fn is_path_like(v: &str, s: usize, e: usize) -> bool {
             c == '.' && after(path, k + 1).is_some_and(|d| d == '_' || d.is_alphanumeric())
         })
     };
-    (v[s..e].contains('.') && prev == Some('/'))
-        || (prev == Some('/') && (next == Some('/') || before_ext))
-        || before_path_ext
-        || matches!(prev, Some('.' | '_' | '\\'))
+    // The scans come last so a long run of rejected matches stays linear.
+    matches!(prev, Some('.' | '_' | '\\'))
         || matches!(next, Some('_' | '\\'))
         || before_ext
+        || (prev == Some('/') && next == Some('/'))
+        || (v[s..e].contains('.') && prev == Some('/'))
+        || (next == Some('/') && before_path_ext())
 }
 
 /// The match is an object or property of a member access (`a.api(`, `api.get()`, `x[api]`).
@@ -1464,10 +1465,10 @@ fn member_access_follows(right: &str) -> bool {
 }
 
 fn skip_match(v: &str, s: usize, e: usize) -> bool {
-    is_path_like(v, s, e)
-        || is_property_access(v, s, e)
-        || before(v, s) == Some('-')
+    before(v, s) == Some('-')
         || matches!(after(v, e), Some('-' | '('))
+        || is_path_like(v, s, e)
+        || is_property_access(v, s, e)
 }
 
 /// Letters and numbers only, lowercased.
@@ -1669,5 +1670,11 @@ mod tests {
         assert_eq!(problem(&[], &long), None);
         let dotted = format!(" {}", "a.".repeat(20_000));
         assert_eq!(problem(&[], &dotted), None);
+        let hyphens = " api-client".repeat(100_000);
+        assert_eq!(problem(&[], &hyphens), None);
+        assert_eq!(
+            problem(&[], " <tag github").as_deref(),
+            Some("github->GitHub")
+        );
     }
 }
