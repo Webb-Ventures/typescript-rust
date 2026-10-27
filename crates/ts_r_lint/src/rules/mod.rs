@@ -72,6 +72,7 @@ mod import_order;
 mod import_prefer_default_export;
 mod import_unambiguous;
 pub(crate) mod import_util;
+mod init_declarations;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_indentation;
@@ -202,6 +203,7 @@ mod no_lone_blocks;
 mod no_lonely_if;
 mod no_loop_func;
 mod no_loss_of_precision;
+mod no_magic_numbers;
 mod no_misleading_character_class;
 mod no_multi_assign;
 mod no_multi_str;
@@ -303,9 +305,7 @@ mod ts_consistent_type_definitions;
 mod ts_consistent_type_imports;
 mod ts_default_param_last;
 mod ts_dot_notation;
-mod ts_explicit_function_return_type;
-mod ts_explicit_member_accessibility;
-mod ts_explicit_module_boundary_types;
+mod ts_init_declarations;
 mod ts_max_params;
 mod ts_method_signature_style;
 mod ts_no_array_constructor;
@@ -330,6 +330,7 @@ mod ts_no_implied_eval;
 mod ts_no_inferrable_types;
 mod ts_no_invalid_this;
 mod ts_no_invalid_void_type;
+mod ts_no_magic_numbers;
 mod ts_no_meaningless_void_operator;
 mod ts_no_misused_new;
 mod ts_no_misused_promises;
@@ -886,6 +887,7 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_named_export::RULE,
     &import_no_relative_parent_imports::RULE,
     &import_unambiguous::RULE,
+    &init_declarations::RULE,
     &import_no_extraneous_dependencies::RULE,
     &import_order::RULE,
     &import_no_unused_modules::RULE,
@@ -969,6 +971,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_lonely_if::RULE,
     &no_loop_func::RULE,
     &no_loss_of_precision::RULE,
+    &no_magic_numbers::RULE,
     &no_misleading_character_class::RULE,
     &no_multi_assign::RULE,
     &no_multi_str::RULE,
@@ -1066,9 +1069,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_consistent_type_imports::RULE,
     &ts_default_param_last::RULE,
     &ts_dot_notation::RULE,
-    &ts_explicit_function_return_type::RULE,
-    &ts_explicit_member_accessibility::RULE,
-    &ts_explicit_module_boundary_types::RULE,
+    &ts_init_declarations::RULE,
     &ts_max_params::RULE,
     &ts_method_signature_style::RULE,
     &ts_no_array_constructor::RULE,
@@ -1093,6 +1094,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_inferrable_types::RULE,
     &ts_no_invalid_this::RULE,
     &ts_no_invalid_void_type::RULE,
+    &ts_no_magic_numbers::RULE,
     &ts_no_meaningless_void_operator::RULE,
     &ts_no_misused_new::RULE,
     &ts_no_misused_promises::RULE,
