@@ -50,6 +50,23 @@ for (const t of TOOLS) {
   }
 }
 
+// ---------------------------------------------------------------- the lint rule count
+
+// Every "N rules" (N >= 100) and "Lint rules | N" quotes the total on ts_r_lint's Status line.
+{
+  const repo = path.join(LANDING, '..');
+  const status = fs.readFileSync(path.join(repo, 'crates/ts_r_lint/AGENTS.md'), 'utf8').match(/^- (\d+) rules \(/m);
+  if (!status) problems.push('crates/ts_r_lint/AGENTS.md: no "- N rules (" Status line');
+  const files = ['README.md', 'docs/metrics.md', 'landing/lib/tools.ts', ...walk(path.join(LANDING, 'content')).filter(f => f.endsWith('.md')).map(f => path.relative(repo, f))];
+  for (const f of status ? files : []) {
+    const text = fs.readFileSync(path.join(repo, f), 'utf8');
+    for (const m of text.matchAll(/\b(\d{3,}) (?:rules\b|ESLint, typescript-eslint)|Lint rules \| (\d+)/g)) {
+      const n = m[1] ?? m[2];
+      if (n !== status[1]) problems.push(`${f}: "${m[0]}" but crates/ts_r_lint/AGENTS.md says ${status[1]} rules`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- links and anchors in out/
 
 const OUT = path.join(LANDING, 'out');

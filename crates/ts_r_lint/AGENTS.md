@@ -149,13 +149,15 @@ Files:
   file. Never `std::fs` in a rule. Cached data holds no timestamps; cache keys include a
   hash of the file's `import/*` settings.
 
-## Status (v1 lint round 9, `wip/v1-lint9`)
+## Status (v1 lint round 10, `wip/v1-lint10`)
 
-- 718 rules (134 core ESLint, 95 typescript-eslint, 74 eslint-plugin-jsdoc, 369
-  eslint-plugin-unicorn, 46 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  77,171 / 77,196 cases. The non-type-aware cases are 70,160 / 70,184 and the type-aware
-  cases 7,011 / 7,012 (2026-10-27); the type-aware failure is `unbound-method` on an
-  `Array` subclass's statics (design record 0006). The 24 others: import/no-unresolved 77/80 (3 cases need the
+- 814 rules (200 core ESLint, 125 typescript-eslint, 74 eslint-plugin-jsdoc, 369
+  eslint-plugin-unicorn, 46 eslint-plugin-import), 61 of them type-aware. Rule oracle:
+  90,430 / 90,461 cases. The non-type-aware cases are 82,432 / 82,463 and the type-aware
+  cases 7,998 / 7,998 (2026-10-27). The 31 failures: no-shadow 360/363 and
+  @typescript-eslint/no-shadow 238/239 (a `.d.ts` script's top-level declarations),
+  no-use-before-define 353/354, func-name-matching 192/193 (esutils' older Unicode tables),
+  prefer-object-spread 106/107 (an HTML-comment parse error), import/no-unresolved 77/80 (3 cases need the
   uppercase absolute path of the machine that recorded them), import/default 22/23 (its
   `FooES7` case needs espree's ecmaVersion parse error) and import/no-unused-modules 111/131
   (the 20 cases depend on state upstream's tests leave behind from earlier cases; linting

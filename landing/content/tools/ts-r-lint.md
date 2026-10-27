@@ -1,6 +1,6 @@
 ---
 title: "`ts-r-lint`: linter"
-description: A linter with 292 ESLint, typescript-eslint, jsdoc and unicorn rules, 51 of them type-aware, that reads eslint.config, .oxlintrc.json or biome.json.
+description: A linter with 814 ESLint, typescript-eslint, jsdoc, unicorn and import rules, 61 of them type-aware, that reads eslint.config, .oxlintrc.json or biome.json.
 nav: ts-r-lint
 section: Tools
 order: 4
@@ -13,15 +13,15 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 ## What works today
 
-- 718 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
-  typescript-eslint 8.71 `recommended` and `strict` rules and a few more, 74
+- 814 rules: all 64 rules of ESLint 10's `recommended` set and 136 more core rules, 125
+  typescript-eslint 8.71 rules (all of `recommended` and `strict`), 74
   eslint-plugin-jsdoc rules, 369 eslint-plugin-unicorn rules (all 338 of its
   `recommended` set) and 46 eslint-plugin-import rules (all of `import/recommended`,
-  resolving modules as its default Node resolver does). 51 of them are type-aware
+  resolving modules as its default Node resolver does). 61 of them are type-aware
   and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
 - The published ESLint, typescript-eslint, eslint-plugin-jsdoc, eslint-plugin-unicorn and
-  eslint-plugin-import tests for those rules: 77,171 of 77,196 cases match (70,160 of 70,184 for
-  rules without types, 7,011 of 7,012 for type-aware rules).
+  eslint-plugin-import tests for those rules: 90,430 of 90,461 cases match (82,432 of 82,463 for
+  rules without types, 7,998 of 7,998 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
 - `eslint-disable` comments and `/* eslint */` inline config, with reports of unused disable
