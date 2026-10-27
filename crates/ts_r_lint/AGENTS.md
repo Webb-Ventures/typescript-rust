@@ -3181,9 +3181,20 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.
   `restrictDefaultExports`: `direct` (`export default ...`), `named` (`export { x as default
   }`), `defaultFrom` / `namedFrom` (re-exports, by the local name), `namespaceFrom`
   (`export * as default from`).
+- `@typescript-eslint/strict-boolean-expressions`: no visited-node set. Each root (`if`,
+  loop and `?:` tests, the `!` operand, an `asserts x` argument, a `&&`/`||` that no
+  enclosing root reaches) walks down its `&&`/`||` chain: left operands are conditions, right
+  ones only when the whole chain is. Union members are reduced to variants (nullish, boolean,
+  truthy boolean, string, truthy string, number, truthy number, enum, object, any, never)
+  and the variant set picks the message. Array predicates (`filter`, `find`, `some`, ... on
+  arrays and tuples) check the callback's return types. Suggestions wrap the operand or, under
+  `!`, the negation, with operand parentheses for non-primary operands, outer parentheses
+  for a weak parent, and a leading `;` when the statement before has none.
 
 Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
 `lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,
-`lib/rules/no-restricted-exports.js`.
+`lib/rules/no-restricted-exports.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/strict-boolean-expressions.ts`, `src/util/getWrappingFixer.ts`,
+`assertionFunctionUtils.ts`, `isArrayMethodCallWithPredicate.ts`.
 The `group` matching follows gitignore as node-ignore applies it, and natural order follows
 the behaviour of the `natural-compare` package; neither package's source was read.

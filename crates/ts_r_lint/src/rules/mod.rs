@@ -411,6 +411,7 @@ mod ts_require_await;
 mod ts_restrict_plus_operands;
 mod ts_restrict_template_expressions;
 mod ts_return_await;
+mod ts_strict_boolean_expressions;
 mod ts_switch_exhaustiveness_check;
 mod ts_triple_slash_reference;
 mod ts_unbound_method;
@@ -1194,6 +1195,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_string_starts_ends_with::RULE,
     &ts_related_getter_setter_pairs::RULE,
     &ts_return_await::RULE,
+    &ts_strict_boolean_expressions::RULE,
     &ts_triple_slash_reference::RULE,
     &ts_unbound_method::RULE,
     &ts_unified_signatures::RULE,
