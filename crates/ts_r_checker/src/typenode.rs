@@ -1668,6 +1668,55 @@ impl<'c, 'a> Ck<'c, 'a> {
         None
     }
 
+    /// A top-level `const x = require("m")` of the enclosing JavaScript file whose module is
+    /// `sym`, in scope as `x` at `at` (tsc names the module `typeof x`).
+    fn require_variable_for(&self, at: Loc, sym: SymId) -> Option<SymId> {
+        if !self.c.file(at.file).is_js() {
+            return None;
+        }
+        let b = self.c.bound(at.file);
+        let ast = self.ast(at.file);
+        let locals = b.scopes.first()?.locals;
+        for &(_, local) in b.table(locals) {
+            let id = self.c.sym(at.file, local);
+            if !self.c.sym_flags(id).intersects(SymbolFlags::VARIABLE) {
+                continue;
+            }
+            let Some(d) = self.c.first_decl(id).filter(|d| d.file == at.file) else {
+                continue;
+            };
+            let declarator = match *ast.node(d.node) {
+                Node::VarDeclarator { .. } => d.node,
+                _ => match self.c.file(at.file).parents().parent(d.node) {
+                    Some(p) => p,
+                    None => continue,
+                },
+            };
+            let Node::VarDeclarator {
+                init: Some(init), ..
+            } = *ast.node(declarator)
+            else {
+                continue;
+            };
+            let Node::Call { callee, args, .. } = *ast.node(init) else {
+                continue;
+            };
+            if crate::nodes::ident_text(ast, callee) != Some("require") {
+                continue;
+            }
+            let [arg] = ast.list(args) else {
+                continue;
+            };
+            if matches!(ast.node(*arg), Node::StringLit { .. })
+                && self.required_module(at.file, *arg) == Some(sym)
+                && self.resolve_name_at(at, self.c.sym_name(id), meaning::VALUE) == Some(id)
+            {
+                return Some(id);
+            }
+        }
+        None
+    }
+
     fn alias_in_file_for(&self, at: Loc, sym: SymId, m: u8) -> Option<SymId> {
         if !self.c.has_meaning(sym, m) {
             return None;
@@ -2122,8 +2171,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                             || self.is_ambient_module_symbol(sym)
                         {
                             // `typeof ns` through a namespace import of the module.
-                            if let Some(alias) =
-                                self.alias_in_file_for(cx.enclosing, sym, meaning::VALUE)
+                            if let Some(alias) = self
+                                .alias_in_file_for(cx.enclosing, sym, meaning::VALUE)
+                                .or_else(|| self.require_variable_for(cx.enclosing, sym))
                             {
                                 cx.refs.push(alias);
                                 let an = self.c.sym_name(alias).to_owned();

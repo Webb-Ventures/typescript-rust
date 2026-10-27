@@ -86,7 +86,9 @@ Files, by layer:
   Naming rules observed in tsc 7 (record 0012, E6 notes): a symbol reachable through a
   top-level namespace import of the file prints `ns.Name`; a local declaration another
   module exports by an export declaration is named by that export (`import("./c").default`,
-  `import("./foo")` for `export =`, `y.Member` through a namespace import of the module);
+  `import("./foo")` for `export =`, `y.Member` through a namespace import of the module,
+  `typeof ns` through a JavaScript file's top-level `const ns = require(m)`,
+  `require_variable_for`);
   `import("…").Name` goes through a module the file imports that exports the symbol
   (explicitly or by `export *`) when that specifier ranks before the declaring module's
   (package before relative, then fewer path segments), else through a program module that
@@ -1329,7 +1331,7 @@ Files, by layer:
     dotted `@typedef` name. An import resolved to a `.jsx` file without `jsx` set is
     TS6142, as for `.tsx`, whether or not the file is in the program.
   - Another name through a `require` binding (`is_require_binding`), `o.Name` on a plain
-    variable (`@typedef {T} o.Name` is not modelled), `typeof module.exports.x`, and a
+    variable (`@typedef {T} o.Name` is not modelled), and a
     qualified import type of a CommonJS JavaScript module are left unresolved and unreported. Except, as tsc 7
     reports TS2749 for them, a plain name bound to a value of a module
     (`require_destructured_value`): `const C = require("m").C`, and `const {C} =
@@ -1368,6 +1370,8 @@ Files, by layer:
     targets without `jsx` are not reported. A type-only import (`@import`, `import type`)
     with an empty `with { }` is TS1464. JavaScript ES modules get the TypeScript import
     checks (TS1192, TS2305, TS2306); CommonJS modules and JSON targets do not.
+  - JSDoc `typeof module.exports` (`.x`) in a CommonJS JavaScript module is its exports
+    object (`commonjs_export_equals_type`), as the expression is.
   - A JSDoc type naming an import whose target is only a value is TS2749, unless the import
     or its immediate export also has a type or namespace meaning (`import_export_has_type`:
     a default export merged with an interface) or the target is `export =`.

@@ -2325,6 +2325,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let s = self.c.resolve_alias(s).unwrap_or(s);
                     return self.type_of_symbol(s);
                 }
+                // JSDoc `typeof module.exports` in a JavaScript CommonJS module: its exports.
+                if self.c.file(l.file).is_js()
+                    && crate::nodes::ident_text(ast, left) == Some("module")
+                    && crate::nodes::ident_text(ast, right) == Some("exports")
+                    && self.is_commonjs_js_file(l.file)
+                    && self.is_commonjs_global(Loc::new(l.file, left))
+                    && let Some(t) = self.commonjs_export_equals_type(l)
+                {
+                    return t;
+                }
                 let lt = self.type_of_entity_expression(Loc::new(l.file, left));
                 // A property of an `any` value is `any` (`typeof anyValue.p`, observed).
                 if matches!(lt, TypeId::ANY | TypeId::IMPLICIT_ANY) {
