@@ -200,7 +200,9 @@ impl<'a> Parser<'a> {
                         _ => {}
                     }
                 }
-                is_param_start_after_modifier(k)
+                // Any keyword may follow, as a property name could (tsc: canFollowModifier):
+                // `(declare export b)`, `(public const c)` take every leading modifier.
+                is_param_start_after_modifier(k) || k.is_identifier_or_keyword()
             }
             ModCtx::TypeParam => k.is_identifier_like() || k == T::In,
         }
