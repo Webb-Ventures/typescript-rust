@@ -783,6 +783,9 @@ impl<'a> Printer<'a> {
         if !self.opts.comments {
             return false;
         }
+        if self.tsc && self.next_to_invalid_backslash(c) {
+            return false;
+        }
         if text.starts_with("//# sourceMappingURL=") || text.starts_with("//@ sourceMappingURL=") {
             // A new map is generated: the old URL would be wrong.
             return self.opts.source_map.is_none();
@@ -791,6 +794,32 @@ impl<'a> Printer<'a> {
             return is_annotation_comment(text);
         }
         true
+    }
+
+    /// tsc drops the comments around a skipped invalid `\\` (parserSkippedTokens5): whether
+    /// the first non-whitespace character after `c`, or before it on its line, is one, outside a comment
+    /// (`\\u` starts an escaped identifier).
+    fn next_to_invalid_backslash(&self, c: &Comment) -> bool {
+        let b = self.src.as_bytes();
+        let invalid = |at: usize| {
+            b.get(at) == Some(&b'\\')
+                && b.get(at + 1) != Some(&b'u')
+                && !{
+                    let cs = &self.ast.comments;
+                    let i = cs.partition_point(|o| (o.span.end as usize) <= at);
+                    cs.get(i).is_some_and(|o| o.span.start as usize <= at)
+                }
+        };
+        let before = b[..(c.span.start as usize).min(b.len())]
+            .iter()
+            .rposition(|x| !x.is_ascii_whitespace())
+            // Before the comment only on its line (parserSkippedTokens10 keeps it).
+            .filter(|&i| !b[i..c.span.start as usize].contains(&b'\n'));
+        let after = b
+            .get(c.span.end as usize..)
+            .and_then(|r| r.iter().position(|x| !x.is_ascii_whitespace()))
+            .map(|i| i + c.span.end as usize);
+        before.is_some_and(invalid) || after.is_some_and(invalid)
     }
 
     /// End of the last erased range that lies inside `(from, to]`, if any.
