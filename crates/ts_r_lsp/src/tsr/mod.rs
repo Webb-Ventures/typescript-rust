@@ -101,6 +101,15 @@ impl Shared {
         });
     }
 
+    /// A project hands an open package file it does not read (and a request for it) to
+    /// the inferred project.
+    pub fn disown(&self, path: &str, request: Option<Value>) {
+        let _ = self.coordinator.send(CMsg::Disown {
+            path: path.to_string(),
+            request,
+        });
+    }
+
     fn cancel(&self, id: &Value) {
         if let Some(k) = IdKey::from_value(id) {
             self.cancelled
@@ -175,6 +184,11 @@ pub enum CMsg {
     Watched(Vec<(String, watch::ChangeKind)>),
     /// A project loaded its program: its input files.
     Inputs { project: String, files: Vec<String> },
+    /// See [`Shared::disown`].
+    Disown {
+        path: String,
+        request: Option<Value>,
+    },
     /// Stop.
     Stop,
 }
@@ -408,6 +422,12 @@ impl Server {
                 self.on_changes(changes);
             }
             CMsg::Inputs { project, files } => self.on_inputs(&project, files),
+            CMsg::Disown { path, request } => {
+                self.set_owner(&path, INFERRED.to_string());
+                if let Some(r) = request {
+                    self.on_lsp(r);
+                }
+            }
         }
     }
 
@@ -846,33 +866,38 @@ impl Server {
         let paths: Vec<String> = self.docs.keys().cloned().collect();
         for path in paths {
             let owner = self.owner_of(&path);
-            let Some(doc) = self.docs.get(&path) else {
-                continue;
-            };
-            if doc.owner == owner || doc.mirror {
-                continue;
-            }
-            let (old, uri) = (doc.owner.clone(), doc.uri.clone());
-            if let Some(p) = self.projects.get(&old) {
-                let _ = p.tx.send(PMsg::Own {
-                    path: path.clone(),
-                    uri: uri.clone(),
-                    own: false,
-                });
-            }
-            self.ensure_project(&owner);
-            if let Some(p) = self.projects.get(&owner) {
-                let _ = p.tx.send(PMsg::Own {
-                    path: path.clone(),
-                    uri,
-                    own: true,
-                });
-            }
-            if let Some(d) = self.docs.get_mut(&path) {
-                d.owner = owner;
-            }
+            self.set_owner(&path, owner);
         }
         self.send_status();
+    }
+
+    /// Moves the open document `path` to the project `owner`.
+    fn set_owner(&mut self, path: &str, owner: String) {
+        let Some(doc) = self.docs.get(path) else {
+            return;
+        };
+        if doc.owner == owner || doc.mirror {
+            return;
+        }
+        let (old, uri) = (doc.owner.clone(), doc.uri.clone());
+        if let Some(p) = self.projects.get(&old) {
+            let _ = p.tx.send(PMsg::Own {
+                path: path.to_string(),
+                uri: uri.clone(),
+                own: false,
+            });
+        }
+        self.ensure_project(&owner);
+        if let Some(p) = self.projects.get(&owner) {
+            let _ = p.tx.send(PMsg::Own {
+                path: path.to_string(),
+                uri,
+                own: true,
+            });
+        }
+        if let Some(d) = self.docs.get_mut(path) {
+            d.owner = owner;
+        }
     }
 
     // ------------------------------------------------------------------------------------
@@ -914,6 +939,10 @@ impl Server {
     /// project.
     fn owner_of(&mut self, path: &str) -> String {
         let mut dir = ts_r_config::path::directory_of(path).to_string();
+        // A package file no config lists belongs to the nearest config above its
+        // `node_modules`, as tsc's project of a dependency; it is no root there, and a
+        // program that does not read it hands it to the inferred project (`disown`).
+        let package = path.find("/node_modules/");
         let mut guard = 0;
         while guard < 128 {
             guard += 1;
@@ -922,7 +951,7 @@ impl Server {
                 let Some(info) = self.config(&cand) else {
                     continue;
                 };
-                if info.set.contains(path) {
+                if info.set.contains(path) || package.is_some_and(|i| dir.len() <= i) {
                     return cand;
                 }
                 for r in info.references.clone() {

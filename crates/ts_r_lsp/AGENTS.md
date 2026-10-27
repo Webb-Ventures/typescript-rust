@@ -638,6 +638,24 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   default a` / `export = a` stand for the specifier's immediate target. From the `default`
   keyword: the keyword, the export's imports and their uses; an anonymous default export's
   keyword is its declaration.
+- **`export =`** (`aliases.rs`): a namespace import of a module whose `export = N` names
+  `N` (`aliases::resolve`; the binder's link stops at the module). An import of such a
+  module (`import x = require`, `import * as x`, a default import) under `N`'s own name
+  starts the search at `N`; under another name it is a local of its own. The `export` of
+  `export = N` renames `N`. Import clauses complete `N`'s exports, and for a value the
+  properties of its type.
+- **Packages**: `node_modules` files are searched only for a symbol declared in one. An
+  open package file no config lists belongs to the nearest config above its
+  `node_modules`, not as a root (it is in the program only when imported). Rename is
+  blocked by a lib declaration, or by one in a package other than the file's; an alias
+  stands for itself (`tsc: tsc/internal/ls/rename.go`).
+- **Meta properties and odd keywords**: `meta` of `import.meta` finds every `import.meta`,
+  hovers and goes to (type definition) `ImportMeta`; `target` of `new.target` goes to the
+  enclosing non-arrow function's name (a constructor's class). A stray `default` in a
+  module goes to the whole file. Type definition of a `@typedef` of `@property` tags
+  shows the tags, from the first `@` to the end of the last tag's line.
+- **JSX tags**: highlights on the tag name of an opening or closing tag are the two tags
+  (`tsc: tsc/internal/ls/documenthighlights.go`); a self-closing tag has none.
 - **CommonJS** (tsc 7's answers on `findAllRefsCommonJsRequire*`, `renameJsExports0*`):
   `const { a } = require("m")` reads the export `a` (and, for `module.exports = { a }`, the
   variable `a`), searched both ways; `const A = require("m")` is found from what

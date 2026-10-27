@@ -123,7 +123,9 @@ pub fn handle<'c, 'p>(
         "textDocument/documentHighlight" => {
             let offset = at(method)?;
             let d = keywords::Doc::new(cx.checker, cx.file);
-            if let Some(mut spans) = keywords::keyword_highlights(&d, offset) {
+            if let Some(mut spans) = keywords::jsx_tag_highlights(&d, offset)
+                .or_else(|| keywords::keyword_highlights(&d, offset))
+            {
                 spans.sort_unstable();
                 spans.dedup();
                 let out = spans

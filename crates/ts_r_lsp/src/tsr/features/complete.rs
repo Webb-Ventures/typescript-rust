@@ -719,7 +719,7 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             }
         }
         Context::ImportClause { decl, after_type } => {
-            let Some(names) = import_clause_names(c, cx.file, decl, ws_of(c, cx.file, offset))
+            let Some(names) = import_clause_names(ck, cx.file, decl, ws_of(c, cx.file, offset))
             else {
                 // No module (yet): only `type` may start a name (TypeScript, not in
                 // `import type { | }`).
@@ -1584,13 +1584,16 @@ fn inside_open_brace(ast: &ts_r_ast::Ast, text: &str, start: u32, tok: u32) -> b
 }
 
 /// The exports of the module an import or export clause names, minus `default` and the
-/// names its other specifiers already take. `None` when the module does not resolve.
+/// names its other specifiers already take. `None` when the module does not resolve. A
+/// module's `export =` stands for the exports of what it exports and, for a value, the
+/// properties of its type.
 fn import_clause_names(
-    c: &Checker<'_>,
+    ck: &mut Ck<'_, '_>,
     file: FileId,
     decl: NodeId,
     ws: u32,
 ) -> Option<Vec<(String, SymId)>> {
+    let c = ck.c;
     let ast = c.ast(file);
     let (source, specifiers) = match *ast.node(decl) {
         Node::ImportDecl {
@@ -1633,12 +1636,19 @@ fn import_clause_names(
         };
         taken.insert(n);
     }
-    Some(
-        c.exports_of(module)
-            .into_iter()
-            .filter(|(n, _)| n != "default" && !taken.contains(n))
-            .collect(),
-    )
+    let mut names = c.exports_of(module);
+    if let Some(i) = names.iter().position(|(n, _)| n == "export=") {
+        let t = c.resolve_alias(names[i].1).unwrap_or(names[i].1);
+        names = c.exports_of(t);
+        if c.has_meaning(t, meaning::VALUE) {
+            let ty = ck.type_of_symbol(t);
+            for (n, p) in ck.properties_of(ty) {
+                names.push((ck.store().str(n).to_string(), p));
+            }
+        }
+    }
+    names.retain(|(n, _)| n != "default" && !taken.contains(n));
+    Some(names)
 }
 
 /// Whether `s` may be named in a type: a type, or a namespace with such a member somewhere

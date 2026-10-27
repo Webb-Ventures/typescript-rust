@@ -307,7 +307,9 @@ fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
         Node::ImportSpecifier {
             imported: Some(i), ..
         } if i == l.node => {
-            return one(c.sym_of_decl(pl).and_then(|s| c.resolve_alias(s)));
+            return one(c
+                .sym_of_decl(pl)
+                .and_then(|s| c.resolve_alias(s).map(|_| super::aliases::resolve(c, s))));
         }
         Node::ExportSpecifier {
             local,
@@ -315,7 +317,9 @@ fn own_meaning(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
             ..
         } if local == l.node => {
             // `export { a as b }`: `a` is what `b` stands for.
-            return one(c.sym_of_decl(pl).and_then(|s| c.resolve_alias(s)));
+            return one(c
+                .sym_of_decl(pl)
+                .and_then(|s| c.resolve_alias(s).map(|_| super::aliases::resolve(c, s))));
         }
         Node::Property { key, .. } if key == l.node => {
             // `({ a: x } = o)`: the key reads `o.a`.
