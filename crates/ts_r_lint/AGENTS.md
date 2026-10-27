@@ -3101,6 +3101,131 @@ and its `rules/utils/` helpers; eslint-plugin-jsdoc 63.3.3 `src/rules/typeFormat
 `src/rules/checkExamples.js`; jsdoc-type-pratt-parser 8.0.0 `dist/index.cjs` (object
 parslet and stringify rules).
 
+## Core and typescript-eslint rules (round 10, lead)
+
+All pass their oracle data unless a count says otherwise.
+
+- Syntax and token rules: `dot-notation`, `no-implied-eval`, `prefer-promise-reject-errors`,
+  `require-await`, `max-params`, `@typescript-eslint/default-param-last`, `curly`,
+  `object-shorthand`, `prefer-template`, `prefer-arrow-callback`, `arrow-body-style`,
+  `func-names`, `no-ternary`, `no-extra-label`, `consistent-this`, `max-classes-per-file`,
+  `no-undefined`, `func-style`, `max-statements`, `complexity` (a class-field arrow is
+  "Method 'x'", its head running from the field to `(`), `no-inner-declarations`,
+  `sort-vars`, `strict`, `id-length`, `id-denylist`, `operator-assignment` (own `same_ref`;
+  the unicorn port missed 12 cases), `id-match` (reuses `unicorn_id_match::IdMatch`).
+- Global member calls: `prefer-exponentiation-operator` and `prefer-object-spread` (106/107:
+  the miss is an HTML-comment parse error) find `Math.pow(..)` / `Object.assign(..)` with
+  `global_member_calls`, as ESLint's ReferenceTracker does: also through `globalThis.X`,
+  parentheses and `?.`, and none when the global is written anywhere in the file. `joins`
+  is ESLint's `canTokensBeAdjacent`, negated.
+- `logical-assignment-operators` runs `unicorn_logical_assignment_operators.rs` with
+  `core: true` (leftmost operand only, no optional chains, `Boolean()` casts, `void 0`).
+- Comment and line rules: `no-warning-comments`, `no-inline-comments` (share
+  `is_directive`/`comment_value`), `max-lines`, `max-lines-per-function` (share
+  `line_starts`/`comment_only_lines`).
+- Code-path rules: `no-useless-return`, `consistent-return` (+ ts), `no-unreachable-loop`
+  (`Cfg.loops` records each loop's blocks and its continue target; a loop is reported when
+  no reachable block of its body goes back to it).
+- `@typescript-eslint/unbound-method` (218/218): `typeof C` keyed by symbol in the checker
+  (`sym_key`) now reports that symbol from `type_symbol`, and a class whose bases are
+  `Array`-like or a bound global counts as bound (`class Foo extends Array {}; Foo.isArray`).
+- Not done: `unicode-bom` (the CLI and the harness strip the BOM before linting, so the rule
+  would need a `has_bom` flag on the file), `jsdoc/check-examples`.
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/` `curly.js`, `object-shorthand.js`,
+`prefer-template.js`, `prefer-arrow-callback.js`, `arrow-body-style.js`, `func-names.js`,
+`no-useless-return.js`, `consistent-return.js`, `no-implied-eval.js`, `require-await.js`,
+`prefer-promise-reject-errors.js`, `no-unreachable-loop.js`, `prefer-exponentiation-operator.js`,
+`operator-assignment.js`, `prefer-object-spread.js`, `logical-assignment-operators.js`,
+`id-match.js`, `no-ternary.js`, `no-extra-label.js`, `consistent-this.js`,
+`max-classes-per-file.js`, `no-warning-comments.js`, `no-inline-comments.js`, `no-undefined.js`,
+`func-style.js`, `max-lines.js`, `max-statements.js`, `max-lines-per-function.js`,
+`complexity.js`, `no-inner-declarations.js`, `sort-vars.js`, `strict.js`, `id-length.js`,
+`id-denylist.js`, `utils/ast-utils.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/consistent-return.ts`, `unbound-method.ts`.
+
+## Core and typescript-eslint rules (round 10, h1)
+
+Scope rules over `cx.semantic()`; each runs once per file in `run_file`.
+
+- **`no-shadow`** (360/363) and **`@typescript-eslint/no-shadow`** (238/239) share
+  `no_shadow.rs`; `cx.rule_name()` picks the variant (ts: `hoist` defaults to
+  `functions-and-types`, enum shadows are `noEnumShadow`, type-import and static-generic
+  exemptions are narrower). Every non-global scope's symbols are looked up from the parent
+  scope; a missing or `/* global */` binding is a global (only with `builtinGlobals`).
+  Reports and "declared at" positions use ESTree's identifier range, which includes a
+  parameter's or declarator's type annotation (`no_shadow::name_span`). Not done: a `.d.ts`
+  without imports or exports is a script, so its top-level `function f(): void;` doesn't
+  shadow a configured global (4 cases).
+- **`no-use-before-define`** (353/354) and **`@typescript-eslint/no-use-before-define`**
+  (127/127) share `no_use_before_define.rs`; the two upstream rules differ (core: "separate
+  execution context" through static initializers, class-name ranges; ts: outer-scope options,
+  type references, named exports, which typescript-eslint also counts as type references).
+  Not done: `"use strict"; a(); { function a() {} }` (1 case: the block function resolves at
+  the top level in ESLint's scope analysis).
+- **`no-param-reassign`** (78/78): writes to a symbol whose first declaration is a
+  parameter; with `props`, member writes, updates, `delete` and `for-in/of` targets.
+- **`no-underscore-dangle`** (116/116), **`camelcase`** (204/204): syntactic checks plus the
+  references of declared, configured-global and undeclared names; camelcase skips call
+  arguments, default values, `import()` option keys and (with `ignoreDestructuring`) names
+  that repeat their key, and reports once per start position.
+- **`no-loop-func`** (96/96): a function scope's "through" references are worked out once
+  per file (each reference walks up to its binding's scope). Plain IIFEs in a loop count as
+  the loop's own code unless they name themselves.
+- **`block-scoped-var`** (106/106), **`vars-on-top`** (61/61).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
+`no-use-before-define.js`, `no-param-reassign.js`, `no-underscore-dangle.js`, `camelcase.js`,
+`no-loop-func.js`, `block-scoped-var.js`, `vars-on-top.js`, `utils/ast-utils.js`
+(`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
+`no-use-before-define.ts`.
+
+### Round 10, h1 second batch
+
+- **`no-invalid-this`** (604/604) and **`@typescript-eslint/no-invalid-this`** (91/91) share
+  `no_invalid_this.rs`. `is_default_this_binding` honours a `@this` JSDoc tag and
+  `capIsConstructor`; `this_binding::is_strict` is never true before ES5 (ESLint's scope
+  analysis has no strict mode there).
+- **`class-methods-use-this`** (164/164) and the ts variant (119/119) share
+  `class_methods_use_this.rs`. A field's function is named and located like a method
+  ("method 'x'", from the field to the `(`); an `accessor` field is not (ESTree has
+  `AccessorProperty`).
+- **`init-declarations`** (81/81), ts (77/77): ts reports a declarator without an
+  initializer at its name only.
+- **`no-magic-numbers`** (205/205), ts (79/79): ESTree parents skip `Paren`/`ParenType`; a
+  literal is a `TSLiteralType` when its parent is a type node or a type slot.
+- **`new-cap`** (146/146).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
+`class-methods-use-this.js`, `init-declarations.js`, `no-magic-numbers.js`, `new-cap.js`,
+`utils/ast-utils.js` (`isDefaultThisBinding`, `hasJSDocThisTag`, `getFunctionNameWithKind`,
+`getFunctionHeadLoc`, `getStaticPropertyName`); typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
+`init-declarations.ts`, `no-magic-numbers.ts`.
+
+### Round 10, h1 third batch
+
+- **`one-var`** (296/296): one pass over the file's declarations in source order, with a
+  per-scope record (`var`: nearest function, Program or static block; the rest: nearest
+  block, `for` or `switch`).
+- **`accessor-pairs`** (313/313) reuses `grouped_accessor_pairs`' key grouping, names and
+  head ranges, and `no_setter_return::is_descriptor`. Computed token keys skip parentheses.
+- **`prefer-regex-literals`** (251/251): global `RegExp` (or `globalThis.RegExp`, ...)
+  calls with static strings; suggestions escape line terminators and `/` through the regex
+  parser's character nodes. Modifier groups need ES2025. `regex.rs` now rejects `&&&` in
+  `v` classes.
+- **`no-implicit-globals`** (227/227): script global-scope declarations, unresolved plain
+  writes in sloppy code, and writes to read-only globals; `/* exported */` and writable
+  globals are exempt.
+- **`func-name-matching`** (192/193). Not done: `'ᢅ'` is an identifier to Rust's
+  `is_alphabetic` but not to esutils' older Unicode tables (1 case).
+- **`no-implicit-coercion`** (141/141).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/one-var.js`,
+`accessor-pairs.js`, `prefer-regex-literals.js`, `no-implicit-globals.js`,
+`func-name-matching.js`, `no-implicit-coercion.js`, `utils/ast-utils.js`
+(`isPropertyDescriptor`, `canTokensBeAdjacent`, `getStaticPropertyName`).
+
 ## typescript-eslint and core rules (round 10, h2)
 
 - **`@typescript-eslint/explicit-function-return-type`** (138/138) and
