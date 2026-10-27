@@ -888,7 +888,7 @@ impl BuildContext {
         let results = pool::map(self.threads, work, |(i, e)| {
             let fs = self.prep.resolver.fs();
             let loader = opts.loader_for(&e);
-            let source = match crate::prepare::load(fs.as_ref(), &e, loader, opts) {
+            let source = match crate::prepare::load(fs.as_ref(), &e, loader, opts, None) {
                 Ok(s) => s,
                 Err(m) => return Err(vec![Message::new(Severity::Error, None, m)]),
             };

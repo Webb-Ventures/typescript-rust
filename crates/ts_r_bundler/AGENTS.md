@@ -139,6 +139,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   imports a binding from is CommonJS. Resolving a missing export never includes its file.
   A re-export cycle is an error (`Detected cycle while resolving import "x"`). Top-level
   `this` in a CommonJS file is `exports`.
+- **Data loaders** (JSON, text, base64, dataurl, binary, file, bytes) are ES modules,
+  `export default ...`, unless an entry or a `require()` loads them (`graph::data_faces`, as
+  esbuild): a JSON object's keys imported by name (every key for a namespace, `export *` or
+  `import()`) are also `export var`s, so unused keys tree-shake. When such a key is not an
+  identifier the module stays CommonJS, as below.
 - **JSON** imported as a namespace gives an ES namespace whose `default` is a getter
   (`__tsrToEsm(mod, 2)`); attributed JSON exposes only that default getter (mode 3),
   regardless of a JSON `__esModule` property. The loader retains original top-level object
