@@ -11,6 +11,7 @@
 @typescript-eslint/consistent-return 30/30
 @typescript-eslint/consistent-type-assertions 185/185
 @typescript-eslint/consistent-type-definitions 33/33
+@typescript-eslint/consistent-type-exports 49/49
 @typescript-eslint/consistent-type-imports 381/381
 @typescript-eslint/default-param-last 87/87
 @typescript-eslint/dot-notation 63/63
@@ -37,6 +38,7 @@
 @typescript-eslint/no-for-in-array 24/24
 @typescript-eslint/no-generated-empty-object-type 27/27
 @typescript-eslint/no-implied-eval 70/70
+@typescript-eslint/no-import-type-side-effects 15/15
 @typescript-eslint/no-inferrable-types 99/99
 @typescript-eslint/no-invalid-this 91/91
 @typescript-eslint/no-invalid-void-type 96/96
@@ -53,10 +55,13 @@
 @typescript-eslint/no-redeclare 52/52
 @typescript-eslint/no-redundant-type-constituents 104/104
 @typescript-eslint/no-require-imports 46/46
+@typescript-eslint/no-restricted-types 42/42
 @typescript-eslint/no-shadow 238/239
 @typescript-eslint/no-this-alias 10/10
 @typescript-eslint/no-unnecessary-boolean-literal-compare 72/72
 @typescript-eslint/no-unnecessary-condition 318/318
+@typescript-eslint/no-unnecessary-parameter-property-assignment 45/45
+@typescript-eslint/no-unnecessary-qualifier 17/17
 @typescript-eslint/no-unnecessary-template-expression 184/184
 @typescript-eslint/no-unnecessary-type-arguments 71/71
 @typescript-eslint/no-unnecessary-type-assertion 263/263
@@ -79,12 +84,14 @@
 @typescript-eslint/no-use-before-define 127/127
 @typescript-eslint/no-useless-constructor 41/41
 @typescript-eslint/no-useless-default-assignment 91/91
+@typescript-eslint/no-useless-empty-export 21/21
 @typescript-eslint/no-wrapper-object-types 58/58
 @typescript-eslint/non-nullable-type-assertion-style 26/26
 @typescript-eslint/only-throw-error 89/89
 @typescript-eslint/parameter-properties 63/63
 @typescript-eslint/prefer-as-const 46/46
 @typescript-eslint/prefer-destructuring 92/92
+@typescript-eslint/prefer-enum-initializers 8/8
 @typescript-eslint/prefer-find 47/47
 @typescript-eslint/prefer-for-of 70/70
 @typescript-eslint/prefer-function-type 23/23
@@ -99,6 +106,7 @@
 @typescript-eslint/prefer-return-this-type 21/21
 @typescript-eslint/prefer-string-starts-ends-with 133/133
 @typescript-eslint/related-getter-setter-pairs 23/23
+@typescript-eslint/require-array-sort-compare 42/42
 @typescript-eslint/require-await 87/87
 @typescript-eslint/restrict-plus-operands 119/119
 @typescript-eslint/restrict-template-expressions 86/86

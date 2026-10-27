@@ -333,6 +333,7 @@ mod ts_consistent_indexed_object_style;
 mod ts_consistent_return;
 mod ts_consistent_type_assertions;
 mod ts_consistent_type_definitions;
+mod ts_consistent_type_exports;
 mod ts_consistent_type_imports;
 mod ts_default_param_last;
 mod ts_dot_notation;
@@ -382,6 +383,7 @@ mod ts_no_this_alias;
 mod ts_no_unnecessary_boolean_literal_compare;
 mod ts_no_unnecessary_condition;
 mod ts_no_unnecessary_parameter_property_assignment;
+mod ts_no_unnecessary_qualifier;
 mod ts_no_unnecessary_template_expression;
 mod ts_no_unnecessary_type_arguments;
 mod ts_no_unnecessary_type_assertion;
@@ -1139,6 +1141,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_class_literal_property_style::RULE,
     &ts_class_methods_use_this::RULE,
     &ts_consistent_type_definitions::RULE,
+    &ts_consistent_type_exports::RULE,
     &ts_consistent_type_imports::RULE,
     &ts_default_param_last::RULE,
     &ts_dot_notation::RULE,
@@ -1188,6 +1191,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_unnecessary_boolean_literal_compare::RULE,
     &ts_no_unnecessary_condition::RULE,
     &ts_no_unnecessary_parameter_property_assignment::RULE,
+    &ts_no_unnecessary_qualifier::RULE,
     &ts_no_unnecessary_type_assertion::RULE,
     &ts_no_unnecessary_template_expression::RULE,
     &ts_no_unnecessary_type_arguments::RULE,

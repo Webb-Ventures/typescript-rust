@@ -204,6 +204,20 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
                     .or_else(|| ck.c.resolve_ident(l, ts_r_binder::meaning::NAMESPACE))
             }
             Node::This {} => None,
+            // A module specifier (`from "./m"`): the module's symbol.
+            Node::StringLit { .. } => {
+                let ck = self.ck.borrow();
+                let c = &ck.c;
+                let request = c
+                    .bound(l.file)
+                    .module_requests
+                    .iter()
+                    .position(|r| r.node == node);
+                match request {
+                    Some(i) => c.module_target_symbol(c.link.module_target(l.file, i as u32)),
+                    None => c.sym_of_decl(l),
+                }
+            }
             _ => {
                 let ck = self.ck.borrow();
                 ck.c.sym_of_decl(l)

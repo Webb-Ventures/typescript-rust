@@ -3337,3 +3337,24 @@ the behaviour of the `natural-compare` package; neither package's source was rea
   `=`, `&&=`, `||=` or `??=`, through `as` and `!`) is reported when `x` is a parameter
   property and neither the parameter nor `this.x` was assigned earlier in the constructor,
   and no field initializer assigns `this.x`.
+- `@typescript-eslint/no-unnecessary-qualifier`: `A.x` (a qualified name, or a member access
+  on identifiers only) inside the body of a namespace or enum that declares the qualifier's
+  symbol, following aliases. The accessed symbol is looked up as an export of the namespace
+  first, because `symbol_at` on `X.T` can return a local `T` that shadows it. The qualifier is
+  unnecessary when `x` alone names the same symbol in the enclosing scope. When the scope
+  lookup finds nothing, the member counts as in scope (a merged or augmented declaration),
+  unless it is an enum member. Only the outermost unnecessary access of a chain is reported.
+- `@typescript-eslint/consistent-type-exports`: a specifier is type-based when one of its
+  declarations is `type`-only, or when it has no value meaning. An alias is followed one hop
+  (an import or re-export in this file is resolved through its source module's export), then
+  through `resolve_alias`. An import or `export { x }` in another module counts as a value when
+  that module also declares `x` as a top-level value, because our checker doesn't merge the
+  two the way tsc does. `export *` is reported when the module's namespace type has no
+  properties. Names are listed as "A, B and C". `symbol_at` on a module specifier string now
+  returns the module's symbol (`typed/ck_types.rs`).
+
+Read to understand (not ported): typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/require-array-sort-compare.ts`, `prefer-enum-initializers.ts`,
+`no-useless-empty-export.ts`, `no-import-type-side-effects.ts`, `no-restricted-types.ts`,
+`no-unnecessary-parameter-property-assignment.ts`, `no-unnecessary-qualifier.ts`,
+`consistent-type-exports.ts`, and `src/util/misc.ts` (formatWordList).
