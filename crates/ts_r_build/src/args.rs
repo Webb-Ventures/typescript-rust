@@ -82,6 +82,9 @@ pub struct Cli {
     pub log_level: LogLevel,
     /// No `--outfile`/`--outdir`: print the output to stdout.
     pub stdout: bool,
+    /// No entry points and stdin is not a terminal: the entry is `<stdin>`, read from stdin
+    /// and resolved from the working directory, as in esbuild.
+    pub stdin: bool,
 }
 
 #[derive(Debug)]
@@ -213,6 +216,12 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             "help" | "h" => return Ok(Parsed::Help),
             "version" => return Ok(Parsed::Version),
             "bundle" => o.bundle = bool_value(name, value)?,
+            // `--loader=ts`: the loader of code from stdin (extensionless, like `<stdin>`).
+            "loader" => {
+                let v = need()?;
+                let l = Loader::parse(v).ok_or_else(|| format!("invalid loader {v:?}"))?;
+                o.loaders.insert(String::new(), l);
+            }
             "outdir" => o.outdir = Some(need()?.to_owned()),
             "outfile" => o.outfile = Some(need()?.to_owned()),
             "format" => {
@@ -339,8 +348,15 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
         }
         o.write = false;
     }
-    if o.entry_points.is_empty() {
-        return Ok(Parsed::Help);
+    let stdin = o.entry_points.is_empty();
+    if stdin {
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return Ok(Parsed::Help);
+        }
+        o.entry_points.push(EntryPoint {
+            path: STDIN.into(),
+            name: Some("stdin".into()),
+        });
     }
     Ok(Parsed::Run(Box::new(Cli {
         options: o,
@@ -348,8 +364,12 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
         metafile,
         log_level,
         stdout,
+        stdin,
     })))
 }
+
+/// The entry path of code read from stdin.
+pub const STDIN: &str = "<stdin>";
 
 #[cfg(test)]
 mod tests {

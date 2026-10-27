@@ -76,12 +76,20 @@ fn run() -> ExitCode {
 /// each file's nearest one.
 pub(crate) fn guard_fs(cli: &Cli) -> Arc<GuardFs> {
     let wd = &cli.options.working_dir;
-    let g = GuardFs::new(
-        Arc::new(ts_r_config::RealFs::new()),
-        wd,
-        guard_options(cli),
-        cli.options.bundle,
-    );
+    let real = Arc::new(ts_r_config::RealFs::new());
+    let fs: Arc<dyn ts_r_config::FileSystem> = if cli.stdin {
+        let mut text = String::new();
+        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut text);
+        let path = ts_r_config::path::combine(wd, args::STDIN);
+        Arc::new(StdinFs {
+            inner: real,
+            path,
+            text,
+        })
+    } else {
+        real
+    };
+    let g = GuardFs::new(fs, wd, guard_options(cli), cli.options.bundle);
     Arc::new(match &cli.options.tsconfig {
         Some(t) => g.with_tsconfig(&ts_r_config::path::resolve(
             wd,
@@ -89,6 +97,67 @@ pub(crate) fn guard_fs(cli: &Cli) -> Arc<GuardFs> {
         )),
         None => g,
     })
+}
+
+/// The real file system plus the `<stdin>` entry's code.
+struct StdinFs {
+    inner: Arc<ts_r_config::RealFs>,
+    path: String,
+    text: String,
+}
+
+impl ts_r_config::FileSystem for StdinFs {
+    fn read_file(&self, p: &str) -> Option<String> {
+        if p == self.path {
+            return Some(self.text.clone());
+        }
+        self.inner.read_file(p)
+    }
+    fn read_bytes(&self, p: &str) -> Option<Vec<u8>> {
+        if p == self.path {
+            return Some(self.text.clone().into_bytes());
+        }
+        self.inner.read_bytes(p)
+    }
+    fn file_exists(&self, p: &str) -> bool {
+        p == self.path || self.inner.file_exists(p)
+    }
+    fn directory_exists(&self, p: &str) -> bool {
+        self.inner.directory_exists(p)
+    }
+    fn read_dir(&self, p: &str) -> Vec<ts_r_config::DirEntry> {
+        let mut v = self.inner.read_dir(p);
+        if ts_r_config::path::directory_of(&self.path) == p {
+            let name = args::STDIN.to_owned();
+            let at = v.partition_point(|e| e.name < name);
+            v.insert(
+                at,
+                ts_r_config::DirEntry {
+                    name,
+                    kind: ts_r_config::EntryKind::File,
+                },
+            );
+        }
+        v
+    }
+    fn realpath(&self, p: &str) -> String {
+        if p == self.path {
+            return p.to_owned();
+        }
+        self.inner.realpath(p)
+    }
+    fn case_sensitive(&self) -> bool {
+        self.inner.case_sensitive()
+    }
+    fn cwd(&self) -> String {
+        self.inner.cwd()
+    }
+    fn may_be_symlink(&self, p: &str) -> bool {
+        p != self.path && self.inner.may_be_symlink(p)
+    }
+    fn stamp(&self, p: &str) -> Option<ts_r_config::FileStamp> {
+        (p != self.path).then(|| self.inner.stamp(p)).flatten()
+    }
 }
 
 /// `[sound.guard]` from `ts-r.toml` or the `"ts-r"` key of the tsconfig (`--tsconfig`, else
