@@ -399,6 +399,7 @@ mod ts_no_unsafe_enum_comparison;
 mod ts_no_unsafe_function_type;
 mod ts_no_unsafe_member_access;
 mod ts_no_unsafe_return;
+mod ts_no_unsafe_type_assertion;
 mod ts_no_unsafe_unary_minus;
 mod ts_no_unused_expressions;
 mod ts_no_unused_private_class_members;
@@ -427,6 +428,7 @@ mod ts_prefer_reduce_type_parameter;
 mod ts_prefer_regexp_exec;
 mod ts_prefer_return_this_type;
 mod ts_prefer_string_starts_ends_with;
+mod ts_promise_function_async;
 mod ts_related_getter_setter_pairs;
 mod ts_require_array_sort_compare;
 mod ts_require_await;
@@ -1207,6 +1209,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_unsafe_function_type::RULE,
     &ts_no_unsafe_member_access::RULE,
     &ts_no_unsafe_return::RULE,
+    &ts_no_unsafe_type_assertion::RULE,
     &ts_no_unsafe_unary_minus::RULE,
     &ts_no_unused_expressions::RULE,
     &ts_no_unused_private_class_members::RULE,
@@ -1239,6 +1242,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_regexp_exec::RULE,
     &ts_prefer_return_this_type::RULE,
     &ts_prefer_string_starts_ends_with::RULE,
+    &ts_promise_function_async::RULE,
     &ts_related_getter_setter_pairs::RULE,
     &ts_require_array_sort_compare::RULE,
     &ts_return_await::RULE,

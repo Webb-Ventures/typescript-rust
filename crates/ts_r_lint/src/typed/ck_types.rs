@@ -517,6 +517,10 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
         self.with(|ck| ck.base_of_literal(t))
     }
 
+    fn widened_type(&self, t: Ty) -> Ty {
+        self.with(|ck| ck.widened_type(t))
+    }
+
     fn union_of(&self, types: &[Ty]) -> Ty {
         self.with(|ck| ck.union(types))
     }

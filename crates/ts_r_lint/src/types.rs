@@ -281,6 +281,10 @@ pub trait TypeInfo {
     fn base_of_literal(&self, t: Ty) -> Ty {
         t
     }
+    /// The widened type (`getWidenedType`): a fresh object literal type becomes regular.
+    fn widened_type(&self, t: Ty) -> Ty {
+        t
+    }
     /// Union of `types` (subtype-reduced like TypeScript's `getUnionType`).
     fn union_of(&self, types: &[Ty]) -> Ty {
         types.first().copied().unwrap_or(Ty::NEVER)

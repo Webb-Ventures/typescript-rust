@@ -3352,9 +3352,25 @@ the behaviour of the `natural-compare` package; neither package's source was rea
   two the way tsc does. `export *` is reported when the module's namespace type has no
   properties. Names are listed as "A, B and C". `symbol_at` on a module specifier string now
   returns the module's symbol (`typed/ck_types.rs`).
+- `@typescript-eslint/promise-function-async`: every call signature of the function's type
+  must return one of the promise names (`Promise` plus `allowedPromiseNames`), matched by the
+  symbol of the reference's target, through union and intersection members and base types.
+  Without a return type annotation, one matching union member is enough. `any` and `unknown`
+  never match; with `allowAny: false` they are reported without a fix. Getters, setters,
+  abstract methods and bodiless overloads are skipped. The head starts after a method's
+  decorators. The method fix puts `async ` before the key, or before a `*` or the `[` of a
+  computed key, with a leading space when the token before touches it.
+- `@typescript-eslint/no-unsafe-type-assertion`: checked in order: `unknown` to `any`; an
+  `any` going in (the expression is `any`, or a type argument of the same generic is, except
+  for `new X()` without type arguments); an `any` coming out (the same test, reversed);
+  then plain assignability. An object literal expression is widened first (`widened_type`,
+  new on `TypeInfo`) so its extra properties are not excess ones. When the target is a type
+  parameter, the message depends on its constraint chain: the chain ends with no
+  declaration (`V extends T`, `T` bare), or the original type is assignable to the constraint.
 
 Read to understand (not ported): typescript-eslint 8.71.1
 `packages/eslint-plugin/src/rules/require-array-sort-compare.ts`, `prefer-enum-initializers.ts`,
 `no-useless-empty-export.ts`, `no-import-type-side-effects.ts`, `no-restricted-types.ts`,
 `no-unnecessary-parameter-property-assignment.ts`, `no-unnecessary-qualifier.ts`,
-`consistent-type-exports.ts`, and `src/util/misc.ts` (formatWordList).
+`consistent-type-exports.ts`, `promise-function-async.ts`, `no-unsafe-type-assertion.ts`,
+and `src/util/misc.ts` (formatWordList).
