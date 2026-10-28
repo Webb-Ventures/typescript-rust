@@ -71,6 +71,9 @@ pub struct TransformResult {
     /// Statements standing for moved source nodes ([`PrintHints::moved_comments`]). Sorted
     /// by node.
     pub moved_comments: Vec<(NodeId, Span)>,
+    /// Where synthesized statements' trailing comments start ([`PrintHints::trail_from`]).
+    /// Sorted by node.
+    pub trail_from: Vec<(NodeId, u32)>,
     /// The JSX transform added statements at the top ([`PrintHints::no_detached_comments`]).
     pub no_detached_comments: bool,
 }
@@ -170,6 +173,7 @@ pub fn transpile(
         single_quoted: &result.single_quoted,
         map_ranges: &result.map_ranges,
         moved_comments: &result.moved_comments,
+        trail_from: &result.trail_from,
         no_detached_comments: result.no_detached_comments,
         strip_numeric_separators: opts.strip_numeric_separators,
     };

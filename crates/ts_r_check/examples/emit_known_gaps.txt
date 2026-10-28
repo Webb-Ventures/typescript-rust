@@ -11,8 +11,6 @@ conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceI
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-type-as.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-type-as-as.js	differs: import/export
-conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=false)	esDecorators-decoratorExpression.3.js	differs: classes
-conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=true)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=es2022)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=esnext)	topLevelAwaitErrors.1.js	differs: classes
 conformance/jsdoc/jsdocTypeTag.ts	a.js	missing: TS5055: would overwrite an input

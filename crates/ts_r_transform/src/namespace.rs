@@ -363,8 +363,13 @@ fn needs_var(tx: &mut Tx, seg: NodeId) -> bool {
 pub(crate) fn first_declaration(tx: &mut Tx, b: BindingId) -> bool {
     let bnd = tx.sc.binding(b);
     match bnd.kind {
-        BindingKind::Class | BindingKind::Function => false,
-        BindingKind::Var | BindingKind::Let | BindingKind::Const
+        // A `declare` one declares nothing at runtime (`declare class C {}` then
+        // `namespace C {}` writes `var C;`, observed).
+        BindingKind::Class
+        | BindingKind::Function
+        | BindingKind::Var
+        | BindingKind::Let
+        | BindingKind::Const
             if !tx.sc.ambient_vars.contains(&bnd.decl) =>
         {
             false

@@ -38,7 +38,8 @@ emitter must not write that file (TSR2002).
 `build_errors(&parsed)` picks the parse errors a build tool fails on, as esbuild does
 (`build_errors.rs`): syntax errors and the grammar errors that are ECMAScript early errors
 or syntax errors in JavaScript (`a && b ?? c`, TS5076), not tsc-only grammar rules
-(`declare function f() {}`, `if (x) ;`, `a?.#x`).
+(`declare function f() {}`, `if (x) ;`, `a?.#x`), plus the parser's `build_only` errors
+(TS1308, `await` in a function that is not async).
 `TranspileOutput::build_errors` holds those plus the transform's errors; the dev server
 fails on them, while `diagnostics` keeps everything tsc reports. `sloppy_only_syntax` lists
 `with` statements and `delete name` with whether the file itself makes them strict code;
@@ -279,7 +280,7 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-27, v1/emit5): 1,723 match, 4 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  Last run (2026-10-27, v1/emit8): 1,724 match, 4 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
   syntax errors are skipped); `--filter esDecorators`: 140 match, 0 mismatch. The 4 left need
   another file's declarations, which a per-file transpile cannot see (an imported enum
   value, an imported const enum, an alias of an imported interface); the program emitter
@@ -324,7 +325,10 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - JSX: a spread of an object literal is flattened into the props object unless the literal
   sets `__proto__` (`{ __proto__: x }` or `{ "__proto__": x }`, not computed/shorthand).
   A pragma (`@jsx h`) counts only first on its comment line; `&#X41;` (upper-case `X`) is
-  not an entity.
+  not an entity. The `createElement`/`jsx` call keeps the element's span (tsc keeps its
+  text range), so an array literal or conditional around it keeps the source's line breaks.
+- A `declare class` or `declare function` emits nothing, so a namespace merged with it
+  writes its own `var C;`. An enum under a top-level label is still top-level (`var E;`).
 - CommonJS `export = x` becomes `module.exports = x;` at the end of the file, and the
   comments on the `export =` line go. After a top-level `using` it is `_default = x;` in the
   `try` and `module.exports = _default;` after it.

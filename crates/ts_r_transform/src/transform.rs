@@ -128,6 +128,11 @@ pub(crate) struct Tx<'a> {
     /// Statements standing for source nodes moved elsewhere
     /// ([`crate::TransformResult::moved_comments`]).
     pub moved_comments: Vec<(NodeId, Span)>,
+    /// `moved_comments` statements later replaced (old → new), applied once at the end.
+    pub moved_remap: FxHashMap<NodeId, NodeId>,
+    /// Where synthesized statements' trailing comments start
+    /// ([`crate::TransformResult::trail_from`]).
+    pub trail_from: Vec<(NodeId, u32)>,
 }
 
 impl Build for Tx<'_> {
@@ -206,6 +211,8 @@ pub(crate) fn run(
         no_detached_comments: false,
         map_ranges: Vec::new(),
         moved_comments: Vec::new(),
+        moved_remap: FxHashMap::default(),
+        trail_from: Vec::new(),
     };
     let using = crate::downlevel::using_needing_lowering(&*tx.ast, opts.target);
     crate::enums::prepass(&mut tx);
@@ -266,6 +273,17 @@ pub(crate) fn run(
         },
         moved_comments: {
             let mut r = tx.moved_comments;
+            for (n, _) in r.iter_mut() {
+                if let Some(&to) = tx.moved_remap.get(n) {
+                    *n = to;
+                }
+            }
+            r.sort_by_key(|&(n, _)| n);
+            r.dedup_by_key(|&mut (n, _)| n);
+            r
+        },
+        trail_from: {
+            let mut r = tx.trail_from;
             r.sort_by_key(|&(n, _)| n);
             r.dedup_by_key(|&mut (n, _)| n);
             r
@@ -669,9 +687,9 @@ impl<'a> Tx<'a> {
     /// A statement in a single-statement position (`if` branch, loop body).
     fn sub_stmt(&mut self, id: NodeId) {
         let mut out = Vec::new();
-        self.list_depth += 1;
+        // No new statement list: an enum or namespace here is still in the enclosing one's
+        // scope (`label: enum E {}` at the top writes `var E;`, observed).
         self.stmt(id, &mut out);
-        self.list_depth -= 1;
         match out.len() {
             1 if out[0] == id => {}
             1 => replace(self.ast, id, out[0]),
@@ -838,6 +856,14 @@ impl<'a> Tx<'a> {
                 let l = self.stmt_list(stmts);
                 self.set(id, Node::Block { stmts: l });
                 out.push(id);
+            }
+            // Decorators with no declaration after them (`{ @g<T> class C {} }`): tsc's
+            // missing declaration prints nothing.
+            Node::ExprStmt { expr }
+                if matches!(self.n(expr), Node::Missing {})
+                    && self.src.as_bytes().get(self.span(id).start as usize) == Some(&b'@') =>
+            {
+                self.erase(id);
             }
             Node::ExprStmt { expr } => {
                 let mut e = expr;

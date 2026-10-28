@@ -60,7 +60,11 @@ pub(crate) fn binary_prec(op: BinaryOp) -> Prec {
 enum Leftmost {
     Brace,
     Function,
-    Class,
+    /// `original`: a source class expression ([`Layout::Tsc`](crate::Layout::Tsc)). One
+    /// only starts a statement once a type around it is erased.
+    Class {
+        original: bool,
+    },
     Let,
     Other,
 }
@@ -542,6 +546,13 @@ impl Printer<'_> {
                         self.expr_trailing(p + dot.len() as u32);
                     }
                 }
+                // tsc keeps a line break after the `.` too, indented once (`this.\n
+                // foo()`); a missing name (`x.` then `}`) ends the line.
+                let after = self.break_after_dot(obj, prop, dot);
+                if after {
+                    self.indent();
+                    self.newline();
+                }
                 match self.node(prop) {
                     Node::PrivateName { .. } => {
                         self.map_start(prop);
@@ -549,6 +560,9 @@ impl Printer<'_> {
                         self.map_end(prop);
                     }
                     _ => self.ident_name(prop),
+                }
+                if after {
+                    self.dedent();
                 }
                 if before {
                     self.dedent();
@@ -908,6 +922,26 @@ impl Printer<'_> {
             return;
         }
         self.expr(id, Prec::Call);
+    }
+
+    /// [`Layout::Tsc`]: whether the source breaks the line between the `.` of member `obj.prop`
+    /// and its name (for a missing name, the next token).
+    fn break_after_dot(&self, obj: NodeId, prop: NodeId, dot: &str) -> bool {
+        if !self.tsc || self.is_synthetic(obj) {
+            return false;
+        }
+        let missing = matches!(self.node(prop), Node::Missing {});
+        if self.is_synthetic(prop) && !missing {
+            return false;
+        }
+        let from = self.span(obj).end;
+        let to = if missing {
+            self.next_token_start(self.span(prop).start)
+        } else {
+            self.span(prop).start
+        };
+        self.token_between(from, to.max(from), dot)
+            .is_some_and(|p| self.has_newline_between(p + dot.len() as u32, to))
     }
 
     fn push_space(&mut self) {
@@ -1594,7 +1628,9 @@ impl Printer<'_> {
                 Node::FunctionExpr { .. } => return Leftmost::Function,
                 Node::ClassExpr { decorators, .. } => {
                     return if decorators.is_empty() {
-                        Leftmost::Class
+                        Leftmost::Class {
+                            original: self.tsc && !self.is_synthetic(id),
+                        }
                     } else {
                         Leftmost::Other
                     };
@@ -1642,7 +1678,11 @@ impl Printer<'_> {
     pub(crate) fn starts_ambiguously(&self, id: NodeId, statement: bool) -> bool {
         match self.leftmost(id) {
             Leftmost::Brace => statement,
-            Leftmost::Function | Leftmost::Class => {
+            // tsc parenthesizes only an object literal or a function at a statement's
+            // start once a type is erased: `<T>class C {}` and `(class C {} as T)` print
+            // `class C {\n};` (source parentheses without a type stay).
+            Leftmost::Class { original: true } if statement => false,
+            Leftmost::Function | Leftmost::Class { .. } => {
                 // `export default function () {}` is a declaration; only wrap when the
                 // function/class is not the whole expression.
                 statement

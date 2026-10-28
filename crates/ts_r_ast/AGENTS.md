@@ -31,6 +31,9 @@ child lists, an `Interner` for identifier and string values, `comments`, `root` 
   comment text to a node for codegen (`ast.synthetic_comments`, sorted by node id;
   `synthetic_comments_of(id)`). Transforms add them; the parser never does, so they are not
   part of `checkpoint`/`rollback`.
+- Empty class members: a class body's `;` members (tsc's semicolon class elements) have no
+  node; `ast.class_semicolons` holds `(class span.end, position)` for each, sorted by
+  position (part of `checkpoint`/`rollback`). JavaScript printers keep them in place.
 - Debugging: `ast.dump()` / `dump_with_source(src)`. The format is `Kind start..end field=value` with
   indented `field:` / `field[i]:` children; it is what the parser snapshot files contain.
 - JSDoc (JavaScript files): `ts_r_parser::attach_jsdoc` appends the nodes it builds from JSDoc

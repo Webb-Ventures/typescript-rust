@@ -100,6 +100,7 @@ impl<'a> Parser<'a> {
             return NodeList::EMPTY;
         }
         let mark = self.scratch.len();
+        let semis = self.ast.class_semicolons.len();
         self.with_ctx(
             Ctx::IN_CLASS,
             Ctx::DISALLOW_IN | Ctx::IN_CONDITIONAL_TRUE | Ctx::DECORATOR,
@@ -134,12 +135,22 @@ impl<'a> Parser<'a> {
         let members = self.finish_list(mark);
         self.check_mapped_member_names(members);
         self.expect_closing(T::RBrace, T::LBrace, open);
+        // This class's `;` members are keyed by its end (nested classes set theirs first).
+        let end = self.prev_end;
+        for s in &mut self.ast.class_semicolons[semis..] {
+            if s.0 == u32::MAX {
+                s.0 = end;
+            }
+        }
         members
     }
 
     fn parse_class_member(&mut self) -> Option<NodeId> {
         let start = self.start();
-        if self.eat(T::Semi) {
+        if self.at(T::Semi) {
+            let at = self.tok().start;
+            self.ast.class_semicolons.push((u32::MAX, at));
+            self.bump();
             return None;
         }
         let mut decorators = if self.at(T::At) {

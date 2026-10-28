@@ -176,6 +176,8 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         let mspan = tx.span(m);
         tx.map_range(s, mspan);
         tx.map_range(stmt_expr, mspan);
+        // Its trailing comments are the member's, before the `,` (`A /* c */,`; observed).
+        tx.trail_from.push((s, mspan.end));
         body.push(s);
     }
     if let Some(k) = key {

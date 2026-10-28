@@ -259,3 +259,50 @@ fn triple_slash_erased_interface() {
 fn decorator_metadata_rules() {
     check("decorator_metadata_rules");
 }
+
+/// Comments of code a transform moves or rewrites: an enum member's (before its `,`; after it
+/// they go), lowered static fields and blocks and private fields (they move with the code),
+/// the first line of a multi-line comment (trailing spaces trimmed), a statement block's
+/// comment after `{` and before `}`, and line breaks after a `.`.
+#[test]
+fn moved_comments() {
+    check("moved_comments");
+}
+
+/// Comments after a statement's keywords, `(`, `)` and blocks' `}` trail them on their line
+/// (`if /* c */ ( /* d */x) /* e */ {`), as tsc writes those tokens.
+#[test]
+fn statement_comments() {
+    check("statement_comments");
+}
+
+/// A class's empty `;` members are kept in source order among its original members, also
+/// after members a transform removed (a lowered private method) and in an otherwise empty
+/// class.
+#[test]
+fn class_semicolons() {
+    check("class_semicolons");
+}
+
+/// A namespace merged with a `declare class` or `declare function` writes its own `var`
+/// (the ambient declaration emits nothing), and an enum under a top-level label is still a
+/// top-level `var`.
+#[test]
+fn ambient_merges() {
+    check("ambient_merges");
+}
+
+/// A JSX element's `createElement` call keeps the element's source position: an array
+/// literal or a conditional around it keeps the source's line breaks.
+#[test]
+fn jsx_source_lines() {
+    check("jsx_source_lines");
+}
+
+/// A class expression that starts a statement once a type around it is erased
+/// (`<T>class C {}`, `(class C {} as T)`) is not parenthesized, as tsc prints it; source
+/// parentheses stay. Decorators with no declaration after them print nothing.
+#[test]
+fn bare_class_statements() {
+    check("bare_class_statements");
+}

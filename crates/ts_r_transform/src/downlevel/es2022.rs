@@ -32,8 +32,8 @@ use crate::helpers::Helper;
 
 /// A static member moved out of the class.
 enum Static {
-    /// `this.x = v;` (a static property; the statement).
-    Prop(NodeId),
+    /// `this.x = v;` (a static property; the statement, and the member it came from).
+    Prop(NodeId, NodeId),
     /// A synthesized expression (`_a = k`).
     Expr(NodeId),
     /// A source static block's statements.
@@ -168,7 +168,7 @@ impl Lower<'_, '_> {
                     match stmts.as_slice() {
                         [s] => match self.n(*s) {
                             Node::ExprStmt { expr } if self.is_this_prop(expr) => {
-                                statics.push(Static::Prop(*s))
+                                statics.push(Static::Prop(*s, m))
                             }
                             Node::ExprStmt { expr } => statics.push(Static::Expr(expr)),
                             _ => statics.push(Static::Block(body, m)),
@@ -243,7 +243,7 @@ impl Lower<'_, '_> {
         let mut u = Usage::default();
         for s in &statics {
             match *s {
-                Static::Prop(st) => {
+                Static::Prop(st, _) => {
                     if let Node::ExprStmt { expr } = self.n(st)
                         && let Node::Assign { left, right, .. } = self.n(expr)
                     {
@@ -474,7 +474,7 @@ impl Lower<'_, '_> {
             }
             for st in &statics {
                 match *st {
-                    Static::Prop(st) => {
+                    Static::Prop(st, _) => {
                         if let Node::ExprStmt { expr } = self.n(st)
                             && let Node::Assign { left, right, .. } = self.n(expr)
                         {
@@ -528,6 +528,9 @@ impl Lower<'_, '_> {
             let this = self.this(at);
             let c = self.call(add, &[this], at);
             let st = self.expr_stmt(c, at);
+            // It stands for no source statement: it takes no comments.
+            let none = ts_r_codegen::NO_MAP;
+            self.tx.map_range(st, ts_r_ast::Span::new(none, none));
             self.ctor_prepend(&mut kept, st, derived, at);
         }
         p.members = self.new_list(&kept);
@@ -536,6 +539,9 @@ impl Lower<'_, '_> {
         let target = if is_expr { alias } else { name_ref };
         let mut lead = caps;
         let mut rest = Vec::new();
+        // The member a moved static property or block stands for: its statement after a
+        // class declaration takes the member's comments (`C.x = 1; // c`).
+        let mut origin: FxHashMap<NodeId, ts_r_ast::Span> = FxHashMap::default();
         let mut leading = true;
         for st in statics {
             match st {
@@ -572,7 +578,7 @@ impl Lower<'_, '_> {
                 }
                 Static::Expr(e) if leading => lead.push(e),
                 Static::Expr(e) => rest.push(e),
-                Static::Prop(st) => {
+                Static::Prop(st, m) => {
                     leading = false;
                     let Node::ExprStmt { expr } = self.n(st) else {
                         continue;
@@ -580,6 +586,7 @@ impl Lower<'_, '_> {
                     if let Some(t) = target {
                         self.retarget(expr, t);
                     }
+                    origin.insert(expr, self.tx.span(m));
                     rest.push(expr);
                 }
                 Static::Block(body, m) => {
@@ -612,6 +619,7 @@ impl Lower<'_, '_> {
                     );
                     let par = self.paren(arrow, bat);
                     let call = self.call(par, &[], bat);
+                    origin.insert(call, sp);
                     rest.push(call);
                 }
             }
@@ -732,7 +740,13 @@ impl Lower<'_, '_> {
         for e in rest {
             self.visit(e);
             let eat = self.at(e);
-            out.push(self.expr_stmt(e, eat));
+            let s = self.expr_stmt(e, eat);
+            if let Some(&span) = origin.get(&e)
+                && span.start < span.end
+            {
+                self.tx.moved_comments.push((s, span));
+            }
+            out.push(s);
         }
         // `export default class C { static ... }`: `class C { }`, the statics, then
         // `export default C;` (observed).
@@ -968,13 +982,17 @@ impl Lower<'_, '_> {
                     self.unary(ts_r_ast::UnaryOp::Void, zero, mat)
                 }
             };
-            if let Some(&st) = privs.get(&m) {
-                let set = self.weak_set_call(st, this, v, mat);
-                inits.push(self.expr_stmt(set, mat));
-                continue;
+            let init = if let Some(&st) = privs.get(&m) {
+                self.weak_set_call(st, this, v, mat)
+            } else {
+                self.define_property(this, k, v, mat)
+            };
+            let st = self.expr_stmt(init, mat);
+            // It takes the field's comments along (`Object.defineProperty(...); // c`).
+            if span.start < span.end {
+                self.tx.moved_comments.push((st, span));
             }
-            let d = self.define_property(this, k, v, mat);
-            inits.push(self.expr_stmt(d, mat));
+            inits.push(st);
         }
         kept.retain(|m| !fields.contains(m));
         for (i, s) in inits.into_iter().enumerate() {
@@ -1245,6 +1263,8 @@ impl Lower<'_, '_> {
             }
         }
         let mut done: Vec<Atom> = Vec::new();
+        // Moved statements replaced by their `_C_x.set(this, v);` (which takes their comments).
+        let mut replaced: FxHashMap<NodeId, NodeId> = FxHashMap::default();
         for s in stmts.iter_mut() {
             if !moved(self, *s) {
                 continue;
@@ -1277,9 +1297,11 @@ impl Lower<'_, '_> {
             let c = self.weak_set_call(st, this, right, sat);
             let ns = self.expr_stmt(c, sat);
             self.tx.ast.set_span(ns, self.tx.span(*s));
+            replaced.insert(*s, ns);
             *s = ns;
             done.push(name);
         }
+        self.tx.moved_remap.extend(replaced);
         for &m in priv_fields {
             let Node::PropertyDef { key, value, .. } = self.n(m) else {
                 continue;
@@ -1326,6 +1348,10 @@ impl Lower<'_, '_> {
             };
             let c = self.weak_set_call(st, this, v, mat);
             let ns = self.expr_stmt(c, mat);
+            let span = self.tx.span(m);
+            if span.start < span.end {
+                self.tx.moved_comments.push((ns, span));
+            }
             stmts.insert(idx, ns);
         }
         let l = self.new_list(&stmts);

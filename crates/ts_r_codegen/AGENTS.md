@@ -94,6 +94,9 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
     `<a><b>x</></a>`).
   - A binary expression whose left operand is missing (a statement starting at `* 2`)
     keeps the space before the operator even at a line start (` * 2;`).
+  - A source class expression that starts a statement once a type around it is erased
+    (`<T>class C {}`, `(class C {} as T)`) is not parenthesized: tsc parenthesizes only an
+    object literal or a function there. Source parentheses (a `Paren` node) stay.
   - Synthesized layout comes from the transform (`PrintHints::single_line` / `multi_line`,
     sorted node ids): blocks and embedded statements tsc builds on one line (`get x() {
     return this.#x; }`, `static { _classThis = this; }`, `get: function () { return m.x; }`,
@@ -155,9 +158,15 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
     (`x, // c`). After `(` of a parenthesized expression or empty arguments/parameters, `.`,
     `[`, a prefix operator or `new` they trail the token with no space after
     (`( /* c */x`, `f( /* c */)`), and so after `...` (`... /* c */x`) when on its line.
-    A binary operator's own comments print around it (`/* c */ in /* d */`). Comments
-    touching no node (`function /* c */ ()`,
-    `) /* c */ {`) are dropped. Comments before the close of a multi-line literal print one
+    A binary operator's own comments print around it (`/* c */ in /* d */`). In a
+    statement, comments after its keywords, `(`, `)` and a block's `}` trail those tokens on
+    their line (`if /* c */ ( /* d */x) /* e */ {`, `case 1: /* c */`, `break /* c */ l;`:
+    `token_trailing`, `keyword_paren`, `close_paren` in `stmt.rs`). Other comments touching
+    no node (`function /* c */ ()`, a function's `) /* c */ {`) are dropped.
+  - `PrintHints::trail_from` gives a synthesized statement standing for a list element the
+    source position its trailing comments start at (an enum member's, before its `,`); a
+    comment after the `,` is dropped. `Ast::class_semicolons` (a class's empty `;` members)
+    print by source position among the original members, with their trailing comments. Comments before the close of a multi-line literal print one
     level in. Array spread elements keep their leading comments. Trailing comments print
     after the outermost expression ending at that position (`Printer::expr_ends`), so they
     follow its source-map end.

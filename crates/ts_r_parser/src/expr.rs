@@ -6,7 +6,7 @@ use ts_r_ast::{
     AssignOp, Atom, BinaryOp, F64Bits, FnFlags, ImportPhase, KeywordTypeKind, MetaPropKind,
     MethodKind, Modifiers, Node, NodeId, NodeList, Span, UnaryOp, UpdateOp,
 };
-use ts_r_diagnostics::messages;
+use ts_r_diagnostics::{Category, Diagnostic, DiagnosticMessage, messages};
 use ts_r_lexer::{TokenFlags, TokenKind as T};
 
 use crate::lists::List;
@@ -15,6 +15,13 @@ use crate::stmt::BodyRule;
 use crate::{Ctx, Parser};
 
 /// Precedence of relational operators (`<`, `instanceof`, `in`, `as`, `satisfies`).
+/// TS1308, reported by tsc's checker; here only for build tools (`ParseResult::build_only`).
+const AWAIT_OUTSIDE_ASYNC: DiagnosticMessage = DiagnosticMessage {
+    code: 1308,
+    category: Category::Error,
+    text: "'await' expressions are only allowed within async functions and at the top levels of modules.",
+};
+
 const PREC_RELATIONAL: u8 = 8;
 
 fn binary_op(k: T) -> Option<(u8, BinaryOp)> {
@@ -851,6 +858,12 @@ impl<'a> Parser<'a> {
                 if self.ctx.has(Ctx::STATIC_BLOCK) {
                     let span = self.tok().span();
                     self.kept_grammar_error_at(messages::AWAIT_IN_STATIC_BLOCK, span, &[]);
+                } else if !self.ctx.has(Ctx::AWAIT) && self.ctx.has(Ctx::IN_FUNCTION) {
+                    // `await x` in a function that is not async: tsc's checker reports
+                    // TS1308; esbuild fails on it (`ParseResult::build_only`).
+                    let span = self.tok().span();
+                    self.build_only
+                        .push(Diagnostic::new(AWAIT_OUTSIDE_ASYNC, span, &[]));
                 }
                 // An operator, not a name (`await_name_seen`).
                 let seen = self.await_name_seen;
