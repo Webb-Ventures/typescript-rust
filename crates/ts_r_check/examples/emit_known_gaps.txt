@@ -1,29 +1,22 @@
 # ES2022+ JavaScript outputs the program emitter does not get shape-equal
 # (record 0012, E1 gate). test<TAB>output<TAB>cause. Regenerate with a full
 # `emit_oracle --emitter program --write-gaps` run; the list may only shrink.
-compiler/bigintArbirtraryIdentifier.ts	badImport.js	differs: other
 compiler/bigintArbirtraryIdentifier.ts	badImport2.js	differs: import/export
 compiler/computedEnumMemberSyntacticallyString2.ts(isolatedmodules=false)	foo.js	differs: other
 compiler/computedEnumMemberSyntacticallyString2.ts(isolatedmodules=true)	foo.js	differs: other
-compiler/exportDeclarationForModuleOrEnumWithMemberOfSameName.ts(module=commonjs)	exportDeclarationForModuleOrEnumWithMemberOfSameName.js	differs: enum/namespace IIFE
 compiler/importElisionExportNonExportAndDefault.ts	main.js	differs: import/export
 compiler/isolatedDeclarationErrorsEnums.ts	isolatedDeclarationErrorsEnums.js	differs: other
 compiler/modulePreserveImportHelpers.ts	b.cjs	differs: CommonJS
-compiler/parseBigInt.ts	parseBigInt.js	differs: other
 compiler/pathMappingBasedModuleResolution1_node.ts	f1.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file3.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file1.js	missing: not emitted
 compiler/reachabilityChecksNoCrash1.ts	reachabilityChecksNoCrash1.js	differs: lowering: async functions
 compiler/staticInitializersAndLegacyClassDecorators.ts	staticInitializersAndLegacyClassDecorators.js	differs: classes
-conformance/classes/classStaticBlock/classStaticBlock26.ts(target=es2022)	classStaticBlock26.js	differs: other
-conformance/classes/classStaticBlock/classStaticBlock26.ts(target=esnext)	classStaticBlock26.js	differs: other
 conformance/classes/members/instanceAndStaticMembers/typeOfThisInStaticMembers12.ts(target=es2022)	typeOfThisInStaticMembers12.js	differs: lowering: temporaries
 conformance/classes/members/instanceAndStaticMembers/typeOfThisInStaticMembers12.ts(target=esnext)	typeOfThisInStaticMembers12.js	differs: lowering: temporaries
 conformance/classes/propertyMemberDeclarations/autoAccessor10.ts	autoAccessor10.js	differs: other
 conformance/classes/propertyMemberDeclarations/autoAccessor5.ts(target=es2022)	autoAccessor5.js	differs: lowering: temporaries
 conformance/classes/propertyMemberDeclarations/autoAccessorDisallowedModifiers.ts(target=esnext)	autoAccessorDisallowedModifiers.js	differs: other
-conformance/decorators/decoratorInAmbientContext.ts	decoratorInAmbientContext.js	differs: decorators
-conformance/decorators/invalid/decoratorOnUsing.ts	decoratorOnUsing.js	differs: other
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_module.ts(module=es6)	arbitraryModuleNamespaceIdentifiers_module.js	differs: lowering: temporaries
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-no-as.js	differs: import/export
@@ -32,72 +25,29 @@ conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceI
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-type-as-as.js	differs: import/export
 conformance/es6/moduleExportsSystem/topLevelVarHoistingCommonJS.ts	topLevelVarHoistingCommonJS.js	differs: CommonJS
 conformance/es6/templates/taggedTemplatesWithTypeArguments2.ts	taggedTemplatesWithTypeArguments2.js	differs: other
-conformance/esDecorators/classDeclaration/accessors/esDecorators-classDeclaration-accessors-staticPrivate.ts(target=es2022)	esDecorators-classDeclaration-accessors-staticPrivate.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.1.ts	esDecorators-classDeclaration-classSuper.1.js	differs: lowering: class static blocks
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.2.ts	esDecorators-classDeclaration-classSuper.2.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.3.ts	esDecorators-classDeclaration-classSuper.3.js	differs: lowering: class static blocks
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.4.ts	esDecorators-classDeclaration-classSuper.4.js	differs: other
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.5.ts	esDecorators-classDeclaration-classSuper.5.js	differs: other
-conformance/esDecorators/classDeclaration/classThisReference/esDecorators-classDeclaration-classThisReference.ts(target=es2022)	esDecorators-classDeclaration-classThisReference.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/esDecorators-classDeclaration-commentPreservation.ts(module=commonjs,target=es2022)	file1.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/esDecorators-classDeclaration-commentPreservation.ts(module=esnext,target=es2022)	file1.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/esDecorators-classDeclaration-sourceMap.ts(target=es2022)	esDecorators-classDeclaration-sourceMap.js	differs: helper __classPrivateFieldIn
-conformance/esDecorators/classDeclaration/fields/esDecorators-classDeclaration-fields-staticAccessor.ts(target=es2022)	esDecorators-classDeclaration-fields-staticAccessor.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/fields/esDecorators-classDeclaration-fields-staticPrivate.ts(target=es2022)	esDecorators-classDeclaration-fields-staticPrivate.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/fields/esDecorators-classDeclaration-fields-staticPrivateAccessor.ts(target=es2022)	esDecorators-classDeclaration-fields-staticPrivateAccessor.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/methods/esDecorators-classDeclaration-methods-staticPrivate.ts(target=es2022)	esDecorators-classDeclaration-methods-staticPrivate.js	differs: lowering: temporaries
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.1.ts	esDecorators-classExpression-classSuper.1.js	differs: lowering: class static blocks
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.2.ts	esDecorators-classExpression-classSuper.2.js	differs: lowering: temporaries
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.3.ts	esDecorators-classExpression-classSuper.3.js	differs: lowering: class static blocks
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.4.ts	esDecorators-classExpression-classSuper.4.js	differs: other
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.5.ts	esDecorators-classExpression-classSuper.5.js	differs: other
-conformance/esDecorators/classExpression/esDecorators-classExpression-commentPreservation.ts(target=es2022)	esDecorators-classExpression-commentPreservation.js	differs: lowering: temporaries
+conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.3.ts	esDecorators-classDeclaration-classSuper.3.js	differs: lowering: temporaries
+conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.5.ts	esDecorators-classDeclaration-classSuper.5.js	differs: arrow functions
+conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.3.ts	esDecorators-classExpression-classSuper.3.js	differs: lowering: temporaries
+conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.5.ts	esDecorators-classExpression-classSuper.5.js	differs: arrow functions
 conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.10.ts	esDecorators-classExpression-namedEvaluation.10.js	differs: lowering: temporaries
 conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.2.ts	esDecorators-classExpression-namedEvaluation.2.js	differs: lowering: temporaries
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.4.ts	esDecorators-classExpression-namedEvaluation.4.js	differs: helper __setFunctionName
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.5.ts	esDecorators-classExpression-namedEvaluation.5.js	differs: helper __setFunctionName
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.7.ts	esDecorators-classExpression-namedEvaluation.7.js	differs: helper __setFunctionName
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.8.ts	a.js	differs: helper __setFunctionName
-conformance/esDecorators/classExpression/namedEvaluation/esDecorators-classExpression-namedEvaluation.8.ts	b.js	differs: helper __setFunctionName
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=false)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=true)	esDecorators-decoratorExpression.3.js	differs: classes
-conformance/externalModules/topLevelAwait.2.ts(module=es2022)	topLevelAwait.2.js	differs: missing code: other
-conformance/externalModules/topLevelAwait.2.ts(module=esnext)	topLevelAwait.2.js	differs: missing code: other
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=es2022)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=esnext)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/verbatimModuleSyntaxRestrictionsCJS.ts	main6.js	differs: missing code: CommonJS
 conformance/jsdoc/jsdocTypeTag.ts	a.js	missing: TS5055: would overwrite an input
 conformance/parser/ecmascript6/Iterators/parserForOfStatement22.ts	parserForOfStatement22.js	differs: other
 conformance/salsa/plainJSGrammarErrors.ts	plainJSGrammarErrors.js	missing: TSR2002: resolver answered Unknown
-conformance/scanner/ecmascript5/scannerUnicodeEscapeInKeyword2.ts	file1.js	differs: other
-conformance/scanner/ecmascript5/scannerUnicodeEscapeInKeyword2.ts	file2.js	differs: other
-conformance/statements/VariableStatements/usingDeclarations/awaitUsingDeclarationsWithImportHelpers.ts	awaitUsingDeclarationsWithImportHelpers.js	differs: extra code at the end
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsInForOf.4.ts	usingDeclarationsInForOf.4.js	differs: other
 conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsTopLevelOfModule.2.ts(module=commonjs)	usingDeclarationsTopLevelOfModule.2.js	differs: other
 conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsTopLevelOfModule.3.ts(module=commonjs)	usingDeclarationsTopLevelOfModule.3.js	differs: CommonJS
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithESClassDecorators.2.ts(module=commonjs,target=esnext)	usingDeclarationsWithESClassDecorators.2.js	differs: other
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithESClassDecorators.2.ts(module=esnext,target=esnext)	usingDeclarationsWithESClassDecorators.2.js	differs: import/export
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithESClassDecorators.3.ts(module=commonjs,target=esnext)	usingDeclarationsWithESClassDecorators.3.js	differs: CommonJS
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithESClassDecorators.3.ts(module=esnext,target=esnext)	usingDeclarationsWithESClassDecorators.3.js	differs: import/export
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithESClassDecorators.4.ts(module=commonjs,target=esnext)	usingDeclarationsWithESClassDecorators.4.js	differs: CommonJS
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithESClassDecorators.4.ts(module=esnext,target=esnext)	usingDeclarationsWithESClassDecorators.4.js	differs: import/export
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithImportHelpers.ts	usingDeclarationsWithImportHelpers.js	differs: extra code at the end
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.10.ts(module=commonjs,target=esnext)	usingDeclarationsWithLegacyClassDecorators.10.js	differs: classes
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.2.ts(module=commonjs,target=esnext)	usingDeclarationsWithLegacyClassDecorators.2.js	differs: other
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.2.ts(module=esnext,target=esnext)	usingDeclarationsWithLegacyClassDecorators.2.js	differs: import/export
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.3.ts(module=commonjs,target=esnext)	usingDeclarationsWithLegacyClassDecorators.3.js	differs: CommonJS
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.3.ts(module=esnext,target=esnext)	usingDeclarationsWithLegacyClassDecorators.3.js	differs: import/export
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.4.ts(module=commonjs,target=esnext)	usingDeclarationsWithLegacyClassDecorators.4.js	differs: CommonJS
-conformance/statements/VariableStatements/usingDeclarations/usingDeclarationsWithLegacyClassDecorators.4.ts(module=esnext,target=esnext)	usingDeclarationsWithLegacyClassDecorators.4.js	differs: import/export
 conformance/types/uniqueSymbol/uniqueSymbolsPropertyNames.ts	uniqueSymbolsPropertyNames.js	differs: other
 tsc7/compiler/anonymousClassDecoratorEs2022.ts	anonymousClassDecoratorEs2022.js	differs: arrow functions
 tsc7/compiler/constEnumOnlyModuleImportAliasEmit.ts	sensmap.js	differs: const enum inlining
 tsc7/compiler/disallowUnerasableAssertion.ts	disallowUnerasableAssertion.js	differs: import/export
-tsc7/compiler/esDecoratorExtendsNull.ts	esDecoratorExtendsNull.js	differs: decorators
 tsc7/compiler/importDeferCallCommonJS.ts	main.js	differs: CommonJS
 tsc7/compiler/jsxNestedIndentation.js	jsxNestedIndentation.js	missing: TS5055: would overwrite an input
 tsc7/compiler/legacyDecoratorsEnumAccessSameNameAsClass.ts	legacyDecoratorsEnumAccessSameNameAsClass.js	differs: classes
 tsc7/compiler/namespaceExportDestructuringReferences.ts	namespaceExportDestructuringReferences.js	differs: lowering: temporaries
 tsc7/compiler/panicForInEmptyDeclarationList.ts	panicForInEmptyDeclarationList.js	differs: other
-tsc7/compiler/typeOnlyExportAsIfBody.ts	typeOnlyExportAsIfBody.js	differs: "use strict"
 tsc7/compiler/typeOnlyExportImportAliasElidesNamespaceImport.ts	b.js	differs: import/export

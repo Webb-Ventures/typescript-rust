@@ -108,6 +108,9 @@ pub(crate) struct Tx<'a> {
     /// Layout hints for codegen ([`crate::TransformResult::single_line`]).
     pub single_line: Vec<NodeId>,
     pub multi_line: Vec<NodeId>,
+    pub single_quoted: Vec<NodeId>,
+    /// [`crate::TransformResult::no_detached_comments`].
+    pub no_detached_comments: bool,
     /// Source-map ranges of synthesized nodes ([`crate::TransformResult::map_ranges`]).
     pub map_ranges: Vec<(NodeId, Span)>,
     /// Statements standing for source nodes moved elsewhere
@@ -131,6 +134,8 @@ pub(crate) fn run(
     let sc = analyze(
         ast,
         opts.experimental_decorators && opts.emit_decorator_metadata,
+        opts.strict_null_checks,
+        Some((resolver, file)),
     );
     let is_module = !ast.source_kind.is_declaration()
         && (opts.force_module
@@ -179,6 +184,8 @@ pub(crate) fn run(
         type_alias_imports: FxHashSet::default(),
         single_line: Vec::new(),
         multi_line: Vec::new(),
+        single_quoted: Vec::new(),
+        no_detached_comments: false,
         map_ranges: Vec::new(),
         moved_comments: Vec::new(),
     };
@@ -229,6 +236,8 @@ pub(crate) fn run(
         unlowered,
         single_line: sorted(tx.single_line),
         multi_line: sorted(tx.multi_line),
+        single_quoted: sorted(tx.single_quoted),
+        no_detached_comments: tx.no_detached_comments,
         map_ranges: {
             // The last range given to a node wins.
             let mut r = tx.map_ranges;
@@ -548,6 +557,7 @@ impl<'a> Tx<'a> {
             self.stmt(s, &mut out);
         }
         let mut jsx_imports = crate::jsx::finish(self);
+        self.no_detached_comments = !jsx_imports.is_empty();
         if self.opts.is_cjs() {
             out = crate::cjs::finish(self, out, std::mem::take(&mut jsx_imports));
         }
@@ -715,6 +725,10 @@ impl<'a> Tx<'a> {
                 }
             }
             Node::ExportAssignment { expr } => {
+                if crate::namespace::export_assignment_elided(self, id) {
+                    self.erase(id);
+                    return;
+                }
                 self.expr(expr);
                 match self.opts.module {
                     ModuleFormat::CommonJs | ModuleFormat::Preserve => {
@@ -1437,7 +1451,7 @@ impl<'a> Tx<'a> {
 
     /// After rewriting `f` into `mod.f` (CommonJS imports), a call `f()` must not pass `mod`
     /// as `this`: print `(0, mod.f)()`.
-    fn fix_detached_callee(&mut self, callee: NodeId) {
+    pub(crate) fn fix_detached_callee(&mut self, callee: NodeId) {
         if self.cjs.detached.remove(&callee) {
             let at = self.at(callee);
             let moved = crate::builder::clone_node(self.ast, callee);
@@ -1725,9 +1739,18 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// The classic JSX factory's root identifier keeps its import alive.
-    fn jsx_needs(&self, local: NodeId) -> bool {
+    /// The classic JSX factory's root identifier keeps its import alive, also under the
+    /// automatic runtime unless that runtime's module resolves (tsc marks the factory's
+    /// root referenced only when there is no implicit runtime import to type the JSX).
+    fn jsx_needs(&mut self, local: NodeId) -> bool {
         if !self.sc.has_jsx {
+            return false;
+        }
+        if matches!(
+            crate::jsx::mode(self),
+            crate::JsxMode::Automatic | crate::JsxMode::AutomaticDev
+        ) && self.resolver.jsx_runtime_found(self.file)
+        {
             return false;
         }
         let root = self.jsx.factory_root(self.opts);
@@ -1748,7 +1771,32 @@ impl<'a> Tx<'a> {
         let kept_by_verbatim = (self.opts.verbatim_module_syntax
             || !self.ast.source_kind.is_typescript())
             && self.kind(module_ref) == NodeKind::ExternalModuleRef;
-        if type_only || !(exported || self.binding_used(name) || kept_by_verbatim) {
+        // A script's top-level alias is a global: tsc keeps it, unused, when its target is
+        // a value or unresolved (`import v = foo.v;` → `var v = foo.v;`).
+        let script_global = !type_only
+            && !exported
+            && !self.is_module
+            && self.ns_stack.is_empty()
+            && self.list_depth <= 1
+            && self.kind(module_ref) != NodeKind::ExternalModuleRef
+            && !self.binding_used(name)
+            && crate::namespace::entity_is_value(self, module_ref) != Some(false)
+            && self.value_alias(id);
+        // The JSX factory's root keeps the alias, as it does an import (`import React =
+        // require("react")` with `<div />`, in every JSX mode).
+        if self.sc.has_jsx {
+            crate::jsx::read_pragmas(self);
+        }
+        let jsx = !type_only && self.jsx_needs(name);
+        // A used `import x = require("m")` whose module exports only a type (`export = I`
+        // of an interface) stands for no value: tsc drops it, uses and all.
+        let used = self.binding_used(name)
+            && (exported
+                || kept_by_verbatim
+                || jsx
+                || self.kind(module_ref) != NodeKind::ExternalModuleRef
+                || self.value_alias(id));
+        if type_only || !(exported || used || kept_by_verbatim || script_global || jsx) {
             self.erase(id);
             return;
         }

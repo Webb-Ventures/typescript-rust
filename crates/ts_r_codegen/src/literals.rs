@@ -103,8 +103,13 @@ pub fn quote_string(s: &str, quote: char, out: &mut String) {
 /// Quotes `s` with `"` as tsc prints a synthesized string: like [`quote_string`], and every
 /// non-ASCII UTF-16 unit as `\uXXXX` (uppercase hex).
 pub fn quote_string_ascii(s: &str, out: &mut String) {
+    quote_string_ascii_with(s, '"', out);
+}
+
+/// [`quote_string_ascii`] with the given quote (`"` or `'`).
+pub fn quote_string_ascii_with(s: &str, quote: char, out: &mut String) {
     let mut q = String::with_capacity(s.len() + 2);
-    quote_string(s, '"', &mut q);
+    quote_string(s, quote, &mut q);
     let mut buf = [0u16; 2];
     for c in q.chars() {
         if c.is_ascii() {

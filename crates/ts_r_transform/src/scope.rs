@@ -148,6 +148,12 @@ struct Walker<'a> {
     out: Scopes,
     refs: Vec<(NodeId, u32)>,
     metadata: bool,
+    /// `strictNullChecks`: in a decorated signature's union type, `null` and `undefined`
+    /// are skipped only without it (the entity rule of `metadata_entity`).
+    strict_null: bool,
+    /// For decorator metadata: the emitter's resolver, which tells type references that
+    /// keep no import alive (reached through `import type`/`export type`).
+    resolver: Option<(&'a dyn crate::EmitResolver, ts_r_diagnostics::FileId)>,
     /// The file has a computed key somewhere; only then are types walked (`type_keys`).
     computed_keys: bool,
     /// Namespace body scope → the namespace's binding (shared by its merged blocks).
@@ -155,8 +161,13 @@ struct Walker<'a> {
 }
 
 /// Analyzes the whole file. `decorator_metadata`: type annotations of decorated members are
-/// runtime references (`emitDecoratorMetadata`).
-pub(crate) fn analyze(ast: &Ast, decorator_metadata: bool) -> Scopes {
+/// runtime references (`emitDecoratorMetadata`), as far as `resolver` tells.
+pub(crate) fn analyze<'a>(
+    ast: &'a Ast,
+    decorator_metadata: bool,
+    strict_null_checks: bool,
+    resolver: Option<(&'a dyn crate::EmitResolver, ts_r_diagnostics::FileId)>,
+) -> Scopes {
     let mut w = Walker {
         ast,
         out: Scopes {
@@ -183,6 +194,8 @@ pub(crate) fn analyze(ast: &Ast, decorator_metadata: bool) -> Scopes {
         },
         refs: Vec::new(),
         metadata: decorator_metadata,
+        strict_null: strict_null_checks,
+        resolver,
         computed_keys: ast
             .nodes
             .iter()
@@ -940,6 +953,16 @@ impl Walker<'_> {
                     ..
                 } => {
                     if modifiers.contains(Modifiers::DECLARE) {
+                        // A decorated `declare` field is still decorated (legacy decorators).
+                        if !ds.is_empty() {
+                            self.decorators(ds, s);
+                            if self.metadata
+                                && let Some(t) = type_ann
+                            {
+                                self.type_as_value(t, s);
+                            }
+                            self.key(key, s);
+                        }
                         continue;
                     }
                     // `abstract [k]: T` is erased but still references `k` (observed).
@@ -980,32 +1003,38 @@ impl Walker<'_> {
                     } = *self.ast.node(value)
                     {
                         let ctor = kind == ts_r_ast::MethodKind::Constructor;
-                        if self.metadata && ((!ds.is_empty()) || (ctor && decorated)) {
-                            for p in self.list(params) {
-                                if let Node::Param {
-                                    type_ann: Some(t), ..
-                                } = *self.ast.node(p)
-                                {
-                                    self.type_as_value(t, s);
-                                }
-                            }
-                            if !ctor && let Some(r) = return_type {
-                                self.type_as_value(r, s);
-                            }
-                        }
                         if self.metadata {
-                            // Parameter decorators also emit metadata.
                             let any_param_deco = self.list(params).iter().any(|&p| {
                                 matches!(self.ast.node(p), Node::Param { decorators, .. } if !decorators.is_empty())
                             });
-                            if any_param_deco && ds.is_empty() && !(ctor && decorated) {
+                            // A decorated accessor keeps its own annotation, or else its
+                            // pair's (`get x(): T` / `set x(v: T)`).
+                            let accessor = matches!(
+                                kind,
+                                ts_r_ast::MethodKind::Get | ts_r_ast::MethodKind::Set
+                            );
+                            if accessor && !ds.is_empty() {
+                                let own = self.accessor_annotation(m);
+                                let ann = own.or_else(|| {
+                                    self.paired_accessor(members, m)
+                                        .and_then(|o| self.accessor_annotation(o))
+                                });
+                                if let Some(t) = ann {
+                                    self.type_as_value(t, s);
+                                }
+                            } else if !ds.is_empty()
+                                || any_param_deco
+                                || (ctor && decorated && body.is_some())
+                            {
+                                // A decorated method, a signature with decorated parameters,
+                                // or the constructor of a decorated class.
                                 for p in self.list(params) {
-                                    if let Node::Param {
-                                        type_ann: Some(t), ..
-                                    } = *self.ast.node(p)
-                                    {
+                                    if let Some(t) = self.param_metadata_type(p) {
                                         self.type_as_value(t, s);
                                     }
+                                }
+                                if !ctor && let Some(r) = return_type {
+                                    self.type_as_value(r, s);
                                 }
                             }
                         }
@@ -1023,37 +1052,168 @@ impl Walker<'_> {
         }
     }
 
-    /// For decorator metadata: the entity name of a type reference is a runtime reference.
+    /// For decorator metadata: the entity a decorated signature's type names is a runtime
+    /// reference (its import is kept), unless it is reached only through `import type`.
     fn type_as_value(&mut self, t: NodeId, scope: u32) {
+        let Some(r) = self.metadata_entity(t, 0) else {
+            return;
+        };
+        let Node::TypeRef { name, .. } = *self.ast.node(r) else {
+            return;
+        };
+        let span = self.ast.span(r);
+        if matches!(self.ast.node(name), Node::Ident { .. })
+            && let Some((res, file)) = self.resolver
+            && span.start < span.end
+            && matches!(res.metadata_type(file, r), crate::MetadataType::TypeOnly(_))
+        {
+            return;
+        }
+        if let Some(l) = self.leftmost_entity(name) {
+            self.reference(l, scope);
+        }
+    }
+
+    /// The type reference whose entity a metadata type keeps alive: the type itself, the
+    /// inside of parentheses or a named tuple member, or the one entity every member of a
+    /// union, intersection or conditional's branches agrees on (`metadata_entity_list`).
+    /// Anything else (keywords, literals, functions) names no entity.
+    fn metadata_entity(&self, t: NodeId, depth: u32) -> Option<NodeId> {
+        if depth > 256 {
+            return None;
+        }
         match *self.ast.node(t) {
-            Node::TypeRef { name, .. } => {
-                if let Some(l) = self.leftmost_entity(name) {
-                    self.reference(l, scope);
-                }
+            Node::TypeRef { .. } => Some(t),
+            Node::ParenType { ty } | Node::NamedTupleMember { ty, .. } => {
+                self.metadata_entity(ty, depth + 1)
             }
-            Node::ParenType { ty } => self.type_as_value(ty, scope),
             Node::UnionType { types } | Node::IntersectionType { types } => {
-                // Serialized only when all members agree; references are kept conservatively
-                // only for single non-null members.
-                let ts: Vec<NodeId> = self
-                    .list(types)
-                    .into_iter()
-                    .filter(|&x| {
-                        !matches!(
-                            self.ast.node(x),
-                            Node::KeywordType {
-                                kind: ts_r_ast::KeywordTypeKind::Null
-                                    | ts_r_ast::KeywordTypeKind::Undefined
-                                    | ts_r_ast::KeywordTypeKind::Never
-                            }
-                        )
-                    })
-                    .collect();
-                if ts.len() == 1 {
-                    self.type_as_value(ts[0], scope);
+                self.metadata_entity_list(&self.list(types), depth)
+            }
+            Node::ConditionalType {
+                true_ty, false_ty, ..
+            } => self.metadata_entity_list(&[true_ty, false_ty], depth),
+            _ => None,
+        }
+    }
+
+    /// The members agree when each names an entity and, with more than one, all are the
+    /// same plain identifier. `never` is skipped, and `null`/`undefined` too without
+    /// `strictNullChecks`; any other member naming no entity means none.
+    fn metadata_entity_list(&self, types: &[NodeId], depth: u32) -> Option<NodeId> {
+        use ts_r_ast::KeywordTypeKind as K;
+        let mut common: Option<NodeId> = None;
+        for &t in types {
+            match *self.ast.node(t) {
+                Node::KeywordType { kind: K::Never } => continue,
+                Node::KeywordType {
+                    kind: K::Null | K::Undefined,
+                } if !self.strict_null => continue,
+                _ => {}
+            }
+            let one = self.metadata_entity(t, depth + 1)?;
+            match common {
+                None => common = Some(one),
+                Some(c) => {
+                    let ident = |r: NodeId| match *self.ast.node(r) {
+                        Node::TypeRef { name, .. } => match *self.ast.node(name) {
+                            Node::Ident { name } => Some(name),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    match (ident(c), ident(one)) {
+                        (Some(a), Some(b)) if a == b => {}
+                        _ => return None,
+                    }
                 }
             }
-            _ => {}
+        }
+        common
+    }
+
+    /// A parameter's type for metadata: a rest parameter's element type (`...a: T[]`,
+    /// `...a: Array<T>`, any reference with one type argument).
+    fn param_metadata_type(&self, p: NodeId) -> Option<NodeId> {
+        let Node::Param { rest, type_ann, .. } = *self.ast.node(p) else {
+            return None;
+        };
+        let t = type_ann?;
+        if !rest {
+            return Some(t);
+        }
+        match *self.ast.node(t) {
+            Node::ArrayType { elem } => Some(elem),
+            Node::TypeRef {
+                type_args: Some(args),
+                ..
+            } => match *self.ast.node(args) {
+                Node::TypeArgs { args } => {
+                    let l = self.list(args);
+                    (l.len() == 1).then(|| l[0])
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// A getter's return type or a setter's parameter type.
+    fn accessor_annotation(&self, m: NodeId) -> Option<NodeId> {
+        let Node::MethodDef { kind, value, .. } = *self.ast.node(m) else {
+            return None;
+        };
+        let Node::FunctionExpr {
+            params,
+            return_type,
+            ..
+        } = *self.ast.node(value)
+        else {
+            return None;
+        };
+        match kind {
+            ts_r_ast::MethodKind::Get => return_type,
+            ts_r_ast::MethodKind::Set => {
+                self.list(params)
+                    .first()
+                    .and_then(|&p| match *self.ast.node(p) {
+                        Node::Param { type_ann, .. } => type_ann,
+                        _ => None,
+                    })
+            }
+            _ => None,
+        }
+    }
+
+    /// The other accessor of the same name and staticness (`None` for computed keys).
+    fn paired_accessor(&self, members: NodeList, m: NodeId) -> Option<NodeId> {
+        use ts_r_ast::MethodKind as MK;
+        let Node::MethodDef {
+            kind,
+            key,
+            modifiers,
+            ..
+        } = *self.ast.node(m)
+        else {
+            return None;
+        };
+        let want = if kind == MK::Get { MK::Set } else { MK::Get };
+        let is_static = modifiers.contains(Modifiers::STATIC);
+        let name = self.key_atom(key)?;
+        self.list(members).into_iter().find(|&o| {
+            matches!(*self.ast.node(o), Node::MethodDef { kind: k, key: ok, modifiers: om, .. }
+                if k == want
+                    && om.contains(Modifiers::STATIC) == is_static
+                    && self.key_atom(ok) == Some(name))
+        })
+    }
+
+    fn key_atom(&self, key: NodeId) -> Option<ts_r_ast::Atom> {
+        match *self.ast.node(key) {
+            Node::Ident { name } | Node::PrivateName { name } | Node::StringLit { value: name } => {
+                Some(name)
+            }
+            _ => None,
         }
     }
 

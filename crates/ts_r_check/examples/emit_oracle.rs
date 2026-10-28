@@ -451,14 +451,18 @@ fn parse_directive(line: &str) -> Option<(String, String)> {
     Some((k.trim().to_ascii_lowercase(), v.trim().to_owned()))
 }
 
-/// The test's units and directives (like the checker conformance harness).
+/// The test's units and directives (like the checker conformance harness). As tsc's harness
+/// does, a unit is its lines joined with `\n` (a `\r\n` file reaches the compiler with `\n`
+/// line breaks, which show in text it copies: templates, JSX, line continuations), and its
+/// leading empty lines are dropped.
 fn split_test(text: &str, default_name: &str) -> (Pairs, Pairs) {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut files: Pairs = Vec::new();
     let mut options = Vec::new();
     let mut cur_name: Option<String> = None;
     let mut cur = String::new();
-    for line in text.split_inclusive('\n') {
+    for line in text.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
         if let Some((k, v)) = parse_directive(line) {
             if k == "filename" {
                 if let Some(n) = cur_name.take() {
@@ -472,8 +476,8 @@ fn split_test(text: &str, default_name: &str) -> (Pairs, Pairs) {
             }
             continue;
         }
-        if cur.is_empty() && line.trim().is_empty() {
-            continue;
+        if !cur.is_empty() {
+            cur.push('\n');
         }
         cur.push_str(line);
     }
@@ -2066,5 +2070,35 @@ fn gates(out: &mut impl std::io::Write, results: &[Outcome], full: bool, write: 
             text.push_str(&format!("{t}\t{f}\t{c}\n"));
         }
         let _ = std::fs::write(known_gaps_path(), text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_test;
+
+    /// Units reach the compiler as tsc's harness gives them: `\n` line breaks, leading empty
+    /// lines dropped, a whitespace-only first line kept, no line break before the next unit.
+    #[test]
+    fn units_are_joined_with_lf() {
+        let (files, options) = split_test(
+            "// @target: es2015\r\n\r\n`a\r\nb`;\r\n// @filename: b.ts\r\n  \r\nx;\r\n",
+            "a.ts",
+        );
+        assert_eq!(options, vec![("target".to_owned(), "es2015".to_owned())]);
+        assert_eq!(files.len(), 1, "{files:?}");
+        let (files, _) = split_test("\r\n\r\n`a\r\nb`;\r\n", "a.ts");
+        assert_eq!(files, vec![("a.ts".to_owned(), "`a\nb`;\n".to_owned())]);
+        let (files, _) = split_test(
+            "// @filename: a.ts\r\n\r\nx;\r\n// @filename: b.ts\r\n  \r\ny;",
+            "t.ts",
+        );
+        assert_eq!(
+            files,
+            vec![
+                ("a.ts".to_owned(), "x;".to_owned()),
+                ("b.ts".to_owned(), "  \ny;".to_owned()),
+            ]
+        );
     }
 }

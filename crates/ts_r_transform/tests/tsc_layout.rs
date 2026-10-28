@@ -1,4 +1,4 @@
-//! `Layout::Tsc` after a transform: each `tests/tsc_layout/<name>.ts` transpiles (options from
+//! `Layout::Tsc` after a transform: each `tests/tsc_layout/<name>.ts` (or `.tsx`) transpiles (options from
 //! its `// @option: value` header) byte-for-byte to the `.js` next to it, which is tsc 7's
 //! output for the same file.
 
@@ -11,7 +11,10 @@ mod support;
 
 fn check(name: &str) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tsc_layout");
-    let path = dir.join(format!("{name}.ts"));
+    let mut path = dir.join(format!("{name}.ts"));
+    if !path.exists() {
+        path = dir.join(format!("{name}.tsx"));
+    }
     let src = std::fs::read_to_string(&path).unwrap();
     let want = std::fs::read_to_string(dir.join(format!("{name}.js"))).unwrap();
     let path = path.to_string_lossy().to_string();
@@ -182,4 +185,77 @@ fn multiline_comments_keep_return_and_throw_operands_parenthesized() {
 #[test]
 fn es_decorated_statics() {
     check("es_decorated_statics");
+}
+
+/// A script's top-level unused `import x = A.B` stays as `var x = A.B;` when `A.B` is a value
+/// or does not resolve; one that names only types (or a namespace of types) is dropped, and an
+/// unused alias inside a namespace is still dropped.
+#[test]
+fn script_import_alias() {
+    check("script_import_alias");
+}
+
+/// A name exported twice (`export { foo, foo as bar }; export { foo }`) is set to `void 0`
+/// once.
+#[test]
+fn cjs_export_names() {
+    check("cjs_export_names");
+}
+
+/// `export =` of an interface emits nothing, and does not make the module an `export =` one.
+#[test]
+fn cjs_export_type() {
+    check("cjs_export_type");
+}
+
+/// The classic JSX factory's root keeps its `import React = require("react")`.
+#[test]
+fn cjs_jsx_factory() {
+    check("cjs_jsx_factory");
+}
+
+/// A one-name imported JSX factory (`/** @jsx dom */`) is called as `(0, renderer_1.dom)(..)`.
+#[test]
+fn cjs_jsx_pragma() {
+    check("cjs_jsx_pragma");
+}
+
+/// Classic JSX: attribute strings keep their quotes; a child element, and every child when
+/// there are several, starts its own line.
+#[test]
+fn jsx_classic_layout() {
+    check("jsx_classic_layout");
+}
+
+/// Once the automatic JSX runtime is imported, the file's leading comments are not detached:
+/// they follow the runtime's `require` and lead the first statement.
+#[test]
+fn jsx_runtime_comments() {
+    check("jsx_runtime_comments");
+}
+
+/// ... and go with that statement when it is erased.
+#[test]
+fn jsx_runtime_comments_erased() {
+    check("jsx_runtime_comments_erased");
+}
+
+/// A triple-slash directive in front of an elided import goes with it.
+#[test]
+fn triple_slash_elided_import() {
+    check("triple_slash_elided_import");
+}
+
+/// A triple-slash directive in front of an erased interface is kept.
+#[test]
+fn triple_slash_erased_interface() {
+    check("triple_slash_erased_interface");
+}
+
+/// Decorator metadata without a checker: `BigInt` guarded below ES2020, an accessor's type
+/// from its setter, a rest parameter's element type, a union that keeps no import, and the
+/// temps tsc declares for a union's discarded guards.
+#[test]
+fn decorator_metadata_rules() {
+    check("decorator_metadata_rules");
 }

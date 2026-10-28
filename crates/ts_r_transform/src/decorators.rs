@@ -16,6 +16,7 @@ use ts_r_ast::{
     TypeOperatorKind, VarKind,
 };
 
+use crate::MetadataType;
 use crate::builder::Build;
 use crate::helpers::Helper;
 use crate::scope::BindingKind;
@@ -182,10 +183,8 @@ pub(crate) fn collect(tx: &mut Tx, id: NodeId) -> Info {
                 ..
             } => {
                 let decorators = decorator_exprs(tx, decorators);
-                if decorators.is_empty()
-                    || modifiers.contains(Modifiers::DECLARE)
-                    || matches!(tx.n(key), Node::PrivateName { .. })
-                {
+                // A decorated `declare` field is decorated too (observed).
+                if decorators.is_empty() || matches!(tx.n(key), Node::PrivateName { .. }) {
                     continue;
                 }
                 let accessor = modifiers.contains(Modifiers::ACCESSOR);
@@ -209,8 +208,10 @@ pub(crate) fn collect(tx: &mut Tx, id: NodeId) -> Info {
             _ => {}
         }
     }
-    // An accessor's metadata describes the pair: the getter's return type or else the
-    // setter's parameter type, and the setter's parameters (observed).
+    // An accessor's metadata describes the pair: with a setter, its parameter's type (none
+    // reads as `Object`, even when the getter has a return type), else the getter's return
+    // type; and the setter's parameters (tsc: tsc/internal/transformers/tstransforms/
+    // typeserializer.go, the accessor type node).
     let members = tx.items(p.members);
     for m in info
         .members
@@ -257,12 +258,10 @@ pub(crate) fn collect(tx: &mut Tx, id: NodeId) -> Info {
             continue;
         }
         let set_types = setter.map(|v| param_info(tx, v).1);
-        m.ty = get_ret.or_else(|| {
-            set_types
-                .as_ref()
-                .and_then(|t| t.first())
-                .and_then(|t| t.ty)
-        });
+        m.ty = match &set_types {
+            Some(t) => t.first().and_then(|t| t.ty),
+            None => get_ret,
+        };
         if let Some(t) = set_types {
             m.param_types = t;
         }
@@ -692,24 +691,47 @@ fn serialize(tx: &mut Tx, ty: Option<NodeId>, at: u32) -> NodeId {
     let Some(ty) = ty else {
         return tx.ident("Object", at);
     };
-    match serial_kind(tx, ty) {
+    let k = serial_kind(tx, ty, 0);
+    serial_expr(tx, k, at)
+}
+
+fn serial_expr(tx: &mut Tx, k: Serial, at: u32) -> NodeId {
+    match k {
+        // `BigInt` is a global only from ES2020: below, tsc guards it.
+        Serial::Name(n) if n == "BigInt" && tx.opts.target < ts_r_config::ScriptTarget::ES2020 => {
+            let x = tx.ident("BigInt", at);
+            let tof = tx.unary(ts_r_ast::UnaryOp::TypeOf, x, at);
+            let fun = tx.string("function", at);
+            let test = tx.binary(tof, ts_r_ast::BinaryOp::StrictEq, fun, at);
+            let cons = tx.ident("BigInt", at);
+            let alt = tx.ident("Object", at);
+            tx.mk(Node::Conditional { test, cons, alt }, at)
+        }
         Serial::Name(n) => tx.ident(&n, at),
         Serial::Void => tx.void0(at),
+        Serial::Entity(n) => entity_expr(tx, n, at),
+        Serial::Members(guards, first) => {
+            let mut value = None;
+            for g in guards {
+                let e = serial_expr(tx, Serial::Guarded(g), at);
+                value.get_or_insert(e);
+            }
+            match value {
+                Some(e) if first => e,
+                _ => tx.ident("Object", at),
+            }
+        }
         Serial::Guarded(n) => {
-            // typeof (_a = typeof X !== "undefined" && X) === "function" ? _a : Object
+            // typeof (_a = <checked name>) === "function" ? _a : Object; the temps of a
+            // dotted name's guard come first.
+            let checked = checked_entity(tx, n, at);
             let t = tx.temp();
-            let x1 = tx.ident(&n, at);
-            let tof = tx.unary(ts_r_ast::UnaryOp::TypeOf, x1, at);
-            let undef = tx.string("undefined", at);
-            let ne = tx.binary(tof, ts_r_ast::BinaryOp::StrictNotEq, undef, at);
-            let x2 = tx.ident(&n, at);
-            let and = tx.binary(ne, ts_r_ast::BinaryOp::LogicalAnd, x2, at);
             let tl = tx.ident_atom(t, at);
-            let a = tx.assign(tl, and, at);
+            let a = tx.assign(tl, checked, at);
             let pa = tx.paren(a, at);
-            let tof2 = tx.unary(ts_r_ast::UnaryOp::TypeOf, pa, at);
+            let tof = tx.unary(ts_r_ast::UnaryOp::TypeOf, pa, at);
             let fun = tx.string("function", at);
-            let test = tx.binary(tof2, ts_r_ast::BinaryOp::StrictEq, fun, at);
+            let test = tx.binary(tof, ts_r_ast::BinaryOp::StrictEq, fun, at);
             let cons = tx.ident_atom(t, at);
             let alt = tx.ident("Object", at);
             tx.mk(Node::Conditional { test, cons, alt }, at)
@@ -717,19 +739,136 @@ fn serialize(tx: &mut Tx, ty: Option<NodeId>, at: u32) -> NodeId {
     }
 }
 
+/// An entity name (`A`, `A.B.C`) as an expression. Under CommonJS a name bound by an import
+/// reads through its module variable (`a_1.A`).
+fn entity_expr(tx: &mut Tx, n: NodeId, at: u32) -> NodeId {
+    match tx.n(n) {
+        Node::QualifiedName { left, right } => {
+            let obj = entity_expr(tx, left, at);
+            let name = tx.name(right).to_owned();
+            tx.member(obj, &name, at)
+        }
+        _ => {
+            let name = tx.name(n).to_owned();
+            let id = tx.ident(&name, at);
+            if tx.opts.is_cjs()
+                && let Some(atom) = tx.ast.atoms.find(&name)
+                && let Some(b) = tx.sc.module_binding(atom)
+            {
+                crate::cjs::rewrite_ref(tx, id, b);
+                tx.cjs.detached.remove(&id);
+            }
+            id
+        }
+    }
+}
+
+/// `typeof A !== "undefined" && A` for a name that may not exist at run time; dotted names
+/// check each step: `typeof A !== "undefined" && (_a = A.B) !== void 0 && _a.C`.
+fn checked_entity(tx: &mut Tx, n: NodeId, at: u32) -> NodeId {
+    let Node::QualifiedName { left, right } = tx.n(n) else {
+        let x = entity_expr(tx, n, at);
+        let y = entity_expr(tx, n, at);
+        return defined_and(tx, x, y, at);
+    };
+    let right = tx.name(right).to_owned();
+    if !matches!(tx.n(left), Node::QualifiedName { .. }) {
+        let x = entity_expr(tx, left, at);
+        let y = entity_expr(tx, n, at);
+        return defined_and(tx, x, y, at);
+    }
+    let inner = checked_entity(tx, left, at);
+    let Node::Binary {
+        left: check,
+        right: value,
+        ..
+    } = tx.n(inner)
+    else {
+        return inner;
+    };
+    let t = tx.temp();
+    let tl = tx.ident_atom(t, at);
+    let a = tx.assign(tl, value, at);
+    let pa = tx.paren(a, at);
+    let v0 = tx.void0(at);
+    let ne = tx.binary(pa, ts_r_ast::BinaryOp::StrictNotEq, v0, at);
+    let both = tx.binary(check, ts_r_ast::BinaryOp::LogicalAnd, ne, at);
+    let obj = tx.ident_atom(t, at);
+    let last = tx.member(obj, &right, at);
+    tx.binary(both, ts_r_ast::BinaryOp::LogicalAnd, last, at)
+}
+
+/// `typeof x !== "undefined" && y`.
+fn defined_and(tx: &mut Tx, x: NodeId, y: NodeId, at: u32) -> NodeId {
+    let tof = tx.unary(ts_r_ast::UnaryOp::TypeOf, x, at);
+    let undef = tx.string("undefined", at);
+    let ne = tx.binary(tof, ts_r_ast::BinaryOp::StrictNotEq, undef, at);
+    tx.binary(ne, ts_r_ast::BinaryOp::LogicalAnd, y, at)
+}
+
 #[derive(PartialEq, Clone)]
 enum Serial {
+    /// A global constructor or a local class, by name.
     Name(String),
     Void,
-    /// An imported (or otherwise unknown) value: guarded by `typeof`.
-    Guarded(String),
+    /// The entity name of a type reference, as a value (an imported or namespaced class).
+    Entity(NodeId),
+    /// An entity name that may not exist at run time: guarded by `typeof`.
+    Guarded(NodeId),
+    /// A union's members that were guarded, in order: tsc builds each one's guard (and
+    /// declares its temporaries) before comparing, so a union that ends as `Object`, or
+    /// repeats a name, still takes their temps. `true`: the value is the first one's
+    /// guard; `false`: `Object`.
+    Members(Vec<NodeId>, bool),
 }
 
 fn obj() -> Serial {
     Serial::Name("Object".to_owned())
 }
 
-fn serial_kind(tx: &Tx, ty: NodeId) -> Serial {
+/// Two serializations of union members print the same (`Object` is returned otherwise).
+fn same_serial(tx: &Tx, a: &Serial, b: &Serial) -> bool {
+    match (a, b) {
+        (Serial::Void, Serial::Void) => true,
+        (Serial::Guarded(x), Serial::Guarded(y)) => entity_text(tx, *x) == entity_text(tx, *y),
+        (Serial::Guarded(_), _)
+        | (_, Serial::Guarded(_))
+        | (Serial::Void, _)
+        | (_, Serial::Void) => false,
+        _ => serial_text(tx, a) == serial_text(tx, b),
+    }
+}
+
+fn serial_text(tx: &Tx, k: &Serial) -> String {
+    match k {
+        Serial::Name(n) => n.clone(),
+        Serial::Entity(n) | Serial::Guarded(n) => entity_text(tx, *n),
+        Serial::Members(g, true) => entity_text(tx, g[0]),
+        Serial::Members(_, false) => "Object".to_owned(),
+        Serial::Void => String::new(),
+    }
+}
+
+fn entity_text(tx: &Tx, n: NodeId) -> String {
+    match tx.n(n) {
+        Node::QualifiedName { left, right } => {
+            format!("{}.{}", entity_text(tx, left), tx.name(right))
+        }
+        _ => tx.name(n).to_owned(),
+    }
+}
+
+/// Maximum nesting of type nodes the serializer follows (deeper reads as `Object`).
+const MAX_SERIAL_DEPTH: u32 = 256;
+
+/// `depth` counts nested type nodes; bit 31 marks a conditional type's branch, where a name
+/// that cannot be resolved reads as `Object`.
+fn serial_kind(tx: &Tx, ty: NodeId, depth: u32) -> Serial {
+    const COND: u32 = 1 << 31;
+    if depth & !COND > MAX_SERIAL_DEPTH {
+        return obj();
+    }
+    let inner = depth + 1;
     let name = |s: &str| Serial::Name(s.to_owned());
     match tx.n(ty) {
         Node::KeywordType { kind } => match kind {
@@ -747,66 +886,129 @@ fn serial_kind(tx: &Tx, ty: NodeId) -> Serial {
         Node::StringLit { .. } | Node::TemplateLitType { .. } => name("String"),
         Node::NumberLit { .. } => name("Number"),
         Node::BigIntLit { .. } => name("BigInt"),
+        Node::TypePredicate { asserts: true, .. } => Serial::Void,
         Node::BoolLit { .. } | Node::TypePredicate { .. } => name("Boolean"),
         Node::NullLit {} => Serial::Void,
-        Node::Unary { arg, .. } => serial_kind(tx, arg),
+        Node::Unary { arg, .. } => serial_kind(tx, arg, inner),
         Node::FunctionType { .. } | Node::ConstructorType { .. } => name("Function"),
         Node::ArrayType { .. } | Node::TupleType { .. } => name("Array"),
-        Node::ParenType { ty } | Node::OptionalType { ty } => serial_kind(tx, ty),
+        Node::ParenType { ty } | Node::OptionalType { ty } => serial_kind(tx, ty, inner),
         Node::TypeOperator { op, ty } => match op {
-            TypeOperatorKind::Readonly => serial_kind(tx, ty),
+            TypeOperatorKind::Readonly => serial_kind(tx, ty, inner),
             TypeOperatorKind::Unique => name("Symbol"),
             TypeOperatorKind::KeyOf => obj(),
         },
+        Node::ConditionalType {
+            true_ty, false_ty, ..
+        } => constituents(tx, &[true_ty, false_ty], false, inner | COND),
         Node::UnionType { types } | Node::IntersectionType { types } => {
             let is_union = tx.kind(ty) == NodeKind::UnionType;
-            let mut result: Option<Serial> = None;
-            for &t in tx.ast.list(types) {
-                let mut inner = t;
-                while let Node::ParenType { ty } = tx.n(inner) {
-                    inner = ty;
-                }
-                let k = serial_kind(tx, inner);
-                let nullish = matches!(
-                    tx.n(inner),
-                    Node::KeywordType {
-                        kind: KeywordTypeKind::Null | KeywordTypeKind::Undefined
-                    } | Node::NullLit {}
-                );
-                let never = matches!(
-                    tx.n(inner),
-                    Node::KeywordType {
-                        kind: KeywordTypeKind::Never
-                    }
-                );
-                if never {
-                    continue;
-                }
-                if nullish {
-                    if tx.opts.strict_null_checks || !is_union {
-                        return obj();
-                    }
-                    continue;
-                }
-                match k {
-                    Serial::Name(ref n) if n == "Object" => return obj(),
-                    Serial::Void | Serial::Guarded(_) => return obj(),
-                    _ => {}
-                }
-                match &result {
-                    None => result = Some(k),
-                    Some(r) if *r == k => {}
-                    Some(_) => return obj(),
-                }
-            }
-            result.unwrap_or(Serial::Void)
+            let items = tx.ast.list(types).to_vec();
+            constituents(tx, &items, !is_union, inner)
         }
-        Node::TypeRef { name: n, .. } => type_ref(tx, n),
+        Node::TypeRef { name: n, .. } => type_ref(tx, ty, n, depth & COND != 0),
         _ => obj(),
     }
 }
 
-fn type_ref(tx: &Tx, n: NodeId) -> Serial {
+/// The members of a union or intersection (or a conditional type's two branches) serialize
+/// to their common value, or to `Object` when they differ.
+fn constituents(tx: &Tx, items: &[NodeId], intersection: bool, depth: u32) -> Serial {
+    let mut result: Option<Serial> = None;
+    let mut guards: Vec<NodeId> = Vec::new();
+    // The value, with the guards built on the way (`Serial::Members`).
+    let done = |guards: Vec<NodeId>, value: Serial| -> Serial {
+        if guards.is_empty() {
+            return value;
+        }
+        let first = matches!(value, Serial::Guarded(_));
+        if first && guards.len() == 1 {
+            return value;
+        }
+        Serial::Members(guards, first)
+    };
+    for &t in items {
+        let mut t = t;
+        while let Node::ParenType { ty } = tx.n(t) {
+            t = ty;
+        }
+        match tx.n(t) {
+            Node::KeywordType {
+                kind: KeywordTypeKind::Never,
+            } => {
+                if intersection {
+                    return done(guards, Serial::Void);
+                }
+                continue;
+            }
+            Node::KeywordType {
+                kind: KeywordTypeKind::Unknown,
+            } => {
+                if !intersection {
+                    return done(guards, obj());
+                }
+                continue;
+            }
+            Node::KeywordType {
+                kind: KeywordTypeKind::Any,
+            } => return done(guards, obj()),
+            Node::KeywordType {
+                kind: KeywordTypeKind::Null | KeywordTypeKind::Undefined,
+            }
+            | Node::NullLit {}
+                if !tx.opts.strict_null_checks =>
+            {
+                continue;
+            }
+            _ => {}
+        }
+        let k = match serial_kind(tx, t, depth) {
+            Serial::Guarded(n) => {
+                guards.push(n);
+                Serial::Guarded(n)
+            }
+            Serial::Members(g, first) => {
+                let head = if first { Serial::Guarded(g[0]) } else { obj() };
+                guards.extend(g);
+                head
+            }
+            k => k,
+        };
+        if matches!(&k, Serial::Name(n) if n == "Object") {
+            return done(guards, k);
+        }
+        match &result {
+            None => result = Some(k),
+            Some(r) if same_serial(tx, r, &k) => {}
+            Some(_) => return done(guards, obj()),
+        }
+    }
+    done(guards, result.unwrap_or(Serial::Void))
+}
+
+/// A type reference: the checker's answer when the emitter has one, else what the file
+/// alone shows.
+fn type_ref(tx: &Tx, ty: NodeId, n: NodeId, in_conditional: bool) -> Serial {
+    let span = tx.span(ty);
+    let answer = if span.start < span.end {
+        tx.resolver.metadata_type(tx.file, ty)
+    } else {
+        MetadataType::Syntactic
+    };
+    let k = match answer {
+        MetadataType::Syntactic => syntactic_type_ref(tx, n),
+        MetadataType::Value => Serial::Entity(n),
+        MetadataType::Unknown => Serial::Guarded(n),
+        MetadataType::Void => Serial::Void,
+        MetadataType::Global(g) | MetadataType::TypeOnly(g) => Serial::Name(g.to_owned()),
+    };
+    match k {
+        Serial::Guarded(_) if in_conditional => obj(),
+        k => k,
+    }
+}
+
+fn syntactic_type_ref(tx: &Tx, n: NodeId) -> Serial {
     let Node::Ident { name } = tx.n(n) else {
         // Qualified names: a namespace member or an enum member we cannot see into.
         return obj();
@@ -820,8 +1022,11 @@ fn type_ref(tx: &Tx, n: NodeId) -> Serial {
                 BindingKind::Enum | BindingKind::ConstEnum => {
                     enum_kind(tx, bnd.decl).unwrap_or_else(obj)
                 }
-                BindingKind::Import | BindingKind::ImportEquals => Serial::Guarded(text),
-                BindingKind::Var | BindingKind::Let | BindingKind::Const => Serial::Guarded(text),
+                BindingKind::Import
+                | BindingKind::ImportEquals
+                | BindingKind::Var
+                | BindingKind::Let
+                | BindingKind::Const => Serial::Guarded(n),
                 _ => obj(),
             }
         }

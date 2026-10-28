@@ -244,7 +244,12 @@ impl Printer<'_> {
                     None if self.tsc => {
                         let v = self.ast.atom(value);
                         let mut s = String::with_capacity(v.len() + 2);
-                        crate::literals::quote_string_ascii(v, &mut s);
+                        let quote = if self.hint_single_quoted(id) {
+                            '\''
+                        } else {
+                            '"'
+                        };
+                        crate::literals::quote_string_ascii_with(v, quote, &mut s);
                         self.tok(&s);
                     }
                     _ => {
@@ -342,7 +347,12 @@ impl Printer<'_> {
                 self.no_in = saved;
             }
             Node::Seq { exprs } => {
-                let es = self.ast.list(exprs).to_vec();
+                let mut es = self.ast.list(exprs).to_vec();
+                // Adjacent JSX elements (`<a/><b/>`, TS2657) parse as a sequence led by a
+                // zero-width `Missing` standing for tsc's synthesized comma: it prints nothing.
+                if es.len() > 1 && self.is_jsx_sibling_marker(es[0], es[1]) {
+                    es.remove(0);
+                }
                 // A sequence the transform breaks after every comma is indented from its
                 // first element on (`(_a = class {\n    },\n    _a)`).
                 let hinted = self.tsc && self.hint_multi_line(id);
@@ -912,21 +922,41 @@ impl Printer<'_> {
             self.tok(")");
             return;
         }
-        self.args(args);
+        // A classic JSX factory call with several children (the transform marks it) puts
+        // each child on its own line: `h("p", null,\n    a,\n    b)`, as tsc does.
+        let children_from = if self.hint_multi_line(call) {
+            2
+        } else {
+            usize::MAX
+        };
+        self.args_lines(args, children_from);
     }
 
-    fn args(&mut self, args: ts_r_ast::NodeList) {
+    /// The arguments; those from index `lines_from` on each start a line, indented once.
+    fn args_lines(&mut self, args: ts_r_ast::NodeList, lines_from: usize) {
         self.tok("(");
         let saved = self.no_in;
         self.no_in = false;
         let items = self.ast.list(args).to_vec();
+        let mut indented = false;
         for (i, a) in items.iter().enumerate() {
             if i > 0 {
                 self.tok(",");
                 self.comma_comments(items[i - 1], *a);
-                self.space();
+                if i >= lines_from {
+                    if !indented {
+                        self.indent();
+                        indented = true;
+                    }
+                    self.newline();
+                } else {
+                    self.space();
+                }
             }
             self.arg(*a);
+        }
+        if indented {
+            self.dedent();
         }
         self.no_in = saved;
         self.tok(")");
@@ -1779,6 +1809,18 @@ impl Printer<'_> {
         }
     }
 
+    /// Whether `first` is the zero-width `Missing` the parser puts before adjacent JSX
+    /// elements it groups into a sequence (`<a/><b/>`).
+    pub(crate) fn is_jsx_sibling_marker(&self, first: NodeId, second: NodeId) -> bool {
+        let at = self.ast.span(first);
+        matches!(self.node(first), Node::Missing {})
+            && at.is_empty()
+            && (matches!(
+                self.node(second),
+                Node::JsxElement { .. } | Node::JsxFragment { .. }
+            ) || self.ast.span(second).start == at.start)
+    }
+
     fn jsx_attr(&mut self, id: NodeId) {
         self.map_node(id);
         match self.node(id) {
@@ -1798,6 +1840,8 @@ impl Printer<'_> {
                             }
                         },
                         Node::JsxExprContainer { .. } => self.jsx_child(v),
+                        // `a=<b/><c/>` (TS2657): tsc prints the sequence bare, `a=<b />, <c />`.
+                        Node::Seq { .. } => self.expr(v, Prec::Lowest),
                         _ => self.jsx(v),
                     }
                 }

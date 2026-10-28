@@ -176,12 +176,37 @@ so the file is refused with TSR2002. `const_enum_value` answers an access of ano
 file's const enum member (`E.A`, `E["A"]`, `ns.E.A` through an import), or a local enum
 whose initializer depends on an import, with
 `Checker::const_enum_access_value`; under `isolatedModules` it answers nothing, so tsc's
-property access stays. Without the program (per-file
+property access stays. `jsx_runtime_found` is precomputed per file
+(`jsx_runtimes_found`): the file's runtime specifier
+(`ts_r_checker::jsx_runtime::runtime_specifier`) names an ambient module or resolves to a
+program file. Without the program (per-file
 transpile) `SyntacticResolver` keeps today's isolatedModules behaviour. ts-r-check builds a
 second `Checker` for emit (the check's checker is internal to `check_program`); alias
 resolution is lazy, so this costs the link step only.
 
+`metadata_type` answers decorator metadata for a type reference in a decorated signature
+(`emitDecoratorMetadata`), in our words after reading tsc's rule
+(tsc: tsc/internal/checker/emitresolver.go, the type reference serialization kind):
+the name is resolved as a value and as a type. A value that is the same symbol as the type
+(a class, or a constructor-typed value such as global `Promise`) is `Value`, printed as an
+entity (`a_1.Foo` under CommonJS); reached only through `import type`/`export type` it is
+`TypeOnly("Function")` and keeps no import. A name that resolves to nothing is `Unknown`
+(guarded: `typeof (_a = typeof X !== "undefined" && X) === "function" ? _a : Object`). Any
+other type maps by its resolved type: `any`/`unknown` and object types `Object`, `void`,
+`undefined`, `null` and `never` `void 0`, then `Boolean`, `Number`, `BigInt`, `String`,
+tuples and arrays `Array`, `Symbol`, callables `Function`. Answers reached through a
+type-only alias are `TypeOnly(..)`, which the transform's scope pass uses to drop the
+import reference.
+
 ## Measurements
+
+Latest (2026-10-26, v1/emit3, `cargo run --release -p ts_r_check --example emit_oracle --
+--emitter program`): ES2022+ JS outputs 2,159: bytes 2,067 (95.7%), shape 2,109 (97.7%; the
+50 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18 bytes-exact outputs
+with a map baseline; all 17,352 outputs: 15,761 bytes-exact (90.8%), JS 13,599 / 14,476
+(93.9%), `.d.ts` 1,960 / 2,640. Declarations (E2): 1,190 of 1,315 baselines without
+JavaScript inputs have every `.d.ts` bytes-exact (90.5%); 1,190 / 1,634 over all baselines.
+The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946
 (90.1%, gate >= 90% met), shape 2,012 (93.2%; the 147 others are listed in

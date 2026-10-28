@@ -104,6 +104,9 @@ pub struct PrintHints<'a> {
     /// (`(_a = class {\n    },\n    _a.x = 1,\n    _a)`), and blocks printed over several
     /// lines though the source has them on one. Sorted.
     pub multi_line: &'a [NodeId],
+    /// [`Layout::Tsc`]: synthesized string literals printed with `'` (a JSX attribute string
+    /// written with single quotes keeps them: `x='1'` → `{ x: '1' }`). Sorted.
+    pub single_quoted: &'a [NodeId],
     /// [`Layout::Tsc`] source maps: the source range tsc maps a synthesized node to (its
     /// start and end segments, as for an original node), sorted by node id. A synthesized
     /// block's range is the original block whose `}` it maps. A start or end of
@@ -117,6 +120,11 @@ pub struct PrintHints<'a> {
     /// (after the previous token's line), those inside it and those trailing it on its last
     /// line. They are not printed where the node was.
     pub moved_comments: &'a [(NodeId, Span)],
+    /// [`Layout::Tsc`]: print no detached comments after the prologue. tsc has none once
+    /// its JSX transform adds statements at the top (the runtime import, `_jsxFileName`):
+    /// the file's leading comments then lead its first statement, and go with it if it is
+    /// erased.
+    pub no_detached_comments: bool,
     /// Print a numeric literal written with `_` separators by its value (`10_000` →
     /// `10000`), as tsc does without a `target` or below ES2021.
     pub strip_numeric_separators: bool,

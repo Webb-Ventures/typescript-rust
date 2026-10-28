@@ -32,14 +32,19 @@ pub(crate) enum Helper {
 }
 
 impl Helper {
-    /// Helpers printed in this order, before the [`Helper::REQUEST_ORDER`] ones.
+    /// Helpers printed in this order, before the [`Helper::REQUEST_ORDER`] ones. tsc sorts
+    /// a file's helpers by a priority (`__createBinding`/`__setModuleDefault` first, then
+    /// `__decorate`, `__importStar`, `__exportStar`, then `__metadata`, `__param`,
+    /// `__awaiter`), keeping the order they were asked for among equals and placing the
+    /// ones without a priority last: `__decorate` comes before `__importStar` (the type
+    /// transform runs before the module one) and `__importDefault` after `__metadata`
+    /// (tsc: tsc/internal/printer/helpers.go, the helper priorities).
     pub const ALL: [Helper; 15] = [
         Helper::CreateBinding,
         Helper::SetModuleDefault,
+        Helper::Decorate,
         Helper::ImportStar,
         Helper::ExportStar,
-        Helper::ImportDefault,
-        Helper::Decorate,
         Helper::Metadata,
         Helper::Param,
         Helper::Awaiter,
@@ -48,6 +53,7 @@ impl Helper {
         Helper::EsDecorate,
         Helper::PropKey,
         Helper::SetFunctionName,
+        Helper::ImportDefault,
         Helper::RewriteRelativeImportExtension,
     ];
 

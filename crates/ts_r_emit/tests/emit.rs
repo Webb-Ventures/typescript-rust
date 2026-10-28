@@ -602,3 +602,111 @@ fn no_common_source_directory() {
     assert_eq!(run("a:/foo/baz.ts", true), vec![5009]);
     assert_eq!(run("a:/foo/baz.ts", false), Vec::<u32>::new());
 }
+
+/// With the automatic JSX runtime, an unused `React` import is elided only when the runtime
+/// module resolves in the program (tsc then does not mark the classic factory's root used).
+#[test]
+fn jsx_runtime_found_elides_unused_react_import() {
+    const JSX_CONFIG: &str = r#"{"compilerOptions":{"target":"es2022","module":"esnext","jsx":"react-jsx","rootDir":"src","outDir":"out","types":[]}}"#;
+    const REACT: &str = "declare module \"react\" { const React: any; export default React; }\n\
+        declare namespace JSX { interface IntrinsicElements { [k: string]: any } }\n";
+    const RUNTIME: &str =
+        "declare module \"react/jsx-runtime\" { export function jsx(...a: any[]): any; }\n";
+    const APP: &str = "import React from \"react\";\nexport const a = <div />;\n";
+    let found = emit(&[
+        ("tsconfig.json", JSX_CONFIG),
+        ("src/react.d.ts", REACT),
+        ("src/rt.d.ts", RUNTIME),
+        ("src/a.tsx", APP),
+    ]);
+    let a = found
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.js")
+        .unwrap();
+    assert!(!a.text.contains("from \"react\""), "{}", a.text);
+    assert!(a.text.contains("react/jsx-runtime"), "{}", a.text);
+    let missing = emit(&[
+        ("tsconfig.json", JSX_CONFIG),
+        ("src/react.d.ts", REACT),
+        ("src/a.tsx", APP),
+    ]);
+    let a = missing
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.js")
+        .unwrap();
+    assert!(a.text.contains("import React from \"react\""), "{}", a.text);
+}
+
+/// Decorator metadata from the checker (tsc 7.0.2's output for the same project): an imported
+/// class reads through its module variable, an interface is `Object`, an alias of `string`
+/// is `String`, a class exported with `export type` is `Function` and keeps no import, an
+/// unresolved name is guarded, and a decorated `declare` field is still decorated.
+#[test]
+fn decorator_metadata_from_the_checker() {
+    let r = emit(&[
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions":{"target":"es2022","module":"commonjs","rootDir":"src","outDir":"out","types":[],"experimentalDecorators":true,"emitDecoratorMetadata":true,"strict":true,"noEmitHelpers":true}}"#,
+        ),
+        (
+            "src/a.ts",
+            "export class Foo {}\nexport interface I {}\nexport type Alias = string;\nclass Hidden {}\nexport type { Hidden };\n",
+        ),
+        (
+            "src/b.ts",
+            r#"import { Foo, I, Alias, Hidden } from "./a";
+declare function dec(...a: any[]): any;
+export class C {
+    @dec f!: Foo;
+    @dec i!: I;
+    @dec s!: Alias;
+    @dec h!: Hidden;
+    @dec u!: Missing;
+    @dec declare d: Foo;
+}
+"#,
+        ),
+    ]);
+    let b = r.outputs.iter().find(|o| o.path == "/p/out/b.js").unwrap();
+    let want = r#""use strict";
+var _a;
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.C = void 0;
+const a_1 = require("./a");
+class C {
+    f;
+    i;
+    s;
+    h;
+    u;
+}
+exports.C = C;
+__decorate([
+    dec,
+    __metadata("design:type", a_1.Foo)
+], C.prototype, "f", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", Object)
+], C.prototype, "i", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", String)
+], C.prototype, "s", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", Function)
+], C.prototype, "h", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", typeof (_a = typeof Missing !== "undefined" && Missing) === "function" ? _a : Object)
+], C.prototype, "u", void 0);
+__decorate([
+    dec,
+    __metadata("design:type", a_1.Foo)
+], C.prototype, "d", void 0);
+"#;
+    assert_eq!(b.text, want);
+}

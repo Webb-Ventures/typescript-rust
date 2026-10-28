@@ -64,11 +64,15 @@ pub struct TransformResult {
     /// Synthesized array literals tsc prints one element per line, and blocks it prints
     /// over several lines ([`PrintHints::multi_line`]). Sorted.
     pub multi_line: Vec<NodeId>,
+    /// Synthesized strings tsc prints with `'` ([`PrintHints::single_quoted`]). Sorted.
+    pub single_quoted: Vec<NodeId>,
     /// Source-map ranges of synthesized nodes ([`PrintHints::map_ranges`]). Sorted by node.
     pub map_ranges: Vec<(NodeId, Span)>,
     /// Statements standing for moved source nodes ([`PrintHints::moved_comments`]). Sorted
     /// by node.
     pub moved_comments: Vec<(NodeId, Span)>,
+    /// The JSX transform added statements at the top ([`PrintHints::no_detached_comments`]).
+    pub no_detached_comments: bool,
 }
 
 /// Rewrites `ast` (parsed from `src`) into a JavaScript tree.
@@ -163,8 +167,10 @@ pub fn transpile(
         prelude: &result.prelude,
         single_line: &result.single_line,
         multi_line: &result.multi_line,
+        single_quoted: &result.single_quoted,
         map_ranges: &result.map_ranges,
         moved_comments: &result.moved_comments,
+        no_detached_comments: result.no_detached_comments,
         strip_numeric_separators: opts.strip_numeric_separators,
     };
     let out = ts_r_codegen::print_with(&ast, src, codegen, &hints);

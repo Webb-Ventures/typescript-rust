@@ -80,7 +80,11 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
             continue;
         }
         match n {
-            Node::ExportAssignment { .. } => tx.cjs.export_assignment = true,
+            Node::ExportAssignment { .. } => {
+                if !crate::namespace::export_assignment_elided(tx, s) {
+                    tx.cjs.export_assignment = true;
+                }
+            }
             Node::ImportDecl {
                 type_only: false,
                 specifiers,
@@ -137,11 +141,10 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
                     if let Some(b) = tx.sc.module_binding(name)
                         && tx.sc.binding(b).kind != BindingKind::Import
                     {
-                        tx.cjs
-                            .list_aliases
-                            .entry(b)
-                            .or_default()
-                            .push(exported_name.clone());
+                        let aliases = tx.cjs.list_aliases.entry(b).or_default();
+                        if !aliases.contains(&exported_name) {
+                            aliases.push(exported_name.clone());
+                        }
                     }
                     match tx.sc.module_binding(name) {
                         Some(b) => match tx.sc.binding(b).kind {
@@ -156,17 +159,22 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
                             }
                             BindingKind::Function => {
                                 let l = tx.name(local).to_owned();
-                                tx.cjs.hoisted.push((exported_name, l));
+                                let pair = (exported_name, l);
+                                // A name exported twice is written once.
+                                if !tx.cjs.hoisted.contains(&pair) {
+                                    tx.cjs.hoisted.push(pair);
+                                }
                             }
                             _ => {
+                                let aliases = tx.cjs.local_exports.entry(b).or_default();
+                                if aliases.contains(&exported_name) {
+                                    // Exported twice: written once.
+                                    continue;
+                                }
+                                aliases.push(exported_name.clone());
                                 tx.cjs.void0.push(exported_name.clone());
                                 tx.cjs
                                     .live_exports
-                                    .entry(b)
-                                    .or_default()
-                                    .push(exported_name.clone());
-                                tx.cjs
-                                    .local_exports
                                     .entry(b)
                                     .or_default()
                                     .push(exported_name);
@@ -285,7 +293,11 @@ pub(crate) fn finish(tx: &mut Tx, out: Vec<NodeId>, runtime: Vec<NodeId>) -> Vec
         tx.cjs.esmodule_stmt = Some(s);
         pre.push(s);
     }
-    let names = std::mem::take(&mut tx.cjs.void0);
+    let mut names = std::mem::take(&mut tx.cjs.void0);
+    // A name exported twice (`export { foo, foo }`, two `export { x as default } from`) is
+    // written once, where it first appears.
+    let mut seen = FxHashSet::default();
+    names.retain(|n| seen.insert(n.clone()));
     // tsc writes at most 50 names per statement.
     for chunk in names.chunks(50) {
         let s = void0_stmt(tx, chunk);
