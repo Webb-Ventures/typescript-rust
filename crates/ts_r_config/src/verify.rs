@@ -127,16 +127,23 @@ pub fn verify_options(
                 id.name()
             );
             let hint = if id == OptionId::BaseUrl {
+                // Relative to the leaf config, not to the config that set `baseUrl`, and
+                // `./`-prefixed unless it starts with `../` (`..` is `./../*`; observed with
+                // tsc 7.0.2 on rxjs `tools/marbles` and playwright `tests`).
                 o.base_url().map(|b| {
-                    let dir = o
-                        .origin(id)
-                        .map(|or| path::directory_of(&or.file).to_owned())
+                    let dir = c
+                        .leaf
+                        .as_deref()
+                        .or(o.origin(id).map(|or| &*or.file))
+                        .map(|f| path::directory_of(f).to_owned())
                         .unwrap_or_default();
-                    let rel = path::relative_dotted(&dir, b, true);
-                    let star = if rel == "./" {
+                    let rel = path::relative(&dir, b, true);
+                    let star = if rel.is_empty() {
                         "./*".to_owned()
-                    } else {
+                    } else if path::is_rooted(&rel) || rel.starts_with("../") {
                         format!("{rel}/*")
+                    } else {
+                        format!("./{rel}/*")
                     };
                     format!("Use '\"paths\": {{\"*\": [\"{star}\"]}}' instead.")
                 })
@@ -527,6 +534,57 @@ mod tests {
             without_config(r#"{"incremental":true,"tsBuildInfoFile":"x.tsbuildinfo"}"#).is_empty()
         );
         assert!(without_config(r#"{"composite":true}"#).is_empty());
+    }
+
+    /// The `baseUrl` hint is relative to the leaf config, `./`-prefixed unless it starts
+    /// with `../` (observed with tsc 7.0.2).
+    #[test]
+    fn base_url_hint_is_relative_to_the_leaf_config() {
+        let hint = |base: &str, base_url: &str| {
+            let mut fs = crate::fs::MemoryFs::new();
+            fs.add_file(
+                base,
+                &format!(r#"{{"compilerOptions":{{"baseUrl":"{base_url}"}}}}"#),
+            );
+            if base != "/r/a/b/c/tsconfig.json" {
+                fs.add_file(
+                    "/r/a/b/c/tsconfig.json",
+                    &format!(r#"{{"extends":"{base}","files":[]}}"#),
+                );
+            }
+            let cfg = crate::tsconfig::load_tsconfig(&fs, "/r/a/b/c/tsconfig.json");
+            let d = verify_options(&cfg.options, None);
+            let d = d.iter().find(|d| d.code == 5102).expect("TS5102");
+            d.related.join("|")
+        };
+        let leaf = "/r/a/b/c/tsconfig.json";
+        for (base_url, star) in [
+            ("..", "./../*"),
+            ("../", "./../*"),
+            ("./..", "./../*"),
+            ("../..", "../../*"),
+            ("../src", "../src/*"),
+            (".", "./*"),
+            ("./", "./*"),
+            ("src", "./src/*"),
+            ("src/", "./src/*"),
+            ("/r", "../../../*"),
+        ] {
+            assert_eq!(
+                hint(leaf, base_url),
+                format!(r#"Use '"paths": {{"*": ["{star}"]}}' instead."#),
+                "{base_url}"
+            );
+        }
+        // Set in a base one level up: still relative to the leaf.
+        assert_eq!(
+            hint("/r/a/b/base.json", "src"),
+            r#"Use '"paths": {"*": ["../src/*"]}' instead."#
+        );
+        assert_eq!(
+            hint("/r/a/b/base.json", "c"),
+            r#"Use '"paths": {"*": ["./*"]}' instead."#
+        );
     }
 
     #[test]

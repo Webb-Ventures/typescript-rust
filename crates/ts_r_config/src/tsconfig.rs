@@ -366,6 +366,9 @@ impl<'fs> ConfigLoader<'fs> {
         // ${configDir} substitution against the leaf config directory.
         substitute_config_dir(&mut merged.options, &config_dir);
         overrides(&mut merged.options);
+        // TS18003 quotes `include` and `exclude` as written, before substitution.
+        let written_include = merged.include.clone().flatten();
+        let written_exclude = merged.exclude.clone().flatten();
         let fix_specs = |s: &mut Option<Option<SpecList>>| {
             if let Some(Some(list)) = s {
                 for spec in &mut list.specs {
@@ -504,8 +507,15 @@ impl<'fs> ConfigLoader<'fs> {
                 (Some(_), None) => {}
                 _ if parsed.declares_references => {}
                 _ => {
-                    let inc = parsed.include_display().unwrap_or_default();
-                    let exc = parsed.exclude_display();
+                    let inc = match (&written_include, &parsed.files) {
+                        (Some(i), _) => i.display_specs(&parsed.config_dir, cs),
+                        (None, None) => vec!["**/*".to_owned()],
+                        (None, Some(_)) => Vec::new(),
+                    };
+                    let exc = match &written_exclude {
+                        Some(e) => e.display_specs(&parsed.config_dir, cs),
+                        None => parsed.default_excludes.clone(),
+                    };
                     let shown = |items: Vec<String>, list: Option<&SpecList>| match list {
                         Some(l) if !l.invalid.is_empty() => json_array_with_raw(&items, &l.invalid),
                         _ => json_string_array(&items),
@@ -846,10 +856,16 @@ pub fn resolve_extends(fs: &dyn FileSystem, spec: &str, from_dir: &str) -> Optio
         }
         let parent = path::directory_of(&dir).to_owned();
         if parent == dir || parent.is_empty() {
-            return None;
+            break;
         }
         dir = parent;
     }
+    // No `node_modules` copy: a Yarn Plug'n'Play manifest may place the package (esbuild's
+    // `TsconfigPackageJsonExportsYarnPnP`). tsc 7 has no PnP support and reports TS6053 here.
+    let pnp = crate::pnp::PnpManifest::find(fs, from_dir)?;
+    let pkg_dir = pnp.package_dir(pkg_name, &path::combine(from_dir, "tsconfig.json"))?;
+    let found = resolve_in_config_package(fs, pkg_dir.trim_end_matches('/'), subpath)?;
+    Some(fs.realpath(&found))
 }
 
 /// Splits `@scope/name/sub/path` into (`@scope/name`, `sub/path`).

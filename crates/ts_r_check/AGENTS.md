@@ -141,6 +141,19 @@ diagnostics in tsc's format. Root rules:
   only the edited files and what the re-checked files reach. Output always equals
   `--no-history`. `Outcome::sources` holds text only for files a diagnostic points into.
   `TS_R_CHECK_STATS=1` prints the mode, counts and phase times to stderr.
+- History is not used when the program is emitted, `incremental`, has project references
+  or `noCheck` (they need the loaded program). A `rootDir` alone does not keep it out: the
+  run uses history, then loads the program for the TS6059 check only when `Outcome::files`
+  holds a file that could be emitted (not an external library, not a declaration) outside
+  `rootDir`. Until 2026-10-26 any `rootDir` meant a full check, so tRPC's and date-fns's
+  bench configs (both inherit a `rootDir`) never had a warm run: macOS arm64, release,
+  median of 10, warm 104 -> 23 ms (tRPC `packages/server`) and 247 -> 59 ms (date-fns
+  `pkgs/core`); `--no-history` is 110 and 230 ms.
+- TS6059 (tsc 7.0.2, observed): a file outside `rootDir` that only an import brings in is
+  reported at that import, and the checker's diagnostics stay (sorted in by position, the
+  TS6059 first at one position). A root file outside `rootDir` is a global option error,
+  and the program's syntactic and semantic diagnostics are dropped
+  (`build::rooted_program_diagnostics`).
 
 ## Measurements (a private monorepo's copy, historical; release, macOS arm64, in-process time)
 

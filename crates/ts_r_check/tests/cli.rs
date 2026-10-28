@@ -1131,3 +1131,68 @@ fn regression_octal_escapes_in_strings_are_syntax_errors_on_every_path() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A `rootDir` no longer keeps the check history out: with every emittable file under it
+/// (a declaration file outside does not count) a warm run reuses the history, and a file
+/// outside it still gets tsc's TS6059 on every path (tsc 7.0.2, `noEmit`: the TS6059 at the
+/// import, then the checker's errors, exit 1).
+#[test]
+fn regression_root_dir_uses_history_and_keeps_ts6059() {
+    let lib = "interface Array<T> {}\ninterface Boolean {}\ninterface Function {}\ninterface CallableFunction {}\ninterface NewableFunction {}\ninterface IArguments {}\ninterface Number {}\ninterface Object {}\ninterface RegExp {}\ninterface String {}\n";
+    let dir = temp_project(
+        "ts-r-check-rootdir-history",
+        &[
+            (
+                "src/a.ts",
+                "import { d } from \"../lib/d\";\nexport const a: string = d;\n",
+            ),
+            ("lib/d.d.ts", "export declare const d: number;\n"),
+            ("lib/l.ts", "export const l = 1;\n"),
+            ("types/lib.d.ts", lib),
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"noEmit":true,"rootDir":"src","target":"es2022","module":"esnext","noLib":true,"types":[]},"files":["src/a.ts","types/lib.d.ts"]}"#,
+            ),
+        ],
+    );
+    let cache = dir.join(".cache");
+    let check = |stats: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ts-r-check"));
+        cmd.env("TS_R_CACHE_DIR", &cache)
+            .args(["--sound=off", "-p", ".", "--pretty", "false"]);
+        if stats {
+            cmd.env("TS_R_CHECK_STATS", "1");
+        }
+        run(&mut cmd, &dir)
+    };
+    let ts2322 =
+        "src/a.ts(2,14): error TS2322: Type 'number' is not assignable to type 'string'.\n";
+    assert_eq!(check(false), (ts2322.to_owned(), 1), "cold history");
+    let (out, code) = check(true);
+    assert_eq!(code, 1);
+    assert!(
+        // Files this new are inside the history's racy window: re-hashed, not re-checked.
+        out.starts_with(ts2322) && out.contains(", 0 checked, 3 reused"),
+        "warm history: {out}"
+    );
+    // A source outside `rootDir`: TS6059 at the import, cold, warm and without history.
+    std::fs::write(
+        dir.join("src/a.ts"),
+        "import { l } from \"../lib/l\";\nexport const a: string = l;\n",
+    )
+    .unwrap();
+    let both = format!(
+        "src/a.ts(1,19): error TS6059: File '${{FIXTURE}}/lib/l.ts' is not under 'rootDir' '${{FIXTURE}}/src'. 'rootDir' is expected to contain all source files.\n{ts2322}"
+    );
+    for (what, (out, code)) in [
+        ("after the edit", check(false)),
+        ("warm", check(false)),
+        (
+            "no history",
+            ts_r_check_args(&dir, &["--sound=off", "-p", ".", "--pretty", "false"]),
+        ),
+    ] {
+        assert_eq!((out.as_str(), code), (both.as_str(), 1), "{what}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

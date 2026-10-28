@@ -37,7 +37,7 @@ esbuild, it strips types without checking them. Run [ts-r-check](ts-r-check.md) 
   literals are kept as written.
 - IIFE output isn't re-indented, and runtime helpers are repeated per chunk.
 - Not implemented: `import defer` and `import source`, glob `require` and `import()` of
-  template strings, Yarn PnP.
+  template strings, Yarn PnP module resolution (a tsconfig `extends` through PnP works).
 
 The full list is in the design record, [0008 bundler](../../../docs/design/0008-bundler.md).
 
@@ -146,8 +146,8 @@ agree: both load in Node with the same exports; ts-r's is 2.2% larger.
 
 Correctness:
 
-- esbuild's end-to-end bundler tests, run against ts-r-build: 852 of 881 compared cases
-  pass (96.7%); 13 of the 29 failures are intended differences where ts-r-build follows
+- esbuild's end-to-end bundler tests, run against ts-r-build: 854 of 881 compared cases
+  pass (96.9%); 13 of the 27 failures are intended differences where ts-r-build follows
   tsc 7.
 - Ecosystem bundle stage: all 915 compared packages pass (100%). Minified output is 2.9%
   smaller than esbuild's in total over 914 packages, with a median per-package ratio of 0.993.

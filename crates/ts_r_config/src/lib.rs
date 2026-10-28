@@ -27,6 +27,7 @@ pub mod glob;
 pub mod jsonc;
 pub mod options;
 pub mod path;
+pub mod pnp;
 pub mod show_config;
 pub mod tsconfig;
 pub mod verify;

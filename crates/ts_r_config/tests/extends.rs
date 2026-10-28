@@ -67,3 +67,127 @@ fn config_dir_template_is_a_relative_path_from_the_leaf_config() {
     };
     assert_eq!(paths.0[0].1, ["/p/lib/*"]);
 }
+
+/// TS18003 quotes `include` and `exclude` as written: `${configDir}` specs stay
+/// unsubstituted, while the default `outDir` exclude is absolute (observed with tsc 7.0.2,
+/// and on date-fns `pkgs/dev/config/tsconfig.json`).
+#[test]
+fn no_inputs_quotes_config_dir_specs_as_written() {
+    let message = |base: &str, leaf: &str| {
+        let mut fs = MemoryFs::new();
+        fs.add_file("/p/shared/base.json", base);
+        fs.add_file("/p/src/tsconfig.json", leaf);
+        let parsed = load_tsconfig(&fs, "/p/src/tsconfig.json");
+        let d: Vec<_> = parsed
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == 18003)
+            .collect();
+        assert_eq!(d.len(), 1, "{:?}", parsed.diagnostics);
+        d[0].message.clone()
+    };
+    let head = "No inputs were found in config file '/p/src/tsconfig.json'.";
+    let base = r#"{ "include": ["${configDir}/*.ts", "${configDir}/lib/**/*"],
+                    "exclude": ["${configDir}/out"] }"#;
+    assert_eq!(
+        message(base, r#"{ "extends": "../shared/base.json" }"#),
+        format!(
+            r#"{head} Specified 'include' paths were '["${{configDir}}/*.ts","${{configDir}}/lib/**/*"]' and 'exclude' paths were '["${{configDir}}/out"]'."#
+        )
+    );
+    assert_eq!(
+        message(
+            base,
+            r#"{ "extends": "../shared/base.json", "include": ["${configDir}/x/*.ts", "y"],
+                 "compilerOptions": { "outDir": "${configDir}/o" } }"#
+        ),
+        format!(
+            r#"{head} Specified 'include' paths were '["${{configDir}}/x/*.ts","y"]' and 'exclude' paths were '["${{configDir}}/out"]'."#
+        )
+    );
+    assert_eq!(
+        message(
+            r#"{ "include": ["${configDir}/*.ts"], "compilerOptions": { "outDir": "${configDir}/o" } }"#,
+            r#"{ "extends": "../shared/base.json" }"#
+        ),
+        format!(
+            r#"{head} Specified 'include' paths were '["${{configDir}}/*.ts"]' and 'exclude' paths were '["/p/src/o"]'."#
+        )
+    );
+}
+
+/// A package `extends` with no `node_modules` copy resolves through Yarn PnP's
+/// `.pnp.data.json` and the package's `exports` (esbuild's `TsconfigPackageJsonExportsYarnPnP`
+/// and `TsconfigStackOverflowYarnPnP`, whose package depends on itself).
+#[test]
+fn package_extends_through_yarn_pnp() {
+    let tsconfigs = |fs: &mut MemoryFs| {
+        fs.add_file(
+            "/u/p/packages/tsconfigs/package.json",
+            r#"{ "exports": { "./config": "./configs/tsconfig.json" } }"#,
+        );
+        fs.add_file(
+            "/u/p/packages/tsconfigs/configs/tsconfig.json",
+            r#"{ "compilerOptions": { "jsxFactory": "success" } }"#,
+        );
+    };
+    let factory = |fs: &MemoryFs, config: &str| {
+        let parsed = load_tsconfig(fs, config);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .all(|d| d.code != 6053 && d.code != 5083),
+            "{:?}",
+            parsed.diagnostics
+        );
+        assert_eq!(
+            parsed.extended_config_paths,
+            ["/u/p/packages/tsconfigs/configs/tsconfig.json"]
+        );
+        parsed.options.get(OptionId::JsxFactory).cloned()
+    };
+    let success = Some(OptionValue::String("success".into()));
+
+    let mut fs = MemoryFs::new();
+    tsconfigs(&mut fs);
+    fs.add_file("/u/p/packages/app/index.tsx", "console.log(<div/>)");
+    fs.add_file(
+        "/u/p/packages/app/tsconfig.json",
+        r#"{ "extends": "tsconfigs/config" }"#,
+    );
+    fs.add_file(
+        "/u/p/.pnp.data.json",
+        r#"{ "packageRegistryData": [
+          ["app", [["workspace:packages/app", { "packageLocation": "./packages/app/",
+            "packageDependencies": [["tsconfigs", "workspace:packages/tsconfigs"]], "linkType": "SOFT" }]]],
+          ["tsconfigs", [["workspace:packages/tsconfigs", { "packageLocation": "./packages/tsconfigs/",
+            "packageDependencies": [], "linkType": "SOFT" }]]]
+        ] }"#,
+    );
+    assert_eq!(factory(&fs, "/u/p/packages/app/tsconfig.json"), success);
+
+    let mut fs = MemoryFs::new();
+    tsconfigs(&mut fs);
+    fs.add_file("/u/p/entry.jsx", "console.log(<div />)");
+    fs.add_file("/u/p/tsconfig.json", r#"{ "extends": "tsconfigs/config" }"#);
+    fs.add_file(
+        "/u/p/.pnp.data.json",
+        r#"{ "packageRegistryData": [
+          [null, [[null, { "packageLocation": "./",
+            "packageDependencies": [["tsconfigs", "virtual:some-path"]], "linkType": "SOFT" }]]],
+          ["tsconfigs", [
+            ["virtual:some-path", { "packageLocation": "./packages/tsconfigs/",
+              "packageDependencies": [["tsconfigs", "virtual:some-path"]], "packagePeers": [], "linkType": "SOFT" }],
+            ["workspace:packages/tsconfigs", { "packageLocation": "./packages/tsconfigs/",
+              "packageDependencies": [["tsconfigs", "workspace:packages/tsconfigs"]], "linkType": "SOFT" }]
+          ]]
+        ] }"#,
+    );
+    assert_eq!(factory(&fs, "/u/p/tsconfig.json"), success);
+
+    // A name the manifest does not list stays TS6053.
+    fs.add_file("/u/p/tsconfig.json", r#"{ "extends": "other/config" }"#);
+    let parsed = load_tsconfig(&fs, "/u/p/tsconfig.json");
+    assert!(parsed.diagnostics.iter().any(|d| d.code == 6053));
+}

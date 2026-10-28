@@ -18,7 +18,8 @@ inheritance and before file discovery, default exclusions and empty-input diagno
 line (`tsc a.ts`, `--ignoreConfig`): defaults plus overrides, the names as `files` and roots,
 `command_line` set and `config_path` `<cwd>/tsconfig.json`, which is never read. A
 `SpecList` keeps its non-string entries in `invalid` (TS5024 each): `files: [1]` is not
-empty (no TS18002), and TS18003 shows them as written (`'[1]'`). Empty inputs: TS18002 for
+empty (no TS18002), and TS18003 shows them as written (`'[1]'`). TS18003 quotes `include`
+and `exclude` as written, `${configDir}` unexpanded (the default `outDir` exclude is absolute). Empty inputs: TS18002 for
 an empty `files` list unless references are listed; TS18003 unless the config has a
 `references` key at all (`declares_references`, an empty list too: a container project).
 `CompilerOptions::get(OptionId)` / typed accessors (`o.strict()`) give explicit values;
@@ -52,6 +53,8 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   node20/nodenext and bundler. Removed options/values (`baseUrl`, `outFile`,
   `downlevelIteration`, ES5, AMD/UMD/System, node10/classic, `esModuleInterop: false`, ...) are
   reported (TS5102/TS5108/TS5095) and treated as their TS 7 replacements (`node10` → bundler).
+  TS5102's hint for `baseUrl` is `paths` `*` relative to the leaf config's directory, `./`-
+  prefixed unless it starts with `../` (`..` gives `./../*`).
 - **Paths are absolute, normalised, `/`-separated strings.** Path-valued options are stored
   absolute; `paths` substitutions stay as written with `CompilerOptions::paths_base_path`.
 - **Positions are UTF-8 byte offsets** (`(u32, u32)` spans). UTF-16 columns only when rendering.
@@ -62,6 +65,11 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   to 4 threads (`prefetch`); that is only a cache, the serial walk decides what is listed.
 - `extends` specs are rebased one level at a time; `${configDir}` is substituted only as a
   prefix; package `extends` uses conditions node/require/types/default and real paths.
+  A package with no `node_modules` copy is looked up in the nearest Yarn PnP
+  `.pnp.data.json` (`pnp.rs`: owner by longest `packageLocation`, its `packageDependencies`,
+  aliases, `fallbackPool`), then resolved as usual (`exports`, `tsconfig`). This goes past
+  tsc 7, which has no PnP and reports TS6053; it only applies where tsc would fail, and
+  matches esbuild (`TsconfigPackageJsonExportsYarnPnP`, `TsconfigStackOverflowYarnPnP`).
 - **Two kinds of config diagnostics.** `diagnostics` are parse errors (JSON, unknown option
   TS5023, wrong type TS5024, bad value TS6046); tsc still checks the program after them.
   `option_diagnostics()` (`verify.rs`) and `emit_overwrite_diagnostics()` (TS5055) are tsc's
@@ -98,13 +106,11 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
   (default `npx -y -p typescript@7.0.2 tsc`).
 - Real projects: `TS_R_EXTERNAL_PROJECTS=/repo1:/repo2 cargo test -p ts_r_config --test oracle -- --ignored external`
   compares every `tsconfig*.json` (outside `node_modules`) with `tsc --showConfig` and diagnostics.
-  Public bench repos (2026-10-24, `ea41eac`, tsc 7.0.2; `bench --fetch-repos` checkouts of
+  Public bench repos (2026-10-26, `b5938d0`, tsc 7.0.2; `bench --fetch-repos` checkouts of
   trpc, date-fns, rxjs, typeorm and playwright): 114 configs, 114 `--showConfig` outputs
-  identical, 3 configs whose diagnostics differ in message text only: TS18003 prints the
-  `include` patterns with `${configDir}` expanded where tsc keeps it (date-fns
-  `pkgs/dev/config`), and TS5102's suggested `paths` for a removed `baseUrl` differs (tsc
-  `../../src/*`, ours `./src/*` in rxjs `tools/marbles`; tsc `./../*`, ours `../*` in
-  playwright `tests`).
+  identical, 114 with the same diagnostics (the last 3, TS18003 quoting `${configDir}`
+  specs as written and TS5102's `paths` hint relative to the leaf config, fixed in
+  `b5938d0`).
 - The harness runs tsc under `scripts/limit.sh` and caps its own memory
   (`ts_r_testing::cap_memory!()`, a dev-dependency).
 - Fixture `node_modules` are checked in (`tests/fixtures/.gitignore` re-includes them) and one

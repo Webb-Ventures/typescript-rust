@@ -144,3 +144,40 @@ fn an_export_edit_spares_users_of_other_exports() {
     assert!(hit.contains(&"shapes.ts".to_owned()), "{hit:?}");
     assert!(hit.contains(&"main.ts".to_owned()), "{hit:?}");
 }
+
+/// An import of a name the target declares but does not export is TS2459; once the local is
+/// renamed it is TS2305. The importer must be re-checked although the exports are unchanged
+/// (differential seeds 2, 4, 8, ... before the shape hashed module locals).
+#[test]
+fn renaming_an_unexported_local_reaches_its_importers() {
+    let Some(libs) = LibStore::locate() else {
+        eprintln!("lib files missing: skipped");
+        return;
+    };
+    let mut program = load(&libs);
+    let all: Vec<String> = program
+        .files
+        .iter()
+        .filter(|f| !f.is_lib)
+        .map(|f| f.path.clone())
+        .collect();
+    edit(
+        &mut program,
+        "src/util.ts",
+        "export const banner",
+        "const banner",
+    );
+    let mut shapes = ProgramShapes::build(&program, 2);
+    let p = edit(&mut program, "src/util.ts", "const banner", "const sum");
+    let affected = shapes.update(&program, &[p], &all);
+    assert_eq!(names(&affected), ["main.ts"]);
+    // A body edit of the same local still affects nobody.
+    let mut shapes = ProgramShapes::build(&program, 2);
+    let q = edit(
+        &mut program,
+        "src/util.ts",
+        "${APP_NAME} ${APP_VERSION}",
+        "${APP_VERSION}",
+    );
+    assert!(shapes.update(&program, &[q], &all).is_empty());
+}

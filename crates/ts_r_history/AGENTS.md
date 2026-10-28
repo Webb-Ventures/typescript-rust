@@ -77,7 +77,8 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   entry (whose deps include sibling exports it names, `ts_r_decls::Dep::Sibling`), the
   module's augmentations, and when `t` does not declare `n` every `export *` target's
   answer; an import that resolves nowhere also depends on `t`'s export names (the error
-  suggests names). Dependency files (`node_modules`), JSON and `export =` modules count as
+  suggests names) and on its top-level local names (`FileShape::locals`: TS2459/TS2460 when
+  `t` declares the name locally, TS2305 when not). Dependency files (`node_modules`), JSON and `export =` modules count as
   a whole (`Node::All`); a dependency file's entry also depends on the global names it reads
   (a package can name a project's global type), and an inferred export on the values it is
   inferred from (`ts_r_decls` deps: `export const y = x` depends on `x`).
@@ -151,12 +152,11 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   new files, DOM globals, `import.meta`, `Window` augmentation), deleted lines, created,
   deleted and renamed files, reverts. After every edit `History::check` and `persist::check`
   (temp cache, racy window 0, unique past mtimes) must equal `check_program`, and the
-  persisted run's file list must equal `load_program`'s. Seeds 1-60 x 300 edits at `ea41eac`
-  (24 Oct 2026): 37 pass; 2, 4, 8, 9, 14, 15, 16, 18, 22, 26, 28, 32, 33, 35, 36, 38, 39, 43,
-  49, 50, 52, 54 and 58 fail on one diagnostic: after `banner` is renamed in `src/util.ts`, the
-  incremental run reports TS2459 ("declares 'banner' locally, but it is not exported") on
-  `src/main.ts` where a fresh check reports TS2305. Most persisted runs take the fast path,
-  some with the DOM libs left out.
+  persisted run's file list must equal `load_program`'s. Seeds 1-60 x 300 edits at `5e68992`
+  (26 Oct 2026): 60 of 60 pass (37 at `ea41eac`: after `banner` was renamed in
+  `src/util.ts` the incremental run kept TS2459 where a fresh check reports TS2305, fixed by
+  `FileShape.locals`); seeds 61-200 x 300 and 1001-1040 x 1000 pass too. Most persisted
+  runs take the fast path, some with the DOM libs left out.
 - `tests/shapes.rs`: body edits affect nobody; an export change reaches its users and not
   the rest (not even other importers of the same file, unless a signature names it); a
   global reaches the files that name it.

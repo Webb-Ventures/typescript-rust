@@ -146,10 +146,11 @@ share one per option set. `resolve_module_traced` / `resolve_type_reference_trac
 - Real projects: `TS_R_EXTERNAL_PROJECTS=/repo cargo test --release -p ts_r_resolver --test oracle -- --ignored external --nocapture`
   replays every resolution in `tsc --traceResolution` for each `tsconfig*.json` and diffs.
   private-app (pnpm-installed copy): 24 configs, 63,958 resolutions, 0 mismatches.
-  Public bench repos (2026-10-24, `ea41eac`, tsc 7.0.2; `bench --fetch-repos` checkouts of
-  trpc, date-fns, rxjs, typeorm and playwright): 114 configs, 158,174 resolutions, 10 mismatches.
-  All 10 are in two tRPC configs (`tsconfig.json`, `packages/tests/tsconfig.json`): a `require`
-  of `vitest` 5.0.0, which tsc resolves to `dist/index.d.ts` and we resolve to `index.d.cts`.
+  Public bench repos (2026-10-26, `d5e3943`, tsc 7.0.2; `bench --fetch-repos` checkouts of
+  trpc, date-fns, rxjs, typeorm and playwright): 114 configs, 158,174 resolutions, 0 mismatches.
+  (The 10 reported at `ea41eac` were the harness's: tsc prints no conditions line for a
+  `/// <reference types>`, so the mode was taken as `require`; it now comes from the first
+  `Matched 'exports' condition` line, and tRPC's `vitest` reference is `import` in both.)
 - The harness runs tsc under `scripts/limit.sh` and caps its own memory
   (`ts_r_testing::cap_memory!()`, a dev-dependency).
 

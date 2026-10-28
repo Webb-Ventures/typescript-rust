@@ -120,7 +120,7 @@ Usage: ts-r-dev [root] [options]
       'ts-r-check type-checks a TypeScript project and prints diagnostics in tsc’s format, with tsc’s error codes. Like tsc, it writes JavaScript, source maps and declarations unless noEmit is set; --noEmit only checks. It is the least finished part of ts-r, and it follows one rule: no false positives first.',
     works: [
       'Loading the project from tsconfig.json, including extends, with tsc’s config diagnostics',
-      'Module resolution that matches tsc’s on all but 10 of 158,174 resolutions in five public repos',
+      'Module resolution that matches tsc’s on all 158,174 resolutions in five public repos',
       'Assignability, calls and overloads, generics and inference, unions and narrowing',
       'keyof, mapped, conditional and literal types; classes, declarations and unused-code checks',
       'tsc’s output in both plain and pretty form, with tsc’s exit codes',

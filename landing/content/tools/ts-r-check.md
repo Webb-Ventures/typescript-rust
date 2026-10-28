@@ -30,7 +30,7 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 - Loading the project from `tsconfig.json`, including `extends`, with tsc's config
   diagnostics such as [TS6053](../errors/TS6053.md).
 - Module resolution that matches tsc's: 158,174 resolutions across 114 configs of five
-  public repos, 10 mismatches (one `require` of vitest, in tRPC).
+  public repos, 0 mismatches.
 - Assignability, calls and overloads, generics and inference, unions and narrowing, type
   operators (`keyof`, mapped, conditional and literal types), classes and declarations,
   and unused-code checks. Errors such as [TS2322](../errors/TS2322.md),
