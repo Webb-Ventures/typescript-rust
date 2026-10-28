@@ -69,7 +69,9 @@ Exit codes: 0 ok, 1 check failed / bump available / regression, 2 usage or runti
   coverage check) and re-run.
 - **The ecosystem harness reports, it never fixes**: failures become causes in STATUS.md and
   repros in `ecosystem/repros/<stage>/` for the owning crate. Workers always run as a release
-  build (`target/release/xtask`, built by the driver), since debug parsing would hit the limits.
+  build (`<target>/release/xtask`, built by the driver, where `<target>` is `CARGO_TARGET_DIR`
+  or `target/`; the ts-r binaries default to the same directory), since debug parsing would
+  hit the limits.
 
 ## Release builds (M7)
 

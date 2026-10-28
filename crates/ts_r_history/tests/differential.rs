@@ -780,7 +780,8 @@ fn path_reference_targets_follow_edits() {
     let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
     let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
     let expected = check_program(&program, run).diagnostics;
-    assert!(expected.iter().any(|d| d.code == 6053));
+    // A blocking syntax error drops the missing target (tsc 7.0.2: only TS1109).
+    assert_eq!(expected.iter().map(|d| d.code).collect::<Vec<_>>(), [1109]);
     let (actual, stats) = history.check(&program, run, Checker::new);
     assert!(stats.blocked);
     assert_eq!(actual, expected);

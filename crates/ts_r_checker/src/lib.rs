@@ -86,4 +86,6 @@ pub use program::{
     LibStore, ModeResolutions, ProgramFiles, SourceCache, SourceFile, load_program,
     load_program_cached, load_program_with_references,
 };
-pub use references::{invalid_reference_diagnostics, reference_diagnostics};
+pub use references::{
+    invalid_reference_diagnostics, reference_diagnostics, type_reference_diagnostics,
+};

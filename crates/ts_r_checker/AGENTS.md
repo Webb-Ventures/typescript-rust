@@ -955,7 +955,9 @@ Files, by layer:
 - `.json` program files (`resolveJsonModule`: an explicit `.json` include or an import) are
   parsed with `ts_r_parser::parse_json` and never type-checked (`should_check`), as in tsc;
   only their syntax errors are reported.
-- Syntax errors suppress semantic diagnostics (tsc behaviour). tsc's test harness reports both,
+- Syntax errors suppress semantic diagnostics (tsc behaviour), and the program diagnostics too
+  (TS6053 and TS2688 for missing `/// <reference path|types>` targets, in any file: tsc 7.0.2
+  reports only the syntax errors, TS1084 included). tsc's test harness reports both,
   and so does `check_program_through_syntax_errors` (used by the conformance example): every
   file is checked, but a file with syntax errors gets no checker grammar errors (TS1xxx; tsc's
   checker reports those only in clean files; TS1294 for `erasableSyntaxOnly` and TS1141

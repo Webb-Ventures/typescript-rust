@@ -13,6 +13,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_checker::driver::CHECKER_GRAMMAR_CODES;
+use ts_r_checker::driver::link_diagnostic_reported;
 use ts_r_checker::{CheckRun, Checker, ProgramFiles, SourceFile, check_files, should_check};
 use ts_r_diagnostics::{Diagnostic, FileId};
 
@@ -223,9 +224,24 @@ pub fn blocking_syntax(program: &ProgramFiles) -> (Vec<Diagnostic>, bool) {
 
 /// A file's syntax diagnostics as tsc reports them: without its checker grammar errors, with
 /// the `lenient` ones (octal escapes in strings), as the checker driver has them
-/// ([`ts_r_parser::tsc_syntax_errors`]).
+/// ([`ts_r_parser::tsc_syntax_errors`]), and with TS1084 for a malformed `/// <reference />`
+/// (a parse error in tsc: it blocks checking like the others).
 pub fn syntax_only(f: &SourceFile) -> impl Iterator<Item = Diagnostic> {
-    ts_r_parser::tsc_syntax_errors(&f.syntax, &f.grammar, &f.lenient).into_iter()
+    ts_r_parser::tsc_syntax_errors(&f.syntax, &f.grammar, &f.lenient)
+        .into_iter()
+        .chain(ts_r_checker::invalid_reference_diagnostics(f))
+}
+
+/// TS2688 for `f`'s `/// <reference types>` directives that `program`'s loader could not
+/// resolve (`ProgramFiles::missing_type_references`), as the checker driver reports them.
+pub fn type_reference_diagnostics(program: &ProgramFiles, f: &SourceFile) -> Vec<Diagnostic> {
+    let missing: Vec<&str> = program
+        .missing_type_references
+        .iter()
+        .filter(|(p, _)| *p == f.path)
+        .map(|(_, n)| n.as_str())
+        .collect();
+    ts_r_checker::type_reference_diagnostics(f, &missing)
 }
 
 /// Global diagnostics of a program (unresolved `types` entries, ambiguous project roots).
@@ -273,17 +289,20 @@ impl History {
             .map(|(i, f)| {
                 ts_r_checker::reference_diagnostics(f, &program.options, &paths)
                     .into_iter()
+                    .chain(type_reference_diagnostics(program, f))
                     .map(|d| d.with_file(FileId(i as u32)))
                     .collect()
             })
             .collect();
-        let mut syntax = syntax;
-        syntax.extend(references.iter().flatten().cloned());
         if blocking {
-            // Nothing is checked; the history stays as it was (it describes texts by hash).
+            // Nothing is checked, and only the syntax errors are reported (not the reference
+            // diagnostics), as `check_program`; the history stays as it was (it describes
+            // texts by hash).
             stats.blocked = true;
             return (ts_r_checker::sort_and_dedup(program, syntax), stats);
         }
+        let mut syntax = syntax;
+        syntax.extend(references.iter().flatten().cloned());
         let key = program_key(program);
         if key != self.key {
             self.files.clear();
@@ -390,12 +409,10 @@ impl History {
             let checker = make(program);
             let globals = ts_r_checker::driver::missing_global_type_diagnostics(&checker);
             out.extend(globals.iter().cloned());
-            for d in &checker.link.diagnostics {
-                let f = d.file.0 as usize;
-                if f < program.files.len() && should_check(program, f) {
-                    out.push(d.clone());
-                }
-            }
+            // As `check_program`: a checked file's, unless `@ts-ignore` or
+            // `@ts-expect-error` governs its line.
+            let reported = |d: &&Diagnostic| link_diagnostic_reported(program, d);
+            out.extend(checker.link.diagnostics.iter().filter(reported).cloned());
             for (&i, ds) in targets.iter().zip(check_files(&checker, &targets, run)) {
                 results.insert(
                     i,
@@ -407,10 +424,7 @@ impl History {
                     .link
                     .diagnostics
                     .iter()
-                    .filter(|d| {
-                        let f = d.file.0 as usize;
-                        f < program.files.len() && should_check(program, f)
-                    })
+                    .filter(reported)
                     .chain(globals.iter())
                     .map(|d| PathDiag::from_diag(program, d))
                     .collect(),

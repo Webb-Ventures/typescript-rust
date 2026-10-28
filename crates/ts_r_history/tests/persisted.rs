@@ -536,3 +536,112 @@ fn wildcard_types_survive_edits_and_track_package_changes() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// Program diagnostics `check_program` reports outside the checker (TS1084 for a malformed
+/// reference directive, TS2688 for a `/// <reference types>` that resolves nowhere) and link
+/// diagnostics under `@ts-ignore` come out of the history the same, cold, warm and after
+/// edits (the fast path included). tsc 7.0.2: TS1084 at (1,1), TS2688 at (1,23), only the
+/// TS1109 of a parse error next to missing references, and the ignored `bold` duplicate of
+/// the global `String` only on the lib side (@colors/colors).
+#[test]
+fn reference_directives_and_ignored_link_errors_match_check_program() {
+    let Some(libs) = LibStore::locate() else {
+        eprintln!("lib files missing: skipped");
+        return;
+    };
+    let ignored = "export {};\ndeclare global {\n  interface String {\n    // @ts-ignore\n    bold: string;\n  }\n}\nconst n: number = \"s\";\n";
+    // Name, texts in turn, and (code, offset) of main.ts's diagnostics with the case.
+    type Case<'a> = (&'a str, &'a [&'a str], &'a [(u32, u32)]);
+    let cases: [Case; 4] = [
+        (
+            "missing-quote",
+            &[
+                "/// <reference path=\"missingquote.ts />\nexport const x: number = 's';\n",
+                "/// <reference path=\"missingquote.ts />\nexport const x: number = 's';\n// edit\n",
+                "export const x: number = 's';\n",
+                "/// <reference path=\"missingquote.ts />\nexport const x: number = 's';\n",
+            ],
+            &[(1084, 0)],
+        ),
+        (
+            "missing-types",
+            &[
+                "/// <reference types=\"nope\" />\nexport const x = 1;\n",
+                "/// <reference types=\"nope\" />\nexport const x = 1;\n// edit\n",
+                "export const x = 1;\n",
+                "/// <reference types=\"nope\" />\nexport const x = 1;\n",
+            ],
+            &[(2688, 22)],
+        ),
+        (
+            // A parse error drops the reference diagnostics: TS1109 at (3,18) only.
+            "parse-error",
+            &[
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = ;\n",
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = ;\n// edit\n",
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = 1;\n",
+                "/// <reference types=\"nope\" />\n/// <reference path=\"gone.ts\" />\nexport const x = ;\n",
+            ],
+            &[(1109, 81)],
+        ),
+        (
+            "ignored-merge",
+            &[
+                ignored,
+                &format!("{ignored}// edit\n"),
+                &ignored.replace("    // @ts-ignore\n", ""),
+                ignored,
+            ],
+            &[(2322, 97)],
+        ),
+    ];
+    for (name, texts, first) in cases {
+        let dir = temp(name);
+        let cache = open_cache(&dir);
+        let mut history = ts_r_history::incremental::History::default();
+        for (step, src) in texts.iter().enumerate() {
+            let fs = project(
+                r#""strict": true, "noEmit": true, "types": []"#,
+                &["main.ts"],
+                &[("main.ts", src)],
+            );
+            let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+            let program =
+                ts_r_checker::load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+            let fresh = ts_r_checker::check_program(&program, ts_r_checker::CheckRun::default());
+            let main: Vec<(u32, u32)> = fresh
+                .diagnostics
+                .iter()
+                .filter(|d| program.files[d.file.0 as usize].path == "/p/main.ts")
+                .map(|d| (d.code, d.span.start))
+                .collect();
+            // The first and last texts carry the case; the third one drops it (without the
+            // `@ts-ignore`, the duplicate `bold` is reported in main.ts too).
+            if step != 2 {
+                assert_eq!(main, first, "{name} step {step}");
+            } else if name == "ignored-merge" {
+                assert!(main.iter().any(|m| m.0 == 2300), "{name}: {main:?}");
+            } else {
+                assert!(main.iter().all(|m| !first.contains(m)), "{name}: {main:?}");
+            }
+            for round in 0..2 {
+                let (diags, _) = history.check(
+                    &program,
+                    ts_r_checker::CheckRun::default(),
+                    ts_r_checker::Checker::new,
+                );
+                assert_eq!(
+                    diags, fresh.diagnostics,
+                    "{name} step {step}: History::check"
+                );
+                let out = persist::check(&fs, Some(&cache), &cfg, Some(&libs), 1);
+                assert_eq!(
+                    out.diagnostics, fresh.diagnostics,
+                    "{name} step {step} round {round}: persist::check ({:?})",
+                    out.mode
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

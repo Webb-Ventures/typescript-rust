@@ -107,10 +107,7 @@ pub fn run(mut args: Args) -> Result<ExitCode> {
     let pkg_dir = PathBuf::from(args.opt("pkg-dir")?.ok_or("--pkg-dir is required")?);
     let tmp = PathBuf::from(args.opt("tmp")?.ok_or("--tmp is required")?);
     let install_dir = args.opt("install-dir")?.map(PathBuf::from);
-    let bin_dir = PathBuf::from(
-        args.opt("bin-dir")?
-            .unwrap_or_else(|| "target/release".into()),
-    );
+    let bin_dir = PathBuf::from(args.opt("bin-dir")?.unwrap_or_else(super::default_bin_dir));
     let out = PathBuf::from(args.opt("out")?.ok_or("--out is required")?);
     let stage = args.positional().ok_or("worker: missing stage")?;
     args.finish()?;
@@ -1142,7 +1139,7 @@ mod tests {
     /// tsc in bench/node_modules; skipped without them.
     #[test]
     fn parse_stage_uses_the_oracle() {
-        let tools = Tools::new(Path::new("target/release"));
+        let tools = Tools::new(&super::super::release_dir());
         let has_node = Command::new("node")
             .arg("--version")
             .output()
