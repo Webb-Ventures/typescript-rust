@@ -77,6 +77,11 @@ from the documented plugin API (no Vite code).
   the ones Vite runs between `vite:css` and `vite:css-post`
   (`vite: packages/vite/src/node/plugins/index.ts`, `resolvePlugins`); `enforce: 'post'` and
   `order: 'post'` hooks, which see the JS wrapper there, are skipped.
+- **Transform stages** in the manifest: `pre` (`enforce: 'pre'`, or `order: 'pre'`), `normal`
+  and `post` run in the cached transform; `late` holds the `transform` hooks Vite runs after
+  its own glob and dynamic-import-vars plugins (`order: 'post'`, or `enforce: 'post'` without
+  an `order: 'pre'`), so they see the expanded code (`transform_late`; `ts_r_hmr`'s
+  `Stage::Late`). Other hooks keep `stageOf`'s three stages.
 - **`this.addWatchFile` / `this.getWatchFiles`** in `load` and `transform`: the context
   collects the files per call, and `load`/`transform` answers carry them (`watchFiles`; a
   transform that only watched files answers with `code: null`). The server keys and watches
@@ -219,7 +224,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 - The latency benchmark uses generated JS; the real-app benchmark (results in `ts_r_hmr`'s
   AGENTS.md) edits one file. Vite's own playground specs run against both servers in
   [`bench/dev-oracle`](../../bench/dev-oracle/README.md); its README lists the failing tests
-  by cause (today one: glob and dynamic-import-vars output isn't visible to post plugins).
+  by cause (today none).
 - No CSS preprocessors: the excalidraw harness maps `.scss` to an empty stylesheet for both
   servers, so the page renders unstyled.
 - Fast Refresh: components created inside other expressions (object literals, conditionals,

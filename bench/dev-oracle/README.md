@@ -33,9 +33,11 @@ Full runs use `--jobs 1`: two playgrounds at once got Chrome killed at its
 
 ## Results
 
-7cba502 (2026-10-26, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47, `--jobs 1`):
-**321 of 322 compared tests pass (99.7%)**; 77 tests are skipped. The same in three full runs
-in a row. Earlier runs: 312 of 322 at 61c9d42; 274 of 322 at e07eafa; 202 of 322 at 58a940e;
+2bd07f1 (2026-10-26, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
+`--jobs 1`): **322 of 322 compared tests pass (100.0%)**; 77 tests are skipped. The same in
+three full runs in a row, except that one run compared 323 of 323: `wasm > should work when
+inlined` timed out against Vite in the other two (a Vite-side flake, so it was skipped). Earlier
+runs: 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322 at e07eafa; 202 of 322 at 58a940e;
 101 of 254 at 8c14f29, with an older harness that loaded fewer specs.
 
 | Playground | Pass | Compared | Skip |
@@ -57,7 +59,7 @@ in a row. Earlier runs: 312 of 322 at 61c9d42; 274 of 322 at e07eafa; 202 of 322
 | dynamic-import-inline | 0 | 0 | 1 |
 | env | 16 | 16 | 1 |
 | env-nested | 3 | 3 | 0 |
-| glob-import | 24 | 25 | 0 |
+| glob-import | 25 | 25 | 0 |
 | hmr | 56 | 56 | 1 |
 | hmr-root | 1 | 1 | 0 |
 | html | 45 | 45 | 18 |
@@ -73,15 +75,10 @@ in a row. Earlier runs: 312 of 322 at 61c9d42; 274 of 322 at e07eafa; 202 of 322
 | tsconfig-json | 5 | 5 | 1 |
 | wasm | 10 | 10 | 1 |
 
-Remaining failure (1):
-
-- **Not implemented**: `import.meta.glob` and dynamic-import-vars output visible to post
-  plugins (glob-import). ts-r-dev expands globs and resolves template-literal imports when it
-  rewrites a module's imports, after the cached transform and its post plugins have run, so a
-  post `transform` hook still sees `import.meta.glob(...)` and the untouched `import(`./${x}.js`)`
-  (Vite runs its glob and dynamic-import-vars plugins as normal transforms ahead of user post
-  plugins: vite: packages/vite/src/node/plugins/importMetaGlob.ts, dynamicImportVars.ts).
-  Moving both into the transform stage is a pipeline change for a later round.
+No failures remain. The last one was glob-import's "import.meta.glob and dynamic import vars
+transformations should be visible to post transform plugins": `enforce: 'post'` and
+`order: 'post'` `transform` hooks now run in a late stage after glob expansion and the
+dynamic-import-vars rewrite (`crates/ts_r_hmr/AGENTS.md`).
 
 Flaky tests: `nested-deps > handle nested package` failed once (`expected '' to be
 'F@2.0.0'`) in one full run before the 7cba502 merge and passed in every other run, and 3 of

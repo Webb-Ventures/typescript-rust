@@ -153,7 +153,7 @@
           ["Peak memory, excalidraw, no cache / cached", "317 / 152 MB", "624 MB", "Without the 61 locale chunks"],
           ["Peak memory, three.js x10, no cache / cached", "422 / 244 MB", "695 MB", "Last of the three invocations"],
           ["three.js x10 output", "7.88 MB (+2.2%), same exports", "7.71 MB", ""],
-          ["esbuild's own bundler tests (oracle)", "854 of 881 compared cases pass (96.9%)", "reference", "Commit 45ab2ad"]
+          ["esbuild's own bundler tests (oracle)", "858 of 885 compared cases pass (96.9%)", "reference", "Commit a5871a7"]
         ]
       },
       "tableTitle": "excalidraw (not like-for-like), memory, output and the oracle",

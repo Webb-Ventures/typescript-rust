@@ -616,9 +616,10 @@ impl PrepareContext {
         }
         let t = Arc::new(self.compute_options(config.as_deref()));
         let cache_key: Arc<str> = Arc::from(format!(
-            "{}|{}|{}|{:?}|{}",
+            "{}|{}|{}|{}|{:?}|{}",
             t.cache_key(),
             self.defines.cache_key(),
+            self.opts.drop_labels.join(","),
             self.opts.ignore_annotations,
             self.opts.effective_format(),
             self.opts.unsupported().key()
@@ -808,6 +809,7 @@ pub fn prepare_with(
         messages.push(lines.message(Severity::Error, display, d.span.start, d.message.clone()));
     }
     let mut ast = parsed.ast;
+    drop_labels(&mut ast, &ctx.opts.drop_labels);
     let mut erased = Vec::new();
     let mut prelude = String::new();
     let first_jsx = ast
@@ -1107,6 +1109,29 @@ pub fn prepare_with(
 /// Reports writes to `const` and `using` bindings and (when `imports`) to imports, as
 /// esbuild does when bundling or minifying: those become `var`s or plain references in the
 /// output, where the write would no longer throw.
+/// `--drop-labels`: a statement labeled with one of `labels` becomes an empty statement
+/// before anything else sees the file, so its imports and `require()` calls are never
+/// resolved (esbuild's conditional compilation). Every node is visited once.
+fn drop_labels(ast: &mut Ast, labels: &[String]) {
+    if labels.is_empty() {
+        return;
+    }
+    for raw in 0..ast.nodes.len() {
+        let Some(id) = NodeId::from_raw(raw as u32) else {
+            continue;
+        };
+        let Node::Labeled { label, .. } = *ast.node(id) else {
+            continue;
+        };
+        let Node::Ident { name } = *ast.node(label) else {
+            continue;
+        };
+        if labels.iter().any(|l| l == ast.atom(name)) {
+            *ast.node_mut(id) = Node::Empty {};
+        }
+    }
+}
+
 fn constant_assignments(
     ast: &Ast,
     scopes: &Scopes,

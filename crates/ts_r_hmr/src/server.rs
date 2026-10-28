@@ -1213,6 +1213,9 @@ fn route(shared: &Shared, req: &Request) -> Response {
     if path == crate::wasm::HELPER_URL {
         return js_response(req, crate::wasm::helper());
     }
+    if path == crate::dynamic_import_vars::HELPER_URL {
+        return js_response(req, crate::dynamic_import_vars::helper());
+    }
     if let Some(rest) = path.strip_prefix("/@id/") {
         // Only ids the graph knows (a module imported them), like `/@fs/`.
         let file = PathBuf::from(plugins::id_from_url_path(rest));
@@ -2138,6 +2141,21 @@ pub(crate) fn prepare_script(
     let mut output = with_relative_sources(output, module_id);
     let mut hot = scan::scan_hot(&output.code);
 
+    // `` import(`./dir/${x}.js`) ``: a lookup in a glob over the files it can name (Vite's
+    // dynamic-import-vars step, which also skips dependencies), expanded with the written
+    // globs below.
+    if !plugin_module
+        && !id_str.contains("/node_modules/")
+        && output.code.contains('`')
+        && output.code.contains("import")
+    {
+        let calls = scan::scan(&output.code).template_imports;
+        if let Some(r) = crate::dynamic_import_vars::rewrite(&output.code, &calls, real) {
+            output = with_edits(&output, r.code, &r.prelude, &r.edits);
+            hot = scan::scan_hot(&output.code);
+        }
+    }
+
     // `import.meta.glob`: expanded here (after the cache: the files it matches change
     // without the module changing), then imports are scanned again.
     let mut glob_watches = Vec::new();
@@ -2157,30 +2175,41 @@ pub(crate) fn prepare_script(
             let loc = render::line_col(&output.code, at);
             fail(m, Some(loc), &output.code)
         })?;
-        let edits: Vec<crate::sourcemap::TextEdit<'_>> = expanded
-            .edits
-            .iter()
-            .map(|(start, end, text)| crate::sourcemap::TextEdit {
-                start: *start,
-                end: *end,
-                text,
-            })
-            .collect();
-        let map = output
-            .map
-            .as_deref()
-            .map(|m| crate::sourcemap::shift_for_edits(m, &output.code, &expanded.prelude, &edits));
-        output = Arc::new(TransformOutput {
-            imports: scan::scan(&expanded.code).imports,
-            code: expanded.code,
-            map,
-        });
+        output = with_edits(&output, expanded.code, &expanded.prelude, &expanded.edits);
         hot = scan::scan_hot(&output.code);
         glob_watches = expanded.watches;
     }
     if let Some(rewritten) = resolve_template_heads(shared, &output, real) {
         output = rewritten;
         hot = scan::scan_hot(&output.code);
+    }
+    // Late `transform` hooks (`enforce: 'post'`, `order: 'post'`) run on the expanded code,
+    // as Vite runs them after its glob step; not cached, since the expansion isn't. (A JSON
+    // module ran them in `json_through_plugins`.)
+    if shared.plugin_hooks.transform_late
+        && !is_json_id(&id_str)
+        && let Some(host) = shared.plugins.as_deref()
+    {
+        let late = host
+            .transform(Stage::Late, &id_str, &output.code)
+            .map_err(|m| fail(m, None, &output.code))?;
+        if let Some(t) = late {
+            for d in plugin_watch_paths(&t.watch_files) {
+                if !watch_deps.contains(&d) {
+                    watch_deps.push(d);
+                }
+            }
+            if t.code != output.code {
+                let mut chain = vec![output.map.clone()];
+                chain.extend(t.maps);
+                output = Arc::new(TransformOutput {
+                    imports: scan::scan(&t.code).imports,
+                    map: compose_maps(&chain, &input),
+                    code: t.code,
+                });
+                hot = scan::scan_hot(&output.code);
+            }
+        }
     }
     {
         let mut w = shared
@@ -2302,6 +2331,33 @@ pub(crate) fn prepare_script(
     node.errored = false;
     node.retry_on_create = false;
     Ok((prepared, pruned))
+}
+
+/// `output` with `edits` (`(start, end, replacement)` in its code) applied, giving `code`
+/// (which starts with `prelude`, added on line 1): imports scanned again, map shifted.
+fn with_edits(
+    output: &TransformOutput,
+    code: String,
+    prelude: &str,
+    edits: &[(usize, usize, String)],
+) -> Arc<TransformOutput> {
+    let text_edits: Vec<crate::sourcemap::TextEdit<'_>> = edits
+        .iter()
+        .map(|(start, end, text)| crate::sourcemap::TextEdit {
+            start: *start,
+            end: *end,
+            text,
+        })
+        .collect();
+    let map = output
+        .map
+        .as_deref()
+        .map(|m| crate::sourcemap::shift_for_edits(m, &output.code, prelude, &text_edits));
+    Arc::new(TransformOutput {
+        imports: scan::scan(&code).imports,
+        code,
+        map,
+    })
 }
 
 /// `` import(`@/${name}.js`) ``: the template's head resolved through `resolve.alias` or
@@ -2599,6 +2655,7 @@ fn resolve_target(shared: &Shared, specifier: &str, importer: &Path) -> Result<P
         path,
         "/@ts-r/client" | "/@vite/client" | "/@ts-r/env" | "/@vite/env"
     ) || path == crate::wasm::HELPER_URL
+        || path == crate::dynamic_import_vars::HELPER_URL
     {
         return Ok(Pending::Url(shared.public_url(specifier)));
     }
@@ -3184,21 +3241,24 @@ fn json_through_plugins(
             e.column() as u32,
         )
     })?;
-    if !hooks.transform_post {
-        return Ok(module);
-    }
-    Ok(
-        match host
-            .transform(Stage::Post, id, &module)
+    // Post and late hooks both see the JS (a JSON module has nothing to expand).
+    let mut module = module;
+    for (stage, on) in [
+        (Stage::Post, hooks.transform_post),
+        (Stage::Late, hooks.transform_late),
+    ] {
+        if !on {
+            continue;
+        }
+        if let Some(t) = host
+            .transform(stage, id, &module)
             .map_err(TransformError::new)?
         {
-            Some(t) => {
-                watch_files.extend(t.watch_files);
-                t.code
-            }
-            None => module,
-        },
-    )
+            watch_files.extend(t.watch_files);
+            module = t.code;
+        }
+    }
+    Ok(module)
 }
 
 /// One map for a chain of transforms (see [`run_transform`]); sources that name the

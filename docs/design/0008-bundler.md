@@ -192,7 +192,7 @@ linked batch runs under Node.
 
 ### Results (M3, Apple M-series, 4 threads)
 
-- esbuild oracle: 854 of 881 compared cases pass (96.9%), 13 of the 27 failures intended
+- esbuild oracle: 858 of 885 compared cases pass (96.9%), 13 of the 27 failures intended
   differences where ts-r-build follows tsc 7; see the oracle README.
 - A private app's server-rendered smoke entry (1983 modules; historical, no longer run):
   ts-r-build 65 ms without and 55 ms with the persistent cache, esbuild 86 ms; +2.7% size.

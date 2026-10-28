@@ -178,6 +178,11 @@ pub struct BuildOptions {
     pub packages_external: bool,
     /// `(key, value)`: `process.env.NODE_ENV` -> `"production"` (value is JS/JSON text).
     pub define: Vec<(String, String)>,
+    /// `--drop-labels=A,B`: statements labeled `A:` or `B:` are removed before scanning.
+    pub drop_labels: Vec<String>,
+    /// `--alias:pkg=replacement`: an import path that is `pkg` or starts with `pkg/` is
+    /// rewritten (the longest key wins) and resolved from the working directory.
+    pub alias: Vec<(String, String)>,
     pub metafile: bool,
     /// Extension (with dot) -> loader overrides.
     pub loaders: FxHashMap<String, Loader>,
@@ -254,6 +259,8 @@ impl Default for BuildOptions {
             external: Vec::new(),
             packages_external: false,
             define: Vec::new(),
+            drop_labels: Vec::new(),
+            alias: Vec::new(),
             metafile: false,
             loaders: FxHashMap::default(),
             global_name: None,

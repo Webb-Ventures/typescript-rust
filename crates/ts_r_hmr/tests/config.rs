@@ -561,20 +561,25 @@ fn wasm_workers_and_dynamic_imports_like_vite() {
     let server = DevServer::start(base_config(&app)).expect("server starts");
     let (_, _, a) = get(&server, "/src/a.js");
     assert!(
-        a.starts_with("import { injectQuery as __vite__injectQuery } from \"/@vite/client\";import init from '/src/m.wasm?import&init'"),
+        a.starts_with("import { injectQuery as __vite__injectQuery } from \"/@vite/client\";import __variableDynamicImportRuntimeHelper from \"/@id/__x00__vite/dynamic-import-helper.js\";import init from '/src/m.wasm?import&init'"),
         "{a}"
     );
     assert!(a.contains("import W from '/src/w.js?worker'"), "{a}");
-    // Expressions, and templates naming a non-script file, get `?import` at run time.
+    // Expressions get `?import` at run time.
     assert!(
         a.contains("import(/* @vite-ignore */ __vite__injectQuery(p, 'import'))"),
         "{a}"
     );
+    // A relative template becomes a lookup in the glob of its static parts, as Vite's
+    // dynamic-import-vars plugin makes it (no `.json` file matches here).
     assert!(
-        a.contains("import(__vite__injectQuery(`./data/${v}.json`, 'import'))"),
+        a.contains("__variableDynamicImportRuntimeHelper((/* #__PURE__ */ Object.assign({})), `./data/${v}.json`, 3)"),
         "{a}"
     );
-    assert!(a.contains("import(`./data/${v}.js`)"), "{a}");
+    assert!(
+        a.contains("__variableDynamicImportRuntimeHelper((/* #__PURE__ */ Object.assign({\"./data/a.js\": () => import(\"/src/data/a.js\")})), `./data/${v}.js`, 3)"),
+        "{a}"
+    );
     // A template's subpath-import head resolves to a URL.
     assert!(a.contains("import(`/src/data/${v}.js`)"), "{a}");
     assert_eq!(

@@ -16,7 +16,7 @@
 use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_config::FileSystem;
 use ts_r_config::jsonc::{self, Value};
 use ts_r_config::path;
@@ -287,6 +287,19 @@ const NODE_BUILTINS: &[&str] = &[
 ];
 
 /// True for Node built-in modules (`fs`, `fs/promises`, `node:test`).
+/// A bare import path (`pkg`, `@scope/pkg/sub`): not relative, absolute, `#imports` or a URL.
+fn is_package_path(spec: &str) -> bool {
+    !(spec.is_empty()
+        || spec.starts_with('/')
+        || spec.starts_with('\\')
+        || spec.starts_with('#')
+        || spec == "."
+        || spec == ".."
+        || spec.starts_with("./")
+        || spec.starts_with("../")
+        || spec.contains(':'))
+}
+
 pub fn is_node_builtin(spec: &str) -> bool {
     if spec.starts_with("node:") {
         return true;
@@ -371,6 +384,10 @@ pub struct Resolver {
     node_modules_extensions: Vec<String>,
     external: Vec<String>,
     packages_external: bool,
+    /// `--alias` keys and replacements, longest key first.
+    alias: Vec<(String, String)>,
+    /// Where aliased paths resolve from.
+    working_dir: String,
     explicit_tsconfig: Option<String>,
     packages: RwLock<FxHashMap<String, Option<Arc<Package>>>>,
     results: RwLock<FxHashMap<(String, String, ResolveKind), Resolution>>,
@@ -424,6 +441,16 @@ impl Resolver {
             node_modules_extensions: javascript_first(&opts.resolve_extensions),
             external: opts.external.clone(),
             packages_external: opts.packages_external,
+            alias: {
+                let mut a = opts.alias.clone();
+                // Longest key first; a later duplicate key replaces an earlier one.
+                a.reverse();
+                let mut seen = FxHashSet::default();
+                a.retain(|(k, _)| seen.insert(k.clone()));
+                a.sort_by(|x, y| y.0.len().cmp(&x.0.len()).then_with(|| x.0.cmp(&y.0)));
+                a
+            },
+            working_dir: opts.working_dir.clone(),
             explicit_tsconfig: opts.tsconfig.clone(),
             packages: RwLock::default(),
             results: RwLock::default(),
@@ -496,7 +523,34 @@ impl Resolver {
         r
     }
 
+    /// `spec` rewritten by the first (longest) `--alias` key it names: the key itself, or the
+    /// key followed by `/`. A bare `key/` takes the replacement as is (observed in esbuild:
+    /// `--alias:x=/a/file.js` makes `x/` resolve to `/a/file.js`). Only package paths are
+    /// aliased; `prefix` does not match `prefix-foo`.
+    fn alias(&self, spec: &str) -> Option<String> {
+        if self.alias.is_empty() || !is_package_path(spec) {
+            return None;
+        }
+        self.alias.iter().find_map(|(k, v)| {
+            let rest = spec.strip_prefix(k.as_str())?;
+            match rest {
+                "" | "/" => Some(v.clone()),
+                _ if rest.starts_with('/') => Some(format!("{v}{rest}")),
+                _ => None,
+            }
+        })
+    }
+
     fn resolve_uncached(&self, spec: &str, dir: &str, kind: ResolveKind) -> Resolution {
+        // As esbuild: the alias comes first (an external pattern sees the replacement) and
+        // the replacement resolves from the working directory, not the importer's.
+        if let Some(to) = self.alias(spec) {
+            return self.resolve_spec(&to, &self.working_dir, kind);
+        }
+        self.resolve_spec(spec, dir, kind)
+    }
+
+    fn resolve_spec(&self, spec: &str, dir: &str, kind: ResolveKind) -> Resolution {
         if self.is_external_spec(spec) {
             return Resolution::External(spec.to_owned());
         }

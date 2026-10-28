@@ -36,6 +36,7 @@ impl PluginHost for Host {
             load_files: false,
             transform_pre: true,
             transform_post: true,
+            transform_late: false,
             index_html: true,
             hot_update: true,
             middleware: true,
@@ -435,6 +436,7 @@ impl PluginHost for WatchFileHost {
             load: true,
             load_files: true,
             transform_post: true,
+            transform_late: false,
             ..PluginHooks::default()
         }
     }
@@ -530,6 +532,7 @@ impl PluginHost for CssWatchHost {
     fn hooks(&self) -> PluginHooks {
         PluginHooks {
             transform_post: true,
+            transform_late: false,
             ..PluginHooks::default()
         }
     }

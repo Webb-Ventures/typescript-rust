@@ -83,6 +83,7 @@ impl Manifest {
                 load_files: b("load_files"),
                 transform_pre: b("transform_pre"),
                 transform_post: b("transform_post"),
+                transform_late: b("transform_late"),
                 index_html: b("index_html"),
                 hot_update: b("hot_update"),
                 middleware: b("middleware"),
@@ -104,6 +105,7 @@ impl Manifest {
             "hooks": {
                 "resolve_pre": h.resolve_pre, "resolve_post": h.resolve_post, "load": h.load,
                 "load_files": h.load_files, "transform_pre": h.transform_pre, "transform_post": h.transform_post,
+                "transform_late": h.transform_late,
                 "index_html": h.index_html, "hot_update": h.hot_update,
                 "middleware": h.middleware, "client_events": h.client_events,
             },

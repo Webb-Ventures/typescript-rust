@@ -134,6 +134,16 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             };
             match name {
                 "external" => o.external.push(rest.to_owned()),
+                "alias" => {
+                    let v = value.ok_or_else(|| format!("Missing \"=\" in {arg:?}"))?;
+                    if key.is_empty() || key.starts_with('.') || key.starts_with('/') {
+                        return Err(format!("Invalid alias name: {key:?}"));
+                    }
+                    if v.is_empty() {
+                        return Err(format!("Invalid alias substitution: {v:?}"));
+                    }
+                    o.alias.push((key.to_owned(), v.to_owned()));
+                }
                 "define" => {
                     let v = value.ok_or_else(|| format!("missing \"=\" in {arg:?}"))?;
                     o.define.push((key.to_owned(), v.to_owned()));
@@ -224,6 +234,7 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
             "main-fields" => o.main_fields = Some(list(need()?)),
             "conditions" => o.conditions = Some(list(need()?)),
             "resolve-extensions" => o.resolve_extensions = list(need()?),
+            "drop-labels" => o.drop_labels = list(need()?),
             "tsconfig" => o.tsconfig = Some(need()?.to_owned()),
             "jsx" => {
                 let v = need()?;
@@ -329,6 +340,8 @@ mod tests {
             "--loader:.png=file",
             "--metafile=meta.json",
             "--banner:js=// hi",
+            "--drop-labels=DEV,TEST",
+            "--alias:old=new/x",
         ]);
         let o = &c.options;
         assert!(o.bundle && o.splitting && o.minify_identifiers && o.minify_syntax);
@@ -345,12 +358,17 @@ mod tests {
         assert_eq!(o.loaders.get(".png"), Some(&Loader::File));
         assert_eq!(c.metafile.as_deref(), Some("meta.json"));
         assert_eq!(o.banner.as_deref(), Some("// hi"));
+        assert_eq!(o.drop_labels, vec!["DEV", "TEST"]);
+        assert_eq!(o.alias, vec![("old".into(), "new/x".into())]);
         assert!(!c.stdout);
     }
 
     #[test]
     fn errors_and_stdout() {
         let v = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(parse(&v(&["a.js", "--alias:./x=y"])).is_err());
+        assert!(parse(&v(&["a.js", "--alias:x"])).is_err());
+        assert!(parse(&v(&["a.js", "--alias:x="])).is_err());
         assert!(parse(&v(&["a.js", "--nope"])).is_err());
         assert!(parse(&v(&["a.js", "--format=amd"])).is_err());
         assert!(parse(&v(&["a.js", "b.js"])).is_err());
