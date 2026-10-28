@@ -1,0 +1,14 @@
+a.ts(12,1): error TS2322: Type '(cb: (x: Animal) => Animal) => void' is not assignable to type '(cb: (x: Dog) => Animal) => void'.
+  Types of parameters 'cb' and 'cb' are incompatible.
+    Types of parameters 'x' and 'x' are incompatible.
+      Property 'dog' is missing in type 'Animal' but required in type 'Dog'.
+a.ts(17,1): error TS2322: Type '(cb: (x: Animal) => Animal) => void' is not assignable to type '(cb: (x: Dog) => Animal) => void'.
+  Types of parameters 'cb' and 'cb' are incompatible.
+    Types of parameters 'x' and 'x' are incompatible.
+      Property 'dog' is missing in type 'Animal' but required in type 'Dog'.
+a.ts(21,1): error TS2322: Type '{ m(cb: (x: Animal) => Animal): void; }' is not assignable to type '{ m(cb: (x: Dog) => Animal): void; }'.
+  Types of property 'm' are incompatible.
+    Type '(cb: (x: Animal) => Animal) => void' is not assignable to type '(cb: (x: Dog) => Animal) => void'.
+      Types of parameters 'cb' and 'cb' are incompatible.
+        Types of parameters 'x' and 'x' are incompatible.
+          Property 'dog' is missing in type 'Animal' but required in type 'Dog'.

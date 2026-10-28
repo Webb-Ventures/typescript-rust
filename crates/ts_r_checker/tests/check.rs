@@ -1177,3 +1177,60 @@ class F { #q = 1; }
         ]
     );
 }
+
+/// A function with no `return` at all needs one unless its type is `any`, exactly
+/// `undefined` or includes `void` (`undefined | number` is not exempt), and a member
+/// access with a missing name (`undefined.`) still checks its object (expected from tsc
+/// 7.0.2 and its test harness, which reports semantic errors through syntax errors).
+#[test]
+fn no_return_needs_exempt_type_and_missing_member_name_checks_object() {
+    let Some(out) = check(
+        STRICT,
+        "function f1(): undefined | number { }\n\
+         function f2(): undefined { }\n\
+         function f3(): void | number { }\n\
+         function f4(): any { }\n\
+         function f5(): number | undefined { if (Math.random()) throw 1; }\n",
+    ) else {
+        return;
+    };
+    let msg = "A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.";
+    assert_eq!(
+        out,
+        vec![format!("1:16 TS2355: {msg}"), format!("5:16 TS2355: {msg}")]
+    );
+    let Some(out) = check_through("a.ts", STRICT, "function f(): void { undefined. }\n") else {
+        return;
+    };
+    assert_eq!(
+        out,
+        vec![
+            "1:22 TS18050: The value 'undefined' cannot be used here.",
+            "1:33 TS1003: Identifier expected."
+        ]
+    );
+}
+
+/// A comparison under a strict callback's re-check does not leave its success in the shared
+/// relation cache: `fd = fa` still fails after `t = s` compared `FA` to `FD` (tsc 7.0.2
+/// reports both; the first needs the re-check two levels deep, not done yet).
+#[test]
+fn strict_callback_success_is_not_cached() {
+    let Some(out) = check(
+        STRICT,
+        "interface Animal { animal: void }\n\
+         interface Dog extends Animal { dog: void }\n\
+         type FA = (cb: { m(x: Animal): Animal }[\"m\"]) => void;\n\
+         type FD = (cb: { m(x: Dog): Animal }[\"m\"]) => void;\n\
+         type MA = { m(x: FA): void }[\"m\"];\n\
+         type MD = { m(x: FD): void }[\"m\"];\n\
+         declare let s: (cb: MA) => void;\n\
+         declare let t: (cb: MD) => void;\n\
+         declare let fa: FA, fd: FD;\n\
+         t = s;\n\
+         fd = fa;\n",
+    ) else {
+        return;
+    };
+    assert!(out.iter().any(|d| d.starts_with("11:1 TS2322")), "{out:?}");
+}

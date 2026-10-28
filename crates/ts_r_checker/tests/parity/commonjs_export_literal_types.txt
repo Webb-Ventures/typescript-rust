@@ -1,0 +1,8 @@
+a.js(10,1): error TS7008: Member 'k' implicitly has an 'any' type.
+b.js(2,16): error TS18048: 'apply' is possibly 'undefined'.
+b.js(2,22): error TS2339: Property 'toFixed' does not exist on type '"ok" | 1 | (() => void)'.
+  Property 'toFixed' does not exist on type '"ok"'.
+b.js(4,7): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+c.ts(3,12): error TS2493: Tuple type '[number, string]' of length '2' has no element at index '2'.
+c.ts(4,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 't2' must be of type 'undefined', but here has type 'string | number'.

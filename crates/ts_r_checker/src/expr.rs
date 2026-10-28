@@ -3668,7 +3668,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         let name = match *ast.node(prop) {
             Node::Ident { name } => ast.atom(name).to_owned(),
             Node::PrivateName { name } => format!("#{}", ast.atom(name)),
-            _ => return TypeId::ERROR,
+            _ => {
+                // A missing name (`undefined.`): the object is still checked (TS18050).
+                if ot != TypeId::UNRESOLVED && !self.store().is_error(ot) {
+                    self.check_non_null(Loc::new(e.file, obj), ot);
+                }
+                return TypeId::ERROR;
+            }
         };
         // Members emptied by conflicting discriminants are gone (`reduced_type`); an
         // intersection emptied so says why.

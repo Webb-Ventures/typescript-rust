@@ -448,3 +448,46 @@ fn quick_info_alias_expands_outermost_alias() {
     let t = ck.declared_type_of_symbol(aliases[1].1);
     assert_eq!(ck.type_to_string(t), "A");
 }
+
+/// Quick info (tsc 7.0.2 fourslash): a predicate keeps the declaration's parentheses
+/// (thisPredicateFunctionQuickInfo01), an object literal property keeps a literal its
+/// contextual type expects (quickInfoFromContextualUnionType2), and an intersection
+/// emptied by conflicting discriminants prints `never` (quickinfoVerbosityIntersection1).
+#[test]
+fn quick_info_predicate_parens_contextual_literals_and_never() {
+    let Some(program) = editor_program(&[(
+        "a.ts",
+        "declare class C { isN(): this is (C & this); }\n\
+         declare function t(arg: { prop: \"foo\" } | undefined): void;\n\
+         t({ prop: \"bar\" });\n\
+         type Foo = { a: \"c\" };\ntype Bar = { a: \"b\" };\ndeclare var obj: Foo & Bar;\n",
+    )]) else {
+        return;
+    };
+    let a = program.file_index("/p/a.ts").unwrap();
+    let file = FileId(a as u32);
+    let ast = &program.files[a].ast;
+    let checker = Checker::new(&program);
+    let mut ck = Ck::new(&checker, file);
+    let find = |f: fn(&Node) -> bool| {
+        (0..ast.node_count())
+            .filter_map(|i| ts_r_ast::NodeId::from_raw(i as u32))
+            .find(|&id| f(ast.node(id)))
+            .and_then(|id| checker.sym_of_decl(Loc::new(file, id)))
+            .unwrap()
+    };
+    let m = find(|n| matches!(n, Node::MethodDef { .. } | Node::MethodSignature { .. }));
+    let mt = ck.type_of_symbol(m);
+    let sig = ck.signatures_of(mt, ts_r_checker::members::SigKind::Call)[0];
+    let mode = ts_r_checker::PrintMode::quick_info(Loc::new(file, ast.root));
+    assert_eq!(
+        ck.signature_to_string_with(sig, ts_r_checker::members::SigKind::Call, false, mode),
+        "(): this is (C & this)"
+    );
+    let p = find(|n| matches!(n, Node::Property { .. }));
+    let pt = ck.type_of_symbol(p);
+    assert_eq!(ck.type_to_string(pt), "\"bar\"");
+    let v = var_syms(&checker, file, ast)[0].1;
+    let vt = ck.type_of_symbol(v);
+    assert_eq!(ck.type_to_string(vt), "never");
+}

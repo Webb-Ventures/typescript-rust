@@ -224,6 +224,26 @@ impl<'c, 'a> Ck<'c, 'a> {
             | Node::Continue { .. } => {}
             Node::ExprStmt { expr } => {
                 self.check_expr(at(expr));
+                // `x.k = void 0` only ever assigned `undefined` (JavaScript): TS7008.
+                if let Node::Assign {
+                    left,
+                    op: ts_r_ast::AssignOp::Assign,
+                    ..
+                } = *ast.node(expr)
+                    && self.c.opts.no_implicit_any
+                    && let Node::Member { obj, prop, .. } = *ast.node(left)
+                    && !matches!(ast.node(obj), Node::This {})
+                    && let Some(s) = self.c.sym_of_decl(at(left))
+                    && self.c.value_decl(s) == Some(at(left))
+                    && self.type_of_symbol(s) == TypeId::IMPLICIT_ANY
+                    && let Some(name) = crate::nodes::ident_text(ast, prop)
+                {
+                    self.error(
+                        at(expr),
+                        dg::MEMBER_0_IMPLICITLY_HAS_AN_1_TYPE_7008,
+                        &[name, "any"],
+                    );
+                }
             }
             Node::If { test, cons, alt } => {
                 self.check_truthiness_expr(at(test));
@@ -2734,7 +2754,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let implicit_returns =
             self.c.opts.no_implicit_returns && !self.exempt_from_implicit_returns(target);
         if returns.is_empty() {
-            if unknown || !accepts_undefined || implicit_returns {
+            // No `return` at all: only `any`, exactly `undefined` and types including
+            // `void` are exempt (`undefined | number` is not; tsc: checker.go,
+            // checkAllCodePathsInNonVoidFunctionReturnOrThrow).
+            if !self.exempt_from_implicit_returns(target) {
                 self.error_span(rl.file, rspan, dg::A_FUNCTION_WHOSE_DECLARED_TYPE_IS_NEITHER_UNDEFINED_VOID_NOR_ANY_MUST_RETURN_A_V_2355, &[]);
             }
         } else if self.c.opts.strict_null_checks && !accepts_undefined {

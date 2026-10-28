@@ -391,9 +391,11 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     fn print_type(&mut self, t: TypeId, depth: u32, stack: &mut Vec<TypeId>) -> String {
         let mut skip_alias = false;
+        let mut no_reduction = false;
         if depth == 0 && stack.is_empty() {
             self.print_nodes = 0;
             skip_alias = std::mem::take(&mut self.print_skip_alias);
+            no_reduction = std::mem::take(&mut self.print_no_reduction);
         }
         self.print_nodes += 1;
         if self.print_nodes > MAX_PRINT_NODES {
@@ -421,6 +423,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(name) = s.error_name(t) {
             return name.to_owned();
         }
+        // An intersection emptied by conflicting discriminants prints as `never`, also
+        // through its alias (tsc reduces every type it prints).
+        if !no_reduction
+            && s.flags(t).contains(TypeFlags::INTERSECTION)
+            && self.reduced_type(t) == TypeId::NEVER
+        {
+            return "never".into();
+        }
+        let s = self.store();
         // A forward reference prints as its alias (`type T = [number, T[]]`).
         if let Some(sym) = s.forward_alias(t).filter(|_| !skip_alias) {
             let name = self.c.sym_name(sym).to_owned();
@@ -1942,6 +1953,26 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// Whether the type predicate of `sig`'s declaration writes its type `t` in parentheses.
+    fn predicate_annotation_parenthesized(&mut self, sig: SigId, t: TypeId) -> bool {
+        let Some(d) = self.store().sig(sig).decl.and_then(Loc::unpack) else {
+            return false;
+        };
+        let ast = self.ast(d.file);
+        let r = match *ast.node(d.node) {
+            Node::MethodSignature { return_type, .. } | Node::CallSignature { return_type, .. } => {
+                return_type
+            }
+            Node::FunctionType { return_type, .. } => Some(return_type),
+            _ => crate::nodes::fn_parts(ast, d.node).and_then(|f| f.return_type),
+        };
+        let Some(Node::TypePredicate { ty: Some(pt), .. }) = r.map(|r| *ast.node(r)) else {
+            return false;
+        };
+        matches!(ast.node(pt), Node::ParenType { .. })
+            && self.type_from_node(Loc::new(d.file, pt)) == t
+    }
+
     /// The return annotation of signature `sig`'s declaration (not a type predicate).
     fn return_annotation_of(&self, sig: SigId) -> Option<Loc> {
         let d = self.store().sig(sig).decl.and_then(Loc::unpack)?;
@@ -2469,15 +2500,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                     ts_r_types::PredicateKind::AssertsIdentifier
                         | ts_r_types::PredicateKind::AssertsThis
                 );
-                match (asserts, p.ty) {
-                    (true, None) => format!("asserts {pname}"),
-                    (true, Some(t)) => format!(
-                        "asserts {pname} is {}",
-                        self.print_type(t, depth + 1, stack)
-                    ),
-                    (false, Some(t)) => {
-                        format!("{pname} is {}", self.print_type(t, depth + 1, stack))
+                let ts = p.ty.map(|t| {
+                    let ts = self.print_type(t, depth + 1, stack);
+                    // Quick info keeps the declaration's parentheses (`this is (A & this)`).
+                    if self.print_reuse && self.predicate_annotation_parenthesized(sig, t) {
+                        format!("({ts})")
+                    } else {
+                        ts
                     }
+                });
+                match (asserts, ts) {
+                    (true, None) => format!("asserts {pname}"),
+                    (true, Some(ts)) => format!("asserts {pname} is {ts}"),
+                    (false, Some(ts)) => format!("{pname} is {ts}"),
                     (false, None) => self.print_type(r, depth + 1, stack),
                 }
             }

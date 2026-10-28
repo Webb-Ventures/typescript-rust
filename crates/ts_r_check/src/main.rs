@@ -774,9 +774,39 @@ fn main() -> ExitCode {
         if report.trace {
             let _ = write!(out, "{}", trace::text(&fs, &program, None));
         }
+        // tsc still reports the config's diagnostics and syntax errors (option errors only
+        // without syntax errors); nothing is checked. Any error: exit 1 (nothing emitted).
+        let syntax = build::syntactic_diagnostics(&program);
+        let mut config_diags = parsed.all_diagnostics();
+        if syntax.iter().any(Diagnostic::is_error) {
+            config_diags = parsed.diagnostics.clone();
+        }
+        let mut sources = sources_of(&program, &syntax);
+        let diags = merge_config_diagnostics(syntax, &config_diags, &mut sources, &fs);
+        let shown = Shown {
+            sources: sources
+                .into_iter()
+                .map(|s| s.map(|(path, text)| SourceText::new(relative(&path, &cwd), text)))
+                .collect(),
+        };
+        for d in diags.iter().filter(|_| !quiet) {
+            if pretty {
+                let mut text = format_pretty(d, &shown, Renderer { color: true });
+                if shown.source(d.file).is_none() && text.ends_with("\n\n") {
+                    text.pop();
+                }
+                let _ = write!(out, "{text}");
+            } else {
+                let _ = writeln!(out, "{}", format_plain(d, &shown));
+            }
+        }
         let _ = write!(out, "{}", explain::list(&program));
+        let errors = diags.iter().filter(|d| d.is_error()).count();
+        if pretty && errors > 0 && !quiet {
+            let _ = write!(out, "\n{}", pretty_summary(&diags, &shown, errors, 0));
+        }
         let _ = out.flush();
-        return ExitCode::SUCCESS;
+        return ExitCode::from(u8::from(errors > 0));
     }
     let started = std::time::Instant::now();
     let mut error_count = 0usize;

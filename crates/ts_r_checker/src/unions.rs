@@ -1206,7 +1206,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             let pn = self.conflicting_private(t)?;
             (crate::diagnostics_generated::THE_INTERSECTION_0_WAS_REDUCED_TO_NEVER_BECAUSE_PROPERTY_1_EXISTS_IN_MULTIPLE_CO_18032, pn)
         };
+        self.print_no_reduction = true;
         let ts = self.type_to_string(t);
+        self.print_no_reduction = false;
         let pname = self.store().str(pn).to_owned();
         Some((info, ts, pname))
     }

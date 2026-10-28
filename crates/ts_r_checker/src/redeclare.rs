@@ -506,8 +506,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     return Some(t);
                 }
+                // `var t2 = t[2]` past a tuple's end is `undefined`, compared as such.
+                let element_undefined = t == TypeId::UNDEFINED
+                    && init.is_some_and(|i| {
+                        matches!(
+                            ast.node(crate::nodes::skip_parens(ast, i)),
+                            Node::Index { .. }
+                        )
+                    });
                 if type_ann.is_none()
                     && init.is_some()
+                    && !element_undefined
                     && (self
                         .store()
                         .flags(t)

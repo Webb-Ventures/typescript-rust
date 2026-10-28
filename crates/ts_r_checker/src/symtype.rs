@@ -737,8 +737,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                 None => TypeId::IMPLICIT_ANY,
             },
             Node::Property { value, .. } => {
-                let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, value)));
-                let w = self.widen_literal(t);
+                // Literals the contextual type expects stay (`{ prop: "bar" }` for `"foo"`).
+                let v = Loc::new(d.file, value);
+                let t = self.quietly(|ck| ck.check_expr(v));
+                let w = self.quietly(|ck| ck.widen_for_mutable_location(v, t));
                 self.widened_type(w)
             }
             Node::ShorthandProp { name, .. } => {
@@ -972,6 +974,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     object_literals += 1;
                 }
+                if commonjs_export {
+                    // The regular type of the rightmost assigned value (`exports.y =
+                    // exports.x = void 0`), literals kept; a first `undefined` of several
+                    // assignments is skipped (tsc: getAssignmentDeclarationInitializerType).
+                    let mut r = right;
+                    while let Node::Assign {
+                        op: ts_r_ast::AssignOp::Assign,
+                        right,
+                        ..
+                    } = *ast.node(skip_parens(ast, r))
+                    {
+                        r = right;
+                    }
+                    let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, r)));
+                    let t = self.store().regular(t);
+                    let skip = t == TypeId::UNDEFINED
+                        && self.c.decls(s).len() > 1
+                        && self.c.decls(s).first() == Some(&d);
+                    if !skip && !types.contains(&t) {
+                        types.push(t);
+                    }
+                    continue;
+                }
                 let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, right)));
                 let w = self.widen_literal(t);
                 types.push(self.widened_type(w));
@@ -983,19 +1008,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         // `x.f = undefined` (or `void 0`) declares nothing: `any` alone, else the other
         // assignments' types (observed).
         if types.iter().all(|&t| t == TypeId::UNDEFINED) {
-            return TypeId::ANY;
+            // In JavaScript, implicitly `any` (TS7008 at the first assignment).
+            let js = self
+                .c
+                .value_decl(s)
+                .is_some_and(|d| self.c.file(d.file).is_js());
+            return if js {
+                TypeId::IMPLICIT_ANY
+            } else {
+                TypeId::ANY
+            };
         }
-        types.retain(|&t| t != TypeId::UNDEFINED);
+        if !commonjs_export {
+            types.retain(|&t| t != TypeId::UNDEFINED);
+        }
         let t = self.union(&types);
         // A union of object literals is normalized by tsc (missing properties become
         // optional `undefined`); not modelled.
         if object_literals > 1 && self.store().flags(t).contains(TypeFlags::UNION) {
             return TypeId::UNRESOLVED;
         }
-        // A CommonJS export assigned values of different types keeps their literal types
-        // (and sometimes `undefined`) in tsc; not modelled.
-        if commonjs_export && self.store().flags(t).contains(TypeFlags::UNION) {
-            return TypeId::UNRESOLVED;
+        if commonjs_export {
+            return self.widened_type(t);
         }
         // `this.x = v` only in a class's methods, never in its constructor, may be unset:
         // `| undefined` under strictNullChecks (tsc 7).
