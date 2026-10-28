@@ -149,8 +149,8 @@ Usage: ts-r-dev [root] [options]
     intro:
       'ts-r-lint runs ESLint-compatible rules over JavaScript and TypeScript. It reads the config you already have, reports in ESLint’s formats and exits with ESLint’s codes, so it can stand in for eslint in scripts and CI when your config only uses the rules it has.',
     works: [
-      '157 rules: all 64 of ESLint 10’s recommended set, typescript-eslint’s recommended and strict rules and three jsdoc rules; 51 are type-aware, on ts-r’s own checker',
-      '15,708 of 15,732 cases of the published ESLint, typescript-eslint and eslint-plugin-jsdoc tests for those rules match',
+      '248 rules: all 64 of ESLint 10’s recommended set and 66 more core rules, typescript-eslint’s recommended and strict rules and 36 jsdoc rules; 51 are type-aware, on ts-r’s own checker',
+      '18,892 of 18,912 cases of the published ESLint, typescript-eslint and eslint-plugin-jsdoc tests for those rules match',
       'ESLint flat config, .oxlintrc.json and biome.json',
       '--fix, eslint-disable comments and inline config, with unused-disable reports',
       'Output as stylish, json, sarif or GitHub Actions annotations',

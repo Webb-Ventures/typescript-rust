@@ -1,0 +1,9 @@
+{"rule":"no-proto","source":"eslint","skipped":{},"cases":[{"code":"var a = test[__proto__];","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var __proto__ = null;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"foo[`__proto`] = null;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"foo[`__proto__\n`] = null;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"class C { #__proto__; foo() { this.#__proto__; } }","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2022},"messages":[],"output":null},
+{"code":"var a = test.__proto__;","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-proto","messageId":"unexpectedProto","message":"The '__proto__' property is deprecated.","line":1,"column":9,"endLine":1,"endColumn":23}],"output":null},
+{"code":"var a = test['__proto__'];","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-proto","messageId":"unexpectedProto","message":"The '__proto__' property is deprecated.","line":1,"column":9,"endLine":1,"endColumn":26}],"output":null},
+{"code":"var a = test[`__proto__`];","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-proto","messageId":"unexpectedProto","message":"The '__proto__' property is deprecated.","line":1,"column":9,"endLine":1,"endColumn":26}],"output":null},
+{"code":"test[`__proto__`] = function () {};","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-proto","messageId":"unexpectedProto","message":"The '__proto__' property is deprecated.","line":1,"column":1,"endLine":1,"endColumn":18}],"output":null}]}

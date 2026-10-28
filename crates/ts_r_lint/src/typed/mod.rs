@@ -184,7 +184,7 @@ pub fn check_and_lint(project: &LoadedProject, lint: &[TypedFile], threads: usiz
             checked.push(d.clone());
         }
     }
-    let ours = tsc_diagnostics(program, checked);
+    let ours = tsc_diagnostics(program, &checker, checked);
     let keys = keys_of(project, &ours);
     let mut failed = failed.into_inner().unwrap_or_else(|e| e.into_inner());
     failed.sort_unstable();
@@ -230,39 +230,78 @@ pub fn lint_program_file(ck: &mut Ck<'_, '_>, file: FileId, cfg: &FileConfig) ->
     )
 }
 
-/// The diagnostics tsc reports for the program given the checker's per-file diagnostics:
-/// syntax errors stop semantic checking (as `ts_r_checker::check_program`).
-fn tsc_diagnostics(program: &ProgramFiles, checked: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let mut syntax: Vec<Diagnostic> = Vec::new();
+/// The diagnostics tsc reports for the program given the checker's per-file diagnostics,
+/// assembled as `ts_r_checker::check_program` does: syntax errors (with the checker-grammar
+/// ones that do not block and malformed `/// <reference />` directives, TS1084) stop
+/// semantic checking; otherwise the reference-directive diagnostics, the global ones
+/// (TS2688 with its chain, TS2209/TS2210, TS2318) and the checked files' follow.
+fn tsc_diagnostics(
+    program: &ProgramFiles,
+    checker: &Checker<'_>,
+    checked: Vec<Diagnostic>,
+) -> Vec<Diagnostic> {
+    use ts_r_checker::diag::{Chain, dg, msg};
+    use ts_r_checker::driver::CHECKER_GRAMMAR_CODES;
+    let mut out: Vec<Diagnostic> = Vec::new();
+    let mut broken = false;
     for (i, f) in program.files.iter().enumerate() {
         if f.is_lib {
             continue;
         }
-        syntax.extend(
-            f.syntax
-                .iter()
-                .cloned()
-                .map(|d| d.with_file(FileId(i as u32))),
+        let file = FileId(i as u32);
+        for d in ts_r_parser::tsc_syntax_errors(&f.syntax, &f.grammar, &f.lenient) {
+            broken |= d.is_error() && !CHECKER_GRAMMAR_CODES.contains(&d.code);
+            out.push(d.with_file(file));
+        }
+        let invalid = ts_r_checker::invalid_reference_diagnostics(f);
+        broken |= !invalid.is_empty();
+        out.extend(invalid.into_iter().map(|d| d.with_file(file)));
+    }
+    if broken {
+        return ts_r_checker::sort_and_dedup(program, out);
+    }
+    let paths: rustc_hash::FxHashSet<&str> =
+        program.files.iter().map(|f| f.path.as_str()).collect();
+    for (i, f) in program.files.iter().enumerate() {
+        let file = FileId(i as u32);
+        out.extend(
+            ts_r_checker::reference_diagnostics(f, &program.options, &paths)
+                .into_iter()
+                .map(|d| d.with_file(file)),
+        );
+        let missing: Vec<&str> = program
+            .missing_type_references
+            .iter()
+            .filter(|(p, _)| *p == f.path)
+            .map(|(_, n)| n.as_str())
+            .collect();
+        out.extend(
+            ts_r_checker::type_reference_diagnostics(f, &missing)
+                .into_iter()
+                .map(|d| d.with_file(file)),
         );
     }
-    if syntax
-        .iter()
-        .any(|d| d.is_error() && !ts_r_checker::driver::CHECKER_GRAMMAR_CODES.contains(&d.code))
-    {
-        return ts_r_checker::sort_and_dedup(program, syntax);
-    }
-    let mut out = syntax;
     for name in &program.missing_types {
         let mut d = Diagnostic::new(
-            ts_r_checker::diag::msg(
-                ts_r_checker::diag::dg::CANNOT_FIND_TYPE_DEFINITION_FILE_FOR_0_2688,
-            ),
+            msg(dg::CANNOT_FIND_TYPE_DEFINITION_FILE_FOR_0_2688),
             ts_r_span::Span::new(0, 0),
             &[name],
         );
+        let mut chain = Chain::new();
+        chain.push_back(dg::CANNOT_FIND_TYPE_DEFINITION_FILE_FOR_0_2688, &[name]);
+        chain.push_back(dg::THE_FILE_IS_IN_THE_PROGRAM_BECAUSE_1430, &[]);
+        chain.push_back(
+            dg::ENTRY_POINT_OF_TYPE_LIBRARY_0_SPECIFIED_IN_COMPILEROPTIONS_1417,
+            &[name],
+        );
+        d.message = chain.text();
         d.file = FileId(u32::MAX);
         out.push(d);
     }
+    out.extend(ts_r_checker::driver::ambiguous_root_diagnostics(program));
+    out.extend(ts_r_checker::driver::missing_global_type_diagnostics(
+        checker,
+    ));
     out.extend(checked);
     ts_r_checker::sort_and_dedup(program, out)
 }
@@ -426,5 +465,32 @@ mod tests {
             reported.keys().any(|k| k.contains("TS2300")),
             "{reported:?}"
         );
+    }
+
+    /// Reference directives give the keys `ts-r-check` gives: a malformed one is a syntax
+    /// error (TS1084) that stops the semantic check, a missing `path` target is TS6053.
+    #[test]
+    fn reference_directive_diagnostics() {
+        let Some(libs) = LibStore::locate() else {
+            eprintln!("skipped: lib files missing (cargo xtask upstream sync --minimal)");
+            return;
+        };
+        let keys = |code: &str| {
+            let mut fs = ts_r_config::MemoryFs::new();
+            fs.set_cwd("/p");
+            fs.add_file(
+                "/p/tsconfig.json",
+                r#"{"compilerOptions": {"strict": true, "noEmit": true, "types": []}, "files": ["a.ts"]}"#,
+            );
+            fs.add_file("/p/a.ts", code);
+            let project = load_project(&fs, "/p/tsconfig.json", &libs, 1);
+            check_and_lint(&project, &[], 1).keys
+        };
+        let bad = keys("/// <reference bogus=\"x\" />\nconst n: number = \"s\";\n");
+        assert!(bad.keys().any(|k| k.contains("TS1084")), "{bad:?}");
+        assert!(!bad.keys().any(|k| k.contains("TS2322")), "{bad:?}");
+        let missing = keys("/// <reference path=\"./nope.ts\" />\nconst n: number = \"s\";\n");
+        assert!(missing.keys().any(|k| k.contains("TS6053")), "{missing:?}");
+        assert!(missing.keys().any(|k| k.contains("TS2322")), "{missing:?}");
     }
 }

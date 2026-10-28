@@ -42,7 +42,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 | Tool | Replaces | Works today | Known gaps |
 |---|---|---|---|
 | `ts-r-check` | `tsc` (type checking, emit, `--build`, `--watch`) | tsc 7's codes, messages and chains; JavaScript, declaration and source-map emit; project references | Some inference and narrowing; 3.0% of conformance tests still differ |
-| `ts-r-lint` | ESLint, oxlint | 157 rules, 51 of them type-aware on ts-r's own checker; 15,708 of 15,732 cases of ESLint's, typescript-eslint's and eslint-plugin-jsdoc's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint (and three eslint-plugin-jsdoc rules) |
+| `ts-r-lint` | ESLint, oxlint | 248 rules, 51 of them type-aware on ts-r's own checker; 18,892 of 18,912 cases of ESLint's, typescript-eslint's and eslint-plugin-jsdoc's own tests pass; flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint (and 36 eslint-plugin-jsdoc rules) |
 | `ts-r-build` | esbuild, `vite build` | esbuild's CLI flags; ESM, CJS and IIFE output; code splitting; minification; source maps; `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | `ts-r-run` | tsx, ts-node | Runs TypeScript on Node 22.15+ with tsc 7's JavaScript output | Only the entry's tsconfig is used |
 | `ts-r-dev` | `vite dev` | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling, `vite.config` and Vite plugins | No CSS preprocessors; some `vite.config` options and plugin APIs; HTTP/1.1 only |

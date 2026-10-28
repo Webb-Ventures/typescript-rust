@@ -1,0 +1,10 @@
+{"rule":"no-new-object","source":"eslint","skipped":{},"cases":[{"code":"var myObject = {};","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var myObject = new CustomObject();","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var foo = new foo.Object()","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var Object = function Object() {};\n            new Object();","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var x = something ? MyClass : Object;\n        var y = new x();","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"\n        class Object {\n            constructor(){\n\n            }\n        }\n        new Object();\n        ","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[],"output":null},
+{"code":"\n        import { Object } from './'\n        new Object();\n        ","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6,"sourceType":"module"},"messages":[],"output":null},
+{"code":"var foo = new Object()","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-new-object","messageId":"preferLiteral","message":"The object literal notation {} is preferable.","line":1,"column":11,"endLine":1,"endColumn":23}],"output":null},
+{"code":"new Object();","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-new-object","messageId":"preferLiteral","message":"The object literal notation {} is preferable.","line":1,"column":1,"endLine":1,"endColumn":13}],"output":null},
+{"code":"const a = new Object()","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":6},"messages":[{"ruleId":"no-new-object","messageId":"preferLiteral","message":"The object literal notation {} is preferable.","line":1,"column":11,"endLine":1,"endColumn":23}],"output":null}]}

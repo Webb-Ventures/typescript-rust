@@ -393,6 +393,7 @@ impl Rule for EscapeInlineTags {
         let contexts = Contexts {
             entries: Vec::new(),
             all: true,
+            plain_any: false,
         };
         jsdoc::for_each_doc(cx, &settings, &contexts, |cx, f, doc| {
             self.check(cx, f, doc)

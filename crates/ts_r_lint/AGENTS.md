@@ -46,7 +46,13 @@ Files:
 - `project.rs`: file discovery (`.gitignore`, ignores, nearest config), parallel runner.
 - `output.rs`: stylish, json, sarif, github.
 - `ast_util.rs`: helpers shared by rules.
+- `rules/this_binding.rs`: where a `this` is bound and whether code is strict (core rules).
 - `jsdoc.rs`: shared machinery for the `jsdoc/*` rules (see "jsdoc rules" below).
+- `jsdoc_util.rs`: helpers the round-3 `jsdoc/*` rules share (the `contexts` option,
+  preferred-tag lookup, "replaces docs" exemptions, generator/`yield`/`throw` questions).
+- `esquery.rs`: esquery selectors (parser and matcher, generic over a `Tree`); `estree.rs`:
+  the typescript-estree view of a file they match; `jsdoc_tree.rs`: the `JsdocBlock` view of
+  one comment for jsdoc `comment` contexts (see "Selectors" below).
 
 ## Invariants
 
@@ -129,13 +135,13 @@ Files:
   variable (`LintEnv::is_builtin_global`). Core `no-undef` reports unresolved type
   references too.
 
-## Status (type-aware round 3, `m4/type-aware-3`)
+## Status (v1 lint round 3, `wip/v1-lint3`)
 
-- 157 rules, 51 of them type-aware. Rule oracle: 15,708 / 15,732 cases. The non-type-aware
-  cases are 8,808 / 8,812 and the type-aware cases 6,900 / 6,920 (2026-10-26); the 20
-  type-aware failures are a subset of the 46 listed in design record 0006, and the 4 others
-  are jsdoc cases whose `contexts` are esquery selectors (`tests/oracle/baseline.txt` has the
-  current per-rule counts).
+- 248 rules (130 core ESLint, 82 typescript-eslint, 36 eslint-plugin-jsdoc), 51 of them
+  type-aware. Rule oracle: 18,892 / 18,912 cases. The non-type-aware cases are
+  11,992 / 11,992 and the type-aware cases 6,900 / 6,920 (2026-10-26); the 20
+  type-aware failures are a subset of the 46 listed in design record 0006
+  (`tests/oracle/baseline.txt` has the current per-rule counts).
 - private-app against ESLint with every configured rule: all 23 projects pass the parity
   gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
@@ -168,6 +174,31 @@ Files:
   --no-gitignore -c oracle.config.mjs -f json`); `compare.py` treats `ALL.json` as every
   package.
 
+## Core ESLint rules (round 3)
+
+Round 3 adds 57 core rules, each at 100% of its oracle (`no-return-assign` through
+`no-useless-rename` at the end of `tests/oracle/gen/rules.txt`).
+
+- **Shared pieces.** `rules/this_binding.rs` (no `RULE`) answers where a `this` is bound and
+  whether that binding is the default one (the global object in sloppy code, and never
+  under `impliedStrict` or in a module); `no-eval`, `no-alert`, `no-extra-bind` and
+  `no-lone-blocks` use it. `rules::max_option` reads a `max-*` limit given as a
+  number or as `{ max }` / `{ maximum }`. `LintEnv::implied_strict` carries
+  `parserOptions.ecmaFeatures.impliedStrict` (all code strict), next to `global_return`.
+- **yoda** decides "is this a range test" with JavaScript's `<=`: two strings compare by
+  UTF-16 code units, anything else through ToNumber, and a regex literal compares as its
+  source text.
+- **no-useless-rename** reports but does not fix when removing the key would drop a comment,
+  or when the target with a default is wrapped in parentheses.
+- Not done yet: `no-promise-executor-return`, `grouped-accessor-pairs`, `no-else-return`.
+
+Read to understand (not ported), ESLint `lib/rules/`: `no-eval.js`, `no-lonely-if.js`,
+`no-alert.js`, `eqeqeq.js`, `no-throw-literal.js`, `radix.js`, `no-extra-bind.js`,
+`no-lone-blocks.js`, `prefer-numeric-literals.js`, `no-extend-native.js`,
+`prefer-object-has-own.js`, `no-useless-computed-key.js`, `no-restricted-properties.js`,
+`no-restricted-globals.js`, `yoda.js`, `no-useless-rename.js`, and `utils/ast-utils.js`
+(the default-`this` test, when braces are needed, same-reference and static property names).
+
 ## jsdoc rules
 
 `jsdoc/require-param-description`, `jsdoc/require-returns` and `jsdoc/escape-inline-tags`
@@ -185,8 +216,21 @@ Files:
   (`Target::Export`), as ESLint sees `ExportNamedDeclaration` before the declaration. Contexts
   name ESTree types (`Finder::es_type` maps our nodes); `any` (or an object without a context)
   switches to "every block once": the first node in pre-order that finds an unclaimed block
-  claims it, and blocks no node claims are checked with no node. esquery selectors and
-  `comment` contexts are not supported (options error).
+  claims it, and blocks no node claims are checked with no node. With `any`, object entries
+  with a `comment` filter decide per block: the first entry with no `comment`, or whose
+  `comment` matches the block, checks it; no such entry, no check.
+- **Selector contexts.** When a context is an esquery selector, or any entry has a `comment`,
+  the rule runs as listeners: every ESTree node in traversal order is tried against each
+  distinct context in specificity order (the plugin registers one listener per context
+  string), and each matching entry checks that node's block, so two entries matching one
+  node report twice. Synthetic ESTree nodes have no block. A `comment` selector is matched,
+  without ancestry, against the block's `JsdocBlock` tree; an entry applies to a node when
+  its context matches it (or is `any`) and its `comment` matches.
+- **Function types.** A `TSFunctionType` borrows the comment of what it types: through
+  parenthesized types up to an (exported) type alias, a property or method signature, a
+  body-less function's return type, a method's return type, a variable declarator's type
+  (the declaration's comment), or a parameter's type (the function's, or for an arrow in a
+  variable, the declaration's).
 - **Block model.** `Block::parse` reproduces the `comment-parser` tokens (start, delimiter,
   tag, type, name, description, end, line end per line; tag sections split on `@name` outside
   fenced code) so a fix can rebuild the comment exactly: lines live in an arena shared by the
@@ -210,12 +254,104 @@ Files:
   `{@link @scope/pkg}`. Descriptions are scanned first, then each tag but `@example`, one
   report per remaining occurrence; the fixer escapes with `\@` or backticks.
 
-Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc.js`,
+Round 3 adds 32 more rules (`src/rules/jsdoc_*.rs`; shared helpers in `src/jsdoc_util.rs`):
+`require-param-{name,type}`, `require-property-{name,type,description}`, `require-{returns,throws,yields}-{type,description}`,
+`require-next-{type,description}`, `require-throws`, `require-yields`, `require-yields-check`,
+`require-returns-check`, `check-access`, `check-alignment`, `check-property-names`,
+`empty-tags`, `implements-on-classes`, `multiline-blocks`, `no-blank-blocks`,
+`no-blank-block-descriptions`, `no-defaults`, `no-multi-asterisks`, `no-types`,
+`reject-any-type`, `reject-function-type`, `require-hyphen-before-param-description`,
+`tag-lines`. `check-param-names`, `require-property` and `require-asterisk-prefix` were
+written but left out: each misses one case on a report position (below). What we learned:
+
+- **Report positions.** A report given a comment-relative line lands at column 0 of that
+  line; one given only `column: 0` lands at the comment's own column. ESLint can report a
+  column past the end of an empty line (`1:2` on an empty first line, `5:9` on a blank line);
+  a byte span can't say that, so rules whose tests need it wait for an explicit report
+  location on `Diagnostic`.
+- **Fixes on one block accumulate.** A rule that reports several times on a block mutates the
+  same parsed block each time and every fix rewrites the whole comment, so the fixes overlap
+  and only the first in source order is applied per pass (tag-lines shows both mutations in a
+  later report's fix text). Removing a tag or inserting lines renumbers every line after it;
+  inserted lines belong to no tag; lines made by replacing the block description are
+  numbered 0 and the first line always has an empty start.
+- **Contexts.** Rules that declare no default contexts ignore the `contexts` option. Rules
+  that do (`require-yields`, the returns rules) check only blocks whose node matches one of
+  the listed contexts.
+- **Yield and return walks.** The yield search skips nested functions, class bodies, call
+  callees, `new` and `await` operands; with `next` only a yield used directly as an
+  initializer counts. A `MethodDefinition` itself never "has a yield value". The returns and
+  throws checks need *every* branch to end in the statement (`if` with both arms, `switch`
+  with a default, `try` with `finally`).
+- **Undefined-ish types.** A `@returns`/`@yields` type is "maybe undefined" when its
+  top-level union mentions `undefined` or `void`, or it names a `@typedef` whose type does;
+  those blocks don't need a matching return or yield. Type checks in reject-*-type and here
+  use a light scanner of the type text, not a full jsdoc type parser.
+- **no-restricted-syntax** reports a block found through an entry of its own `contexts`
+  (`settings.jsdoc.contexts` is ignored; with no options it visits the four function types
+  and reports the missing option on each block). The block carries the `comment` selector it
+  was found through (`Doc::info_comment`: the entry's under listeners, the first matching
+  `comment` when iterating every block, none under a plain `any`). An entry applies when it is
+  a string whose selector matches the node, or an object whose `context` matches the node (or
+  is missing or `any`) and whose `comment` is that same selector; the first such entry gives
+  the message (`message`, or `Syntax is restricted: {{context}}` plus ` with {{comment}}`).
+  `jsdoc/no-missing-syntax` is not done: it reports at `1:2` on an empty first line.
+
+Read to understand the rules (not ported): eslint-plugin-jsdoc `src/iterateJsdoc.js`
+(iterateAllJsdocs, findContext), `src/jsdocUtils.js` (getContextObject),
 `src/jsdocUtils.js`, `src/utils/hasReturnValue.js`, `src/rules/requireParamDescription.js`,
-`src/rules/requireReturns.js`, `src/rules/escapeInlineTags.js`; `@es-joy/jsdoccomment`
-`src/jsdoccomment.js`, `src/parseComment.js`; `comment-parser` `src/parser/{index,
+`src/rules/requireReturns.js`, `src/rules/escapeInlineTags.js`, and for round 3
+`src/rules/{requireParamName,requireParamType,requireReturnsDescription,requireReturnsType,
+requirePropertyName,checkAccess,emptyTags,implementsOnClasses,noDefaults,noTypes,
+checkAlignment,noMultiAsterisks,noBlankBlocks,noBlankBlockDescriptions,
+requireHyphenBeforeParamDescription,multilineBlocks,requireThrows,requireYields,
+requireYieldsCheck,requireReturnsCheck,checkPropertyNames,tagLines,noRestrictedSyntax}.js`,
+`src/buildRejectOrPreferRuleDefinition.js`, `src/buildForbidRuleDefinition.js`,
+`src/getDefaultTagStructureForMode.js`, `src/index-cjs.js`; `@es-joy/jsdoccomment`
+`src/jsdoccomment.js` (getReducedASTNode, getTSFunctionComment), `src/parseComment.js`,
+`src/commentParserToESTree.js`, `src/commentHandler.js`, `src/parseInlineTags.js`; `comment-parser` `src/parser/{index,
 source-parser,block-parser,spec-parser}.ts`, `src/parser/tokenizers/{tag,type,name,
 description}.ts`, `src/util.ts`, `src/stringifier/index.ts`.
+
+## Selectors
+
+`no-restricted-syntax` and jsdoc `contexts` use esquery 1.7.0 selectors. What we learned:
+
+- **Syntax.** Compound (`A[x]:not(B)`), descendant (` `), child (`>`), sibling (`~`, `+`),
+  `,` lists, `*`, attributes (`[a]`, `[a.b=1]`, `=~`/`!=` with `/re/flags`, `type(...)`,
+  `<`/`<=`/`>`/`>=`, quoted or bare values), `:not/:matches/:is/:has`, `:first-child`,
+  `:last-child`, `:nth-child(n)`, `:nth-last-child(n)`, and the class pseudos
+  (`:statement`, `:declaration`, `:pattern`, `:expression`, `:function`). Type names match
+  case-insensitively. A bare attribute value compares as a string against the property's
+  JavaScript string form; a number compares as a number; a regex only matches strings.
+- **ESLint on top.** ESLint parses each listener key once, strips `:exit`, buckets selectors
+  by the node types they can match (case-sensitive) and, on each node, runs matching
+  selectors in order of attribute count, then identifier count, then the selector text. A
+  repeated selector keeps the last option's message. Sibling and `:nth-*` selectors look at
+  the node's position in its parent's list field; `:has` searches the subtree, with the
+  path back to the subject as its ancestry.
+- **ESTree view.** `EsTree::build` lays out the typescript-estree tree once (types, field
+  names, visitor-key order, ranges): export wrappers, `ChainExpression`, `TSTypeAnnotation`,
+  `ClassBody`, `TSInterfaceBody`, `TemplateElement`, `Property` shorthand values and
+  similar have no AST node of their own (`Origin::Synthetic`). Checked against
+  typescript-estree on the oracle snippets (14,439 of 14,439 matched type, range and parent).
+- **JsdocBlock view.** `JsdocTree` mirrors jsdoccomment's compact ESTree: one
+  `JsdocDescriptionLine` per description line, `JsdocTag` with its `JsdocTypeLine`s, and
+  `JsdocInlineTag`s (`{@link x}`, `{@link x|text}`, `{@link x text}`, `[text]{@link x}`).
+  Tag types are parsed for a subset of jsdoc-type-pratt-parser's typescript mode
+  (`parse_type`): names, numbers, quoted strings, `null`, `undefined`, `*`, `?`, property
+  paths (`JsdocTypeNamePath` with a `JsdocTypeProperty` right side), generics (`A<B>`,
+  `A.<B>`, and `B[]` as a `square` generic of `Array`), object types (`JsdocTypeObject` of
+  `JsdocTypeObjectField`s, whose `key` is a plain string), parentheses and unions. Anything
+  else gets `parsedType: null`, as a type that fails to parse does. Children follow the type
+  parser's visitor keys (`left`, `right`, `element`, `elements`); nested plain objects such
+  as `meta.quote` / `meta.brackets` / `meta.dot` / `meta.separator` are attributes.
+
+Read to understand (not ported): esquery `dist/esquery.esm.js`; ESLint
+`lib/linter/esquery.js`, `lib/linter/source-code-traverser.js`. The type shapes come from
+observed `jsdoc-type-pratt-parser` output (`parse(type, 'typescript')`) and its
+`visitorKeys`. The ESTree shape comes from
+typescript-estree's output (types, ranges, parents) and `@typescript-eslint/visitor-keys`.
 
 ## Patterns
 

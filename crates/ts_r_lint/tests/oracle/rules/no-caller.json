@@ -1,0 +1,6 @@
+{"rule":"no-caller","source":"eslint","skipped":{},"cases":[{"code":"var x = arguments.length","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var x = arguments","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var x = arguments[0]","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var x = arguments[caller]","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var x = arguments.callee","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-caller","messageId":"unexpected","message":"Avoid arguments.callee.","line":1,"column":9,"endLine":1,"endColumn":25}],"output":null},
+{"code":"var x = arguments.caller","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-caller","messageId":"unexpected","message":"Avoid arguments.caller.","line":1,"column":9,"endLine":1,"endColumn":25}],"output":null}]}

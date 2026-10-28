@@ -1,0 +1,4 @@
+{"rule":"no-nested-ternary","source":"eslint","skipped":{},"cases":[{"code":"foo ? doBar() : doBaz();","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var foo = bar === baz ? qux : quxx;","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"foo ? bar : baz === qux ? quxx : foobar;","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-nested-ternary","messageId":"noNestedTernary","message":"Do not nest ternary expressions.","line":1,"column":1,"endLine":1,"endColumn":40}],"output":null},
+{"code":"foo ? baz === qux ? quxx : foobar : bar;","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-nested-ternary","messageId":"noNestedTernary","message":"Do not nest ternary expressions.","line":1,"column":1,"endLine":1,"endColumn":40}],"output":null}]}

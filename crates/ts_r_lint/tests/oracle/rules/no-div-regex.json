@@ -1,0 +1,3 @@
+{"rule":"no-div-regex","source":"eslint","skipped":{},"cases":[{"code":"var f = function() { return /foo/ig.test('bar'); };","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var f = function() { return /\\=foo/; };","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"var f = function() { return /=foo/; };","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-div-regex","messageId":"unexpected","message":"A regular expression literal can be confused with '/='.","line":1,"column":29,"endLine":1,"endColumn":35,"fix":true}],"output":"var f = function() { return /[=]foo/; };"}]}

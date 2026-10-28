@@ -1,0 +1,5 @@
+{"rule":"no-eq-null","source":"eslint","skipped":{},"cases":[{"code":"if (x === null) { }","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"if (null === f()) { }","valid":true,"filename":"file.js","parser":"espree","languageOptions":{},"messages":[],"output":null},
+{"code":"if (x == null) { }","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-eq-null","messageId":"unexpected","message":"Use '===' to compare with null.","line":1,"column":5,"endLine":1,"endColumn":14}],"output":null},
+{"code":"if (x != null) { }","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-eq-null","messageId":"unexpected","message":"Use '===' to compare with null.","line":1,"column":5,"endLine":1,"endColumn":14}],"output":null},
+{"code":"do {} while (null == x)","filename":"file.js","parser":"espree","languageOptions":{},"messages":[{"ruleId":"no-eq-null","messageId":"unexpected","message":"Use '===' to compare with null.","line":1,"column":14,"endLine":1,"endColumn":23}],"output":null}]}

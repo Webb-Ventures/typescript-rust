@@ -118,6 +118,8 @@ pub struct LintEnv {
     pub jsx_pragma: Option<String>,
     /// `languageOptions.parserOptions.ecmaFeatures.globalReturn`.
     pub global_return: bool,
+    /// `languageOptions.parserOptions.ecmaFeatures.impliedStrict`: all code is strict.
+    pub implied_strict: bool,
     /// The fragment factory that TSX fragments implicitly reference (`jsxFragmentName`).
     pub jsx_fragment_name: Option<String>,
     /// `emitDecoratorMetadata` and `experimentalDecorators` are both on: decorated classes
@@ -151,6 +153,7 @@ impl Default for LintEnv {
             typescript: false,
             jsx_pragma: None,
             global_return: false,
+            implied_strict: false,
             jsx_fragment_name: None,
             decorator_metadata: false,
             settings: Arc::new(serde_json::Value::Null),
