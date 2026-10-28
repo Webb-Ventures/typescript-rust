@@ -711,7 +711,10 @@ impl<'a> Parser<'a> {
                 // changes once `as T` is erased (`a + b * c`), so the expression stops before
                 // an operator that binds tighter than the one under the `as` (tsc 7,
                 // microsoft/TypeScript#63527; `',' expected` follows in a declaration).
-                if let Node::Binary { op: under, .. } = *self.ast.node(last) {
+                // TypeScript 5.x (typescript-estree) takes it: `ParseOptions::assertion_continues`.
+                if !self.assertion_continues
+                    && let Node::Binary { op: under, .. } = *self.ast.node(last)
+                {
                     if self.at(T::Gt) {
                         self.lx.rescan_greater();
                     }
@@ -992,7 +995,8 @@ impl<'a> Parser<'a> {
     }
 
     /// `super`, which must be followed by `(`, `.` or `[`: anything else is TS1034 at the
-    /// next token (`super;`, `super?.x`). Type arguments after it are parsed and dropped,
+    /// next token (`super;`, `super?.x`), and a member access whose name is parsed there
+    /// (missing unless a name follows). Type arguments after it are parsed and dropped,
     /// TS2754 on them (parserSuperExpression2, taggedTemplatesWithTypeArguments2).
     fn parse_super(&mut self, start: u32) -> NodeId {
         self.bump();
@@ -1013,7 +1017,19 @@ impl<'a> Parser<'a> {
             }
         }
         if !matches!(self.kind(), T::LParen | T::Dot | T::LBracket) {
+            // As tsc: the missing `.` is reported and the name after it parsed, so the
+            // expression is a member access (`super;` is `super.;`, `` super `t` `` is
+            // `` super. `t` ``, `super x` is `super.x`).
             self.error(messages::SUPER_MUST_BE_FOLLOWED);
+            let prop = self.parse_member_name();
+            return self.finish_node(
+                start,
+                Node::Member {
+                    obj: node,
+                    optional: false,
+                    prop,
+                },
+            );
         }
         node
     }
@@ -1024,21 +1040,25 @@ impl<'a> Parser<'a> {
             // `import<T>("m")`, `import<>("m")`, `import<T>;`: type arguments are parsed
             // and dropped, the call is still a module request, and the whole expression is
             // the checker's TS1326 (importCallExpressionWithTypeArgument).
+            // The type arguments are kept on the node: the checker resolves their names
+            // (importWithTypeArguments: TS2304 on `T`).
             self.bump();
-            if self.at(T::Lt) && self.peek_kind() == T::Gt {
+            let type_args = if self.at(T::Lt) && self.peek_kind() == T::Gt {
                 self.bump();
                 self.bump();
+                None
             } else {
-                self.parse_type_args();
-            }
+                Some(self.parse_type_args())
+            };
             let call = if self.at(T::LParen) {
-                self.parse_import_call_rest(start, ImportPhase::Evaluation)
+                self.parse_import_call_rest(start, ImportPhase::Evaluation, type_args)
             } else {
                 let arg = self.missing();
                 self.finish_node(
                     start,
                     Node::ImportCall {
                         phase: ImportPhase::Evaluation,
+                        type_args,
                         arg,
                         options: None,
                     },
@@ -1075,11 +1095,16 @@ impl<'a> Parser<'a> {
                 );
             }
         }
-        self.parse_import_call_rest(start, phase)
+        self.parse_import_call_rest(start, phase, None)
     }
 
     /// `(specifier, options)` of an `import()` call starting at `start`.
-    fn parse_import_call_rest(&mut self, start: u32, phase: ImportPhase) -> NodeId {
+    fn parse_import_call_rest(
+        &mut self,
+        start: u32,
+        phase: ImportPhase,
+        type_args: Option<NodeId>,
+    ) -> NodeId {
         let open = self.start();
         if !self.expect(T::LParen) {
             let arg = self.missing();
@@ -1087,6 +1112,7 @@ impl<'a> Parser<'a> {
                 start,
                 Node::ImportCall {
                     phase,
+                    type_args,
                     arg,
                     options: None,
                 },
@@ -1122,6 +1148,7 @@ impl<'a> Parser<'a> {
             start,
             Node::ImportCall {
                 phase,
+                type_args,
                 arg,
                 options,
             },

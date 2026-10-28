@@ -622,7 +622,15 @@ fn jsx_text_spans(src: &str, kind: SourceKind, ts_in_js: TsInJs) -> Vec<(u32, u3
     if !kind.is_jsx() || !(src.contains("</") || src.contains("/>")) {
         return Vec::new();
     }
-    let ast = ts_r_parser::parse_with(src, kind, ParseOptions { ts_in_js }).ast;
+    let ast = ts_r_parser::parse_with(
+        src,
+        kind,
+        ParseOptions {
+            ts_in_js,
+            ..Default::default()
+        },
+    )
+    .ast;
     (1..ast.nodes.len() as u32)
         .filter_map(NodeId::from_raw)
         .filter(|&n| ast.kind(n) == NodeKind::JsxText)

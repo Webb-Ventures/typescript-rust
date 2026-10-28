@@ -512,7 +512,10 @@ pub fn parse_for_lint(path: &str, src: &str, env: &LintEnv) -> ts_r_parser::Pars
     ts_r_parser::parse_with(
         src,
         SourceKind::from_path(path),
-        ts_r_parser::ParseOptions { ts_in_js },
+        ts_r_parser::ParseOptions {
+            ts_in_js,
+            ..Default::default()
+        },
     )
 }
 

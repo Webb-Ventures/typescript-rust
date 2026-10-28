@@ -7,17 +7,11 @@ compiler/pathMappingBasedModuleResolution1_node.ts	f1.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file3.js	missing: not emitted
 compiler/pathMappingBasedModuleResolution6_node.ts	file1.js	missing: not emitted
 compiler/reachabilityChecksNoCrash1.ts	reachabilityChecksNoCrash1.js	differs: lowering: async functions
-conformance/classes/propertyMemberDeclarations/autoAccessorDisallowedModifiers.ts(target=esnext)	autoAccessorDisallowedModifiers.js	differs: other
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-no-as.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	values-type-as.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-bad-import.js	differs: import/export
 conformance/es2022/arbitraryModuleNamespaceIdentifiers/arbitraryModuleNamespaceIdentifiers_syntax.ts	type-clause-type-as-as.js	differs: import/export
-conformance/es6/templates/taggedTemplatesWithTypeArguments2.ts	taggedTemplatesWithTypeArguments2.js	differs: other
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.3.ts	esDecorators-classDeclaration-classSuper.3.js	differs: lowering: temporaries
-conformance/esDecorators/classDeclaration/classSuper/esDecorators-classDeclaration-classSuper.5.ts	esDecorators-classDeclaration-classSuper.5.js	differs: arrow functions
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.3.ts	esDecorators-classExpression-classSuper.3.js	differs: lowering: temporaries
-conformance/esDecorators/classExpression/classSuper/esDecorators-classExpression-classSuper.5.ts	esDecorators-classExpression-classSuper.5.js	differs: arrow functions
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=false)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecorators=true)	esDecorators-decoratorExpression.3.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=es2022)	topLevelAwaitErrors.1.js	differs: classes
@@ -29,4 +23,3 @@ tsc7/compiler/anonymousClassDecoratorEs2022.ts	anonymousClassDecoratorEs2022.js	
 tsc7/compiler/constEnumOnlyModuleImportAliasEmit.ts	sensmap.js	differs: const enum inlining
 tsc7/compiler/jsxNestedIndentation.js	jsxNestedIndentation.js	missing: TS5055: would overwrite an input
 tsc7/compiler/panicForInEmptyDeclarationList.ts	panicForInEmptyDeclarationList.js	differs: other
-tsc7/compiler/typeOnlyExportImportAliasElidesNamespaceImport.ts	b.js	differs: import/export

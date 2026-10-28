@@ -748,3 +748,56 @@ fn enum_members_from_other_files_are_folded() {
         }
     }
 }
+
+/// `export import A = ns.A` of an interface imported from another file is dropped, and
+/// so is the namespace import only it used (typeOnlyExportImportAliasElidesNamespaceImport).
+/// Unused aliases release their import the same way. Expected outputs are tsc 7.0.2's.
+#[test]
+fn dropped_aliases_release_their_imports() {
+    let r = emit(&[
+        ("tsconfig.json", CONFIG),
+        (
+            "src/a.ts",
+            "export interface A { a: number; }\nexport const v = 1;\n",
+        ),
+        (
+            "src/b.ts",
+            "import * as ns from \"./a\";\n\nexport import A = ns.A;\n",
+        ),
+        // An unused alias is dropped, and with it the import only it used, value or not.
+        (
+            "src/c.ts",
+            "import * as ns from \"./a\";\nimport A = ns.A;\n",
+        ),
+        (
+            "src/d.ts",
+            "import * as ns from \"./a\";\nimport V = ns.v;\n",
+        ),
+        // A chain of unused aliases releases its root too.
+        (
+            "src/e.ts",
+            "import * as ns from \"./a\";\nimport N = ns;\nimport V = N.v;\n",
+        ),
+        (
+            "src/f.ts",
+            "import * as ns from \"./a\";\nexport import V = ns.v;\n",
+        ),
+    ]);
+    assert!(!r.skipped, "{:?}", codes(&r));
+    let out = |name: &str| {
+        let path = format!("/p/out/{name}.js");
+        r.outputs
+            .iter()
+            .find(|o| o.path == path)
+            .unwrap()
+            .text
+            .clone()
+    };
+    for name in ["b", "c", "d", "e"] {
+        assert_eq!(out(name), "export {};\n", "{name}.js");
+    }
+    assert_eq!(
+        out("f"),
+        "import * as ns from \"./a\";\nexport var V = ns.v;\n"
+    );
+}

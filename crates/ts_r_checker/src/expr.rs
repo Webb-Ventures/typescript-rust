@@ -508,6 +508,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 arg,
                 options,
                 phase,
+                ..
             } => {
                 // `import()` under verbatimModuleSyntax and `module: commonjs` is a grammar
                 // error, before the others (tsc: grammarchecks.go

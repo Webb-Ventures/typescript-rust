@@ -1712,6 +1712,7 @@ fn js_grammar_errors_stay_next_to_ts8xxx() {
     use crate::{ParseOptions, TsInJs, parse_with};
     let report = ParseOptions {
         ts_in_js: TsInJs::Report,
+        ..Default::default()
     };
     let cases: &[(&str, &[(u32, u32)])] = &[
         ("class C { const x = 1 }", &[(8009, 10), (1248, 16)]),
@@ -1949,9 +1950,11 @@ fn ts_in_js_matches_tsc() {
     ];
     let report = ParseOptions {
         ts_in_js: TsInJs::Report,
+        ..Default::default()
     };
     let allow = ParseOptions {
         ts_in_js: TsInJs::Allow,
+        ..Default::default()
     };
     for &(src, want) in cases {
         let r = parse_with(src, SourceKind::Js, report);
@@ -3084,6 +3087,7 @@ fn checked_js_grammar_is_grammar_only_in_javascript() {
             kind,
             crate::ParseOptions {
                 ts_in_js: crate::TsInJs::Report,
+                ..Default::default()
             },
         );
         assert_eq!(codes(&r.diagnostics), Vec::<u32>::new(), "{kind:?} checker");
@@ -3201,4 +3205,132 @@ fn import_type_has_no_comma_after_attributes() {
         [(1005, 40), (1128, 42), (1128, 43)]
     );
     assert!(at("type A = typeof import(\"a\", { with: {}, });").is_empty());
+}
+
+/// `import<T>(x)` and `import<T>` keep their type arguments on the `ImportCall` (the
+/// checker resolves them: importWithTypeArguments, TS2304 on `T`); `import<>` has none.
+#[test]
+fn import_call_keeps_type_arguments() {
+    for (src, expect) in [
+        ("import<T>(\"m\");", Some(1)),
+        ("import<T>\nconst a = import<string, number>", Some(1)),
+        ("const a = import<string, number>(\"m\");", Some(2)),
+        ("import<>(\"m\");", None),
+        ("import(\"m\");", None),
+    ] {
+        let r = parse(src, SourceKind::Ts);
+        let ast = &r.ast;
+        let call = (1..ast.nodes.len() as u32)
+            .filter_map(ts_r_ast::NodeId::from_raw)
+            .find(|&id| matches!(ast.node(id), ts_r_ast::Node::ImportCall { .. }))
+            .expect("an import call");
+        let ts_r_ast::Node::ImportCall { type_args, .. } = *ast.node(call) else {
+            unreachable!()
+        };
+        let n = type_args.map(|ta| match *ast.node(ta) {
+            ts_r_ast::Node::TypeArgs { args } => ast.list(args).len(),
+            _ => panic!("{src}: type_args is {:?}", ast.kind(ta)),
+        });
+        assert_eq!(n, expect, "{src}");
+        // Children before parents, in source order.
+        if let Some(ta) = type_args {
+            assert!(ta < call);
+        }
+    }
+}
+
+/// `ParseOptions::module` parses with the module goal without `import`/`export`: top-level
+/// `await` before a line break is the operator (espree `sourceType: "module"`).
+#[test]
+fn module_option_forces_top_level_await() {
+    let src = "Promise.all([\n\tawait\n\t\tpromise,\n]);";
+    let script = parse(src, SourceKind::Js);
+    assert!(!script.diagnostics.is_empty(), "the default stays tsc's");
+    let opts = crate::ParseOptions {
+        module: true,
+        ..Default::default()
+    };
+    let r = crate::parse_with(src, SourceKind::Js, opts);
+    assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+    let awaits = (1..r.ast.nodes.len() as u32)
+        .filter_map(ts_r_ast::NodeId::from_raw)
+        .filter(|&id| r.ast.kind(id) == NodeKind::Await)
+        .count();
+    assert_eq!(awaits, 1);
+}
+
+/// TS1228 (a type predicate outside a return type) is tsc's checker's, reported while
+/// checking the predicate: it stays next to syntax errors (a kept grammar error).
+#[test]
+fn misplaced_type_predicate_is_kept_next_to_syntax_errors() {
+    let r = parse("var x: this is string;\nlet = ;", SourceKind::Ts);
+    let codes: Vec<u32> = r.diagnostics.iter().map(|d| d.code).collect();
+    assert!(codes.contains(&1228), "{codes:?}");
+    assert!(codes.contains(&1109), "{codes:?}");
+    assert!(r.grammar.iter().any(|d| d.code == 1228));
+    assert!(r.syntax_errors().iter().all(|d| d.code != 1228));
+}
+
+/// `super` followed by none of `(`, `.`, `[` is TS1034 and, as in tsc, a member access whose
+/// name is parsed there: `super;` is `super.;` (missing name), `super x` is `super.x`.
+#[test]
+fn bare_super_is_a_member_access() {
+    for (src, members) in [
+        ("class A extends B { m() { super; } }", 1),
+        ("class A extends B { m() { super x; } }", 1),
+    ] {
+        let r = parse(src, SourceKind::Ts);
+        assert!(
+            r.diagnostics.iter().any(|d| d.code == 1034),
+            "{src}: {:?}",
+            r.diagnostics
+        );
+        let n = (1..r.ast.nodes.len() as u32)
+            .filter_map(ts_r_ast::NodeId::from_raw)
+            .filter(|&id| r.ast.kind(id) == NodeKind::Member)
+            .count();
+        assert_eq!(n, members, "{src}\n{}", r.ast.dump());
+    }
+}
+
+/// `a ## b as T $$ c` with `$$` tighter than `##`: tsc 7.0.2 stops before `$$` (TS1005,
+/// microsoft/TypeScript#63527); `ParseOptions::assertion_continues` parses it as TypeScript
+/// 5.x and typescript-estree do, `((a ## b) as T) $$ c`.
+#[test]
+fn assertion_continues_takes_tighter_operators() {
+    for src in [
+        "array.indexOf(value) < 0 as any ** 2;",
+        "array.lastIndexOf(value) < 0 satisfies boolean as any ** 2;",
+    ] {
+        let tsc = parse(src, SourceKind::Ts);
+        assert!(
+            tsc.diagnostics.iter().any(|d| d.code == 1005),
+            "{src}: {:?}",
+            tsc.diagnostics
+        );
+        let opts = crate::ParseOptions {
+            assertion_continues: true,
+            ..Default::default()
+        };
+        let r = crate::parse_with(src, SourceKind::Ts, opts);
+        assert!(r.diagnostics.is_empty(), "{src}: {:?}", r.diagnostics);
+        // One statement whose expression is `**` over the assertion.
+        let ast = &r.ast;
+        let ts_r_ast::Node::Program { stmts } = *ast.node(ast.root) else {
+            panic!()
+        };
+        let stmts = ast.list(stmts);
+        assert_eq!(stmts.len(), 1, "{}", ast.dump());
+        let ts_r_ast::Node::ExprStmt { expr } = *ast.node(stmts[0]) else {
+            panic!("{}", ast.dump())
+        };
+        let ts_r_ast::Node::Binary { left, op, .. } = *ast.node(expr) else {
+            panic!("{}", ast.dump())
+        };
+        assert_eq!(op, ts_r_ast::BinaryOp::Exp);
+        assert_eq!(ast.kind(left), NodeKind::As, "{}", ast.dump());
+    }
+    // Without a binary operator under the assertion both agree.
+    let ok = parse("x satisfies boolean as any ** 2;", SourceKind::Ts);
+    assert!(ok.diagnostics.is_empty(), "{:?}", ok.diagnostics);
 }

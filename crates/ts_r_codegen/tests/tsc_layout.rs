@@ -9,13 +9,23 @@ use ts_r_ast::SourceKind;
 use ts_r_codegen::{CodegenOptions, Layout, PrintHints, Syntax, print_as};
 
 fn check(name: &str, kind: SourceKind, out_ext: &str) {
+    check_parsed(name, kind, out_ext, false);
+}
+
+/// [`check`] for inputs with syntax errors: tsc prints what its parser recovered.
+fn check_recovered(name: &str, kind: SourceKind, out_ext: &str) {
+    check_parsed(name, kind, out_ext, true);
+}
+
+fn check_parsed(name: &str, kind: SourceKind, out_ext: &str, errors: bool) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tsc_layout");
     let in_ext = if kind == SourceKind::Tsx { "tsx" } else { "ts" };
     let src = std::fs::read_to_string(dir.join(format!("{name}.{in_ext}"))).unwrap();
     let want = std::fs::read_to_string(dir.join(format!("{name}.{out_ext}"))).unwrap();
     let r = ts_r_parser::parse(&src, kind);
-    assert!(
-        !r.diagnostics.iter().any(|d| d.is_error()),
+    assert_eq!(
+        r.diagnostics.iter().any(|d| d.is_error()),
+        errors,
         "{name}: {:?}",
         r.diagnostics
     );
@@ -108,4 +118,21 @@ fn numbers() {
     )
     .code;
     assert_eq!(got, want);
+}
+
+/// Error recovery in JSX, as tsc prints it: an empty `{}` prints nothing, a missing attribute
+/// value leaves the bare name, an unclosed element gets `</>`, and children go on after an
+/// expression container that lacks its `}`.
+#[test]
+fn jsx_recovery() {
+    check_recovered("jsx_recovery", SourceKind::Tsx, "jsx");
+    check_recovered("jsx_unclosed", SourceKind::Tsx, "jsx");
+}
+
+/// A statement that starts at a binary operator (its left operand missing, TS1109) keeps the
+/// space before the operator, or is indented when the missing operand sits at the end of the
+/// line before (`** 2;` on line 2); a bare `super` is `super.` and its missing name.
+#[test]
+fn missing_operand() {
+    check_recovered("missing_operand", SourceKind::Ts, "js");
 }

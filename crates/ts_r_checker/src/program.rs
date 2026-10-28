@@ -73,6 +73,7 @@ impl SourceFile {
                 kind,
                 ts_r_parser::ParseOptions {
                     ts_in_js: ts_r_parser::TsInJs::Report,
+                    ..Default::default()
                 },
             )
         };

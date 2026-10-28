@@ -390,6 +390,14 @@ impl<'a> Printer<'a> {
         }
     }
 
+    /// A space written even at a line start (after indentation): tsc's writer does not drop
+    /// it, so an empty operand that begins a line keeps it (` * 2;` after a missing operand).
+    pub(crate) fn space_at_line_start(&mut self) {
+        if !self.compact {
+            self.push(" ");
+        }
+    }
+
     /// A required space (between keywords and what follows), unless one is implied. In
     /// compact layout it is written only if the next token would merge with the keyword
     /// (`return x` but `return(x)`, `let{a}=b`).

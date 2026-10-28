@@ -269,8 +269,10 @@ impl<'a> Parser<'a> {
     }
 
     /// A type predicate where only a type may be (a constructor, accessor or construct
-    /// signature's return type, or any other type position): the checker's TS1228 on it,
-    /// deferred (not in JSDoc). Returns whether `ty` is a predicate.
+    /// signature's return type, or any other type position): the checker's TS1228 on it (not
+    /// in JSDoc). tsc reports it while checking the predicate (`checkTypePredicate`, a
+    /// semantic error), so it is kept next to syntax errors (`kept_grammar_error_at`), like
+    /// TS18037. Returns whether `ty` is a predicate.
     pub(crate) fn check_predicate_return(&mut self, ty: Option<NodeId>) -> bool {
         let Some(ty) = ty else {
             return false;
@@ -281,7 +283,7 @@ impl<'a> Parser<'a> {
         // In JSDoc the checker reports it (it knows the tag).
         if !self.jsdoc {
             let span = self.ast.span(ty);
-            self.deferred_grammar_error_at(messages::TYPE_PREDICATE_NOT_RETURN, span, &[]);
+            self.kept_grammar_error_at(messages::TYPE_PREDICATE_NOT_RETURN, span, &[]);
         }
         true
     }

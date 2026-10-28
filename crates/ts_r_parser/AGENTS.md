@@ -38,6 +38,20 @@ let opts = ParseOptions { ts_in_js: TsInJs::Report }; // or Allow (no TS8xxx), R
 let r = ts_r_parser::parse_with(src, SourceKind::Js, opts);
 ```
 
+`ParseOptions { module: true, .. }` parses with the module goal even when the file has no
+`import`/`export` (top-level `await` is always the operator, as espree's `sourceType:
+"module"` and typescript-estree; request from lint). The default (`false`) is tsc's: the
+file's own syntax decides.
+
+`ParseOptions { assertion_continues: true, .. }` keeps taking tighter operators after
+`a ## b as T` / `satisfies T` (`a < 0 as any ** 2` is `((a < 0) as any) ** 2`), as
+TypeScript 5.x and typescript-estree do (request from lint: unicorn/prefer-includes). The
+default (`false`) is tsc 7.0.2's: the expression stops before an operator binding tighter than
+`##`, because erasing the assertion would change its meaning (microsoft/TypeScript#63527,
+disallowUnerasableAssertion; `';' expected` / `',' expected` follows). Verified with tsc 7.0.2
+on both `array.indexOf(value) < 0 as any ** 2;` and `array.lastIndexOf(value) < 0 satisfies
+boolean as any ** 2;`: both TS1005.
+
 Files:
 - `stmt.rs`: statements, declarations, import/export.
 - `expr.rs`: expressions, arrows, literals, templates, binding patterns.
@@ -381,10 +395,14 @@ Files:
     the previous token to `<>`. A closing tag that names the direct parent
     (`<a><b>x</a>`) is the parent's, and the child is TS17008. A fragment closed by a
     named tag (`<>x</a>`) is TS17015 and ends after `</`; in children the rest is read
-    again as JSX text. A bad attribute value is TS1145; the first `attr={}` of an
-    element is a deferred TS17000. A token that cannot start an attribute gets the list
-    recovery (`List::JsxAttributes`), and a tag that then lacks `>` is `'/' expected.`
-    and has no children (in children, the rest is read again as JSX text). A conflict
+    again as JSX text. A bad attribute value is TS1145 and, as in tsc, the attribute has
+    no value (`value: None`, the token is left for the attribute list); the first
+    `attr={}` of an element is a deferred TS17000. A child `{expr` without its `}` is
+    `'}' expected.` and the children go on from the end of the expression, read again as
+    JSX text (`<a>{"s";}</a>` has the text `;}`, TS1381). A token that cannot start an
+    attribute gets the list recovery (`List::JsxAttributes`), and a tag that then lacks
+    `>` is `'/' expected.`, self-closing (`self_closing: true`, as tsc builds it) and has
+    no children (in children, the rest is read again as JSX text). A conflict
     marker in children is TS1185 plus `'</' expected.` over the marker line. Adjacent
     elements outside children (`<a/><b/>`, not under a prefix operator) are TS2657 and a
     `Seq` led by a zero-width `Missing` (tsc's synthesized comma: no TS2695).

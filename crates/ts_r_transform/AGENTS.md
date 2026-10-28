@@ -186,6 +186,18 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   nested classes with the outer flags but only a synthesized key-capture block of theirs
   (`Tx::inline_static`), never their methods or field initializers. A class expression's key
   captures come before its `__setFunctionName` call (observed).
+- **Static `super` in class-decorated classes** (`es_decorators.rs` `StaticSuper`): reads go
+  through `Reflect.get(_classSuper, k, _classThis)`, writes through `Reflect.set` (the value
+  `(Reflect.set(.., _a = v, ..), _a)` unless discarded: an expression statement, a comma
+  operand, a `for` initializer or update). Compound and logical assignments both store
+  `Reflect.get(..) op v` (tsc 7 does not short-circuit `??=` there); a `for...of` target
+  `super.x` is read, as tsc does. Temporaries belong to their static block (a `var` first),
+  arrow (body made a block) or field initializer (`(() => { var _a; return v; })()`), each
+  named from `_a` again; a destructuring setter's parameter too (observed in
+  `esDecorators-class{Declaration,Expression}-classSuper.*`).
+- **Misplaced `accessor`** (an error) on a method, accessor, constructor or class stays when
+  `accessor` fields are not lowered (ESNext), and an `accessor enum` gives `accessor var E;`
+  at every target (autoAccessorDisallowedModifiers).
 - **Static privates of class-decorated classes** (`static_privates.rs`, ES2022 <= target <
   ESNext): as tsc does, every static private member becomes a variable declared first in
   the decorator IIFE (a class decorator may replace the class, so `#x` brand checks go
@@ -267,8 +279,11 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-26, v1/emit4): 1,718 match, 9 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
-  syntax errors are skipped); `--filter esDecorators`: 136 match, 4 mismatch.
+  Last run (2026-10-27, v1/emit5): 1,723 match, 4 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  syntax errors are skipped); `--filter esDecorators`: 140 match, 0 mismatch. The 4 left need
+  another file's declarations, which a per-file transpile cannot see (an imported enum
+  value, an imported const enum, an alias of an imported interface); the program emitter
+  (`ts_r_emit`) matches them.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
   tsc's emit. Last run: 48/48 packages pass.
@@ -394,9 +409,7 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   an async arrow outside an async method and computed keys inside a pattern nested under an
   object rest (tsc flattens them too) are not handled. Private methods using `super`, and
   private classes evaluated in a loop with an outer `await` or `yield`, are refused (TSR2003).
-- TC39 decorators: writes to `super` properties in static members stay as written (tsc
-  uses `Reflect.set` and temporaries; reads, calls and tags already go through
-  `Reflect.get(_classSuper, k, _classThis)`). Static privates of class-decorated classes
+- TC39 decorators: static privates of class-decorated classes
   (`static_privates.rs`) leave `++`/`--`, logical assignments, destructuring targets and
   compound assignments on a non-`this` receiver as written (tsc caches the receiver in a
   function-scoped temporary).
