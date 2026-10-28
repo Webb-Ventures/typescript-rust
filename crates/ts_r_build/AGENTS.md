@@ -15,7 +15,9 @@
   Our own additions: `--no-cache` (skip the persistent `ts_r_cache` namespace `build`) and
   `--threads=N`.
 - `watch.rs`: `--watch` keeps one `BuildContext` alive and rebuilds on file events in the
-  directories of the last build's inputs (non-recursive) plus the working directory.
+  directories of the last build's inputs (non-recursive) plus the working directory, and in
+  the directories glob `require`/`import()` patterns listed (`BuildResult::watch_dirs`),
+  where any added or removed entry counts, whatever its extension.
 - `parse<T>` (record 0007): builds read through `ts_r_guard::vfs::GuardFs`, which expands
   files importing `@ts-r.dev/guard` as they are read. Bundles import one virtual module per
   validated declaration (`<working dir>/.ts-r-guard/...`, shared by the bundle and
@@ -28,8 +30,11 @@
 ## Invariants
 
 - Flag names and meanings match esbuild 0.28.2; when we cannot honour a flag we reject it
-  rather than silently ignoring it (a few output-cosmetic flags such as `--charset` are
-  accepted and ignored).
+  rather than silently ignoring it (a few output-cosmetic flags such as `--color` are
+  accepted and ignored; `--charset=utf8` keeps non-ASCII in CSS output, JavaScript output
+  keeps it either way; `--jsx-side-effects` is accepted because JSX is never removed).
+  `NODE_PATH` is read like esbuild's CLI reads it. An entry `out/name=in/file.js` names its
+  output, unless the whole argument is an existing file.
 - No JavaScript config file, no plugins.
 - Exit code 1 on any error message, 0 otherwise.
 

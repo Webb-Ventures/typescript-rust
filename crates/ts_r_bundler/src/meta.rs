@@ -24,9 +24,20 @@ pub enum RecordKind {
     CssUrl,
     /// A stylesheet's `composes: x from "file"`.
     CssComposes,
+    /// `require("./dir/" + x)`: `spec` is the glob pattern (`./dir/**/*`). The graph adds
+    /// one [`RecordKind::Require`] per matching file, with the same `node` and the file's
+    /// `./`-relative path as `spec` (`graph::expand_globs`).
+    GlobRequire,
+    /// `import(`./dir/${x}`)`, as [`RecordKind::GlobRequire`] with [`RecordKind::Dynamic`]
+    /// records.
+    GlobDynamic,
 }
 
 impl RecordKind {
+    pub fn is_glob(self) -> bool {
+        matches!(self, RecordKind::GlobRequire | RecordKind::GlobDynamic)
+    }
+
     pub fn is_css(self) -> bool {
         matches!(
             self,
@@ -195,6 +206,8 @@ impl ModuleMeta {
                 RecordKind::CssImport => 4,
                 RecordKind::CssUrl => 5,
                 RecordKind::CssComposes => 6,
+                RecordKind::GlobRequire => 7,
+                RecordKind::GlobDynamic => 8,
             });
             w.str(&r.spec);
             w.u32(r.start);
@@ -299,6 +312,8 @@ impl ModuleMeta {
                 4 => RecordKind::CssImport,
                 5 => RecordKind::CssUrl,
                 6 => RecordKind::CssComposes,
+                7 => RecordKind::GlobRequire,
+                8 => RecordKind::GlobDynamic,
                 _ => return None,
             };
             m.records.push(Record {

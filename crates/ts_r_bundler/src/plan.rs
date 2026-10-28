@@ -70,6 +70,9 @@ pub struct ModulePlan {
     pub ns_rewrites: Vec<(Sym, String, Rewrite)>,
     /// `require()` / `import()` replacements, per record (`None` = keep).
     pub records: Vec<Option<Expr>>,
+    /// Records whose replacement is a function the printer calls with the call's own
+    /// argument: a glob's `__tsrGlob({ ... })` (`RecordKind::GlobRequire`).
+    pub globs: Vec<u32>,
     pub prologue: Vec<PrologueStmt>,
     /// Name for an anonymous `export default`.
     pub default_name: String,
@@ -159,7 +162,7 @@ pub struct Plan {
     pub chunks: Vec<Chunk>,
     pub plans: Vec<Option<ModulePlan>>,
     pub module_chunk: Vec<Option<usize>>,
-    pub helper_names: [String; 7],
+    pub helper_names: [String; crate::runtime::HELPER_COUNT],
     pub format: Format,
     /// Output directory (absolute).
     pub outdir: String,
@@ -276,7 +279,7 @@ struct Planner<'a> {
     ext_locals: FxHashMap<(u32, Imported), String>,
     /// name -> owning module (for cross-chunk imports).
     owner: FxHashMap<String, ModuleId>,
-    helper_names: [String; 7],
+    helper_names: [String; crate::runtime::HELPER_COUNT],
     /// CommonJS entries printed at the top level of their CommonJS chunk (see
     /// [`unwrapped_entries`]).
     unwrapped: Vec<ModuleId>,
@@ -963,6 +966,62 @@ impl Planner<'_> {
         let base = base.split('.').next().unwrap_or(base);
         ts_r_minify::names::sanitize(base)
     }
+    /// For each live glob record, `__tsrGlob({ "./src/a.js": () => e, ... })`, where `e` is
+    /// the replacement of the record of that file (`graph::expand_globs` gave it the glob's
+    /// call node), which is then dropped: the glob's call replaces the whole call. Returns
+    /// the glob records.
+    fn glob_maps(
+        &self,
+        meta: &crate::meta::ModuleMeta,
+        targets: &[Target],
+        live: &FxHashSet<u32>,
+        records: &mut [Option<Expr>],
+        helpers: &mut Helpers,
+    ) -> Vec<u32> {
+        let mut owner: FxHashMap<u32, usize> = FxHashMap::default();
+        for (ri, r) in meta.records.iter().enumerate() {
+            if r.kind.is_glob() && live.contains(&(ri as u32)) {
+                owner.insert(r.node, ri);
+            }
+        }
+        if owner.is_empty() {
+            return Vec::new();
+        }
+        let mut maps: Vec<Vec<(String, Expr)>> = vec![Vec::new(); meta.records.len()];
+        for (ri, r) in meta.records.iter().enumerate() {
+            if !matches!(r.kind, RecordKind::Require | RecordKind::Dynamic) {
+                continue;
+            }
+            let Some(&gi) = owner.get(&r.node) else {
+                continue;
+            };
+            // An external file (`--external:./src/a.js`) has no replacement, as a kept call:
+            // its entry is the call itself, as esbuild writes it.
+            let e = records[ri]
+                .take()
+                .or_else(|| match (r.kind, targets.get(ri)) {
+                    (RecordKind::Require, Some(Target::External(x))) => {
+                        Some(Expr::call("require", vec![Expr::Str(x.clone())]))
+                    }
+                    (RecordKind::Dynamic, Some(Target::External(x))) => {
+                        Some(Expr::Import(x.clone()))
+                    }
+                    _ => None,
+                });
+            if let Some(e) = e {
+                maps[gi].push((r.spec.clone(), Expr::Arrow(Box::new(e))));
+            }
+        }
+        let mut globs: Vec<u32> = owner.values().map(|&gi| gi as u32).collect();
+        globs.sort_unstable();
+        helpers.mark(Helper::Glob);
+        let name = &self.helper_names[Helper::Glob as usize];
+        for &gi in &globs {
+            let map = std::mem::take(&mut maps[gi as usize]);
+            records[gi as usize] = Some(Expr::call(name, vec![Expr::Object(map)]));
+        }
+        globs
+    }
 
     /// How references to binding `b` look in module `m`'s code. Records referenced names
     /// in `refs` and needed helpers.
@@ -1221,6 +1280,7 @@ impl Planner<'_> {
             };
             records.push(e);
         }
+        let globs = self.glob_maps(meta, &module.targets, &live_records, &mut records, helpers);
         // Prologue: static imports in order, then anything else bindings need.
         let mut prologue = Vec::new();
         if !self.import_meta[mi].is_empty() {
@@ -1449,6 +1509,7 @@ impl Planner<'_> {
             rewrites,
             ns_rewrites,
             records,
+            globs,
             prologue,
             default_name: self.default_name[mi].clone(),
             reserved,

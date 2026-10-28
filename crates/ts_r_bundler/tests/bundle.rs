@@ -2427,6 +2427,156 @@ fn javascript_imports_css_modules_and_gets_their_names() {
 }
 
 #[test]
+fn minified_css_module_names_follow_use_counts_and_letter_frequency() {
+    // Observed in esbuild 0.28.2 (`--minify-identifiers`): the letters are ordered by how
+    // often the stylesheets use them outside comments, external URLs and the local names
+    // (`o`, `l`, `e`, `n`, ...), and the most used local names get the first ones.
+    let fs = project(&[
+        (
+            "entry.js",
+            "import s from './s.module.css';\nimport './g.css';\nconsole.log(JSON.stringify(s));\n",
+        ),
+        (
+            "s.module.css",
+            "/* zzzzzzzzzzzzzzzzzzzzzzzz */\n.a { color: red }\n.b .b .b { display: none }\n.c .b { color: blue }\n",
+        ),
+        ("g.css", ".o, .l { color: black }\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.minify_identifiers = true;
+    let r = run_build(&fs, o);
+    let css = file(&r, "/proj/out/entry.css");
+    // Letters: o (5), l (4), c and e (3 each), then d, r, ...; `o` and `l` are global, and
+    // `b` (used four times) comes first.
+    assert!(css.contains(".r {\n  color: red;"), "{css}");
+    assert!(css.contains(".c .c .c {"), "{css}");
+    assert!(css.contains(".e .c {"), "{css}");
+}
+
+#[test]
+fn css_output_escapes_non_ascii_unless_charset_is_utf8() {
+    let fs = project(&[
+        ("entry.js", "import './a.css';\n"),
+        ("a.css", ".caf\u{e9}1 { content: \"\u{1f44d}\" }\n"),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let css = file(&r, "/proj/out/entry.css");
+    assert!(css.contains(".caf\\e9 1 {"), "{css}");
+    assert!(css.contains("content: \"\\1f44d\""), "{css}");
+    let mut o = opts(&["entry.js"]);
+    o.charset_utf8 = true;
+    let r = run_build(&fs, o);
+    let css = file(&r, "/proj/out/entry.css");
+    assert!(css.contains(".caf\u{e9}1 {"), "{css}");
+}
+
+#[test]
+fn pure_names_are_tree_shaken_and_ignore_annotations_keeps_side_effects_false_packages() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import './keep';\nlet a = pure(1);\nlet b = some.fn();\nlet c = other();\n",
+        ),
+        ("keep/index.js", "console.log('kept');\n"),
+        ("keep/package.json", "{ \"sideEffects\": false }\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.pure = vec!["pure".into(), "some.fn".into()];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(!js.contains("pure(") && !js.contains("some.fn"), "{js}");
+    assert!(js.contains("other()") && !js.contains("kept"), "{js}");
+    // `--ignore-annotations` ignores both `--pure` and `sideEffects`, as esbuild does.
+    let mut o = opts(&["entry.js"]);
+    o.pure = vec!["pure".into()];
+    o.ignore_annotations = true;
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(js.contains("pure(1)") && js.contains("kept"), "{js}");
+}
+
+#[test]
+fn node_paths_are_searched_after_node_modules() {
+    let fs = project(&[
+        ("src/entry.js", "import 'pkg1';\nimport 'pkg2';\n"),
+        ("lib/pkg1/package.json", "{ \"main\": \"./foo.js\" }\n"),
+        ("lib/pkg1/foo.js", "console.log('from node path');\n"),
+        ("lib/pkg2/index.js", "console.log('shadowed');\n"),
+        (
+            "node_modules/pkg2/index.js",
+            "console.log('from node_modules');\n",
+        ),
+    ]);
+    let mut o = opts(&["src/entry.js"]);
+    o.node_paths = vec!["lib".into()];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(
+        js.contains("from node path") && js.contains("from node_modules"),
+        "{js}"
+    );
+    assert!(!js.contains("shadowed"), "{js}");
+}
+
+#[test]
+fn css_imports_need_an_output_path_and_assert_json_needs_the_json_loader() {
+    let fs = project(&[
+        ("entry.js", "import './a.css';\n"),
+        ("a.css", "a { color: red }\n"),
+        (
+            "json.js",
+            "import foo from './foo.json' assert { type: 'json' };\nconsole.log(foo);\n",
+        ),
+        ("foo.json", "{}"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.outdir = None;
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter().any(|m| m.contains(
+            "Cannot import \"a.css\" into a JavaScript file without an output path configured"
+        )),
+        "{text:?}"
+    );
+    let mut o = opts(&["json.js"]);
+    o.loaders.insert(".json".into(), ts_r_bundler::Loader::Js);
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter()
+            .any(|m| m.contains("The file \"foo.json\" was loaded with the \"js\" loader")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn plain_css_keeps_local_and_global_and_modules_move_type_selectors() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import p from './p.css';\nimport m from './m.module.css';\nconsole.log(p, m);\n",
+        ),
+        ("p.css", ":local(.a) { color: red }\n"),
+        (
+            "m.module.css",
+            ".b:global(div) { color: red }\ndiv:global(span.c) { color: blue }\n:global { .d { color: green } }\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["entry.js"]));
+    let css = file(&r, "/proj/out/entry.css");
+    // As esbuild 0.28.2 prints them.
+    assert!(css.contains(":local(.a) {"), "{css}");
+    assert!(css.contains("div.m_b {"), "{css}");
+    assert!(css.contains("div:is(span).c {"), "{css}");
+    assert!(css.contains("& {\n  .d {"), "{css}");
+}
+
+#[test]
 fn a_missing_css_module_name_is_an_error() {
     let fs = project(&[
         (
@@ -2778,5 +2928,179 @@ fn injected_star_reexports_inject_nothing() {
     assert!(
         !text.contains("obj = {") && text.contains("named = 3"),
         "{text}"
+    );
+}
+
+#[test]
+fn glob_require_and_import_bundle_every_matching_file() {
+    let fs = project(&[
+        (
+            "entry.js",
+            concat!(
+                "const x = globalThis.x;\n",
+                "console.log(require('./src/' + x + '.js'));\n",
+                "import(`./src/file-${x}.js`).then(console.log);\n",
+                "require('./src/' + x + '.json');\n",
+                "require(`./sr${x}`);\n",
+            ),
+        ),
+        ("src/file-a.js", "module.exports = 'a';\n"),
+        ("src/file-a.js.map", "DO NOT BUNDLE\n"),
+        ("src/nested/dir/file-b.js", "module.exports = 'b';\n"),
+        ("src/data.json", "{ \"n\": 1 }\n"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    // `*` reaches no file (`src` is a directory): a warning, and an empty map.
+    assert!(
+        text.iter()
+            .any(|m| m.contains("The glob pattern require(\"./sr*\") did not match any files")),
+        "{text:?}"
+    );
+    assert!(!r.has_errors(), "{text:?}");
+    let js = file(&r, "/proj/out/entry.js");
+    // `./src/**/*.js` reaches into subdirectories; `./src/file-*.js` stays in `src`.
+    assert!(
+        js.contains("\"./src/file-a.js\": () => require_file_a(), \"./src/nested/dir/file-b.js\": () => require_file_b()"),
+        "{js}"
+    );
+    assert!(
+        js.contains("__tsrGlob({ \"./src/file-a.js\": () => Promise.resolve().then(() => __tsrToEsm(require_file_a())) })(`./src/file-${x}.js`)"),
+        "{js}"
+    );
+    assert!(
+        js.contains("__tsrGlob({ \"./src/data.json\": () => require_data() })"),
+        "{js}"
+    );
+    assert!(js.contains("__tsrGlob({})(`./sr${x}`)"), "{js}");
+    assert!(js.contains("Module not found in bundle: "), "{js}");
+    assert!(!js.contains("DO NOT BUNDLE"), "{js}");
+}
+
+#[test]
+fn glob_of_a_missing_directory_is_an_error() {
+    let fs = project(&[("entry.js", "require('./nope/' + globalThis.x);\n")]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter()
+            .any(|m| m.contains("Could not resolve require(\"./nope/**/*\")")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn exports_arrays_stop_at_a_valid_target_and_bare_paths_match_local_browser_keys() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import red from 'pkg/apples/red.js';\nimport green from 'pkg/apples/green.js';\nconsole.log(red, green);\n",
+        ),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "exports": { "./apples/*": ["./good/*", "./bad/*"] } }"#,
+        ),
+        (
+            "node_modules/pkg/good/green.js",
+            "export default 'green';\n",
+        ),
+        ("node_modules/pkg/bad/red.js", "export default 'red';\n"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    // `./good/red.js` is missing: Node and esbuild don't go on to `./bad/red.js`.
+    assert!(r.has_errors(), "{text:?}");
+    assert!(
+        text.iter().any(|m| m.contains("pkg/apples/red.js")),
+        "{text:?}"
+    );
+    assert!(!text.iter().any(|m| m.contains("green")), "{text:?}");
+
+    let fs = project(&[
+        ("entry.js", "require('pkg/sub');\n"),
+        (
+            "node_modules/pkg/package.json",
+            r#"{ "browser": { "./sub": "./sub/foo.js", "./sub/sub": "./sub/bar.js" } }"#,
+        ),
+        ("node_modules/pkg/sub/foo.js", "require('sub');\n"),
+        ("node_modules/pkg/sub/bar.js", "works();\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.platform = Platform::Browser;
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/entry.js").contains("works()"));
+}
+
+#[test]
+fn assert_json_with_a_quoted_key_needs_the_json_loader_too() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import foo from './foo.json' assert { 'type': 'json' };\nconsole.log(foo);\n",
+        ),
+        ("foo.json", "{}"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.loaders.insert(".json".into(), ts_r_bundler::Loader::Js);
+    let r = BuildContext::new(o, Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    let text: Vec<String> = r.messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        text.iter()
+            .any(|m| m.contains("The file \"foo.json\" was loaded with the \"js\" loader")),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn glob_directories_are_watch_dependencies() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "import('./locales/' + globalThis.lang + '.json');\nrequire('./gone/' + globalThis.x);\n",
+        ),
+        ("locales/en.json", "{}"),
+        ("locales/new/.keep.json", "{}"),
+    ]);
+    let r = BuildContext::new(opts(&["entry.js"]), Arc::new(fs.clone()))
+        .expect("options")
+        .build();
+    // Every directory the pattern listed, and for the missing `gone/` its parent.
+    assert_eq!(
+        r.watch_dirs,
+        ["/proj", "/proj/locales", "/proj/locales/new"]
+    );
+}
+
+#[test]
+fn external_glob_files_keep_their_call_in_the_map() {
+    let fs = project(&[
+        (
+            "entry.js",
+            "console.log(require('./src/' + globalThis.x + '.js'));\nimport('./src/' + globalThis.x + '.js');\n",
+        ),
+        ("src/a.js", "module.exports = 'a';\n"),
+        ("src/b.js", "module.exports = 'b';\n"),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.external = vec!["./src/a.js".into()];
+    let r = run_build(&fs, o);
+    let js = file(&r, "/proj/out/entry.js");
+    assert!(
+        js.contains(
+            "\"./src/a.js\": () => require(\"./src/a.js\"), \"./src/b.js\": () => require_b()"
+        ),
+        "{js}"
+    );
+    assert!(
+        js.contains("\"./src/a.js\": () => import(\"./src/a.js\")"),
+        "{js}"
     );
 }

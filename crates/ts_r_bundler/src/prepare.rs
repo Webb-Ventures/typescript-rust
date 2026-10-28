@@ -257,9 +257,12 @@ pub fn load(
             } else {
                 crate::css::NameMode::Global
             };
-            let mut sheet = crate::css::parse(Arc::from(text), mode);
+            let mut sheet = crate::css::parse_with(Arc::from(text), mode, loader != Loader::Css);
             if opts.unsupported().has(crate::features::Feature::Nesting) {
-                crate::css::nesting::lower(&mut sheet);
+                let is = !opts
+                    .unsupported()
+                    .has(crate::features::Feature::IsPseudoClass);
+                crate::css::nesting::lower(&mut sheet, is);
             }
             let h = blake3::hash(key.as_bytes());
             sheet.id = h.as_bytes()[..8]
@@ -775,11 +778,12 @@ impl PrepareContext {
         }
         let t = Arc::new(self.compute_options(config.as_deref()));
         let cache_key: Arc<str> = Arc::from(format!(
-            "{}|{}|{}|{}|{:?}|{}|{}",
+            "{}|{}|{}|{}|{}|{:?}|{}|{}",
             t.cache_key(),
             self.defines.cache_key(),
             self.opts.drop_labels.join(","),
             self.opts.ignore_annotations,
+            self.opts.pure.join(","),
             self.opts.effective_format(),
             self.opts.unsupported().key(),
             self.props.as_ref().map_or("", |p| p.key.as_str())

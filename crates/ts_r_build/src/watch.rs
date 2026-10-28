@@ -54,7 +54,8 @@ pub fn run(cli: &Cli) -> i32 {
         if cli.log_level >= LogLevel::Info {
             eprintln!("[watch] build finished, watching for changes...");
         }
-        let dirs = watch_dirs(&r.inputs, &guard.touched(), &cli.options.working_dir);
+        let mut dirs = watch_dirs(&r.inputs, &guard.touched(), &cli.options.working_dir);
+        dirs.extend(r.watch_dirs.iter().cloned());
         for d in &dirs {
             if !watched.contains(d) {
                 let _ = watcher.watch(std::path::Path::new(d), RecursiveMode::NonRecursive);
@@ -62,6 +63,7 @@ pub fn run(cli: &Cli) -> i32 {
             }
         }
         let inputs: BTreeSet<&str> = r.inputs.iter().map(String::as_str).collect();
+        let glob_dirs: BTreeSet<&str> = r.watch_dirs.iter().map(String::as_str).collect();
         // Wait for a relevant change, then debounce.
         let mut changed: BTreeSet<String> = BTreeSet::new();
         while changed.is_empty() {
@@ -69,14 +71,14 @@ pub fn run(cli: &Cli) -> i32 {
                 return 0;
             };
             let s = ts_r_config::path::normalize_slashes(&p.to_string_lossy());
-            if relevant(&s, &inputs, outdir.as_deref()) {
+            if relevant(&s, &inputs, &glob_dirs, outdir.as_deref()) {
                 changed.insert(s);
             }
         }
         let until = Instant::now() + Duration::from_millis(20);
         while let Ok(p) = rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             let s = ts_r_config::path::normalize_slashes(&p.to_string_lossy());
-            if relevant(&s, &inputs, outdir.as_deref()) {
+            if relevant(&s, &inputs, &glob_dirs, outdir.as_deref()) {
                 changed.insert(s);
             }
         }
@@ -124,11 +126,20 @@ fn watch_dirs(inputs: &[String], guard_files: &[String], wd: &str) -> BTreeSet<S
     dirs
 }
 
-fn relevant(p: &str, inputs: &BTreeSet<&str>, outdir: Option<&str>) -> bool {
+/// Whether a changed path can change the build. Anything added to or removed from a
+/// directory a glob `require`/`import()` listed counts, whatever its name (a new
+/// subdirectory can hold matches).
+fn relevant(
+    p: &str,
+    inputs: &BTreeSet<&str>,
+    glob_dirs: &BTreeSet<&str>,
+    outdir: Option<&str>,
+) -> bool {
     if outdir.is_some_and(|d| p.starts_with(d)) {
         return false;
     }
     inputs.contains(p)
+        || glob_dirs.contains(ts_r_config::path::directory_of(p))
         || p.ends_with("/package.json")
         || p.ends_with("/tsconfig.json")
         || [
@@ -154,5 +165,14 @@ mod tests {
         let dirs: Vec<String> = watch_dirs(&inputs, &guard, "/p").into_iter().collect();
         assert!(dirs.contains(&"/p/types".to_owned()), "{dirs:?}");
         assert!(dirs.contains(&"/p".to_owned()));
+    }
+
+    #[test]
+    fn changes_in_glob_directories_are_relevant_whatever_their_name() {
+        let inputs = BTreeSet::from(["/p/main.js"]);
+        let globs = BTreeSet::from(["/p/locales"]);
+        assert!(relevant("/p/locales/new", &inputs, &globs, None));
+        assert!(relevant("/p/locales/fr.json", &inputs, &globs, None));
+        assert!(!relevant("/p/other/new", &inputs, &globs, None));
     }
 }

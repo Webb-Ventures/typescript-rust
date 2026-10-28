@@ -49,6 +49,10 @@ pub enum Feature {
     ImportAttributes,
     ImportMeta,
     InlineScript,
+    /// CSS output may be inlined in a `<style>` tag (`</style` is escaped when unsupported).
+    InlineStyle,
+    /// CSS `:is()` (nesting lowering expands selector lists instead when unsupported).
+    IsPseudoClass,
     LogicalAssignment,
     NestedRestBinding,
     /// CSS nesting (`--supported:nesting=false`; no ECMAScript target lacks it).
@@ -131,6 +135,8 @@ const TABLE: &[(Feature, &str, u32)] = &[
     (ImportAttributes, "import-attributes", 2025),
     (ImportMeta, "import-meta", 2020),
     (InlineScript, "inline-script", 0),
+    (InlineStyle, "inline-style", 0),
+    (IsPseudoClass, "is-pseudo-class", 0),
     (LogicalAssignment, "logical-assignment", 2021),
     (NestedRestBinding, "nested-rest-binding", 2016),
     (Nesting, "nesting", 0),

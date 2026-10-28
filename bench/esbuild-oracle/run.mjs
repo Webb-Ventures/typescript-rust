@@ -197,7 +197,13 @@ function loadCases() {
             try {
               const p = new Parser(toks, k + 1);
               const lit = p.composite('bundled');
-              cases.push({ file: f, name, kind: t.v, spec: asObject(lit), defines: localDefines(toks, i, j) });
+              const spec = asObject(lit);
+              // `files: relocateFiles` (a package-level `var`), a file's text in a local
+              // `css := ...`: the variable's value, read from the same test file.
+              const lookup = (v) => (v?.ident && /^\w+$/.test(v.ident) ? goVariable(toks, v.ident, i, j) ?? v : v);
+              for (const key of ['files', 'entryPaths']) spec[key] = lookup(spec[key]);
+              if (spec.files?.items) for (const it of spec.files.items) it.value = lookup(it.value);
+              cases.push({ file: f, name, kind: t.v, spec, defines: localDefines(toks, i, j) });
             } catch (e) {
               cases.push({ file: f, name, error: `parse: ${e.message}` });
             }
@@ -208,6 +214,21 @@ function loadCases() {
     }
   }
   return cases;
+}
+
+// The value of Go variable `name`: `name := value` between tokens `from` and `to` (the test
+// function), else a package-level `var name = value`. Null when it isn't a literal.
+function goVariable(toks, name, from, to) {
+  const at = (k) => {
+    try { return new Parser(toks, k).value(); } catch { return null; }
+  };
+  for (let k = from; k < to; k++) {
+    if (toks[k].t === 'id' && toks[k].v === name && toks[k + 1]?.v === ':' && toks[k + 2]?.v === '=') return at(k + 3);
+  }
+  for (let k = 0; k + 3 < toks.length; k++) {
+    if (toks[k].v === 'var' && toks[k + 1]?.v === name && toks[k + 2]?.v === '=') return at(k + 3);
+  }
+  return null;
 }
 
 // `defines := config.ProcessDefines([]config.DefineData{...})` between tokens `from` and `to`
@@ -225,8 +246,10 @@ function localDefines(toks, from, to) {
 // One `config.DefineData` as `--define:key=value`, or null when the CLI can't express it.
 function defineFlag(key, data) {
   const d = asObject(data);
-  if (Object.keys(d).some((k) => k !== 'KeyParts' && k !== 'DefineExpr')) return null;
   if (key === null) key = d.KeyParts ? asList(d.KeyParts).join('.') : null;
+  // `Flags: config.CallCanBeUnwrappedIfUnused` alone: the CLI's `--pure:name`.
+  if (key && d.Flags?.ident === 'config.CallCanBeUnwrappedIfUnused' && Object.keys(d).every((k) => k === 'KeyParts' || k === 'Flags')) return `--pure:${key}`;
+  if (Object.keys(d).some((k) => k !== 'KeyParts' && k !== 'DefineExpr')) return null;
   const e = d.DefineExpr ? asObject(d.DefineExpr) : null;
   if (!key || !e) return null;
   let value = null;
@@ -259,7 +282,7 @@ function flagsFor(c) {
   const s = c.spec;
   const why = [];
   for (const k of Object.keys(s)) {
-    if (!['files', 'entryPaths', 'options', 'expectedScanLog', 'expectedCompileLog', 'debugLogs', 'absWorkingDir'].includes(k)) why.push(`bundled.${k}`);
+    if (!['files', 'entryPaths', 'entryPathsAdvanced', 'options', 'expectedScanLog', 'expectedCompileLog', 'debugLogs', 'absWorkingDir'].includes(k)) why.push(`bundled.${k}`);
   }
   if (c.kind !== 'expectBundled' && c.kind !== 'expectBundledUnix') why.push(c.kind);
   const o = s.options ? asObject(s.options) : {};
@@ -352,19 +375,45 @@ function flagsFor(c) {
         break;
       }
       // The `--target` the options came from (it also makes esbuild ignore tsconfig's).
+      // A browser name (`chrome10`) only names the target in messages: the test spells out
+      // its features in `Unsupported*Features`.
       case 'OriginalTargetEnv': {
         const t = `--target=${String(v).toLowerCase()}`;
+        if (/^--target=[a-z]+\d[\d.]*$/.test(t) && !/^--target=es\d/.test(t) && (o.UnsupportedCSSFeatures || o.UnsupportedJSFeatures)) break;
         if (!/^--target=(esnext|es\d+)$/.test(t)) { why.push(k); break; }
         if (!flags.includes(t)) flags.push(t);
         break;
       }
-      // CSS features: only nesting has a CLI name ts-r-build lowers.
+      // CSS features with a CLI name ts-r-build implements.
       case 'UnsupportedCSSFeatures': {
         const set = v.or ?? [v];
-        if (!set.every((f) => f.ident === 'compat.Nesting')) { why.push(k); break; }
-        flags.push('--supported:nesting=false');
+        const names = { 'compat.Nesting': 'nesting', 'compat.IsPseudoClass': 'is-pseudo-class', 'compat.InlineStyle': 'inline-style' };
+        if (!set.every((f) => names[f.ident])) { why.push(k); break; }
+        for (const f of set) flags.push(`--supported:${names[f.ident]}=false`);
         break;
       }
+      // `TS: config.TSOptions{Config: config.TSConfig{UseDefineForClassFields: config.True}}`:
+      // the same setting in a tsconfig.json at the root of the case (runCase writes it).
+      case 'TS': {
+        const cfg = asObject(v).Config ? asObject(asObject(v).Config) : null;
+        const ok = cfg && Object.keys(asObject(v)).length === 1 && Object.keys(cfg).length > 0
+          && Object.entries(cfg).every(([ck, cv]) => ck === 'UseDefineForClassFields' && ['config.True', 'config.False'].includes(cv?.ident));
+        if (!ok) { why.push(k); break; }
+        out.tsconfig = { compilerOptions: { useDefineForClassFields: cfg.UseDefineForClassFields.ident === 'config.True' } };
+        break;
+      }
+      // Node's NODE_PATH, which both CLIs read.
+      case 'AbsNodePaths': out.nodePaths = asList(v); break;
+      // `<stdin>` contents resolved from a directory: piped to the CLI, run from there.
+      // ts-r-build doesn't read entry code from stdin, so these stay skipped.
+      case 'Stdin': {
+        const si = asObject(v);
+        if (Object.keys(si).some((x) => x !== 'Contents' && x !== 'AbsResolveDir') || typeof si.Contents !== 'string') { why.push(k); break; }
+        out.stdin = { contents: si.Contents, dir: si.AbsResolveDir ?? '/' };
+        why.push('Stdin (ts-r-build reads no code from stdin)');
+        break;
+      }
+      case 'WriteToStdout': if (v === true) out.stdout = true; break;
       case 'JSBanner': flags.push(`--banner:js=${v}`); break;
       case 'JSX': {
         for (const [jk, jv] of Object.entries(asObject(v))) {
@@ -376,6 +425,14 @@ function flagsFor(c) {
           else if (jk === 'Development' && jv === true) flags.push('--jsx-dev');
           else if (jk === 'Factory' && dotted) flags.push(`--jsx-factory=${dotted}`);
           else if (jk === 'Fragment' && dotted) flags.push(`--jsx-fragment=${dotted}`);
+          else if (jk === 'SideEffects' && jv === true) flags.push('--jsx-side-effects');
+          // A constant fragment (`&js_ast.EString{...}`): esbuild's CLI takes it as JSON.
+          else if (jk === 'Fragment' && jv?.type === 'config.DefineExpr' && Object.keys(asObject(jv)).length === 1
+            && asObject(jv).Constant?.type === '&js_ast.EString') {
+            const sv = asObject(asObject(jv).Constant).Value;
+            if (sv?.call === 'helpers.StringToUTF16' && sv.args.length === 1 && sv.args[0].t === 'str') flags.push(`--jsx-fragment=${JSON.stringify(sv.args[0].v)}`);
+            else why.push(`JSX.${jk}`);
+          }
           else why.push(`JSX.${jk}`);
         }
         break;
@@ -427,19 +484,22 @@ function flagsFor(c) {
       default: why.push(k);
     }
   }
-  if (!out.file && !out.dir) why.push('no output path');
-  if (!s.entryPaths) why.push('no entryPaths');
+  // No output path: the bundle goes to stdout (one entry point), compared as an output.
+  if (!out.file && !out.dir) out.stdout = true;
+  if (!s.entryPaths && !s.entryPathsAdvanced && !out.stdin) why.push('no entryPaths');
+  if (out.stdout && ((s.entryPaths?.items?.length ?? 0) + (s.entryPathsAdvanced?.items?.length ?? 0) > 1)) why.push('several entry points to stdout');
   return { flags, out, format, bundle, why };
 }
 
 // ---------------------------------------------------------------------------------------
 
-function run(cmd, argv, cwd, timeoutMs) {
+function run(cmd, argv, cwd, timeoutMs, { stdin = null, env = {} } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, argv, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TS_R_THREADS: '1', NODE_OPTIONS: '' } });
+    const child = spawn(cmd, argv, { cwd, stdio: [stdin === null ? 'ignore' : 'pipe', 'pipe', 'pipe'], env: { ...process.env, TS_R_THREADS: '1', NODE_OPTIONS: '', ...env } });
+    if (stdin !== null) child.stdin.end(stdin);
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d) => { if (stdout.length < 1e5) stdout += d; });
+    child.stdout.on('data', (d) => { if (stdout.length < 1e6) stdout += d; });
     child.stderr.on('data', (d) => { if (stderr.length < 1e5) stderr += d; });
     const timer = setTimeout(() => { child.kill('SIGKILL'); }, timeoutMs);
     child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code, signal, stdout, stderr }); });
@@ -508,18 +568,29 @@ function unmangled(code, re) {
 async function buildAndRun(tool, bin, c, plan, caseDir) {
   const inRoot = path.join(caseDir, 'in');
   const outRoot = path.join(caseDir, tool);
-  const cwd = path.join(inRoot, c.spec.absWorkingDir ?? '/');
-  const entries = asList(c.spec.entryPaths).map((e) => (e.startsWith('/') ? path.join(inRoot, e) : e));
-  const outFlag = plan.out.file ? `--outfile=${path.join(outRoot, plan.out.file)}` : `--outdir=${path.join(outRoot, plan.out.dir)}`;
+  const cwd = path.join(inRoot, plan.out.stdin?.dir ?? c.spec.absWorkingDir ?? '/');
+  const abs = (e) => (e.startsWith('/') ? path.join(inRoot, e) : e);
+  // `entryPathsAdvanced` with an `OutputPath` is the CLI's `out=in` entry syntax.
+  const advanced = c.spec.entryPathsAdvanced?.items ? asList(c.spec.entryPathsAdvanced).map(asObject) : [];
+  const entries = c.spec.entryPaths?.items ? asList(c.spec.entryPaths).map(abs) : advanced.map((e) => abs(e.InputPath));
+  const entryArgs = c.spec.entryPaths?.items ? entries : advanced.map((e, i) => (e.OutputPath ? `${e.OutputPath}=${entries[i]}` : entries[i]));
+  const stdoutFile = path.join(outRoot, 'stdout.js');
+  const outFlag = plan.out.stdout ? [] : [plan.out.file ? `--outfile=${path.join(outRoot, plan.out.file)}` : `--outdir=${path.join(outRoot, plan.out.dir)}`];
   const meta = path.join(caseDir, `${tool}-meta.json`);
   const extra = tool === 'tsr' ? ['--no-cache'] : [];
   const flags = plan.flags.map((f) => (f.includes('\0IN') ? f.replace(/\0IN(.*)$/, (_, p) => path.join(inRoot, p)) : f));
-  const b = await run(bin, [...entries, ...flags, outFlag, `--metafile=${meta}`, '--log-level=error', ...extra], cwd, 30000);
+  const env = plan.out.nodePaths ? { NODE_PATH: plan.out.nodePaths.map((p) => path.join(inRoot, p)).join(path.delimiter) } : {};
+  const b = await run(bin, [...entryArgs, ...flags, ...outFlag, ...(plan.out.stdout ? [] : [`--metafile=${meta}`]), '--log-level=error', ...extra], cwd, 30000,
+    { stdin: plan.out.stdin?.contents ?? null, env });
   if (b.code !== 0) return { built: false, log: (b.stderr || '').slice(0, 2000), signal: b.signal };
   // Entry outputs, in entry order.
   let outputs = [];
   let css = [];
-  try {
+  if (plan.out.stdout) {
+    fs.mkdirSync(outRoot, { recursive: true });
+    fs.writeFileSync(stdoutFile, b.stdout);
+    outputs = [stdoutFile];
+  } else try {
     const m = JSON.parse(fs.readFileSync(meta, 'utf8'));
     const byEntry = new Map();
     for (const [o, info] of Object.entries(m.outputs)) {
@@ -533,7 +604,7 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
   const runs = [];
   const mangled = mangleRegex(plan.flags);
   for (const o of outputs) {
-    const r = await run(process.execPath, [o], path.dirname(o), 10000);
+    const r = await run(process.execPath, [...(plan.random ? ['--require', plan.random] : []), o], path.dirname(o), 10000);
     runs.push({
       file: path.relative(outRoot, o),
       // Printing `process` (UseStrictDirectiveBundleIssue1837) shows the process ids.
@@ -553,19 +624,26 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
 
 async function runCase(c, tmp) {
   if (c.error) return { status: 'skip', why: [c.error] };
-  if (!c.spec.files?.items || !c.spec.entryPaths?.items) return { status: 'skip', why: ['shared Go variable'] };
+  if (!c.spec.files?.items || !(c.spec.entryPaths?.items || c.spec.entryPathsAdvanced?.items || c.spec.options)) return { status: 'skip', why: ['shared Go variable'] };
   const plan = flagsFor(c);
   if (plan.why.length) return { status: 'skip', why: plan.why };
   const files = asObject(c.spec.files);
   if (Object.values(files).some((v) => typeof v !== 'string')) return { status: 'skip', why: ['non-string file'] };
-  if (Object.values(files).some((v) => v.includes('Math.random'))) return { status: 'skip', why: ['nondeterministic (Math.random)'] };
-  const entries = asList(c.spec.entryPaths);
   const caseDir = path.join(tmp, c.name);
   fs.rmSync(caseDir, { recursive: true, force: true });
+  if (plan.out.tsconfig) {
+    if (files['/tsconfig.json'] !== undefined) return { status: 'skip', why: ['TS options and a tsconfig.json'] };
+    files['/tsconfig.json'] = JSON.stringify(plan.out.tsconfig);
+  }
   for (const [p, content] of Object.entries(files)) {
     const full = path.join(caseDir, 'in', p);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content);
+  }
+  // `Math.random()` gets the same seeded sequence in both runs.
+  if (Object.values(files).some((v) => v.includes('Math.random'))) {
+    plan.random = path.join(caseDir, 'random.cjs');
+    fs.writeFileSync(plan.random, 'let s = 42;\nMath.random = () => (s = (s * 16807) % 2147483647) / 2147483647;\n');
   }
   fs.mkdirSync(path.join(caseDir, 'in', c.spec.absWorkingDir ?? '/'), { recursive: true });
   const ref = await buildAndRun('esbuild', esbuild, c, plan, caseDir);

@@ -61,6 +61,9 @@ pub struct BuildResult {
     /// Absolute paths of every file the build read (modules), for watch mode. Also filled
     /// when the build failed after the graph was built.
     pub inputs: Vec<String>,
+    /// Directories whose listing the build depends on (glob `require`/`import()`
+    /// patterns), sorted: a file added or removed there changes the bundle.
+    pub watch_dirs: Vec<String>,
 }
 
 impl BuildResult {
@@ -81,7 +84,7 @@ impl BuildResult {
 }
 
 /// Persistent-cache format version (bump when meta, fragments or plans change shape).
-const CACHE_VERSION: u32 = 10;
+const CACHE_VERSION: u32 = 11;
 
 /// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
 pub struct BuildContext {
@@ -422,6 +425,7 @@ impl BuildContext {
             .collect();
         let fail = |m: Vec<Message>| BuildResult {
             inputs: inputs.clone(),
+            watch_dirs: graph.glob_dirs.clone(),
             ..BuildResult::fail(m)
         };
         let mut messages = graph.messages.clone();
@@ -487,6 +491,7 @@ impl BuildContext {
             messages.extend(self.string_name_errors(&graph, &lk.included));
         }
         messages.extend(crate::css::link::check(&graph, &lk));
+        messages.extend(import_errors(&graph, &lk, opts));
         if messages.iter().any(Message::is_error) {
             return fail(sorted(messages));
         }
@@ -733,6 +738,7 @@ impl BuildContext {
             metafile,
             stats,
             inputs,
+            watch_dirs: graph.glob_dirs.clone(),
         }
     }
 
@@ -889,8 +895,9 @@ impl BuildContext {
             let pretty = pretty_path(&wd, &e);
             if let Some(sheet) = &source.css {
                 // A CSS entry is its own `.css` output, printed as written.
-                let css =
+                let mut css =
                     crate::css::print_sheet(sheet, opts.minify_whitespace, opts.minify_syntax);
+                css = crate::css::lexer::finish_output(css, opts);
                 let file = match outfile {
                     Some(f) => f.to_owned(),
                     None => {
@@ -970,7 +977,7 @@ impl BuildContext {
                     return Err(errs);
                 }
             }
-            if module.is_some() && crate::scan::scan(&prepared, false).has_tla {
+            if module.is_some() && crate::scan::scan(&prepared, false, &[]).has_tla {
                 return Err(vec![Message::new(
                     Severity::Error,
                     Some(pretty.clone()),
@@ -1133,6 +1140,7 @@ impl BuildContext {
                 .then(|| crate::metafile::render_transform(&metas, &opts.working_dir)),
             stats: BuildStats::default(),
             inputs: entries.to_vec(),
+            watch_dirs: Vec::new(),
         }
     }
 }
@@ -1406,4 +1414,100 @@ fn glob_directory(pattern: &str, dir: &str) -> bool {
         };
         crate::resolve::glob(&pattern[..end], &prefix)
     })
+}
+
+/// Imports esbuild rejects once their targets are known (observed in esbuild 0.28.2): a
+/// stylesheet imported from JavaScript with no output path to put it in (the bundle goes to
+/// stdout), and an `assert { type: "json" }` import of a file another loader loads (`with`
+/// sets the loader instead, so it never fails).
+fn import_errors(g: &Graph, l: &crate::link::Link, opts: &BuildOptions) -> Vec<Message> {
+    let mut out = Vec::new();
+    let no_output = opts.outfile.is_none() && opts.outdir.is_none();
+    for (i, m) in g.modules.iter().enumerate() {
+        if !l.included[i] || m.source.css.is_some() {
+            continue;
+        }
+        for (r, rec) in m.meta.records.iter().enumerate() {
+            let Some(Target::Module(t)) = m.targets.get(r) else {
+                continue;
+            };
+            let tm = &g.modules[*t as usize];
+            if no_output && tm.loader.is_css() {
+                out.push(m.message_at(
+                    Severity::Error,
+                    rec.start,
+                    format!(
+                        "Cannot import {:?} into a JavaScript file without an output path configured",
+                        tm.pretty
+                    ),
+                ));
+            }
+            if rec.attrs.starts_with("assert")
+                && let Some(want) = attribute_type(&rec.attrs)
+                && want == "json"
+                && tm.loader != crate::options::Loader::Json
+            {
+                out.push(m.message_at(
+                    Severity::Error,
+                    rec.start,
+                    format!(
+                        "The file {:?} was loaded with the {:?} loader\nThis import assertion requires the loader to be \"json\" instead.\nYou need to either reconfigure esbuild to ensure that the loader for this file is \"json\" or you need to remove this import assertion.",
+                        tm.pretty,
+                        tm.loader.as_str()
+                    ),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// The `type` value of printed import attributes (`assert { type: "json" }`, or a quoted
+/// key: `assert { "type": "json" }`).
+fn attribute_type(attrs: &str) -> Option<String> {
+    let inner = attrs.split_once('{')?.1;
+    let mut chars = inner.chars().peekable();
+    // Each step consumes a character, so this ends.
+    loop {
+        while chars.next_if(|c| c.is_whitespace() || *c == ',').is_some() {}
+        let key = match chars.peek()? {
+            '}' => return None,
+            '"' | '\'' => quoted(&mut chars)?,
+            _ => {
+                let mut k = String::new();
+                while let Some(c) = chars.next_if(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                {
+                    k.push(c);
+                }
+                if k.is_empty() {
+                    return None;
+                }
+                k
+            }
+        };
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        chars.next_if_eq(&':')?;
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        let value = quoted(&mut chars)?;
+        if key == "type" {
+            return Some(value);
+        }
+    }
+}
+
+/// A `"..."` or `'...'` string at the iterator (escapes kept as written but skipped over).
+fn quoted(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+    let q = chars.next().filter(|c| *c == '"' || *c == '\'')?;
+    let mut out = String::new();
+    while let Some(c) = chars.next() {
+        if c == q {
+            return Some(out);
+        }
+        if c == '\\' {
+            out.push(chars.next()?);
+        } else {
+            out.push(c);
+        }
+    }
+    None
 }

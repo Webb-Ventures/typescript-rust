@@ -23,40 +23,42 @@ node bench/esbuild-oracle/fails.mjs [REGEX]   # list failures from target/esbuil
 ```
 
 Cases are skipped when they need options the CLI cannot express or that ts-r-build does not
-implement (Go plugins, browser targets, custom JSX factories through Go structs, ...). `results.json` lists every skip reason; cases that print `Math.random()`
-results are skipped as nondeterministic. `UnsupportedJSFeatures` maps to `--target=esN` when
+implement (Go plugins, browser targets, custom JSX factories through Go structs, ...). `results.json` lists every skip reason. Outputs run with a seeded
+`Math.random()` (preloaded with `node --require`), so cases that print random values compare. `UnsupportedJSFeatures` maps to `--target=esN` when
 the set equals a year target and to `--supported:<feature>=false` flags otherwise.
 
 ## Results
 
-v1 build6 at c0449fb (2026-10-27, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**1,002 of 1,028 compared cases pass (97.5%)**; 42 of the 1070 cases are skipped. Of the 26 failures, 14 are
-intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
-artifacts; the other 4 are gaps. The esbuild test files come from
+v1 build7 at dafb1fa (2026-10-27, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**1,046 of 1,066 compared cases pass (98.1%)**; 4 of the 1070 cases are skipped. Of the 20 failures, 14 are
+intended differences where ts-r-build follows tsc 7 (listed below) and 6 are oracle
+artifacts; no gaps are left. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-Since af89821 (938 of 964): ts-r-build has `--mangle-props`, `--mangle-quoted`,
-`--reserve-props`, `--inject`, path externals matched after resolution, CSS nesting
-lowering (`--supported:nesting=false`), `calc()` folding and short numbers under
-`--minify-syntax`, and more CSS module names (`@container`, counter styles, string keyframe
-names); `define` applies inside enum initializers and to JSX factories. The runner maps
-`MangleProps`, `MangleQuoted`, `ReserveProps`, `InjectPaths`, `External.PostResolve`,
-`OriginalTargetEnv` and `UnsupportedCSSFeatures` (nesting), so 64 more cases are compared.
+Since c0449fb (1,002 of 1,028): ts-r-build bundles glob `require()`/`import()` of computed
+relative paths (`require("./src/" + x)`), names minified CSS local classes like esbuild (by
+use count, letters by frequency), escapes non-ASCII CSS unless `--charset=utf8`, lowers
+nesting without `:is()`, and has `--pure:N`, `--charset`, `--jsx-side-effects` and
+`NODE_PATH`; an `exports` array stops at its first valid target and bare imports match
+directory-relative `browser` keys. The runner now compares cases with no output path
+(stdout), seeded `Math.random()`, `Defines` with call flags, JSX `SideEffects`/`Fragment`,
+`AbsNodePaths`, `UnsupportedCSSFeatures` (`inline-style`, `is-pseudo-class`),
+`UseDefineForClassFields` and shared Go variables, so 38 more cases are compared.
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| bundler_css_test.go | 55 | 4 | 3 |
-| bundler_dce_test.go | 117 | 0 | 4 |
-| bundler_default_test.go | 293 | 1 | 9 |
-| bundler_glob_test.go | 1 | 0 | 9 |
+| bundler_css_test.go | 62 | 0 | 0 |
+| bundler_dce_test.go | 121 | 0 | 0 |
+| bundler_default_test.go | 300 | 1 | 2 |
+| bundler_glob_test.go | 10 | 0 | 0 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
 | bundler_importstar_ts_test.go | 23 | 0 | 0 |
-| bundler_loader_test.go | 80 | 0 | 5 |
+| bundler_loader_test.go | 84 | 0 | 1 |
 | bundler_lower_test.go | 73 | 11 | 0 |
-| bundler_packagejson_test.go | 93 | 2 | 1 |
+| bundler_packagejson_test.go | 96 | 0 | 0 |
 | bundler_splitting_test.go | 22 | 1 | 0 |
-| bundler_ts_test.go | 76 | 3 | 9 |
-| bundler_tsconfig_test.go | 75 | 4 | 1 |
+| bundler_ts_test.go | 85 | 3 | 0 |
+| bundler_tsconfig_test.go | 76 | 4 | 0 |
 | bundler_yarnpnp_test.go | 2 | 0 | 1 |
 
 ### Intended differences (14): ts-r-build follows tsc 7
@@ -91,13 +93,10 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
   longer has the option, so ts-r-build drops an import whose names are only used as types;
   esbuild keeps it as `import "./foo"`.
 
-### Oracle artifacts (8)
+### Oracle artifacts (6)
 
 - `TsconfigExtendsDotWithSlash` / `DotDotWithSlash` expect a warning where the real esbuild
   CLI fails ("is a directory"); ts-r matches the test's intent.
-- `PackageJsonBrowserIssue2002B` depends on an esbuild quirk (a bare `sub` matched against a
-  browser-map key relative to the importer), and `PackageJsonExportsAlternatives` fails in
-  esbuild itself.
 - `TopLevelAwaitAllowedImportWithSplitting`: esbuild's own output throws
   (`require_entry is not defined`).
 - `LowerStaticSuperES2021NoBundle` and `LowerStaticAsyncSuperES2021NoBundle`: esbuild's output
@@ -105,23 +104,13 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
   `await super.foo?.(1, 2)` in an arrow moved out of the class); ts-r's runs as tsc 7's does
   and throws a ReferenceError, so the thrown errors differ. These count as one artifact each.
 - `SplittingMinifyIdentifiersCrashIssue437`: the output differs only in which short name the
-  minifier picks (`o` vs `f`), which shows in a thrown error.
+  minifier picks for a function in a shared chunk (`f` vs `l`), which shows when it is
+  printed.
 
-### Gaps (4)
+### Skipped (4)
 
-- **CSS** (4): with `--minify-identifiers`, esbuild names local CSS classes by how often
-  they are used, ts-r-build in source order (`ImportLocalCSSFromJSMinifyIdentifiers`,
-  `...AvoidGlobalNames`, `...MultipleEntryPoints`); esbuild escapes non-ASCII characters in
-  CSS strings (`"\1f44d"`, its default ASCII charset) and ts-r-build keeps them
-  (`ImportCSSFromJSLocalAtCounterStyle`).
-
-### Skipped (42)
-
-Nondeterministic (12), Go-only TypeScript options (10), cases sharing a Go variable (6), no
-output path (4, one of them writes to stdout), Windows paths (2), and one each for a browser
-target with CSS features (`CSSNestingOldBrowser`), `UnsupportedCSSFeatures` other than
-nesting (`InlineStyle`), `Defines` with call flags (`--pure`), a non-string file, the two JSX
-options `Fragment` and `SideEffects`, absolute node paths and `Plugins` (a Go plugin).
+A Go plugin (`WarningsInsideNodeModules`), code on stdin (`ErrorMessageCrashStdinIssue2913`;
+ts-r-build reads no code from stdin) and Windows paths (2).
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -142,3 +131,4 @@ options `Fragment` and `SideEffects`, absolute node paths and `Plugins` (a Go pl
 | v1 build4 at 955b2a9: CSS bundling and CSS modules, `copy` / `local-css` / `global-css` loaders; runner compares CSS and maps those loaders | 1070 | 957 | 931 | 26 | 113 | 97.3% |
 | v1 build5 at af89821: `--keep-names`; runner maps `KeepNames` | 1070 | 964 | 938 | 26 | 106 | 97.3% |
 | v1 build6 at c0449fb: `--mangle-props` / `--mangle-quoted` / `--reserve-props`, `--inject`, path externals, CSS nesting lowering, `calc()` folding, more CSS module names, `define` in enums and JSX factories; runner maps those options | 1070 | 1028 | 1002 | 26 | 42 | 97.5% |
+| v1 build7 at dafb1fa: glob `require`/`import()`, esbuild's minified CSS names, ASCII CSS output, nesting without `:is()`, `--pure`, `--charset`, `NODE_PATH`, `exports` arrays and `browser` keys as esbuild; runner compares stdout, seeded `Math.random()` and more options | 1070 | 1066 | 1046 | 20 | 4 | 98.1% |

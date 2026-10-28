@@ -415,6 +415,10 @@ pub fn assemble(
             outbase,
         };
         result.css = crate::css::order::bundle(&host, &c.css, compact, opts.minify_syntax);
+        result.css = result
+            .css
+            .take()
+            .map(|css| crate::css::lexer::finish_output(css, opts));
     }
     if out.col != 0 {
         out.push("\n");

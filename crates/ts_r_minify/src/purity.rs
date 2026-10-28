@@ -31,6 +31,9 @@ pub struct Purity<'a> {
     pub scopes: Option<&'a Scopes>,
     /// Honour `/* @__PURE__ */` annotations (esbuild's `--ignore-annotations` turns this off).
     pub annotations: bool,
+    /// Global functions whose calls are pure like annotated ones (esbuild's `--pure:name`,
+    /// `a.b` for a member of a global; honoured only with `annotations`).
+    pub pure_calls: &'a [String],
 }
 
 impl std::fmt::Debug for Purity<'_> {
@@ -179,7 +182,9 @@ impl Purity<'_> {
             } => self.class(decorators, heritage, members, d),
             Node::Call { callee, args, .. } => {
                 let annotated = self.annotations
-                    && (has_pure_comment(ast, self.src, id) || self.no_side_effects_callee(callee));
+                    && (has_pure_comment(ast, self.src, id)
+                        || self.no_side_effects_callee(callee)
+                        || self.pure_callee(callee));
                 (annotated || self.known_pure_call(callee, args))
                     && ast.list(args).iter().all(|&a| self.arg(a, d))
             }
@@ -297,6 +302,40 @@ impl Purity<'_> {
             Node::StaticBlock { body } => ast.list(body).iter().all(|&s| self.stmt(s)),
             _ => true,
         })
+    }
+
+    /// `callee` is a global name or member chain listed in [`Purity::pure_calls`].
+    fn pure_callee(&self, callee: NodeId) -> bool {
+        if self.pure_calls.is_empty() {
+            return false;
+        }
+        let ast = self.ast;
+        let mut parts: Vec<&str> = Vec::new();
+        let mut cur = callee;
+        // Member chains are bounded by the parser's nesting limit; this caps them anyway.
+        for _ in 0..64 {
+            match *ast.node(cur) {
+                Node::Ident { name } => {
+                    if !self.is_global(cur) {
+                        return false;
+                    }
+                    parts.push(ast.atom(name));
+                    parts.reverse();
+                    let dotted = parts.join(".");
+                    return self.pure_calls.contains(&dotted);
+                }
+                Node::Member { obj, prop, .. } => match *ast.node(prop) {
+                    Node::Ident { name } => {
+                        parts.push(ast.atom(name));
+                        cur = obj;
+                    }
+                    _ => return false,
+                },
+                Node::Paren { expr } => cur = expr,
+                _ => return false,
+            }
+        }
+        false
     }
 
     fn is_global(&self, id: NodeId) -> bool {
@@ -609,6 +648,7 @@ mod tests {
             src,
             scopes: Some(&scopes),
             annotations: true,
+            pure_calls: &[],
         };
         crate::build::program_stmts(&ast)
             .into_iter()

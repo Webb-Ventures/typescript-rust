@@ -161,6 +161,9 @@ pub struct Graph {
     pub modules: Vec<Module>,
     pub entries: Vec<ModuleId>,
     pub messages: Vec<Message>,
+    /// Directories glob `require`/`import()` patterns listed, sorted: watch mode rebuilds
+    /// when their contents change.
+    pub glob_dirs: Vec<String>,
 }
 
 impl Graph {
@@ -202,6 +205,11 @@ enum RawTarget {
 #[derive(Debug)]
 struct Node {
     loaded: Arc<Loaded>,
+    /// The module's meta with glob records expanded ([`expand_globs`]), when it has any.
+    /// The cached [`Loaded`] keeps the meta as scanned: the files may change.
+    globbed: Option<Arc<ModuleMeta>>,
+    /// Directories its glob records listed ([`expand_globs`]).
+    glob_dirs: Vec<String>,
     targets: Vec<RawTarget>,
     side_effects: bool,
     node_mode: bool,
@@ -265,8 +273,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
         let required: FxHashSet<String> = nodes
             .values()
             .flat_map(|n| {
-                n.loaded
-                    .meta
+                n.meta()
                     .records
                     .iter()
                     .zip(&n.targets)
@@ -278,8 +285,8 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             })
             .collect();
         for n in nodes.values_mut() {
-            let loaded = Arc::clone(&n.loaded);
-            for (r, t) in loaded.meta.records.iter().zip(n.targets.iter_mut()) {
+            let meta = Arc::clone(n.meta());
+            for (r, t) in meta.records.iter().zip(n.targets.iter_mut()) {
                 if r.kind != RecordKind::Require
                     && let RawTarget::Path(q) = t
                     && let Some(main) = dual.get(q.as_str())
@@ -313,6 +320,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
     let mut g = Graph::default();
     for p in &order {
         let Some(n) = nodes.remove(p) else { continue };
+        g.glob_dirs.extend(n.glob_dirs.iter().cloned());
         g.messages.extend(n.loaded.messages.iter().cloned());
         g.messages.extend(n.messages);
         let targets = n
@@ -333,7 +341,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             pretty: l.pretty.clone(),
             loader: l.loader,
             source: l.source.clone(),
-            meta: Arc::clone(&l.meta),
+            meta: Arc::clone(n.globbed.as_ref().unwrap_or(&l.meta)),
             prepared: l.prepared.clone(),
             targets,
             side_effects: n.side_effects,
@@ -347,6 +355,8 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             .unwrap_or_else(|e| e.into_inner())
             .insert(p.clone(), n.loaded);
     }
+    g.glob_dirs.sort();
+    g.glob_dirs.dedup();
     copy_imports_external(&mut g);
     g.entries = entries.iter().filter_map(|e| ids.get(e).copied()).collect();
     g
@@ -448,6 +458,110 @@ fn is_relative(spec: &str) -> bool {
     spec.starts_with("./") || spec.starts_with("../") || spec == "." || spec == ".."
 }
 
+impl Node {
+    fn meta(&self) -> &Arc<ModuleMeta> {
+        self.globbed.as_ref().unwrap_or(&self.loaded.meta)
+    }
+}
+
+/// Most directory entries one glob pattern may read, and most directory levels it walks: a
+/// pattern over a huge tree is an error rather than a partial (or endless) listing.
+const GLOB_MAX_FILES: usize = 10_000;
+const GLOB_MAX_DEPTH: usize = 64;
+
+/// What a glob record found ([`expand_globs`]).
+enum GlobFound {
+    Files,
+    NoMatches,
+    NoDirectory,
+    TooMany,
+}
+
+/// Adds a `require`/`import()` record for every file a glob record's pattern matches,
+/// relative to `dir` and sorted, as esbuild bundles `require("./src/" + x)`: each file is
+/// bundled, and the call looks the path up in a map of them at run time (`plan.rs`). The
+/// added records share the glob record's call node and part, after every scanned record.
+/// `dirs` gets every directory the patterns listed, or for a missing one its nearest
+/// existing parent: a file or directory added there changes the expansion (watch mode).
+fn expand_globs(
+    fs: &dyn ts_r_config::fs::FileSystem,
+    dir: &str,
+    meta: &ModuleMeta,
+    dirs: &mut Vec<String>,
+) -> (ModuleMeta, FxHashMap<usize, GlobFound>) {
+    let mut out = meta.clone();
+    let mut found = FxHashMap::default();
+    let mut part_of: FxHashMap<u32, usize> = FxHashMap::default();
+    for (pi, p) in meta.parts.iter().enumerate() {
+        for &r in &p.records {
+            part_of.insert(r, pi);
+        }
+    }
+    for (ri, r) in meta.records.iter().enumerate() {
+        if !r.kind.is_glob() {
+            continue;
+        }
+        let pattern = crate::glob::Pattern::parse(&r.spec);
+        let base = path::resolve(dir, pattern.dir());
+        if !fs.directory_exists(&base) {
+            found.insert(ri, GlobFound::NoDirectory);
+            // Each step is a shorter path, so this ends.
+            let mut up = path::directory_of(&base);
+            while !up.is_empty() && !fs.directory_exists(up) {
+                let next = path::directory_of(up);
+                if next.len() >= up.len() {
+                    break;
+                }
+                up = next;
+            }
+            if !up.is_empty() {
+                dirs.push(up.to_owned());
+            }
+            continue;
+        }
+        let mut files = Vec::new();
+        let complete = crate::glob::walk(
+            fs,
+            &base,
+            pattern.dir(),
+            &pattern,
+            GLOB_MAX_DEPTH,
+            GLOB_MAX_FILES,
+            &mut files,
+            dirs,
+        );
+        if !complete {
+            found.insert(ri, GlobFound::TooMany);
+            continue;
+        }
+        files.sort();
+        found.insert(
+            ri,
+            if files.is_empty() {
+                GlobFound::NoMatches
+            } else {
+                GlobFound::Files
+            },
+        );
+        let kind = match r.kind {
+            RecordKind::GlobRequire => RecordKind::Require,
+            _ => RecordKind::Dynamic,
+        };
+        let part = part_of.get(&(ri as u32)).copied();
+        for f in files {
+            if let Some(pi) = part {
+                out.parts[pi].records.push(out.records.len() as u32);
+            }
+            out.records.push(crate::meta::Record {
+                kind,
+                spec: f,
+                ..r.clone()
+            });
+        }
+    }
+    (out, found)
+}
+
 fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
     let loaded = load_module(ctx, p, wd);
     let resolver = &ctx.prep.resolver;
@@ -459,14 +573,60 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
         path::directory_of(p).to_owned()
     };
     let mut messages = Vec::new();
-    let mut targets = Vec::with_capacity(loaded.meta.records.len());
+    let mut glob_dirs = Vec::new();
+    let (globbed, glob_found) = if ctx.prep.opts.bundle
+        && !is_data
+        && !p.starts_with(DISABLED_PREFIX)
+        && loaded.meta.records.iter().any(|r| r.kind.is_glob())
+    {
+        let (m, found) = expand_globs(resolver.fs().as_ref(), &dir, &loaded.meta, &mut glob_dirs);
+        (Some(Arc::new(m)), found)
+    } else {
+        (None, FxHashMap::default())
+    };
+    let meta = Arc::clone(globbed.as_ref().unwrap_or(&loaded.meta));
+    let mut targets = Vec::with_capacity(meta.records.len());
     let pretty = &loaded.pretty;
     let mut lines: Option<LineIndex> = None;
     let text_of_lines: &str = match &loaded.source.css {
         Some(sheet) => &sheet.src,
         None => &loaded.source.js,
     };
-    for r in &loaded.meta.records {
+    for (ri, r) in meta.records.iter().enumerate() {
+        if r.kind.is_glob() {
+            let call = if r.kind == RecordKind::GlobRequire {
+                "require"
+            } else {
+                "import"
+            };
+            let note = match glob_found.get(&ri) {
+                Some(GlobFound::NoDirectory) => Some((
+                    Severity::Error,
+                    format!("Could not resolve {call}({:?})", r.spec),
+                )),
+                Some(GlobFound::NoMatches) => Some((
+                    Severity::Warning,
+                    format!(
+                        "The glob pattern {call}({:?}) did not match any files",
+                        r.spec
+                    ),
+                )),
+                Some(GlobFound::TooMany) => Some((
+                    Severity::Error,
+                    format!(
+                        "The glob pattern {call}({:?}) reads more than {GLOB_MAX_FILES} directory entries",
+                        r.spec
+                    ),
+                )),
+                Some(GlobFound::Files) | None => None,
+            };
+            if let Some((sev, text)) = note {
+                let lines = lines.get_or_insert_with(|| LineIndex::new(text_of_lines));
+                messages.push(lines.message(sev, pretty, r.start, text));
+            }
+            targets.push(RawTarget::Missing);
+            continue;
+        }
         let kind = match r.kind {
             RecordKind::Require => ResolveKind::Require,
             RecordKind::CssImport | RecordKind::CssComposes => ResolveKind::CssImport,
@@ -538,6 +698,23 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
                     }
                 }
             }
+            // The files of a glob `import()` with a `type` (`expand_globs` copied it).
+            Resolution::File(f)
+                if ctx.prep.opts.bundle
+                    && r.kind == RecordKind::Dynamic
+                    && !r.attrs.is_empty()
+                    && ctx.prep.opts.loader_for(&f) != Loader::Copy =>
+            {
+                match attribute_type(&r.attrs) {
+                    Ok(Some(t)) => RawTarget::Path(format!("{f}{WITH_TYPE_SEP}{t}")),
+                    Ok(None) => RawTarget::Path(f),
+                    Err(text) => {
+                        let lines = lines.get_or_insert_with(|| LineIndex::new(text_of_lines));
+                        messages.push(lines.message(Severity::Error, pretty, r.start, text));
+                        RawTarget::Path(f)
+                    }
+                }
+            }
             Resolution::File(f) => match &ctx.prep.opts.dynamic_import_url {
                 Some(hook) if r.kind == RecordKind::Dynamic => match (hook.0)(&f) {
                     Some(url) => RawTarget::External(url),
@@ -585,13 +762,16 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             || lower.ends_with(".mts")
             || ((lower.ends_with(".js") || lower.ends_with(".ts"))
                 && pkg.as_ref().is_some_and(|k| k.is_module));
+        // `--ignore-annotations` ignores `sideEffects` too, as esbuild documents.
         (
-            pkg.as_ref().is_none_or(|k| k.has_side_effects(p)),
+            ctx.prep.opts.ignore_annotations || pkg.as_ref().is_none_or(|k| k.has_side_effects(p)),
             node_mode,
         )
     };
     Node {
         loaded,
+        globbed,
+        glob_dirs,
         targets,
         side_effects,
         node_mode,
@@ -693,7 +873,7 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
     ctx.parsed
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prepared = prepare::prepare(ctx.prep, p, &pretty, Arc::clone(&source.js), loader);
-    let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations);
+    let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations, &opts.pure);
     if let Some(props) = &ctx.prep.props {
         meta.props = crate::props::collect(props, &prepared, true);
     }

@@ -4,7 +4,11 @@
 //
 // scripts/limit.sh --mem-mb 4096 --time-s 3600 -- node bench/dev-oracle/run.mjs \
 //   [--playgrounds hmr,assets] [--server both|vite|ts-r] [--jobs 2] [--tsr target/release/ts-r-dev]
-//   [--out target/dev-oracle/results.json] [--list]
+//   [--out target/dev-oracle/results.json] [--list] [--modules <node_modules dir>]
+//
+// npm packages (Vite and the playgrounds' dependencies) come from bench/node_modules, or from
+// the directory `--modules` (or the TS_R_BENCH_MODULES environment variable) names, so a
+// checkout can use another checkout's install read-only without linking it into bench/.
 
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -23,6 +27,9 @@ for (let i = 2; i < process.argv.length; i++) {
   if (k === 'list' || k === 'keep') opts[k] = true
   else opts[k] = process.argv[++i]
 }
+const modules = path.resolve(opts.modules ?? process.env.TS_R_BENCH_MODULES ?? path.join(bench, 'node_modules'))
+// vite-serve.mjs (run by the workers) imports Vite from the same directory.
+process.env.TS_R_BENCH_MODULES = modules
 const jobs = Math.min(2, Number(opts.jobs) || 1)
 const servers = opts.server === 'both' ? ['vite', 'ts-r'] : [opts.server]
 const chrome = process.env.TS_R_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -30,8 +37,8 @@ if (!fs.existsSync(playground)) {
   console.error('missing target/upstream/vite/playground: run `cargo xtask upstream sync vite`')
   process.exit(1)
 }
-if (!fs.existsSync(path.join(bench, 'node_modules/vite'))) {
-  console.error('missing bench/node_modules: run `npm ci` in bench/')
+if (!fs.existsSync(path.join(modules, 'vite'))) {
+  console.error(`missing ${modules}/vite: run \`npm ci\` in bench/, or pass --modules <node_modules dir>`)
   process.exit(1)
 }
 
@@ -90,8 +97,8 @@ function missingDeps(pkgDir, seen = new Set()) {
     } else if (spec.startsWith('workspace:')) {
       workspace ??= workspacePackages(playground)
       if (workspace.has(name)) missing.push(...missingDeps(workspace.get(name), seen))
-      else if (!exists(path.join(bench, 'node_modules', name))) missing.push(name)
-    } else if (!exists(path.join(bench, 'node_modules', name))) missing.push(name)
+      else if (!exists(path.join(modules, name))) missing.push(name)
+    } else if (!exists(path.join(modules, name))) missing.push(name)
   }
   return [...new Set(missing)]
 }
@@ -116,7 +123,7 @@ function playgrounds() {
     if (!skip && specs.length === 0) skip = `only variant specs with a custom server (${variants.join(', ')})`
     if (!skip) {
       const missing = missingDeps(path.join(playground, name))
-      if (missing.length) skip = `npm packages not in bench/node_modules: ${missing.join(', ')}`
+      if (missing.length) skip = `npm packages not in the node_modules directory: ${missing.join(', ')}`
     }
     out.push({ name, specs, variants, skip })
   }
@@ -126,7 +133,7 @@ function playgrounds() {
 // ---------------------------------------------------------------------------------------
 // Work copies: the playground copied (as vitest's global setup copies it to playground-temp)
 // with its local packages installed the way pnpm does (file: copied, link: and workspace:
-// symlinked). npm packages resolve from bench/node_modules through a symlink above it.
+// symlinked). npm packages resolve from the node_modules directory through a symlink above it.
 
 function installDeps(pkgDir, root, depth = 0) {
   const pj = path.join(pkgDir, 'package.json')
@@ -244,7 +251,7 @@ const wanted = opts.playgrounds ? new Set(opts.playgrounds.split(',')) : null
 const todo = all.filter((p) => !p.skip && (!wanted || wanted.has(p.name)))
 fs.rmSync(path.join(outDir, 'node_modules'), { force: true, recursive: true })
 fs.mkdirSync(outDir, { recursive: true })
-fs.symlinkSync(path.join(bench, 'node_modules'), path.join(outDir, 'node_modules'), 'dir')
+fs.symlinkSync(modules, path.join(outDir, 'node_modules'), 'dir')
 
 const results = {}
 let next = 0
@@ -274,7 +281,7 @@ for (const p of all) {
   summary.playgrounds[p.name] = row
   for (const k of ['pass', 'compared', 'skip']) summary.total[k] += row[k]
 }
-const version = (pkg) => readJson(path.join(bench, 'node_modules', pkg, 'package.json')).version
+const version = (pkg) => readJson(path.join(modules, pkg, 'package.json')).version
 const meta = {
   commit: spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo, encoding: 'utf8' }).stdout.trim(),
   date: new Date().toISOString().slice(0, 10),

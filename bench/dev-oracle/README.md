@@ -23,8 +23,13 @@ scripts/limit.sh --mem-mb 4096 --time-s 3600 -- node bench/dev-oracle/run.mjs --
 node bench/dev-oracle/fails.mjs [--playground hmr] [--skips]   # list failures
 ```
 
+`--modules DIR` (or `TS_R_BENCH_MODULES`) takes the npm packages from another
+`node_modules` directory instead of `bench/node_modules` (Vite itself, its version, the
+packages playgrounds need and the `target/dev-oracle/node_modules` link), so a checkout can
+reuse an installed one without running npm.
+
 Whole playgrounds are skipped when they have no browser page (SSR), start a custom server
-(`__tests__/serve.ts`), need npm packages that `bench/node_modules` doesn't have (vue, sass,
+(`__tests__/serve.ts`), need npm packages the node_modules directory doesn't have (vue, sass,
 react, ...), are build-only (legacy) or use `experimental.bundledDev` (hmr-full-bundle-mode).
 Variant specs (`__tests__/<variant>/*.spec.ts`) run with the playground's
 `vite.config-<variant>.js` (`--config` for ts-r-dev, the third argument of `vite-serve.mjs`),
@@ -37,8 +42,12 @@ Full runs use `--jobs 1`: two playgrounds at once got Chrome killed at its
 
 ## Results
 
-c0449fb (2026-10-27, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
-`--jobs 1`): **512 of 512 compared tests pass (100.0%)**; 97 tests are skipped. Since
+dafb1fa (2026-10-27, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47,
+`--jobs 1`, `--modules` naming a shared install):
+**512 of 512 compared tests pass (100.0%)**; 97 tests are skipped, unchanged since c0449fb. Of the 97: 74 are build-only
+(`runIf(false)` in serve), 8 assert on the dev server's terminal output, 4 use Vite's server
+object, 4 are `test.skip` in the spec and 7 failed against Vite in the run; none of them is
+a ts-r-dev gap. Since
 b5d9371 (509 of 509, 100 skipped): the shim has `text=` selectors and
 `page.frame(name).content()`, so html's "invalid > should reload when fixed" and
 proxy-bypass's `async-proxy-bypass` are compared and pass, and `wasm > should work when
@@ -53,7 +62,7 @@ What made them pass in ts-r-dev: `--config`, `new Worker(new URL(...))` URLs wit
 `worker_file&type=...`, classic workers, `build.assetsInlineLimit` as a function,
 `optimizeDeps.exclude`, an encoded base in the server URL, `srcset` URLs with spaces, `t=` on
 asset URLs after a hot update and `html.cspNonce` (`crates/ts_r_hmr/AGENTS.md`).
-Earlier runs: 509 of 509 at b5d9371; 322 of 322 at 2bd07f1; 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322
+Earlier runs: 512 of 512 at c0449fb; 509 of 509 at b5d9371; 322 of 322 at 2bd07f1; 321 of 322 at 7cba502; 312 of 322 at 61c9d42; 274 of 322
 at e07eafa; 202 of 322 at 58a940e; 101 of 254 at 8c14f29, with an older harness that loaded
 fewer specs.
 

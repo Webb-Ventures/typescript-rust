@@ -67,8 +67,8 @@ pub fn render(
             };
             let kind = match r.kind {
                 RecordKind::Import | RecordKind::ReExport => "import-statement",
-                RecordKind::Require => "require-call",
-                RecordKind::Dynamic => "dynamic-import",
+                RecordKind::Require | RecordKind::GlobRequire => "require-call",
+                RecordKind::Dynamic | RecordKind::GlobDynamic => "dynamic-import",
                 RecordKind::CssImport => "import-rule",
                 RecordKind::CssUrl => "url-token",
                 RecordKind::CssComposes => "composes-from",

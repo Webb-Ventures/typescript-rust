@@ -498,12 +498,136 @@ pub fn escape_ident(text: &str) -> String {
     out
 }
 
+/// The last rewrites of a CSS output: [`ascii_only`] unless `--charset=utf8`, and `</style`
+/// written `<\/style` when CSS may not be inlined in a `<style>` tag as is
+/// (`--supported:inline-style=false`, as esbuild does for its legal comments and strings).
+pub fn finish_output(css: String, opts: &crate::options::BuildOptions) -> String {
+    let css = if opts.charset_utf8 {
+        css
+    } else {
+        ascii_only(css)
+    };
+    if opts
+        .unsupported()
+        .has(crate::features::Feature::InlineStyle)
+    {
+        escape_style_end(css)
+    } else {
+        css
+    }
+}
+
+/// `</style` (any case) as `<\/style`.
+fn escape_style_end(css: String) -> String {
+    let lower = css.to_ascii_lowercase();
+    if !lower.contains("</style") {
+        return css;
+    }
+    let mut out = String::with_capacity(css.len() + 8);
+    let mut last = 0;
+    for (i, _) in lower.match_indices("</style") {
+        out.push_str(&css[last..i + 1]);
+        out.push('\\');
+        last = i + 1;
+    }
+    out.push_str(&css[last..]);
+    out
+}
+
+/// Printed CSS with every non-ASCII character outside comments written as a hex escape
+/// (`👍` is `\1f44d`), as esbuild's default `--charset=ascii` prints it (observed in
+/// esbuild 0.28.2). An escape is followed by a space when the next character is a hex digit
+/// or whitespace, which would otherwise be read as part of it; `\é` (a backslash escape of
+/// the character) becomes the hex escape alone. Strings are tracked so a `/*` inside one is
+/// not taken for a comment.
+pub fn ascii_only(css: String) -> String {
+    if css.is_ascii() {
+        return css;
+    }
+    let mut out = String::with_capacity(css.len() + css.len() / 8);
+    let mut chars = css.chars().peekable();
+    let mut quote: Option<char> = None;
+    let mut comment = false;
+    let mut pending = false;
+    while let Some(c) = chars.next() {
+        if pending {
+            if c.is_ascii_hexdigit() || matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}') {
+                out.push(' ');
+            }
+            pending = false;
+        }
+        if comment {
+            out.push(c);
+            if c == '*' && chars.peek() == Some(&'/') {
+                out.push('/');
+                chars.next();
+                comment = false;
+            }
+            continue;
+        }
+        match c {
+            '/' if quote.is_none() && chars.peek() == Some(&'*') => {
+                out.push_str("/*");
+                chars.next();
+                comment = true;
+            }
+            '"' | '\'' => {
+                if quote == Some(c) {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(c);
+                }
+                out.push(c);
+            }
+            '\\' => match chars.next() {
+                Some(n) if !n.is_ascii() => {
+                    out.push_str(&format!("\\{:x}", n as u32));
+                    pending = true;
+                }
+                Some(n) => {
+                    out.push('\\');
+                    out.push(n);
+                }
+                None => out.push('\\'),
+            },
+            c if !c.is_ascii() => {
+                out.push_str(&format!("\\{:x}", c as u32));
+                pending = true;
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn kinds(s: &str) -> Vec<T> {
         tokenize(s).0.into_iter().map(|t| t.t).collect()
+    }
+
+    #[test]
+    fn ascii_only_escapes() {
+        let t = |s: &str| ascii_only(s.to_owned());
+        assert_eq!(t("a{b:c}"), "a{b:c}");
+        assert_eq!(
+            t("div{list-style-type:\"👍\"}"),
+            "div{list-style-type:\"\\1f44d\"}"
+        );
+        // A hex digit or whitespace after an escape needs a separating space.
+        assert_eq!(t(".é1{}"), ".\\e9 1{}");
+        assert_eq!(t(".é {}"), ".\\e9  {}");
+        assert_eq!(t(".éx{}"), ".\\e9x{}");
+        // A backslash escape of the character itself, comments, and a `/*` in a string.
+        assert_eq!(t(".\\é{}"), ".\\e9{}");
+        assert_eq!(t("/* é */a{}"), "/* é */a{}");
+        assert_eq!(t("a{b:\"/*\";c:\"é\"}"), "a{b:\"/*\";c:\"\\e9\"}");
+        assert_eq!(
+            escape_style_end("/*! </style> </STYLE */".to_owned()),
+            "/*! <\\/style> <\\/STYLE */"
+        );
     }
 
     #[test]

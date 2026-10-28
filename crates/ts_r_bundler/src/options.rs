@@ -257,6 +257,17 @@ pub struct BuildOptions {
     /// `@import`s inlined and its `url()`s the URLs the files are served at, so they stay as
     /// written. The dev server's dependency adapter reads dependency CSS this way.
     pub css_prebundled: bool,
+    /// `--charset=utf8`: CSS output keeps non-ASCII characters. By default (esbuild's
+    /// `ascii`) each one outside comments is written as a `\hex` escape. JavaScript output
+    /// keeps them either way.
+    pub charset_utf8: bool,
+    /// `--pure:name`: calls of these global functions (`a.b` for a member of a global) are
+    /// removable when unused, like `/* @__PURE__ */` ones (tree shaking only; ignored with
+    /// `--ignore-annotations`).
+    pub pure: Vec<String>,
+    /// Package directories searched after every `node_modules` (`NODE_PATH`, which the CLI
+    /// reads as esbuild's does); relative ones are against `working_dir`.
+    pub node_paths: Vec<String>,
 }
 
 /// See [`BuildOptions::dynamic_import_url`]: resolved file path to URL, or `None` to bundle.
@@ -330,6 +341,9 @@ impl Default for BuildOptions {
             require_to_import: false,
             dynamic_import_url: None,
             css_prebundled: false,
+            charset_utf8: false,
+            pure: Vec::new(),
+            node_paths: Vec::new(),
         }
     }
 }
