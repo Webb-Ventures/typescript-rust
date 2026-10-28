@@ -56,7 +56,7 @@ fn hot_updates_in_headless_chrome() {
     );
     // The HMR socket is up before we edit anything.
     cdp.wait_for(
-        "performance.getEntriesByType('resource').some(e => e.name.includes('/@ts-r/client')) && window.__loads === 1",
+        "performance.getEntriesByType('resource').some(e => e.name.includes('/@vite/client')) && window.__loads === 1",
         T,
     );
     std::thread::sleep(Duration::from_millis(300));

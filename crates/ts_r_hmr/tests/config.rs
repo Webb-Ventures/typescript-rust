@@ -64,7 +64,7 @@ fn env_define_and_base_like_vite() {
         html.contains("<title>Title development %SECRET% /app/</title>"),
         "{html}"
     );
-    assert!(html.contains("src=\"/app/@ts-r/client\""), "{html}");
+    assert!(html.contains("src=\"/app/@vite/client\""), "{html}");
     assert!(html.contains("src=\"/app/src/main.js\""), "{html}");
     assert!(html.contains("href=\"/app/favicon.ico\""), "{html}");
     assert!(
@@ -88,8 +88,14 @@ fn env_define_and_base_like_vite() {
         ),
         "{env}"
     );
-    let (_, _, client) = get(&server, "/app/@ts-r/client");
-    assert!(client.starts_with("const __tsr_defines"), "{client}");
+    let (_, _, client) = get(&server, "/app/@vite/client");
+    // The client imports the defines, as Vite's does.
+    assert!(
+        client.starts_with("import \"/app/@vite/env\";\n"),
+        "{client}"
+    );
+    let (_, _, alias) = get(&server, "/app/@ts-r/client");
+    assert_eq!(alias, "export * from \"/app/@vite/client\";\n");
     assert!(client.contains("const base = \"/app/\";"));
     assert!(client.contains("const wsPath = \"/app/@ts-r/ws\";"));
 
@@ -555,7 +561,7 @@ fn wasm_workers_and_dynamic_imports_like_vite() {
     let server = DevServer::start(base_config(&app)).expect("server starts");
     let (_, _, a) = get(&server, "/src/a.js");
     assert!(
-        a.starts_with("import { injectQuery as __vite__injectQuery } from \"/@ts-r/client\";import init from '/src/m.wasm?import&init'"),
+        a.starts_with("import { injectQuery as __vite__injectQuery } from \"/@vite/client\";import init from '/src/m.wasm?import&init'"),
         "{a}"
     );
     assert!(a.contains("import W from '/src/w.js?worker'"), "{a}");

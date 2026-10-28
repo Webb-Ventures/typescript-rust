@@ -53,7 +53,9 @@ pub mod worker;
 pub mod ws;
 
 pub use graph::{Boundary, FullReload, ModuleGraph, ModuleId, ModuleKind, Propagation};
-pub use plugin::{PluginHooks, PluginHost, PluginResolution, ServerHandle, Stage, Transformed};
+pub use plugin::{
+    Loaded, PluginHooks, PluginHost, PluginResolution, ServerHandle, Stage, Transformed,
+};
 pub use prebundle::{DepBatch, DepBundler, DepRequest, UnbundledDeps};
 pub use resolve::{Resolve, ResolveError, Resolved, SimpleResolver};
 pub use scan::{HotInfo, ImportKind, ImportRecord, ModuleScan};

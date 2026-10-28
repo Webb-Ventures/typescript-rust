@@ -45,6 +45,9 @@ pub struct PluginHooks {
     pub resolve_pre: bool,
     pub resolve_post: bool,
     pub load: bool,
+    /// A `load` hook may claim any module (it has no filter): regular files go through
+    /// [`PluginHost::load_with_watch`] too, for its code or the files it watches.
+    pub load_files: bool,
     pub transform_pre: bool,
     pub transform_post: bool,
     pub index_html: bool,
@@ -82,6 +85,9 @@ pub struct Transformed {
     /// The source map (JSON) of each hook that changed the code, in the order they ran;
     /// `None` for a hook that returned no map (treated as not moving anything).
     pub maps: Vec<Option<String>>,
+    /// Files the hooks added with `this.addWatchFile` (absolute, `/`-separated): their
+    /// contents join the module's cache key, and editing one updates the module.
+    pub watch_files: Vec<String>,
 }
 
 impl Transformed {
@@ -89,9 +95,18 @@ impl Transformed {
     pub fn code(code: impl Into<String>) -> Transformed {
         Transformed {
             code: code.into(),
-            maps: Vec::new(),
+            ..Transformed::default()
         }
     }
+}
+
+/// What `load` hooks made of a module id.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Loaded {
+    /// `None`: no hook loaded it (a regular file is read from disk).
+    pub code: Option<String>,
+    /// Files the hooks added with `this.addWatchFile`, as in [`Transformed::watch_files`].
+    pub watch_files: Vec<String>,
 }
 
 /// `(specifier, importer id)` to `(id, external)`.
@@ -147,7 +162,16 @@ pub trait PluginHost: Send + Sync + fmt::Debug {
     /// `load(id)`; `None` = no plugin loaded it.
     fn load(&self, id: &str) -> Result<Option<String>, String>;
 
-    /// The `transform` hooks of one stage, chained; `None` = code unchanged.
+    /// `load(id)` with the files the hooks watch.
+    fn load_with_watch(&self, id: &str) -> Result<Loaded, String> {
+        Ok(Loaded {
+            code: self.load(id)?,
+            watch_files: Vec::new(),
+        })
+    }
+
+    /// The `transform` hooks of one stage, chained; `None` = code unchanged and no watch
+    /// files (a hook that only watched files returns `Some` with `code` as given).
     fn transform(&self, stage: Stage, id: &str, code: &str) -> Result<Option<Transformed>, String>;
 
     /// `transformIndexHtml` for the page at `url` (file `file`).

@@ -13,7 +13,7 @@
 //! | `/@id/<plugin id>` | a plugin module (virtual id, `x.svg?react`), see [`crate::plugin`] |
 //! | `/@ts-r/deps/<name>[.map]` | a pre-bundled dependency file, or its source map |
 //! | `/@ts-r/up/<n>/<path>` | a file inside `node_modules` above the root (dependency CSS assets) |
-//! | `/@ts-r/client` (`/@vite/client`) | the client runtime |
+//! | `/@vite/client` | the client runtime (`/@ts-r/client` re-exports it, one instance) |
 //! | `/@ts-r/ws` (any upgrade) | the HMR WebSocket |
 //! | `/@ts-r/stats` | latency stats JSON |
 //! | `/@ts-r/ping` | 204, for reconnecting clients |
@@ -317,14 +317,17 @@ pub(crate) struct Shared {
     pub headers: Vec<(String, String)>,
     pub cors: Cors,
     pub proxy: Vec<ProxyRule>,
-    /// The client runtime with the base and the global `define`s filled in.
-    pub client_js: RwLock<Arc<String>>,
+    /// The client runtime with the base filled in ([`client_js`]).
+    pub client_js: String,
     /// `import.meta.glob` patterns per importing module: a matching file appearing or
     /// disappearing re-prepares the importer.
     pub glob_watches: Mutex<HashMap<ModuleId, Vec<GlobWatch>>>,
     /// The same for pre-bundled files (by name, expanded when served): a matching file
     /// appearing or disappearing reloads the page.
     pub dep_glob_watches: Mutex<BTreeMap<String, Vec<GlobWatch>>>,
+    /// Files plugin hooks watch for a module (`this.addWatchFile`), by module file: what its
+    /// last `load` and `transform` calls added. Their contents join its cache key.
+    pub plugin_watch: Mutex<HashMap<PathBuf, PluginWatch>>,
     #[cfg(feature = "tls")]
     pub tls: Option<Arc<rustls::ServerConfig>>,
     pub transforms: Vec<Arc<dyn Transform>>,
@@ -382,11 +385,9 @@ impl Shared {
         Arc::clone(&self.env.read().unwrap_or_else(|e| e.into_inner()))
     }
 
-    /// Reloads the env files (one changed) and the client that carries the `define`s.
+    /// Reloads the env files (one changed); `/@vite/env` serves the new `define`s.
     pub fn reload_env(&self) {
         let env = Arc::new(crate::env::load(&self.env_options));
-        *self.client_js.write().unwrap_or_else(|e| e.into_inner()) =
-            Arc::new(client_js(&self.base, &env));
         *self.env.write().unwrap_or_else(|e| e.into_inner()) = env;
     }
 
@@ -420,8 +421,10 @@ impl Shared {
     }
 }
 
-/// The client runtime for `base`, with the global `define`s first.
-fn client_js(base: &str, env: &Env) -> String {
+/// The client runtime for `base`. It imports the global `define`s from `/@vite/env` first,
+/// as Vite's client does (`vite: packages/vite/src/client/client.ts`): the same module graph,
+/// so the page's modules and the socket's `connected` race as they do under Vite.
+fn client_js(base: &str) -> String {
     let js = CLIENT_JS
         .replacen(
             "const base = \"/\";",
@@ -444,11 +447,10 @@ fn client_js(base: &str, env: &Env) -> String {
             ),
             1,
         );
-    if env.globals.is_empty() {
-        js
-    } else {
-        format!("{}\n{js}", env.globals)
-    }
+    format!(
+        "import {};\n{js}",
+        render::js_string(&with_base(base, "/@vite/env"))
+    )
 }
 
 /// Connected HMR sockets.
@@ -580,7 +582,7 @@ impl DevServer {
             process_env: config.config_env.clone(),
         };
         let env = crate::env::load(&env_options);
-        let client = client_js(&base, &env);
+        let client = client_js(&base);
         let listener = bind(&config.host, config.port, config.strict_port)?;
         let addr = listener.local_addr()?;
         let cache = match &config.cache {
@@ -615,9 +617,10 @@ impl DevServer {
             headers: config.headers.clone(),
             cors: config.cors.clone(),
             proxy: config.proxy.clone(),
-            client_js: RwLock::new(Arc::new(client)),
+            client_js: client,
             glob_watches: Mutex::default(),
             dep_glob_watches: Mutex::default(),
+            plugin_watch: Mutex::default(),
             #[cfg(feature = "tls")]
             tls,
             root: root.clone(),
@@ -1140,9 +1143,18 @@ fn websocket(
 fn route(shared: &Shared, req: &Request) -> Response {
     let path = req.path.as_str();
     match path {
-        "/@ts-r/client" | "/@vite/client" => {
-            let js = Arc::clone(&shared.client_js.read().unwrap_or_else(|e| e.into_inner()));
-            return cacheable(req, JS_CONTENT_TYPE, js.as_bytes().to_vec(), "no-cache");
+        "/@ts-r/client" => {
+            // An alias that shares the runtime's module instance (one WebSocket, one
+            // `import.meta.hot` registry) with pages importing `/@vite/client`.
+            let js = format!(
+                "export * from {};\n",
+                render::js_string(&shared.client_url())
+            );
+            return cacheable(req, JS_CONTENT_TYPE, js.into_bytes(), "no-cache");
+        }
+        "/@vite/client" => {
+            let js = shared.client_js.as_bytes().to_vec();
+            return cacheable(req, JS_CONTENT_TYPE, js, "no-cache");
         }
         "/@ts-r/env" | "/@vite/env" => {
             let env = shared.env();
@@ -1600,9 +1612,7 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
             return Response::text(404, "Not found");
         };
         ensure_asset(shared, file, &url);
-        let mut host = app_css::AppCss::new(shared);
-        let css = host.transform(file, &source);
-        let mut deps = host.into_deps();
+        let (css, mut deps) = app_css_text(shared, file, &source);
         let scoped = scope_css_module(shared, file, &url, &css, 0, &mut deps);
         add_watch_deps(shared, file, &url, deps);
         return js_response(req, crate::assets::default_export(&scoped.css));
@@ -1670,9 +1680,15 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
             Ok(text) => {
                 ensure_asset(shared, file, &url);
                 let module = match transform_plugins(shared) {
-                    Some(host) => {
-                        json_through_plugins(shared, host, &crate::paths::id(file), &text)
-                    }
+                    // JSON files are assets in the graph, not prepared: their watch files are
+                    // not tracked (a documented gap).
+                    Some(host) => json_through_plugins(
+                        shared,
+                        host,
+                        &crate::paths::id(file),
+                        &text,
+                        &mut Vec::new(),
+                    ),
                     None => crate::assets::json_module(&text).map_err(|e| {
                         TransformError::at(
                             format!("invalid JSON: {e}"),
@@ -1783,8 +1799,18 @@ fn error_response(shared: &Shared, err: ModuleError) -> Response {
 }
 
 fn ensure_asset(shared: &Shared, file: &Path, url: &str) -> ModuleId {
-    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
-    g.ensure(file, url, kind_for(file))
+    let (id, first) = {
+        let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+        let id = g.ensure(file, url, kind_for(file));
+        let n = g.node_mut(id);
+        let first = !n.known_to_watcher;
+        n.known_to_watcher = true;
+        (id, first)
+    };
+    if first && file.is_file() {
+        note_known(shared, file);
+    }
+    id
 }
 
 pub(crate) fn kind_for(file: &Path) -> ModuleKind {
@@ -1807,14 +1833,23 @@ fn serve_css_module(shared: &Shared, req: &Request, file: &Path, url: &str) -> R
         return Response::text(404, "Not found");
     };
     if !render::is_css_module(url) {
-        return js_response(req, render::css_module_at(&shared.client_url(), url, &css));
+        return js_response(
+            req,
+            render::css_module_at(&shared.client_url(), url, &crate::paths::id(file), &css),
+        );
     }
     let mut deps = Vec::new();
     let scoped = scope_css_module(shared, file, url, &css, 0, &mut deps);
     add_watch_deps(shared, file, url, deps);
     js_response(
         req,
-        render::css_module_with_exports(&shared.client_url(), url, &scoped.css, &scoped.exports),
+        render::css_module_with_exports(
+            &shared.client_url(),
+            url,
+            &crate::paths::id(file),
+            &scoped.css,
+            &scoped.exports,
+        ),
     )
 }
 
@@ -1873,9 +1908,7 @@ fn add_watch_deps(shared: &Shared, file: &Path, url: &str, mut deps: Vec<PathBuf
 /// hash, and the files it depends on.
 fn app_stylesheet(shared: &Shared, file: &Path, url: &str, as_js: bool) -> Option<String> {
     let source = fs::read_to_string(file).ok()?;
-    let mut host = app_css::AppCss::new(shared);
-    let css = host.transform(file, &source);
-    let deps = host.into_deps();
+    let (css, deps) = app_css_text(shared, file, &source);
     let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
     let id = g.ensure(file, url, ModuleKind::Css);
     let n = g.node_mut(id);
@@ -1885,9 +1918,59 @@ fn app_stylesheet(shared: &Shared, file: &Path, url: &str, as_js: bool) -> Optio
         n.linked_css = true;
     }
     n.pruned = false;
+    let first = !n.known_to_watcher;
+    n.known_to_watcher = true;
     set_hash_only(n, Key::of(source.as_bytes()));
     g.set_watch_deps(id, deps);
+    drop(g);
+    if first {
+        note_known(shared, file);
+    }
     Some(css)
+}
+
+/// A stylesheet of the app through the built-in CSS step ([`app_css`]) with the plugins'
+/// `transform` hooks around it, and the files it depends on (its `@import`s and the files
+/// the hooks watch). Pre hooks see the source; post hooks the CSS the built-in step made
+/// (the sidecar runs only the normal-order ones, which in Vite sit between `vite:css` and
+/// `vite:css-post`: `vite: packages/vite/src/node/plugins/index.ts`, `resolvePlugins`).
+/// A failing hook is logged and skipped: the stylesheet is served without it.
+fn app_css_text(shared: &Shared, file: &Path, source: &str) -> (String, Vec<PathBuf>) {
+    let hooks = shared.plugin_hooks;
+    let host = shared.plugins.as_deref().filter(|_| hooks.transforms());
+    let id = crate::paths::id(file);
+    let mut watch = Vec::new();
+    let mut run = |stage: Stage, code: &str| -> Option<String> {
+        let host = host?;
+        match host.transform(stage, &id, code) {
+            Ok(Some(t)) => {
+                watch.extend(t.watch_files);
+                Some(t.code)
+            }
+            Ok(None) => None,
+            Err(message) => {
+                shared.log(&format!("transform failed for {id}: {message}"));
+                None
+            }
+        }
+    };
+    let pre = if hooks.transform_pre {
+        run(Stage::Pre, source)
+    } else {
+        None
+    };
+    let mut css_host = app_css::AppCss::new(shared);
+    let css = css_host.transform(file, pre.as_deref().unwrap_or(source));
+    let css = if hooks.transform_post {
+        run(Stage::Post, &css).unwrap_or(css)
+    } else {
+        css
+    };
+    let mut deps = css_host.into_deps();
+    deps.extend(plugin_watch_paths(&watch));
+    deps.sort();
+    deps.dedup();
+    (css, deps)
 }
 
 /// Records a non-script module's content hash (its "prepared" state).
@@ -1917,16 +2000,25 @@ fn serve_script_with(
     url: &str,
     extra: &str,
 ) -> Response {
-    let id = {
+    let (id, first) = {
         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let id = g.ensure(file, url, ModuleKind::Script);
         let n = g.node_mut(id);
         n.served_as_js = true;
         n.pruned = false;
-        id
+        // The deps scan or a page's preload may have added the module already: the flag,
+        // not the node, says whether the watcher heard of the file.
+        let first = !n.known_to_watcher;
+        n.known_to_watcher = true;
+        (id, first)
     };
     let source = match module_source(shared, file, url) {
-        Ok(b) => b,
+        Ok(b) => {
+            if first && !plugins::is_plugin_url(url) {
+                note_known(shared, file);
+            }
+            b
+        }
         Err(message)
             if plugins::is_plugin_url(url) || crate::wasm::split_glue_file(file).is_some() =>
         {
@@ -1935,7 +2027,7 @@ fn serve_script_with(
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .node_mut(id)
-                .errored = true;
+                .fail();
             return error_response(
                 shared,
                 ModuleError {
@@ -1969,7 +2061,7 @@ fn serve_script_with(
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .node_mut(id)
-                    .errored = true;
+                    .fail();
                 return error_response(shared, e);
             }
         },
@@ -2035,32 +2127,14 @@ pub(crate) fn prepare_script(
     if plugin_module && real != file && real.is_absolute() {
         watch_deps.push(real.to_path_buf());
     }
-    let content = if watch_deps.is_empty() {
-        hash
-    } else {
-        let mut b = KeyBuilder::new("ts-r-dev/transform-deps");
-        b.key_field(&hash);
-        for d in &watch_deps {
-            b.str(&crate::paths::id(d.strip_prefix(&shared.root).unwrap_or(d)));
-            match fs::read(d) {
-                Ok(bytes) => b.key_field(&Key::of(&bytes)),
-                Err(_) => b.str("\0missing"),
-            };
-        }
-        b.key()
-    };
-    let plugin_transforms = transform_plugins(shared);
-    let cache_id = transform_cache_id(shared, transform);
-    let key = TransformCache::key(&cache_id, Mode::Dev, module_id, &content);
-    let output = shared
-        .cache
-        .get_or_insert(key, || {
-            run_transform(shared, plugin_transforms, transform, &input, &id_str)
-        })
-        .map_err(|e: TransformError| {
-            let loc = e.line.zip(e.column);
-            fail(e.message, loc, text)
-        })?;
+    let (output, watch_deps) = cached_transform(
+        shared, file, transform, &input, &id_str, hash, watch_deps,
+    )
+    .map_err(|e: TransformError| {
+        let loc = e.line.zip(e.column);
+        fail(e.message, loc, text)
+    })?;
+    let mut watch_deps = watch_deps;
     let mut output = with_relative_sources(output, module_id);
     let mut hot = scan::scan_hot(&output.code);
 
@@ -2226,6 +2300,7 @@ pub(crate) fn prepare_script(
     let node = g.node_mut(id);
     node.prepared = Some(Arc::clone(&prepared));
     node.errored = false;
+    node.retry_on_create = false;
     Ok((prepared, pruned))
 }
 
@@ -2456,6 +2531,14 @@ fn new_url_asset(
 /// watched: its package directory (the nearest one with a `package.json`) is added to the
 /// watcher recursively, once. When that directory contains the root (a file in a parent of
 /// the app), only the file's own directory is watched, non-recursively.
+/// Tells the watcher a module file exists, so its deletion is reported even when FSEvents
+/// flags it as created too (`ts_r_watch`: "unless it is known"). Once per file, on first serve.
+fn note_known(shared: &Shared, file: &Path) {
+    if let Some(adder) = shared.watch_adder.get() {
+        adder.known(file);
+    }
+}
+
 pub(crate) fn watch_outside(shared: &Shared, file: &Path) {
     let Some(adder) = shared.watch_adder.get() else {
         return;
@@ -2859,19 +2942,162 @@ pub(crate) fn resolve_for_scan(
 
 /// The built-in transform between plugins' pre and post `transform` hooks. The plugins'
 /// source maps and the transform's are composed into one map back to the original file.
+/// A module's transform output through the cache, and the files its key covers: `deps`
+/// (what the built-in transform reads) plus the files plugin hooks watch for it
+/// ([`Shared::plugin_watch`]). The deps scan warms the cache through this too, so the
+/// browser's request reuses that run.
+pub(crate) fn cached_transform(
+    shared: &Shared,
+    file: &Path,
+    transform: &dyn Transform,
+    input: &TransformInput<'_>,
+    id_str: &str,
+    hash: Key,
+    deps: Vec<PathBuf>,
+) -> Result<(Arc<TransformOutput>, Vec<PathBuf>), TransformError> {
+    let mut watch_deps = deps;
+    // What plugin hooks watched for this module last time (`this.addWatchFile`).
+    let (load_watch, known_watch) = shared
+        .plugin_watch
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(file)
+        .map(|w| (w.load.clone(), w.transform.clone()))
+        .unwrap_or_default();
+    let base_deps = watch_deps.len();
+    for d in load_watch.into_iter().chain(known_watch.iter().cloned()) {
+        if !watch_deps.contains(&d) {
+            watch_deps.push(d);
+        }
+    }
+    let plugin_transforms = transform_plugins(shared);
+    let cache_id = transform_cache_id(shared, transform);
+    let key_for = |deps: &[PathBuf]| {
+        let content = deps_content_key(shared, hash, deps);
+        TransformCache::key(&cache_id, Mode::Dev, input.id, &content)
+    };
+    let key = key_for(&watch_deps);
+    let mut ran_watch: Option<Vec<PathBuf>> = None;
+    let output = shared.cache.get_or_insert_rekeyed(key, || {
+        let mut added = Vec::new();
+        let out = run_transform(
+            shared,
+            plugin_transforms,
+            transform,
+            input,
+            id_str,
+            &mut added,
+        )?;
+        let added = plugin_watch_paths(&added);
+        if added == known_watch {
+            return Ok((out, None));
+        }
+        // The hooks watched other files than last time: store the output under the key
+        // their contents make, so a later request (or a restart) never reuses it for
+        // other contents.
+        let mut deps = watch_deps[..base_deps].to_vec();
+        for d in shared
+            .plugin_watch
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(file)
+            .map(|w| w.load.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .chain(added.iter().cloned())
+        {
+            if !deps.contains(&d) {
+                deps.push(d);
+            }
+        }
+        let rekey = key_for(&deps);
+        ran_watch = Some(added);
+        Ok((out, Some(rekey)))
+    })?;
+    if let Some(added) = ran_watch {
+        set_plugin_watch(shared, file, |w| w.transform = added);
+    }
+    // What the hooks watch now: this call's run, or the run another caller (the deps scan
+    // and a request) did while this one waited for it.
+    let now = shared
+        .plugin_watch
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(file)
+        .map(|w| w.transform.clone())
+        .unwrap_or_default();
+    for d in now {
+        if !watch_deps.contains(&d) {
+            watch_deps.push(d);
+        }
+    }
+    Ok((output, watch_deps))
+}
+
+/// The cache key part for a module's content and the files its output also depends on.
+fn deps_content_key(shared: &Shared, hash: Key, deps: &[PathBuf]) -> Key {
+    if deps.is_empty() {
+        return hash;
+    }
+    let mut b = KeyBuilder::new("ts-r-dev/transform-deps");
+    b.key_field(&hash);
+    for d in deps {
+        b.str(&crate::paths::id(d.strip_prefix(&shared.root).unwrap_or(d)));
+        match fs::read(d) {
+            Ok(bytes) => b.key_field(&Key::of(&bytes)),
+            Err(_) => b.str("\0missing"),
+        };
+    }
+    b.key()
+}
+
+/// Files plugin hooks watch for one module ([`Shared::plugin_watch`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PluginWatch {
+    /// Added by its last `load` call.
+    pub load: Vec<PathBuf>,
+    /// Added by its last `transform` call.
+    pub transform: Vec<PathBuf>,
+}
+
+/// Watch files a plugin reported (absolute, `/`-separated), sorted and deduplicated.
+fn plugin_watch_paths(files: &[String]) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = files
+        .iter()
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+fn set_plugin_watch(shared: &Shared, file: &Path, f: impl FnOnce(&mut PluginWatch)) {
+    let mut map = shared
+        .plugin_watch
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let w = map.entry(file.to_path_buf()).or_default();
+    f(w);
+    if *w == PluginWatch::default() {
+        map.remove(file);
+    }
+}
+
 pub(crate) fn run_transform(
     shared: &Shared,
     host: Option<&dyn PluginHost>,
     transform: &dyn Transform,
     input: &TransformInput<'_>,
     plugin_id: &str,
+    watch_files: &mut Vec<String>,
 ) -> Result<TransformOutput, TransformError> {
     let Some(host) = host else {
         return transform.transform(input);
     };
     // A plugin module with a JSON id (`\0/data.json`): Vite's JSON plugin is its built-in step.
     if is_json_id(plugin_id) {
-        let code = json_through_plugins(shared, host, plugin_id, input.source)?;
+        let code = json_through_plugins(shared, host, plugin_id, input.source, watch_files)?;
         return Ok(TransformOutput {
             imports: scan::scan(&code).imports,
             code,
@@ -2889,6 +3115,7 @@ pub(crate) fn run_transform(
     let mut chain: Vec<Option<String>> = Vec::new();
     let mut out = match pre {
         Some(t) => {
+            watch_files.extend(t.watch_files);
             chain.extend(t.maps);
             transform.transform(&TransformInput {
                 source: &t.code,
@@ -2901,6 +3128,10 @@ pub(crate) fn run_transform(
         && let Some(t) = host
             .transform(Stage::Post, plugin_id, &out.code)
             .map_err(TransformError::new)?
+        && {
+            watch_files.extend(t.watch_files.iter().cloned());
+            t.code != out.code
+        }
     {
         chain.push(out.map.take());
         chain.extend(t.maps);
@@ -2933,6 +3164,7 @@ fn json_through_plugins(
     host: &dyn PluginHost,
     id: &str,
     text: &str,
+    watch_files: &mut Vec<String>,
 ) -> Result<String, TransformError> {
     let hooks = shared.plugin_hooks;
     let pre = if hooks.transform_pre {
@@ -2941,6 +3173,9 @@ fn json_through_plugins(
     } else {
         None
     };
+    if let Some(t) = &pre {
+        watch_files.extend(t.watch_files.iter().cloned());
+    }
     let json = pre.as_ref().map_or(text, |t| t.code.as_str());
     let module = crate::assets::json_module(json).map_err(|e| {
         TransformError::at(
@@ -2952,10 +3187,18 @@ fn json_through_plugins(
     if !hooks.transform_post {
         return Ok(module);
     }
-    Ok(host
-        .transform(Stage::Post, id, &module)
-        .map_err(TransformError::new)?
-        .map_or(module, |t| t.code))
+    Ok(
+        match host
+            .transform(Stage::Post, id, &module)
+            .map_err(TransformError::new)?
+        {
+            Some(t) => {
+                watch_files.extend(t.watch_files);
+                t.code
+            }
+            None => module,
+        },
+    )
 }
 
 /// One map for a chain of transforms (see [`run_transform`]); sources that name the
@@ -3023,6 +3266,22 @@ pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<V
         return crate::wasm::glue_source(&wasm, instance, &wasm_url).map(String::into_bytes);
     }
     if !plugins::is_plugin_url(url) {
+        // An unfiltered `load` hook sees regular files too (vite:
+        // packages/vite/src/node/server/transformRequest.ts loads every module through the
+        // plugins and reads the file only when none returned code).
+        if let Some(host) = shared
+            .plugins
+            .as_deref()
+            .filter(|_| shared.plugin_hooks.load_files)
+        {
+            let loaded = host.load_with_watch(&crate::paths::id(file))?;
+            set_plugin_watch(shared, file, |w| {
+                w.load = plugin_watch_paths(&loaded.watch_files);
+            });
+            if let Some(code) = loaded.code {
+                return Ok(code.into_bytes());
+            }
+        }
         return fs::read(file).map_err(|e| format!("{}: {e}", file.display()));
     }
     let id = crate::paths::id(file);
@@ -3423,7 +3682,7 @@ fn serve_dep(shared: &Shared, req: &Request, spec: &str) -> Response {
             "css" if !as_script => ("text/css; charset=utf-8", css()),
             "css" => (
                 JS_CONTENT_TYPE,
-                render::css_module_at(&shared.client_url(), &url, &css()),
+                render::css_module_at(&shared.client_url(), &url, &url, &css()),
             ),
             "json" => (
                 JS_CONTENT_TYPE,

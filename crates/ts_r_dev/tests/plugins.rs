@@ -417,6 +417,73 @@ export default {
     assert!(v.contains(r#"export const post = "js";"#), "{v}");
 }
 
+/// An ES module `vite.config.js` in a `"type": "commonjs"` package loads (Vite bundles it;
+/// the sidecar retries it as `.mjs`), and `this.addWatchFile` in an unfiltered `load` hook and
+/// in `transform` makes editing those files run the module's hooks again.
+#[test]
+fn esm_config_in_a_commonjs_package_and_plugin_watch_files() {
+    if !node_available() {
+        eprintln!("skipping: node not found (set TS_R_NODE)");
+        return;
+    }
+    let app = TempDir::new("plugins-cjs-watch");
+    let cache = TempDir::new("plugins-cjs-watch-cache");
+    app.write("package.json", r#"{ "type": "commonjs" }"#);
+    app.write(
+        "index.html",
+        "<!doctype html><script type=\"module\" src=\"/src/main.js\"></script>\n",
+    );
+    app.write("src/main.js", "console.log(RUNS);\n");
+    app.write("dep.txt", "a");
+    app.write("load-dep.txt", "a");
+    app.write(
+        "vite.config.js",
+        r#"import path from 'node:path'
+let runs = 0
+const dir = import.meta.dirname
+export default {
+  plugins: [{
+    name: 'watcher',
+    load(id) { if (id.endsWith('/src/main.js')) this.addWatchFile('./load-dep.txt') },
+    transform(code, id) {
+      if (!id.endsWith('/src/main.js')) return
+      this.addWatchFile(path.join(dir, 'dep.txt'))
+      return `const RUNS = ${++runs};\n` + code
+    },
+  }],
+}
+"#,
+    );
+    let dev = DevProcess::start(app.path(), cache.path(), &[]);
+    let addr = dev.addr.parse().unwrap();
+    let runs = |n: u32| {
+        let want = format!("const RUNS = {n};");
+        let deadline = Instant::now() + T;
+        loop {
+            let (status, _, body) = http_get(addr, "/src/main.js", &[]);
+            if status == 200 && body.contains(&want) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "no {want}: {status} {body}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    runs(1);
+    runs(1);
+    app.write("dep.txt", "b");
+    runs(2);
+    app.write("load-dep.txt", "b");
+    runs(3);
+    assert!(
+        std::fs::read_dir(app.path()).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("timestamp")),
+        "the temporary config copy is removed"
+    );
+}
+
 #[test]
 fn proxy_bypass_functions_run_in_the_sidecar() {
     if !node_available() {

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use ts_r_cache::{Cache, Key, KeyBuilder};
 
@@ -33,10 +33,40 @@ struct Memory {
     stats: CacheStats,
 }
 
+/// A key being computed: requests for it wait for that run instead of running the
+/// transform (and plugin hooks with side effects) a second time.
+#[derive(Debug, Default)]
+struct Flight {
+    /// `None` while running; `Some(None)` when the run failed (a waiter runs it itself).
+    done: Mutex<Option<Option<Arc<TransformOutput>>>>,
+    ready: Condvar,
+}
+
+/// Ends a flight however its run ends (an error, or a panic, wakes the waiters too).
+struct Landing<'a> {
+    cache: &'a TransformCache,
+    key: Key,
+    flight: Arc<Flight>,
+    out: Option<Arc<TransformOutput>>,
+}
+
+impl Drop for Landing<'_> {
+    fn drop(&mut self) {
+        self.cache
+            .in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.key);
+        *self.flight.done.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.out.take());
+        self.flight.ready.notify_all();
+    }
+}
+
 #[derive(Debug)]
 pub struct TransformCache {
     memory: Mutex<Memory>,
     disk: Option<Cache>,
+    in_flight: Mutex<HashMap<Key, Arc<Flight>>>,
 }
 
 impl TransformCache {
@@ -45,6 +75,7 @@ impl TransformCache {
         TransformCache {
             memory: Mutex::default(),
             disk: None,
+            in_flight: Mutex::default(),
         }
     }
 
@@ -58,6 +89,7 @@ impl TransformCache {
         TransformCache {
             memory: Mutex::default(),
             disk: disk.ok(),
+            in_flight: Mutex::default(),
         }
     }
 
@@ -82,21 +114,82 @@ impl TransformCache {
         key: Key,
         compute: impl FnOnce() -> Result<TransformOutput, E>,
     ) -> Result<Arc<TransformOutput>, E> {
+        self.get_or_insert_rekeyed(key, || compute().map(|out| (out, None)))
+    }
+
+    /// [`TransformCache::get_or_insert`] where `compute` may name the key its output belongs
+    /// under instead (its inputs turned out to include more than `key` covers): the output
+    /// is then stored only under that key.
+    pub fn get_or_insert_rekeyed<E>(
+        &self,
+        key: Key,
+        compute: impl FnOnce() -> Result<(TransformOutput, Option<Key>), E>,
+    ) -> Result<Arc<TransformOutput>, E> {
+        if let Some(hit) = self.lookup(key) {
+            return Ok(hit);
+        }
+        // Concurrent misses of one key (the deps scan warming a module while the browser
+        // asks for it) share one run.
+        let (flight, leader) = {
+            let mut fl = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+            match fl.get(&key) {
+                Some(f) => (Arc::clone(f), false),
+                None => {
+                    let f = Arc::new(Flight::default());
+                    fl.insert(key, Arc::clone(&f));
+                    (f, true)
+                }
+            }
+        };
+        if !leader {
+            let mut done = flight.done.lock().unwrap_or_else(|e| e.into_inner());
+            while done.is_none() {
+                done = flight.ready.wait(done).unwrap_or_else(|e| e.into_inner());
+            }
+            if let Some(Some(out)) = done.as_ref() {
+                return Ok(Arc::clone(out));
+            }
+            drop(done);
+            return self.compute_and_store(key, compute);
+        }
+        let mut landing = Landing {
+            cache: self,
+            key,
+            flight,
+            out: None,
+        };
+        let result = self.compute_and_store(key, compute);
+        landing.out = result.as_ref().ok().map(Arc::clone);
+        drop(landing);
+        result
+    }
+
+    fn lookup(&self, key: Key) -> Option<Arc<TransformOutput>> {
         {
             let mut mem = self.memory.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(hit) = mem.map.get(&key).cloned() {
                 mem.stats.memory_hits += 1;
-                return Ok(hit);
+                return Some(hit);
             }
         }
-        if let Some(disk) = &self.disk
-            && let Some(out) = disk.get(&key).and_then(|blob| decode(&blob))
-        {
-            let out = Arc::new(out);
-            self.remember(key, &out, |s| s.disk_hits += 1);
-            return Ok(out);
-        }
-        let out = Arc::new(compute()?);
+        let out = Arc::new(
+            self.disk
+                .as_ref()?
+                .get(&key)
+                .and_then(|blob| decode(&blob))?,
+        );
+        self.remember(key, &out, |s| s.disk_hits += 1);
+        Some(out)
+    }
+
+    fn compute_and_store<E>(
+        &self,
+        key: Key,
+        compute: impl FnOnce() -> Result<(TransformOutput, Option<Key>), E>,
+    ) -> Result<Arc<TransformOutput>, E> {
+        let (out, rekey) = compute()?;
+        let out = Arc::new(out);
+        let key = rekey.unwrap_or(key);
         if let Some(disk) = &self.disk {
             // A failed write only costs a future miss.
             let _ = disk.put(&key, &encode(&out));
@@ -243,6 +336,58 @@ mod tests {
         let mut extra = bytes.clone();
         extra.push(0);
         assert_eq!(decode(&extra), None);
+    }
+
+    /// Concurrent misses of one key run the transform once; the others get its output.
+    #[test]
+    fn concurrent_misses_share_one_run() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let cache = TransformCache::in_memory();
+        let runs = AtomicU32::new(0);
+        let key = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"x"));
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    let out = cache
+                        .get_or_insert(key, || -> Result<TransformOutput, ()> {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            Ok(sample())
+                        })
+                        .unwrap();
+                    assert_eq!(*out, sample());
+                });
+            }
+        });
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        // A failed run is not shared: the next caller runs it again.
+        let other = TransformCache::key("t/1", Mode::Dev, "src/b.js", &Key::of(b"x"));
+        assert!(
+            cache
+                .get_or_insert(other, || Err::<TransformOutput, _>(()))
+                .is_err()
+        );
+        assert!(cache.get_or_insert(other, || Ok::<_, ()>(sample())).is_ok());
+    }
+
+    /// A rekeyed output is stored only under the key its run named.
+    #[test]
+    fn rekeyed_outputs_are_stored_under_the_new_key() {
+        let cache = TransformCache::in_memory();
+        let a = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"a"));
+        let b = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"b"));
+        cache
+            .get_or_insert_rekeyed(a, || Ok::<_, ()>((sample(), Some(b))))
+            .unwrap();
+        let calls = Cell::new(0);
+        let count = || -> Result<TransformOutput, ()> {
+            calls.set(calls.get() + 1);
+            Ok(sample())
+        };
+        cache.get_or_insert(b, count).unwrap();
+        assert_eq!(calls.get(), 0);
+        cache.get_or_insert(a, count).unwrap();
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]

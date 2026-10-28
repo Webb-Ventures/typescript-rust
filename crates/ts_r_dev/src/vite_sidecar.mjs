@@ -238,7 +238,9 @@ function normalizeResolution(r, specifier) {
   return null
 }
 
-function context(plugin) {
+// `sink`: where `this.addWatchFile` collects files for the load or transform call being run
+// (absolute, `/`-separated); other hooks have none, as their added files would not be read.
+function context(plugin, sink = null) {
   const name = plugin?.name ?? 'ts-r-dev'
   return {
     meta,
@@ -254,8 +256,10 @@ function context(plugin) {
       const r = await builtinResolve(aliased(source) ?? source, importer)
       return r ? { id: r[0], external: r[1] } : null
     },
-    addWatchFile() {},
-    getWatchFiles: () => [],
+    addWatchFile(file) {
+      if (sink && typeof file === 'string') sink.add(path.resolve(root, file).split(path.sep).join('/'))
+    },
+    getWatchFiles: () => [...(sink ?? [])],
     emitFile: () => '',
     getFileName: () => '',
     setAssetSource() {},
@@ -325,21 +329,23 @@ async function opResolve({ stage, importer, specifiers }) {
   return out
 }
 
+// `{ code, watchFiles }`, or null when no hook loaded it and none added a watch file.
 async function opLoad({ moduleId }) {
+  const sink = new Set()
   for (const h of sorted(active, 'load')) {
     if (!h.test(moduleId)) continue
     let r
     try {
-      r = await h.fn.call(context(h.plugin), moduleId, { ssr: false })
+      r = await h.fn.call(context(h.plugin, sink), moduleId, { ssr: false })
     } catch (e) {
       throw new Error(hookError(h.plugin, e))
     }
     if (r != null) {
       loadedModule(moduleId)
-      return typeof r === 'string' ? r : (r.code ?? null)
+      return { code: typeof r === 'string' ? r : (r.code ?? null), watchFiles: [...sink] }
     }
   }
-  return null
+  return sink.size > 0 ? { code: null, watchFiles: [...sink] } : null
 }
 
 // A hook's `map` as JSON text; null when there is none (`{ mappings: '' }` included).
@@ -358,14 +364,19 @@ function mapText(map) {
 // JSON, `ts` for TypeScript), after it `js`, as Vite's own JSON and TS plugins return. A hook
 // may change it (`{ code, moduleType }`).
 async function opTransform({ stage, moduleId, code }) {
+  const sink = new Set()
   let changed = false
   const maps = []
-  const options = { ssr: false, moduleType: (stage === 'pre' ? guessModuleType(moduleId) : null) ?? 'js' }
+  // A stylesheet's post stage runs on CSS: only the normal-order hooks, which Vite runs
+  // between its CSS compile and the step that wraps the CSS in JS.
+  const css = stage === 'post' && guessModuleType(moduleId.split('?')[0]) === 'css'
+  const options = { ssr: false, moduleType: (stage === 'pre' || css ? guessModuleType(moduleId) : null) ?? 'js' }
   for (const h of sorted(active, 'transform')) {
     if (stageOf(h) !== stage || !h.test(moduleId, code, options.moduleType)) continue
+    if (css && (h.order === 'post' || h.plugin.enforce === 'post')) continue
     let r
     try {
-      r = await h.fn.call(context(h.plugin), code, moduleId, options)
+      r = await h.fn.call(context(h.plugin, sink), code, moduleId, options)
     } catch (e) {
       throw new Error(hookError(h.plugin, e))
     }
@@ -378,7 +389,8 @@ async function opTransform({ stage, moduleId, code }) {
       maps.push(typeof r === 'string' ? null : mapText(r.map))
     }
   }
-  return changed ? { code, maps } : null
+  const watchFiles = [...sink]
+  return changed ? { code, maps, watchFiles } : watchFiles.length > 0 ? { code: null, maps, watchFiles } : null
 }
 
 // ---- dev server options (define, env, base, server.*) ----
@@ -828,8 +840,32 @@ function opMiddleware({ method, url, headers, body }) {
 
 // ---- startup ----
 
+// The config module. ESM syntax in a `.js` or `.ts` config of a CommonJS package
+// (`"type": "commonjs"`) is a SyntaxError for Node, but works in Vite, which bundles the
+// config to the format the package implies and loads the result from a temporary file next
+// to it (vite: packages/vite/src/node/config.ts, `loadConfigFromBundledFile`). ts-r-dev
+// retries such a config as ES module from a temporary `.mjs` / `.mts` copy next to it (so
+// relative imports and `import.meta.dirname` still work), removed once it is loaded.
+async function importConfig(file) {
+  try {
+    return await import(pathToFileURL(file).href)
+  } catch (e) {
+    const ext = path.extname(file)
+    if (e?.name !== 'SyntaxError' || (ext !== '.js' && ext !== '.ts')) throw e
+    const copy = `${file}.timestamp-${process.pid}-ts-r${ext === '.ts' ? '.mts' : '.mjs'}`
+    try {
+      fs.copyFileSync(file, copy)
+      return await import(pathToFileURL(copy).href)
+    } catch {
+      throw e
+    } finally {
+      fs.rmSync(copy, { force: true })
+    }
+  }
+}
+
 async function start() {
-  let userConfig = (await import(pathToFileURL(configFile).href)).default
+  let userConfig = (await importConfig(configFile)).default
   if (typeof userConfig === 'function') userConfig = await userConfig(env)
   userConfig = (await userConfig) ?? {}
   config = { ...userConfig, plugins: undefined }
@@ -944,6 +980,9 @@ async function start() {
       resolve_pre: resolveStages.has('pre') || aliases.length > 0,
       resolve_post: resolveStages.has('post'),
       load: sorted(active, 'load').length > 0,
+      // A load hook without a filter may claim (or watch files for) any module, so regular
+      // files go through load too; filtered hooks only see plugin modules.
+      load_files: sorted(active, 'load').some((h) => !h.filter),
       transform_pre: transformStages.has('pre'),
       transform_post: transformStages.has('post'),
       index_html: sorted(active, 'transformIndexHtml').length > 0,

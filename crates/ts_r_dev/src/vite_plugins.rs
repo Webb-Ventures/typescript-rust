@@ -25,7 +25,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use ts_r_cache::{Cache, Key, KeyBuilder};
 use ts_r_hmr::http::{Request, Response};
-use ts_r_hmr::{PluginHooks, PluginHost, PluginResolution, ServerHandle, Stage, Transformed};
+use ts_r_hmr::{
+    Loaded, PluginHooks, PluginHost, PluginResolution, ServerHandle, Stage, Transformed,
+};
 
 const SIDECAR: &str = include_str!("vite_sidecar.mjs");
 const CONFIG_NAMES: &[&str] = &[
@@ -69,15 +71,6 @@ pub struct Manifest {
 
 impl Manifest {
     fn from_json(v: &Value) -> Manifest {
-        let strings = |v: &Value| -> Vec<String> {
-            v.as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|s| s.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
         let h = &v["hooks"];
         let b = |k: &str| h[k].as_bool().unwrap_or(false);
         Manifest {
@@ -87,6 +80,7 @@ impl Manifest {
                 resolve_pre: b("resolve_pre"),
                 resolve_post: b("resolve_post"),
                 load: b("load"),
+                load_files: b("load_files"),
                 transform_pre: b("transform_pre"),
                 transform_post: b("transform_post"),
                 index_html: b("index_html"),
@@ -109,7 +103,7 @@ impl Manifest {
             "replaced": self.replaced,
             "hooks": {
                 "resolve_pre": h.resolve_pre, "resolve_post": h.resolve_post, "load": h.load,
-                "transform_pre": h.transform_pre, "transform_post": h.transform_post,
+                "load_files": h.load_files, "transform_pre": h.transform_pre, "transform_post": h.transform_post,
                 "index_html": h.index_html, "hot_update": h.hot_update,
                 "middleware": h.middleware, "client_events": h.client_events,
             },
@@ -133,6 +127,17 @@ impl Manifest {
                     .any(|r| r["rewrite"] == true || r["bypass"] == true)
             })
     }
+}
+
+/// The strings in a JSON array (nothing for anything else).
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Applies the manifest's dev options to `config`. `rewrite(index)` and `bypass(index)`
@@ -658,8 +663,15 @@ impl PluginHost for VitePlugins {
     }
 
     fn load(&self, id: &str) -> Result<Option<String>, String> {
+        Ok(self.load_with_watch(id)?.code)
+    }
+
+    fn load_with_watch(&self, id: &str) -> Result<Loaded, String> {
         let v = self.call("load", json!({ "moduleId": id }))?;
-        Ok(v.as_str().map(str::to_owned))
+        Ok(Loaded {
+            code: v["code"].as_str().map(str::to_owned),
+            watch_files: strings(&v["watchFiles"]),
+        })
     }
 
     fn transform(&self, stage: Stage, id: &str, code: &str) -> Result<Option<Transformed>, String> {
@@ -667,11 +679,16 @@ impl PluginHost for VitePlugins {
             "transform",
             json!({ "stage": stage.as_str(), "moduleId": id, "code": code }),
         )?;
-        let Some(code) = v["code"].as_str() else {
-            return Ok(None);
+        let watch_files = strings(&v["watchFiles"]);
+        let code = match v["code"].as_str() {
+            Some(c) => c.to_owned(),
+            // Only files were watched: the code is unchanged.
+            None if !watch_files.is_empty() => code.to_owned(),
+            None => return Ok(None),
         };
         Ok(Some(Transformed {
-            code: code.to_owned(),
+            code,
+            watch_files,
             maps: v["maps"]
                 .as_array()
                 .into_iter()

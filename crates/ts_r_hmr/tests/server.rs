@@ -116,7 +116,7 @@ fn serves_html_modules_deps_and_static_files() {
     let (status, h, body) = f.get("/");
     assert_eq!(status, 200);
     assert_eq!(header(&h, "content-type"), Some("text/html"));
-    assert!(body.contains("<script type=\"module\" src=\"/@ts-r/client\"></script>"));
+    assert!(body.contains("<script type=\"module\" src=\"/@vite/client\"></script>"));
 
     let (status, h, main) = f.get("/src/main.js");
     assert_eq!(status, 200, "{main}");
@@ -135,7 +135,7 @@ fn serves_html_modules_deps_and_static_files() {
         main.contains("import.meta.hot.accept('/src/accepted.js'"),
         "{main}"
     );
-    assert!(main.starts_with("import { createHotContext as __ts_r_hot } from \"/@ts-r/client\";import.meta.hot = __ts_r_hot(\"/src/main.js\");"));
+    assert!(main.starts_with("import { createHotContext as __ts_r_hot } from \"/@vite/client\";import.meta.hot = __ts_r_hot(\"/src/main.js\");"));
 
     // ETag → 304 on revalidation.
     let etag = header(&h, "etag").unwrap().to_owned();
@@ -203,7 +203,7 @@ fn serves_html_modules_deps_and_static_files() {
         Some("text/javascript; charset=utf-8")
     );
     assert!(
-        html.starts_with("export default \"<!") && !html.contains("/@ts-r/client"),
+        html.starts_with("export default \"<!") && !html.contains("/@vite/client"),
         "{html}"
     );
     assert_eq!(
@@ -222,10 +222,14 @@ fn serves_html_modules_deps_and_static_files() {
         http_get(f.server.addr(), "/robots.txt", &[("If-None-Match", &etag)]).0,
         304
     );
-    let (status, _, client) = f.get("/@ts-r/client");
+    let (status, _, client) = f.get("/@vite/client");
     assert_eq!(status, 200);
     assert!(client.contains("export function createHotContext"));
-    assert_eq!(f.get("/@vite/client").0, 200);
+    let (status, _, alias) = f.get("/@ts-r/client");
+    assert!(
+        status == 200 && alias == "export * from \"/@vite/client\";\n",
+        "{alias}"
+    );
     assert_eq!(f.get("/nope.js").0, 404);
     assert_eq!(f.get("/../../etc/passwd").0, 403);
     assert_eq!(f.get("/@fs/etc/passwd").0, 403);
@@ -233,7 +237,7 @@ fn serves_html_modules_deps_and_static_files() {
     let (status, _, body) = f.get(&format!("/@modules/tiny-dep/{up}etc/passwd"));
     assert_eq!(status, 404, "{body}");
     let (status, _, html) = http_get(f.server.addr(), "/some/route", &[("Accept", "text/html")]);
-    assert!(status == 200 && html.contains("/@ts-r/client"));
+    assert!(status == 200 && html.contains("/@vite/client"));
     let (status, _, stats) = f.get("/@ts-r/stats");
     assert_eq!(status, 200);
     assert_eq!(serde_json::from_str::<Value>(&stats).unwrap()["count"], 0);
@@ -255,7 +259,7 @@ fn denied_files_case_html_fallback_and_asset_queries() {
     assert!(body.contains("<p>about</p>"), "{body}");
     // `fetch` accepts `*/*`: it gets the fallback page too.
     let (status, _, body) = http_get(f.server.addr(), "/missing", &[("Accept", "*/*")]);
-    assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
+    assert!(status == 200 && body.contains("/@vite/client"), "{body}");
     // A public file matches only in its own case (the disk may not care).
     let (status, _, body) = http_get(f.server.addr(), "/ROBOTS.TXT", &[("Accept", "text/plain")]);
     assert_eq!(status, 404, "{body}");
@@ -276,7 +280,7 @@ fn denied_files_case_html_fallback_and_asset_queries() {
     assert!(js.contains("\"/src/logo.svg?no-inline&x=1\""), "{js}");
     // `//x` is not a file of the root or the public directory: the fallback page.
     let (status, _, body) = http_get(f.server.addr(), "//robots.txt", &html);
-    assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
+    assert!(status == 200 && body.contains("/@vite/client"), "{body}");
     // A file without an extension has no type to name.
     std::fs::write(f.app.path().join("LICENSE"), "MIT\n").unwrap();
     let (status, h, _) = f.get("/LICENSE");
@@ -359,6 +363,46 @@ fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
     };
     assert!(m["type"] == "full-reload" || m["type"] == "update", "{m}");
     assert_eq!(f.get("/src/needs.js").0, 200);
+}
+
+/// A file creation retries modules that failed: one that still fails and that nothing
+/// accepts reloads the page (as Vite does for a restored file), and is not retried again
+/// until the page asks for it.
+#[test]
+fn creating_a_known_file_retries_modules_that_failed() {
+    // No watcher: only the changes this test sends.
+    let f = start_with_watch(false);
+    f.app.write("src/needs.js", "import './missing.js';\n");
+    assert_eq!(f.get("/src/needs.js").0, 500);
+    // A file nothing uses yet: only the retry can update the page.
+    f.app.write("src/restored.js", "export const v = 1;\n");
+    let mut ws = f.ws();
+    let created = || ts_r_hmr::ChangeBatch {
+        changes: vec![ts_r_hmr::FileChange {
+            path: f.app.path().join("src/restored.js"),
+            kind: ts_r_hmr::ChangeKind::Created,
+            first_event: Instant::now(),
+            first_event_wall: std::time::SystemTime::now(),
+        }],
+        flushed: Instant::now(),
+    };
+    f.server.notify_changes(created());
+    // The page connecting is shown the module's error first.
+    let m = loop {
+        let m = next(&mut ws);
+        if m["type"] != "error" {
+            break m;
+        }
+    };
+    assert_eq!(m["type"], "full-reload", "{m}");
+    // The reloaded page didn't ask for the module again: the next creation leaves it alone
+    // (Vite's hmr "deleted file should trigger dispose and prune callbacks" restores a file
+    // after a reload like this one and expects a hot update, not a second reload).
+    f.server.notify_changes(created());
+    ws.set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let second = ws.recv_text();
+    assert!(second.is_err(), "no second reload: {second:?}");
 }
 
 #[test]
@@ -453,6 +497,79 @@ fn a_pruned_module_imported_again_is_fetched_fresh() {
         body.contains(&format!("from '/src/child.js?t={t}'")),
         "{body}"
     );
+}
+
+/// A stylesheet both `<link>`ed (a server-rendered copy) and imported from JS is pruned when
+/// the import goes, so the page drops the copy; later edits still update the link, without
+/// a JS update nothing imports.
+#[test]
+fn a_linked_stylesheet_whose_import_is_removed_is_pruned() {
+    let f = start();
+    f.app.write("src/both.css", ".a { color: red; }\n");
+    let with_css = "import './both.css';\nimport.meta.hot.accept();\n";
+    f.app.write("src/uses-css.js", with_css);
+    let (status, _, _) = http_get(
+        f.server.addr(),
+        "/src/both.css",
+        &[("Accept", "text/css,*/*;q=0.1")],
+    );
+    assert_eq!(status, 200);
+    assert_eq!(f.get("/src/uses-css.js").0, 200);
+    let (status, _, body) = f.get("/src/both.css?import");
+    assert_eq!(status, 200, "{body}");
+    let mut ws = f.ws();
+    f.app
+        .write("src/uses-css.js", "import.meta.hot.accept();\n");
+    next_of(&mut ws, "update");
+    assert_eq!(next_of(&mut ws, "prune")["paths"][0], "/src/both.css");
+    f.app.write("src/both.css", ".a { color: blue; }\n");
+    let m = next_of(&mut ws, "update");
+    let updates = m["updates"].as_array().unwrap();
+    assert_eq!(updates.len(), 1, "{m}");
+    assert_eq!(updates[0]["type"], "css-update");
+    assert_eq!(updates[0]["path"], "/src/both.css");
+}
+
+/// Deleting a file nothing imports any more reloads the page, and afterwards an update of a
+/// module the deleted file imported doesn't walk up through it (Vite's `onFileDelete`).
+#[test]
+fn a_deleted_module_no_longer_imports_its_dependencies() {
+    let f = start();
+    f.app.write(
+        "src/display.js",
+        "export const show = (n) => `count ${n}`;\n",
+    );
+    f.app
+        .write("src/re-export.js", "export * from './display.js';\n");
+    f.app.write(
+        "src/counter.js",
+        "import { show } from './re-export.js';\nshow(1);\nimport.meta.hot.accept();\n",
+    );
+    for url in ["/src/counter.js", "/src/re-export.js", "/src/display.js"] {
+        assert_eq!(f.get(url).0, 200, "{url}");
+    }
+    let mut ws = f.ws();
+    f.app.write(
+        "src/counter.js",
+        "import { show } from './display.js';\nshow(1);\nimport.meta.hot.accept();\n",
+    );
+    assert_eq!(next_of(&mut ws, "prune")["paths"][0], "/src/re-export.js");
+    let (status, _, _) = f.get("/src/counter.js?t=1");
+    assert_eq!(status, 200);
+    std::fs::remove_file(f.app.path().join("src/re-export.js")).unwrap();
+    assert_eq!(next_of(&mut ws, "full-reload")["type"], "full-reload");
+    f.app.write(
+        "src/display.js",
+        "export const show = (n) => `count ${n}!`;\n",
+    );
+    let m = loop {
+        let m = next(&mut ws);
+        if m["type"] == "update" || m["type"] == "full-reload" {
+            break m;
+        }
+    };
+    assert_eq!(m["type"], "update", "{m}");
+    assert_eq!(m["updates"][0]["path"], "/src/counter.js", "{m}");
 }
 
 #[test]

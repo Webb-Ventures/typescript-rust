@@ -60,10 +60,18 @@ pub struct ModuleNode {
     pub linked_css: bool,
     /// Served as a JS module at least once.
     pub served_as_js: bool,
+    /// The watcher was told the file exists (`WatchAdder::known`), on its first serve.
+    pub known_to_watcher: bool,
     /// Prepared (transformed + resolved) output, owned by the server.
     pub prepared: Option<Arc<crate::server::Prepared>>,
     /// The last prepare failed (transform or resolve error).
     pub errored: bool,
+    /// Failed since the last file creation retried it: the next creation retries it. Like
+    /// Vite's set of modules that failed to resolve an import, a retry takes the module out,
+    /// and only a later failure the page asked for (a request, or an update of a module the
+    /// page keeps) puts it back (`vite: packages/vite/src/node/server/moduleGraph.ts`,
+    /// `_hasResolveFailedErrorModules`, cleared by `invalidateModule`).
+    pub retry_on_create: bool,
     /// Lost its last importer and wasn't imported or requested since: the page no longer
     /// uses it, so changes to its file are ignored (a late watcher event after the import
     /// was removed must not reload the page). Deleting it in a later batch reloads the page.
@@ -72,6 +80,14 @@ pub struct ModuleNode {
     pub pruned_at: Option<Instant>,
     /// Files outside the graph its transform read ([`crate::Transform::deps`]).
     pub watch_deps: Vec<PathBuf>,
+}
+
+impl ModuleNode {
+    /// Its last prepare failed: errored, and retried by the next file creation.
+    pub fn fail(&mut self) {
+        self.errored = true;
+        self.retry_on_create = true;
+    }
 }
 
 /// A module that accepted an update.
@@ -174,8 +190,10 @@ impl ModuleGraph {
             last_hmr_timestamp: 0,
             linked_css: false,
             served_as_js: false,
+            known_to_watcher: false,
             prepared: None,
             errored: false,
+            retry_on_create: false,
             pruned: false,
             pruned_at: None,
             watch_deps: Vec::new(),
@@ -236,7 +254,9 @@ impl ModuleGraph {
             if let Ok(pos) = n.importers.binary_search(&id) {
                 n.importers.remove(pos);
             }
-            if n.importers.is_empty() && !n.linked_css {
+            // A `<link>`ed stylesheet is pruned too: the page removes the link only when it
+            // carries `data-vite-dev-id` (a server-rendered copy of the import).
+            if n.importers.is_empty() {
                 n.pruned = true;
                 n.pruned_at = Some(Instant::now());
                 pruned.push(gone);
@@ -255,6 +275,25 @@ impl ModuleGraph {
         node.self_accepting = self_accepting || node.kind == ModuleKind::Css;
         node.declined = declined;
         pruned
+    }
+
+    /// A deleted module no longer imports anything: its importees forget it as an importer,
+    /// so an update of one of them doesn't walk up through the deleted file (where it would
+    /// find no importers and reload the page). An importee left with no importers is pruned.
+    /// The node keeps its other state; a restored file re-prepares and sets new edges
+    /// (`vite: packages/vite/src/node/server/moduleGraph.ts`, `onFileDelete`).
+    pub fn detach(&mut self, id: ModuleId) {
+        let old = std::mem::take(&mut self.nodes[id as usize].importees);
+        for gone in old {
+            let n = &mut self.nodes[gone as usize];
+            if let Ok(pos) = n.importers.binary_search(&id) {
+                n.importers.remove(pos);
+                if n.importers.is_empty() {
+                    n.pruned = true;
+                    n.pruned_at = Some(Instant::now());
+                }
+            }
+        }
     }
 
     /// Sets `id`'s partially accepted exports and the bindings it imports from each importee

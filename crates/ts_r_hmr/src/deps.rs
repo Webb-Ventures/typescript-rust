@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use ts_r_cache::{Cache, Key, KeyBuilder};
 
-use crate::cache::{self, TransformCache};
+use crate::cache;
 use crate::prebundle::{DepBatch, DepRequest};
 use crate::render;
 use crate::resolve::Resolved;
@@ -577,15 +577,14 @@ pub(crate) fn scan_deps(shared: &Shared) -> Vec<DepEntry> {
     found.into_values().collect()
 }
 
-/// The transform the browser will request, through the cache (so the scan warms it).
+/// The transform the browser will request, through the cache (so the scan warms it): the
+/// same source (`load` hooks included) and key as the request's.
 fn transform_for_scan(shared: &Shared, file: &Path) -> Option<Arc<TransformOutput>> {
     let transform = shared.transforms.iter().find(|t| t.handles(file))?;
-    let source = fs::read(file).ok()?;
-    let text = std::str::from_utf8(&source).ok()?;
     let url = server::url_for_file(&shared.root, file);
+    let source = server::module_source(shared, file, &url).ok()?;
+    let text = std::str::from_utf8(&source).ok()?;
     let id = url.trim_start_matches('/');
-    let cache_id = server::transform_cache_id(shared, transform.as_ref());
-    let key = TransformCache::key(&cache_id, Mode::Dev, id, &Key::of(&source));
     let input = TransformInput {
         path: file,
         id,
@@ -593,18 +592,18 @@ fn transform_for_scan(shared: &Shared, file: &Path) -> Option<Arc<TransformOutpu
         mode: Mode::Dev,
     };
     let plugin_id = crate::paths::id(file);
-    shared
-        .cache
-        .get_or_insert(key, || {
-            server::run_transform(
-                shared,
-                server::transform_plugins(shared),
-                transform.as_ref(),
-                &input,
-                &plugin_id,
-            )
-        })
-        .ok()
+    let deps = transform.deps(&input);
+    server::cached_transform(
+        shared,
+        file,
+        transform.as_ref(),
+        &input,
+        &plugin_id,
+        Key::of(&source),
+        deps,
+    )
+    .ok()
+    .map(|(out, _)| out)
 }
 
 // ---------------------------------------------------------------------------------------
