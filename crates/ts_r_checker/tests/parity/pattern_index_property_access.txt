@@ -1,0 +1,14 @@
+a.ts(10,7): error TS2322: Type '{ [x: Lowercase<string>]: { a: 1; }; } | undefined' is not assignable to type 'never'.
+  Type 'undefined' is not assignable to type 'never'.
+a.ts(11,7): error TS2322: Type '1 | undefined' is not assignable to type 'never'.
+  Type 'undefined' is not assignable to type 'never'.
+a.ts(11,19): error TS18048: 'a.a.a' is possibly 'undefined'.
+a.ts(17,7): error TS2322: Type '{ value: "value"; } | undefined' is not assignable to type 'never'.
+  Type 'undefined' is not assignable to type 'never'.
+a.ts(18,7): error TS2322: Type '{ VALUE: "VALUE"; } | null | undefined' is not assignable to type 'never'.
+  Type 'undefined' is not assignable to type 'never'.
+a.ts(19,7): error TS2322: Type '{ value: "value"; } | undefined' is not assignable to type 'never'.
+  Type 'undefined' is not assignable to type 'never'.
+a.ts(20,12): error TS7053: Element implicitly has an 'any' type because expression of type '"aB"' can't be used to index type 'T'.
+  Property 'aB' does not exist on type 'T'.
+a.ts(22,14): error TS2339: Property 'a' does not exist on type 'T | { [k: string]: number; }'.

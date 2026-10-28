@@ -3184,6 +3184,48 @@ Type-aware lint round 3 (`m4/type-aware-3`):
   properties keep the read type for writes (`accessor_signatures`). Conformance
   7881 -> 7887 exact.
 
+Round 8 (`wip/v1-checker8`), from typescript-eslint's typed rule tests and tsc 7.0.2 probes:
+
+- A property name with no `string` index signature to read reads those keyed by a template
+  literal or string mapping its literal fits (`t.a` for `[k: Lowercase<string>]`), by `.`
+  and by a literal element access; several such signatures intersect their values. A union
+  only has the signatures whose key every member declares exactly, so
+  `(T | { [k: string]: number }).a` is TS2339 (tsc: getApplicableIndexInfoForName,
+  getUnionIndexInfos). `Ck::name_pattern_index_info` is public for lint rules
+  (`pattern_index_property_access`).
+- `new.target` is the type of the class of the constructor it is in, else of the function
+  declaration or expression (`() => void` printed), arrows looking through; elsewhere it is
+  TS17013 and the error type. Its properties narrow like `this.x` (`RefRoot::NewTarget`;
+  tsc: checkNewTargetMetaProperty) (`new_target_types`).
+- An array literal that is a destructuring assignment target is a tuple (`[[x]] = v` is
+  `[[any]]`), as tsc's checkArrayLiteral does for `inDestructuringPattern`.
+- `contextual_type` of a call argument, once the call is resolved, is the resolved
+  signature's parameter: `[].map(() => e)` gives `e` the context `{ a: false; }` that `U`
+  was inferred as, not `U` (tsc's getContextualTypeForArgumentAtIndex reads the resolved
+  signature). The context an argument was first checked with only applies while the call
+  infers (`tests/editor_queries.rs`).
+- Flow walks of a reference without a property path (`this`, `x`) are cached at the
+  assignment node they start from (`assignment_cache_key`, keyed like label entries), and
+  an assignment with more property accesses than the reference is skipped before its key
+  is built, so `this.p0 = 0; this.p1 = 0; ...` (each reading `this`) checks in linear time:
+  64,000 statements in 0.13 s, from 2.8 s for 32,000 (`bounded.rs`,
+  `many_this_assignments_walk_flow_linearly`).
+- `#x in v` inside a class where no enclosing class declares `#x` is TS2339 against `v`'s
+  type (not in unchecked JS); otherwise it narrows `v` like `v instanceof C` for the
+  nearest class declaring `#x` (`typeof C` for a static member) (tsc: checkInExpression,
+  narrowTypeByPrivateIdentifierInInExpression) (`private_name_in_undeclared`).
+- Two deferred conditionals without `infer` relate when their `extends` types are
+  identical, one check type relates to the other and the branches relate pairwise; else
+  the source relates to the target's branches that can be taken, or through its own
+  constraint. They were always related, so `Equals<A, B>` built from
+  `<T>() => T extends A ? 1 : 2` was `true` for any `A` and `B` (tsc: relater.go,
+  structuredTypeRelatedToWorker) (`conditional_pair_relation`).
+- An unannotated parameter whose default reads itself, directly or through another
+  parameter's default (`f(a = b, b = a)`), is TS7022 under `noImplicitAny`, as variables are
+  (`param_default_self_reference`).
+- Under `exactOptionalPropertyTypes`, `delete o.p` needs `p?`: `undefined` in its type no
+  longer makes it optional (TS2790) (`delete_exact_optional`).
+
 ## Levels (`layers.rs`, design record 0005)
 
 `Checker::layered(&program, Some(&layer))` builds a checker whose own level holds the
@@ -3265,15 +3307,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-27, 6a873bc, wip/v1-checker7 on v1/lsp7: uninferred parameters read
-  through their constraints, exactOptionalPropertyTypes heads (TS2375/TS2379), generic
-  rest parameters related and inferred as a whole, deferred conditional constraints,
-  `typeof a.p` property checks, decorator `super` placement and TS8038, JS constructor
-  this-properties and JS module names in type nodes; 12750 compared variants):
-  12446 exact (97.6%; all diagnostics and chains), 12466 (97.8%) exact on first lines;
+  Current (2026-10-27, d505570, wip/v1-checker8 on v1/lint8: `#x in v` checks and
+  narrowing, two deferred conditionals related structurally, TS7022 for self-referencing
+  parameter defaults, `delete` under exactOptionalPropertyTypes; 12750 compared variants):
+  12451 exact (97.7%; all diagnostics and chains), 12471 (97.8%) exact on first lines;
   144 variants with a diagnostic tsc does not report, 5 of them tests where tsc reports
   nothing.
-  Earlier: 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

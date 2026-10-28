@@ -733,6 +733,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .global_symbol("ImportMeta", ts_r_binder::meaning::TYPE)
                         .map(|s| self.declared_type_of_symbol(s))
                         .unwrap_or(TypeId::UNRESOLVED),
+                    // The constructor's class (`typeof Foo`) or the function's own type.
+                    ts_r_ast::MetaPropKind::NewTarget if written == "new.target" => {
+                        match self.new_target_container(e) {
+                            Some(c) => match self.c.sym_of_decl(c) {
+                                Some(s) => self.type_of_symbol(s),
+                                None => TypeId::UNRESOLVED,
+                            },
+                            None => TypeId::ERROR,
+                        }
+                    }
                     _ => TypeId::UNRESOLVED,
                 }
             }
@@ -849,27 +859,50 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// constructor (arrows look through; methods, accessors, class fields and the top
     /// level do not allow it: invalidNewTarget.es6).
     fn new_target_allowed(&self, e: Loc) -> bool {
+        self.new_target_container(e).is_some()
+    }
+
+    /// The declaration whose symbol types `new.target` at `e`: the class of a constructor,
+    /// else the function declaration or expression (arrows look through), as
+    /// [`Self::new_target_allowed`] finds it (tsc: checkNewTargetMetaProperty).
+    fn new_target_container(&self, e: Loc) -> Option<Loc> {
         let ast = self.ast(e.file);
         let parents = self.c.file(e.file).parents();
         let mut cur = parents.parent(e.node);
         while let Some(n) = cur {
             match *ast.node(n) {
-                Node::FunctionDecl { .. } => return true,
+                Node::FunctionDecl { .. } => return Some(Loc::new(e.file, n)),
                 Node::FunctionExpr { .. } => {
-                    return match parents.parent(n).map(|p| *ast.node(p)) {
-                        Some(Node::MethodDef { kind, .. }) => kind == MethodKind::Constructor,
-                        _ => true,
+                    return match parents.parent(n).map(|p| (p, *ast.node(p))) {
+                        Some((p, Node::MethodDef { kind, .. })) => {
+                            if kind != MethodKind::Constructor {
+                                return None;
+                            }
+                            // The method's parent is the class body's owner.
+                            let mut c = parents.parent(p);
+                            while let Some(cn) = c {
+                                if matches!(
+                                    ast.node(cn),
+                                    Node::ClassDecl { .. } | Node::ClassExpr { .. }
+                                ) {
+                                    return Some(Loc::new(e.file, cn));
+                                }
+                                c = parents.parent(cn);
+                            }
+                            None
+                        }
+                        _ => Some(Loc::new(e.file, n)),
                     };
                 }
                 Node::ClassDecl { .. }
                 | Node::ClassExpr { .. }
                 | Node::PropertyDef { .. }
-                | Node::StaticBlock { .. } => return false,
+                | Node::StaticBlock { .. } => return None,
                 _ => {}
             }
             cur = parents.parent(n);
         }
-        false
+        None
     }
 
     /// TS18057 at each string literal import or export name (`export { a as "b" }`,
@@ -3806,6 +3839,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.index_info_of(nt, TypeId::NUMBER)
             } else {
                 self.index_info_of(nt, TypeId::STRING)
+                    .or_else(|| self.name_pattern_index_info(nt, &name))
             };
             if let Some(i) = info {
                 if self.c.opts.no_property_access_from_index_signature && !is_write {
@@ -4160,6 +4194,30 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = self.enclosing_class(c);
         }
         false
+    }
+
+    /// The type `#x in v` narrows `v` to: the nearest enclosing class declaring `#x`, its
+    /// instance type for an instance member and the constructor type for a static one.
+    pub(crate) fn private_name_class_type(&mut self, e: Loc, name: &str) -> Option<TypeId> {
+        let mut cur = self.enclosing_class(e);
+        for _ in 0..64 {
+            let c = cur?;
+            if let Some(m) = self.private_member_named(c, name) {
+                let cs = self.c.sym_of_decl(c)?;
+                let is_static = self
+                    .ast(m.file)
+                    .node(m.node)
+                    .modifiers()
+                    .contains(ts_r_ast::Modifiers::STATIC);
+                return Some(if is_static {
+                    self.type_of_symbol(cs)
+                } else {
+                    self.declared_type_of_symbol(cs)
+                });
+            }
+            cur = self.enclosing_class(c);
+        }
+        None
     }
 
     /// Whether class `outer` encloses class `inner`.
@@ -4676,6 +4734,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             for m in members {
                 if self.property_of_type_id(m, nid).is_none()
                     && self.index_info_of(m, TypeId::STRING).is_none()
+                    && self.name_pattern_index_info(m, name).is_none()
                 {
                     let ms = self.type_to_string(m);
                     chain.push_back(dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339, &[name, &ms]);
@@ -4847,12 +4906,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut n = e.node;
         for _ in 0..64 {
             match *ast.node(n) {
-                Node::Ident { .. }
-                | Node::This {}
-                | Node::Super {}
-                | Node::MetaProperty {
-                    kind: ts_r_ast::MetaPropKind::ImportMeta,
-                } => return true,
+                Node::Ident { .. } | Node::This {} | Node::Super {} | Node::MetaProperty { .. } => {
+                    return true;
+                }
                 Node::Member { obj, .. } | Node::JsxMemberExpr { obj, .. } => n = obj,
                 Node::Index { obj, index, .. } => {
                     if !matches!(
@@ -5475,7 +5531,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.pattern_key_index_info(nt, itr)
                 .or_else(|| self.index_info_of(nt, TypeId::STRING))
         } else {
-            self.index_info_of(nt, TypeId::STRING)
+            self.index_info_of(nt, TypeId::STRING).or_else(|| {
+                let name = self.store().string_value(itr)?.to_owned();
+                self.name_pattern_index_info(nt, &name)
+            })
         };
         // A union key of numbers and strings reads both index signatures
         // (`o[k]` with `k: string | number` is `A | B`).
@@ -6179,9 +6238,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .any(|m| self.c.is_array_like_type(m) && !self.is_readonly_array_like(m))
             });
         let readonly_tuple = (const_assert && !mutable_ctx) || const_param == Some(true);
+        // An array literal that is a destructuring assignment target is a tuple (`[[x]] = v`
+        // reads as `[[any]]`; tsc: checkArrayLiteral's `inDestructuringPattern`).
         let tuple_ctx = const_ctx
             || self.is_spread_into_call(e)
-            || ct.is_some_and(|c| self.is_tuple_like_context(c));
+            || ct.is_some_and(|c| self.is_tuple_like_context(c))
+            || self.is_destructuring_target(e);
         let mut els: Vec<TupleEl> = Vec::new();
         let mut elem_types: Vec<TypeId> = Vec::new();
         for &el in ast.list(elements) {
@@ -7786,7 +7848,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 .store()
                                 .flags(pt)
                                 .intersects(TypeFlags::ANY | TypeFlags::UNKNOWN | TypeFlags::NEVER);
-                            let has_undef = self.nullable_facts(pt).0;
+                            // Under exactOptionalPropertyTypes only `?` makes it optional.
+                            let has_undef = !self.c.opts.exact_optional_property_types
+                                && self.nullable_facts(pt).0;
                             if !optional && !any_like && !has_undef {
                                 self.error(
                                     il,
@@ -8205,6 +8269,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_expr(ll)
                 };
                 let rt = self.check_expr(rl);
+                // `#x in v` inside a class where no enclosing class declares `#x`: TS2339
+                // against the right operand's type (tsc: checkInExpression).
+                if let Node::PrivateName { name } = *self.ast(ll.file).node(ll.node)
+                    && self.enclosing_class(ll).is_some()
+                    && self.reporting(ll.file)
+                    && !self.has_syntax_errors(ll.file)
+                    // Unchecked JavaScript only gets a suggestion.
+                    && !(self.c.file(ll.file).is_js()
+                        && !self.c.opts.check_js
+                        && !self.c.file(ll.file).has_ts_check())
+                {
+                    let text = format!("#{}", self.ast(ll.file).atom(name));
+                    if !self.private_name_in_scope(ll, &text) {
+                        let rs = self.type_to_string(rt);
+                        self.error(
+                            ll,
+                            dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                            &[&text, &rs],
+                        );
+                    }
+                }
                 let lt = self.check_non_null(ll, lt);
                 let rt = self.check_non_null(rl, rt);
                 if !self.store().is_error(lt) {

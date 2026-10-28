@@ -236,3 +236,38 @@ fn many_this_properties_of_a_js_constructor_stay_definitely_assigned() {
     );
     assert!(took.as_secs() < 60, "took {took:?}");
 }
+
+/// Straight-line `this.pN = 0;` statements in a JS constructor: each reads `this`, whose
+/// flow walk stops at the previous assignment (cached there) instead of walking back over
+/// every earlier one, so 40,000 of them check in linear time.
+#[test]
+fn many_this_assignments_walk_flow_linearly() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let n = 40_000;
+    let mut src = String::from("export class C {\n  constructor() {\n");
+    for i in 0..n {
+        src.push_str(&format!("    this.p{i} = 0;\n"));
+    }
+    src.push_str("  }\n}\n/** @type {string} */\nvar a = new C().p7;\n");
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file("/p/a.js", &src);
+    fs.add_file(
+        "/p/tsconfig.json",
+        "{\"compilerOptions\": {\"strict\": true, \"allowJs\": true, \"checkJs\": true, \"target\": \"es2022\"}, \"files\": [\"a.js\"]}",
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let start = std::time::Instant::now();
+    let result = check_program(&program, CheckRun { threads: 1 });
+    let took = start.elapsed();
+    let msgs: Vec<&str> = result
+        .diagnostics
+        .iter()
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(msgs, ["Type 'number' is not assignable to type 'string'."]);
+    assert!(took.as_secs() < 30, "took {took:?}");
+}

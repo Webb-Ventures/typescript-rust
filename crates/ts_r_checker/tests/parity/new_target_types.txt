@@ -1,0 +1,5 @@
+a.ts(5,11): error TS2322: Type 'typeof Foo' is not assignable to type 'never'.
+a.ts(7,13): error TS2322: Type 'typeof Foo' is not assignable to type 'never'.
+a.ts(12,9): error TS2322: Type '() => void' is not assignable to type 'never'.
+a.ts(15,9): error TS2322: Type '() => void' is not assignable to type 'never'.
+a.ts(19,15): error TS17013: Meta-property 'new.target' is only allowed in the body of a function declaration, function expression, or constructor.

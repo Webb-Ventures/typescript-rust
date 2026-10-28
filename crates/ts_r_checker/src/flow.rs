@@ -41,6 +41,8 @@ pub enum RefRoot {
     Super,
     /// `import.meta` (its properties narrow like `this.x`).
     ImportMeta,
+    /// `new.target`, likewise.
+    NewTarget,
 }
 
 /// What a const binding (or a binding of a parameter pattern) stands for: `prop` of the
@@ -72,6 +74,10 @@ struct Walk {
 
 /// Cache key of a flow type at a label: (file, flow node, reference hash, declared, initial).
 pub(crate) type FlowKey = (u32, u32, u64, TypeId, TypeId);
+
+/// Mixed into the reference hash of assignment-node cache entries, which hold the result
+/// of a walk starting at the assignment (label entries hold the type at the label).
+const ASSIGNMENT_CACHE_SALT: u64 = 0x9e37_79b9_7f4a_7c15;
 
 mod facts {
     pub const STRING: u16 = 1;
@@ -163,10 +169,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 root: RefRoot::Super,
                 path: Vec::new(),
             }),
-            Node::MetaProperty {
-                kind: ts_r_ast::MetaPropKind::ImportMeta,
-            } => Some(RefKey {
-                root: RefRoot::ImportMeta,
+            Node::MetaProperty { kind } => Some(RefKey {
+                root: match kind {
+                    ts_r_ast::MetaPropKind::ImportMeta => RefRoot::ImportMeta,
+                    ts_r_ast::MetaPropKind::NewTarget => RefRoot::NewTarget,
+                },
                 path: Vec::new(),
             }),
             Node::Paren { expr } | Node::NonNull { expr } => {
@@ -276,6 +283,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::MetaProperty {
                     kind: ts_r_ast::MetaPropKind::ImportMeta,
                 } => return Some("import.meta".into()),
+                Node::MetaProperty {
+                    kind: ts_r_ast::MetaPropKind::NewTarget,
+                } => return Some("new.target".into()),
                 Node::Paren { expr } | Node::NonNull { expr } => n = expr,
                 Node::Member { obj, .. }
                 | Node::JsxMemberExpr { obj, .. }
@@ -1170,9 +1180,57 @@ impl<'c, 'a> Ck<'c, 'a> {
             return w.declared;
         }
         self.flow_depth += 1;
+        // Walks of a plain reference (`this`, `x`) from an assignment are cached there, so
+        // a later walk passing that assignment stops: straight-line code of many
+        // unrelated assignments (`this.p0 = 0; this.p1 = 0; ...`, each reading `this`)
+        // stays linear. Keyed like the label cache.
+        let key = self.assignment_cache_key(w, start);
+        if let Some(k) = key
+            && let Some(t) = self.flow_cached(&k)
+        {
+            self.flow_depth -= 1;
+            return t;
+        }
         let t = self.walk_flow_inner(w, start);
+        if let Some(k) = key {
+            self.flow_store(k, t);
+        }
         self.flow_depth -= 1;
         t
+    }
+
+    /// The cache key of a walk from `flow` when it is an assignment node and the walk is
+    /// for a reference without property path that does not cross functions.
+    fn assignment_cache_key(&self, w: &Walk, flow: FlowId) -> Option<FlowKey> {
+        if !w.key.path.is_empty() || w.cross_functions {
+            return None;
+        }
+        let node = self.c.bound(w.file).flow.nodes.get(flow.index())?;
+        if node.kind != FlowKind::Assignment {
+            return None;
+        }
+        Some((
+            w.file.0,
+            flow.0,
+            w.hash ^ ASSIGNMENT_CACHE_SALT ^ self.reduce_salt(),
+            w.declared,
+            w.initial,
+        ))
+    }
+
+    /// Mixed into label and assignment cache keys: the active `finally` restrictions
+    /// change which antecedents a walk follows (0 without any).
+    fn reduce_salt(&self) -> u64 {
+        let mut h = 0u64;
+        for (target, allowed) in &self.flow_reduce {
+            for f in std::iter::once(target).chain(allowed) {
+                h = (h ^ u64::from(f.0))
+                    .wrapping_mul(0x0100_0000_01b3)
+                    .rotate_left(5);
+            }
+            h = h.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        }
+        h
     }
 
     fn walk_flow_inner(&mut self, w: &Walk, start: FlowId) -> TypeId {
@@ -1210,6 +1268,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return w.initial;
                 }
                 FlowKind::Assignment => {
+                    if flow != start
+                        && let Some(k) = self.assignment_cache_key(w, flow)
+                        && let Some(t) = self.flow_cached(&k)
+                    {
+                        return t;
+                    }
                     let Some(target) = node.node else {
                         flow = FlowId(node.a);
                         continue;
@@ -1309,7 +1373,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return self.narrow_switch(w, t, sl, start, end);
                 }
                 FlowKind::BranchLabel => {
-                    let key: FlowKey = (file.0, flow.0, w.hash, w.declared, w.initial);
+                    let key: FlowKey = (
+                        file.0,
+                        flow.0,
+                        w.hash ^ self.reduce_salt(),
+                        w.declared,
+                        w.initial,
+                    );
                     if let Some(t) = self.flow_cached(&key) {
                         return t;
                     }
@@ -1554,6 +1624,24 @@ impl<'c, 'a> Ck<'c, 'a> {
             return AssignEffect::None;
         }
         let ast = self.ast(target.file);
+        // A target with more property accesses than the reference neither is it nor a
+        // prefix of it (`this.p = 0` against `this`): skip without building its key, so a
+        // walk back over many such assignments stays cheap per step.
+        let mut accesses = 0usize;
+        let mut n = target.node;
+        for _ in 0..64 {
+            match *ast.node(n) {
+                Node::Member { obj, .. } | Node::Index { obj, .. } => {
+                    accesses += 1;
+                    n = obj;
+                }
+                Node::Paren { expr } | Node::NonNull { expr } => n = expr,
+                _ => break,
+            }
+        }
+        if accesses > w.key.path.len() {
+            return AssignEffect::None;
+        }
         // Quick filter by the root name.
         match self.root_name(target) {
             Some(n) if n == w.root_name => {}
@@ -1570,7 +1658,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // Patterns and for-heads: does any identifier inside bind/assign our root?
                 if matches!(
                     w.key.root,
-                    RefRoot::This | RefRoot::Super | RefRoot::ImportMeta
+                    RefRoot::This | RefRoot::Super | RefRoot::ImportMeta | RefRoot::NewTarget
                 ) {
                     return AssignEffect::None;
                 }
@@ -2126,10 +2214,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         return true;
                     }
                 }
-                Node::MetaProperty {
-                    kind: ts_r_ast::MetaPropKind::ImportMeta,
-                } => {
-                    if name == "import.meta" {
+                Node::MetaProperty { kind } => {
+                    let written = match kind {
+                        ts_r_ast::MetaPropKind::ImportMeta => "import.meta",
+                        ts_r_ast::MetaPropKind::NewTarget => "new.target",
+                    };
+                    if name == written {
                         return true;
                     }
                 }
@@ -2582,7 +2672,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     _ => self.is_const_declaration(rd),
                 }
             }
-            RefRoot::This | RefRoot::ImportMeta => true,
+            RefRoot::This | RefRoot::ImportMeta | RefRoot::NewTarget => true,
             RefRoot::Super => false,
         };
         if !keeps {
@@ -3139,6 +3229,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 BinaryOp::In => {
                     let l = skip_parens(ast, left);
+                    // `#x in v` narrows `v` like `v instanceof C` for the class declaring
+                    // `#x` (tsc: narrowTypeByPrivateIdentifierInInExpression).
+                    if let Node::PrivateName { name } = *ast.node(l) {
+                        if !self.is_ref(w, at(right)) {
+                            return t;
+                        }
+                        let text = format!("#{}", ast.atom(name));
+                        return match self.private_name_class_type(at(l), &text) {
+                            Some(c) => self.narrow_to_derived(t, c, assume_true),
+                            None => t,
+                        };
+                    }
                     let name = match *ast.node(l) {
                         Node::StringLit { .. } | Node::NumberLit { .. } => key_text(ast, l),
                         Node::TemplateLit { parts } => match ast.list(parts) {
@@ -3867,6 +3969,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(candidate) = self.instance_type_of_constructor(rt) else {
             return t;
         };
+        self.narrow_to_derived(t, candidate, assume_true)
+    }
+
+    /// Narrows `t` by a check that its value derives from `candidate` (`instanceof`,
+    /// `#x in v`): the true branch keeps what derives from it, the false branch drops it.
+    fn narrow_to_derived(&mut self, t: TypeId, candidate: TypeId, assume_true: bool) -> TypeId {
         if assume_true {
             self.narrow_by_instance_type(t, candidate)
         } else {
