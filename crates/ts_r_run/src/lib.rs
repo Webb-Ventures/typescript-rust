@@ -70,8 +70,9 @@ pub enum Mode {
     Run,
     Help,
     Version,
-    /// Internal: compile one file to stdout (`esm`/`cjs` line, then the code).
-    Compile(String),
+    /// Internal: compile one file to stdout (`esm`/`cjs` line, then the code); `true`
+    /// (`--compile-cjs`) when it is loaded with `require()`.
+    Compile(String, bool),
     /// Internal: resolve the specifier (the positional argument) imported from this parent
     /// through tsconfig `paths` and `baseUrl`, printing the file or nothing.
     Resolve(String),
@@ -148,7 +149,8 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "-h" | "--help" => cli.mode = Mode::Help,
             "-V" | "--version" => cli.mode = Mode::Version,
             "--serve" => cli.mode = Mode::Serve,
-            "--tsconfig" | "--strategy" | "--node" | "--compile" | "--resolve" => {
+            "--tsconfig" | "--strategy" | "--node" | "--compile" | "--compile-cjs"
+            | "--resolve" => {
                 let v = match inline {
                     Some(v) => v,
                     None => value(&mut i, flag)?,
@@ -156,7 +158,8 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
                 match flag {
                     "--tsconfig" => cli.tsconfig = Some(v),
                     "--node" => cli.node = v,
-                    "--compile" => cli.mode = Mode::Compile(v),
+                    "--compile" => cli.mode = Mode::Compile(v, false),
+                    "--compile-cjs" => cli.mode = Mode::Compile(v, true),
                     "--resolve" => cli.mode = Mode::Resolve(v),
                     _ => {
                         cli.strategy = match v.as_str() {
@@ -209,7 +212,7 @@ pub fn main_with(args: &[String]) -> i32 {
             println!("ts-r-run {}", env!("CARGO_PKG_VERSION"));
             0
         }
-        Mode::Compile(file) => compile_to_stdout(&cli, file),
+        Mode::Compile(file, cjs) => compile_to_stdout(&cli, file, *cjs),
         Mode::Resolve(parent) => resolve_to_stdout(&cli, parent),
         Mode::Serve => {
             let engine = engine_from_env(&cli);
@@ -254,14 +257,14 @@ fn resolve_to_stdout(cli: &Cli, parent: &str) -> i32 {
     0
 }
 
-fn compile_to_stdout(cli: &Cli, file: &str) -> i32 {
+fn compile_to_stdout(cli: &Cli, file: &str, as_cjs: bool) -> i32 {
     use std::io::Write as _;
     let mut cli = cli.clone();
     if cli.entry.is_empty() {
         cli.entry = file.to_owned();
     }
     let engine = engine_from_env(&cli);
-    match engine.compile_file(&absolute(file)) {
+    match engine.compile_file(&absolute(file), as_cjs) {
         Ok(u) => {
             let mut out = std::io::stdout().lock();
             let _ = writeln!(out, "{}", u.compiled.format.as_str());

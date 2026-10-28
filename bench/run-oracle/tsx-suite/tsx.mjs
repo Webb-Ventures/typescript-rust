@@ -7,6 +7,7 @@
 // Tests that use tsx's API or CLI path directly are skipped before they run; tests that run a
 // file through tsx's loader flags run `ts-r-run <file>` instead.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execa, execaNode } from 'execa';
@@ -24,7 +25,15 @@ export const tsxEsmPath = new URL('file://' + path.join(tsxDist, 'esm/index.mjs'
 export const tsxEsmApiPath = new URL('file://' + path.join(tsxDist, 'esm/api/index.mjs')).toString();
 export const tsxEsmApiCjsPath = path.join(tsxDist, 'esm/api/index.cjs');
 
+// TS_R_ORACLE_KEEP=<dir>: copy each test's fixture there before running it (for repros).
+let kept = 0;
+const keep = (cwd) => {
+  const dir = process.env.TS_R_ORACLE_KEEP;
+  if (dir && cwd) fs.cpSync(cwd, path.join(dir, String(++kept)), { recursive: true });
+};
+
 const run = (args, options) => {
+  keep(options.cwd);
   const env = {
     TSX_DISABLE_CACHE: '1',
     DEBUG: '1',
@@ -68,6 +77,7 @@ const track = (child) => {
 
 /** A file run through tsx's loader flags (tsx) or ts-r-run (ts-r-run). */
 const loader = (flags, args, cwd) => {
+  keep(cwd);
   if (subject === 'tsx') {
     return track(execaNode(args[0], args.slice(1), {
       cwd, nodePath: process.execPath, nodeOptions: flags, reject: false, all: true,

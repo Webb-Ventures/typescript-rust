@@ -52,6 +52,9 @@ pub struct Spec {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Compiled {
     pub format: Format,
+    /// An ES module compiled to CommonJS because it was asked for with `require()`
+    /// ([`compile`]'s `as_cjs`); its own format is ESM.
+    pub forced: bool,
     /// JavaScript, with an inline source map comment when maps are on.
     pub code: String,
     pub specs: Vec<Spec>,
@@ -261,16 +264,26 @@ pub fn file_options(base: &TransformOptions, format: Format) -> TransformOptions
         Format::Esm => ModuleFormat::Esm { node_require: true },
         Format::Cjs => ModuleFormat::CommonJs,
     };
+    // `import()` stays native in CommonJS output, as under tsx: Node loads the target through
+    // the ESM loader (so an unknown extension is `ERR_UNKNOWN_FILE_EXTENSION`), and the code
+    // needs no helper, so a function's text still runs when it is `eval`ed elsewhere.
+    o.node_module = true;
     o
 }
 
 /// Compiles `src`. Errors are syntax errors, rendered tsc-style.
+///
+/// `as_cjs`: the file is loaded with `require()`. Under tsx everything `require()` reaches is
+/// compiled to CommonJS, so an ES module is too, unless it has top-level `await` (which
+/// CommonJS can't hold: Node's `require(esm)` then throws, and the preload names the error as
+/// tsx does). Such output is [`Compiled::forced`].
 pub fn compile(
     path: &str,
     src: &str,
     base: &TransformOptions,
     pkg: PackageType,
     source_maps: bool,
+    as_cjs: bool,
 ) -> Result<Compiled, String> {
     let kind = SourceKind::from_path(path);
     let parsed = ts_r_parser::parse(src, kind);
@@ -281,14 +294,20 @@ pub fn compile(
         return Err(render_errors(path, src, &errors));
     }
     let mut ast = parsed.ast;
-    let format = format_of(path, pkg, &ast, src);
+    let natural = format_of(path, pkg, &ast, src);
+    let forced = as_cjs && natural == Format::Esm && !has_top_level_await(&ast);
+    let format = if forced { Format::Cjs } else { natural };
     let emulate_meta =
         format == Format::Cjs && src.contains("import.meta") && calls_import_meta(&mut ast);
     if src.contains("import") {
         unwrap_dynamic_imports(&mut ast);
     }
     let opts = file_options(base, format);
-    let result = ts_r_transform::transform(&mut ast, src, &opts);
+    let mut result = ts_r_transform::transform(&mut ast, src, &opts);
+    if format == Format::Cjs {
+        sort_cjs_exports(&mut ast);
+        default_first_in_import_star(&mut result.prelude);
+    }
     let specs = collect_specs(&ast);
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned();
     let codegen = CodegenOptions {
@@ -322,6 +341,15 @@ pub fn compile(
         code.push_str(IMPORT_META);
         code.push('\n');
     }
+    if forced && src.contains("module.exports") {
+        // `export { x as "module.exports" }` is what `require()` returns (Node's rule for
+        // `require(esm)`, which tsx applies to the CommonJS it compiles).
+        if !code.ends_with('\n') {
+            code.push('\n');
+        }
+        code.push_str(MODULE_EXPORTS_EXPORT);
+        code.push('\n');
+    }
     if let Some(map) = printed.map {
         if !code.ends_with('\n') {
             code.push('\n');
@@ -332,10 +360,16 @@ pub fn compile(
     }
     Ok(Compiled {
         format,
+        forced,
         code,
         specs,
     })
 }
+
+/// Appended to an ES module compiled to CommonJS for `require()` that may export the name
+/// `module.exports`.
+const MODULE_EXPORTS_EXPORT: &str = "if (Object.prototype.hasOwnProperty.call(exports, \"module.exports\")) \
+     module.exports = exports[\"module.exports\"];";
 
 /// What `import.meta` becomes in CommonJS output (tsx runs such files too): a call of a
 /// function appended to the file, hoisted, that makes the object once. `url` is the file's URL;
@@ -502,6 +536,234 @@ fn calls_import_meta(ast: &mut Ast) -> bool {
     true
 }
 
+/// tsx's CommonJS output (esbuild's) defines every export of an ES module up front, sorted
+/// by name, so `Object.keys(require("./m"))` and a namespace import of it list them in that
+/// order; tsc's order is the declaration order with `default` where it is assigned. So the
+/// `exports.b = exports.a = void 0;` list after the `__esModule` marker is rebuilt to hold every
+/// name the module exports at the top level (`exports.x = ...`, `exports["x"] = ...` and
+/// `Object.defineProperty(exports, "x", ...)`), sorted, `default` and hoisted functions
+/// included. Re-exports through `__exportStar` come after, as under tsx. Files without the
+/// marker (plain CommonJS, `export =`) are left alone.
+fn sort_cjs_exports(ast: &mut Ast) {
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return;
+    };
+    let items: Vec<NodeId> = ast.list(stmts).to_vec();
+    let Some(marker) = items
+        .iter()
+        .position(|&s| exported_by_define(ast, s) == Some("__esModule"))
+    else {
+        return;
+    };
+    let mut names: Vec<String> = Vec::new();
+    // The `void 0` lists written by the transform: right after the marker, among the hoisted
+    // function exports.
+    let mut lists = Vec::new();
+    let mut prelude = true;
+    for (i, &s) in items.iter().enumerate().skip(marker + 1) {
+        if let Some(name) = exported_by_define(ast, s) {
+            names.push(name.to_owned());
+            prelude = false;
+            continue;
+        }
+        let Node::ExprStmt { expr } = *ast.node(s) else {
+            prelude = false;
+            continue;
+        };
+        let mut e = expr;
+        let mut chain = 0usize;
+        while let Node::Assign {
+            left,
+            op: ts_r_ast::AssignOp::Assign,
+            right,
+        } = *ast.node(e)
+        {
+            match export_target(ast, left) {
+                Some(name) => {
+                    names.push(name.to_owned());
+                    chain += 1;
+                }
+                None => break,
+            }
+            e = right;
+        }
+        let void0 = matches!(
+            *ast.node(e),
+            Node::Unary {
+                op: UnaryOp::Void,
+                ..
+            }
+        );
+        if prelude && chain > 0 && void0 {
+            lists.push(i);
+        } else if !(prelude && chain == 1 && matches!(*ast.node(e), Node::Ident { .. })) {
+            prelude = false;
+        }
+    }
+    names.sort_unstable();
+    names.dedup();
+    if names.is_empty() {
+        return;
+    }
+    let span = ast.span(items[marker]);
+    let exports = ast.intern("exports");
+    let mut new_lists = Vec::new();
+    // A chain assigns its last target first: the first name goes innermost. At most 50
+    // names a statement, as tsc writes them (a long chain would nest deeply).
+    for chunk in names.chunks(50) {
+        let zero = ast.add(
+            Node::NumberLit {
+                value: ts_r_ast::F64Bits::new(0.0),
+            },
+            span,
+        );
+        let mut value = ast.add(
+            Node::Unary {
+                op: UnaryOp::Void,
+                arg: zero,
+            },
+            span,
+        );
+        for name in chunk {
+            let obj = ast.add(Node::Ident { name: exports }, span);
+            let atom = ast.intern(name);
+            let left = if is_identifier_name(name) {
+                let prop = ast.add(Node::Ident { name: atom }, span);
+                ast.add(
+                    Node::Member {
+                        obj,
+                        optional: false,
+                        prop,
+                    },
+                    span,
+                )
+            } else {
+                let index = ast.add(Node::StringLit { value: atom }, span);
+                ast.add(
+                    Node::Index {
+                        obj,
+                        optional: false,
+                        index,
+                    },
+                    span,
+                )
+            };
+            value = ast.add(
+                Node::Assign {
+                    left,
+                    op: ts_r_ast::AssignOp::Assign,
+                    right: value,
+                },
+                span,
+            );
+        }
+        new_lists.push(ast.add(Node::ExprStmt { expr: value }, span));
+    }
+    let mut out = Vec::with_capacity(items.len() + new_lists.len());
+    for (i, &s) in items.iter().enumerate() {
+        if lists.contains(&i) {
+            continue;
+        }
+        out.push(s);
+        if i == marker {
+            out.extend_from_slice(&new_lists);
+        }
+    }
+    let stmts = ast.add_list(&out);
+    *ast.node_mut(ast.root) = Node::Program { stmts };
+}
+
+/// `x` of `exports.x` or `exports["x"]`.
+fn export_target(ast: &Ast, id: NodeId) -> Option<&str> {
+    let (obj, key) = match *ast.node(id) {
+        Node::Member {
+            obj,
+            optional: false,
+            prop,
+        } => match *ast.node(prop) {
+            Node::Ident { name } => (obj, name),
+            _ => return None,
+        },
+        Node::Index {
+            obj,
+            optional: false,
+            index,
+        } => match *ast.node(index) {
+            Node::StringLit { value } => (obj, value),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    match *ast.node(obj) {
+        Node::Ident { name } if ast.atom(name) == "exports" => Some(ast.atom(key)),
+        _ => None,
+    }
+}
+
+/// `x` of the statement `Object.defineProperty(exports, "x", ...);`.
+fn exported_by_define(ast: &Ast, stmt: NodeId) -> Option<&str> {
+    let Node::ExprStmt { expr } = *ast.node(stmt) else {
+        return None;
+    };
+    let Node::Call { callee, args, .. } = *ast.node(expr) else {
+        return None;
+    };
+    let Node::Member { obj, prop, .. } = *ast.node(callee) else {
+        return None;
+    };
+    let (Node::Ident { name: o }, Node::Ident { name: p }) = (*ast.node(obj), *ast.node(prop))
+    else {
+        return None;
+    };
+    if ast.atom(o) != "Object" || ast.atom(p) != "defineProperty" {
+        return None;
+    }
+    let args = ast.list(args);
+    let (Some(&target), Some(&key)) = (args.first(), args.get(1)) else {
+        return None;
+    };
+    match (*ast.node(target), *ast.node(key)) {
+        (Node::Ident { name }, Node::StringLit { value }) if ast.atom(name) == "exports" => {
+            Some(ast.atom(value))
+        }
+        _ => None,
+    }
+}
+
+/// An ASCII identifier name (reserved words included: `exports.default` is fine).
+fn is_identifier_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+/// tsx's namespace of a CommonJS module (esbuild's `__toESM`) has `default` first, then the
+/// module's own keys; tsc's `__importStar` adds `default` last. The two lines of the helper are
+/// swapped (on their own lines, so nothing below moves).
+fn default_first_in_import_star(prelude: &mut String) {
+    const COPY: &str = "if (mod != null) for (var k = ownKeys(mod)";
+    const DEFAULT: &str = "__setModuleDefault(result, mod);";
+    let Some(copy) = prelude.find(COPY) else {
+        return;
+    };
+    let line_start = prelude[..copy].rfind('\n').map_or(0, |i| i + 1);
+    let Some(copy_end) = prelude[copy..].find('\n').map(|i| copy + i + 1) else {
+        return;
+    };
+    let rest = &prelude[copy_end..];
+    let Some(end) = rest.find('\n') else {
+        return;
+    };
+    if rest[..end].trim() != DEFAULT {
+        return;
+    }
+    let copy_line = prelude[line_start..copy_end].to_owned();
+    let default_line = prelude[copy_end..copy_end + end + 1].to_owned();
+    prelude.replace_range(line_start..copy_end + end + 1, &(default_line + &copy_line));
+}
+
 /// The CommonJS transform marks the exports with `__esModule` in the form Node's CommonJS
 /// export detection reads, so an ES namespace import of the file would list `__esModule`
 /// (tsx's output doesn't). The parenthesised name keeps the marker for `require` callers and
@@ -532,14 +794,15 @@ fn render_errors(path: &str, src: &str, diags: &[&ts_r_diagnostics::Diagnostic])
     out
 }
 
-// ---- cache payload: [format u8][spec count u32]{[flags u8][len u32][utf8]}[code] ----
+// ---- cache payload: [format u8: 0 ESM, 1 CJS, 2 CJS forced][spec count u32]{[flags u8][len u32][utf8]}[code] ----
 // flags: 1 = require, 2 = lazy.
 
 pub fn encode(c: &Compiled) -> Vec<u8> {
     let mut out = Vec::with_capacity(c.code.len() + 16 + c.specs.len() * 24);
-    out.push(match c.format {
-        Format::Esm => 0,
-        Format::Cjs => 1,
+    out.push(match (c.format, c.forced) {
+        (Format::Esm, _) => 0,
+        (Format::Cjs, false) => 1,
+        (Format::Cjs, true) => 2,
     });
     out.extend_from_slice(&(c.specs.len() as u32).to_le_bytes());
     for s in &c.specs {
@@ -556,9 +819,10 @@ pub fn decode(data: &[u8]) -> Option<Compiled> {
         let b = d.get(at..at + 4)?;
         Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
     }
-    let format = match *data.first()? {
-        0 => Format::Esm,
-        1 => Format::Cjs,
+    let (format, forced) = match *data.first()? {
+        0 => (Format::Esm, false),
+        1 => (Format::Cjs, false),
+        2 => (Format::Cjs, true),
         _ => return None,
     };
     let n = u32_at(data, 1)?;
@@ -578,6 +842,7 @@ pub fn decode(data: &[u8]) -> Option<Compiled> {
     let code = std::str::from_utf8(data.get(at..)?).ok()?.to_owned();
     Some(Compiled {
         format,
+        forced,
         code,
         specs,
     })
@@ -590,7 +855,7 @@ mod tests {
     ts_r_testing::cap_memory!();
 
     fn run(path: &str, src: &str, pkg: PackageType) -> Compiled {
-        compile(path, src, &TransformOptions::default(), pkg, false).expect("compiles")
+        compile(path, src, &TransformOptions::default(), pkg, false, false).expect("compiles")
     }
 
     #[test]
@@ -651,7 +916,10 @@ mod tests {
         let cjs = run("m.ts", src, PackageType::CommonJs);
         let texts: Vec<&str> = cjs.specs.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(texts, ["./a.js", "./b", "./c"]);
-        assert!(cjs.specs.iter().all(|s| s.require));
+        // `import()` stays native in CommonJS output (an ES module with top-level `await`
+        // loads through it); static imports become `require`.
+        let required: Vec<bool> = cjs.specs.iter().map(|s| s.require).collect();
+        assert_eq!(required, [true, true, false]);
     }
 
     #[test]
@@ -674,6 +942,7 @@ mod tests {
             &TransformOptions::default(),
             PackageType::Module,
             false,
+            false,
         )
         .expect_err("syntax error");
         assert!(e.contains("bad.ts"), "{e}");
@@ -690,6 +959,7 @@ mod tests {
             &TransformOptions::default(),
             PackageType::Module,
             false,
+            false,
         )
         .expect_err("early error");
         assert!(e.contains("must be initialized"), "{e}");
@@ -703,6 +973,7 @@ mod tests {
             &TransformOptions::default(),
             PackageType::Module,
             true,
+            false,
         )
         .expect("compiles");
         assert!(
@@ -752,7 +1023,8 @@ mod tests {
             target: ts_r_config::ScriptTarget::ES2022,
             ..Default::default()
         };
-        let c = compile("a.cts", &src, &opts, PackageType::Unspecified, false).expect("compiles");
+        let c = compile("a.cts", &src, &opts, PackageType::Unspecified, false, false)
+            .expect("compiles");
         assert_eq!(c.format, Format::Cjs);
         assert!(c.code.contains(&value), "{}", c.code);
     }
@@ -776,5 +1048,70 @@ mod tests {
         for p in ["a.d.ts", "b.d.mts", "c.js", "d.json", "e.d.css.ts"] {
             assert!(!is_compiled_path(p), "{p}");
         }
+    }
+
+    #[test]
+    fn commonjs_exports_are_declared_in_name_order() {
+        let src =
+            "export const z = 1;\nexport function b() {}\nexport default 3;\nexport { z as a };\n";
+        let c = run("a.cts", src, PackageType::Unspecified);
+        let line = c
+            .code
+            .lines()
+            .find(|l| l.contains("= void 0"))
+            .expect("a void 0 chain");
+        assert_eq!(
+            line.trim(),
+            "exports.z = exports.default = exports.b = exports.a = void 0;",
+            "{}",
+            c.code
+        );
+    }
+
+    #[test]
+    fn import_star_sets_the_default_before_copying_keys() {
+        let c = run(
+            "a.cts",
+            "import * as ns from './b';\nconsole.log(ns);\n",
+            PackageType::Unspecified,
+        );
+        let default = c
+            .code
+            .find("__setModuleDefault(result, mod);")
+            .expect("default");
+        let keys = c.code.find("for (var k = ownKeys(mod)").expect("keys");
+        assert!(default < keys, "{}", c.code);
+    }
+
+    #[test]
+    fn dynamic_import_stays_native_in_commonjs_output() {
+        let c = run(
+            "a.cts",
+            "export const p = import('./b.mjs');\n",
+            PackageType::Unspecified,
+        );
+        assert_eq!(c.format, Format::Cjs);
+        assert!(
+            c.code.contains("import('./b.mjs')") || c.code.contains("import(\"./b.mjs\")"),
+            "{}",
+            c.code
+        );
+        assert!(!c.code.contains("require(\"./b.mjs\")"), "{}", c.code);
+    }
+
+    #[test]
+    fn a_required_es_module_compiles_to_commonjs_unless_it_awaits() {
+        let opts = TransformOptions::default();
+        let esm = "export const a = 1;\n";
+        let c = compile("a.ts", esm, &opts, PackageType::Module, false, true).expect("compiles");
+        assert_eq!(c.format, Format::Cjs);
+        assert!(c.forced);
+        let natural =
+            compile("a.ts", esm, &opts, PackageType::Module, false, false).expect("compiles");
+        assert_eq!(natural.format, Format::Esm);
+        let tla = "export const a = await 1;\n";
+        let c = compile("a.ts", tla, &opts, PackageType::Module, false, true).expect("compiles");
+        assert_eq!(c.format, Format::Esm);
+        assert!(!c.forced);
     }
 }

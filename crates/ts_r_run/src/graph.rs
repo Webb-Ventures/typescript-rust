@@ -13,7 +13,7 @@ use crate::compile::{self, Compiled, Format, PackageType};
 use crate::project::Project;
 
 /// Bump when the cache payload or anything that shapes it changes.
-pub const CACHE_FORMAT: u32 = 2;
+pub const CACHE_FORMAT: u32 = 3;
 
 /// Compiles files for one project, through the transpile cache.
 #[derive(Debug)]
@@ -79,8 +79,9 @@ impl Engine {
         }
     }
 
-    /// Reads and compiles `path`. Errors are ready to print.
-    pub fn compile_file(&self, path: &str) -> Result<Unit, String> {
+    /// Reads and compiles `path`; `as_cjs` when it is loaded with `require()`
+    /// ([`compile::compile`]). Errors are ready to print.
+    pub fn compile_file(&self, path: &str, as_cjs: bool) -> Result<Unit, String> {
         let src = std::fs::read_to_string(path)
             .map_err(|e| format!("ts-r-run: cannot read {path}: {e}\n"))?;
         let (pkg, package_json) = self.project.package_type(path);
@@ -102,7 +103,7 @@ impl Engine {
             }
             None => src,
         };
-        let compiled = self.compile_source(path, &src, pkg)?;
+        let compiled = self.compile_source(path, &src, pkg, as_cjs)?;
         Ok(Unit {
             compiled,
             package_json,
@@ -115,6 +116,7 @@ impl Engine {
         path: &str,
         src: &str,
         pkg: PackageType,
+        as_cjs: bool,
     ) -> Result<Compiled, String> {
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
         let (options, plain_jsx) = self.project.options_for(path);
@@ -128,6 +130,7 @@ impl Engine {
                 PackageType::Unspecified => "",
             })
             .u64(u64::from(self.source_maps))
+            .u64(u64::from(as_cjs))
             .bytes(src.as_bytes())
             .key();
         if let Some(cache) = &self.cache
@@ -136,7 +139,7 @@ impl Engine {
         {
             return Ok(c);
         }
-        let c = compile::compile(path, src, options, pkg, self.source_maps)?;
+        let c = compile::compile(path, src, options, pkg, self.source_maps, as_cjs)?;
         if let Some(cache) = &self.cache {
             let _ = cache.put(&key, &compile::encode(&c));
         }
@@ -173,12 +176,33 @@ pub fn build_fingerprint() -> String {
 pub struct Module {
     pub path: String,
     pub format: Format,
+    /// An ES module compiled to CommonJS for `require()` ([`Compiled::forced`]): the manifest
+    /// holds it next to the file's own compilation, under [`Module::key`].
+    pub forced: bool,
     pub code: String,
     /// `(specifier, resolved file)` for the specifiers ts-r-run resolves itself.
     pub resolved: Vec<(String, Arc<str>)>,
     /// The resolved files loaded as soon as this module runs (not only by an `import()` or
     /// a `require()` inside a function).
     pub eager: Vec<Arc<str>>,
+    /// The resolved files loaded with `import`/`import()`, and those loaded with `require()`.
+    pub imported: Vec<Arc<str>>,
+    pub required: Vec<Arc<str>>,
+}
+
+/// What the manifest appends to a file's path for its CommonJS compilation for `require()`
+/// (`js/hooks.mjs` has the same text).
+pub const CJS_VARIANT: &str = "\0cjs";
+
+impl Module {
+    /// The module's name in the manifest: its path, with [`CJS_VARIANT`] when forced.
+    pub fn key(&self) -> std::borrow::Cow<'_, str> {
+        if self.forced {
+            format!("{}{CJS_VARIANT}", self.path).into()
+        } else {
+            self.path.as_str().into()
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -197,11 +221,13 @@ pub struct Graph {
 
 type Processed = (Module, Option<String>, Vec<String>);
 
-fn process(engine: &Engine, path: &str) -> Result<Processed, String> {
-    let unit = engine.compile_file(path)?;
+fn process(engine: &Engine, path: &str, as_cjs: bool) -> Result<Processed, String> {
+    let unit = engine.compile_file(path, as_cjs)?;
     let c = unit.compiled;
     let mut resolved = Vec::new();
     let mut eager = Vec::new();
+    let mut imported = Vec::new();
+    let mut required = Vec::new();
     for s in &c.specs {
         // A query or hash on a path (`./config.ts?v=1`, `@/config.ts?v=1` under `paths`)
         // names the file without it; the hooks put it back on the URL.
@@ -209,12 +235,15 @@ fn process(engine: &Engine, path: &str) -> Result<Processed, String> {
             Some(cut) if cut > 0 && !s.text.contains(':') => &s.text[..cut],
             _ => s.text.as_str(),
         };
-        if let Some(t) = engine
-            .project
-            .resolve(file, path, s.require || c.format == Format::Cjs)
-        {
+        // CommonJS output keeps `import()`, which Node resolves as an import.
+        if let Some(t) = engine.project.resolve(file, path, s.require) {
             if !s.lazy {
                 eager.push(t.clone());
+            }
+            if s.require {
+                required.push(t.clone());
+            } else {
+                imported.push(t.clone());
             }
             resolved.push((s.text.clone(), t));
         }
@@ -223,9 +252,12 @@ fn process(engine: &Engine, path: &str) -> Result<Processed, String> {
         Module {
             path: path.to_owned(),
             format: c.format,
+            forced: c.forced,
             code: c.code,
             resolved,
             eager,
+            imported,
+            required,
         },
         unit.package_json,
         unit.guard_deps,
@@ -290,14 +322,17 @@ pub fn build(engine: &Engine, entry: &str, threads: usize) -> Graph {
         g.errors.push(engine.project.config_errors.clone());
         return g;
     }
-    let mut seen: FxHashSet<String> = FxHashSet::default();
-    seen.insert(entry.to_owned());
-    let mut frontier = vec![entry.to_owned()];
+    // (file, loaded with `require()`): a file both imported and required is compiled twice
+    // when it is an ES module (tsx has an ES and a CommonJS instance of it too).
+    let mut seen: FxHashSet<(String, bool)> = FxHashSet::default();
+    seen.insert((entry.to_owned(), false));
+    let mut frontier = vec![(entry.to_owned(), false)];
+    let mut stored: FxHashSet<(String, bool)> = FxHashSet::default();
     let mut failed: Vec<(String, String)> = Vec::new();
     while !frontier.is_empty() {
-        let results = parallel_map(&frontier, threads, |p| process(engine, p));
+        let results = parallel_map(&frontier, threads, |(p, cjs)| process(engine, p, *cjs));
         let mut next = Vec::new();
-        for (path, r) in frontier.iter().zip(results) {
+        for ((path, cjs), r) in frontier.iter().zip(results) {
             g.inputs.insert(path.clone());
             match r {
                 Ok((m, pj, deps)) => {
@@ -305,14 +340,26 @@ pub fn build(engine: &Engine, entry: &str, threads: usize) -> Graph {
                         g.inputs.insert(pj);
                     }
                     g.inputs.extend(deps);
-                    for (_, t) in &m.resolved {
-                        if compile::is_compiled_path(t) && seen.insert(t.to_string()) {
-                            next.push(t.to_string());
+                    // Asked for the other way, the file compiles the same unless it is an ES
+                    // module asked for with `require()` (and has no top-level `await`).
+                    if !m.forced && (m.format == Format::Cjs || *cjs) {
+                        seen.insert((path.clone(), !*cjs));
+                    }
+                    let wanted = m.imported.iter().map(|t| (t, false));
+                    for (t, as_cjs) in wanted.chain(m.required.iter().map(|t| (t, true))) {
+                        if compile::is_compiled_path(t) && seen.insert((t.to_string(), as_cjs)) {
+                            next.push((t.to_string(), as_cjs));
                         }
                     }
-                    g.modules.push(m);
+                    if stored.insert((m.path.clone(), m.forced)) {
+                        g.modules.push(m);
+                    }
                 }
-                Err(e) => failed.push((path.clone(), e)),
+                Err(e) => {
+                    if !failed.iter().any(|(p, _)| p == path) {
+                        failed.push((path.clone(), e));
+                    }
+                }
             }
         }
         frontier = next;
@@ -333,13 +380,16 @@ pub fn build(engine: &Engine, entry: &str, threads: usize) -> Graph {
 
 /// The files that load with `entry`, following eager edges only.
 fn eager_closure<'a>(modules: &'a [Module], entry: &'a str) -> FxHashSet<&'a str> {
-    let by_path: rustc_hash::FxHashMap<&str, &Module> =
-        modules.iter().map(|m| (m.path.as_str(), m)).collect();
+    // A file's ES and CommonJS compilations share its path.
+    let mut by_path: rustc_hash::FxHashMap<&str, Vec<&Module>> = rustc_hash::FxHashMap::default();
+    for m in modules {
+        by_path.entry(m.path.as_str()).or_default().push(m);
+    }
     let mut seen: FxHashSet<&str> = FxHashSet::default();
     seen.insert(entry);
     let mut stack = vec![entry];
     while let Some(p) = stack.pop() {
-        if let Some(m) = by_path.get(p) {
+        for m in by_path.get(p).into_iter().flatten() {
             for t in &m.eager {
                 if seen.insert(t) {
                     stack.push(t);
