@@ -40,7 +40,8 @@ pub struct ParseResult {
     /// stop at syntax errors only, like typescript-eslint's, do not report them. TS1501 and
     /// TS1503 (regex flags and named groups newer than the target,
     /// [`is_target_regex_error`]) are only here, not in `diagnostics`: the checker keeps
-    /// them for older targets.
+    /// them for older targets. So are, in a JavaScript file, the TypeScript-only rules of
+    /// [`is_checked_js_grammar`] (`if (x);`), which only a checked JavaScript file reports.
     pub grammar: Vec<Diagnostic>,
     /// Syntax errors to tsc that ESLint's parser and esbuild accept in sloppy code: octal
     /// and `\8` escapes in strings (TS1487, TS1488; `"\033"`). They are also in `grammar`,
@@ -110,6 +111,18 @@ pub fn is_target_regex_error(d: &Diagnostic) -> bool {
         || d.code == messages::REGEX_NAMED_GROUPS_NEED_TARGET.code
 }
 
+/// Checker grammar errors about code JavaScript accepts, which tsc 7 reports in a JavaScript
+/// file only when it is type checked (`checkJs`, `// @ts-check`), not in a plain one or with
+/// `noCheck`: an empty `if` body (TS1313, `if (x);`), `return` outside a function (TS1108, a
+/// CommonJS script may return) and a `set` accessor parameter's initializer (TS1052). In a
+/// JavaScript file they are only in [`ParseResult::grammar`], not in `diagnostics` (observed;
+/// minified bundles and CommonJS bins in the ecosystem run hit all three).
+pub fn is_checked_js_grammar(d: &Diagnostic) -> bool {
+    d.code == messages::EMPTY_IF_BODY.code
+        || d.code == messages::RETURN_OUTSIDE_FUNCTION.code
+        || d.code == messages::SET_ACCESSOR_PARAMETER_INITIALIZER.code
+}
+
 /// What to do with TypeScript-only syntax (types, `interface`, `as`, ...) in a JavaScript
 /// file (`SourceKind::Js` / `Jsx`). Ignored for TypeScript kinds.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -165,13 +178,22 @@ pub fn parse_with(src: &str, kind: SourceKind, opts: ParseOptions) -> ParseResul
             p.js_ts = true;
         }
         p.module_await = module_await;
+        if module_await {
+            // As tsc reparses a module's statements that hold an `await` name: `await` is
+            // an operator at the top level (`@await class C {}` is TS1109).
+            p.ctx.0 |= Ctx::AWAIT;
+        }
         p.parse_program();
         p
     };
     let mut p = start(false);
-    // In a module, `await` at the top level is an operator even before a line break: the
-    // file is parsed again when that changes anything (rare: `await` then a newline).
-    if p.await_newline_seen && p.program_is_module() {
+    // In a module, `await` at the top level is an operator even before a line break or
+    // where only a name may appear: the file is parsed again when that changes anything
+    // (rare: `await` then a newline, or `await` read as a name outside functions).
+    if (p.await_newline_seen || p.await_name_seen)
+        && !kind.is_declaration()
+        && p.program_is_module()
+    {
         p = start(true);
     }
     if js_ts && opts.ts_in_js == TsInJs::Report {
@@ -372,8 +394,17 @@ pub(crate) struct Parser<'a> {
     jsdoc_import: bool,
     /// A top-level `await` had its operand on the next line, so it was read as a name.
     await_newline_seen: bool,
+    /// `await` was read as a name (not an operator) outside any function, type or ambient
+    /// declaration: in a module the file is parsed again with `await` an operator at the
+    /// top level, as tsc reparses the statements that hold such a name
+    /// (topLevelAwaitErrors.1).
+    await_name_seen: bool,
     /// Reparsing a module: such an `await` is an operator (as in tsc, topLevelAwait.1).
     module_await: bool,
+    /// While a function's parameter list is parsed: whether `await` was an operator
+    /// outside the function. Parameter decorators are read in that outer context, as in
+    /// tsc (`method(@await x) {}` at a module's top level is TS1109).
+    param_decorator_await: Option<bool>,
     /// Stack address when parsing started.
     stack_base: usize,
     /// The nesting limit was hit; the rest of the file was skipped.
@@ -452,7 +483,9 @@ impl<'a> Parser<'a> {
             unary_operand_start: u32::MAX,
             jsdoc_import: false,
             await_newline_seen: false,
+            await_name_seen: false,
             module_await: false,
+            param_decorator_await: None,
             stack_base: stack_addr(),
             halted: false,
             grammar_diags: 0,
@@ -530,6 +563,12 @@ impl<'a> Parser<'a> {
                 .any(|k| k == d)
         });
         grammar.dedup_by(|a, b| a.span.start == b.span.start);
+        if !self.ast.source_kind.is_typescript() && !grammar.is_empty() {
+            // TypeScript-only rules on valid JavaScript: only a checked JavaScript file
+            // reports them (`checkJs`), and the checker reads them from `grammar`.
+            let mut g = grammar.as_slice();
+            diags.retain(|d| !(is_checked_js_grammar(d) && in_sorted(&mut g, d)));
+        }
         if clean && !self.regex_errs.is_empty() {
             grammar.extend(self.regex_errs.iter().cloned());
             grammar.sort_by_key(|d| d.span.start);
@@ -602,6 +641,13 @@ impl<'a> Parser<'a> {
         let tok = self.lx.token();
         if tok.flags.has(TokenFlags::ESCAPED_KEYWORD) && tok.start != self.name_tok {
             self.escaped_keyword_error(tok);
+        }
+        if tok.kind == TokenKind::Await
+            && !self
+                .ctx
+                .has(Ctx::AWAIT | Ctx::IN_FUNCTION | Ctx::AMBIENT | Ctx::TYPE)
+        {
+            self.await_name_seen = true;
         }
         self.prev_end = tok.end;
         self.lx.next_token();
@@ -844,9 +890,15 @@ impl<'a> Parser<'a> {
     }
 
     /// A checker grammar error tsc reports next to syntax errors without stopping the
-    /// check (TS18037): see `kept_grammar`. Does not fail speculation.
-    fn kept_grammar_error_at(&mut self, msg: DiagnosticMessage, span: Span) {
-        self.kept_grammar.push(Diagnostic::new(msg, span, &[]));
+    /// check (TS18037, TS1156 for `if (x) let y`): see `kept_grammar`. Does not fail
+    /// speculation.
+    pub(crate) fn kept_grammar_error_at(
+        &mut self,
+        msg: DiagnosticMessage,
+        span: Span,
+        args: &[&str],
+    ) {
+        self.kept_grammar.push(Diagnostic::new(msg, span, args));
     }
 
     /// A grammar error tsc's checker reports only when the file has no syntax errors: kept

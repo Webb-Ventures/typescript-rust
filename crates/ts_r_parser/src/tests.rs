@@ -1654,6 +1654,7 @@ fn first_error_matches_tsc() {
         ("var f = ()\n=> 1;", 1200, 12),
         ("function f(! b) {}", 1003, 12),
         ("const x = A<T>.foo;", 1477, 12),
+        ("const x = A<T>?.foo;", 1477, 12),
         ("class B extends A x {}", 1005, 19),
         ("function f(null) {}", 1359, 12),
         ("function f(export) {}", 1359, 12),
@@ -3043,4 +3044,140 @@ fn jsx_name_unicode_escapes_are_ts17021() {
     assert_eq!(errs(r"<a></\u{61}>;"), vec![(17021, 5, 11)]);
     assert_eq!(errs(r"<a></b>;")[0].0, 17002);
     assert!(errs("<a-b c-d='' />;").is_empty());
+}
+
+/// TypeScript-only grammar rules on valid JavaScript (TS1313 `if (x);`, TS1108 a top-level
+/// `return`, TS1052 `set x(v = 0)`) are in `grammar` only in a JavaScript file: tsc 7 reports
+/// them there only with `checkJs`. A TypeScript file has them in both. Other grammar errors
+/// (TS1105 `break` outside a loop) stay in both. Found in @babel/parser, which, ora (ecosystem).
+#[test]
+fn checked_js_grammar_is_grammar_only_in_javascript() {
+    let src = "if (!m) ;else f();\nreturn;\nclass C { set indent(indent = 0) {} }\nvar o = { set c(c = []) {} };";
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    for kind in [SourceKind::Js, SourceKind::Jsx] {
+        let r = parse(src, kind);
+        assert_eq!(codes(&r.diagnostics), Vec::<u32>::new(), "{kind:?}");
+        assert_eq!(codes(&r.grammar), vec![1313, 1108, 1052, 1052], "{kind:?}");
+        let r = crate::parse_with(
+            src,
+            kind,
+            crate::ParseOptions {
+                ts_in_js: crate::TsInJs::Report,
+            },
+        );
+        assert_eq!(codes(&r.diagnostics), Vec::<u32>::new(), "{kind:?} checker");
+        assert_eq!(codes(&r.grammar), vec![1313, 1108, 1052, 1052], "{kind:?}");
+    }
+    for kind in [SourceKind::Ts, SourceKind::Tsx] {
+        let r = parse(src, kind);
+        assert_eq!(
+            codes(&r.diagnostics),
+            vec![1313, 1108, 1052, 1052],
+            "{kind:?}"
+        );
+        assert_eq!(r.grammar, r.diagnostics, "{kind:?}");
+    }
+    let r = parse("if (x);\nbreak;", SourceKind::Js);
+    assert_eq!(codes(&r.diagnostics), vec![1105]);
+    assert_eq!(codes(&r.grammar), vec![1313, 1105]);
+    assert!(r.syntax_errors().is_empty());
+    // With a syntax error there are no grammar errors at all.
+    let r = parse("if (x);\nreturn;\nlet = ;", SourceKind::Js);
+    assert_eq!(codes(&r.diagnostics), vec![1109]);
+    assert!(r.grammar.is_empty());
+}
+
+/// TS1156 for a `let`, `const`, `using` or `await using` statement as an `if` or loop body
+/// is reported next to syntax errors (tsc 7's checker reports it with `error`, not as a
+/// grammar error that waits for a clean file); for `type` and `interface` it waits
+/// (disallowedBlockScopedInPresenceOfParseErrors1).
+#[test]
+fn embedded_variable_statement_is_reported_next_to_syntax_errors() {
+    let codes = |ds: &[Diagnostic]| ds.iter().map(|d| d.code).collect::<Vec<_>>();
+    let src = "function f() {\n  if (1 > 0)\n    const e = 3;\n  while (x) l: let y = 1;\n  if (x) type T = 1;\n  }\n}\n";
+    let r = parse(src, SourceKind::Ts);
+    // (TS1344 for the label is the binder's: `ts_r_binder` reports it either way.)
+    assert_eq!(codes(&r.diagnostics), vec![1156, 1156, 1128]);
+    assert_eq!(codes(&r.grammar), vec![1156, 1156]);
+    assert_eq!(codes(&r.syntax_errors()), vec![1128]);
+    // In a clean file all three are reported.
+    let r = parse(&src[..src.len() - 2], SourceKind::Ts);
+    assert_eq!(codes(&r.diagnostics), vec![1156, 1344, 1156, 1156]);
+    assert_eq!(r.grammar, r.diagnostics);
+}
+
+/// In a module `await` is an operator at the top level even where only a name fits, as
+/// tsc reparses such statements (topLevelAwaitErrors.1): `@await` decorators (also on
+/// parameters, which are read in the context outside the function) and `extends await<T>`
+/// are TS1109. A declaration named `await` is left to the checker (TS1262,
+/// topLevelAwaitErrors.12). In a script nothing changes.
+#[test]
+fn top_level_await_is_an_operator_in_a_module() {
+    let codes_at = |r: &crate::ParseResult, src: &str| {
+        let lines = ts_r_span::LineIndex::new(src);
+        r.diagnostics
+            .iter()
+            .map(|d| {
+                let at = lines.line_col(d.span.start);
+                (d.code, at.line + 1, at.col + 1)
+            })
+            .collect::<Vec<_>>()
+    };
+    let body = "@await\nclass C1 {}\n@(await)\nclass C2 {}\nclass C3 extends await<string> {}\nclass C4 {\n  m(@await(1) [x]) {}\n}\nfunction f(@await [x]) {}\n";
+    let src = format!("export {{}};\n{body}");
+    let r = parse(&src, SourceKind::Ts);
+    assert_eq!(
+        codes_at(&r, &src),
+        vec![
+            (1109, 2, 2),
+            (1109, 4, 8),
+            (1109, 6, 18),
+            (1109, 6, 23),
+            (1005, 6, 30),
+            (1109, 8, 6),
+            (1109, 10, 13),
+        ]
+    );
+    let src = "export {};\nimport await = foo.await;\ndeclare namespace foo { const await: any; }\ndeclare class C extends await {}\nlet t: await;\n";
+    assert!(parse(src, SourceKind::Ts).diagnostics.is_empty());
+    // A script: `await` is a name.
+    let r = parse(body, SourceKind::Ts);
+    assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+}
+
+/// After `?.` only a name makes a property access, so an instantiation expression followed
+/// by an optional call (`f<T>?.()`, `f<T>?.<U>()`) or element access is not TS1477
+/// (instantiationExpressionErrors).
+#[test]
+fn instantiation_before_optional_call_is_not_a_property_access() {
+    for src in [
+        "f<number>?.();",
+        "f<number>?.<number>();",
+        "f<number>?.[0];",
+    ] {
+        let r = parse(src, SourceKind::Ts);
+        assert!(r.diagnostics.is_empty(), "{src}: {:?}", r.diagnostics);
+    }
+}
+
+/// An import type takes no `,` after its attributes' `}` (tsc 7): the comma is `')'
+/// expected` and is left for the statement list (importAttributes10).
+#[test]
+fn import_type_has_no_comma_after_attributes() {
+    let at = |src: &str| {
+        parse(src, SourceKind::Ts)
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.span.start))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        at("type A = typeof import(\"a\", { with: {} },);"),
+        [(1005, 40), (1128, 41)]
+    );
+    assert_eq!(
+        at("type A = typeof import(\"a\", { with: {} ,,\n});"),
+        [(1005, 40), (1128, 42), (1128, 43)]
+    );
+    assert!(at("type A = typeof import(\"a\", { with: {}, });").is_empty());
 }

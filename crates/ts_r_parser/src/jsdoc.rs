@@ -856,8 +856,8 @@ impl<'a> Doc<'a> {
         None
     }
 
-    /// `@satisfies {T}`: the braces are required (TS1005 `'{' expected`, then the type and
-    /// `'}' expected`).
+    /// `@satisfies {T}`: the braces are required (TS1005 `'{' expected`, then the type; tsc 7
+    /// wants a `}` only after a `{`, checkJsdocSatisfiesTag14).
     fn tag_type_required(&mut self, r: RawTag) -> Option<NodeId> {
         let i = self.skip_ws(r.name_end, r.end);
         let doc = self.doc_of(r);
@@ -875,7 +875,6 @@ impl<'a> Doc<'a> {
             self.p.lx.next_token();
             self.p.prev_end = i;
             let _ = self.p.jsdoc_type_expr();
-            self.p.expect(T::RBrace);
             self.take_diags(d0, l0, doc);
         }
         None
@@ -2779,7 +2778,8 @@ mod tests {
         let (_, d) =
             run("/** @type {function(): string} */\nvar x;\n/** @satisfies T */\nvar y = 1;\n");
         let codes: Vec<u32> = d.iter().map(|d| d.code).collect();
-        assert_eq!(codes, vec![1005, 1005, 1005], "{d:?}");
+        // `@satisfies T`: `'{' expected` only, no `'}' expected` (tsc 7).
+        assert_eq!(codes, vec![1005, 1005], "{d:?}");
     }
 
     #[test]

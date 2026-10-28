@@ -114,7 +114,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
 | Lint rule oracle (ESLint + typescript-eslint test cases) | 15,495 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,898 / 6,920) |
 | Lint on TypeORM without types, every configured rule, vs ESLint | 2,174 of ESLint's 7,392 problems match, 2 only ts-r-lint; most of the 5,218 missed (4,928) are jsdoc plugin rules |
-| Parser + printer round trip over tsc's test files | 17,740 files, 0 mismatches (1,472 with syntax errors skipped) |
+| Parser + printer round trip over tsc's test files | 17,741 files, 0 mismatches (1,471 with syntax errors skipped) |
 | esbuild's bundler test cases | 851 / 881 (189 skipped; 13 failures are intended tsc differences) |
 | tsconfig files of the five bench repos vs `tsc --showConfig` and config diagnostics | 114 / 114 `--showConfig`; 111 / 114 diagnostics (3 differ in message text) |
 | Module resolution, the same 114 configs vs `tsc --traceResolution` | 158,174 resolutions, 10 mismatches |
@@ -125,7 +125,7 @@ private app before the switch to public repos and are not re-measured yet.
 
 | Stage | Pass |
 |---|---|
-| Parse | 97.0% (959 / 989; the 30 failures are grammar errors ts-r's parser reports in JavaScript that Node and tsc accept, most often TS1313) |
+| Parse | 100% (989 / 989) |
 | TS transform | 100% (48 / 48) |
 | Bundle and run, vs esbuild | 100% (915 / 915) |
 | Type check, vs tsc 7 | 92.0% (652 / 709) |

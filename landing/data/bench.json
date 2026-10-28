@@ -574,7 +574,7 @@
           "rows": [
             { "label": "Bundle and run (vs esbuild)", "value": 100, "kind": "ours", "extra": ["915 / 915"] },
             { "label": "Transform TypeScript (vs tsc)", "value": 100, "kind": "ours", "extra": ["48 / 48"] },
-            { "label": "Parse every file", "value": 97.0, "kind": "ours", "extra": ["959 / 989"] },
+            { "label": "Parse every file", "value": 100, "kind": "ours", "extra": ["989 / 989"] },
             { "label": "Check an import of it (vs tsc 7)", "value": 92.0, "kind": "ours", "extra": ["652 / 709"] },
             { "label": "Own test suite", "value": 50, "kind": "ours", "extra": ["2 / 4"] }
           ],

@@ -1,0 +1,49 @@
+Program 0..322
+  stmts[0]: If 149..198
+    test: Unary 153..161 op=Not
+      arg: Ident 154..161 name="matches" `matches`
+    cons: Empty 163..164 `;`
+    alt: If 169..198
+      test: Binary 173..194 op=StrictEq
+        left: Index 173..183
+          obj: Ident 173..180 name="matches" `matches`
+          index: NumberLit 181..182 value=1 `1`
+        right: StringLit 188..194 value="flow" `"flow"`
+      cons: Block 196..198 `{}`
+  stmts[1]: If 199..237
+    test: Unary 203..215 op=Not
+      arg: Member 204..215
+        obj: Ident 204..208 name="argv" `argv`
+        prop: Ident 209..215 name="length" `length`
+    cons: Block 217..237
+      stmts[0]: Return 221..235
+        arg: Call 228..235
+          callee: Ident 228..233 name="usage" `usage`
+  stmts[2]: ClassDecl 238..279
+    name: Ident 244..247 name="Ora" `Ora`
+    members[0]: MethodDef 252..277 kind=Set
+      key: Ident 256..262 name="indent" `indent`
+      value: FunctionExpr 262..277
+        params[0]: Param 263..273
+          pattern: Ident 263..269 name="indent" `indent`
+          init: NumberLit 272..273 value=0 `0`
+        body: Block 275..277 `{}`
+  stmts[3]: VarDecl 280..321
+    decls[0]: VarDeclarator 284..320
+      name: Ident 284..285 name="o" `o`
+      init: ObjectLit 288..320
+        props[0]: MethodDef 290..318 kind=Set
+          key: Ident 294..301 name="choices" `choices`
+          value: FunctionExpr 301..318
+            params[0]: Param 302..314
+              pattern: Ident 302..309 name="choices" `choices`
+              init: ArrayLit 312..314 `[]`
+            body: Block 316..318 `{}`
+---- comments ----
+Line 0..89 "// The same TypeScript-only grammar rules in a TypeScript file: TS1313, TS1108 and TS1052"
+Line 90..147 "// are reported (tsc 7). checked_js_grammar.cjs has none."
+---- diagnostics ----
+checked_js_grammar_errors.ts(4,15): error TS1313: The body of an 'if' statement cannot be the empty statement.
+checked_js_grammar_errors.ts(6,3): error TS1108: A 'return' statement can only be used within a function body.
+checked_js_grammar_errors.ts(9,7): error TS1052: A 'set' accessor parameter cannot have an initializer.
+checked_js_grammar_errors.ts(11,15): error TS1052: A 'set' accessor parameter cannot have an initializer.

@@ -231,8 +231,8 @@ Files:
   `ParseResult::grammar`, so a consumer that wants syntax errors only (the linter) can drop
   them (`ParseResult::syntax_errors`). A checker grammar error tsc reports next to syntax
   errors without stopping the check (TS18037, an `await` expression in a class static
-  block) goes to `kept_grammar` (`kept_grammar_error_at`): always in both lists, never
-  deduplicated.
+  block; TS1156 for `if (x) let y`) goes to `kept_grammar` (`kept_grammar_error_at`):
+  always in both lists, never deduplicated.
   Statement grammar errors come from `grammar.rs`, checked as each statement is parsed
   (no extra tree walk: a walk cost 28% of parse time): jump targets
   (TS1104/1105/1107/1115/1116, from a `Jump` scope stack pushed around loop, switch and
@@ -244,7 +244,9 @@ Files:
   TS1096/1017/1018/1019/1020, TS1268 for a keyword key type, then TS1021 only when the key
   type is surely valid: other key types are the checker's), class heritage (one of
   TS1172/1173/1174/1175), declarations without modifiers as `if`/loop bodies, through
-  labels (TS1156), `import(T)` types (TS1141), and ambient rules: initializers (TS1039;
+  labels (TS1156; kept next to syntax errors for `let`/`const`/`using`, which tsc's
+  checker reports with a plain error, deferred for `type`/`interface`), `import(T)` types
+  (TS1141), and ambient rules: initializers (TS1039;
   TS1254 for a `const` or `readonly` without a type whose initializer is not a literal, a
   literal enum reference or similar), bodies (TS1183, also accessor bodies in types and
   `declare` class method bodies, not `declare` accessors or constructors) and
@@ -258,6 +260,13 @@ Files:
   told apart by `Jump::StaticBlock`), generator overloads (TS1222),
   definite assignment `!` (TS1255/1263/1264), abstract accessor bodies (TS1318) and index
   signature trailing commas (TS1025). Nothing under a `with` body is checked.
+- **Some grammar errors are checked-JS only.** In a JavaScript file, TS1313 (`if (x);`),
+  TS1108 (top-level `return`, as in CommonJS bins) and TS1052 (a `set` parameter
+  initializer) are in `ParseResult::grammar` but not in `diagnostics`
+  (`is_checked_js_grammar`). tsc 7 reports them in a JS file only with `checkJs` (they are
+  not plain-JS errors), and `node --check` accepts the code, so a tool that reads JS
+  (bundler, linter, the ecosystem parse stage) must not fail on them. The checker still
+  reports `grammar` for checked files. TypeScript files keep them in both lists.
 - **Import calls take an argument list.** `import(...)` parses its arguments like a call:
   the first is the specifier, the second the options, later ones are parsed and dropped
   (tsc's TS1450 for them, and for `import()`, is a checker message). A spread argument is
@@ -304,7 +313,16 @@ Files:
   At the top level, `await` is an operator when an operand follows on its line. When one
   follows on the next line (`await` + newline + `1`), the file is parsed again with
   `module_await` if it has `import`/`export` syntax: in a module that `await` is an
-  operator too (topLevelAwait.1). The second parse only happens in that case.
+  operator too (topLevelAwait.1). Likewise when `await` was read as a name outside any
+  function, type or `declare` statement (`@await class C {}`, `extends await<T>`; not in
+  `.d.ts`; tsc does not reparse ambient statements, so `await` stays a name in them,
+  topLevelAwait.3): the reparse sets `Ctx::AWAIT` at the top level, as tsc reparses such
+  statements, so these are TS1109 (topLevelAwaitErrors.1). There, `@await` skips the `await` and keeps the member chain on a
+  missing name; `extends await<T>` skips it and goes on as tsc's list does (TS1109 at `<`,
+  `',' expected` at `>`). A declaration named `await` gets no TS1359 there: the checker
+  reports TS1262 (topLevelAwaitErrors.12). Parameter decorators are read in the await
+  context outside the function (`param_decorator_await`), as in tsc. The second parse only
+  happens in these cases.
 - **Class static blocks** are parsed with `Ctx::AWAIT | Ctx::STATIC_BLOCK`: `await` is an
   operator (`await;` is TS1109) and each await expression is TS18037; `return` is a
   deferred TS18041. Functions, arrows, field initializers and module blocks clear

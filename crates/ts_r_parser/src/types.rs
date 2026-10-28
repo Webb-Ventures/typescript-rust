@@ -869,7 +869,9 @@ impl<'a> Parser<'a> {
                     },
                 ));
             }
-            self.eat(T::Comma);
+            // No `,` after the `}`: as in tsc, `import("a", { with: {} },)` is `')' expected`
+            // and in `{ with: {} },, }` the second `,` is left for the statement list
+            // (importAttributes10).
         }
         self.expect_closing(T::RParen, T::LParen, open);
         let qualifier = if self.eat(T::Dot) {
