@@ -105,6 +105,7 @@ impl Walk<'_> {
                     name,
                     prelude,
                     body: None,
+                    ..
                 } if name == "layer" => leading.extend(super::layer_names(sheet, prelude)),
                 Node::Import(_) => break,
                 _ => {

@@ -258,6 +258,9 @@ pub fn load(
                 crate::css::NameMode::Global
             };
             let mut sheet = crate::css::parse(Arc::from(text), mode);
+            if opts.unsupported().has(crate::features::Feature::Nesting) {
+                crate::css::nesting::lower(&mut sheet);
+            }
             let h = blake3::hash(key.as_bytes());
             sheet.id = h.as_bytes()[..8]
                 .iter()
@@ -558,14 +561,80 @@ fn build_json(ast: &mut Ast, v: &Value, at: u32, depth: u32) -> NodeId {
 }
 
 /// Replaces `define` keys in read positions. Returns true when anything changed.
-fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
-    // Unresolved identifier references.
-    let global_refs: FxHashSet<u32> = scopes
-        .refs
-        .iter()
-        .filter(|r| r.symbol.is_none())
-        .map(|r| r.node.raw())
-        .collect();
+/// Every node inside an enum member's initializer, except names of that enum's own
+/// members (which the transform resolves; the scope pass skips enums).
+fn enum_initializers(ast: &Ast) -> FxHashSet<u32> {
+    let mut out = FxHashSet::default();
+    let mut stack: Vec<NodeId> = Vec::new();
+    for n in &ast.nodes {
+        let Node::Enum { members, .. } = *n else {
+            continue;
+        };
+        let mut own = FxHashSet::default();
+        for &m in ast.list(members) {
+            if let Node::EnumMember { name, init } = *ast.node(m) {
+                if let Node::Ident { name } | Node::StringLit { value: name } = *ast.node(name) {
+                    own.insert(name);
+                }
+                stack.extend(init);
+            }
+        }
+        // Each node is visited once: the walk is bounded by the tree.
+        while let Some(id) = stack.pop() {
+            if matches!(*ast.node(id), Node::Ident { name } if own.contains(&name)) {
+                continue;
+            }
+            if out.insert(id.raw()) {
+                ast.for_each_child(id, |c| stack.push(c));
+            }
+        }
+    }
+    out
+}
+
+/// `only`: replace only these nodes (an enum's initializers, before the TypeScript
+/// transform).
+fn apply_defines(
+    ast: &mut Ast,
+    scopes: &Scopes,
+    defines: &Defines,
+    only: Option<&FxHashSet<u32>>,
+) -> bool {
+    // Unresolved identifier references. The scope pass skips enums, so in their
+    // initializers (`only`, without the enum's own member names) a name is free when
+    // nothing in the file declares it.
+    let global_refs: FxHashSet<u32> = match only {
+        None => scopes
+            .refs
+            .iter()
+            .filter(|r| r.symbol.is_none())
+            .map(|r| r.node.raw())
+            .collect(),
+        Some(only) => {
+            let props: FxHashSet<u32> = ast
+                .nodes
+                .iter()
+                .filter_map(|n| match *n {
+                    Node::Member { prop, .. } => Some(prop.raw()),
+                    _ => None,
+                })
+                .collect();
+            only.iter()
+                .copied()
+                .filter(|&raw| {
+                    let Some(id) = NodeId::from_raw(raw) else {
+                        return false;
+                    };
+                    match *ast.node(id) {
+                        Node::Ident { name } => {
+                            !props.contains(&raw) && !scopes.declares_name(name)
+                        }
+                        _ => false,
+                    }
+                })
+                .collect()
+        }
+    };
     if global_refs.is_empty() && !defines.roots.contains("import") {
         return false;
     }
@@ -592,6 +661,9 @@ fn apply_defines(ast: &mut Ast, scopes: &Scopes, defines: &Defines) -> bool {
     let count = ast.nodes.len() as u32;
     // Parents have larger ids than their children: visit them first so the longest key wins.
     for raw in (1..count).rev() {
+        if only.is_some_and(|o| !o.contains(&raw)) {
+            continue;
+        }
         let Some(id) = NodeId::from_raw(raw) else {
             continue;
         };
@@ -658,6 +730,10 @@ pub struct PrepareContext {
     pub opts: Arc<BuildOptions>,
     pub defines: Defines,
     pub resolver: Arc<Resolver>,
+    /// `--mangle-props` (checked by `BuildContext::new`).
+    pub props: Option<crate::props::PropMatcher>,
+    /// `--inject`: set at the start of each build (`BuildContext::build`).
+    inject: RwLock<Arc<crate::inject::Inject>>,
     /// tsconfig path (or "") -> base transform options and their [`Self::cache_key`].
     ts: RwLock<FxHashMap<String, OptionsEntry>>,
 }
@@ -665,9 +741,13 @@ pub struct PrepareContext {
 impl PrepareContext {
     pub fn new(opts: Arc<BuildOptions>, defines: Defines, resolver: Arc<Resolver>) -> Self {
         PrepareContext {
+            props: crate::props::PropMatcher::from_options(&opts)
+                .ok()
+                .flatten(),
             opts,
             defines,
             resolver,
+            inject: RwLock::default(),
             ts: RwLock::default(),
         }
     }
@@ -695,13 +775,14 @@ impl PrepareContext {
         }
         let t = Arc::new(self.compute_options(config.as_deref()));
         let cache_key: Arc<str> = Arc::from(format!(
-            "{}|{}|{}|{}|{:?}|{}",
+            "{}|{}|{}|{}|{:?}|{}|{}",
             t.cache_key(),
             self.defines.cache_key(),
             self.opts.drop_labels.join(","),
             self.opts.ignore_annotations,
             self.opts.effective_format(),
-            self.opts.unsupported().key()
+            self.opts.unsupported().key(),
+            self.props.as_ref().map_or("", |p| p.key.as_str())
         ));
         let entry = (t, cache_key);
         self.ts
@@ -774,7 +855,33 @@ impl PrepareContext {
 
     /// A stable string describing everything that affects preparation of `path`.
     pub fn cache_key(&self, path: &str) -> Arc<str> {
-        self.options_entry(path).1
+        let base = self.options_entry(path).1;
+        let inject = self.inject();
+        if inject.is_empty() {
+            return base;
+        }
+        let role = if inject.is_injected(path) {
+            "injected"
+        } else if inject.entries.contains(path) {
+            "entry"
+        } else {
+            "module"
+        };
+        Arc::from(format!("{base}|inject:{role}\n{}", inject.key))
+    }
+
+    /// The `--inject` settings of the current build.
+    pub fn inject(&self) -> Arc<crate::inject::Inject> {
+        Arc::clone(&self.inject.read().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Sets the `--inject` settings; `true` when they differ from the last build's (what the
+    /// injected files export changed), so no cached module may be trusted unchecked.
+    pub fn set_inject(&self, inject: crate::inject::Inject) -> bool {
+        let mut cur = self.inject.write().unwrap_or_else(|e| e.into_inner());
+        let changed = cur.key != inject.key;
+        *cur = Arc::new(inject);
+        changed
     }
 }
 
@@ -814,6 +921,9 @@ pub struct Prepared {
     pub default_sym: Option<SymbolId>,
     pub messages: Vec<Message>,
     pub strict: bool,
+    /// `--inject`: the import statements added for injected names, which do not make the
+    /// file an ES module (`inject.rs`).
+    pub injected: Vec<NodeId>,
 }
 
 fn source_kind(path: &str, loader: Loader) -> SourceKind {
@@ -980,6 +1090,19 @@ pub fn prepare_with(
             ));
         }
     }
+    // An enum initializer can name a member of its own enum, which the transform resolves:
+    // a define there applies first (`enum a { b = 1, c = d }` with `d` defined as `b`).
+    if kind.is_typescript()
+        && !ctx.defines.is_empty()
+        && messages.is_empty()
+        && ast.nodes.iter().any(|n| matches!(n, Node::Enum { .. }))
+    {
+        let inside = enum_initializers(&ast);
+        if !inside.is_empty() {
+            let scopes = Scopes::analyze(&ast, true);
+            apply_defines(&mut ast, &scopes, &ctx.defines, Some(&inside));
+        }
+    }
     // JavaScript files go through the transform when the target needs lowering.
     let lower_js = !kind.is_typescript()
         && crate::lowering::js_needs_lowering(&ast, lowering_target(unsupported));
@@ -1143,8 +1266,10 @@ pub fn prepare_with(
     let mut scopes = Scopes::analyze(&ast, strict);
     let mut dirty = false;
     if !ctx.defines.is_empty()
-        && ctx.defines.roots.iter().any(|r| src.contains(r.as_str()))
-        && apply_defines(&mut ast, &scopes, &ctx.defines)
+        // The JSX transform writes factory names (`React.createElement`) that the source
+        // may not contain.
+        && (first_jsx.is_some() || ctx.defines.roots.iter().any(|r| src.contains(r.as_str())))
+        && apply_defines(&mut ast, &scopes, &ctx.defines, None)
     {
         scopes = Scopes::analyze(&ast, strict);
         dirty = true;
@@ -1158,6 +1283,22 @@ pub fn prepare_with(
     }
     if dirty {
         scopes = Scopes::analyze(&ast, strict);
+    }
+    let mut injected = Vec::new();
+    let inject = ctx.inject();
+    if !inject.is_empty() && !inject.is_injected(path) {
+        let is_entry = inject.entries.contains(path);
+        let mut errors = Vec::new();
+        injected = crate::inject::apply(&mut ast, &scopes, &inject, is_entry, &mut |at, text| {
+            errors.push((at, text));
+        });
+        for (at, text) in errors {
+            let lines = lines.get_or_insert_with(|| crate::LineIndex::new(&src));
+            messages.push(lines.message(Severity::Error, display, at, text));
+        }
+        if !injected.is_empty() {
+            scopes = Scopes::analyze(&ast, strict);
+        }
     }
     if ctx.opts.bundle || ctx.opts.minify_syntax {
         constant_assignments(&ast, &scopes, ctx.opts.bundle, |at, text| {
@@ -1182,6 +1323,7 @@ pub fn prepare_with(
         default_sym,
         messages,
         strict,
+        injected,
     }
 }
 

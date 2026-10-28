@@ -88,6 +88,10 @@ pub struct ModulePlan {
     /// output, or `import-meta` unsupported); empty = keep `import.meta`.
     pub import_meta: String,
     pub mangle: bool,
+    /// `--mangle-props`: new names for the module's property names (sorted by name), and
+    /// whether written strings in property positions are names (`--mangle-quoted`).
+    pub props: Vec<(String, String)>,
+    pub props_quoted: bool,
     pub minify_syntax: bool,
     pub compact: bool,
     pub comments: bool,
@@ -284,6 +288,9 @@ struct Planner<'a> {
     boundaries: Vec<Vec<(usize, usize)>>,
     /// Import statements moved out of an importer, to print before a module of its chunk.
     before: FxHashMap<ModuleId, Vec<(ModuleId, String)>>,
+    /// `--mangle-props`: one short name per property name over every included module,
+    /// sorted by name.
+    props: Vec<(String, String)>,
 }
 
 /// The CommonJS entries that can run directly at the top of their CommonJS output file, with
@@ -438,6 +445,7 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         position: vec![usize::MAX; n],
         boundaries: vec![Vec::new(); n],
         before: FxHashMap::default(),
+        props: Vec::new(),
     };
     for h in Helper::ALL {
         p.helper_names[h as usize] = p.names.alloc(h.name());
@@ -459,6 +467,10 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         p.boundaries[m as usize].push((ri, at));
     }
     p.order = order.clone();
+    if o.mangle_props.is_some() {
+        p.props =
+            ts_r_minify::props::assign(order.iter().map(|&m| &g.modules[m as usize].meta.props));
+    }
     // Chunks.
     let chunks = p.make_chunks(input, &order);
     let mut module_chunk = vec![None; n];
@@ -712,9 +724,40 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         // runs before the rest of the importer).
         {
             let order = external_order(g, out.chunks[ci].entry, &mods);
-            let rank = |p: &str| order.iter().position(|o| *o == p).unwrap_or(usize::MAX);
+            let rank = |p: &str| order.iter().position(|o| o.path == p).unwrap_or(usize::MAX);
             ext_requires.sort_by_key(|(p, _)| rank(p));
             ext_imports.sort_by_key(|x| rank(&x.path));
+            // CommonJS and IIFE output: an external that an unwrapped module of this chunk
+            // loads first is required where that import runs, as esbuild does: before the
+            // code of the next module to finish in evaluation order (the importer's own, or
+            // a dependency it imports next). The rest load at the top of the chunk.
+            let c = &mut out.chunks[ci];
+            ext_requires.retain(|(path, var)| {
+                let Some(at) = order.iter().find(|o| o.path == path) else {
+                    return true;
+                };
+                if l.wrap[at.importer as usize] != Wrap::None
+                    || !mods.contains(&at.importer)
+                    || !mods.contains(&at.before)
+                {
+                    return true;
+                }
+                let path = crate::graph::split_external(path).0;
+                let call = format!("require({})", Expr::Str(path.to_owned()).to_text(true));
+                let text = if var.is_empty() {
+                    format!("{call};")
+                } else {
+                    format!(
+                        "var {var}{sp}={sp}{}({call});",
+                        p.helper_names[Helper::ToEsm as usize]
+                    )
+                };
+                c.before
+                    .entry(at.before)
+                    .or_default()
+                    .push((at.importer, text));
+                false
+            });
         }
         // CSS modules reachable from this chunk.
         let c = &mut out.chunks[ci];
@@ -1420,6 +1463,23 @@ impl Planner<'_> {
             top_reserved: Vec::new(),
             import_meta: self.import_meta[mi].clone(),
             mangle: self.o.minify_identifiers,
+            props: {
+                let mut v: Vec<(String, String)> = meta
+                    .props
+                    .mangled
+                    .iter()
+                    .filter_map(|(n, _)| {
+                        let i = self
+                            .props
+                            .binary_search_by(|(k, _)| k.as_str().cmp(n))
+                            .ok()?;
+                        Some(self.props[i].clone())
+                    })
+                    .collect();
+                v.sort();
+                v
+            },
+            props_quoted: self.o.mangle_quoted,
             minify_syntax: self.o.minify_syntax,
             compact: self.o.minify_whitespace,
             comments: !self.o.minify_whitespace,
@@ -1637,10 +1697,16 @@ pub fn relative_import(from: &str, to: &str) -> String {
 
 /// External import keys in evaluation order, walking from the chunk's entry and then its
 /// other modules. Iterative so deep import chains cannot overflow the stack.
-fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) -> Vec<&'g str> {
-    let mut order: Vec<&'g str> = Vec::new();
+fn external_order<'g>(
+    g: &'g Graph,
+    entry: Option<ModuleId>,
+    mods: &[ModuleId],
+) -> Vec<ExternalAt<'g>> {
+    let mut order: Vec<ExternalAt<'g>> = Vec::new();
     let mut seen: FxHashSet<&'g str> = FxHashSet::default();
     let mut visited = vec![false; g.modules.len()];
+    // Externals waiting for the next module whose code ends (post-order).
+    let mut pending = 0;
     for root in entry.into_iter().chain(mods.iter().copied()) {
         if visited[root as usize] {
             continue;
@@ -1652,6 +1718,10 @@ fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) 
             let (m, i) = *top;
             let module = &g.modules[m as usize];
             if i >= module.targets.len() {
+                for e in &mut order[pending..] {
+                    e.before = m;
+                }
+                pending = order.len();
                 stack.pop();
                 continue;
             }
@@ -1664,7 +1734,11 @@ fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) 
             match &module.targets[i] {
                 Target::External(x) => {
                     if seen.insert(x.as_str()) {
-                        order.push(x.as_str());
+                        order.push(ExternalAt {
+                            path: x.as_str(),
+                            importer: m,
+                            before: m,
+                        });
                     }
                 }
                 Target::Module(t) if !dynamic && !visited[*t as usize] => {
@@ -1676,4 +1750,12 @@ fn external_order<'g>(g: &'g Graph, entry: Option<ModuleId>, mods: &[ModuleId]) 
         }
     }
     order
+}
+
+/// An external in evaluation order: the module that loads it first, and the module before
+/// whose code it loads (the next one whose code ends, in evaluation order).
+struct ExternalAt<'g> {
+    path: &'g str,
+    importer: ModuleId,
+    before: ModuleId,
 }

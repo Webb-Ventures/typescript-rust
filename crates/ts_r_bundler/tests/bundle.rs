@@ -2533,3 +2533,250 @@ fn keep_names_survives_renaming() {
         }
     }
 }
+
+/// `--mangle-props`: one short name per property name across every module of a bundle
+/// (most used first), quoted names kept unless `--mangle-quoted`, `--reserve-props` honoured,
+/// and lowered class fields and rest patterns renamed with their uses.
+#[test]
+fn mangle_props_across_modules() {
+    let main = "import { make } from './b.js'\nconst o = make()\no.count_ += o.count_\nconst { count_, ...rest } = o\nclass P { field_ = 1; static s_ = 2; keep_me_ = 3 }\nconsole.log(count_, Object.keys(rest).length, new P().field_, P.s_, o['label_'], new P().keep_me_)\n";
+    let other =
+        "export function make() { return { count_: 1, label_: 'x', 'label_': 'q', other: 2 } }\n";
+    for (case, target) in [("esnext", None), ("es2020", Some(2020))] {
+        let fs = project(&[("a.js", main), ("b.js", other)]);
+        let mut o = opts(&["a.js"]);
+        o.mangle_props = Some("_$".into());
+        o.reserve_props = Some("^keep".into());
+        o.target = target;
+        let r = run_build(&fs, o);
+        let text = file(&r, "/proj/out/a.js");
+        assert!(
+            !text.contains("count_:") && !text.contains(".count_"),
+            "{case}: {text}"
+        );
+        assert!(
+            text.contains("'label_'") && text.contains(".keep_me_"),
+            "{case}: {text}"
+        );
+        if have_node() {
+            assert_eq!(
+                run_node(&format!("mangle-props-{case}"), &r, "a.js"),
+                "2 3 1 2 q 3\n",
+                "{case}: {text}"
+            );
+        }
+    }
+    let fs = project(&[("a.js", "x.a_; x['b_']; x[/* @__KEY__ */ 'c_']\n")]);
+    let mut o = opts(&["a.js"]);
+    o.bundle = false;
+    o.format = None;
+    o.mangle_props = Some("_$".into());
+    o.mangle_quoted = true;
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(!text.contains('_'), "{text}");
+    let mut bad = opts(&["a.js"]);
+    bad.mangle_props = Some("(".into());
+    assert!(ts_r_bundler::BuildContext::new(bad, std::sync::Arc::new(fs)).is_err());
+}
+
+/// `--inject`: free names (and dotted keys) become imports of the injected file, which runs
+/// first; a CommonJS file using one stays CommonJS; writes are errors; a missing file is an
+/// error; without bundling only the injected files are inlined.
+#[test]
+fn inject_files() {
+    let shim = "export let obj = { v: 1 }\nconsole.log('shim')\nlet p = 'proc'\nexport { p as process, p as 'a.b' }\n";
+    let main = "import './side.js'\nconsole.log(obj.v, a.b, require('./cjs.js').x)\n";
+    let fs = project(&[
+        ("a.js", main),
+        ("side.js", "console.log('side')\n"),
+        ("cjs.js", "'use strict'\nexports.x = process\n"),
+        ("shim.js", shim),
+    ]);
+    let mut o = opts(&["a.js"]);
+    o.inject = vec!["shim.js".into()];
+    let r = run_build(&fs, o.clone());
+    let text = file(&r, "/proj/out/a.js");
+    assert!(
+        text.contains("require_cjs") && !text.contains("= process"),
+        "{text}"
+    );
+    if have_node() {
+        assert_eq!(
+            run_node("inject", &r, "a.js"),
+            "shim\nside\n1 proc proc\n",
+            "{text}"
+        );
+    }
+    let fs2 = project(&[("a.js", "obj = 2\n"), ("shim.js", shim)]);
+    let ctx = ts_r_bundler::BuildContext::new(o.clone(), Arc::new(fs2)).expect("options");
+    let msgs: Vec<String> = ctx.build().messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        msgs.iter().any(|m| m.contains("Cannot assign to \"obj\"")),
+        "{msgs:?}"
+    );
+    let mut missing = o.clone();
+    missing.inject = vec!["nope.js".into()];
+    let ctx = ts_r_bundler::BuildContext::new(missing, Arc::new(fs.clone())).expect("options");
+    let msgs: Vec<String> = ctx.build().messages.iter().map(|m| m.to_string()).collect();
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Could not resolve \"nope.js\"")),
+        "{msgs:?}"
+    );
+    let fs3 = project(&[
+        ("a.js", "import x from 'pkg'\nconsole.log(obj.v, x)\n"),
+        ("shim.js", shim),
+    ]);
+    let mut nb = o;
+    nb.bundle = false;
+    nb.format = None;
+    let r = run_build(&fs3, nb);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(
+        text.contains("from \"pkg\"") || text.contains("from 'pkg'"),
+        "{text}"
+    );
+    assert!(
+        text.contains("console.log('shim')") || text.contains("console.log(\"shim\")"),
+        "{text}"
+    );
+}
+
+/// CommonJS output requires an external where its import runs: after the modules before
+/// it, before the dependencies the importer loads next.
+#[test]
+fn external_require_order() {
+    let fs = project(&[
+        ("a.js", "import './b.js'\nimport 'ext'\nimport './c.js'\n"),
+        ("b.js", "console.log('b')\n"),
+        ("c.js", "console.log('c')\n"),
+    ]);
+    let mut o = opts(&["a.js"]);
+    o.format = Some(Format::Cjs);
+    o.external = vec!["ext".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    let (b, ext, c) = (
+        text.find("'b'").expect("b"),
+        text.find("require(\"ext\")").expect("ext"),
+        text.find("'c'").expect("c"),
+    );
+    assert!(b < ext && ext < c, "{text}");
+}
+
+/// A define inside an enum initializer applies before the enum transform, so the value can
+/// name a member of the enum (esbuild's TSEnumDefine). A member of the define's name wins.
+#[test]
+fn define_in_enum_initializer() {
+    let fs = project(&[(
+        "a.ts",
+        "enum A { b = 123, c = d }\nenum B { d = 5, e = d }\nconsole.log(A.c, B.e, d)\n",
+    )]);
+    let mut o = opts(&["a.ts"]);
+    o.define = vec![("d".into(), "b".into())];
+    o.external = vec!["b".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(text.contains("\"c\"] = 123"), "{text}");
+    assert!(text.contains("\"e\"] = 5"), "{text}");
+    assert!(text.contains(", b)"), "{text}");
+}
+
+/// `--external:./path` matches the resolved path (esbuild's post-resolve externals): the
+/// import stays, relative to the output directory, even when the file doesn't exist.
+#[test]
+fn path_externals_match_after_resolution() {
+    let fs = project(&[
+        (
+            "src/a.js",
+            "import x from './dir/../lib.js'\nimport './gone.js'\nconsole.log(x)\n",
+        ),
+        ("src/lib.js", "export default 1\n"),
+    ]);
+    let mut o = opts(&["src/a.js"]);
+    o.external = vec!["./src/lib.js".into(), "/proj/src/gone.js".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/a.js");
+    assert!(text.contains("\"../src/lib.js\""), "{text}");
+    assert!(text.contains("\"../src/gone.js\""), "{text}");
+    assert!(!text.contains("export default 1"), "{text}");
+    // Relative to the output directory, not the chunk's: esbuild 0.28.2 prints
+    // `../src/lib.js` in `out/sub/a.js` too (observed), so ts-r-build does the same.
+    let mut o = opts(&["src/a.js"]);
+    o.external = vec!["./src/lib.js".into(), "/proj/src/gone.js".into()];
+    o.entry_names = "sub/[name]".into();
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/sub/a.js");
+    assert!(text.contains("\"../src/lib.js\""), "{text}");
+}
+
+/// `& &` at each of 30 levels doubles the lowered selector every level (2^30 copies of `a`
+/// from under 200 bytes): lowering stops with an error under the memory cap.
+#[test]
+fn css_nesting_blowup_is_an_error() {
+    let css = format!("a {{{}x:y{}}}", "& & {".repeat(30), "}".repeat(31));
+    let fs = project(&[("entry.css", &css)]);
+    let mut o = opts(&["entry.css"]);
+    o.supported = vec![(ts_r_bundler::Feature::Nesting, false)];
+    let ctx = BuildContext::new(o, Arc::new(fs.clone())).expect("options");
+    let r = ctx.build();
+    let errors: Vec<String> = r.errors().map(|m| m.to_string()).collect();
+    assert!(
+        errors.iter().any(|e| e.contains("selectors too large")),
+        "{errors:?}"
+    );
+}
+
+/// An injected file's exports decide how every other module is prepared: when they change,
+/// an unchanged module that refers to a newly injected name is prepared again.
+#[test]
+fn rebuild_after_injected_exports_change() {
+    let fs = Arc::new(SharedFs(std::sync::RwLock::new(project(&[
+        ("entry.js", "console.log(typeof obj)\n"),
+        ("shim.js", "export const x = 1\n"),
+    ]))));
+    let mut o = opts(&["entry.js"]);
+    o.inject = vec!["shim.js".into()];
+    let ctx = BuildContext::new(o, fs.clone()).expect("options");
+    let r = ctx.build();
+    assert!(!file(&r, "/proj/out/entry.js").contains("obj = {"));
+    fs.0.write().expect("lock").add_file(
+        "/proj/shim.js",
+        "export const x = 1\nexport const obj = { v: 1 }\n",
+    );
+    ctx.invalidate(&["shim.js".to_owned()]);
+    let r = ctx.build();
+    assert!(!r.has_errors(), "{:?}", r.messages);
+    let text = file(&r, "/proj/out/entry.js");
+    assert!(
+        text.contains("typeof obj") && text.contains("obj = { v: 1 }"),
+        "{text}"
+    );
+}
+
+/// A plain `export * from` in an injected file injects none of the star-exported names:
+/// esbuild 0.28.2 leaves `obj` and `deep` global here too (observed).
+#[test]
+fn injected_star_reexports_inject_nothing() {
+    let fs = project(&[
+        ("entry.js", "console.log(obj.v, deep, named)\n"),
+        (
+            "barrel.js",
+            "export * from './shim.js'\nexport { named } from './shim.js'\n",
+        ),
+        (
+            "shim.js",
+            "export const obj = { v: 1 }\nexport const deep = 2\nexport const named = 3\n",
+        ),
+    ]);
+    let mut o = opts(&["entry.js"]);
+    o.inject = vec!["barrel.js".into()];
+    let r = run_build(&fs, o);
+    let text = file(&r, "/proj/out/entry.js");
+    assert!(text.contains("console.log(obj.v, deep, named)"), "{text}");
+    assert!(
+        !text.contains("obj = {") && text.contains("named = 3"),
+        "{text}"
+    );
+}

@@ -42,7 +42,9 @@ read already bundled by `ts_r_hmr::css`, so `BuildOptions::css_prebundled` keeps
 `color.rs` (shortest colors for `--minify-syntax`; the CSS named-color table),
 `order.rs` (`@import` expansion, duplicates, layers, one stylesheet per chunk) and
 `link.rs` (final local names, `composes` class lists, reference errors);
-`data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
+`props.rs` compiles `--mangle-props` / `--reserve-props` (the names themselves are found and
+rewritten by `ts_r_minify::props`); `inject.rs` is `--inject` (exports of the injected files
+replace free names, before preparation's scope pass); `data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
 expression builder for generated code; `pool.rs` is the std-thread pool.
 
 ## Invariants
@@ -123,7 +125,10 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   own module (key `path\0with:type`, loader from the attribute; `bytes` is `Loader::Bytes`).
   Binary loaders use `FileSystem::read_bytes`, preserving invalid UTF-8 and UTF-16 BOMs.
   External imports are keyed `path\0phase\0attrs` (`import defer`/`import source` and
-  attributes are kept), and keep source evaluation order (`plan::external_order`).
+  attributes are kept), and keep source evaluation order (`plan::external_order`). In CommonJS
+  and IIFE output an external first loaded by an unwrapped module is required where that
+  import runs (before the code of the next module to finish in evaluation order), as esbuild
+  does; the rest are required at the top of the chunk.
 - **Module kinds** (`link::compute_kinds`): a JS file with no ESM syntax that something
   imports a binding from is CommonJS. Resolving a missing export never includes its file.
   A re-export cycle is an error (`Detected cycle while resolving import "x"`). Top-level
@@ -207,6 +212,45 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 - **Resolution**: a `package.json` `exports` target or import of `./x.js` that is missing
   falls back to `./x.ts`/`./x.tsx` (`.jsx` tries `.ts` first); esbuild's dual-package rule
   (require picks `main`) applies only with the default main fields.
+- **`--mangle-props`** (`props.rs`, `ts_r_minify::props`): a bundle gives each matching
+  property name one short name over every included module (`plan.rs`, from the per-module
+  counts in `ModuleMeta::props`), so objects keep their shape across modules; `ns.x` of an
+  `import * as ns` is an import, not a property. Without `--bundle` each file is its own unit,
+  as esbuild links each entry point alone. The patterns are part of the preparation cache
+  key. Names follow esbuild's rules where observed, including what it deliberately breaks
+  (an enum member read `E.x_` is mangled, the enum's own strings are not).
+- **`--inject`** (`inject.rs`): every export of an injected file (dotted string names like
+  `"a.b"` and `import.meta.x` included) replaces the same free name or member chain in every
+  other module, after `define` (a define with a value wins; one that names an injected export
+  forwards to it). Each entry imports every injected file first, in the order given; the
+  added imports don't make a CommonJS file an ES module (`Prepared::injected`). Writing to
+  an injected name and a missing file are errors. Without `--bundle` the build bundles only
+  the injected files (`BuildOptions::bundle_only_injected`, tree shaking off, ESM by
+  default); every other import stays as written. The injected files and their exports are
+  part of each file's preparation cache key.
+- **CSS `--minify-syntax`** (`css/calc.rs`, `css/print.rs`): declaration values get short
+  numbers (`0.50px` is `.5px`) and folded `calc()` (only results exact to 5 decimal places);
+  `@keyframes` selectors `from` / `100%` become `0%` / `to`. At-rule names print as written
+  except `@media` and `@layer`, as esbuild does.
+- **CSS nesting** (`css/nesting.rs`) is lowered with `--supported:nesting=false` (no
+  target table yet), as esbuild does: descendant or `&`-substituted selectors, `:is()` for a
+  parent list, `:scope` for a top-level rule a CSS module left without a selector; `&`
+  inside selector functions is replaced too. Lowering has a budget of 2^20 component values
+  plus 4 per input byte (`& &` doubles a selector per level): past it the sheet gets an
+  error and lowering stops. Pretty
+  output prints one selector of a list per line. `Cv::Raw` / `Cv::Space` are the only
+  component values not backed by source text.
+- **Local names** (`local-css`) also cover `@container` names, `container` /
+  `container-name`, string keyframe and animation names, and the counter style of
+  `list-style-type` / a valid `list-style` (predefined styles and keywords stay). A bare
+  `:global` inside a function's selector list (`:nth-child(2n of ...)`) lasts past its commas.
+- **Path externals** (`--external:./x`, `/x`): matched against the resolved path, before
+  extension probing and after resolution (esbuild's post-resolve externals); the import is
+  written relative to the output directory, also when the chunk is in a subdirectory of it
+  (`--entry-names=sub/[name]` gives `../src/lib.js` in `out/sub/main.js`, as esbuild 0.28.2
+  prints it, observed). This is esbuild's behaviour, kept on purpose.
+- A define also applies inside TypeScript enum initializers before the enum transform, so
+  its value can name a member of that enum (`prepare::enum_initializers`).
 - Never panic on user input; every problem is a `Message` (esbuild-style text).
 - At most `TS_R_THREADS` worker threads (default: cores, capped at 8). While a fresh graph
   loads, one more thread reads module files ahead of the workers (`CachedFs::read_ahead`)
@@ -232,7 +276,8 @@ Workspace: `ts_r_span`, `ts_r_ast`, `ts_r_parser`, `ts_r_transform`, `ts_r_codeg
 (optional, feature `hmr`, for the `DepBundler` adapter; the crate's dev-dependency on itself turns the feature on for
 its own tests). External: `rustc-hash` (fast maps
 for ids and paths), `blake3` (content and plan hashes for cache keys and chunk names; stable
-across runs, unlike `std`'s hasher). Dev: `ts_r_testing`.
+across runs, unlike `std`'s hasher), `regex-lite` (the `--mangle-props` / `--reserve-props`
+patterns, Go RE2 syntax as esbuild takes them; already used by `ts_r_hmr`). Dev: `ts_r_testing`.
 
 ## Gaps
 

@@ -27,10 +27,10 @@ esbuild, it strips types without checking them. Run [ts-r-check](ts-r-check.md) 
 ## Not yet
 
 - No plugins and no JavaScript config file. Everything is set on the command line.
-- No CSS bundling. CSS imports are concatenated into a sibling `.css` file and `@import` is
-  not followed.
+- CSS is bundled (`@import`, `url()` assets, CSS modules), but esbuild's CSS syntax lowering
+  is limited to nesting.
 - No serve mode with `--watch`, and no legal-comment extraction.
-- No `--mangle-props`, `--drop` or `--pure`.
+- No `--drop` or `--pure`.
 - Syntax lowering goes through tsc 7's down-level passes, so ES2015 is the lowest output.
   With `--target=es5` (or `--supported:<feature>=false` for an ES2015 feature) `const`,
   classes, destructuring and similar syntax are errors, as in esbuild; arrows and template
@@ -50,6 +50,7 @@ Simple options:
   --bundle                  Bundle all dependencies into the output files
   --define:K=V              Substitute K with V while parsing
   --external:M              Exclude module M from the bundle (can use * wildcards)
+  --inject:F                Import the file F into all input files
   --format=...              Output format (iife | cjs | esm)
   --loader:X=L              Use loader L for .X files (js, jsx, ts, tsx, json, text,
                             file, css, empty, base64, dataurl, binary)
@@ -60,7 +61,8 @@ Simple options:
   --platform=...            Platform target (browser | node | neutral)
   --sourcemap               Emit a source map
   --splitting               Enable code splitting (requires --format=esm)
-  --target=...              Environment target (es5..es2025, esnext, node18, chrome110, ...)
+  --target=...              Environment target (es5..es2025, esnext, node18, chrome110,
+                            ...); newer syntax is lowered
   --watch                   Rebuild when a source file changes
 
 Advanced options:
@@ -81,6 +83,10 @@ Advanced options:
   --metafile=...            Write metadata about the build to a JSON file
   --minify-whitespace       Remove whitespace
   --minify-identifiers      Shorten identifiers
+  --keep-names              Keep function and class names when identifiers are renamed
+  --mangle-props=...        Rename all properties matching a regular expression
+  --mangle-quoted=...       Mangle quoted properties too (true | false)
+  --reserve-props=...       Do not mangle these properties
   --minify-syntax           Use equivalent but shorter syntax
   --no-cache                Do not use the persistent build cache
   --out-extension:.js=.mjs  Use a custom output extension
@@ -146,8 +152,8 @@ agree: both load in Node with the same exports; ts-r's is 2.2% larger.
 
 Correctness:
 
-- esbuild's end-to-end bundler tests, run against ts-r-build: 938 of 964 compared cases
-  pass (97.3%); 13 of the 26 failures are intended differences where ts-r-build follows
+- esbuild's end-to-end bundler tests, run against ts-r-build: 1,002 of 1,028 compared cases
+  pass (97.5%); 14 of the 26 failures are intended differences where ts-r-build follows
   tsc 7.
 - Ecosystem bundle stage: all 915 compared packages pass (100%). Minified output is 2.9%
   smaller than esbuild's in total over 914 packages, with a median per-package ratio of 0.993.

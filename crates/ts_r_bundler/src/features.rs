@@ -51,6 +51,8 @@ pub enum Feature {
     InlineScript,
     LogicalAssignment,
     NestedRestBinding,
+    /// CSS nesting (`--supported:nesting=false`; no ECMAScript target lacks it).
+    Nesting,
     NewTarget,
     NodeColonPrefixImport,
     NodeColonPrefixRequire,
@@ -131,6 +133,7 @@ const TABLE: &[(Feature, &str, u32)] = &[
     (InlineScript, "inline-script", 0),
     (LogicalAssignment, "logical-assignment", 2021),
     (NestedRestBinding, "nested-rest-binding", 2016),
+    (Nesting, "nesting", 0),
     (NewTarget, "new-target", 2015),
     (NodeColonPrefixImport, "node-colon-prefix-import", 0),
     (NodeColonPrefixRequire, "node-colon-prefix-require", 0),

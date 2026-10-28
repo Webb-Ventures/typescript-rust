@@ -81,7 +81,7 @@ impl BuildResult {
 }
 
 /// Persistent-cache format version (bump when meta, fragments or plans change shape).
-const CACHE_VERSION: u32 = 8;
+const CACHE_VERSION: u32 = 10;
 
 /// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
 pub struct BuildContext {
@@ -148,7 +148,16 @@ impl BuildContext {
     pub fn new(opts: BuildOptions, fs: Arc<dyn FileSystem>) -> Result<BuildContext, Vec<Message>> {
         let defines = Defines::from_options(&opts)
             .map_err(|e| vec![Message::new(Severity::Error, None, e)])?;
+        crate::props::PropMatcher::from_options(&opts)
+            .map_err(|e| vec![Message::new(Severity::Error, None, e)])?;
         let mut opts = opts;
+        if !opts.bundle && !opts.inject.is_empty() {
+            // esbuild bundles the injected files into each output even without `--bundle`.
+            opts.bundle = true;
+            opts.bundle_only_injected = true;
+            opts.tree_shaking = Some(opts.tree_shaking.unwrap_or(false));
+            opts.format = Some(opts.format.unwrap_or(Format::Esm));
+        }
         // Symlinked working directories (macOS `/var` -> `/private/var`) would otherwise give
         // modules reached through a realpath a different prefix than the entries.
         let real = fs.realpath(&opts.working_dir);
@@ -306,6 +315,57 @@ impl BuildContext {
         }
     }
 
+    /// `--inject`: resolves the injected files (like entry points) and reads their exports.
+    fn resolve_inject(&self, entries: &[String]) -> Result<bool, Vec<Message>> {
+        let opts = &*self.opts;
+        if opts.inject.is_empty() {
+            if !self.prep.inject().is_empty() {
+                return Ok(self.prep.set_inject(crate::inject::Inject::default()));
+            }
+            return Ok(false);
+        }
+        let wd = &opts.working_dir;
+        let fs = self.prep.resolver.fs();
+        let mut files = Vec::new();
+        let mut errs = Vec::new();
+        for p in &opts.inject {
+            let abs = path::resolve(wd, p);
+            let f = if fs.file_exists(&abs) {
+                fs.realpath(&abs)
+            } else {
+                match self.prep.resolver.resolve(p, wd, ResolveKind::Import) {
+                    Resolution::File(f) => f,
+                    _ => {
+                        errs.push(Message::new(
+                            Severity::Error,
+                            None,
+                            format!("Could not resolve {p:?}"),
+                        ));
+                        continue;
+                    }
+                }
+            };
+            if opts.bundle_only_injected && opts.loader_for(&f) == Loader::Copy {
+                errs.push(Message::new(
+                    Severity::Error,
+                    None,
+                    format!(
+                        "Cannot inject {:?} with the \"copy\" loader without bundling enabled",
+                        pretty_path(wd, &f)
+                    ),
+                ));
+                continue;
+            }
+            files.push(f);
+        }
+        if !errs.is_empty() {
+            return Err(errs);
+        }
+        Ok(self
+            .prep
+            .set_inject(crate::inject::Inject::new(&**fs, opts, files, entries)))
+    }
+
     /// Runs a build.
     pub fn build(&self) -> BuildResult {
         let opts = &*self.opts;
@@ -326,6 +386,10 @@ impl BuildContext {
             Ok(e) => e,
             Err(m) => return BuildResult::fail(m),
         };
+        let inject_changed = match self.resolve_inject(&entries) {
+            Ok(c) => c,
+            Err(m) => return BuildResult::fail(m),
+        };
         let (outdir, outfile_name) = self.output_location(&entries);
         if !opts.bundle {
             return self.transform_only(&entries, &entry_names, &outdir, outfile_name.as_deref());
@@ -334,7 +398,10 @@ impl BuildContext {
             .trusted
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .take();
+            .take()
+            // Every module's preparation depends on what the injected files export: when
+            // that changed, each cached module is checked against its preparation key.
+            .filter(|_| !inject_changed);
         let gctx = GraphContext {
             prep: &self.prep,
             cache: &self.modules,
@@ -918,6 +985,21 @@ impl BuildContext {
                 None => self.entry_file_name(&e, &outbase, names[i].as_deref()),
             };
             let mut ast = prepared.ast.clone();
+            // `--mangle-props` without bundling: each file is its own unit, as esbuild links
+            // each entry point on its own.
+            if let Some(pm) = &self.prep.props {
+                let names = crate::props::collect(pm, &prepared, false);
+                let map = ts_r_minify::props::assign([&names]);
+                pm.with_options(false, |o| {
+                    ts_r_minify::props::apply(
+                        &mut ast,
+                        &prepared.src,
+                        Some(&prepared.scopes),
+                        o,
+                        &map,
+                    )
+                });
+            }
             let unsupported = opts.unsupported();
             if unsupported.has(crate::features::Feature::ImportMeta) {
                 let kind = if unsupported.has(crate::features::Feature::ConstAndLet) {

@@ -28,6 +28,7 @@ ts_r_diagnostics = { path = "../ts_r_diagnostics" }
 ts_r_hmr = { path = "../ts_r_hmr", optional = true }
 rustc-hash = "2"
 blake3 = "1.8"
+regex-lite = "0.1"
 
 [dev-dependencies]
 ts_r_testing = { path = "../ts_r_testing" }

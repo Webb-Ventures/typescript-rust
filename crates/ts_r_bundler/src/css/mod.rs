@@ -7,9 +7,11 @@
 //! decoded: reference targets, local names, `@import` conditions. Behaviour follows
 //! esbuild's documented and observed output (its `bundler_css_test.go` cases as data).
 
+pub mod calc;
 pub mod color;
 pub mod lexer;
 pub mod link;
+pub mod nesting;
 pub mod order;
 pub mod print;
 
@@ -22,6 +24,66 @@ use lexer::{T, Token};
 /// Nesting limit for blocks and functions: deeper input is reported, not recursed into.
 const MAX_DEPTH: usize = 128;
 
+/// CSS Counter Styles' predefined styles (and `none`'s neighbours), which a local
+/// `list-style` never renames.
+const PREDEFINED_COUNTER_STYLES: &[&str] = &[
+    "decimal",
+    "decimal-leading-zero",
+    "arabic-indic",
+    "armenian",
+    "upper-armenian",
+    "lower-armenian",
+    "bengali",
+    "cambodian",
+    "khmer",
+    "cjk-decimal",
+    "devanagari",
+    "georgian",
+    "gujarati",
+    "gurmukhi",
+    "hebrew",
+    "kannada",
+    "lao",
+    "malayalam",
+    "mongolian",
+    "myanmar",
+    "oriya",
+    "persian",
+    "lower-roman",
+    "upper-roman",
+    "tamil",
+    "telugu",
+    "thai",
+    "tibetan",
+    "lower-alpha",
+    "lower-latin",
+    "upper-alpha",
+    "upper-latin",
+    "lower-greek",
+    "hiragana",
+    "hiragana-iroha",
+    "katakana",
+    "katakana-iroha",
+    "disc",
+    "circle",
+    "square",
+    "disclosure-open",
+    "disclosure-closed",
+    "japanese-informal",
+    "japanese-formal",
+    "korean-hangul-formal",
+    "korean-hanja-informal",
+    "korean-hanja-formal",
+    "simp-chinese-informal",
+    "simp-chinese-formal",
+    "trad-chinese-informal",
+    "trad-chinese-formal",
+    "ethiopic-numeric",
+    "cjk-earthly-branch",
+    "cjk-heavenly-stem",
+    "cjk-ideographic",
+];
+
 /// One component value (CSS Syntax 5.4.7), with the bundler's rewrites resolved.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Cv {
@@ -31,6 +93,10 @@ pub enum Cv {
         open: u8,
         items: Vec<Cv>,
     },
+    /// Text the bundler writes (`:is(` when lowering nesting).
+    Raw(Box<str>),
+    /// Whitespace the bundler writes: printed like a whitespace token.
+    Space,
     /// A function: `name` is the function token (including `(`).
     Func {
         name: Token,
@@ -62,6 +128,8 @@ pub enum Node {
     At {
         /// Lower-case name without `@`.
         name: String,
+        /// The name as written (esbuild prints it so, except `@media` and `@layer`).
+        raw: Box<str>,
         prelude: Vec<Cv>,
         body: Option<Vec<Node>>,
     },
@@ -347,7 +415,8 @@ impl Parser {
                     },
                 ) => {
                     let tok = *tok;
-                    let name = self.text(&tok)[1..].to_ascii_lowercase();
+                    let raw: Box<str> = self.text(&tok)[1..].into();
+                    let name = raw.to_ascii_lowercase();
                     let mut prelude = Vec::new();
                     let mut body = None;
                     for cv in it.by_ref() {
@@ -369,6 +438,7 @@ impl Parser {
                             self.warn(tok.start, "All \"@import\" rules must come first");
                             out.push(Node::At {
                                 name,
+                                raw,
                                 prelude,
                                 body: None,
                             });
@@ -391,7 +461,7 @@ impl Parser {
                     if !(name == "charset" || name == "layer" && body.is_none() && !seen_import) {
                         seen_rule = true;
                     }
-                    out.push(self.at_rule(name, prelude, body));
+                    out.push(self.at_rule(name, raw, prelude, body));
                 }
                 _ => {
                     // A declaration (`name: value`) unless a `{}` block comes before the
@@ -474,10 +544,17 @@ impl Parser {
         out
     }
 
-    fn at_rule(&mut self, name: String, prelude: Vec<Cv>, body: Option<Vec<Cv>>) -> Node {
+    fn at_rule(
+        &mut self,
+        name: String,
+        raw: Box<str>,
+        prelude: Vec<Cv>,
+        body: Option<Vec<Cv>>,
+    ) -> Node {
         let prelude = match name.as_str() {
             "keyframes" | "-webkit-keyframes" | "-moz-keyframes" | "-o-keyframes"
             | "counter-style" => self.localize_name_prelude(prelude),
+            "container" => self.localize_container_prelude(prelude),
             _ => prelude,
         };
         let body = body.map(|b| {
@@ -492,12 +569,13 @@ impl Parser {
         });
         Node::At {
             name,
+            raw,
             prelude,
             body,
         }
     }
 
-    /// `@keyframes name`: the name is local in local mode (a string name stays as written).
+    /// `@keyframes name`: the name is local in local mode (a string name too).
     fn localize_name_prelude(&mut self, prelude: Vec<Cv>) -> Vec<Cv> {
         if self.mode != NameMode::Local {
             return prelude;
@@ -507,6 +585,14 @@ impl Parser {
             .map(|cv| match cv {
                 Cv::Tok(t) if t.t == T::Ident => {
                     let n = lexer::unescape(self.text(&t));
+                    Cv::Local {
+                        name: self.local(&n),
+                        prefix: 0,
+                    }
+                }
+                // `@keyframes "none"`: a string name is local too (observed in esbuild).
+                Cv::Tok(t) if t.t == T::Str => {
+                    let n = lexer::string_value(self.text(&t));
                     Cv::Local {
                         name: self.local(&n),
                         prefix: 0,
@@ -539,11 +625,14 @@ impl Parser {
     fn selector(&mut self, prelude: Vec<Cv>) -> (Vec<Cv>, NameMode) {
         let mut out = Vec::with_capacity(prelude.len());
         let mut mode = self.mode;
-        self.selector_into(prelude, &mut mode, &mut out);
+        self.selector_into(prelude, &mut mode, true, &mut out);
         (out, mode)
     }
 
-    fn selector_into(&mut self, items: Vec<Cv>, mode: &mut NameMode, out: &mut Vec<Cv>) {
+    /// `top`: a comma ends a bare `:global` / `:local` only in the rule's own selector list,
+    /// not inside a function's (`:nth-child(2n of :global .a, .b)` keeps `.b` global, as
+    /// esbuild does).
+    fn selector_into(&mut self, items: Vec<Cv>, mode: &mut NameMode, top: bool, out: &mut Vec<Cv>) {
         let base = self.mode;
         let mut i = 0;
         let items_len = items.len();
@@ -556,7 +645,9 @@ impl Parser {
             i += 1;
             match cv {
                 Cv::Tok(t) if t.t == T::Comma => {
-                    *mode = base;
+                    if top {
+                        *mode = base;
+                    }
                     out.push(cv);
                 }
                 Cv::Tok(t) if t.t == T::Colon => {
@@ -598,7 +689,7 @@ impl Parser {
                                 } else {
                                     NameMode::Local
                                 };
-                                self.selector_into(trim(&inner).to_vec(), &mut m, out);
+                                self.selector_into(trim(&inner).to_vec(), &mut m, false, out);
                                 continue;
                             }
                             out.push(cv);
@@ -649,7 +740,7 @@ impl Parser {
                     // `:is(.a)`, `:not(.b)`, `:has(.c)`: selectors inside keep the mode.
                     let mut m = *mode;
                     let mut v = Vec::new();
-                    self.selector_into(inner, &mut m, &mut v);
+                    self.selector_into(inner, &mut m, false, &mut v);
                     out.push(Cv::Func { name, items: v });
                 }
                 other => out.push(other),
@@ -709,6 +800,14 @@ impl Parser {
                 "animation" | "animation-name" | "-webkit-animation" | "-webkit-animation-name"
             ) {
             self.localize_animation(value)
+        } else if self.mode == NameMode::Local
+            && matches!(lname.as_str(), "container" | "container-name")
+        {
+            self.localize_container(value)
+        } else if self.mode == NameMode::Local
+            && matches!(lname.as_str(), "list-style" | "list-style-type")
+        {
+            self.localize_list_style(value, lname == "list-style")
         } else {
             value
         };
@@ -760,9 +859,130 @@ impl Parser {
                         prefix: 0,
                     }
                 }
+                // A string names an animation whatever it says (`"none"`).
+                Cv::Tok(t) if t.t == T::Str => {
+                    let n = lexer::string_value(self.text(&t));
+                    Cv::Local {
+                        name: self.local(&n),
+                        prefix: 0,
+                    }
+                }
                 other => other,
             })
             .collect()
+    }
+
+    /// Container names in local mode: identifiers other than `none` and the CSS-wide
+    /// keywords, before the `/` of the `container` shorthand.
+    fn localize_container(&mut self, value: Vec<Cv>) -> Vec<Cv> {
+        const KEYWORDS: &[&str] = &[
+            "none",
+            "initial",
+            "inherit",
+            "unset",
+            "revert",
+            "revert-layer",
+            "default",
+        ];
+        let mut names = true;
+        value
+            .into_iter()
+            .map(|cv| match cv {
+                Cv::Tok(t) if t.t == T::Delim && self.text(&t) == "/" => {
+                    names = false;
+                    cv
+                }
+                Cv::Tok(t)
+                    if names
+                        && t.t == T::Ident
+                        && !KEYWORDS.contains(&self.text(&t).to_ascii_lowercase().as_str()) =>
+                {
+                    let n = lexer::unescape(self.text(&t));
+                    Cv::Local {
+                        name: self.local(&n),
+                        prefix: 0,
+                    }
+                }
+                other => other,
+            })
+            .collect()
+    }
+
+    /// A counter style name in `list-style-type`, or the type of a valid `list-style`
+    /// shorthand (one position, one image and one type at most; `none` fills the image or
+    /// the type), is local in local mode unless it is a keyword or a predefined style.
+    fn localize_list_style(&mut self, mut value: Vec<Cv>, shorthand: bool) -> Vec<Cv> {
+        let keyword = |w: &str| {
+            matches!(
+                w,
+                "initial" | "inherit" | "unset" | "revert" | "revert-layer" | "default"
+            ) || PREDEFINED_COUNTER_STYLES.contains(&w)
+        };
+        let (mut position, mut images, mut nones) = (false, 0, 0);
+        let mut types: Vec<usize> = Vec::new();
+        for (i, cv) in value.iter().enumerate() {
+            match cv {
+                Cv::Tok(t) if t.t == T::Ws => {}
+                Cv::Tok(t) if t.t == T::Ident => {
+                    let w = self.text(t).to_ascii_lowercase();
+                    if shorthand && !position && (w == "inside" || w == "outside") {
+                        position = true;
+                    } else if w == "none" {
+                        nones += 1;
+                    } else {
+                        types.push(i);
+                    }
+                }
+                Cv::Tok(t) if t.t == T::Str => types.push(usize::MAX),
+                Cv::Url { .. } | Cv::Tok(Token { t: T::Url, .. }) if shorthand => images += 1,
+                Cv::Func { name, .. }
+                    if shorthand && self.text(name).to_ascii_lowercase().ends_with("gradient(") =>
+                {
+                    images += 1
+                }
+                _ => return value,
+            }
+        }
+        let image_slots: i32 = if shorthand { 1 - images } else { 0 };
+        let type_slots = 1 - types.len() as i32;
+        if image_slots < 0 || type_slots < 0 || nones > image_slots + type_slots {
+            return value;
+        }
+        if let [i] = types[..]
+            && i != usize::MAX
+            && let Cv::Tok(t) = value[i]
+            && !keyword(&self.text(&t).to_ascii_lowercase())
+        {
+            let n = lexer::unescape(self.text(&t));
+            value[i] = Cv::Local {
+                name: self.local(&n),
+                prefix: 0,
+            };
+        }
+        value
+    }
+
+    /// `@container name (...)`: the leading name is local in local mode (`not`, `and`,
+    /// `or` and functions are conditions).
+    fn localize_container_prelude(&mut self, mut prelude: Vec<Cv>) -> Vec<Cv> {
+        if self.mode != NameMode::Local {
+            return prelude;
+        }
+        if let Some(first) = prelude.first_mut()
+            && let Cv::Tok(t) = *first
+            && t.t == T::Ident
+            && !matches!(
+                self.text(&t).to_ascii_lowercase().as_str(),
+                "not" | "and" | "or" | "none"
+            )
+        {
+            let n = lexer::unescape(self.text(&t));
+            *first = Cv::Local {
+                name: self.local(&n),
+                prefix: 0,
+            };
+        }
+        prelude
     }
 
     /// `url()` references in a value become records (nested in functions too).
@@ -999,6 +1219,7 @@ pub fn declared_layers(sheet: &Sheet, nodes: &[Node], prefix: &str, out: &mut Ve
             name,
             prelude,
             body,
+            ..
         } = n
             && name == "layer"
         {
@@ -1130,6 +1351,22 @@ mod tests {
             panic!()
         };
         assert!(matches!(&body[..], [Node::Decl { .. }]));
+    }
+
+    #[test]
+    fn local_container_and_counter_style_names() {
+        let s = parse(
+            Arc::from(
+                "@container box (min-width: 1px) { a { b: c } } @container not (x) {} d { container: one two / size; container-name: none; list-style: inside inside; list-style-type: disc } e { list-style: url(x) none bad } :nth-child(2n of :global .g, .h) {}",
+            ),
+            NameMode::Local,
+        );
+        for n in ["box", "one", "two", "inside"] {
+            assert!(s.locals.iter().any(|l| l == n), "{n}: {:?}", s.locals);
+        }
+        for n in ["not", "size", "none", "disc", "bad", "h"] {
+            assert!(!s.locals.iter().any(|l| l == n), "{n}: {:?}", s.locals);
+        }
     }
 
     #[test]

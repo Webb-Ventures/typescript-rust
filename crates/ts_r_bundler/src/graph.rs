@@ -477,6 +477,20 @@ fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
             targets.push(RawTarget::External(r.spec.clone()));
             continue;
         }
+        // `--inject` without `--bundle`: only the injected files are bundled (the imports
+        // `inject.rs` adds name them by absolute path); every other import stays as written.
+        if ctx.prep.opts.bundle_only_injected
+            && !r.kind.is_css()
+            && !ctx.prep.inject().is_injected(&r.spec)
+        {
+            targets.push(RawTarget::External(match r.kind {
+                RecordKind::Import | RecordKind::ReExport => {
+                    external_key(&r.spec, r.phase, &r.attrs)
+                }
+                _ => r.spec.clone(),
+            }));
+            continue;
+        }
         let res = if p.starts_with(DISABLED_PREFIX) {
             Resolution::NotFound(String::new())
         } else if is_data && is_relative(&r.spec) {
@@ -680,6 +694,9 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prepared = prepare::prepare(ctx.prep, p, &pretty, Arc::clone(&source.js), loader);
     let mut meta = crate::scan::scan(&prepared, !opts.ignore_annotations);
+    if let Some(props) = &ctx.prep.props {
+        meta.props = crate::props::collect(props, &prepared, true);
+    }
     messages.extend(prepared.messages.iter().cloned());
     if let Some(sheet) = &source.css {
         css_records(sheet, &mut meta, &pretty, &mut messages);

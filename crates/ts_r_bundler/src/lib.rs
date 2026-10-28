@@ -11,6 +11,7 @@ pub mod fscache;
 pub mod graph;
 #[cfg(feature = "hmr")]
 pub mod hmr;
+pub mod inject;
 pub mod link;
 pub mod lowering;
 pub mod meta;
@@ -20,6 +21,7 @@ pub mod plan;
 pub mod pool;
 pub mod prepare;
 pub mod print;
+pub mod props;
 pub mod resolve;
 pub mod runtime;
 pub mod scan;

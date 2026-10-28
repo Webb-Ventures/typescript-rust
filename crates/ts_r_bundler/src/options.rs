@@ -187,6 +187,20 @@ pub struct BuildOptions {
     pub minify_syntax: bool,
     /// `--keep-names`: functions and classes keep their `name` when renamed.
     pub keep_names: bool,
+    /// `--mangle-props=RE`: property names matching the pattern get short names, the same
+    /// in every file of an output unit (`ts_r_minify::props`).
+    pub mangle_props: Option<String>,
+    /// `--reserve-props=RE`: names matching it are never mangled.
+    pub reserve_props: Option<String>,
+    /// `--mangle-quoted`: written strings in property positions are mangled too.
+    pub mangle_quoted: bool,
+    /// `--inject:file`: files whose exports replace the matching free names of every module
+    /// and which run before the entry points.
+    pub inject: Vec<String>,
+    /// Not an esbuild option: set by `BuildContext::new` for `--inject` without `--bundle`.
+    /// The build bundles only the injected files into each entry, as esbuild does; every
+    /// other import stays as written.
+    pub bundle_only_injected: bool,
     pub sourcemap: SourceMapMode,
     pub sources_content: bool,
     pub splitting: bool,
@@ -283,6 +297,11 @@ impl Default for BuildOptions {
             define: Vec::new(),
             drop_labels: Vec::new(),
             keep_names: false,
+            mangle_props: None,
+            reserve_props: None,
+            mangle_quoted: false,
+            inject: Vec::new(),
+            bundle_only_injected: false,
             alias: Vec::new(),
             metafile: false,
             loaders: FxHashMap::default(),
