@@ -335,6 +335,11 @@ pub(crate) struct CachedTypes {
     /// program order (`typenode::Ck::reexporters`).
     pub reexporters:
         OnceLock<rustc_hash::FxHashMap<ts_r_types::SymId, Vec<(ts_r_types::SymId, String)>>>,
+    /// Emit: each enum member's evaluated value (by member symbol), filled for a whole enum
+    /// the first time one of its members is asked for (`Checker::enum_member_value`), so
+    /// emitting an enum's members reads its member list once.
+    pub enum_member_values:
+        std::sync::Mutex<rustc_hash::FxHashMap<ts_r_types::SymId, Option<crate::emit::EnumConst>>>,
     /// Measured variances of generic classes and interfaces, by declared type.
     pub variances: std::sync::Mutex<
         rustc_hash::FxHashMap<crate::variance::VarianceKey, Arc<crate::variance::Variances>>,
@@ -688,6 +693,11 @@ pub struct Ck<'c, 'a> {
     /// Nesting of [`Ck::link_arg_forward`]: instantiations that keep making new
     /// arguments (`type R<T> = Array<T | R<T[]>>`) stop linking there.
     pub(crate) arg_forward_depth: u32,
+    /// The forward references [`Ck::link_arg_forward`] is linking now (innermost last): one
+    /// met again while it is linked closes the cycle and is read as is; any other unlinked
+    /// one (created past the depth limit) is linked when met, so the types do not depend on
+    /// which instantiation was resolved first.
+    pub(crate) linking_arg_forwards: Vec<TypeId>,
     pub(crate) assigned_syms: FxHashSet<SymId>,
     /// Assigned symbols with at least one non-compound assignment (`x = ...`, not `x++`).
     pub(crate) definitely_assigned_syms: FxHashSet<SymId>,
@@ -918,6 +928,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             pending_node_forwards: Vec::new(),
             pending_arg_forwards: Vec::new(),
             arg_forward_depth: 0,
+            linking_arg_forwards: Vec::new(),
             assigned_syms: FxHashSet::default(),
             definitely_assigned_syms: FxHashSet::default(),
             last_assignment: FxHashMap::default(),

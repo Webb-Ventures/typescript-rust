@@ -111,8 +111,7 @@ impl Checker<'_> {
             return None;
         }
         let m = self.export_of(e, &key)?;
-        let v = ck.enum_members(e).into_iter().find(|x| x.0 == m)?.1?;
-        enum_const_of(&ck, v)
+        self.cached_enum_member_value(&mut ck, e, m)
     }
 
     /// The value the checker's evaluator gives the enum member declared at `member` (an
@@ -128,10 +127,48 @@ impl Checker<'_> {
         }
         let m = self.sym_of_decl(member)?;
         let e = self.sym_parent(m)?;
+        if let Some(v) = self.cached.enum_member_values.lock().ok()?.get(&m) {
+            return v.clone();
+        }
         let mut ck = Ck::new(self, member.file);
         ck.no_report += 1;
-        let v = ck.enum_members(e).into_iter().find(|x| x.0 == m)?.1?;
-        enum_const_of(&ck, v)
+        self.cached_enum_member_value(&mut ck, e, m)
+    }
+
+    /// The value of member `m` of enum `e`: from the cache, else every member of `e`
+    /// evaluated once into it (constant per member, not per query: emitting an enum of
+    /// many members whose initializers do not fold reads its member list once).
+    fn cached_enum_member_value(
+        &self,
+        ck: &mut Ck<'_, '_>,
+        e: ts_r_types::SymId,
+        m: ts_r_types::SymId,
+    ) -> Option<EnumConst> {
+        let cache = &self.cached.enum_member_values;
+        if let Some(v) = cache.lock().ok()?.get(&m) {
+            return v.clone();
+        }
+        let members = ck.enum_members(e);
+        if members.is_empty() {
+            // Nothing evaluated (an enum without members, or one met in a cycle): no value,
+            // and nothing to keep.
+            return None;
+        }
+        let values: Vec<(ts_r_types::SymId, Option<EnumConst>)> = members
+            .iter()
+            .map(|&(s, v)| (s, v.and_then(|v| enum_const_of(ck, v))))
+            .collect();
+        let mut cache = cache.lock().ok()?;
+        let mut found = None;
+        for (s, v) in values {
+            if s == m {
+                found = Some(v.clone());
+            }
+            cache.entry(s).or_insert(v);
+        }
+        let found = found.flatten();
+        cache.entry(m).or_insert_with(|| found.clone());
+        found
     }
 }
 

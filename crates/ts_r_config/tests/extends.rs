@@ -186,8 +186,55 @@ fn package_extends_through_yarn_pnp() {
     );
     assert_eq!(factory(&fs, "/u/p/tsconfig.json"), success);
 
-    // A name the manifest does not list stays TS6053.
+    // The manifest that placed the package is a configuration input, for watchers.
+    let parsed = load_tsconfig(&fs, "/u/p/tsconfig.json");
+    assert_eq!(parsed.pnp_manifest_paths, ["/u/p/.pnp.data.json"]);
+
+    // A name the manifest does not list stays TS6053; the manifest was still read, and a
+    // change to it can make the name resolve.
     fs.add_file("/u/p/tsconfig.json", r#"{ "extends": "other/config" }"#);
     let parsed = load_tsconfig(&fs, "/u/p/tsconfig.json");
     assert!(parsed.diagnostics.iter().any(|d| d.code == 6053));
+    assert_eq!(parsed.pnp_manifest_paths, ["/u/p/.pnp.data.json"]);
+}
+
+/// A manifest consulted by a base config is an input of every config that extends it; one
+/// that resolves through `node_modules` consults none.
+#[test]
+fn pnp_manifests_are_inherited_inputs() {
+    let mut fs = MemoryFs::new();
+    fs.add_file(
+        "/u/p/packages/tsconfigs/package.json",
+        r#"{ "exports": { "./config": "./configs/tsconfig.json" } }"#,
+    );
+    fs.add_file(
+        "/u/p/packages/tsconfigs/configs/tsconfig.json",
+        r#"{ "compilerOptions": { "strict": true } }"#,
+    );
+    fs.add_file(
+        "/u/p/.pnp.data.json",
+        r#"{ "packageRegistryData": [
+          [null, [[null, { "packageLocation": "./",
+            "packageDependencies": [["tsconfigs", "workspace:packages/tsconfigs"]] }]]],
+          ["tsconfigs", [["workspace:packages/tsconfigs", { "packageLocation": "./packages/tsconfigs/",
+            "packageDependencies": [] }]]]
+        ] }"#,
+    );
+    fs.add_file("/u/p/base.json", r#"{ "extends": "tsconfigs/config" }"#);
+    fs.add_file("/u/p/a/tsconfig.json", r#"{ "extends": "../base.json" }"#);
+    fs.add_file("/u/p/a/x.ts", "");
+    let parsed = load_tsconfig(&fs, "/u/p/a/tsconfig.json");
+    assert_eq!(parsed.pnp_manifest_paths, ["/u/p/.pnp.data.json"]);
+
+    fs.add_file(
+        "/u/p/node_modules/tsconfigs/package.json",
+        r#"{ "exports": { "./config": "./c.json" } }"#,
+    );
+    fs.add_file("/u/p/node_modules/tsconfigs/c.json", "{}");
+    let parsed = load_tsconfig(&fs, "/u/p/a/tsconfig.json");
+    assert!(
+        parsed.pnp_manifest_paths.is_empty(),
+        "{:?}",
+        parsed.pnp_manifest_paths
+    );
 }

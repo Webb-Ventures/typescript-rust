@@ -64,3 +64,55 @@ fn enum_member_values_reach_other_files() {
         );
     }
 }
+
+/// Many members whose initializers do not fold (`Math.random()`, with `noCheck`): each
+/// query reads the enum's values from the checker's cache (filled once per enum), not a
+/// fresh copy of its whole member list, so emitting all 20,000 members stays linear.
+/// Values interleave with computed ones.
+#[test]
+fn enum_member_values_of_a_large_enum_are_read_once() {
+    let Some(libs) = LibStore::locate() else {
+        eprintln!("skipped: no lib files");
+        return;
+    };
+    let n = 20_000;
+    let mut src = String::from("export enum E {\n");
+    for i in 0..n {
+        if i % 2 == 0 {
+            src.push_str(&format!("    A{i} = Math.random(),\n"));
+        } else {
+            src.push_str(&format!("    A{i} = {i},\n"));
+        }
+    }
+    src.push_str("}\n");
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file("/p/e.ts", &src);
+    fs.add_file(
+        "/p/tsconfig.json",
+        r#"{"compilerOptions":{"target":"es2020","noCheck":true,"noEmit":true},"files":["e.ts"]}"#,
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let checker = Checker::new(&program);
+    let fi = program
+        .files
+        .iter()
+        .position(|f| f.path == "/p/e.ts")
+        .unwrap();
+    let ast = &program.files[fi].ast;
+    let t = std::time::Instant::now();
+    let mut got = Vec::new();
+    for (i, n) in ast.nodes.iter().enumerate() {
+        if let Node::EnumMember { .. } = *n {
+            let id = ts_r_ast::NodeId::from_raw(i as u32).unwrap();
+            got.push(checker.enum_member_value(Loc::new(FileId(fi as u32), id)));
+        }
+    }
+    eprintln!("{n} members: {:?}", t.elapsed());
+    assert_eq!(got.len(), n);
+    for (i, v) in got.iter().enumerate() {
+        let want = (i % 2 == 1).then_some(EnumConst::Number(i as f64));
+        assert_eq!(*v, want, "A{i}");
+    }
+}

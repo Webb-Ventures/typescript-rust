@@ -1055,7 +1055,8 @@ impl<'a> Parser<'a> {
             // and dropped, the call is still a module request, and the whole expression is
             // the checker's TS1326 (importCallExpressionWithTypeArgument).
             // The type arguments are kept on the node: the checker resolves their names
-            // (importWithTypeArguments: TS2304 on `T`).
+            // only for a bare `import<T>` (importWithTypeArguments: TS2304 on `T`); tsc
+            // never looks at those of a call.
             self.bump();
             let type_args = if self.at(T::Lt) && self.peek_kind() == T::Gt {
                 self.bump();
@@ -1574,7 +1575,14 @@ impl<'a> Parser<'a> {
         }
         match self.kind() {
             T::PrivateName => self.parse_private_name(),
-            k if k.is_identifier_or_keyword() => self.parse_identifier_name(),
+            k if k.is_identifier_or_keyword() => {
+                // `obj.await` is a property name under either goal: it does not make a
+                // module be parsed again (`await_name_seen`).
+                let seen = self.await_name_seen;
+                let name = self.parse_identifier_name();
+                self.await_name_seen = seen;
+                name
+            }
             _ => {
                 self.error(messages::IDENTIFIER_EXPECTED);
                 self.missing()

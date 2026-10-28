@@ -6,6 +6,7 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use rustc_hash::FxHashMap;
 use ts_r_diagnostics::{Diagnostic, FileId};
 
 use crate::checker::{Checker, Ck};
@@ -67,15 +68,49 @@ pub fn should_check(program: &ProgramFiles, i: usize) -> bool {
 /// directives to every semantic error of a file, merge errors included: @colors/colors
 /// ignores its `bold` member of the global `String`), or it is in a lib file tsc checks
 /// ([`lib_link_diagnostics_reported`]).
+/// Reads the file's comments on every call: to filter many diagnostics, use
+/// [`LinkDiagnosticFilter`].
 pub fn link_diagnostic_reported(program: &ProgramFiles, d: &Diagnostic) -> bool {
-    let f = d.file.0 as usize;
-    if f >= program.files.len() {
-        return false;
+    LinkDiagnosticFilter::new(program).reported(d)
+}
+
+/// [`link_diagnostic_reported`] for many diagnostics: each file's comment directives are
+/// read once, the first time a diagnostic in it is asked about.
+#[derive(Debug)]
+pub struct LinkDiagnosticFilter<'p> {
+    program: &'p ProgramFiles,
+    directives: FxHashMap<usize, crate::check::FileDirectives>,
+}
+
+impl<'p> LinkDiagnosticFilter<'p> {
+    pub fn new(program: &'p ProgramFiles) -> LinkDiagnosticFilter<'p> {
+        LinkDiagnosticFilter {
+            program,
+            directives: FxHashMap::default(),
+        }
     }
-    if program.files[f].is_lib {
-        return lib_link_diagnostics_reported(program, f);
+
+    /// Whether program-level (link) diagnostic `d` is reported ([`link_diagnostic_reported`]).
+    pub fn reported(&mut self, d: &Diagnostic) -> bool {
+        let program = self.program;
+        let f = d.file.0 as usize;
+        if f >= program.files.len() {
+            return false;
+        }
+        if program.files[f].is_lib {
+            return lib_link_diagnostics_reported(program, f);
+        }
+        if !should_check(program, f) {
+            return false;
+        }
+        let sf = &program.files[f];
+        !d.is_error()
+            || !self
+                .directives
+                .entry(f)
+                .or_insert_with(|| crate::check::FileDirectives::of(sf))
+                .suppresses(sf, d)
     }
-    should_check(program, f) && !crate::check::suppressed_by_directive(&program.files[f], d)
 }
 
 /// Whether the link (merge) diagnostics located in file `i` are reported because it is a
@@ -244,22 +279,19 @@ fn check_program_impl<'a>(
         };
     }
     // Program diagnostics (`/// <reference path>` targets) come with the syntax ones.
-    let paths: rustc_hash::FxHashSet<&str> =
-        program.files.iter().map(|f| f.path.as_str()).collect();
+    let paths = program.reference_paths();
+    let missing_types = program.missing_type_references_by_file();
     for (i, f) in program.files.iter().enumerate() {
         syntax.extend(
             crate::reference_diagnostics(f, &program.options, &paths)
                 .into_iter()
                 .map(|d| d.with_file(FileId(i as u32))),
         );
-        let missing: Vec<&str> = program
-            .missing_type_references
-            .iter()
-            .filter(|(p, _)| *p == f.path)
-            .map(|(_, n)| n.as_str())
-            .collect();
+        let missing = missing_types
+            .get(f.path.as_str())
+            .map_or(&[][..], Vec::as_slice);
         syntax.extend(
-            crate::references::type_reference_diagnostics(f, &missing)
+            crate::references::type_reference_diagnostics(f, missing)
                 .into_iter()
                 .map(|d| d.with_file(FileId(i as u32))),
         );
@@ -307,8 +339,9 @@ fn check_program_impl<'a>(
         Default::default()
     };
     out.extend(missing_global_type_diagnostics(&checker));
+    let mut reported = LinkDiagnosticFilter::new(program);
     for d in &checker.link.diagnostics {
-        if link_diagnostic_reported(program, d) {
+        if reported.reported(d) {
             out.push(d.clone());
         }
     }

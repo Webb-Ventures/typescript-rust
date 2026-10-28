@@ -110,10 +110,11 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   full checks and lazy replay use the checker's `reference_diagnostics` against the full
   program's paths, plus TS2688 for a `/// <reference types>` that resolves nowhere
   (`type_reference_diagnostics`: the full path takes the names from
-  `ProgramFiles::missing_type_references`, the fast path from the saved references without
-  a target), refreshing them when the source or its resolutions change. A blocking syntax
-  error drops them, as in `check_program` (tsc reports only the syntax errors then).
-  Link diagnostics go through `driver::link_diagnostic_reported`, as in `check_program`:
+  `ProgramFiles::missing_type_references_by_file`, grouped once per check, the fast path
+  from the saved references without a target), refreshing them when the source or its
+  resolutions change. A blocking syntax error drops them, as in `check_program` (tsc
+  reports only the syntax errors then), and they are not built at all in that case.
+  Link diagnostics go through `driver::LinkDiagnosticFilter`, as in `check_program`:
   a checked file's, unless `@ts-ignore` / `@ts-expect-error` governs the line
   (@colors/colors). A lib file's half of a clash with a project declaration is reported
   too, at the lib file's path (`driver::lib_link_diagnostics_reported`: not under
@@ -132,8 +133,11 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   order (`libinfo::walk`; the manifest keeps libs in program order). Anything it does not
   handle (inconsistent manifest after blocking syntax errors, lib or option changes, a
   missing lib file that appeared, new blocking syntax errors, a program whose libs lack
-  required core globals, reported as TS2318) returns `None` and the caller
-  does the full load. Re-checked files
+  required core globals, reported as TS2318, one package identity resolved at two paths,
+  which `load_program`'s package deduplication folds into one file and the replay does not:
+  `tests/package_dedup.rs`) returns `None` and the caller does the full load (a project
+  with duplicate package copies therefore always loads in full; replaying the redirects
+  would let it reuse history). Re-checked files
   are checked on a sub-program: the libs, the files their uses reach (deep reach), re-linked
   files (those sharing a global, ambient-module or augmentation key with an edited or removed
   file, and augmentations of modules that re-export from one, transitively: an augmentation

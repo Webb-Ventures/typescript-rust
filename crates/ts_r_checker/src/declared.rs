@@ -696,6 +696,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let l = Loc::new(ts_r_diagnostics::FileId(node.0), node_id);
         self.arg_forward_depth += 1;
+        self.linking_arg_forwards.push(f);
         let outer = self.referenced_outer_type_params(l);
         let base = self.type_from_node(l);
         let items = self.store().list_items(args).to_vec();
@@ -705,6 +706,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             let m = self.store().mapper(&outer, &items);
             self.instantiate(base, m)
         };
+        self.linking_arg_forwards.pop();
         self.arg_forward_depth -= 1;
         if t != TypeId::UNRESOLVED && self.store().unforward(t) != f {
             self.store().link_forward(f, t);
@@ -712,7 +714,9 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The instantiation of the forward reference `f` to `node` under `args`: the forward
-    /// reference under the instantiated arguments, linked when new.
+    /// reference under the instantiated arguments, linked when new, or when an earlier
+    /// instantiation made it past the depth limit and left it unlinked (not while it is
+    /// being linked: that is the cycle).
     pub(crate) fn instantiate_arg_forward(
         &mut self,
         f: TypeId,
@@ -727,9 +731,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let list = self.store().list(&mapped);
         let (g, created) = self.store().forward_node_args(node, list);
-        if created {
+        let unlinked = created
+            || (!self.store().is_linked_forward(g) && !self.linking_arg_forwards.contains(&g));
+        if unlinked {
             if self.in_alias_resolution() {
-                self.pending_arg_forwards.push(g);
+                if created || !self.pending_arg_forwards.contains(&g) {
+                    self.pending_arg_forwards.push(g);
+                }
             } else {
                 self.link_arg_forward(g);
             }

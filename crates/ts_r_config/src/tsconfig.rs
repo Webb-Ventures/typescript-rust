@@ -143,6 +143,9 @@ pub struct ParsedConfig {
     pub compile_on_save: Option<bool>,
     /// Every config file in the `extends` chain (absolute, resolved), for watchers.
     pub extended_config_paths: Vec<String>,
+    /// Yarn PnP manifests (`.pnp.data.json`) read to resolve a package `extends` anywhere in
+    /// the chain, whether or not they resolved it: configuration inputs, for watchers.
+    pub pnp_manifest_paths: Vec<String>,
     /// Parse, option and file-discovery diagnostics, in file/position order.
     pub diagnostics: Vec<ConfigDiagnostic>,
     /// Span of the leaf config's `compilerOptions` key, if present.
@@ -273,6 +276,8 @@ struct Merged {
     watch: Option<WatchOptions>,
     type_acquisition: Option<TypeAcquisition>,
     chain: Vec<String>,
+    /// PnP manifests read while resolving the chain's `extends`, in first-read order.
+    pnp_manifests: Vec<String>,
 }
 
 /// Loads tsconfig files, caching parsed files (so shared bases are read once).
@@ -353,6 +358,7 @@ impl<'fs> ConfigLoader<'fs> {
                 type_acquisition: None,
                 compile_on_save: None,
                 extended_config_paths: Vec::new(),
+                pnp_manifest_paths: Vec::new(),
                 diagnostics: diags,
                 compiler_options_key: None,
                 command_line: false,
@@ -482,6 +488,7 @@ impl<'fs> ConfigLoader<'fs> {
             type_acquisition: merged.type_acquisition,
             compile_on_save: merged.compile_on_save,
             extended_config_paths: merged.chain,
+            pnp_manifest_paths: merged.pnp_manifests,
             diagnostics: Vec::new(),
             compiler_options_key: raw.compiler_options_key,
             command_line: false,
@@ -575,6 +582,7 @@ impl<'fs> ConfigLoader<'fs> {
             type_acquisition: None,
             compile_on_save: None,
             extended_config_paths: Vec::new(),
+            pnp_manifest_paths: Vec::new(),
             diagnostics: Vec::new(),
             compiler_options_key: None,
             command_line: true,
@@ -593,7 +601,12 @@ impl<'fs> ConfigLoader<'fs> {
         let cs = self.fs.case_sensitive();
         let mut merged = Merged::default();
         for (spec, span) in &raw.extends {
-            let Some(target) = resolve_extends(self.fs, spec, &raw.dir) else {
+            let resolved = resolve_extends_reading(self.fs, spec, &raw.dir, &mut |m| {
+                if !merged.pnp_manifests.iter().any(|p| p == m) {
+                    merged.pnp_manifests.push(m.to_owned());
+                }
+            });
+            let Some(target) = resolved else {
                 diags.push(ConfigDiagnostic::at(
                     6053,
                     format!("File '{spec}' not found."),
@@ -646,6 +659,11 @@ impl<'fs> ConfigLoader<'fs> {
             for p in std::iter::once(&target).chain(&base.chain) {
                 if !merged.chain.contains(p) {
                     merged.chain.push(p.clone());
+                }
+            }
+            for m in &base.pnp_manifests {
+                if !merged.pnp_manifests.contains(m) {
+                    merged.pnp_manifests.push(m.clone());
                 }
             }
             overlay_merged(&mut merged, base);
@@ -820,6 +838,16 @@ fn substitute_config_dir(opts: &mut CompilerOptions, dir: &str) {
 
 /// Resolves an `extends` specifier from directory `from_dir`.
 pub fn resolve_extends(fs: &dyn FileSystem, spec: &str, from_dir: &str) -> Option<String> {
+    resolve_extends_reading(fs, spec, from_dir, &mut |_| {})
+}
+
+/// [`resolve_extends`], calling `read_manifest` with each Yarn PnP manifest it reads.
+fn resolve_extends_reading(
+    fs: &dyn FileSystem,
+    spec: &str,
+    from_dir: &str,
+    read_manifest: &mut dyn FnMut(&str),
+) -> Option<String> {
     let spec_n = path::normalize_slashes(spec);
     // `.` and `..` go through module resolution (observed): `<dir>.json`, then
     // `<dir>/tsconfig.json`. `./dir` and `../` are plain paths and fail (TS6053).
@@ -863,6 +891,7 @@ pub fn resolve_extends(fs: &dyn FileSystem, spec: &str, from_dir: &str) -> Optio
     // No `node_modules` copy: a Yarn Plug'n'Play manifest may place the package (esbuild's
     // `TsconfigPackageJsonExportsYarnPnP`). tsc 7 has no PnP support and reports TS6053 here.
     let pnp = crate::pnp::PnpManifest::find(fs, from_dir)?;
+    read_manifest(pnp.path());
     let pkg_dir = pnp.package_dir(pkg_name, &path::combine(from_dir, "tsconfig.json"))?;
     let found = resolve_in_config_package(fs, pkg_dir.trim_end_matches('/'), subpath)?;
     Some(fs.realpath(&found))

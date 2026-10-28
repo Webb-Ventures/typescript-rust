@@ -27,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::SourceKind;
 use ts_r_binder::{BindOptions, RequestKind};
 use ts_r_cache::{Cache, Key};
-use ts_r_checker::driver::{CHECKER_GRAMMAR_CODES, link_diagnostic_reported};
+use ts_r_checker::driver::{CHECKER_GRAMMAR_CODES, LinkDiagnosticFilter};
 use ts_r_checker::program::{
     Resolution, bind_options_for, expand_wildcard_types, reference_target, resolve_request,
     resolve_request_in,
@@ -88,6 +88,22 @@ struct Scanned {
     /// Current requests and references (`Moved`, `Edited`).
     requests: Option<Vec<SavedRequest>>,
     references: Option<Vec<SavedReference>>,
+    /// Package identities of the files its requests resolve to now ([`Packages`]).
+    packages: Packages,
+}
+
+/// (package identity, resolved path) of the requests a file makes: two paths with one
+/// identity are copies `load_program`'s package deduplication folds into one file, which
+/// the reconstruction does not replay, so such a run takes the full load.
+type Packages = Vec<(ts_r_resolver::PackageId, String)>;
+
+/// Records `r`'s package identity in `packages`.
+fn note_package(packages: &mut Packages, r: &Resolution) {
+    if let Some(id) = &r.package_id
+        && !packages.iter().any(|(i, p)| i == id && *p == r.resolved)
+    {
+        packages.push((id.clone(), r.resolved.clone()));
+    }
 }
 
 impl Scanned {
@@ -102,6 +118,7 @@ impl Scanned {
             pragma: false,
             requests: None,
             references: None,
+            packages: Vec::new(),
         }
     }
 }
@@ -116,6 +133,7 @@ struct NewFile {
     pragma: bool,
     requests: Vec<SavedRequest>,
     references: Vec<SavedReference>,
+    packages: Packages,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -307,14 +325,16 @@ impl<'a, F: FileSystem> Run<'a, F> {
         &self.config.options
     }
 
-    /// Resolutions of `f`'s module requests and its reference targets, as saved.
+    /// Resolutions of `f`'s module requests and its reference targets, as saved, and the
+    /// package identities they resolve to.
     fn edges(
         &self,
         resolver: &Resolver<&F>,
         f: &SourceFile,
-    ) -> (Vec<SavedRequest>, Vec<SavedReference>) {
+    ) -> (Vec<SavedRequest>, Vec<SavedReference>, Packages) {
         let allow_js = self.options().effective().allow_js();
         let mut first = FxHashMap::default();
+        let mut packages = Packages::new();
         let requests = crate::module_requests_with_modes(f, self.options())
             .map(|(spec, kind, mode)| {
                 let res = first
@@ -326,7 +346,10 @@ impl<'a, F: FileSystem> Run<'a, F> {
                             }
                             None => resolve_request(resolver, allow_js, &f.path, &spec, kind),
                         }
-                        .map(|r| self.paths.res(&r))
+                        .map(|r| {
+                            note_package(&mut packages, &r);
+                            self.paths.res(&r)
+                        })
                     })
                     .clone();
                 SavedRequest {
@@ -347,7 +370,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
                 ((*k).to_owned(), v.clone(), t)
             })
             .collect();
-        (requests, references)
+        (requests, references, packages)
     }
 
     /// Scans saved file `f`.
@@ -377,7 +400,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             let hash = hash_of(&t);
             let pragma = has_pragma(&t);
             let file = SourceFile::new(path, t, false, &bind_opts);
-            let (requests, references) = self.edges(resolver, &file);
+            let (requests, references, packages) = self.edges(resolver, &file);
             return Scanned {
                 status: Status::Edited,
                 hash,
@@ -388,12 +411,14 @@ impl<'a, F: FileSystem> Run<'a, F> {
                 pragma,
                 requests: Some(requests),
                 references: Some(references),
+                packages,
             };
         }
         // Same text: verify resolutions and references.
         let allow_js = options.effective().allow_js();
         let mut first = FxHashMap::default();
         let mut moved = false;
+        let mut packages = Packages::new();
         let requests: Vec<SavedRequest> = f
             .requests
             .iter()
@@ -408,7 +433,10 @@ impl<'a, F: FileSystem> Run<'a, F> {
                             }
                             None => resolve_request(resolver, allow_js, &path, &r.spec, kind),
                         }
-                        .map(|x| self.paths.res(&x))
+                        .map(|x| {
+                            note_package(&mut packages, &x);
+                            self.paths.res(&x)
+                        })
                     })
                     .clone();
                 moved |= res != r.res;
@@ -440,6 +468,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             file: None,
             requests: moved.then_some(requests),
             references: moved.then_some(references),
+            packages,
         }
     }
 
@@ -452,7 +481,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
         let pragma = has_pragma(&text);
         let bind_opts = bind_options_for(&path, self.options(), Some(resolver));
         let file = SourceFile::new(path, text, false, &bind_opts);
-        let (requests, references) = self.edges(resolver, &file);
+        let (requests, references, packages) = self.edges(resolver, &file);
         Some(NewFile {
             rel: rel.to_owned(),
             file: Some(file),
@@ -462,6 +491,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             pragma,
             requests,
             references,
+            packages,
         })
     }
 
@@ -681,6 +711,23 @@ impl<'a, F: FileSystem> Run<'a, F> {
                     src,
                     deps,
                 });
+            }
+        }
+        // One package identity at two paths: `load_program` keeps the first copy it walks
+        // and redirects the other to it (package deduplication), which this reconstruction
+        // does not replay (it would check the copies as two files): the full load decides.
+        if options.effective().deduplicate_packages() {
+            let mut owner: FxHashMap<&ts_r_resolver::PackageId, &str> = FxHashMap::default();
+            for sk in &sks {
+                let packages = match sk.src {
+                    Src::Saved(i) => &scanned[i].packages,
+                    Src::New(j) => &news[j].packages,
+                };
+                for (id, path) in packages {
+                    if *owner.entry(id).or_insert(path.as_str()) != path.as_str() {
+                        return None;
+                    }
+                }
             }
         }
         // Order: depth-first post-order from the `types` entries, then the roots.
@@ -1204,8 +1251,9 @@ impl<'a, F: FileSystem> Run<'a, F> {
             let checker = Checker::new(&sub);
             // As `check_program`: a checked file's, unless `@ts-ignore` or
             // `@ts-expect-error` governs its line.
+            let mut filter = LinkDiagnosticFilter::new(&sub);
             for d in &checker.link.diagnostics {
-                if !link_diagnostic_reported(&sub, d) {
+                if !filter.reported(d) {
                     continue;
                 }
                 // One in a lib file (a project declaration clashing with a lib one): the
@@ -1481,6 +1529,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             files: files_out,
             parsed: parsed_count,
             pragma: any_pragma,
+            program: None,
         })
     }
 
@@ -1656,6 +1705,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             files,
             parsed: 0,
             pragma: scanned.iter().any(|s| s.pragma),
+            program: None,
         }
     }
 }

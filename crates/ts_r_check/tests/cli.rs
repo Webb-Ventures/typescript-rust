@@ -1212,6 +1212,31 @@ fn regression_root_dir_uses_history_and_keeps_ts6059() {
     ] {
         assert_eq!((out.as_str(), code), (both.as_str(), 1), "{what}");
     }
+    // The TS6059 check takes the checked program's diagnostics: the program is not checked a
+    // second time, warm (history answered, the program is only loaded) or without history
+    // (the history's own load is reused).
+    let reused = "ts-r-check: rootDir check on the checked program's diagnostics\n";
+    let (out, code) = check(true);
+    assert!(
+        out.contains(reused) && out.starts_with(&both),
+        "warm: {out}"
+    );
+    assert_eq!(code, 1);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ts-r-check"));
+    cmd.env("TS_R_CHECK_STATS", "1").args([
+        "--no-history",
+        "--sound=off",
+        "-p",
+        ".",
+        "--pretty",
+        "false",
+    ]);
+    let (out, code) = run(&mut cmd, &dir);
+    assert!(
+        out.contains(reused) && out.starts_with(&both),
+        "no history: {out}"
+    );
+    assert_eq!(code, 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

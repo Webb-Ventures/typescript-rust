@@ -1235,3 +1235,34 @@ fn strict_callback_success_is_not_cached() {
     assert!(out.iter().any(|d| d.starts_with("10:1 TS2322")), "{out:?}");
     assert!(out.iter().any(|d| d.starts_with("11:1 TS2322")), "{out:?}");
 }
+
+/// `import<..>("m")` is only TS1326: tsc never resolves the type arguments of an import
+/// call (no TS2304 for `Missing`, nor for the function type's own `T`); a bare `import<T>`
+/// still resolves them (importWithTypeArguments). tsc 7.0.2, `--module commonjs --target
+/// es2015 --strict`: 1:1 TS1326, 1:8 TS2304, then TS1326 at 2:25, 3:11, 4:11 and 5:11.
+#[test]
+fn import_call_type_arguments_are_not_resolved() {
+    let src = "import<T>\nconst x: Promise<any> = import<string>(\"./a\");\nconst y = import<Missing>(\"./a\");\nconst p = import< <T>() => T>(\"./a\");\nconst q = import<{ a: Missing }>(\"./a\");\nexport {};\n";
+    let Some(d) = check(
+        "\"strict\": true, \"module\": \"commonjs\", \"target\": \"es2015\"",
+        src,
+    ) else {
+        return;
+    };
+    let got: Vec<&str> = d
+        .iter()
+        .map(|l| l.split_once(": ").map_or(&l[..], |p| p.0))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "1:1 TS1326",
+            "1:8 TS2304",
+            "2:25 TS1326",
+            "3:11 TS1326",
+            "4:11 TS1326",
+            "5:11 TS1326"
+        ],
+        "{d:#?}"
+    );
+}

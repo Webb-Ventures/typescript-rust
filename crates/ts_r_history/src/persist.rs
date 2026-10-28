@@ -122,6 +122,11 @@ pub struct Outcome {
     pub parsed: usize,
     /// Some non-lib file mentions `@ts-r` (known without reading unchanged files).
     pub pragma: bool,
+    /// The whole program, when this run loaded it (no history, or history that fell back to
+    /// a full load): `diagnostics` and `sources` use its file ids, so a caller that needs the
+    /// program too (`ts-r-check`'s TS6059) takes it instead of loading and checking again.
+    /// `None` when the history answered from its saved state.
+    pub program: Option<ProgramFiles>,
 }
 
 /// Whether `text` mentions `@ts-r` (sound-mode pragmas; `ts-r-check` then needs the program).
@@ -313,9 +318,12 @@ pub fn check<F: FileSystem>(
         _ => None,
     };
     phases.lap("read");
-    // Lazy reconstruction does not track the JavaScript depth of each import route.
+    // Lazy reconstruction does not track the JavaScript depth of each import route, nor
+    // where `libReplacement` finds a lib's `@typescript/lib-*` package (it checks only the
+    // bundled libs): those take the full load.
     if let (Some(c), Some(m), Some(digest)) = (cache, &manifest, digest)
         && !(options.effective().allow_js() && options.effective().max_node_module_js_depth() > 0)
+        && options.lib_replacement() != Some(true)
     {
         let run = crate::lazy::Run {
             fs,
@@ -377,6 +385,7 @@ pub fn check<F: FileSystem>(
             files,
             parsed,
             pragma,
+            program: Some(program),
         };
     };
     let mut history = History {
@@ -417,6 +426,7 @@ pub fn check<F: FileSystem>(
         files,
         parsed,
         pragma,
+        program: Some(program),
     }
 }
 

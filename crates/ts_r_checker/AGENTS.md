@@ -665,7 +665,9 @@ Files, by layer:
   semantic errors: `tsc: tsc/internal/compiler/program.go`; they also hide the program's
   link (merge) errors on their line, such as a duplicate `declare global` member, and such a
   hit counts as the directive's use, so no TS2578: `driver::link_diagnostic_reported`,
-  `check::suppressed_by_directive`; a lib file's half of a clash with a project
+  `check::suppressed_by_directive`; to filter many, `driver::LinkDiagnosticFilter` reads each
+  file's directives once (`check::FileDirectives`), so a file with many merge errors and
+  many comments stays linear (`tests/link_directives.rs`); a lib file's half of a clash with a project
   declaration, TS2300 `Duplicate identifier 'bold'` in `lib.es2015.core.d.ts`, is reported
   as tsc 7's CLI does unless `skipLibCheck` or `skipDefaultLibCheck`:
   `driver::lib_link_diagnostics_reported`; the conformance example does not compare them,
@@ -1508,7 +1510,10 @@ Files, by layer:
   such forward, linked at once (or once no alias is being resolved) to the node's type
   instantiated with them, which meets the forward again and closes the cycle (`R<string>`
   is `Array<string | R<string>>`). Arguments that keep growing (`type G<T> = Array<T |
-  G<T[]>>`) stop linking 16 levels deep (unlinked, `any`). Class type arguments are not
+  G<T[]>>`) stop linking 16 levels deep (unlinked, `any`); one left unlinked there is
+  linked when an instantiation meets it again outside its own linking
+  (`linking_arg_forwards`), so the types do not depend on which instantiation was
+  resolved first (`tests/arg_forwards.rs`, tsc 7.0.2's TS2322 in both orders). Class type arguments are not
   deferred. A reference that is a generic alias's whole type keeps the alias through
   instantiation (`type A<T> = T[]`: `A<string>` prints `A<string>`; tsc defers such
   references).
@@ -3026,7 +3031,9 @@ Files, by layer:
   - Overloads (`overloads.rs`): a zero-width body made up by the parser is no body. A
     group only continues across trivia. An implementation followed later, not
     consecutively, by a body-less declaration of the same member is TS2391 too
-    (checkFunctionOrConstructorSymbol).
+    (checkFunctionOrConstructorSymbol). "The next declaration of the same member" (name,
+    kind, staticness) comes from one backward pass (`next_same_member`); nothing scans
+    the rest of the list per declaration (`tests/overload_groups.rs`).
   - A function's type parameters do not see its parameters (`<T extends typeof a>(a: T)`
     is TS2304) or its body's locals. This applies in the binder's reference resolution
     and in `lookup_in_scope_chain`. A name that is both a type parameter and a parameter
@@ -3066,7 +3073,10 @@ Files, by layer:
     getWidenedTypeOfObjectLiteral). The unannotated parameters of an IIFE past its
     arguments are optional in the signature (`y?: undefined`). Fixture:
     `tests/parity/widened_literal_subtypes_and_iife_params`.
-  - `import<T>` resolves its type arguments. `export default X` of a local type `X` and an
+  - A bare `import<T>` resolves its type arguments (TS2304 on `T`); an import call
+    `import<A>("m")` is only TS1326, and neither `check_expr` nor the type-annotation walk
+    looks at its type arguments (tsc 7.0.2; `tests/check.rs`
+    `import_call_type_arguments_are_not_resolved`). `export default X` of a local type `X` and an
     exported value `X` is a value for `alias_is_value` (`tests/alias_is_value.rs`).
   - Round 7 (wip/v1-checker7).
     - A rest parameter of a generic type (`...t: T`, not a tuple) is related as a whole.

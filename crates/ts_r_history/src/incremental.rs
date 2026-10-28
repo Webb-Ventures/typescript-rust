@@ -13,7 +13,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_checker::driver::CHECKER_GRAMMAR_CODES;
-use ts_r_checker::driver::link_diagnostic_reported;
+use ts_r_checker::driver::LinkDiagnosticFilter;
 use ts_r_checker::{CheckRun, Checker, ProgramFiles, SourceFile, check_files, should_check};
 use ts_r_diagnostics::{Diagnostic, FileId};
 
@@ -232,18 +232,6 @@ pub fn syntax_only(f: &SourceFile) -> impl Iterator<Item = Diagnostic> {
         .chain(ts_r_checker::invalid_reference_diagnostics(f))
 }
 
-/// TS2688 for `f`'s `/// <reference types>` directives that `program`'s loader could not
-/// resolve (`ProgramFiles::missing_type_references`), as the checker driver reports them.
-pub fn type_reference_diagnostics(program: &ProgramFiles, f: &SourceFile) -> Vec<Diagnostic> {
-    let missing: Vec<&str> = program
-        .missing_type_references
-        .iter()
-        .filter(|(p, _)| *p == f.path)
-        .map(|(_, n)| n.as_str())
-        .collect();
-    ts_r_checker::type_reference_diagnostics(f, &missing)
-}
-
 /// Global diagnostics of a program (unresolved `types` entries, ambiguous project roots).
 pub fn global_diagnostics(program: &ProgramFiles) -> Vec<Diagnostic> {
     let mut out: Vec<Diagnostic> = program
@@ -281,19 +269,6 @@ impl History {
             t = std::time::Instant::now();
         };
         let (syntax, blocking) = blocking_syntax(program);
-        let paths: FxHashSet<&str> = program.files.iter().map(|f| f.path.as_str()).collect();
-        let references: Vec<Vec<Diagnostic>> = program
-            .files
-            .iter()
-            .enumerate()
-            .map(|(i, f)| {
-                ts_r_checker::reference_diagnostics(f, &program.options, &paths)
-                    .into_iter()
-                    .chain(type_reference_diagnostics(program, f))
-                    .map(|d| d.with_file(FileId(i as u32)))
-                    .collect()
-            })
-            .collect();
         if blocking {
             // Nothing is checked, and only the syntax errors are reported (not the reference
             // diagnostics), as `check_program`; the history stays as it was (it describes
@@ -301,6 +276,23 @@ impl History {
             stats.blocked = true;
             return (ts_r_checker::sort_and_dedup(program, syntax), stats);
         }
+        let paths = program.reference_paths();
+        let missing_types = program.missing_type_references_by_file();
+        let references: Vec<Vec<Diagnostic>> = program
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let missing = missing_types
+                    .get(f.path.as_str())
+                    .map_or(&[][..], Vec::as_slice);
+                ts_r_checker::reference_diagnostics(f, &program.options, &paths)
+                    .into_iter()
+                    .chain(ts_r_checker::type_reference_diagnostics(f, missing))
+                    .map(|d| d.with_file(FileId(i as u32)))
+                    .collect()
+            })
+            .collect();
         let mut syntax = syntax;
         syntax.extend(references.iter().flatten().cloned());
         let key = program_key(program);
@@ -411,8 +403,16 @@ impl History {
             out.extend(globals.iter().cloned());
             // As `check_program`: a checked file's, unless `@ts-ignore` or
             // `@ts-expect-error` governs its line.
-            let reported = |d: &&Diagnostic| link_diagnostic_reported(program, d);
-            out.extend(checker.link.diagnostics.iter().filter(reported).cloned());
+            let mut filter = LinkDiagnosticFilter::new(program);
+            let mut reported = |d: &&Diagnostic| filter.reported(d);
+            out.extend(
+                checker
+                    .link
+                    .diagnostics
+                    .iter()
+                    .filter(&mut reported)
+                    .cloned(),
+            );
             for (&i, ds) in targets.iter().zip(check_files(&checker, &targets, run)) {
                 results.insert(
                     i,
@@ -424,7 +424,7 @@ impl History {
                     .link
                     .diagnostics
                     .iter()
-                    .filter(reported)
+                    .filter(&mut reported)
                     .chain(globals.iter())
                     .map(|d| PathDiag::from_diag(program, d))
                     .collect(),

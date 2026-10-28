@@ -460,6 +460,33 @@ fn is_declaration_name(path: &str) -> bool {
 /// Per file id: `(path, text)` for non-lib files, and for the lib files `diags` point
 /// into (tsc prints a lib file's diagnostics with its path: a declaration colliding with a
 /// lib one is a TS2300 in both files).
+/// `diags` (file ids into `sources`, as the history returned them, in the order a check of
+/// `program` gives) with the ids of the same files in `program`; `None` when a file is not in
+/// `program` (the caller then checks it).
+fn rebase_diagnostics(
+    program: &ProgramFiles,
+    sources: &[Option<(String, String)>],
+    mut diags: Vec<Diagnostic>,
+) -> Option<Vec<Diagnostic>> {
+    let ids: std::collections::HashMap<&str, FileId> = program
+        .files
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.path.as_str(), FileId(i as u32)))
+        .collect();
+    let id = |f: FileId| {
+        let (path, _) = sources.get(f.0 as usize)?.as_ref()?;
+        ids.get(path.as_str()).copied()
+    };
+    for d in &mut diags {
+        d.file = id(d.file)?;
+        for r in &mut d.related {
+            r.file = id(r.file)?;
+        }
+    }
+    Some(diags)
+}
+
 fn sources_of(program: &ProgramFiles, diags: &[Diagnostic]) -> Vec<Option<(String, String)>> {
     let mut shown: Vec<bool> = program.files.iter().map(|f| !f.is_lib).collect();
     for d in diags {
@@ -986,10 +1013,50 @@ fn main() -> ExitCode {
             .options
             .root_dir()
             .is_some_and(|root| outside_root_dir(root, &outcome.files, fs.case_sensitive()));
-        if pragmas || outside_root {
+        if pragmas {
             let (program, diags, _, _, _) = full_check(true, false);
             let sources = sources_of(&program, &diags);
             (Some(program), sources, diags)
+        } else if outside_root {
+            // The check is done: TS6059 needs only the program. The one history loaded, or a
+            // fresh load (no second check) with the diagnostics moved onto its file ids.
+            let stats = std::env::var_os("TS_R_CHECK_STATS").is_some();
+            let ts_r_history::persist::Outcome {
+                program,
+                diagnostics,
+                sources,
+                ..
+            } = outcome;
+            let reused = match program {
+                Some(program) => Some((program, diagnostics)),
+                None => {
+                    let (program, _, _, _, _) = full_check(false, false);
+                    rebase_diagnostics(&program, &sources, diagnostics).map(|d| (program, d))
+                }
+            };
+            match reused {
+                Some((program, mut diags)) => {
+                    if stats {
+                        eprintln!("ts-r-check: rootDir check on the checked program's diagnostics");
+                    }
+                    let composite =
+                        ts_r_projects::references::composite_diagnostics(&program, &parsed);
+                    if !composite.is_empty() {
+                        diags.extend(composite);
+                        build::sort_by_file(&program, &mut diags);
+                    }
+                    let sources = sources_of(&program, &diags);
+                    (Some(program), sources, diags)
+                }
+                None => {
+                    if stats {
+                        eprintln!("ts-r-check: rootDir check after a full check");
+                    }
+                    let (program, diags, _, _, _) = full_check(true, false);
+                    let sources = sources_of(&program, &diags);
+                    (Some(program), sources, diags)
+                }
+            }
         } else {
             (None, outcome.sources, outcome.diagnostics)
         }
