@@ -255,6 +255,11 @@ pub trait TypeInfo {
     fn index_type(&self, t: Ty, number: bool) -> Option<Ty> {
         None
     }
+    /// The index signature type a property name reads through a pattern key
+    /// (`[k: Lowercase<string>]` for `t.a`), when no `string` signature covers it.
+    fn name_index_type(&self, t: Ty, name: &str) -> Option<Ty> {
+        None
+    }
     /// The declared global type `name` (`Promise`, `Error`, ...), as a non-generic reference
     /// target.
     fn global_type(&self, name: &str) -> Option<Ty> {

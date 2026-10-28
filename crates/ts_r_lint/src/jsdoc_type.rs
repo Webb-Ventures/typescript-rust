@@ -306,6 +306,41 @@ impl N {
 pub struct TypeTree {
     pub nodes: Vec<N>,
     pub root: Id,
+    /// Printing choices per node (`jsdoc/type-formatting` sets them; the parser records
+    /// none, so the printer's defaults apply). Indexed by node id; may be shorter.
+    pub meta: Vec<Meta>,
+}
+
+/// How [`TypeTree::stringify`] spaces and punctuates one node; `None` is the default.
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct Meta {
+    /// Around a union's `|` (default ` | `).
+    pub spacing: Option<String>,
+    /// After a generic's or tuple's `,`.
+    pub element_spacing: Option<String>,
+    pub post_key: Option<String>,
+    pub post_colon: Option<String>,
+    pub post_optional: Option<String>,
+    pub post_variadic: Option<String>,
+    /// Objects: a separator after a lone field, and after the last one.
+    pub separator_for_single: bool,
+    pub trailing_punctuation: bool,
+    pub bracket_spacing: Option<String>,
+    pub property_indent: Option<String>,
+    /// Functions and signatures.
+    pub parameter_spacing: Option<String>,
+    pub post_generic: Option<String>,
+    pub post_return: Option<String>,
+    pub pre_return: Option<String>,
+    pub type_parameter_spacing: Option<String>,
+    pub post_new: Option<String>,
+    pub post_method_name: Option<String>,
+    /// Around a type parameter's `=`.
+    pub default_value_spacing: Option<String>,
+}
+
+fn or<'a>(v: &'a Option<String>, d: &'a str) -> &'a str {
+    v.as_deref().unwrap_or(d)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2433,6 +2468,7 @@ fn run(text: &str, loose: bool, gram: G, top: Option<bool>) -> Option<TypeTree> 
     Some(TypeTree {
         nodes: ar.nodes,
         root: r,
+        meta: Vec::new(),
     })
 }
 
@@ -2634,9 +2670,28 @@ impl TypeTree {
         out
     }
 
+    /// Node `id`'s printing choices, for editing.
+    pub fn meta_mut(&mut self, id: Id) -> &mut Meta {
+        if self.meta.len() <= id {
+            self.meta.resize(id + 1, Meta::default());
+        }
+        &mut self.meta[id]
+    }
+
+    fn m(&self, id: Id) -> Meta {
+        self.meta.get(id).cloned().unwrap_or_default()
+    }
+
     pub fn stringify(&self) -> String {
         let mut s = String::new();
         self.write(self.root, &mut s);
+        s
+    }
+
+    /// Node `id` written as text.
+    pub fn stringify_at(&self, id: Id) -> String {
+        let mut s = String::new();
+        self.write(id, &mut s);
         s
     }
 
@@ -2665,19 +2720,35 @@ impl TypeTree {
         }
     }
 
-    fn signature_tail(&self, tps: &Option<Vec<Id>>, params: &[Id], ret: Id, out: &mut String) {
-        if let Some(t) = tps {
-            out.push('<');
-            self.list(t, ", ", out);
-            out.push('>');
-        }
+    fn signature_tail(
+        &self,
+        m: &Meta,
+        tps: &Option<Vec<Id>>,
+        params: &[Id],
+        ret: Id,
+        out: &mut String,
+    ) {
+        self.type_params(m, tps, out);
         out.push('(');
-        self.list(params, ", ", out);
-        out.push_str("): ");
+        self.list(params, &format!(",{}", or(&m.parameter_spacing, " ")), out);
+        out.push(')');
+        out.push_str(or(&m.pre_return, ""));
+        out.push(':');
+        out.push_str(or(&m.post_return, " "));
         self.write(ret, out);
     }
 
+    fn type_params(&self, m: &Meta, tps: &Option<Vec<Id>>, out: &mut String) {
+        if let Some(t) = tps {
+            out.push('<');
+            self.list(t, &format!(",{}", or(&m.type_parameter_spacing, " ")), out);
+            out.push('>');
+            out.push_str(or(&m.post_generic, ""));
+        }
+    }
+
     fn write(&self, id: Id, out: &mut String) {
+        let m = &self.m(id);
         match &self.nodes[id] {
             N::Name(v) => out.push_str(v),
             N::Number(v) => out.push_str(&js_number(*v)),
@@ -2723,13 +2794,19 @@ impl TypeTree {
             } => {
                 if *variadic && !*optional {
                     out.push_str("...");
+                    out.push_str(or(&m.post_variadic, ""));
                 }
                 out.push_str(key);
                 if *optional {
+                    out.push_str(or(&m.post_key, ""));
                     out.push('?');
+                    out.push_str(or(&m.post_optional, ""));
+                } else if !*variadic && right.is_some() {
+                    out.push_str(or(&m.post_key, ""));
                 }
                 if let Some(r) = right {
-                    out.push_str(": ");
+                    out.push(':');
+                    out.push_str(or(&m.post_colon, " "));
                     self.write(*r, out);
                 }
             }
@@ -2756,11 +2833,14 @@ impl TypeTree {
                         out.push('.');
                     }
                     out.push('<');
-                    self.list(elements, ", ", out);
+                    self.list(elements, &format!(",{}", or(&m.element_spacing, " ")), out);
                     out.push('>');
                 }
             }
-            N::Union(els) => self.list(els, " | ", out),
+            N::Union(els) => {
+                let s = or(&m.spacing, " ");
+                self.list(els, &format!("{s}|{s}"), out)
+            }
             N::Intersection(els) => self.list(els, " & ", out),
             N::Function {
                 type_params,
@@ -2776,24 +2856,25 @@ impl TypeTree {
                         return;
                     }
                     out.push('(');
-                    self.list(params, ", ", out);
+                    self.list(params, &format!(",{}", or(&m.parameter_spacing, " ")), out);
                     out.push(')');
                     if let Some(r) = ret {
-                        out.push_str(": ");
+                        out.push_str(or(&m.pre_return, ""));
+                        out.push(':');
+                        out.push_str(or(&m.post_return, " "));
                         self.write(*r, out);
                     }
                 } else {
                     if *constructor {
                         out.push_str("new ");
                     }
-                    if let Some(t) = type_params {
-                        out.push('<');
-                        self.list(t, ", ", out);
-                        out.push('>');
-                    }
+                    self.type_params(m, type_params, out);
                     out.push('(');
-                    self.list(params, ", ", out);
-                    out.push_str(") => ");
+                    self.list(params, &format!(",{}", or(&m.parameter_spacing, " ")), out);
+                    out.push(')');
+                    out.push_str(or(&m.pre_return, " "));
+                    out.push_str("=>");
+                    out.push_str(or(&m.post_return, " "));
                     if let Some(r) = ret {
                         self.write(*r, out);
                     }
@@ -2854,19 +2935,47 @@ impl TypeTree {
                     Sep::Linebreak => "\n",
                     _ => "",
                 };
-                out.push('{');
+                // The parser indents linebreak-separated fields by two spaces.
+                let indent = m
+                    .property_indent
+                    .as_deref()
+                    .unwrap_or(if lb { "  " } else { "" });
+                let brackets = or(&m.bracket_spacing, "");
                 let many = elements.len() > 1;
-                if lb && many {
-                    out.push_str("\n  ");
+                out.push('{');
+                if lb && (many || m.separator_for_single) {
+                    out.push('\n');
+                    out.push_str(indent);
+                } else {
+                    out.push_str(brackets);
                 }
                 let joiner = match sep {
                     Sep::Comma => ", ".to_owned(),
-                    _ if lb => format!("{ending}  "),
+                    _ if lb => format!("{ending}{indent}"),
                     _ => "; ".to_owned(),
                 };
                 self.list(elements, &joiner, out);
+                let starts_comma = matches!(sep, Sep::Comma | Sep::CommaLinebreak);
+                let starts_semi = matches!(sep, Sep::Semicolon | Sep::SemicolonLinebreak);
+                if m.separator_for_single && elements.len() == 1 {
+                    out.push_str(match sep {
+                        Sep::Comma => ",",
+                        _ if lb => ending,
+                        _ => ";",
+                    });
+                } else if m.trailing_punctuation {
+                    out.push_str(if starts_comma {
+                        ","
+                    } else if starts_semi {
+                        ";"
+                    } else {
+                        ""
+                    });
+                }
                 if lb && many {
                     out.push('\n');
+                } else {
+                    out.push_str(brackets);
                 }
                 out.push('}');
             }
@@ -2888,11 +2997,14 @@ impl TypeTree {
                         self.write(*k, out);
                     }
                 }
+                out.push_str(or(&m.post_key, ""));
                 if !method && *optional {
                     out.push('?');
+                    out.push_str(or(&m.post_optional, ""));
                 }
                 if let Some(r) = right {
-                    out.push_str(": ");
+                    out.push(':');
+                    out.push_str(or(&m.post_colon, " "));
                     self.write(*r, out);
                 }
             }
@@ -2916,7 +3028,7 @@ impl TypeTree {
             }
             N::Tuple(els) => {
                 out.push('[');
-                self.list(els, ", ", out);
+                self.list(els, &format!(",{}", or(&m.element_spacing, " ")), out);
                 out.push(']');
             }
             N::Asserts { left, right } => {
@@ -2967,7 +3079,10 @@ impl TypeTree {
                     self.write(*c, out);
                 }
                 if let Some(d) = default {
-                    out.push_str(" = ");
+                    let s = or(&m.default_value_spacing, " ");
+                    out.push_str(s);
+                    out.push('=');
+                    out.push_str(s);
                     self.write(*d, out);
                 }
             }
@@ -2979,10 +3094,16 @@ impl TypeTree {
             } => {
                 match kind {
                     SigKind::Call => {}
-                    SigKind::Construct => out.push_str("new "),
-                    SigKind::Method { name, quote } => Self::quoted(name, *quote, out),
+                    SigKind::Construct => {
+                        out.push_str("new");
+                        out.push_str(or(&m.post_new, " "));
+                    }
+                    SigKind::Method { name, quote } => {
+                        Self::quoted(name, *quote, out);
+                        out.push_str(or(&m.post_method_name, ""));
+                    }
                 }
-                self.signature_tail(type_params, params, *ret, out);
+                self.signature_tail(m, type_params, params, *ret, out);
             }
             N::IndexSignature { key, right } => {
                 out.push('[');
@@ -3031,7 +3152,7 @@ impl TypeTree {
                 if *optional {
                     out.push('?');
                 }
-                self.signature_tail(type_params, params, *ret, out);
+                self.signature_tail(m, type_params, params, *ret, out);
             }
         }
     }

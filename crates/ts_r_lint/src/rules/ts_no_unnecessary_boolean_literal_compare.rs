@@ -19,6 +19,7 @@ pub static RULE: RuleDef = RuleDef {
 struct NoUnnecessaryBooleanLiteralCompare {
     nullable_true: bool,
     nullable_false: bool,
+    allow_without_strict_null_checks: bool,
 }
 
 impl FromOptions for NoUnnecessaryBooleanLiteralCompare {
@@ -27,6 +28,11 @@ impl FromOptions for NoUnnecessaryBooleanLiteralCompare {
         Ok(NoUnnecessaryBooleanLiteralCompare {
             nullable_true: bool_field(o, "allowComparingNullableBooleansToTrue", true),
             nullable_false: bool_field(o, "allowComparingNullableBooleansToFalse", true),
+            allow_without_strict_null_checks: bool_field(
+                o,
+                "allowRuleToRunWithoutStrictNullChecksIKnowWhatIAmDoing",
+                false,
+            ),
         })
     }
 }
@@ -40,10 +46,16 @@ const NULL_FALSE: &str = "This expression unnecessarily compares a nullable bool
 
 impl Rule for NoUnnecessaryBooleanLiteralCompare {
     fn kinds(&self) -> &'static [NodeKind] {
-        &[NodeKind::Binary]
+        &[NodeKind::Program, NodeKind::Binary]
     }
 
     fn enter(&self, node: NodeId, cx: &mut Ctx<'_, '_>) {
+        if matches!(cx.node(node), Node::Program { .. }) {
+            if !self.allow_without_strict_null_checks && !cx.types().strict_null_checks() {
+                crate::type_util::report_no_strict_null_checks(cx);
+            }
+            return;
+        }
         let Node::Binary { left, op, right } = *cx.node(node) else {
             return;
         };

@@ -353,7 +353,7 @@ static COMBINING_MARKS: &[(u32, u32)] = &[
     (0xE0100, 0xE01EF),
 ];
 
-fn is_mark(c: u32) -> bool {
+pub(crate) fn is_mark(c: u32) -> bool {
     COMBINING_MARKS
         .binary_search_by(|&(a, b)| {
             if b < c {

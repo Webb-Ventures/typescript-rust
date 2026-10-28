@@ -25,6 +25,7 @@ struct PreferNullishCoalescing {
     ignore_if_statements: bool,
     /// `ignorePrimitives`: string, number, boolean, bigint.
     primitives: [bool; 4],
+    allow_without_strict_null_checks: bool,
 }
 
 impl FromOptions for PreferNullishCoalescing {
@@ -47,6 +48,11 @@ impl FromOptions for PreferNullishCoalescing {
             ignore_boolean_coercion: bool_field(o, "ignoreBooleanCoercion", false),
             ignore_if_statements: bool_field(o, "ignoreIfStatements", false),
             primitives,
+            allow_without_strict_null_checks: bool_field(
+                o,
+                "allowRuleToRunWithoutStrictNullChecksIKnowWhatIAmDoing",
+                false,
+            ),
         })
     }
 }
@@ -67,6 +73,7 @@ const MAX_DEPTH: u32 = 200;
 impl Rule for PreferNullishCoalescing {
     fn kinds(&self) -> &'static [NodeKind] {
         &[
+            NodeKind::Program,
             NodeKind::Binary,
             NodeKind::Assign,
             NodeKind::Conditional,
@@ -76,6 +83,11 @@ impl Rule for PreferNullishCoalescing {
 
     fn enter(&self, node: NodeId, cx: &mut Ctx<'_, '_>) {
         if !cx.types().strict_null_checks() {
+            if !self.allow_without_strict_null_checks
+                && matches!(cx.node(node), Node::Program { .. })
+            {
+                crate::type_util::report_no_strict_null_checks(cx);
+            }
             return;
         }
         match *cx.node(node) {

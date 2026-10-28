@@ -463,6 +463,11 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
         self.with(|ck| ck.index_info_of(t, key)).map(|i| i.value)
     }
 
+    fn name_index_type(&self, t: Ty, name: &str) -> Option<Ty> {
+        self.with(|ck| ck.name_pattern_index_info(t, name))
+            .map(|i| i.value)
+    }
+
     fn global_type(&self, name: &str) -> Option<Ty> {
         let s = {
             let ck = self.ck.borrow();

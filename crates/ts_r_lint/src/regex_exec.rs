@@ -21,6 +21,9 @@ struct Exec<'r, 'a> {
     r: &'r Regex<'a>,
     input: Vec<u32>,
     icase: bool,
+    /// `i` with `u`/`v`: simple case folding, where `ſ` is `s` and the Kelvin sign is `k`
+    /// (both then also count as word characters for `\b`).
+    unicode_fold: bool,
     multiline: bool,
     dotall: bool,
     steps: Cell<u32>,
@@ -50,7 +53,19 @@ impl Exec<'_, '_> {
     }
 
     fn same(&self, a: u32, b: u32) -> bool {
-        a == b || (self.icase && fold(a) == fold(b))
+        a == b || (self.icase && fold(self.unfold(a)) == fold(self.unfold(b)))
+    }
+
+    fn unfold(&self, c: u32) -> u32 {
+        match c {
+            0x17F if self.unicode_fold => 's' as u32,
+            0x212A if self.unicode_fold => 'k' as u32,
+            _ => c,
+        }
+    }
+
+    fn word(&self, c: u32) -> bool {
+        is_word(self.unfold(c))
     }
 
     fn in_set(&self, kind: SetKind, negate: bool, c: u32) -> bool {
@@ -243,7 +258,8 @@ impl Exec<'_, '_> {
                             || (self.multiline && cur.is_some_and(is_line_terminator))
                     }
                     AssertKind::WordBoundary | AssertKind::NotWordBoundary => {
-                        let b = before.is_some_and(is_word) != cur.is_some_and(is_word);
+                        let b = before.is_some_and(|c| self.word(c))
+                            != cur.is_some_and(|c| self.word(c));
                         b == (*a == AssertKind::WordBoundary)
                     }
                 };
@@ -288,6 +304,7 @@ fn exec_all(pattern: &str, flags: &str, text: &str) -> Option<Matches> {
         r: &r,
         input,
         icase: flags.contains('i'),
+        unicode_fold: unicode && flags.contains('i'),
         multiline: flags.contains('m'),
         dotall: flags.contains('s'),
         steps: Cell::new(0),
@@ -520,6 +537,13 @@ mod tests {
 
     fn all(p: &str, f: &str, t: &str) -> Vec<Vec<Option<String>>> {
         match_all(p, f, t).unwrap()
+    }
+
+    #[test]
+    fn unicode_ignore_case_folds_long_s_and_kelvin() {
+        assert!(test(r"\bsql\b", "iu", "the \u{17f}ql query"));
+        assert!(!test(r"\bsql\b", "i", "the \u{17f}ql query"));
+        assert!(test("k", "iu", "\u{212a}"));
     }
 
     #[test]

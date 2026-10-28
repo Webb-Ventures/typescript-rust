@@ -149,24 +149,24 @@ Files:
   file. Never `std::fs` in a rule. Cached data holds no timestamps; cache keys include a
   hash of the file's `import/*` settings.
 
-## Status (v1 lint round 8, `wip/v1-lint8`)
+## Status (v1 lint round 9, `wip/v1-lint9`)
 
-- 716 rules (134 core ESLint, 95 typescript-eslint, 73 eslint-plugin-jsdoc, 368
+- 718 rules (134 core ESLint, 95 typescript-eslint, 74 eslint-plugin-jsdoc, 369
   eslint-plugin-unicorn, 46 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  76,925 / 76,963 cases. The non-type-aware cases are 69,927 / 69,951 and the type-aware
-  cases 6,998 / 7,012 (2026-10-27); the 14 type-aware failures are a subset of the 46 listed
-  in design record 0006. The 24 others: import/no-unresolved 77/80 (3 cases need the
+  77,170 / 77,196 cases. The non-type-aware cases are 70,160 / 70,184 and the type-aware
+  cases 7,010 / 7,012 (2026-10-27); the 2 type-aware failures are `unbound-method` on an
+  `Array` subclass's statics and `prefer-optional-chain` on `(undefined && foo ?? {})`,
+  which needs TS5076 as a grammar error (design record 0006). The 24 others: import/no-unresolved 77/80 (3 cases need the
   uppercase absolute path of the machine that recorded them), import/default 22/23 (its
   `FooES7` case needs espree's ecmaVersion parse error) and import/no-unused-modules 111/131
   (the 20 cases depend on state upstream's tests leave behind from earlier cases; linting
   each file alone with ESLint gives our answers). `tests/oracle/baseline.txt` has the
   per-rule counts.
   Every rule of ESLint's, typescript-eslint's, eslint-plugin-jsdoc's and
-  eslint-plugin-unicorn's recommended presets is implemented (unicorn: 338 of 338, plus 30
-  of its opt-in rules: 368 of its 376 live rules; comment-content is missing and 7 have only
-  JSON, CSS, Markdown, YAML or TOML tests). Every eslint-plugin-import rule is implemented
-  (45 live rules plus the deprecated imports-first). jsdoc/check-examples,
-  jsdoc/type-formatting and unicorn/comment-content have oracle data but no implementation.
+  eslint-plugin-unicorn's recommended presets is implemented (unicorn: 338 of 338, plus 31
+  of its opt-in rules: 369 of its 376 live rules; 7 have only JSON, CSS, Markdown, YAML or
+  TOML tests). Every eslint-plugin-import rule is implemented (45 live rules plus the
+  deprecated imports-first). jsdoc/check-examples has oracle data but no implementation.
 - private-app against ESLint with every configured rule (round 3 run): all 23 projects
   pass the parity gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
@@ -3051,13 +3051,7 @@ Not done, and why:
 - `unicorn/comma-spacing`, `indent`, `key-name-casing`, `no-empty-link-text`,
   `no-javascript-url`, `no-loss-of-precision`, `require-frontmatter-fields`: their data is
   only JSON, CSS, Markdown, YAML or TOML; ts-r-lint lints JS and TS only.
-- `unicorn/comment-content` (145 cases): not started for lack of time. It needs a masking
-  pipeline over comment text (code blocks, `@example`, JSDoc syntax, code-like lines,
-  inline code, URLs, domains, MIME types, package names, links, markup) before the term
-  table runs with Unicode word boundaries.
-- `jsdoc/type-formatting` (88): needs the jsdoc-type-pratt-parser's spacing metadata (union
-  and element spacing, object separators, indentation, quotes) kept in our `jsdoc_type`
-  tree, plus a printer that honours it; too large for this round.
+- `unicorn/comment-content` and `jsdoc/type-formatting`: done in round 9 (below).
 - `jsdoc/check-examples` (57): needs ESLint run on the example code.
 
 Read to understand (not ported), eslint-plugin-unicorn: `rules/string-content.js`,
@@ -3070,3 +3064,40 @@ requireDescriptionCompleteSentence,typeFormatting}.js`, `src/index.js`,
 `src/buildForbidRuleDefinition.js`, `src/defaultTagOrder.js`, `src/jsdocUtils.js` (tag
 description, template tag and special-method helpers) and `src/iterateJsdoc.js` (report,
 description and tag editing helpers).
+
+## eslint-plugin-unicorn and jsdoc rules (round 9)
+
+- **`unicorn/comment-content`** (145/145). Each comment (not directives, not a hashbang) is
+  masked first: every byte that isn't prose becomes DEL (U+7F), so offsets stay put and a
+  term can't match across a hidden run. Masked: fenced blocks, `@example` bodies, JSDoc
+  syntax (tag names, `{types}`, parameter names), code-like lines (bracket depth carries
+  over adjacent `//` lines), code spans and quotes, URLs, bare domains, MIME types, package
+  specifiers, markdown link targets, markup, and the `ignore` patterns. The term table
+  (about 120 defaults, extended or replaced by `replacements` and
+  `extendDefaultReplacements`) then matches with Unicode word boundaries; a match is
+  dropped when it is part of a path, a property access, a `-`-joined word or a call. One
+  report per comment, for its earliest match, fixed by that replacement.
+  Scans for URLs and link labels are capped, so long lines stay linear.
+  `regex_exec` now folds `ſ` to `s` and the Kelvin sign to `k` under `iu` / `iv`, as JS
+  does. Not done: the line shapes for bracketed member access.
+- **`jsdoc/type-formatting`** (88/88). jsdoc-type-pratt-parser keeps only separators,
+  generic brackets and dots, and quotes, so every spacing choice reads as the printer's
+  default. `TypeTree::meta` holds per-node printing choices (`Meta`; `None` prints the
+  default) and the printer honours them. The rule walks the parsed type in pre-order. At
+  each node the first option that differs from what the node has sets that choice and
+  gives a message: constructor signatures check `new` spacing, then fall through to the
+  function checks; arrows check only their `=>` spacing; methods check name spacing and
+  quotes first. An object is rewritten when its separator, single-field separator, indent
+  (for `-and-linebreak` separators only) or trailing punctuation differs; bracket spacing
+  changes silently. Object keys are requoted only when they are identifiers or a quote
+  style is set, and never when they look like numbers. When the reprint (wrapped in
+  `typeBracketSpacing`) differs from the written type, each message is reported, or a
+  generic one if there are none, at column 1 of the tag's line, with the reprint as the fix.
+- **`jsdoc/check-examples`** stays undone. It lints each `@example` with ESLint itself, and
+  `checkEslintrc` (on by default) loads the `.eslintrc` found from the upstream test's own
+  working directory, so the expected output depends on the plugin's repo layout.
+
+Read to understand (not ported): eslint-plugin-unicorn 79.0.0 `rules/comment-content.js`
+and its `rules/utils/` helpers; eslint-plugin-jsdoc 63.3.3 `src/rules/typeFormatting.js`,
+`src/rules/checkExamples.js`; jsdoc-type-pratt-parser 8.0.0 `dist/index.cjs` (object
+parslet and stringify rules).

@@ -13,15 +13,15 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 ## What works today
 
-- 716 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
-  typescript-eslint 8.71 `recommended` and `strict` rules and a few more, 73
-  eslint-plugin-jsdoc rules, 368 eslint-plugin-unicorn rules (all 338 of its
+- 718 rules: all 64 rules of ESLint 10's `recommended` set and 70 more core rules, the
+  typescript-eslint 8.71 `recommended` and `strict` rules and a few more, 74
+  eslint-plugin-jsdoc rules, 369 eslint-plugin-unicorn rules (all 338 of its
   `recommended` set) and 46 eslint-plugin-import rules (all of `import/recommended`,
   resolving modules as its default Node resolver does). 51 of them are type-aware
   and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
 - The published ESLint, typescript-eslint, eslint-plugin-jsdoc, eslint-plugin-unicorn and
-  eslint-plugin-import tests for those rules: 76,925 of 76,963 cases match (69,927 of 69,951 for
-  rules without types, 6,998 of 7,012 for type-aware rules).
+  eslint-plugin-import tests for those rules: 77,170 of 77,196 cases match (70,160 of 70,184 for
+  rules without types, 7,010 of 7,012 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
 - `eslint-disable` comments and `/* eslint */` inline config, with reports of unused disable
@@ -33,7 +33,7 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 - Type-aware rules run only on a tsconfig project where ts-r-check reports the same
   diagnostics as your tsc. Elsewhere they are skipped, and listed on stderr with the reason.
-- No ESLint plugins other than typescript-eslint, apart from 73 eslint-plugin-jsdoc, 368
+- No ESLint plugins other than typescript-eslint, apart from 74 eslint-plugin-jsdoc, 369
   eslint-plugin-unicorn and 46 eslint-plugin-import rules
   (`ts-r-lint --list-rules` names them). Rules from other plugins are skipped and
   listed as "plugin not implemented".

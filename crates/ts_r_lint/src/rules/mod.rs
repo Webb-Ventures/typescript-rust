@@ -134,6 +134,7 @@ mod jsdoc_ts_method_signature_style;
 mod jsdoc_ts_no_empty_object_type;
 mod jsdoc_ts_no_unnecessary_template_expression;
 mod jsdoc_ts_prefer_function_type;
+mod jsdoc_type_formatting;
 mod jsdoc_valid_types;
 mod max_depth;
 mod max_nested_callbacks;
@@ -359,6 +360,7 @@ mod unicorn_ast;
 mod unicorn_better_dom_traversing;
 mod unicorn_catch_error_name;
 mod unicorn_class_reference_in_static_methods;
+mod unicorn_comment_content;
 mod unicorn_conditions;
 mod unicorn_consistent_arrow_return_style;
 mod unicorn_consistent_assert;
@@ -1134,6 +1136,7 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_ts_no_empty_object_type::RULE,
     &jsdoc_ts_no_unnecessary_template_expression::RULE,
     &jsdoc_ts_prefer_function_type::RULE,
+    &jsdoc_type_formatting::RULE,
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
@@ -1164,6 +1167,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_consistent_json_file_read::RULE,
     &unicorn_consistent_optional_chaining::RULE,
     &unicorn_catch_error_name::RULE,
+    &unicorn_comment_content::RULE,
     &unicorn_consistent_function_scoping::RULE,
     &unicorn_consistent_template_literal_escape::RULE,
     &unicorn_consistent_tuple_labels::RULE,

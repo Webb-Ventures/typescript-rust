@@ -45,11 +45,11 @@
 @typescript-eslint/no-redundant-type-constituents 104/104
 @typescript-eslint/no-require-imports 46/46
 @typescript-eslint/no-this-alias 10/10
-@typescript-eslint/no-unnecessary-boolean-literal-compare 71/72
-@typescript-eslint/no-unnecessary-condition 314/318
+@typescript-eslint/no-unnecessary-boolean-literal-compare 72/72
+@typescript-eslint/no-unnecessary-condition 318/318
 @typescript-eslint/no-unnecessary-template-expression 184/184
 @typescript-eslint/no-unnecessary-type-arguments 71/71
-@typescript-eslint/no-unnecessary-type-assertion 259/263
+@typescript-eslint/no-unnecessary-type-assertion 263/263
 @typescript-eslint/no-unnecessary-type-constraint 34/34
 @typescript-eslint/no-unnecessary-type-conversion 70/70
 @typescript-eslint/no-unnecessary-type-parameters 173/173
@@ -66,7 +66,7 @@
 @typescript-eslint/no-unused-expressions 38/38
 @typescript-eslint/no-unused-vars 587/587
 @typescript-eslint/no-useless-constructor 41/41
-@typescript-eslint/no-useless-default-assignment 89/91
+@typescript-eslint/no-useless-default-assignment 91/91
 @typescript-eslint/no-wrapper-object-types 58/58
 @typescript-eslint/non-nullable-type-assertion-style 26/26
 @typescript-eslint/only-throw-error 89/89
@@ -77,7 +77,7 @@
 @typescript-eslint/prefer-includes 42/42
 @typescript-eslint/prefer-literal-enum-member 33/33
 @typescript-eslint/prefer-namespace-keyword 8/8
-@typescript-eslint/prefer-nullish-coalescing 619/620
+@typescript-eslint/prefer-nullish-coalescing 620/620
 @typescript-eslint/prefer-optional-chain 1116/1117
 @typescript-eslint/prefer-promise-reject-errors 162/162
 @typescript-eslint/prefer-reduce-type-parameter 31/31
@@ -220,6 +220,7 @@ jsdoc/ts-method-signature-style 14/14
 jsdoc/ts-no-empty-object-type 6/6
 jsdoc/ts-no-unnecessary-template-expression 15/15
 jsdoc/ts-prefer-function-type 7/7
+jsdoc/type-formatting 88/88
 jsdoc/valid-types 137/137
 max-depth 28/28
 max-nested-callbacks 32/32
@@ -346,6 +347,7 @@ symbol-description 8/8
 unicorn/better-dom-traversing 175/175
 unicorn/catch-error-name 120/120
 unicorn/class-reference-in-static-methods 133/133
+unicorn/comment-content 145/145
 unicorn/consistent-arrow-return-style 78/78
 unicorn/consistent-assert 31/31
 unicorn/consistent-boolean-name 2033/2033

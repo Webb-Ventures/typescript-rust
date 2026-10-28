@@ -34,7 +34,6 @@ impl FromOptions for NoUselessDefaultAssignment {
 
 const PREFER_OPTIONAL: &str =
     "Using `= undefined` to make a parameter optional adds unnecessary runtime logic.";
-const NO_STRICT_NULL_CHECKS: &str = "This rule requires the `strictNullChecks` compiler option to be turned on to function correctly.";
 const REMOVE: &str = "Remove the default value.";
 
 impl Rule for NoUselessDefaultAssignment {
@@ -52,8 +51,7 @@ impl Rule for NoUselessDefaultAssignment {
         match *cx.node(node) {
             Node::Program { .. } => {
                 if !ti.strict_null_checks() && !self.allow_without_strict_null_checks {
-                    cx.report(Span::new(0, 0), NO_STRICT_NULL_CHECKS)
-                        .id("noStrictNullCheck");
+                    crate::type_util::report_no_strict_null_checks(cx);
                 }
             }
             Node::Param {
