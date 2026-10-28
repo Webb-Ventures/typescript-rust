@@ -3,11 +3,16 @@
 //! range goes back out through [`LspLines`].
 
 pub mod actions;
+mod class_items;
 mod complete;
 mod hover;
+mod jsx_items;
 pub mod locate;
+mod multiline;
 mod nav;
 mod outline;
+mod position;
+mod quick_info;
 mod signature;
 mod strings;
 
