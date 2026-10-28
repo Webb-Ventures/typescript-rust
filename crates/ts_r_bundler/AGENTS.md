@@ -73,7 +73,8 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   a file with `import` statements, as esbuild does.
 - **Top-level `let`, `const` and `class` become `var`** (`print.rs` `class_to_var`) in every
   bundled module, as esbuild prints them: `var C = class {}`, or `var C = class _C {}` with
-  the class's references to itself renamed `_C` (the same short name when mangling).
+  the class's references to itself renamed `_C` (the same short name when mangling; a
+  shorthand `{ C }` becomes `{ C: _C }`).
   Decorated classes and nested declarations stay as written; transform mode never does it.
 - **Every CommonJS entry runs unwrapped** in `cjs` format without splitting when nothing
   else imports it (`plan.rs` `unwrapped_entries`), and `import * as ns` of a CommonJS file
@@ -97,8 +98,12 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   functions and classes whose binding changed get their `name` back through the `__name`
   runtime helper (`Helper::Name`, `Object.defineProperty(target, "name", { value,
   configurable: true })`); a top-level class always does, because `var C = class _C {}`
-  would be named `_C`. The calls for a top-level declaration are printed right after it.
-  Transform mode uses `__name`, defined in the prelude when a call was added.
+  would be named `_C`. The calls for a declaration are printed right after it, as esbuild
+  0.28.2 prints them (`TestKeepNamesAllForms`), so a hoisted function read before its
+  declaration sees its mangled name there, as in esbuild.
+  Transform mode uses `__name`, defined in the prelude when a call was added, or `__name2`,
+  `__name3`, ... when the file already declares or reads a global of that name
+  (`bundle::free_helper_name`).
 - **`drop_labels`** turns labeled statements whose label is in the set into empty statements
   right after parsing (`prepare.rs` `drop_labels`), so their imports are never resolved.
 - **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:
@@ -197,6 +202,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   each chunk by the copy's URL from that chunk (`chunk::copy_url`); the copy is named with
   `--asset-names`, or is the entry's own output when the file is also an entry point.
   Import attributes on such an import are kept, never checked.
+- **`[hash]` in `--entry-names`** is a same-length placeholder (`bundle::hash_marker`,
+  `~tsr` and four base-36 digits) until every chunk is assembled; `finish_hashes` then
+  writes the final hash into the names, other chunks' imports of them and
+  `sourceMappingURL` comments and maps. An entry's hash covers its own code and every chunk
+  it reaches through imports, so changing an imported entry renames its importers too.
 - **A module only `import()` reaches is named like a chunk** (`bundle::dynamic_file_name`):
   `--chunk-names` (default `[name]-[hash]`, `[name]` the file's stem, `[dir]` dropped), not
   `--entry-names`, as esbuild 0.28.2 does (`import('./sub/c')` gives `out/c-HASH.js`).
@@ -207,7 +217,11 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   chunk's stylesheet is its entry's CSS in first-import order, every `@import` expanded in
   place; an earlier copy of a file is dropped when a later one applies under the same or
   fewer conditions, leaving an `@layer` statement only where layer order needs it (the
-  rules are in `css/order.rs`). External `@import`s go first; only the first file's leading
+  rules are in `css/order.rs`). The expansion has a budget (`order::MAX_EXPANSION`: one
+  unit per file copy, external import or `@layer` statement plus its condition bytes): a
+  file imported twice by every file of a chain would expand 2^n times, so past it the build
+  fails with `Too many "@import" copies`. Duplicates are found by hash (exact repeats) before
+  comparing distinct condition chains. External `@import`s go first; only the first file's leading
   `@layer` statements go above them. A leading `@charset` becomes `@charset "UTF-8";` at
   the top, a later one stays. `composes ... from "file"` orders that file like an
   `@import`. The `:global` / `:local` mode a selector ends in holds for its body, and a
@@ -279,6 +293,8 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   numbers (`0.50px` is `.5px`) and folded `calc()` (only results exact to 5 decimal places);
   `@keyframes` selectors `from` / `100%` become `0%` / `to`. At-rule names print as written
   except `@media` and `@layer`, as esbuild does.
+- Minified selectors keep a space before `:` (`a :hover` is a descendant combinator), but
+  not after a combinator or comma (`css/print.rs` `Printer::selector`).
 - **CSS nesting** (`css/nesting.rs`) is lowered with `--supported:nesting=false` (no
   target table yet), as esbuild does: descendant or `&`-substituted selectors, `:is()` for a
   parent list or for a parent with combinators that isn't the selector's leading compound,

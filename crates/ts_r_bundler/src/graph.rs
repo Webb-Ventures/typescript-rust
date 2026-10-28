@@ -193,7 +193,7 @@ pub struct ModuleCache {
 }
 
 /// Version of the prepared-module format (part of every cache key).
-pub const PREP_VERSION: u32 = 3;
+pub const PREP_VERSION: u32 = 4;
 
 #[derive(Debug)]
 enum RawTarget {

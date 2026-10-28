@@ -84,7 +84,7 @@ impl BuildResult {
 }
 
 /// Persistent-cache format version (bump when meta, fragments or plans change shape).
-const CACHE_VERSION: u32 = 11;
+const CACHE_VERSION: u32 = 12;
 
 /// A build that can be repeated cheaply (watch mode, the dev server, benchmarks).
 pub struct BuildContext {
@@ -505,6 +505,16 @@ impl BuildContext {
                 .map(|(i, e)| self.entry_file_name(e, &outbase, entry_names[i].as_deref()))
                 .collect(),
         };
+        // `[hash]` stands for the entry's final hash until its contents are known
+        // (`finish_hashes`); other chunks import it by that name.
+        let entry_files: Vec<String> = entry_files
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| match hash_marker(i) {
+                Some(m) => f.replace("[hash]", &m),
+                None => f,
+            })
+            .collect();
         // Each entry's stylesheet: the entry template with `[ext]` = `css` (a CSS entry with
         // `--outfile` writes to that file as named, as esbuild does).
         let entry_css_files: Vec<String> = match &outfile_name {
@@ -621,6 +631,12 @@ impl BuildContext {
         let mut chunk_outs: Vec<ChunkOutput> = (0..pl.chunks.len())
             .map(|ci| assemble(ci, &pl, &graph, &by_module, opts, self.threads, &outbase))
             .collect();
+        for co in &mut chunk_outs {
+            messages.append(&mut co.messages);
+        }
+        if messages.iter().any(Message::is_error) {
+            return fail(sorted(messages));
+        }
         let mut outputs = Vec::new();
         // Assets from the file loader, with paths relative to outdir.
         let mut assets: Vec<(&Asset, String)> = Vec::new();
@@ -634,6 +650,7 @@ impl BuildContext {
             }
         }
         // Final names: `[hash]` from the contents; a CSS entry's chunk is its stylesheet.
+        finish_hashes(&mut pl, &mut chunk_outs);
         for (ci, co) in chunk_outs.iter().enumerate() {
             let c = &pl.chunks[ci];
             let css_entry = c
@@ -1017,6 +1034,13 @@ impl BuildContext {
                 crate::print::empty_import_meta(&mut ast, kind);
             }
             let mut keep_names_used = false;
+            // Without bundling the file's own names stay, so the helper takes one that no
+            // binding or global reference of the file uses (`__name2`, `__name3`, ...).
+            let helper = if opts.keep_names {
+                free_helper_name(&ast, &prepared.scopes, KEEP_NAMES_HELPER)
+            } else {
+                KEEP_NAMES_HELPER.to_owned()
+            };
             if opts.minify_syntax || opts.minify_identifiers {
                 let module = prepared.strict;
                 keep_names_used = ts_r_minify::minify_ast_keep_names(
@@ -1029,7 +1053,7 @@ impl BuildContext {
                         module,
                     },
                     module,
-                    opts.keep_names.then_some(KEEP_NAMES_HELPER),
+                    opts.keep_names.then_some(helper.as_str()),
                 );
             }
             // `--keep-names` without bundling: the helper is defined at the top of the file.
@@ -1037,7 +1061,7 @@ impl BuildContext {
                 let mut h = crate::runtime::Helpers::with_names(
                     crate::runtime::Helper::ALL.map(|h| h.name().to_owned()),
                 );
-                h.names[crate::runtime::Helper::Name as usize] = KEEP_NAMES_HELPER.to_owned();
+                h.names[crate::runtime::Helper::Name as usize] = helper.clone();
                 h.mark(crate::runtime::Helper::Name);
                 let mut p = h.render(opts.minify_whitespace && opts.minify_identifiers);
                 p.push_str(&prepared.prelude);
@@ -1219,6 +1243,153 @@ fn with_css_extension(file: &str) -> String {
     match file[name_start..].rfind('.') {
         Some(i) if i > 0 => format!("{}.css", &file[..name_start + i]),
         _ => format!("{file}.css"),
+    }
+}
+
+/// `base`, or `base2`, `base3`, ... : the first name no binding in any scope of the file
+/// declares and no global reference uses.
+fn free_helper_name(ast: &ts_r_ast::Ast, scopes: &ts_r_minify::Scopes, base: &str) -> String {
+    let taken: FxHashSet<&str> = scopes
+        .symbols
+        .iter()
+        .map(|s| s.name)
+        .chain(scopes.globals.keys().copied())
+        .map(|a| ast.atom(a))
+        .filter(|n| n.starts_with(base))
+        .collect();
+    if !taken.contains(base) {
+        return base.to_owned();
+    }
+    // Each taken candidate is a distinct name in `taken`, so this ends within its size.
+    (2..)
+        .map(|i| format!("{base}{i}"))
+        .find(|n| !taken.contains(n.as_str()))
+        .unwrap_or_else(|| base.to_owned())
+}
+
+/// Prefix of [`hash_marker`]s.
+const HASH_MARKER: &str = "~tsr";
+
+/// What `[hash]` in user entry `i`'s file name is until [`finish_hashes`]: as long as the
+/// final hash ([`crate::hash_text`], 8 characters), so replacing it moves no source map
+/// column. `None` past 36^4 entries (those keep `[hash]`, hashed from their own code).
+fn hash_marker(i: usize) -> Option<String> {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if i >= 36usize.pow(4) {
+        return None;
+    }
+    let mut m = String::from(HASH_MARKER);
+    for k in (0..4).rev() {
+        m.push(DIGITS[i / 36usize.pow(k) % 36] as char);
+    }
+    Some(m)
+}
+
+/// The user entry a [`hash_marker`] at the start of `s` names.
+fn parse_hash_marker(s: &str) -> Option<usize> {
+    let digits = s.strip_prefix(HASH_MARKER)?.get(..4)?;
+    let mut i = 0usize;
+    for b in digits.bytes() {
+        let d = match b {
+            b'0'..=b'9' => b - b'0',
+            b'a'..=b'z' => b - b'a' + 10,
+            _ => return None,
+        };
+        i = i * 36 + d as usize;
+    }
+    Some(i)
+}
+
+/// Fills in entry chunks' `[hash]`es ([`hash_marker`]) everywhere: the chunk names, other
+/// chunks' imports of them, and `sourceMappingURL` comments and maps. A chunk's hash covers
+/// its own text and the text of every chunk it reaches through imports, so a change in an
+/// imported entry renames its importers too (their imports of it changed), cycles
+/// included.
+fn finish_hashes(pl: &mut crate::plan::Plan, outs: &mut [ChunkOutput]) {
+    // The chunk each marker stands for.
+    let mut marked: FxHashMap<usize, usize> = FxHashMap::default();
+    for (ci, c) in pl.chunks.iter().enumerate() {
+        if let Some(i) = c.user_entry
+            && let Some(m) = hash_marker(i)
+            && c.file.contains(&m)
+        {
+            marked.insert(i, ci);
+        }
+    }
+    if marked.is_empty() {
+        return;
+    }
+    // Where each chunk's text names a marked chunk: `(position, chunk)`.
+    let find = |text: &str| -> Vec<(usize, usize)> {
+        text.match_indices(HASH_MARKER)
+            .filter_map(|(at, _)| {
+                let i = parse_hash_marker(&text[at..])?;
+                marked.get(&i).map(|&ci| (at, ci))
+            })
+            .collect()
+    };
+    let in_code: Vec<Vec<(usize, usize)>> = outs.iter().map(|o| find(&o.code)).collect();
+    let in_map: Vec<Vec<(usize, usize)>> = outs
+        .iter()
+        .map(|o| o.map.as_deref().map(find).unwrap_or_default())
+        .collect();
+    let own: Vec<[u8; 32]> = outs
+        .iter()
+        .map(|o| *blake3::hash(o.code.as_bytes()).as_bytes())
+        .collect();
+    let edges: Vec<Vec<usize>> = (0..outs.len())
+        .map(|ci| {
+            let mut e: Vec<usize> = in_code[ci].iter().map(|&(_, t)| t).collect();
+            e.extend(pl.chunks[ci].imports.iter().map(|(t, _)| *t));
+            e.sort_unstable();
+            e.dedup();
+            e
+        })
+        .collect();
+    let mut hashes: FxHashMap<usize, String> = FxHashMap::default();
+    let mut seen = vec![false; outs.len()];
+    for &ci in marked.values() {
+        seen.iter_mut().for_each(|s| *s = false);
+        let mut stack = vec![ci];
+        seen[ci] = true;
+        while let Some(c) = stack.pop() {
+            for &t in &edges[c] {
+                if t < outs.len() && !seen[t] {
+                    seen[t] = true;
+                    stack.push(t);
+                }
+            }
+        }
+        let mut h = blake3::Hasher::new();
+        for (c, _) in seen.iter().enumerate().filter(|(_, s)| **s) {
+            h.update(&own[c]);
+        }
+        hashes.insert(ci, crate::hash_text(h.finalize().as_bytes()));
+    }
+    let fill = |text: &mut String, at: &[(usize, usize)]| {
+        if at.is_empty() {
+            return;
+        }
+        let mut out = String::with_capacity(text.len());
+        let mut last = 0;
+        for &(pos, ci) in at {
+            out.push_str(&text[last..pos]);
+            out.push_str(&hashes[&ci]);
+            last = pos + HASH_MARKER.len() + 4;
+        }
+        out.push_str(&text[last..]);
+        *text = out;
+    };
+    for (ci, o) in outs.iter_mut().enumerate() {
+        fill(&mut o.code, &in_code[ci]);
+        if let Some(map) = &mut o.map {
+            fill(map, &in_map[ci]);
+        }
+    }
+    for (&i, &ci) in &marked {
+        if let Some(m) = hash_marker(i) {
+            pl.chunks[ci].file = pl.chunks[ci].file.replace(&m, &hashes[&ci]);
+        }
     }
 }
 

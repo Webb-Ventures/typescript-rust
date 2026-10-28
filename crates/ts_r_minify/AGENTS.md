@@ -50,6 +50,10 @@ children are remapped once, which keeps memory linear in the number of renamed k
   Scopes containing direct `eval` or `with` keep every name in reach. One exception, as
   esbuild: compression drops function and class expression names nothing references, which
   changes their `.name` (`CompressOptions::names`, off when `--keep-names` runs after it).
+- Purity: `/* @__NO_SIDE_EFFECTS__ */` marks a function declaration, or a never-written
+  `const` whose initializer node is a function expression or arrow
+  (`Scopes::is_const_function`); text after the comment never decides it, so
+  `(factory())` or `asyncFactory()` stays impure.
 - Purity: a computed key that is a well-known symbol (`[Symbol.iterator]`) is pure, as in
   esbuild; `[Symbol.foo]` is not.
 - **Stable mangling**: names are assigned scope by scope, most-referenced binding first (ties

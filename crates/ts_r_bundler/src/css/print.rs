@@ -96,6 +96,7 @@ impl Printer<'_> {
                         colors,
                         numbers: true,
                         calc: false,
+                        selector: false,
                     };
                     self.values_in(value, ctx, out);
                 } else {
@@ -131,7 +132,7 @@ impl Printer<'_> {
                     p => p,
                 };
                 if self.minify {
-                    self.values(prelude, out);
+                    self.selector(prelude, out);
                 } else {
                     // One selector of a list per line, as esbuild prints them.
                     // Top-level commas (not those inside a written `:is(`).
@@ -158,7 +159,7 @@ impl Printer<'_> {
                             |cv: &Cv| matches!(cv, Cv::Space | Cv::Tok(Token { t: T::Ws, .. }));
                         let start = sel.iter().position(|c| !ws(c)).unwrap_or(sel.len());
                         let end = sel.iter().rposition(|c| !ws(c)).map_or(start, |e| e + 1);
-                        self.values(&sel[start..end.max(start)], out);
+                        self.selector(&sel[start..end.max(start)], out);
                     }
                 }
                 self.block(body, indent, true, out);
@@ -283,6 +284,16 @@ impl Printer<'_> {
         self.values_in(v, Ctx::default(), out);
     }
 
+    /// A style rule's selector: like [`Printer::values`], but a space before `:` is a
+    /// descendant combinator (`a :hover` is not `a:hover`), so it stays.
+    fn selector(&self, v: &[Cv], out: &mut String) {
+        let ctx = Ctx {
+            selector: true,
+            ..Ctx::default()
+        };
+        self.values_in(v, ctx, out);
+    }
+
     fn values_in(&self, v: &[Cv], ctx: Ctx, out: &mut String) {
         let Ctx {
             colors, numbers, ..
@@ -301,7 +312,9 @@ impl Printer<'_> {
                     if i == 0 || i + 1 == n {
                         continue;
                     }
-                    if self.minify && (tight(&v[i - 1]) || tight(&v[i + 1])) {
+                    let next_tight = tight(&v[i + 1])
+                        && !(ctx.selector && matches!(&v[i + 1], Cv::Tok(t) if t.t == T::Colon));
+                    if self.minify && (tight(&v[i - 1]) || next_tight) {
                         continue;
                     }
                     out.push(' ');
@@ -341,6 +354,7 @@ impl Printer<'_> {
                         colors: colors && !fname.eq_ignore_ascii_case("var("),
                         numbers,
                         calc: tree,
+                        selector: ctx.selector,
                     };
                     self.values_in(items, inner, out);
                     out.push(')');
@@ -417,6 +431,8 @@ struct Ctx {
     numbers: bool,
     /// Inside a `calc()` that didn't fold for its structure (`calc::Unfolded::Tree`).
     calc: bool,
+    /// Printing a selector (functions like `:is()` included).
+    selector: bool,
 }
 
 /// Whether a node may be dropped for an identical later one.
@@ -493,6 +509,27 @@ mod tests {
         assert_eq!(
             print("@media screen { .a { x: y !important } }", true),
             "@media screen{.f_a{x:y!important}}"
+        );
+    }
+
+    /// A space before `:` in a selector is a descendant combinator and survives minifying;
+    /// after a combinator or comma it still goes.
+    #[test]
+    fn minified_selectors_keep_descendant_space_before_pseudo() {
+        let min = |src: &str| print_with(src, true, false, NameMode::Global);
+        assert_eq!(min("a :hover { color: red }"), "a :hover{color:red}");
+        assert_eq!(
+            min(".p :is(.c, .d :focus) { x: y }"),
+            ".p :is(.c,.d :focus){x:y}"
+        );
+        assert_eq!(
+            min("a ::before, b > :hover , c :first-child { x: y }"),
+            "a ::before,b>:hover,c :first-child{x:y}"
+        );
+        assert_eq!(min("a:hover { x : y }"), "a:hover{x:y}");
+        assert_eq!(
+            min("@media (min-width : 1px) { a { x: y } }"),
+            "@media (min-width:1px){a{x:y}}"
         );
     }
 

@@ -165,6 +165,9 @@ pub struct Scopes {
     /// `(declaring scope, symbol)` for declarations that hoist out of the scope they appear
     /// in (`var` in a block, sloppy block functions). The scopes in between see the name.
     hoisted: Vec<(ScopeId, SymbolId)>,
+    /// Name nodes of `const x = <function or arrow>` declarators (for
+    /// `/* @__NO_SIDE_EFFECTS__ */`, which annotates only functions).
+    fn_consts: Vec<u32>,
 }
 
 impl Scopes {
@@ -200,6 +203,7 @@ impl Scopes {
             b.stmt(s);
         }
         b.resolve();
+        b.out.fn_consts.sort_unstable();
         b.out
     }
 
@@ -210,6 +214,12 @@ impl Scopes {
             Some(&v) if v != 0 => Some(SymbolId(v - 1)),
             _ => None,
         }
+    }
+
+    /// True when `name` is the plain identifier of a `const` declarator whose initializer
+    /// is a function expression or an arrow (not parenthesized, not a call).
+    pub fn is_const_function(&self, name: NodeId) -> bool {
+        self.fn_consts.binary_search(&name.raw()).is_ok()
     }
 
     /// The scope a node creates (program, functions, blocks, ...).
@@ -785,6 +795,14 @@ impl Builder<'_> {
         for &d in ast.list(decls) {
             if let Node::VarDeclarator { name, init, .. } = *ast.node(d) {
                 self.pattern(name, sk, scope);
+                if kind == VarKind::Const
+                    && matches!(ast.node(name), Node::Ident { .. })
+                    && init.is_some_and(|i| {
+                        matches!(ast.node(i), Node::FunctionExpr { .. } | Node::Arrow { .. })
+                    })
+                {
+                    self.out.fn_consts.push(name.raw());
+                }
                 if let Some(i) = init {
                     self.expr(i);
                 }

@@ -433,10 +433,7 @@ impl Purity<'_> {
                 });
             let fn_init = || {
                 let rest = src.get(span.end as usize..).unwrap_or("").trim_start();
-                rest.strip_prefix('=').is_some_and(|r| {
-                    let r = r.trim_start();
-                    r.starts_with("function") || r.starts_with("async") || r.starts_with('(')
-                })
+                rest.starts_with('=') && scopes.is_const_function(decl)
             };
             if keywords_only && (sym.kind == SymbolKind::Function || fn_init()) {
                 return true;
@@ -450,10 +447,7 @@ impl Purity<'_> {
                 .get(span.end as usize..c.span.start as usize)
                 .is_some_and(|b| b.trim() == "=")
         {
-            let after = src.get(c.span.end as usize..).unwrap_or("").trim_start();
-            return after.starts_with("function")
-                || after.starts_with("async")
-                || after.starts_with('(');
+            return scopes.is_const_function(decl);
         }
         false
     }

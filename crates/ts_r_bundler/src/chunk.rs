@@ -20,6 +20,8 @@ pub struct ChunkOutput {
     /// Bytes each module contributed.
     pub module_bytes: Vec<(ModuleId, usize)>,
     pub css: Option<String>,
+    /// Errors found while assembling (a stylesheet whose `@import`s expand past the budget).
+    pub messages: Vec<crate::Message>,
 }
 
 struct Out {
@@ -414,11 +416,17 @@ pub fn assemble(
             opts,
             outbase,
         };
-        result.css = crate::css::order::bundle(&host, &c.css, compact, opts.minify_syntax);
-        result.css = result
-            .css
-            .take()
-            .map(|css| crate::css::lexer::finish_output(css, opts));
+        match crate::css::order::bundle(&host, &c.css, compact, opts.minify_syntax) {
+            Ok(css) => result.css = css.map(|css| crate::css::lexer::finish_output(css, opts)),
+            Err(e) => result.messages.push(crate::Message::new(
+                crate::Severity::Error,
+                Some(graph.modules[e.root as usize].pretty.clone()),
+                format!(
+                    "Too many \"@import\" copies: expanding this stylesheet's imports goes past {} files and conditions",
+                    crate::css::order::MAX_EXPANSION
+                ),
+            )),
+        }
     }
     if out.col != 0 {
         out.push("\n");
