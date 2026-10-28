@@ -40,15 +40,16 @@ every skip reason.
 
 ## Results
 
-4eda074 (2026-10-24, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`, 27 s):
-**795 of 2549 compared tests pass (31.2%)**; 4050 of 9094 queries agree.
-3770 of the 6319 test files are skipped (3698 verify no compared feature, 123 get no answer
-from either server). Up from 685 of 2550 at 8c14f29: 110 tests fixed, none regressed.
+f591d51 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**1048 of 2543 compared tests pass (41.2%)**; 4677 of 9055 queries agree.
+3776 of the 6319 test files are skipped (3698 verify no compared feature, 130 get no answer
+from either server). Up from 795 of 2549 at 4eda074: 250 tests fixed, none regressed (all of
+them completions).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
 | hover | 198 | 320 | 20 | 1446 / 2513 |
-| completion | 293 | 765 | 75 | 905 / 2915 |
+| completion | 546 | 506 | 81 | 1532 / 2876 |
 | references | 72 | 273 | 12 | 628 / 1443 |
 | rename | 85 | 91 | 13 | 267 / 549 |
 | definition | 45 | 122 | 25 | 297 / 528 |
@@ -74,9 +75,15 @@ Remaining failures by cause (example tests in parentheses):
 - **Definition (ts_r_lsp)**: `override` to the base member (`goToDefinitionOverriddenMember*`),
   keywords (`return`, `await`, `yield`, `case`), ambient and shorthand module names,
   contextually typed object literal properties, labels, meta properties, JSX.
-- **Completion (ts_r_lsp)**: no module-specifier or path completions (locals are listed inside
-  import strings: `completionForStringLiteral*Import*`), no string-literal-type completions,
-  private `#` names, JSX attributes.
+- **Completion (ts_r_lsp)**: JSX attributes and closing tags (`jsxAttributeCompletionStyle*`,
+  `tsxCompletion*`), member declarations in class bodies (`completionsOverridingMethod*`) and
+  type literals in type arguments (`completionListInTypeLiteralInTypeParameter*`), names
+  being declared where tsc gives no list (`completionListAtIdentifierDefinitionLocations_*`),
+  scope lists in unclosed functions and parameter lists (`completionListInUnclosedFunction*`),
+  `import |` statement and import-type completions (`importStatementCompletions*`,
+  `importTypeCompletions*`), object literals in overloaded or generic calls
+  (`completionListInObjectLiteral7`), protected and private members after `.`, keyword sets
+  by position.
 - **Signature help (ts_r_lsp)**: type-argument help (`f<|`, `signatureHelpTypeArguments`),
   `super(` calls (`signatureHelpForSuperCalls1`), JSX (`tsxSignatureHelp1`), rest tuples
   expanded into parameters (`signatureHelpExpandedRestTuples`), contextual signatures for a
@@ -94,3 +101,4 @@ Remaining failures by cause (example tests in parentheses):
 | --- | --- | ---: | ---: | ---: | --- |
 | 8c14f29 | 2026-10-24 | 685 | 2550 | 26.9% | First run |
 | 4eda074 | 2026-10-24 | 795 | 2549 | 31.2% | Tagged templates, instantiated and `new`-less signature help; `Function` members and `arguments` completions; tsc 7 alias hover; highlight kinds; overload definitions |
+| f591d51 | 2026-10-26 | 1048 | 2543 | 41.2% | Completions in string literals and module specifiers (package `exports`/`imports`/`typesVersions`, `paths`), object literal and binding pattern properties, `name?` labels for optional members, own-initializer and CommonJS scope rules |

@@ -170,7 +170,7 @@ pub fn meaning_at(ck: &mut Ck<'_, '_>, l: Loc) -> Meaning {
 }
 
 /// The symbol of an entity name (`A` or `A.B`), for qualified names.
-fn entity_symbol(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
+pub fn entity_symbol(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
     let ast = ck.c.ast(l.file);
     match *ast.node(l.node) {
         Node::QualifiedName { right, .. } => meaning_at(ck, Loc::new(l.file, right)).primary,
