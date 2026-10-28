@@ -14,9 +14,11 @@ mod default_param_last;
 mod eqeqeq;
 mod for_direction;
 mod getter_return;
+mod grouped_accessor_pairs;
 mod guard_for_in;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
+mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
@@ -25,17 +27,20 @@ mod jsdoc_multiline_blocks;
 mod jsdoc_no_blank_block_descriptions;
 mod jsdoc_no_blank_blocks;
 mod jsdoc_no_defaults;
+mod jsdoc_no_missing_syntax;
 mod jsdoc_no_multi_asterisks;
 mod jsdoc_no_restricted_syntax;
 mod jsdoc_no_types;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
+mod jsdoc_require_asterisk_prefix;
 mod jsdoc_require_hyphen_before_param_description;
 mod jsdoc_require_next_description;
 mod jsdoc_require_next_type;
 mod jsdoc_require_param_description;
 mod jsdoc_require_param_name;
 mod jsdoc_require_param_type;
+mod jsdoc_require_property;
 mod jsdoc_require_property_description;
 mod jsdoc_require_property_name;
 mod jsdoc_require_property_type;
@@ -79,8 +84,10 @@ mod no_dupe_class_members;
 mod no_dupe_else_if;
 mod no_dupe_keys;
 mod no_duplicate_case;
+mod no_else_return;
 mod no_empty;
 mod no_empty_character_class;
+mod no_empty_function;
 mod no_empty_pattern;
 mod no_empty_static_block;
 mod no_eq_null;
@@ -118,6 +125,7 @@ mod no_object_constructor;
 mod no_octal;
 mod no_octal_escape;
 mod no_plusplus;
+mod no_promise_executor_return;
 mod no_proto;
 mod no_prototype_builtins;
 mod no_redeclare;
@@ -171,19 +179,29 @@ mod radix;
 mod require_yield;
 mod symbol_description;
 mod this_binding;
+mod ts_adjacent_overload_signatures;
+mod ts_array_type;
 mod ts_await_thenable;
 mod ts_ban_ts_comment;
+mod ts_ban_tslint_comment;
+mod ts_class_literal_property_style;
+mod ts_consistent_generic_constructors;
+mod ts_consistent_indexed_object_style;
+mod ts_consistent_type_assertions;
+mod ts_consistent_type_definitions;
 mod ts_consistent_type_imports;
 mod ts_dot_notation;
 mod ts_no_array_constructor;
 mod ts_no_array_delete;
 mod ts_no_base_to_string;
+mod ts_no_confusing_non_null_assertion;
 mod ts_no_confusing_void_expression;
 mod ts_no_deprecated;
 mod ts_no_dupe_class_members;
 mod ts_no_duplicate_enum_values;
 mod ts_no_duplicate_type_constituents;
 mod ts_no_dynamic_delete;
+mod ts_no_empty_function;
 mod ts_no_empty_object_type;
 mod ts_no_explicit_any;
 mod ts_no_extra_non_null_assertion;
@@ -192,6 +210,7 @@ mod ts_no_floating_promises;
 mod ts_no_for_in_array;
 mod ts_no_generated_empty_object_type;
 mod ts_no_implied_eval;
+mod ts_no_inferrable_types;
 mod ts_no_invalid_void_type;
 mod ts_no_meaningless_void_operator;
 mod ts_no_misused_new;
@@ -233,6 +252,8 @@ mod ts_non_nullable_type_assertion_style;
 mod ts_only_throw_error;
 mod ts_prefer_as_const;
 mod ts_prefer_find;
+mod ts_prefer_for_of;
+mod ts_prefer_function_type;
 mod ts_prefer_includes;
 mod ts_prefer_literal_enum_member;
 mod ts_prefer_namespace_keyword;
@@ -253,6 +274,30 @@ mod ts_triple_slash_reference;
 mod ts_unbound_method;
 mod ts_unified_signatures;
 mod ts_use_unknown_in_catch_callback_variable;
+mod unicorn_empty_brace_spaces;
+mod unicorn_escape_case;
+mod unicorn_new_for_builtins;
+mod unicorn_no_console_spaces;
+mod unicorn_no_document_cookie;
+mod unicorn_no_instanceof_builtins;
+mod unicorn_no_lonely_if;
+mod unicorn_no_nested_ternary;
+mod unicorn_no_new_array;
+mod unicorn_no_null;
+mod unicorn_no_this_assignment;
+mod unicorn_no_typeof_undefined;
+mod unicorn_no_unreadable_iife;
+mod unicorn_no_xor_as_exponentiation;
+mod unicorn_no_zero_fractions;
+mod unicorn_number_literal_case;
+mod unicorn_numeric_separators_style;
+mod unicorn_prefer_date_now;
+mod unicorn_prefer_node_protocol;
+mod unicorn_prefer_optional_catch_binding;
+mod unicorn_prefer_type_error;
+mod unicorn_text_encoding_identifier_case;
+mod unicorn_throw_new_error;
+mod unicorn_util;
 mod use_isnan;
 mod valid_typeof;
 mod yoda;
@@ -290,6 +335,7 @@ pub static ALL: &[&RuleDef] = &[
     &eqeqeq::RULE,
     &for_direction::RULE,
     &getter_return::RULE,
+    &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
     &max_depth::RULE,
     &max_nested_callbacks::RULE,
@@ -320,8 +366,10 @@ pub static ALL: &[&RuleDef] = &[
     &no_dupe_else_if::RULE,
     &no_dupe_keys::RULE,
     &no_duplicate_case::RULE,
+    &no_else_return::RULE,
     &no_empty::RULE,
     &no_empty_character_class::RULE,
+    &no_empty_function::RULE,
     &no_empty_pattern::RULE,
     &no_empty_static_block::RULE,
     &no_eq_null::RULE,
@@ -359,6 +407,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_octal::RULE,
     &no_octal_escape::RULE,
     &no_plusplus::RULE,
+    &no_promise_executor_return::RULE,
     &no_proto::RULE,
     &no_prototype_builtins::RULE,
     &no_redeclare::RULE,
@@ -409,19 +458,29 @@ pub static ALL: &[&RuleDef] = &[
     &preserve_caught_error::RULE,
     &radix::RULE,
     &require_yield::RULE,
+    &ts_array_type::RULE,
+    &ts_adjacent_overload_signatures::RULE,
     &ts_await_thenable::RULE,
     &ts_ban_ts_comment::RULE,
+    &ts_consistent_generic_constructors::RULE,
+    &ts_consistent_indexed_object_style::RULE,
+    &ts_consistent_type_assertions::RULE,
+    &ts_ban_tslint_comment::RULE,
+    &ts_class_literal_property_style::RULE,
+    &ts_consistent_type_definitions::RULE,
     &ts_consistent_type_imports::RULE,
     &ts_dot_notation::RULE,
     &ts_no_array_constructor::RULE,
     &ts_no_base_to_string::RULE,
     &ts_no_array_delete::RULE,
+    &ts_no_confusing_non_null_assertion::RULE,
     &ts_no_confusing_void_expression::RULE,
     &ts_no_deprecated::RULE,
     &ts_no_dupe_class_members::RULE,
     &ts_no_duplicate_enum_values::RULE,
     &ts_no_duplicate_type_constituents::RULE,
     &ts_no_dynamic_delete::RULE,
+    &ts_no_empty_function::RULE,
     &ts_no_empty_object_type::RULE,
     &ts_no_explicit_any::RULE,
     &ts_no_extra_non_null_assertion::RULE,
@@ -430,6 +489,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_for_in_array::RULE,
     &ts_no_generated_empty_object_type::RULE,
     &ts_no_implied_eval::RULE,
+    &ts_no_inferrable_types::RULE,
     &ts_no_invalid_void_type::RULE,
     &ts_no_meaningless_void_operator::RULE,
     &ts_no_misused_new::RULE,
@@ -471,6 +531,8 @@ pub static ALL: &[&RuleDef] = &[
     &ts_only_throw_error::RULE,
     &ts_prefer_as_const::RULE,
     &ts_prefer_find::RULE,
+    &ts_prefer_function_type::RULE,
+    &ts_prefer_for_of::RULE,
     &ts_prefer_includes::RULE,
     &ts_prefer_literal_enum_member::RULE,
     &ts_prefer_namespace_keyword::RULE,
@@ -497,6 +559,7 @@ pub static ALL: &[&RuleDef] = &[
     &yoda::RULE,
     &jsdoc_check_access::RULE,
     &jsdoc_check_alignment::RULE,
+    &jsdoc_check_param_names::RULE,
     &jsdoc_check_property_names::RULE,
     &jsdoc_empty_tags::RULE,
     &jsdoc_escape_inline_tags::RULE,
@@ -505,17 +568,20 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_no_blank_block_descriptions::RULE,
     &jsdoc_no_blank_blocks::RULE,
     &jsdoc_no_defaults::RULE,
+    &jsdoc_no_missing_syntax::RULE,
     &jsdoc_no_multi_asterisks::RULE,
     &jsdoc_no_restricted_syntax::RULE,
     &jsdoc_no_types::RULE,
     &jsdoc_reject_any_type::RULE,
     &jsdoc_reject_function_type::RULE,
+    &jsdoc_require_asterisk_prefix::RULE,
     &jsdoc_require_hyphen_before_param_description::RULE,
     &jsdoc_require_next_description::RULE,
     &jsdoc_require_next_type::RULE,
     &jsdoc_require_param_description::RULE,
     &jsdoc_require_param_name::RULE,
     &jsdoc_require_param_type::RULE,
+    &jsdoc_require_property::RULE,
     &jsdoc_require_property_description::RULE,
     &jsdoc_require_property_name::RULE,
     &jsdoc_require_property_type::RULE,
@@ -531,6 +597,30 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
     &jsdoc_tag_lines::RULE,
+    // eslint-plugin-unicorn
+    &unicorn_empty_brace_spaces::RULE,
+    &unicorn_escape_case::RULE,
+    &unicorn_new_for_builtins::RULE,
+    &unicorn_no_console_spaces::RULE,
+    &unicorn_no_document_cookie::RULE,
+    &unicorn_no_instanceof_builtins::RULE,
+    &unicorn_no_lonely_if::RULE,
+    &unicorn_no_nested_ternary::RULE,
+    &unicorn_no_new_array::RULE,
+    &unicorn_no_null::RULE,
+    &unicorn_no_this_assignment::RULE,
+    &unicorn_no_typeof_undefined::RULE,
+    &unicorn_no_unreadable_iife::RULE,
+    &unicorn_no_xor_as_exponentiation::RULE,
+    &unicorn_no_zero_fractions::RULE,
+    &unicorn_number_literal_case::RULE,
+    &unicorn_numeric_separators_style::RULE,
+    &unicorn_prefer_date_now::RULE,
+    &unicorn_prefer_node_protocol::RULE,
+    &unicorn_prefer_optional_catch_binding::RULE,
+    &unicorn_prefer_type_error::RULE,
+    &unicorn_text_encoding_identifier_case::RULE,
+    &unicorn_throw_new_error::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

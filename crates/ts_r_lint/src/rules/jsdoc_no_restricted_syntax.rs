@@ -46,7 +46,7 @@ impl FromOptions for NoRestrictedSyntax {
 }
 
 /// ESLint's message placeholders: `{{ key }}` becomes the value, unknown keys stay.
-fn interpolate(msg: &str, data: &[(&str, &str)]) -> String {
+pub(crate) fn interpolate(msg: &str, data: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(msg.len());
     let mut rest = msg;
     while let Some(open) = rest.find("{{") {

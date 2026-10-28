@@ -392,15 +392,9 @@ pub fn function_name_with_kind(ast: &Ast, src: &str, parents: &ParentMap, f: Nod
                     .into(),
                 );
                 if kind != MethodKind::Constructor {
-                    if let Some(n) = key_name(ast, src, key)
-                        && !matches!(ast.node(key), Node::ComputedKey { .. })
-                    {
-                        let n = if is_private {
-                            format!("#{n}")
-                        } else {
-                            n.into_owned()
-                        };
-                        tokens.push(format!("'{n}'"));
+                    // A private name is shown bare (`#x`), others quoted.
+                    if is_private && let Some(n) = key_name(ast, src, key) {
+                        tokens.push(format!("#{n}"));
                     } else if let Some(n) = key_name(ast, src, key) {
                         tokens.push(format!("'{n}'"));
                     }
@@ -443,12 +437,11 @@ pub fn function_name_with_kind(ast: &Ast, src: &str, parents: &ParentMap, f: Nod
                     .into(),
                 );
                 if let Some(n) = key_name(ast, src, key) {
-                    let n = if is_private {
+                    tokens.push(if is_private {
                         format!("#{n}")
                     } else {
-                        n.into_owned()
-                    };
-                    tokens.push(format!("'{n}'"));
+                        format!("'{n}'")
+                    });
                 }
                 return tokens.join(" ");
             }
@@ -519,9 +512,18 @@ pub fn function_head_span(ast: &Ast, src: &str, parents: &ParentMap, f: NodeId) 
                     Node::MethodDef { .. } | Node::PropertyDef { .. }
                 )
             {
-                // From the start of the method (or key) to the `(`.
+                // From the start of the method (or key) to the `(` of its parameters,
+                // which follows the key (a computed key can hold parentheses).
                 let start = ast.span(p).start;
-                let paren = paren_after(src, start, span.end).unwrap_or(span.start);
+                let key_end = match *ast.node(p) {
+                    Node::MethodDef { key, .. } | Node::PropertyDef { key, .. } => {
+                        ast.span(key).end.max(start)
+                    }
+                    _ => start,
+                };
+                let paren = paren_after(src, key_end, span.end)
+                    .or_else(|| paren_after(src, start, span.end))
+                    .unwrap_or(span.start);
                 return Span::new(start, paren);
             }
             // ESTree's function declaration starts after `export` / `default` / `declare`.
@@ -1199,4 +1201,38 @@ pub fn keyword_and_space(src: &str, start: u32, keyword: &str) -> Span {
         end += src[end..].chars().next().map_or(1, char::len_utf8);
     }
     Span::new(start, end as u32)
+}
+
+/// The span ESLint gives a `TemplateElement`: its raw text plus the delimiters around it
+/// (the opening `` ` `` or `}`, and the closing `` ` `` or `${`).
+pub fn template_element_span(src: &str, raw: Span) -> Span {
+    let s = src.as_bytes();
+    let end = match s.get(raw.end as usize) {
+        Some(b'`') => raw.end + 1,
+        Some(b'$') => raw.end + 2,
+        _ => raw.end,
+    };
+    Span::new(raw.start.saturating_sub(1), end.min(s.len() as u32))
+}
+
+/// The span of the string literal itself for a `StringLit` or a `Directive` (whose span also
+/// covers its `;` and anything up to it).
+pub fn string_literal_span(ast: &Ast, src: &str, id: NodeId) -> Span {
+    let span = ast.span(id);
+    if !matches!(ast.node(id), Node::Directive { .. }) {
+        return span;
+    }
+    let b = span.text(src).as_bytes();
+    let Some(&quote) = b.first() else {
+        return span;
+    };
+    let mut i = 1;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            c if c == quote => return Span::new(span.start, span.start + i as u32 + 1),
+            _ => i += 1,
+        }
+    }
+    span
 }

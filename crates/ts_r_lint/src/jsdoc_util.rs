@@ -126,6 +126,9 @@ fn run(
     checks: Checks,
     mut f: impl FnMut(&mut Ctx<'_, '_>, &Finder<'_>, &mut Doc),
 ) {
+    if !jsdoc::settings_load(cx) {
+        return;
+    }
     let file = cx.file;
     let finder = Finder {
         ast: file.ast,
@@ -159,6 +162,7 @@ pub fn all_blocks() -> Contexts {
         }],
         all: true,
         plain_any: true,
+        additive: false,
     }
 }
 
@@ -1513,4 +1517,21 @@ pub fn same_path(a: &str, b: &str) -> bool {
 /// `name` does not start with `other` (quoted or not).
 pub fn path_does_not_begin_with(name: &str, other: &str) -> bool {
     !name.starts_with(other) && !drop_path_quotes(name).starts_with(&drop_path_quotes(other))
+}
+
+/// `getRegexFromString` then `search`: whether `text` matches `re`, given as `/pattern/flags`
+/// or a bare pattern (the `v` flag when none is given). A pattern that doesn't compile
+/// matches nothing.
+pub fn regex_string_matches(re: &str, text: &str) -> bool {
+    let (pattern, flags) = match re
+        .strip_prefix('/')
+        .and_then(|r| r.rfind('/').map(|i| (&r[..i], &r[i + 1..])))
+    {
+        Some((p, f)) if f.chars().all(|c| "gimyvus".contains(c)) => {
+            (p, if f.is_empty() { "v" } else { f })
+        }
+        _ => (re, "v"),
+    };
+    crate::regex::parse(pattern, crate::regex::Flags::new(flags))
+        .is_ok_and(|r| r.is_match(text, flags.contains('i')))
 }

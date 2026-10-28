@@ -28,7 +28,7 @@ pub mod type_util;
 pub mod typed;
 pub mod types;
 
-pub use diagnostic::{Diagnostic, Edit, Fix, Severity, Suggestion};
+pub use diagnostic::{Diagnostic, Edit, Fix, Loc, Severity, Suggestion};
 pub use engine::{FileConfig, FileResult, lint_and_fix, lint_source};
 pub use registry::Registry;
 pub use rule::{Ctx, Rule, RuleDef, RuleMeta};

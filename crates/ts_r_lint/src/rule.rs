@@ -218,6 +218,12 @@ impl Report<'_> {
         self.0.fix = Some(fix);
         self
     }
+    /// Shows the report at an explicit ESLint location (1-based line, 1-based UTF-16 column),
+    /// which may lie past the end of its line; the span still decides directives and fixes.
+    pub fn loc(self, loc: crate::diagnostic::Loc) -> Self {
+        self.0.loc = Some(loc);
+        self
+    }
     pub fn fix_opt(self, fix: Option<Fix>) -> Self {
         if let Some(f) = fix {
             self.0.fix = Some(f);
@@ -329,6 +335,7 @@ impl<'f, 'a> Ctx<'f, 'a> {
             fix: None,
             suggestions: Vec::new(),
             fatal: false,
+            loc: None,
         });
         let last = self.out.len() - 1;
         Report(&mut self.out[last])

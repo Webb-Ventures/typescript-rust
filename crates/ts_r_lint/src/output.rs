@@ -121,6 +121,21 @@ impl<'a> Positions<'a> {
         let lc = self.lines.line_col_utf16(self.src, pos);
         (lc.line + 1, lc.col + 1 + extra)
     }
+    /// Where `d` starts, as ESLint prints it: its explicit [`Loc`](crate::diagnostic::Loc)
+    /// if it has one, else its span's start.
+    pub fn start_of(&self, d: &Diagnostic) -> (u32, u32) {
+        match d.loc {
+            Some(l) => (l.line, l.column),
+            None => self.line_col(d.span.start),
+        }
+    }
+    /// Where `d` ends (its explicit location's end, else its span's end).
+    pub fn end_of(&self, d: &Diagnostic) -> (u32, u32) {
+        match d.loc {
+            Some(l) => (l.end_line, l.end_column),
+            None => self.line_col(d.span.end.max(d.span.start)),
+        }
+    }
     /// The UTF-16 index of a byte offset.
     pub fn utf16(&self, pos: u32) -> u32 {
         if self.ascii {
@@ -183,7 +198,7 @@ pub fn stylish(reports: &[FileReport]) -> String {
                 let (l, c) = if d.rule.is_none() && r.source.is_empty() {
                     (0, 0)
                 } else {
-                    pos.line_col(d.span.start)
+                    pos.start_of(d)
                 };
                 [
                     l.to_string(),
@@ -264,7 +279,7 @@ fn fix_json(pos: &Positions<'_>, src: &str, f: &crate::diagnostic::Fix) -> Value
 
 /// One ESLint message object.
 pub fn message_json(pos: &Positions<'_>, src: &str, d: &Diagnostic) -> Value {
-    let (line, column) = pos.line_col(d.span.start);
+    let (line, column) = pos.start_of(d);
     let mut m = serde_json::Map::new();
     m.insert("ruleId".into(), d.rule.map_or(Value::Null, |r| r.into()));
     if d.fatal {
@@ -281,7 +296,7 @@ pub fn message_json(pos: &Positions<'_>, src: &str, d: &Diagnostic) -> Value {
         m.insert("messageId".into(), id.into());
     }
     if !d.fatal && d.rule.is_some() {
-        let (el, ec) = pos.line_col(d.span.end);
+        let (el, ec) = pos.end_of(d);
         m.insert("endLine".into(), el.into());
         m.insert("endColumn".into(), ec.into());
     }
@@ -372,8 +387,8 @@ pub fn sarif(reports: &[FileReport], cwd: &Path, registry: &Registry) -> String 
         artifacts.push(json!({ "location": { "uri": uri } }));
         let pos = Positions::new(&r.source);
         for d in &r.result.diagnostics {
-            let (sl, sc) = pos.line_col(d.span.start);
-            let (el, ec) = pos.line_col(d.span.end.max(d.span.start));
+            let (sl, sc) = pos.start_of(d);
+            let (el, ec) = pos.end_of(d);
             let mut res = json!({
                 "level": if d.is_error() { "error" } else { "warning" },
                 "message": { "text": d.message },
@@ -442,8 +457,8 @@ pub fn github(reports: &[FileReport], cwd: &Path) -> String {
         let pos = Positions::new(&r.source);
         let file = rel_uri(&r.path, cwd);
         for d in &r.result.diagnostics {
-            let (l, c) = pos.line_col(d.span.start);
-            let (el, ec) = pos.line_col(d.span.end.max(d.span.start));
+            let (l, c) = pos.start_of(d);
+            let (el, ec) = pos.end_of(d);
             let kind = if d.is_error() { "error" } else { "warning" };
             let title = d.rule.unwrap_or("ts-r-lint");
             let _ = writeln!(
@@ -469,6 +484,7 @@ pub fn file_warning(message: &str) -> Diagnostic {
         fix: None,
         suggestions: Vec::new(),
         fatal: false,
+        loc: None,
     }
 }
 
@@ -497,6 +513,7 @@ mod tests {
             fix: None,
             suggestions: Vec::new(),
             fatal: false,
+            loc: None,
         }
     }
 
@@ -550,5 +567,21 @@ mod tests {
             s,
             "::warning file=a.js,line=1,endLine=1,col=1,endColumn=2,title=r::a%0Ab%25\n"
         );
+    }
+
+    /// An explicit location wins over the span everywhere a position is printed, even past
+    /// the end of its line (ESLint's 1:2 on an empty first line).
+    #[test]
+    fn explicit_location() {
+        let mut d = diag("r", Severity::Error, Span::at(0), "m");
+        d.loc = Some(crate::diagnostic::Loc::at(1, 2));
+        let src = "\nx";
+        let pos = Positions::new(src);
+        let m = message_json(&pos, src, &d);
+        assert_eq!((&m["line"], &m["column"]), (&json!(1), &json!(2)));
+        assert_eq!((&m["endLine"], &m["endColumn"]), (&json!(1), &json!(2)));
+        let r = report(src, vec![d]);
+        assert!(stylish(std::slice::from_ref(&r)).contains("1:2"));
+        assert!(github(&[r], Path::new("/p")).contains("line=1,endLine=1,col=2,endColumn=2"));
     }
 }

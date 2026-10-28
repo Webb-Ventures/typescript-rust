@@ -870,6 +870,7 @@ mod tests {
             fix,
             suggestions: Vec::new(),
             fatal: false,
+            loc: None,
         }
     }
 
