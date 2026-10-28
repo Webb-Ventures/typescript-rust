@@ -1,0 +1,6 @@
+a.ts(1,39): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(2,32): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(8,13): error TS7006: Parameter 'x' implicitly has an 'any' type.
+a.ts(11,7): error TS7006: Parameter 'y' implicitly has an 'any' type.
+a.ts(13,16): error TS7006: Parameter 'w' implicitly has an 'any' type.
+a.ts(14,7): error TS2322: Type '<T>(x: T) => T' is not assignable to type 'number'.

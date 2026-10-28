@@ -65,12 +65,32 @@ pub fn should_check(program: &ProgramFiles, i: usize) -> bool {
 /// Whether program-level (link) diagnostic `d` is reported: its file is checked, and no
 /// `// @ts-ignore` or `// @ts-expect-error` directive governs its line (tsc applies the
 /// directives to every semantic error of a file, merge errors included: @colors/colors
-/// ignores its `bold` member of the global `String`).
+/// ignores its `bold` member of the global `String`), or it is in a lib file tsc checks
+/// ([`lib_link_diagnostics_reported`]).
 pub fn link_diagnostic_reported(program: &ProgramFiles, d: &Diagnostic) -> bool {
     let f = d.file.0 as usize;
-    f < program.files.len()
-        && should_check(program, f)
-        && !crate::check::suppressed_by_directive(&program.files[f], d)
+    if f >= program.files.len() {
+        return false;
+    }
+    if program.files[f].is_lib {
+        return lib_link_diagnostics_reported(program, f);
+    }
+    should_check(program, f) && !crate::check::suppressed_by_directive(&program.files[f], d)
+}
+
+/// Whether the link (merge) diagnostics located in file `i` are reported because it is a
+/// lib file tsc checks: tsc type-checks the default libraries unless `skipLibCheck` or
+/// `skipDefaultLibCheck` is set, so a declaration that collides with a lib one (an
+/// augmented `String` with a `bold` property, @colors/colors) is a TS2300 at both
+/// declarations, the lib's printed by its path (observed in tsc 7.0.2; the
+/// `@ts-ignore` above the package's own declaration does not reach the lib's). The lib
+/// files themselves are not walked: only their merge diagnostics come out.
+pub fn lib_link_diagnostics_reported(program: &ProgramFiles, i: usize) -> bool {
+    let options = &program.options;
+    program.files[i].is_lib
+        && options.no_check() != Some(true)
+        && options.skip_lib_check() != Some(true)
+        && options.skip_default_lib_check() != Some(true)
 }
 
 /// A "plain" JavaScript file: JavaScript without `checkJs` set either way, `// @ts-check` or

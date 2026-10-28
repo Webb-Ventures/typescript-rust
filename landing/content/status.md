@@ -23,7 +23,7 @@ number disappears from its source, so the table can't silently go stale).
 | [`ts-r-dev`](tools/ts-r-dev.md) | Hot reload, Vite's `import.meta.hot` API, React Fast Refresh, dependency pre-bundling | No CSS preprocessors; some `vite.config` options and plugin APIs; HTTP/1.1 only |
 | [`ts-r-build`](tools/ts-r-build.md) | esbuild's CLI flags, ESM/CJS/IIFE, splitting, minify, source maps, `--watch` | No plugins, no CSS bundling, lowering down to ES2015 (not ES5) |
 | [`ts-r-check`](tools/ts-r-check.md) | tsc's codes and messages; 97.0% of conformance tests exact; 3 of 6 public bench projects match exactly | No "Did you mean" suggestions on regular expression errors (TS1369); some inference and narrowing; emits like tsc unless `--noEmit` |
-| [`ts-r-lint`](tools/ts-r-lint.md) | 157 rules (51 type-aware) matching 15,706 of 15,732 of ESLint's own tests; ESLint flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint unsupported (three eslint-plugin-jsdoc rules aside) |
+| [`ts-r-lint`](tools/ts-r-lint.md) | 157 rules (51 type-aware) matching 15,708 of 15,732 of ESLint's own tests; ESLint flat config, oxlint and Biome configs | Type-aware rules only where ts-r-check matches your tsc; plugins other than typescript-eslint unsupported (three eslint-plugin-jsdoc rules aside) |
 | [`ts-r-lsp`](tools/ts-r-lsp.md) | Shared server per workspace; lint; our checker or your TypeScript as the type backend | Slower than TypeScript 7's LSP to first diagnostics; most projects fall back to your TypeScript for diagnostics |
 
 ## Conformance

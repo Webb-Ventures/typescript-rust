@@ -1,0 +1,3 @@
+a.d.ts(2,22): error TS2717: Subsequent property declarations must have the same type.  Property 'length' must be of type 'number', but here has type 'string'.
+b.d.ts(1,17): error TS2717: Subsequent property declarations must have the same type.  Property 'a' must be of type 'number', but here has type 'string'.
+b.d.ts(2,17): error TS2717: Subsequent property declarations must have the same type.  Property 'a' must be of type 'number', but here has type 'boolean'.

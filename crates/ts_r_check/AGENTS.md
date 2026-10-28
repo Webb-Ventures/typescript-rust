@@ -77,7 +77,11 @@ diagnostics in tsc's format. Root rules:
   then `Found 1 error in a.ts:3` / `Found N errors in the same file, starting at: a.ts:3` /
   `Found N errors in M files.` plus the `Errors  Files` table (rows sorted by the displayed
   file name, also for `-b`), the `:line` in grey, and a closing blank line. Global diagnostics count as errors but not as files.
-- Paths are shown relative to the cwd. Output is sorted by path, then position.
+- Paths are shown relative to the cwd, with `../` up to the shared root as tsc does (a lib
+  file under `/Users` seen from `/private/tmp`); a path on another drive stays absolute.
+  Output is sorted by absolute path, then position. The sources hold every project file
+  and the lib files a diagnostic points into (a lib file's half of a clash with a project
+  declaration, `driver::lib_link_diagnostics_reported`).
 - **Emit** (record 0012, E1): unless `noEmit`, the program goes through `ts_r_emit` (JS and
   source maps, `Layout::Tsc`, the checker as `EmitResolver`) into memory; outputs are
   written only after every diagnostic is known, and not at all with `noEmitOnError` and

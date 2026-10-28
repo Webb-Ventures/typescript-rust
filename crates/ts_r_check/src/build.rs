@@ -250,7 +250,7 @@ pub fn compile(
         e
     });
     let emit_errors = errors_before_emit == 0 && error_count(&diags, &config_diags) > 0;
-    let mut sources = crate::sources_of(&program);
+    let mut sources = crate::sources_of(&program, &diags);
     let diags = merge_config_diagnostics(diags, &config_diags, &mut sources, fs);
     let diags = add_missing_roots(parsed, fs, diags, &mut sources);
     let mut rendered = host.render_diags(&diags, sources);

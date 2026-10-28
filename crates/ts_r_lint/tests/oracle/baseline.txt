@@ -5,7 +5,7 @@
 @typescript-eslint/dot-notation 63/63
 @typescript-eslint/no-array-constructor 33/33
 @typescript-eslint/no-array-delete 31/31
-@typescript-eslint/no-base-to-string 316/317
+@typescript-eslint/no-base-to-string 317/317
 @typescript-eslint/no-confusing-void-expression 123/123
 @typescript-eslint/no-deprecated 266/266
 @typescript-eslint/no-dupe-class-members 21/21
@@ -76,7 +76,7 @@
 @typescript-eslint/restrict-plus-operands 119/119
 @typescript-eslint/restrict-template-expressions 86/86
 @typescript-eslint/return-await 103/103
-@typescript-eslint/switch-exhaustiveness-check 112/113
+@typescript-eslint/switch-exhaustiveness-check 113/113
 @typescript-eslint/triple-slash-reference 21/21
 @typescript-eslint/unbound-method 217/218
 @typescript-eslint/unified-signatures 115/115

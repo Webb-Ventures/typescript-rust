@@ -14,6 +14,42 @@ use crate::declared::anon;
 use crate::members::SigKind;
 use ts_r_ast::Node;
 
+/// How editor features print types; [`PrintMode::default`] prints as diagnostics do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrintMode {
+    /// Names carry the namespaces around them, except those whose body encloses this node
+    /// (as [`Ck::type_to_string_at`]).
+    pub scope: Option<Loc>,
+    /// A `?` parameter or property prints without the `undefined` its optionality adds
+    /// (`c?: () => string`, as tsc's quick info shows it); an annotation that spells out
+    /// `undefined` keeps it.
+    pub omit_optional_undefined: bool,
+    /// With `scope`, a type that is not in scope by its own name is named through an
+    /// import alias in scope that reaches it or one of its namespaces (`a<a<string>>` for
+    /// `import a = require("./a")` of `export = Foo`; `d.C<number>` for `import d = M.N`).
+    pub via_aliases: bool,
+}
+
+impl PrintMode {
+    /// Qualified as seen from `scope`, otherwise as diagnostics print.
+    pub fn at(scope: Loc) -> Self {
+        PrintMode {
+            scope: Some(scope),
+            ..PrintMode::default()
+        }
+    }
+
+    /// tsc's quick info: as seen from `scope`, through import aliases, and `?` members
+    /// without the `undefined` optionality adds.
+    pub fn quick_info(scope: Loc) -> Self {
+        PrintMode {
+            scope: Some(scope),
+            omit_optional_undefined: true,
+            via_aliases: true,
+        }
+    }
+}
+
 const MAX_PRINT_DEPTH: u32 = 100;
 /// Types one outermost print may visit before the rest is elided.
 const MAX_PRINT_NODES: u32 = 100_000;
@@ -180,6 +216,63 @@ impl<'c, 'a> Ck<'c, 'a> {
         let s = self.type_to_string(t);
         (self.print_qualified, self.print_scope) = saved;
         s
+    }
+
+    /// Runs `f` with the printer set up for `mode`, then restores the previous setup.
+    fn with_print_mode<R>(&mut self, mode: PrintMode, f: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = (
+            self.print_qualified,
+            self.print_scope,
+            self.print_omit_optional_undefined,
+            self.print_via_aliases,
+        );
+        if let Some(scope) = mode.scope {
+            self.print_qualified = true;
+            self.print_scope = Some(scope);
+            self.print_via_aliases = mode.via_aliases;
+        }
+        self.print_omit_optional_undefined = mode.omit_optional_undefined;
+        let r = f(self);
+        (
+            self.print_qualified,
+            self.print_scope,
+            self.print_omit_optional_undefined,
+            self.print_via_aliases,
+        ) = saved;
+        r
+    }
+
+    /// The printed form of a type in an editor mode (see [`PrintMode`]).
+    pub fn type_to_string_with(&mut self, t: TypeId, mode: PrintMode) -> String {
+        self.with_print_mode(mode, |ck| ck.type_to_string(t))
+    }
+
+    /// A signature as seen from `scope`: names are qualified as
+    /// [`Self::type_to_string_at`] qualifies them (`iterator?: Underscore.Iterator<number,
+    /// boolean>`). `arrow` prints `(...) => R`, else `(...): R`.
+    pub fn signature_to_string_at(
+        &mut self,
+        sig: SigId,
+        kind: SigKind,
+        arrow: bool,
+        scope: Loc,
+    ) -> String {
+        self.signature_to_string_with(sig, kind, arrow, PrintMode::at(scope))
+    }
+
+    /// A signature in an editor mode (see [`PrintMode`]).
+    pub fn signature_to_string_with(
+        &mut self,
+        sig: SigId,
+        kind: SigKind,
+        arrow: bool,
+        mode: PrintMode,
+    ) -> String {
+        self.with_print_mode(mode, |ck| {
+            let mut stack = Vec::new();
+            let s = ck.print_signature(sig, kind, arrow, 0, &mut stack);
+            truncate(s)
+        })
     }
 
     /// Prints `t` before a postfix (`[]`, `?`, `[K]`): like [`Self::print_wrapped`], and a
@@ -689,6 +782,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.print_qualified {
             return name;
         }
+        if self.print_via_aliases
+            && let Some(scope) = self.print_scope
+            && let Some(q) = self.name_via_alias(sym, &name, scope)
+        {
+            return q;
+        }
         let mut out = name;
         let mut cur = self.c.sym_parent(sym);
         let mut guard = 0;
@@ -742,6 +841,86 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = self.c.sym_parent(p);
         }
         out
+    }
+
+    /// `sym` named through an import alias visible at `scope` that resolves to it or to
+    /// one of its namespaces, the nearest first (`a` for `import a = require("./a")` of
+    /// `export = Foo`, `d.C` for `import d = M.N`, `ns.C` for `import * as ns`); `None`
+    /// when `sym` or the namespace reached first is in scope by its own name, or no alias
+    /// reaches it (tsc: checker.go getAccessibleSymbolChain, which tries each container
+    /// from the symbol outwards, by name and then through aliases, in each scope's table).
+    fn name_via_alias(&self, sym: SymId, name: &str, scope: Loc) -> Option<String> {
+        let same = |a: SymId, b: SymId| {
+            a == b || {
+                let (da, db) = (self.c.first_decl(a), self.c.first_decl(b));
+                da.is_some() && da == db
+            }
+        };
+        let b = self.c.bound(scope.file);
+        let ast = self.c.ast(scope.file);
+        let parents = self.c.file(scope.file).parents();
+        // The import aliases in scope, innermost scope first.
+        let mut aliases: Vec<(String, SymId)> = Vec::new();
+        let mut cur = Some(scope.node);
+        let mut guard = 0;
+        while let Some(node) = cur {
+            guard += 1;
+            if guard > 10_000 {
+                break;
+            }
+            if let Some(sc) = b.scope_of(node) {
+                let sc = b.scopes[sc.0 as usize];
+                for &(n, s) in b.table(sc.locals) {
+                    let id = self.c.sym(scope.file, s);
+                    if self.c.sym_flags(id).intersects(SymbolFlags::ALIAS)
+                        && let Some(t) = self.c.resolve_alias(id)
+                    {
+                        aliases.push((b.name_text(ast, n).to_owned(), t));
+                    }
+                }
+            }
+            cur = parents.parent(node);
+        }
+        if aliases.is_empty() {
+            return None;
+        }
+        let mut target = sym;
+        let mut path = name.to_owned();
+        for _ in 0..32 {
+            let own = self.c.sym_name(target);
+            let m = crate::symbols::symbol_meaning(self.c.sym_flags(target));
+            let visible = self
+                .c
+                .lookup_in_scope_chain(scope, own, m)
+                .or_else(|| self.c.global_symbol(own, m))
+                .and_then(|v| self.c.resolve_alias(v))
+                .is_some_and(|v| same(v, target));
+            if visible {
+                return None;
+            }
+            if let Some((alias, _)) = aliases.iter().find(|(_, t)| same(*t, target)) {
+                return Some(if target == sym {
+                    alias.clone()
+                } else {
+                    format!("{alias}.{path}")
+                });
+            }
+            let parent = self.c.sym_parent(target)?;
+            let f = self.c.sym_flags(parent);
+            if !f.intersects(
+                SymbolFlags::MODULE_FILE
+                    | SymbolFlags::NAMESPACE_MODULE
+                    | SymbolFlags::VALUE_MODULE,
+            ) || self.c.sym_name(parent) == "__global"
+            {
+                return None;
+            }
+            if target != sym {
+                path = format!("{}.{path}", self.c.sym_name(target));
+            }
+            target = parent;
+        }
+        None
     }
 
     /// The name of a symbol in `typeof C`: an unnamed class expression takes the name it is
@@ -1213,6 +1392,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                         pt = TypeId::UNDEFINED;
                     }
                 }
+                // Editor printing leaves it out unless the annotation spells it out.
+                if optional
+                    && self.c.opts.strict_null_checks
+                    && self.print_omit_optional_undefined
+                    && !self.annotation_spells_undefined(p)
+                {
+                    let t2 = self.filter_type(pt, |ck, x| {
+                        !ck.store().flags(x).contains(TypeFlags::UNDEFINED)
+                    });
+                    if !self.store().flags(t2).contains(TypeFlags::NEVER) {
+                        pt = t2;
+                    }
+                }
                 let ts = match self.error_annotation_text(p) {
                     Some(text) if pt == TypeId::ERROR && !optional => text,
                     _ => self.print_type(pt, depth + 1, stack),
@@ -1602,6 +1794,45 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(out)
     }
 
+    /// Whether `sym`'s declaration annotates it with `undefined` or a union that lists
+    /// `undefined` (`x?: string | undefined`).
+    fn annotation_spells_undefined(&self, sym: SymId) -> bool {
+        if sym == SymId::NONE {
+            return false;
+        }
+        let Some(d) = self.c.first_decl(sym) else {
+            return false;
+        };
+        let ast = self.ast(d.file);
+        let ann = match *ast.node(d.node) {
+            Node::Param { type_ann, .. }
+            | Node::PropertySignature { type_ann, .. }
+            | Node::PropertyDef { type_ann, .. } => type_ann,
+            _ => None,
+        };
+        let Some(mut n) = ann else {
+            return false;
+        };
+        for _ in 0..64 {
+            match *ast.node(n) {
+                Node::ParenType { ty } => n = ty,
+                _ => break,
+            }
+        }
+        let is_undef = |n: ts_r_ast::NodeId| {
+            matches!(
+                ast.node(n),
+                Node::KeywordType {
+                    kind: ts_r_ast::KeywordTypeKind::Undefined
+                }
+            )
+        };
+        match *ast.node(n) {
+            Node::UnionType { types } => ast.list(types).iter().any(|&m| is_undef(m)),
+            _ => is_undef(n),
+        }
+    }
+
     pub fn print_signature(
         &mut self,
         sig: SigId,
@@ -1715,7 +1946,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         _ => !is_undef(a.node),
                     }
                 });
-            if optional && self.c.opts.strict_null_checks && (!question || as_annotated) {
+            // Editor printing drops the `undefined` a `?` adds unless the annotation
+            // spells it out.
+            let omit = self.print_omit_optional_undefined
+                && question
+                && !self.annotation_spells_undefined(p.sym);
+            if optional && self.c.opts.strict_null_checks && (!question || as_annotated || omit) {
                 let t2 = self.filter_type(ty, |ck, x| {
                     !ck.store().flags(x).contains(TypeFlags::UNDEFINED)
                 });

@@ -1130,6 +1130,16 @@ impl<'a, F: FileSystem> Run<'a, F> {
         let mut new_diags: FxHashMap<usize, Vec<PathDiag>> = FxHashMap::default();
         let mut new_link: Vec<PathDiag> = Vec::new();
         let relink_rels: FxHashSet<&str> = relink.iter().map(|&i| rels[i]).collect();
+        // A stored link diagnostic in a lib file can't be tied to the project file that
+        // caused it, so a relink or removal with any of them takes the full path.
+        let lib_side = |d: &PathDiag| {
+            std::iter::once(&d.file)
+                .chain(&d.related)
+                .any(|f| f.as_deref().is_some_and(|f| f.starts_with("lib:")))
+        };
+        if (!relink.is_empty() || !removed.is_empty()) && m.link.iter().flatten().any(lib_side) {
+            return None;
+        }
         // The libs: all but the DOM group, which only when the check can see it.
         let dom: Vec<usize> = (0..m.libs.len())
             .filter(|&i| DOM_GROUP.contains(&m.libs[i].0.as_str()))
@@ -1195,9 +1205,15 @@ impl<'a, F: FileSystem> Run<'a, F> {
             // As `check_program`: a checked file's, unless `@ts-ignore` or
             // `@ts-expect-error` governs its line.
             for d in &checker.link.diagnostics {
-                if link_diagnostic_reported(&sub, d)
-                    && relink_rels.contains(sub_rels[d.file.0 as usize])
-                {
+                if !link_diagnostic_reported(&sub, d) {
+                    continue;
+                }
+                // One in a lib file (a project declaration clashing with a lib one): the
+                // sub-program holds only some libs, so the full path decides.
+                if sub.files.get(d.file.0 as usize).is_some_and(|f| f.is_lib) {
+                    return None;
+                }
+                if relink_rels.contains(sub_rels[d.file.0 as usize]) {
                     new_link.push(to_path(d));
                 }
             }
@@ -1228,9 +1244,9 @@ impl<'a, F: FileSystem> Run<'a, F> {
             .iter()
             .flatten()
             .filter(|d| {
-                d.file
-                    .as_deref()
-                    .is_some_and(|f| present_set.contains(f) && !relink_rels.contains(f))
+                d.file.as_deref().is_some_and(|f| {
+                    (present_set.contains(f) && !relink_rels.contains(f)) || f.starts_with("lib:")
+                })
             })
             .cloned()
             .collect();
@@ -1365,15 +1381,18 @@ impl<'a, F: FileSystem> Run<'a, F> {
             .collect();
         // Sources: text for the files diagnostics point into.
         let mut shown: FxHashSet<usize> = FxHashSet::default();
+        let mut shown_libs: FxHashSet<usize> = FxHashSet::default();
         for d in &out {
             for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
                 let f = f.0 as usize;
-                if f >= nl && f < nl + n {
+                if f < nl {
+                    shown_libs.insert(f);
+                } else if f < nl + n {
                     shown.insert(f - nl);
                 }
             }
         }
-        let mut sources: Vec<Option<(String, String)>> = lib_paths.iter().map(|_| None).collect();
+        let mut sources: Vec<Option<(String, String)>> = lib_sources(&lib_paths, &shown_libs);
         for i in 0..n {
             let text = if shown.contains(&i) {
                 match (&parsed[i], &texts[i]) {
@@ -1568,17 +1587,16 @@ impl<'a, F: FileSystem> Run<'a, F> {
         old: &Sidecar,
     ) -> Outcome {
         let paths = self.paths;
-        let mut lib_paths: Vec<String> = m
+        // Lib ids in program order, as the manifest keeps them (`load_program` puts the lib
+        // files first, in its lib walk's order).
+        let lib_paths: Vec<String> = m
             .libs
             .iter()
             .map(|(n, _)| paths.abs(&format!("lib:{n}")))
             .collect();
-        lib_paths.sort();
         let mut index: FxHashMap<&str, u32> = FxHashMap::default();
         let lib_rels: Vec<String> = m.libs.iter().map(|(n, _)| format!("lib:{n}")).collect();
-        let mut sorted_rels: Vec<&String> = lib_rels.iter().collect();
-        sorted_rels.sort_by_key(|r| paths.abs(r));
-        for (i, r) in sorted_rels.iter().enumerate() {
+        for (i, r) in lib_rels.iter().enumerate() {
             index.insert(r.as_str(), i as u32);
         }
         let nl = lib_paths.len();
@@ -1588,15 +1606,18 @@ impl<'a, F: FileSystem> Run<'a, F> {
         let diagnostics: Vec<Diagnostic> =
             m.output.iter().filter_map(|d| d.to_diag(&index)).collect();
         let mut shown: FxHashSet<usize> = FxHashSet::default();
+        let mut shown_libs: FxHashSet<usize> = FxHashSet::default();
         for d in &diagnostics {
             for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
                 let f = f.0 as usize;
-                if f >= nl && f < nl + m.files.len() {
+                if f < nl {
+                    shown_libs.insert(f);
+                } else if f < nl + m.files.len() {
                     shown.insert(f - nl);
                 }
             }
         }
-        let mut sources: Vec<Option<(String, String)>> = lib_paths.iter().map(|_| None).collect();
+        let mut sources: Vec<Option<(String, String)>> = lib_sources(&lib_paths, &shown_libs);
         let mut files = Vec::with_capacity(m.files.len());
         for (i, (f, s)) in m.files.iter().zip(scanned).enumerate() {
             let abs = paths.abs(&f.path);
@@ -1637,6 +1658,20 @@ impl<'a, F: FileSystem> Run<'a, F> {
 }
 
 /// Whether `f` contains `import.meta`.
+/// Sources for the lib files: text for the ones diagnostics point into (`shown`, by id),
+/// `None` for the rest.
+fn lib_sources(lib_paths: &[String], shown: &FxHashSet<usize>) -> Vec<Option<(String, String)>> {
+    lib_paths
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            shown
+                .contains(&i)
+                .then(|| (p.clone(), std::fs::read_to_string(p).unwrap_or_default()))
+        })
+        .collect()
+}
+
 fn uses_import_meta(f: &SourceFile) -> bool {
     f.text.contains("meta")
         && (1..=f.ast.node_count() as u32)

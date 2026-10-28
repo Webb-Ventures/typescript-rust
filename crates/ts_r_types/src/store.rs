@@ -110,8 +110,9 @@ pub enum TypeKind {
         ty: TypeId,
     },
     /// A forward reference to a non-generic type alias whose declared type is still being
-    /// resolved (`type J = string | J[]`): index into the level's forwards. Once linked,
-    /// every accessor sees the alias's type; until then it behaves as `UNRESOLVED`.
+    /// resolved (`type J = string | J[]`), or to the type of a type node that names one
+    /// (the element of `type V = (string | V)[]`): index into the level's forwards. Once
+    /// linked, every accessor sees the target type; until then it behaves as `UNRESOLVED`.
     Forward(u32),
 }
 
@@ -519,6 +520,7 @@ enum Key {
     Restrictive(TypeId),
     NamedError(StrId),
     Forward(SymId),
+    ForwardNode((u32, u32)),
 }
 
 const SHARDS: usize = 64;
@@ -713,7 +715,8 @@ pub struct TypeStore {
     cond_root_map: Sharded<(u32, u32), u32>,
     conds: ChunkVec<ConditionalData>,
     templates: ChunkVec<TemplateData>,
-    forwards: ChunkVec<(SymId, OnceLock<TypeId>)>,
+    /// Forward references: the alias (`None` for a type node's) and the linked target.
+    forwards: ChunkVec<(Option<SymId>, OnceLock<TypeId>)>,
     relations: [RelationCache; 5],
     /// Members of lower-level objects whose resolution involves this level's entities:
     /// object id (raw) -> index into `shadow_vals`.
@@ -1023,6 +1026,7 @@ impl TypeStore {
             Key::Template(d) => level_of(d.texts.0).max(level_of(d.types.0)),
             Key::Restrictive(t) => Self::lt(t),
             Key::Forward(s) => level_of(s.0),
+            Key::ForwardNode(decl) => self.decl_level(decl),
             Key::Index(t) => Self::lt(t),
             Key::IndexedAccess(a, b) | Key::Substitution(a, b) => Self::lt(a).max(Self::lt(b)),
             Key::StringMapping(s, t) => level_of(s.0).max(Self::lt(t)),
@@ -1096,7 +1100,16 @@ impl TypeStore {
     /// The forward reference to the non-generic type alias `sym` (see
     /// [`TypeKind::Forward`]).
     pub fn forward(&self, sym: SymId) -> TypeId {
-        let key = Key::Forward(sym);
+        self.forward_of(Key::Forward(sym), Some(sym))
+    }
+
+    /// The forward reference to the type of the type node `node` (file, node), linked once
+    /// the alias it names is known (see [`TypeKind::Forward`]).
+    pub fn forward_node(&self, node: (u32, u32)) -> TypeId {
+        self.forward_of(Key::ForwardNode(node), None)
+    }
+
+    fn forward_of(&self, key: Key, sym: Option<SymId>) -> TypeId {
         let l = self.key_level(&key);
         let s = self.at(l);
         self.intern(key, || {
@@ -1110,14 +1123,20 @@ impl TypeStore {
         })
     }
 
-    /// The alias symbol of `t` when `t` itself is a forward reference (linked or not).
-    /// Printers stop there: a linked forward closes a cycle.
+    /// The alias symbol of `t` when `t` itself is a forward reference to an alias (linked
+    /// or not). Printers stop there: a linked forward closes a cycle.
     pub fn forward_alias(&self, t: TypeId) -> Option<SymId> {
         let s = self.at(level_of(t.0));
         match s.types.get(index_of(t.0)).kind {
-            TypeKind::Forward(i) => Some(s.forwards.get(i).0),
+            TypeKind::Forward(i) => s.forwards.get(i).0,
             _ => None,
         }
+    }
+
+    /// Whether `t` itself is a forward reference (to an alias or a type node, linked or not).
+    pub fn is_forward(&self, t: TypeId) -> bool {
+        let s = self.at(level_of(t.0));
+        matches!(s.types.get(index_of(t.0)).kind, TypeKind::Forward(_))
     }
 
     /// The type the forward reference `t` is linked to (following chains), or `t` itself

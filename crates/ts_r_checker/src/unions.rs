@@ -275,10 +275,12 @@ impl<'a> Checker<'a> {
                 let fb = self.store.regular(b) == TypeId::TRUE;
                 fa.cmp(&fb)
             }
+            // Unique symbols by their symbol's first declaration, then name (`typeof zebra |
+            // typeof apple` when `zebra` is declared first).
             (TypeKind::UniqueSymbol(x), TypeKind::UniqueSymbol(y)) => self
-                .sym_name(x)
-                .cmp(self.sym_name(y))
-                .then_with(|| self.decl_position(x).cmp(&self.decl_position(y))),
+                .decl_position(x)
+                .cmp(&self.decl_position(y))
+                .then_with(|| self.sym_name(x).cmp(self.sym_name(y))),
             (TypeKind::TypeParameter(_), TypeKind::TypeParameter(_)) => {
                 let pa = s.type_param_data(a);
                 let pb = s.type_param_data(b);
@@ -387,9 +389,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         // Forward references to type aliases read differently once linked: not cached.
         if types.len() >= CACHED_UNION_MIN
             && reduction != Reduction::Subtype
-            && !types
-                .iter()
-                .any(|&t| self.store().forward_alias(t).is_some())
+            && !types.iter().any(|&t| self.store().is_forward(t))
         {
             if let Some(t) = self.union_cache.get(types, reduction, alias) {
                 return t;

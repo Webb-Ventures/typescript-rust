@@ -673,6 +673,10 @@ pub struct Ck<'c, 'a> {
     /// Aliases handed out as forward references before their resolution started; resolved
     /// (and linked) once no type alias is being resolved.
     pub(crate) pending_forwards: Vec<SymId>,
+    /// Type nodes handed out as forward references (a deferred position whose union names
+    /// an alias being resolved, `type V = (string | V)[]`): resolved and linked like
+    /// `pending_forwards`.
+    pub(crate) pending_node_forwards: Vec<Loc>,
     pub(crate) assigned_syms: FxHashSet<SymId>,
     /// Assigned symbols with at least one non-compound assignment (`x = ...`, not `x++`).
     pub(crate) definitely_assigned_syms: FxHashSet<SymId>,
@@ -827,6 +831,13 @@ pub struct Ck<'c, 'a> {
     /// With `print_qualified`, also name the module a type comes from
     /// (`import("a").F`): only to tell apart two relation operands that print alike.
     pub(crate) print_module_qualified: bool,
+    /// Editor printing (`PrintMode::omit_optional_undefined`): a `?` parameter or
+    /// property prints without the `undefined` its optionality adds (`c?: () => string`).
+    pub(crate) print_omit_optional_undefined: bool,
+    /// Editor printing (`PrintMode::via_aliases`): with `print_scope`, a type that is not
+    /// in scope by its own name is named through an import alias that reaches it or one
+    /// of its namespaces (`a<a<string>>` for `import a = require("./a")`, `d.C`).
+    pub(crate) print_via_aliases: bool,
     /// Types printed so far by the outermost `print_type` call (a budget against nested
     /// generic instantiations that double at each level).
     pub(crate) print_nodes: u32,
@@ -882,6 +893,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             ret_ctx_mappers: Vec::new(),
             deferred_alias_ref: false,
             pending_forwards: Vec::new(),
+            pending_node_forwards: Vec::new(),
             assigned_syms: FxHashSet::default(),
             definitely_assigned_syms: FxHashSet::default(),
             last_assignment: FxHashMap::default(),
@@ -947,6 +959,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             print_scope: None,
             print_qualified: false,
             print_module_qualified: false,
+            print_omit_optional_undefined: false,
+            print_via_aliases: false,
             print_nodes: 0,
             compound_assigned: FxHashMap::default(),
             reverse_mapping: Vec::new(),

@@ -383,7 +383,9 @@ fn relative(path: &str, cwd: &str) -> String {
     let p: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     let c: Vec<&str> = cwd.split('/').filter(|s| !s.is_empty()).collect();
     let common = p.iter().zip(&c).take_while(|(a, b)| a == b).count();
-    if common == 0 {
+    // Only a shared root (`/` on Unix) can be climbed to, as tsc does: a lib file under
+    // `/Users` seen from `/private/tmp` is `../../Users/...`. Different drives stay absolute.
+    if common == 0 && !(path.starts_with('/') && cwd.starts_with('/')) {
         return path.to_owned();
     }
     let mut out: Vec<&str> = vec![".."; c.len() - common];
@@ -455,12 +457,23 @@ fn is_declaration_name(path: &str) -> bool {
         || (lower.ends_with(".ts") && lower.rsplit('/').next().is_some_and(|n| n.contains(".d.")))
 }
 
-/// Per file id: `(path, text)` for non-lib files.
-fn sources_of(program: &ProgramFiles) -> Vec<Option<(String, String)>> {
+/// Per file id: `(path, text)` for non-lib files, and for the lib files `diags` point
+/// into (tsc prints a lib file's diagnostics with its path: a declaration colliding with a
+/// lib one is a TS2300 in both files).
+fn sources_of(program: &ProgramFiles, diags: &[Diagnostic]) -> Vec<Option<(String, String)>> {
+    let mut shown: Vec<bool> = program.files.iter().map(|f| !f.is_lib).collect();
+    for d in diags {
+        for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
+            if let Some(s) = shown.get_mut(f.0 as usize) {
+                *s = true;
+            }
+        }
+    }
     program
         .files
         .iter()
-        .map(|f| (!f.is_lib).then(|| (f.path.clone(), f.text.clone())))
+        .zip(shown)
+        .map(|(f, shown)| shown.then(|| (f.path.clone(), f.text.clone())))
         .collect()
 }
 
@@ -897,7 +910,7 @@ fn main() -> ExitCode {
         if options_failed {
             build::syntax_before_options(&parsed, &program, &mut diags, &mut config_diags);
         }
-        let sources = sources_of(&program);
+        let sources = sources_of(&program, &diags);
         (Some(program), sources, diags)
     } else if options_failed {
         (None, Vec::new(), Vec::new())
@@ -905,7 +918,7 @@ fn main() -> ExitCode {
         let (program, diags, s, _, p) = full_check(true, false);
         semantic = s;
         package_jsons = Some(p);
-        let sources = sources_of(&program);
+        let sources = sources_of(&program, &diags);
         (Some(program), sources, diags)
     } else {
         let t = std::time::Instant::now();
@@ -945,7 +958,7 @@ fn main() -> ExitCode {
             .is_some_and(|root| outside_root_dir(root, &outcome.files, fs.case_sensitive()));
         if pragmas || outside_root {
             let (program, diags, _, _, _) = full_check(true, false);
-            let sources = sources_of(&program);
+            let sources = sources_of(&program, &diags);
             (Some(program), sources, diags)
         } else {
             (None, outcome.sources, outcome.diagnostics)

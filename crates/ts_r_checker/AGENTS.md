@@ -25,7 +25,11 @@ result.diagnostics; result.error_count();
 // lower level: let checker = Checker::new(&program); let mut ck = Ck::new(&checker, file);
 // ck.check_source_file(file); ck.check_expr(loc); ck.is_assignable(s, t); ck.type_to_string(t)
 // editor queries (ts_r_lsp): ck.type_to_string_at(t, scope) (`m1.m2.c`, qualified from
-// scope), ck.jsx_props_type(opening), ck.pattern_parent_type(pattern)
+// scope), ck.signature_to_string_at(sig, kind, arrow, scope),
+// ck.type_to_string_with(t, PrintMode::quick_info(scope)) and
+// ck.signature_to_string_with(sig, kind, arrow, mode) (PrintMode: scope, `?` members without
+// the added `| undefined`, names through import aliases), ck.jsx_props_type(opening),
+// ck.pattern_parent_type(pattern)
 ```
 
 Files, by layer:
@@ -245,6 +249,10 @@ Files, by layer:
   expression body is a context-sensitive function is context sensitive itself, and fixes
   what the returned function's contextual parameters mention (`() => a => a.foo` against
   `() => (a: T) => void` fixes `T`, widened: tsc `hasContextSensitiveReturnExpression`).
+  A function expression with its own type parameters is never context sensitive, and its
+  unannotated parameters get no contextual type, as an IIFE too (`<S>(x) => x` against
+  `<T>(x: T) => T` is TS7006, `x: any`; tsc: ast/utilities.go
+  HasContextSensitiveParameters; `generic_function_expression_params`).
   A computed entity-name key in a signature's binding pattern prints as written
   (`({ [foo.bar]: c }: {}) => any`). A type parameter source
   (a class's `this`) infers to an object target through its constraint (`infer.rs`).
@@ -616,7 +624,11 @@ Files, by layer:
   semantic errors: `tsc: tsc/internal/compiler/program.go`; they also hide the program's
   link (merge) errors on their line, such as a duplicate `declare global` member, and such a
   hit counts as the directive's use, so no TS2578: `driver::link_diagnostic_reported`,
-  `check::suppressed_by_directive`),
+  `check::suppressed_by_directive`; a lib file's half of a clash with a project
+  declaration, TS2300 `Duplicate identifier 'bold'` in `lib.es2015.core.d.ts`, is reported
+  as tsc 7's CLI does unless `skipLibCheck` or `skipDefaultLibCheck`:
+  `driver::lib_link_diagnostics_reported`; the conformance example does not compare them,
+  since the baselines keep only some, as `lib.es5.d.ts(--,--)`),
   `driver.rs` (threads, ordering).
 - A property missing on a global lib type that a later lib adds is TS2550 naming that lib
   (`lib_hint.rs`: `[].at` without es2022). The table holds the container/member pairs
@@ -1039,6 +1051,14 @@ Files, by layer:
   Under `print_qualified`, `Ck::print_scope` (set only by declaration checks) still drops
   the namespaces that enclose the error location. `Ck::type_to_string_at` sets both for
   editor hovers, where tsc qualifies names from the hovered location (`m1.m2.c`).
+  `PrintMode` (`print.rs`) holds the editor-only printing switches, which diagnostics never
+  set: `scope` (as `type_to_string_at`), `omit_optional_undefined` (`c?: () => string`,
+  `{ a?: number; }`: tsc's quick info reuses the written annotation, so an annotation that
+  spells `undefined` keeps it) and `via_aliases` (`Ck::print_via_aliases`: a type not in
+  scope by its own name is named through an import alias in scope that resolves to it or
+  to one of its namespaces, the nearest first: `a<a<string>>` for `import a =
+  require("./a")` of `export = Foo`, `d.C<number>` for `import d = M.N`; tsc:
+  checker.go getAccessibleSymbolChain). Tests: `tests/instantiation_queries.rs`.
 - **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
   declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
   the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
@@ -1072,7 +1092,9 @@ Files, by layer:
   (declared, referenced, aliased) come first by name; unnamed ones (type literals, object
   literals, `typeof` types) follow by declaration position, interleaved; a written `{}` is a
   single shared type with no declaration, so it sorts after them (with mapped types); tuples
-  last (`Checker::object_sort_key`). A spread's result lists its properties by where each
+  last (`Checker::object_sort_key`). Unique symbol types sort as enum members do, by their
+  symbol's first declaration and then by name (`typeof zebra | typeof apple` when `zebra`
+  is declared first). A spread's result lists its properties by where each
   was declared, ones with no declaration last by name, not left-then-right
   (`Ck::sort_props_by_declaration`; `spread_member_and_empty_literal_order`).
 - **`extends any` reads as `unknown`** (tsc: `checker.go`, getConstraintFromTypeParameter,
@@ -1387,9 +1409,14 @@ Files, by layer:
   non-generic type alias that is being resolved, or not yet resolved while another alias
   is, is a store forward reference (`deferred_alias_ref`, `pending_forwards` in
   `declared.rs`); the alias's resolution links it (without this, react18's `ReactNode =
-  ... | Iterable<ReactNode>` read as `Iterable<any>` and accepted anything). Generic
-  aliases and class type arguments are not deferred. Relations unforward both sides
-  first (`[Traversable]` with `type Traversable = object`; `generic_constraint_args`).
+  ... | Iterable<ReactNode>` read as `Iterable<any>` and accepted anything). A union or
+  intersection there with such a member (through parentheses and nested unions:
+  `type V = (string | V)[]`, `Array<string | V>`, `type Box2 = Box<Box2 | number>`),
+  that uses no outer type parameter, is a forward to the node's type
+  (`pending_node_forwards`), built and linked once the alias is published (before that
+  the union would need the alias and make it circular, silently `any`). Generic
+  aliases (`type R<T> = Array<T | R<T>>`) and class type arguments are not deferred.
+  Relations unforward both sides first (`[Traversable]` with `type Traversable = object`; `generic_constraint_args`).
   A union of an aliased union and members it already contains is that aliased union
   (`C | undefined` with `type C = undefined | ...` prints `C`; `union_origin_items`).
 - **Conditional and indexed sources.** A deferred conditional source relates to a target

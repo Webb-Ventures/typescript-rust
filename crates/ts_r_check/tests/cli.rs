@@ -1280,3 +1280,109 @@ fn regression_reference_directives_and_ignored_link_errors_on_the_history_path()
     assert_eq!(with_history(), (ts1109.to_owned(), 1), "parse error, warm");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A project declaration that clashes with a lib one is reported in the lib file too, at the
+/// lib file's path relative to the working directory (`../` up to the shared root), as tsc
+/// 7.0.2 does (@colors/colors): `a.d.ts(1,20)` and `lib.es2015.core.d.ts(479,5)` TS2300
+/// `Duplicate identifier 'bold'`, in absolute-path order. `--skipDefaultLibCheck` drops the lib one,
+/// `--skipLibCheck` both. Without history, cold, warm and after edits.
+#[test]
+fn regression_lib_side_link_diagnostics_are_reported_with_the_lib_path() {
+    let Some(store) = ts_r_checker::LibStore::locate() else {
+        return;
+    };
+    let lib_dir = ts_r_testing::canonical(store.dir()).unwrap();
+    let core = lib_dir.join("lib.es2015.core.d.ts");
+    let core_text = std::fs::read_to_string(&core).unwrap();
+    let Some((line, col)) = core_text.lines().enumerate().find_map(|(i, l)| {
+        l.trim_start()
+            .starts_with("bold(): string;")
+            .then(|| (i + 1, l.len() - l.trim_start().len() + 1))
+    }) else {
+        return;
+    };
+    let dir = temp_project(
+        "ts-r-check-lib-side-link",
+        &[
+            ("a.d.ts", "interface String { bold: string; }\n"),
+            ("b.ts", "export const n: number = 1;\n"),
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"target":"es2015","noEmit":true,"types":[]},"files":["a.d.ts","b.ts"]}"#,
+            ),
+        ],
+    );
+    // `core` relative to `dir`.
+    let parts = |p: &Path| -> Vec<String> {
+        p.to_string_lossy()
+            .replace('\\', "/")
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let (c, d) = (parts(&core), parts(&dir));
+    let common = c.iter().zip(&d).take_while(|(a, b)| a == b).count();
+    let mut rel: Vec<String> = vec!["..".to_owned(); d.len() - common];
+    rel.extend(c[common..].iter().cloned());
+    let rel = rel.join("/");
+    let lib_line = format!("{rel}({line},{col}): error TS2300: Duplicate identifier 'bold'.\n");
+    let ours = "a.d.ts(1,20): error TS2300: Duplicate identifier 'bold'.\n";
+    // Sorted by absolute path, as tsc sorts them.
+    let both = if core < dir.join("a.d.ts") {
+        format!("{lib_line}{ours}")
+    } else {
+        format!("{ours}{lib_line}")
+    };
+    let cache = dir.join(".cache");
+    let with_history = |args: &[&str]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ts-r-check"));
+        cmd.env("TS_R_CACHE_DIR", &cache)
+            .env("TS_R_LIB_DIR", &lib_dir)
+            .args(["--sound=off", "-p", ".", "--pretty", "false"])
+            .args(args);
+        run(&mut cmd, &dir)
+    };
+    let no_history = |args: &[&str]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ts-r-check"));
+        cmd.env("TS_R_LIB_DIR", &lib_dir)
+            .args([
+                "--no-history",
+                "--sound=off",
+                "-p",
+                ".",
+                "--pretty",
+                "false",
+            ])
+            .args(args);
+        run(&mut cmd, &dir)
+    };
+    assert_eq!(no_history(&[]), (both.clone(), 1), "no history");
+    assert_eq!(with_history(&[]), (both.clone(), 1), "cold history");
+    assert_eq!(with_history(&[]), (both.clone(), 1), "warm history");
+    std::fs::write(dir.join("b.ts"), "export const n: number = 2;\n").unwrap();
+    assert_eq!(with_history(&[]), (both.clone(), 1), "b.ts edited");
+    std::fs::write(
+        dir.join("a.d.ts"),
+        "interface String { bold: string; }\n// x\n",
+    )
+    .unwrap();
+    assert_eq!(with_history(&[]), (both.clone(), 1), "a.d.ts edited");
+    assert_eq!(with_history(&[]), (both.clone(), 1), "warm again");
+    // The clash gone: neither side is left behind.
+    std::fs::write(dir.join("a.d.ts"), "interface String { bolder: string; }\n").unwrap();
+    assert_eq!(with_history(&[]), (String::new(), 0), "clash removed");
+    std::fs::write(dir.join("a.d.ts"), "interface String { bold: string; }\n").unwrap();
+    assert_eq!(with_history(&[]), (both.clone(), 1), "clash back");
+    assert_eq!(
+        no_history(&["--skipDefaultLibCheck"]),
+        (ours.to_owned(), 1),
+        "skipDefaultLibCheck"
+    );
+    assert_eq!(
+        no_history(&["--skipLibCheck"]),
+        (String::new(), 0),
+        "skipLibCheck"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

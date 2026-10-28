@@ -1,0 +1,2 @@
+main.ts(3,14): error TS2322: Type 'string[]' is not assignable to type 'number'.
+main.ts(3,26): error TS2454: Variable 'y' is used before being assigned.

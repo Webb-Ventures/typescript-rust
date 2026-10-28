@@ -115,7 +115,12 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   error drops them, as in `check_program` (tsc reports only the syntax errors then).
   Link diagnostics go through `driver::link_diagnostic_reported`, as in `check_program`:
   a checked file's, unless `@ts-ignore` / `@ts-expect-error` governs the line
-  (@colors/colors). Lib-side ones stay out (ts-r-check prints lib diagnostics without a path).
+  (@colors/colors). A lib file's half of a clash with a project declaration is reported
+  too, at the lib file's path (`driver::lib_link_diagnostics_reported`: not under
+  `skipLibCheck` / `skipDefaultLibCheck`), and the sources carry its text. The fast path
+  keeps saved lib-side link diagnostics when nothing is re-linked or removed, and hands
+  over to the full load otherwise, or when its sub-program (which holds only some libs)
+  links one: a lib-side diagnostic can't be tied to the project file that caused it.
 - **Deep hashes are path-form independent**: `History::path_key` (set by `persist`) makes
   deep hashes write paths as saved (relative, `lib:<name>`, `?<spec>` for unresolved
   specifiers), so the full path (absolute paths) and the fast path (saved paths) compute the
