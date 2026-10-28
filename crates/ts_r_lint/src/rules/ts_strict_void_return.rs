@@ -494,34 +494,57 @@ fn add_void_suggestion(r: crate::rule::Report<'_>, fix: Option<Fix>) {
     }
 }
 
-/// The first `word` token in `span` (outside comments and strings).
+/// The first `word` token in `span` (outside comments and strings). Positions only ever land
+/// on character boundaries: a non-ASCII character is stepped over whole (and counts as part
+/// of a name when it is alphanumeric, so `éasync` is not `async`).
 fn find_word(src: &str, span: Span, word: &str) -> Option<u32> {
     let b = src.as_bytes();
     let end = (span.end as usize).min(b.len());
+    let ident = |i: usize| -> Option<usize> {
+        match b[i] {
+            c if c.is_ascii_alphanumeric() || c == b'_' || c == b'$' => Some(1),
+            c if c >= 0x80 => src[i..]
+                .chars()
+                .next()
+                .filter(|ch| ch.is_alphanumeric())
+                .map(char::len_utf8),
+            _ => None,
+        }
+    };
     let mut i = span.start as usize;
     while i < end {
         let c = b[i];
-        if src[i..].starts_with("//") {
-            i = src[i..end].find('\n').map_or(end, |p| i + p);
-        } else if src[i..].starts_with("/*") {
-            i = src[i + 2..end].find("*/").map_or(end, |p| i + 2 + p + 2);
+        if b[i..end].starts_with(b"//") {
+            i = b[i..end]
+                .iter()
+                .position(|&c| c == b'\n')
+                .map_or(end, |p| i + p);
+        } else if b[i..end].starts_with(b"/*") {
+            i = b[i + 2..end]
+                .windows(2)
+                .position(|w| w == b"*/")
+                .map_or(end, |p| i + 2 + p + 2);
         } else if c == b'"' || c == b'\'' || c == b'`' {
+            // Only ASCII bytes are compared, so stepping two bytes past a `\` into a
+            // multi-byte character still stops on the (ASCII) closing quote.
             let mut j = i + 1;
             while j < end && b[j] != c {
                 j += if b[j] == b'\\' { 2 } else { 1 };
             }
-            i = j + 1;
-        } else if c.is_ascii_alphanumeric() || c == b'_' || c == b'$' {
-            let mut j = i;
-            while j < end && (b[j].is_ascii_alphanumeric() || b[j] == b'_' || b[j] == b'$') {
-                j += 1;
+            i = (j + 1).min(end);
+        } else if let Some(n) = ident(i) {
+            let mut j = i + n;
+            while j < end
+                && let Some(n) = ident(j)
+            {
+                j += n;
             }
             if &src[i..j] == word {
                 return Some(i as u32);
             }
             i = j;
         } else {
-            i += 1;
+            i += src[i..].chars().next().map_or(1, char::len_utf8);
         }
     }
     None
@@ -639,5 +662,23 @@ impl Rule for StrictVoidReturn {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn find(src: &str, word: &str) -> Option<u32> {
+        find_word(src, Span::new(0, src.len() as u32), word)
+    }
+
+    #[test]
+    fn find_word_steps_over_non_ascii() {
+        assert_eq!(find("é: async () => {}", "async"), Some(4));
+        assert_eq!(find("éasync: async () => {}", "async"), Some(9));
+        assert_eq!(find("'\\é' /* é */ // é\n async", "async"), Some(22));
+        assert_eq!(find("\u{a0}async x", "async"), Some(2));
+        assert_eq!(find("'é", "async"), None);
     }
 }

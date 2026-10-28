@@ -207,14 +207,15 @@ fn string_len(s: &str) -> Option<usize> {
 fn valid_string_escapes(tok: &str) -> bool {
     let inner = &tok[1..tok.len() - 1];
     let mut cs = inner.char_indices().peekable();
-    while let Some((i, c)) = cs.next() {
+    while let Some((_, c)) = cs.next() {
         if c != '\\' {
             continue;
         }
-        let Some((_, e)) = cs.next() else {
+        let Some((j, e)) = cs.next() else {
             break;
         };
-        let rest = &inner[i + 2..];
+        // The escaped character may be wider than one byte (`\é`).
+        let rest = &inner[j + e.len_utf8()..];
         if e == 'x' && !(rest.len() >= 2 && rest.as_bytes()[..2].iter().all(u8::is_ascii_hexdigit))
         {
             return false;
@@ -3817,6 +3818,10 @@ mod tests {
             JType::NonPrimitive
         );
         assert_eq!(parse_jsdoc_type("Array<"), JType::Unknown);
+        // An escaped character wider than one byte.
+        assert!(valid_string_escapes("'\\é'"));
+        assert!(!valid_string_escapes("'\\xé'"));
+        let _ = parse_jsdoc_type("'\\é'");
         assert_eq!(
             parse_jsdoc_type("'a' | 1n"),
             JType::Union(vec![name("string"), name("bigint")])

@@ -101,15 +101,19 @@ impl RequireAtomicUpdates {
             }
             s
         };
-        let local_without_escape = |sym: SymbolId, member: bool| {
-            let s = sem.symbol(sym);
-            if member && s.decls.iter().any(|d| d.kind == DeclKind::Param) {
-                return false;
-            }
-            let home = var_scope(s.scope);
-            s.refs
-                .iter()
-                .all(|&r| var_scope(sem.reference(r).scope) == home)
+        // Every reference of a symbol is scanned once, not once per assignment to it.
+        let mut escapes: FxHashMap<(SymbolId, bool), bool> = FxHashMap::default();
+        let mut local_without_escape = |sym: SymbolId, member: bool| {
+            *escapes.entry((sym, member)).or_insert_with(|| {
+                let s = sem.symbol(sym);
+                if member && s.decls.iter().any(|d| d.kind == DeclKind::Param) {
+                    return false;
+                }
+                let home = var_scope(s.scope);
+                s.refs
+                    .iter()
+                    .all(|&r| var_scope(sem.reference(r).scope) == home)
+            })
         };
         // Pending checks, keyed by the assigned expression.
         let mut targets: FxHashMap<NodeId, Vec<Target>> = FxHashMap::default();

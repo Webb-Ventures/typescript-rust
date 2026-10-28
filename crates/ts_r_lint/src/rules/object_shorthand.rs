@@ -380,7 +380,11 @@ impl ObjectShorthand {
                 text.push_str(&src[from..vspan.end as usize]);
             }
             Node::Arrow { body, .. } => {
-                let arrow = src[..cx.span(body).start as usize].rfind("=>")?;
+                // Only trivia separates `=>` from the body, so step back over it (comments
+                // included: a `=>` inside one is not the arrow).
+                let arrow = skip_trivia_backward(ast, src, cx.span(body).start as usize)
+                    .checked_sub(2)
+                    .filter(|&a| src.as_bytes()[a..].starts_with(b"=>"))?;
                 let mut first = vspan.start as usize;
                 if flags.contains(FnFlags::ASYNC) {
                     first = skip_trivia_forward(src, first + "async".len());

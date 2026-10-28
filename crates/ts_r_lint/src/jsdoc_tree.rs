@@ -857,17 +857,25 @@ impl<'s> TypeParser<'s> {
 
     fn postfix(&mut self, depth: u32) -> Option<TypeNode> {
         let mut t = self.primary(depth)?;
+        // Each suffix wraps `t` one level deeper, so it counts toward the nesting limit.
+        let mut depth = depth;
+        let mut deeper = || {
+            depth += 1;
+            (depth <= MAX_TYPE_DEPTH).then_some(depth)
+        };
         loop {
             if self.eat("[]") {
+                deeper()?;
                 let left = TypeNode::Name("Array".into());
                 t = TypeNode::Generic(Box::new(left), vec![t], "square", false);
             } else if self.eat(".<") {
-                let args = self.args(depth)?;
+                let args = self.args(deeper()?)?;
                 t = TypeNode::Generic(Box::new(t), args, "angle", true);
             } else if self.eat("<") {
-                let args = self.args(depth)?;
+                let args = self.args(deeper()?)?;
                 t = TypeNode::Generic(Box::new(t), args, "angle", false);
             } else if self.eat(".") {
+                deeper()?;
                 if !matches!(
                     t,
                     TypeNode::Name(_) | TypeNode::NamePath(..) | TypeNode::Generic(..)
@@ -1234,6 +1242,17 @@ mod tests {
         }
         let deep = "A<".repeat(500) + &">".repeat(500);
         assert_eq!(parse_type(&deep), None);
+        // Suffixes nest without recursing in the parser; they count toward the limit too.
+        for long in [
+            format!("string{}", "[]".repeat(200_000)),
+            format!("a{}", ".b".repeat(200_000)),
+            format!("A{}", "<B>".repeat(200_000)),
+        ] {
+            assert_eq!(parse_type(&long), None);
+        }
+        let c = format!("/** @type {{string{}}} */", "[]".repeat(200_000));
+        let _ = JsdocTree::build(&Block::parse(&c));
+        assert!(parse_type(&format!("string{}", "[]".repeat(32))).is_some());
     }
 
     #[test]

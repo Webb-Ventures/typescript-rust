@@ -35,6 +35,9 @@ struct Walk<'c, 'a, 'f> {
     globals: Option<FxHashMap<&'a str, Vec<RefId>>>,
     /// Each function scope's references that resolve outside it (or not at all).
     through: FxHashMap<NodeId, Vec<RefId>>,
+    /// `is_safe` answers by loop and binding (a symbol, or a global by name): the answer
+    /// scans every reference of the binding, so it is worked out once per pair.
+    safe: FxHashMap<(NodeId, bool, u32), bool>,
 }
 
 impl<'c, 'a, 'f> Walk<'c, 'a, 'f> {
@@ -131,6 +134,20 @@ impl<'c, 'a, 'f> Walk<'c, 'a, 'f> {
     }
 
     fn is_safe(&mut self, lp: NodeId, r: &Reference) -> bool {
+        let key = match r.resolution {
+            Resolution::Symbol(s) => (lp, false, s.0),
+            Resolution::Global => (lp, true, r.name.0),
+            Resolution::Unresolved => return true,
+        };
+        if let Some(&v) = self.safe.get(&key) {
+            return v;
+        }
+        let v = self.binding_is_safe(lp, r);
+        self.safe.insert(key, v);
+        v
+    }
+
+    fn binding_is_safe(&mut self, lp: NodeId, r: &Reference) -> bool {
         let cx = self.cx;
         let sem = cx.semantic();
         let (refs, decl_scope, kind_decl): (
@@ -252,6 +269,7 @@ impl Rule for NoLoopFunc {
                 skipped: FxHashMap::default(),
                 globals: None,
                 through: through_map(sem),
+                safe: FxHashMap::default(),
             };
             for f in fns {
                 let Some(lp) = w.containing_loop(f, 0) else {

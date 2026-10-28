@@ -77,7 +77,8 @@ Files:
 - **Rules are stateless.** `Rule` objects are shared across threads and files; per-file state
   lives in locals of `run_file`, or is derived from `cx.file.parents` / `cx.semantic()`.
   Whole-file facts that many reports need are worked out once in a `FileCtx` `OnceCell`
-  (`semantic`, and `indent_unit` for the unicorn fixes), never per report.
+  (`semantic`, `indent_unit` for the unicorn fixes, `modified_globals` for
+  `unicorn_util::is_modified_global`), never per report.
 - **One walk per file.** Rules register node kinds in `kinds()` / `exit_kinds()`; whole-file
   rules use `run_file` and should walk only what they need.
 - **The semantic model is lazy** (`FileCtx::semantic`) and behind the `Semantic` trait.
@@ -450,7 +451,9 @@ should-add-parentheses-to-expression-statement-expression,comments}.js`, `ast/` 
 - **escape-inline-tags**: an `@word` at the start of a description line or after whitespace
   is reported unless allowed, inside a markdown code span, or the scoped-package part of a
   `{@link @scope/pkg}`. Descriptions are scanned first, then each tag but `@example`, one
-  report per remaining occurrence; the fixer escapes with `\@` or backticks.
+  report per remaining occurrence, on the first of the tag's lines whose escape changes
+  something (a line whose only `@name` is in a code span is skipped); the fixer escapes with
+  `\@` or backticks. Code spans are worked out once per description.
 
 Round 3 adds 32 more rules (`src/rules/jsdoc_*.rs`; shared helpers in `src/jsdoc_util.rs`):
 `require-param-{name,type}`, `require-property-{name,type,description}`, `require-{returns,throws,yields}-{type,description}`,
@@ -566,6 +569,11 @@ description}.ts`, `src/util.ts`, `src/stringifier/index.ts`.
   else gets `parsedType: null`, as a type that fails to parse does. Children follow the type
   parser's visitor keys (`left`, `right`, `element`, `elements`); nested plain objects such
   as `meta.quote` / `meta.brackets` / `meta.dot` / `meta.separator` are attributes.
+- **Depth.** Selector nesting and `parse_type` nesting stop at 64 levels with an error
+  (selectors: an option error) or `parsedType: null`. Each combinator of a flat chain
+  (`a > b > c`) and each type suffix (`[]`, `.b`, `<B>`) counts as a level, because the
+  trees they build are walked and dropped recursively. Sibling selectors try candidates
+  lazily, in list order.
 
 Read to understand (not ported): esquery `dist/esquery.esm.js`; ESLint
 `lib/linter/esquery.js`, `lib/linter/source-code-traverser.js`. The type shapes come from
@@ -792,7 +800,10 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   `Object.freeze`/`seal`/`preventExtensions` of a static value pass their argument through.
   `static_value_control_flow` also needs every binding on an evaluated path to be a `const`
   declared before the use. Evaluated children skip functions, classes, type nodes,
-  non-computed member names and plain property keys.
+  non-computed member names and plain property keys. A `const` is evaluated again at each
+  use, so one `static_value` call has a budget (100,000 nodes, 2^21 array elements, object
+  entries and string bytes produced); past it the value is unknown, never a huge
+  allocation. `unicorn/no-new-array`'s own `static_kind` has a 10,000-node budget.
 - **`unicorn_types.rs`: the guessing engine.** A `Checker` lists the target type names, the
   names known not to be it, aliases (`ReadonlyMap` is `Map`), target imports, constructor and
   call names, and hooks for node shapes, annotations, JSDoc types and static values. It
@@ -1049,8 +1060,9 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   root types (`this` only outside class context), as the reference's default strict mode
   does; the rules call it with `class_context` false except valid-types.
   `parse_name_path(.., include_special)` and `parse_name` are the namepath and name
-  grammars. Recursion stops at depth 64 (`MAX_DEPTH`) with a failed parse; a regression
-  test checks deep nesting. Checked differentially against jsdoc-type-pratt-parser 8.0.0
+  grammars. Recursion stops at depth 64 (`MAX_DEPTH`) with a failed parse, and each infix
+  wrap (`A[][]`, `a.b.c`) counts as a level too, so `stringify` and the tree walks stay
+  shallow; a regression test checks deep nesting. Checked differentially against jsdoc-type-pratt-parser 8.0.0
   on 635 type strings (every type in the jsdoc oracle data plus hand-written ones): tree,
   stringify, namepath and name results agree in all 5715 comparisons (mode x entry point).
   `JsdocTree`'s selector view still uses its own smaller parser (`parse_type`); switching it

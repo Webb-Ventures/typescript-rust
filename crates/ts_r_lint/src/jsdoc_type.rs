@@ -1230,11 +1230,23 @@ impl<'p> Cx<'p> {
         self.parse_infix(lx, ar, left, prec)
     }
 
+    /// Each infix rule wraps `left` one level deeper (`A[][]`, `A.b.c`), so the chain counts
+    /// toward [`MAX_DEPTH`] like recursion does: the tree stays shallow enough for the
+    /// recursive walks over it.
     fn parse_infix(&self, lx: &mut Lexer, ar: &mut Arena, mut left: Id, prec: u8) -> R<Id> {
-        while let Some(r) = self.try_rules(lx, ar, Some(left), prec)? {
-            left = r;
-        }
-        Ok(left)
+        let base = ar.depth;
+        let r = (|| {
+            while let Some(r) = self.try_rules(lx, ar, Some(left), prec)? {
+                left = r;
+                if ar.depth >= MAX_DEPTH {
+                    return Err(Fail::Other);
+                }
+                ar.depth += 1;
+            }
+            Ok(left)
+        })();
+        ar.depth = base;
+        r
     }
 
     fn parse_type(&self, lx: &mut Lexer, ar: &mut Arena, prec: u8) -> R<Id> {
@@ -3427,6 +3439,13 @@ pub(crate) mod tests {
         let parens = format!("{}x{}", "(".repeat(5000), ")".repeat(5000));
         assert!(parse(&parens, Mode::Jsdoc, false).is_none());
         assert!(parse(&"?".repeat(5000), Mode::Closure, false).is_none());
+        // Suffix chains build depth in a loop, not by recursion: they count all the same.
+        let arrays = format!("Number{}", "[]".repeat(100_000));
+        assert!(parse(&arrays, Mode::Typescript, false).is_none());
+        let paths = format!("a{}", ".b".repeat(100_000));
+        assert!(parse(&paths, Mode::Jsdoc, false).is_none());
+        let ok = format!("Number{}", "[]".repeat(32));
+        assert_eq!(ts(&ok).as_deref(), Some(ok.as_str()));
     }
 
     /// Writes our parse of every line of `$TS_R_JSDOC_TYPE_CORPUS` (one JSON string per

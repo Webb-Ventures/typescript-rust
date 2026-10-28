@@ -3,6 +3,7 @@
 
 use super::prelude::*;
 use crate::jsdoc::{self, Block, Contexts, Doc, Settings, Tokens};
+use rustc_hash::FxHashMap;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -76,15 +77,37 @@ fn scan(desc: &str) -> Vec<(usize, usize, usize)> {
 
 /// The contents of the markdown code spans of `desc`, in order (`` `a` ``, ``` ``a`b`` ```;
 /// a backslash before the opening run disables it).
+///
+/// An opener is the rest of a backtick run from `s` (`n` backticks); its closer is the next
+/// whole run of exactly `n` backticks. Whole runs are indexed by length up front, so a long
+/// run with no closer costs a lookup per backtick, not a rescan of the rest of the text.
 fn code_spans(desc: &str) -> Vec<(usize, usize)> {
     let b = desc.as_bytes();
     let run = |s: usize| b[s..].iter().take_while(|&&c| c == b'`').count();
+    let mut by_len: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'`' {
+            let n = run(i);
+            by_len.entry(n).or_default().push(i);
+            i += n;
+        } else {
+            i += 1;
+        }
+    }
     let mut out = Vec::new();
     let mut s = 0;
+    // The end of the backtick run `s` is in (recomputed when `s` passes it).
+    let mut run_end = 0;
     while s < b.len() {
         if b[s] == b'`' && (s == 0 || b[s - 1] != b'\\') {
-            let n = run(s);
-            let close = (s + n..b.len()).find(|&e| b[e] == b'`' && b[e - 1] != b'`' && run(e) == n);
+            if run_end <= s {
+                run_end = s + run(s);
+            }
+            let n = run_end - s;
+            let close = by_len
+                .get(&n)
+                .and_then(|starts| starts.get(starts.partition_point(|&e| e < s + n)).copied());
             if let Some(e) = close {
                 out.push((s + n, e));
                 s = e + n;
@@ -96,17 +119,10 @@ fn code_spans(desc: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// Whether `at` is inside the content of a markdown code span.
-fn in_code_span(desc: &str, at: usize) -> bool {
-    for (start, end) in code_spans(desc) {
-        if at < start {
-            return false;
-        }
-        if at < end {
-            return true;
-        }
-    }
-    false
+/// Whether `at` is inside the content of one of `spans` (from [`code_spans`]).
+fn in_code_span(spans: &[(usize, usize)], at: usize) -> bool {
+    let k = spans.partition_point(|&(_, end)| end <= at);
+    spans.get(k).is_some_and(|&(start, _)| start <= at)
 }
 
 fn inline_tag_name(desc: &str, at: usize) -> &str {
@@ -135,9 +151,10 @@ fn scoped_package(s: &str) -> bool {
     b.get(2 + n).is_some_and(|&c| part(c))
 }
 
-fn ignored(desc: &str, m_start: usize, m_end: usize) -> bool {
+/// Whether the match `m_start..m_end` of `desc` is exempt; `spans` are `desc`'s code spans.
+fn ignored(desc: &str, spans: &[(usize, usize)], m_start: usize, m_end: usize) -> bool {
     let at = m_start + desc[m_start..m_end].rfind('@').unwrap_or(0);
-    in_code_span(desc, at)
+    in_code_span(spans, at)
         || (matches!(
             inline_tag_name(desc, at),
             "inheritDoc" | "link" | "linkcode" | "linkplain"
@@ -146,9 +163,11 @@ fn ignored(desc: &str, m_start: usize, m_end: usize) -> bool {
 
 impl EscapeInlineTags {
     fn unescaped<'d>(&self, desc: &'d str) -> Option<&'d str> {
+        let spans = code_spans(desc);
         scan(desc).into_iter().find_map(|(s, e, n)| {
             let name = &desc[n..e];
-            (!self.allowed.iter().any(|a| a == name) && !ignored(desc, s, e)).then_some(name)
+            (!self.allowed.iter().any(|a| a == name) && !ignored(desc, &spans, s, e))
+                .then_some(name)
         })
     }
 
@@ -173,8 +192,9 @@ impl EscapeInlineTags {
     fn escape(&self, desc: &str, name: &str) -> String {
         let mut out = String::with_capacity(desc.len() + 2);
         let mut last = 0;
+        let spans = code_spans(desc);
         for (s, e) in Self::occurrences(desc, name) {
-            if ignored(desc, s, e) {
+            if ignored(desc, &spans, s, e) {
                 continue;
             }
             let at = s + desc[s..e].rfind('@').unwrap_or(0);
@@ -299,20 +319,16 @@ fn tag_descriptions(b: &Block, tag: usize) -> Vec<String> {
 }
 
 /// `rewireSpecs`: block lines are replaced by the tag line with the same number.
+/// The last tag line with a number wins; one map lookup per line.
 fn rewire(b: &mut Block) {
-    let mut by_number: Vec<(i64, usize)> = Vec::new();
+    let mut by_number: FxHashMap<i64, usize> = FxHashMap::default();
     for t in &b.tags {
         for &id in &t.source {
-            let n = b.lines[id].number;
-            match by_number.iter_mut().find(|(k, _)| *k == n) {
-                Some(e) => e.1 = id,
-                None => by_number.push((n, id)),
-            }
+            by_number.insert(b.lines[id].number, id);
         }
     }
     for i in 0..b.source.len() {
-        let n = b.lines[b.source[i]].number;
-        if let Some(&(_, id)) = by_number.iter().find(|(k, _)| *k == n) {
+        if let Some(&id) = by_number.get(&b.lines[b.source[i]].number) {
             b.source[i] = id;
         }
     }
@@ -323,12 +339,13 @@ impl EscapeInlineTags {
         let description = block_description(&doc.block);
         let normalized = description.strip_prefix('\n').unwrap_or(&description);
         let mut found: Vec<(String, usize)> = Vec::new();
+        let spans = code_spans(normalized);
         let mut line_start = 0;
         for (idx, line) in normalized.split('\n').enumerate() {
             for (s, e, n) in scan(line) {
                 let name = &line[n..e];
                 if self.allowed.iter().any(|a| a == name)
-                    || ignored(normalized, line_start + s, line_start + e)
+                    || ignored(normalized, &spans, line_start + s, line_start + e)
                 {
                     continue;
                 }
@@ -357,12 +374,19 @@ impl EscapeInlineTags {
                 };
                 let mut rel = 0;
                 let lines = doc.block.tags[ti].source.clone();
+                // The first line with an occurrence the escape changes: one that is only in a
+                // code span (or a `{@link @scope/pkg}`) is not the one `unescaped` found.
+                let mut changed = false;
                 for (k, &id) in lines.iter().enumerate() {
                     let d = &doc.block.lines[id].tokens.description;
                     if !d.is_empty() && !Self::occurrences(d, &name).is_empty() {
                         let new = self.escape(d, &name);
+                        if new == *d {
+                            continue;
+                        }
                         doc.block.lines[id].tokens.description = new;
                         rel = k as i64;
+                        changed = true;
                         break;
                     }
                 }
@@ -373,6 +397,11 @@ impl EscapeInlineTags {
                 });
                 cx.report(doc.line_span(f, line), message(&name))
                     .fix_opt(fix);
+                if !changed {
+                    // Nothing on the tag's lines to escape: another round would find the same
+                    // name again.
+                    break;
+                }
             }
         }
     }
@@ -414,11 +443,26 @@ mod tests {
         assert_eq!(names, ["a", "c"]);
     }
 
+    fn in_span(desc: &str, at: usize) -> bool {
+        in_code_span(&super::code_spans(desc), at)
+    }
+
     #[test]
     fn code_spans() {
-        assert!(in_code_span("x `a @b` y", 5));
-        assert!(!in_code_span("x `a` @b", 6));
-        assert!(in_code_span("``npm `init` @eslint/config``", 13));
-        assert!(!in_code_span("\\`a @b`", 4));
+        assert!(in_span("x `a @b` y", 5));
+        assert!(!in_span("x `a` @b", 6));
+        assert!(in_span("``npm `init` @eslint/config``", 13));
+        assert!(!in_span("\\`a @b`", 4));
+        // The tail of an unmatched run opens a span when a run that long follows.
+        assert_eq!(super::code_spans("```a``b"), [(3, 4)]);
+        assert_eq!(super::code_spans("``a`b`c"), [(2, 3)]);
+    }
+
+    #[test]
+    fn long_unmatched_backtick_run_is_fast() {
+        let desc = format!("text @bad {}", "`".repeat(200_000));
+        let start = std::time::Instant::now();
+        assert!(super::code_spans(&desc).is_empty());
+        assert!(start.elapsed().as_secs() < 5, "took {:?}", start.elapsed());
     }
 }

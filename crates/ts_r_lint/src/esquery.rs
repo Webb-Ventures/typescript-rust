@@ -336,11 +336,20 @@ impl<'s> Parser<'s> {
             return Err("selector is nested too deeply".into());
         }
         let mut left = self.sequence()?;
+        // `a > b > c` nests to the left, one level per combinator: the chain counts toward
+        // the limit like nesting does, since matching and dropping it recurse.
+        let mut links = 0;
         loop {
             let save = self.pos;
             let Some(op) = self.combinator() else { break };
             match self.sequence_opt()? {
-                Some(right) => left = Sel::Binary(op, Box::new(left), Box::new(right)),
+                Some(right) => {
+                    links += 1;
+                    if self.depth + links > MAX_DEPTH {
+                        return Err("selector is nested too deeply".into());
+                    }
+                    left = Sel::Binary(op, Box::new(left), Box::new(right));
+                }
                 None => {
                     self.pos = save;
                     break;
@@ -1045,17 +1054,19 @@ impl<T: Tree + ?Sized> Matcher<'_, '_, T> {
         let Some((idx, len)) = self.t.list_pos(n) else {
             return false;
         };
-        let range: Vec<u32> = match (left, adjacent) {
-            (true, true) => idx.checked_sub(1).into_iter().collect(),
-            (false, true) => (idx + 1 < len).then_some(idx + 1).into_iter().collect(),
-            (true, false) => (0..idx).collect(),
-            (false, false) => (idx + 1..len).collect(),
-        };
-        range.into_iter().any(|i| {
+        // Candidates are tried in list order and the first match stops the scan, so nothing
+        // is collected up front.
+        let hit = |i: u32| {
             self.t
                 .list_item(n, i)
                 .is_some_and(|m| self.matches(s, m, avail))
-        })
+        };
+        match (left, adjacent) {
+            (true, true) => idx.checked_sub(1).is_some_and(hit),
+            (false, true) => idx + 1 < len && hit(idx + 1),
+            (true, false) => (0..idx).any(hit),
+            (false, false) => (idx + 1..len).any(hit),
+        }
     }
 
     fn has(&self, s: &Sel, root: u32) -> bool {
@@ -1233,5 +1244,11 @@ mod tests {
         }
         let deep = ":not(".repeat(200) + "A" + &")".repeat(200);
         assert!(parse(&deep).is_err());
+        // A flat chain nests one level per combinator.
+        let chain = vec!["*"; 1_000_000].join(" > ");
+        assert!(parse(&chain).is_err());
+        let chain = vec!["*"; 1_000].join(" ~ ");
+        assert!(parse(&format!(":has({chain})")).is_err());
+        assert!(parse(&vec!["*"; 40].join(" > ")).is_ok());
     }
 }

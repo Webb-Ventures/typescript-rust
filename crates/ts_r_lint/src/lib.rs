@@ -1,5 +1,10 @@
 //! ts-r-lint engine. See AGENTS.md and docs/design/0006-lint.md.
 
+// The unit tests run generated input (long backtick runs, deep types) and the ignored
+// `jsdoc_type::tests::dump_corpus` reads a whole corpus: the lib test binary is capped too.
+#[cfg(test)]
+ts_r_testing::cap_memory!();
+
 pub mod ast_util;
 pub mod cfg;
 pub mod config;
