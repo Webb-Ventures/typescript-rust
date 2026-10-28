@@ -354,6 +354,13 @@ const position = (text, offset) => {
   return { line: before.split('\n').length - 1, character: offset - nl - 1 };
 };
 
+/** The marker's line with `¦` at the marker, for reading dumps. */
+const markerLine = (text, offset) => {
+  const start = text.lastIndexOf('\n', offset - 1) + 1;
+  const end = text.indexOf('\n', offset);
+  return `${text.slice(start, offset)}¦${text.slice(offset, end < 0 ? text.length : end)}`.trim();
+};
+
 function languageId(name) {
   if (name.endsWith('.json')) return 'json';
   if (/\.[cm]?tsx$/.test(name)) return 'typescriptreact';
@@ -539,7 +546,7 @@ async function runCase(pair, c, test) {
       if (a == null && b == null) continue;
       compared++;
       const d = compare(feature, a, b);
-      if (dump) fs.appendFileSync(dump, `${JSON.stringify({ test: c.name, feature, marker: p.name, file: p.file.name, tsc: ra.result ?? null, tsr: rb.result ?? null })}\n`);
+      if (dump) fs.appendFileSync(dump, `${JSON.stringify({ test: c.name, feature, marker: p.name, file: p.file.name, at: markerLine(p.file.text, p.offset), tsc: ra.result ?? null, tsr: rb.result ?? null })}\n`);
       if (d === null) agree++;
       else diffs.push(`${p.file.name} /*${p.name}*/: ${d.length > 600 ? `${d.slice(0, 600)}...` : d}`);
       if (broken) break;

@@ -33,7 +33,7 @@ node bench/lsp-oracle/fails.mjs [REGEX]   # list failures from target/lsp-oracle
 `--filter REGEX` and `--feature hover,completion` narrow the run, `--show N` prints the first
 N differences, `--keep` leaves the temporary projects, `--tsr PATH` runs another ts-r-lsp
 binary, and `--dump FILE` appends every compared query as a JSON line
-(`{test, feature, marker, file, tsc, tsr}`) for grouping mismatches by cause. Tests are skipped when they verify no
+(`{test, feature, marker, file, at, tsc, tsr}`; `at` is the marker's line with `¦` at the marker) for grouping mismatches by cause. Tests are skipped when they verify no
 compared feature (code fixes, formatting, navigation bars, ...), when both servers answer
 nothing at every marker, or when they need a setup the harness can't give both servers the
 same way: non-TS extensions, `outFile`, symlinks, files outside the project, non-source files,
@@ -42,23 +42,24 @@ every skip reason.
 
 ## Results
 
-88dfde6 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**1308 of 2541 compared tests pass (51.5%)**; 5865 of 9034 queries agree.
-3778 of the 6319 test files are skipped (3698 verify no compared feature, 130 get no answer
-from either server). Up from 1048 of 2543 at f591d51: 261 tests fixed (hover and
-completions), one lost to flakiness (`pathCompletionsPackageJsonExportsWildcard11` passes
-when run again).
+7068c74 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**1562 of 2540 compared tests pass (61.5%)**; 6555 of 9030 queries agree.
+3779 of the 6319 test files are skipped (3698 verify no compared feature, 131 get no answer
+from either server). Up from 1309 of 2541 at eb039ec: 254 tests fixed (references, rename,
+highlights, definition and type definition), none lost; one test drops out of the compared
+set because tsc did not answer in time (`findAllRefsDefaultImport`, which passes when run
+again).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 292 | 227 | 19 | 1979 / 2514 |
-| completion | 711 | 338 | 84 | 2186 / 2854 |
-| references | 72 | 273 | 12 | 628 / 1443 |
-| rename | 85 | 91 | 13 | 267 / 549 |
-| definition | 46 | 121 | 25 | 298 / 528 |
+| hover | 304 | 215 | 19 | 2020 / 2514 |
+| completion | 712 | 338 | 83 | 2187 / 2855 |
+| references | 155 | 188 | 14 | 842 / 1440 |
+| rename | 106 | 70 | 13 | 318 / 549 |
+| definition | 96 | 71 | 25 | 376 / 528 |
 | signatureHelp | 78 | 74 | 24 | 406 / 658 |
-| highlights | 24 | 93 | 20 | 91 / 431 |
-| typeDefinition | 0 | 16 | 3 | 10 / 57 |
+| highlights | 98 | 19 | 20 | 354 / 431 |
+| typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
 Remaining failures by cause (example tests in parentheses):
 
@@ -75,16 +76,23 @@ Remaining failures by cause (example tests in parentheses):
   incomplete declarations (`quickInfoDisplayPartsClassIncomplete`: `class __missing`),
   enum members with odd names (`(typeof Foo)["\t"]`), the name tsc picks for a module
   reached through several aliases (`quickInfoDisplayPartsExternalModuleAlias`).
-- **Highlights (ts_r_lsp)**: keyword occurrences (`switch`/`case`/`break`, `if`/`else`,
-  `async`/`await`, `return`, modifiers, `this`: the `getOccurrences*` tests), members
-  inherited across classes, `export { x as y }` names, JSX tag names.
-- **References and rename (ts_r_lsp)**: default exports, arbitrary module namespace names,
-  constructors (`findAllRefsOfConstructor2`), import types (`findAllRefs_importType_named`),
-  JSDoc `@typedef`, string literal types (`renameStringLiteralTypes2`), the extra edits tsc
-  makes when renaming a default import.
-- **Definition (ts_r_lsp)**: `override` to the base member (`goToDefinitionOverriddenMember*`),
-  keywords (`return`, `await`, `yield`, `case`), ambient and shorthand module names,
-  contextually typed object literal properties, labels, meta properties, JSX.
+- **Highlights (ts_r_lsp)**: members inherited across classes
+  (`documentHighlightAtInheritedProperties5`), `export { x as y }` names
+  (`documentHighlightInExport1`), string literals and template strings
+  (`getOccurrencesStringLiterals`, `documentHighlightTemplateStrings`), JSDoc `@typedef`
+  (`jsdocTypedefTagServices`), a few keyword sets (`getOccurrencesConst04`,
+  `getOccurrencesTryCatchFinallyBroken`), JSX tag names.
+- **References and rename (ts_r_lsp)**: default exports (`findAllRefsForDefaultExport*`),
+  members inherited or overridden across classes and interfaces
+  (`referencesForInheritedProperties*`, `referencesForOverrides`), merged declarations,
+  constructors (`findAllRefsOfConstructor2`), JSDoc `@link` and `@import`, import types
+  (`findAllRefs_importType_named`), re-exports, CommonJS `require`, dynamic `import()`, JSX
+  (`tsxFindAllReferences*`), string literal types (`renameStringLiteralTypes2`), private
+  names, the extra edits tsc makes when renaming a default import.
+- **Definition (ts_r_lsp)**: shorthand properties (`goToDefinitionShorthandProperty*`),
+  external module names (`goToDefinitionExternalModuleName*`), contextually typed object
+  literal properties, constructors, meta properties (`goToDefinitionMetaProperty`), a
+  `yield` and a `case` edge (`goToDefinitionYield3`, `goToDefinitionSwitchCase6`), JSX.
 - **Completion (ts_r_lsp)**: JSX in tags the parser closes early
   (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers (`completionsThisPropertiesInPropertyDeclaration2`) and
   contextual `this` (`memberListOnContextualThis`), type literals in type arguments
@@ -101,10 +109,8 @@ Remaining failures by cause (example tests in parentheses):
   callback argument (`signatureHelp_contextual`), the active overload after an argument that
   rules one out (`signatureHelpOnOverloadsDifferentArity`), generic overloads other than the
   resolved one shown uninstantiated.
-- **Type definition (ts_r_lsp)**: every test fails on at least one marker; ts-r answers nothing
-  on a declaration's own name (`goToTypeDefinition3`, `goToTypeDefinitionModifiers`) and on
-  module names (`goToTypeDefinitionModule`), and goes to the enum rather than the enum member
-  (`goToTypeDefinitionEnumMembers`).
+- **Type definition (ts_r_lsp)**: `import.meta` (`goToTypeDefinitionImportMeta`) and JSDoc
+  `@typedef` (`goToTypeDefinition_typedef`, `jsDocServices`).
 
 ## Run history
 
@@ -114,3 +120,4 @@ Remaining failures by cause (example tests in parentheses):
 | 4eda074 | 2026-10-24 | 795 | 2549 | 31.2% | Tagged templates, instantiated and `new`-less signature help; `Function` members and `arguments` completions; tsc 7 alias hover; highlight kinds; overload definitions |
 | f591d51 | 2026-10-26 | 1048 | 2543 | 41.2% | Completions in string literals and module specifiers (package `exports`/`imports`/`typesVersions`, `paths`), object literal and binding pattern properties, `name?` labels for optional members, own-initializer and CommonJS scope rules |
 | 88dfde6 | 2026-10-26 | 1308 | 2541 | 51.5% | tsc 7 quick info in hover (a line per meaning and overload, resolved signatures at calls, owners with type arguments, `(alias)` lines, multi-line object types); completions in class, interface and type literal bodies, `this` members, JSX attributes, closing tags and intrinsic tags |
+| 7068c74 | 2026-10-26 | 1562 | 2540 | 61.5% | tsc 7 quick-info printing mode in hover; references, rename and highlights on declaration keywords and modifiers, `get`/`set`, through destructuring targets, `for`-`of` bindings, contextually typed object literals and string or numeric literal keys; keyword highlights (`switch`/`case`/`break`, `if`/`else`, `try`, `async`/`await`, `return`, modifiers); definition at `override` and keywords; tsc's type definition rule (declaration names, modules, enum members) |

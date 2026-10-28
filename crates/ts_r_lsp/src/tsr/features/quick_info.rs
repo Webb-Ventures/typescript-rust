@@ -26,7 +26,7 @@
 use ts_r_ast::{ModuleKind, Node, VarKind};
 use ts_r_binder::{SymbolFacts, SymbolFlags, decl_name_node, meaning};
 use ts_r_checker::members::SigKind;
-use ts_r_checker::{Ck, Loc};
+use ts_r_checker::{Ck, Loc, PrintMode};
 use ts_r_types::{MapperId, SigId, SymId, TypeId, TypeKind};
 
 /// The quick info of `s` named at `at`; `is_decl` when `at` declares `s`.
@@ -157,6 +157,11 @@ pub fn call_of(ck: &Ck<'_, '_>, at: Loc) -> Option<Loc> {
 }
 
 impl Writer {
+    /// How quick info prints types and signatures here.
+    fn mode(&self) -> PrintMode {
+        PrintMode::quick_info(self.at)
+    }
+
     fn line(&mut self) {
         if !self.out.is_empty() {
             self.out.push('\n');
@@ -257,7 +262,7 @@ impl Writer {
         if flags.intersects(SymbolFlags::SIGNATURE) {
             self.line();
             let t = ck.type_of_symbol(s);
-            let ts = ck.type_to_string_at(t, self.at);
+            let ts = ck.type_to_string_with(t, self.mode());
             self.out.push_str(&ts);
         }
     }
@@ -308,24 +313,28 @@ impl Writer {
                 SigKind::Call
             };
             let args = sig_type_args(ck, sig);
-            let mut stack = Vec::new();
-            let text = ck.print_signature(sig, kind, true, 0, &mut stack);
+            let text = ck.signature_to_string_with(sig, kind, true, self.mode());
             let text = match (args.is_empty(), text.strip_prefix("new ")) {
                 (false, Some(rest)) => format!("new {args}{rest}"),
                 (false, None) => format!("{args}{text}"),
                 _ => text,
             };
-            self.out.push_str(&drop_optional_undefined(&text));
+            self.out.push_str(&text);
             return;
         }
-        // Through an alias, tsc shows the target's declared type (no narrowing).
+        // Through an alias, tsc shows the target's declared type (no narrowing); a
+        // property being assigned shows the type it accepts (no `undefined` from an
+        // `exactOptionalPropertyTypes` `?`).
         let t = if self.alias.is_some() {
             ck.type_of_symbol(s)
+        } else if flags.intersects(SymbolFlags::PROPERTY) && assigned_member(ck, self.at) {
+            let t = ck.type_of_symbol(s);
+            ck.remove_missing(t)
         } else {
             type_at(ck, s, self.at)
         };
-        let ts = ck.type_to_string_at(t, self.at);
-        self.out.push_str(&drop_optional_undefined(&ts));
+        let ts = ck.type_to_string_with(t, self.mode());
+        self.out.push_str(&ts);
     }
 
     fn enum_member(&mut self, ck: &mut Ck<'_, '_>, s: SymId) {
@@ -337,7 +346,7 @@ impl Writer {
         };
         // The literal's printed name qualifies the enum as the location sees it; a
         // one-member enum prints as the enum itself, so fall back to `Enum.member`.
-        let printed = named.then(|| ck.type_to_string_at(t, self.at));
+        let printed = named.then(|| ck.type_to_string_with(t, self.mode()));
         let name = match printed {
             Some(p) if p.contains('.') || p.contains('[') => p,
             _ => self.name(ck, s),
@@ -373,7 +382,7 @@ impl Writer {
             self.line();
             let name = self.name(ck, s);
             let t = ck.type_of_symbol(s);
-            let ts = ck.type_to_string_at(t, at);
+            let ts = ck.type_to_string_with(t, self.mode());
             let p = if is_method { "(method) " } else { "function " };
             self.out.push_str(&format!("{p}{name}: {ts}"));
             return;
@@ -406,10 +415,8 @@ impl Writer {
                 break;
             }
             let args = sig_type_args(ck, sig);
-            let mut stack = Vec::new();
-            let text = ck.print_signature(sig, kind, false, 0, &mut stack);
+            let text = ck.signature_to_string_with(sig, kind, false, self.mode());
             let text = text.strip_prefix("new ").unwrap_or(&text);
-            let text = drop_optional_undefined(text);
             self.out
                 .push_str(&format!("{prefix}{name}{opt}{args}{text}"));
         }
@@ -436,14 +443,12 @@ impl Writer {
             } else if !sigs.is_empty() {
                 // The implementation of overloads: its own parameters, the class instance.
                 let sig = ck.signature_from_decl(p);
-                let mut stack = Vec::new();
-                let text = ck.print_signature(sig, SigKind::Call, false, 0, &mut stack);
+                let text = ck.signature_to_string_with(sig, SigKind::Call, false, self.mode());
                 let text = text.strip_suffix(": void").unwrap_or(&text).to_string();
                 let inst = ck.declared_type_of_symbol(class);
-                let inst = ck.type_to_string_at(inst, self.at);
+                let inst = ck.type_to_string_with(inst, self.mode());
                 let name = self.name(ck, class);
                 self.line();
-                let text = drop_optional_undefined(&text);
                 self.out
                     .push_str(&format!("constructor {name}{text}: {inst}"));
                 return;
@@ -490,7 +495,7 @@ impl Writer {
         let name = c.sym_name(s).to_string();
         self.out.push_str(&format!("(type parameter) {name}"));
         if let Some(cn) = ck.type_param_constraint(t) {
-            let cs = ck.type_to_string_at(cn, self.at);
+            let cs = ck.type_to_string_with(cn, self.mode());
             self.out.push_str(&format!(" extends {cs}"));
         }
         let Some(d) = c
@@ -556,9 +561,8 @@ impl Writer {
                     }
                 }
                 let sig = ck.signature_from_decl(owner);
-                let mut stack = Vec::new();
-                let text = ck.print_signature(sig, kind, false, 0, &mut stack);
-                self.out.push_str(&drop_optional_undefined(&text));
+                let text = ck.signature_to_string_with(sig, kind, false, self.mode());
+                self.out.push_str(&text);
             }
             _ => {}
         }
@@ -575,11 +579,11 @@ impl Writer {
             let mut p = ck.type_to_string(tp);
             if let Some(cn) = ck.type_param_constraint(tp) {
                 p.push_str(" extends ");
-                p.push_str(&ck.type_to_string_at(cn, self.at));
+                p.push_str(&ck.type_to_string_with(cn, self.mode()));
             }
             if let Some(d) = ck.type_param_default(tp) {
                 p.push_str(" = ");
-                p.push_str(&ck.type_to_string_at(d, self.at));
+                p.push_str(&ck.type_to_string_with(d, self.mode()));
             }
             parts.push(p);
         }
@@ -667,7 +671,7 @@ impl Writer {
                 let mut parts = Vec::with_capacity(tps.len());
                 for tp in tps {
                     let a = ck.instantiate(tp, mapper);
-                    parts.push(ck.type_to_string_at(a, self.at));
+                    parts.push(ck.type_to_string_with(a, self.mode()));
                 }
                 return format!("<{}>", parts.join(", "));
             }
@@ -796,8 +800,9 @@ fn sig_type_args(ck: &mut Ck<'_, '_>, sig: SigId) -> String {
 /// The signatures to show for `s` at `at`: at a call of an overloaded or generic function,
 /// the one the call resolved to; otherwise all of them.
 fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Loc) -> Vec<SigId> {
+    // An optional method's type carries the `undefined` optionality adds.
     let t = ck.type_of_symbol(s);
-    let t = ck.remove_missing(t);
+    let t = ck.remove_optionality(t);
     let sigs = ck.signatures_of(t, kind);
     let generic = sigs.len() == 1 && {
         let st = ck.store();
@@ -810,6 +815,27 @@ fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Loc) -> Vec<S
         return vec![r];
     }
     sigs
+}
+
+/// Whether `at` names the member an assignment writes (`o.p = 1`, `o["p"] ??= 1`, `o.p++`).
+fn assigned_member(ck: &Ck<'_, '_>, at: Loc) -> bool {
+    let c = ck.c;
+    let Some(access) = c.parent(at) else {
+        return false;
+    };
+    let named = match *c.node(access) {
+        Node::Member { prop, .. } => prop == at.node,
+        Node::Index { index, .. } => index == at.node,
+        _ => false,
+    };
+    if !named {
+        return false;
+    }
+    match c.parent(access).map(|p| *c.node(p)) {
+        Some(Node::Assign { left, .. }) => left == access.node,
+        Some(Node::Update { .. }) => true,
+        _ => false,
+    }
 }
 
 /// The type of `s` as seen at `at`: narrowed for expression names, declared otherwise.
@@ -906,135 +932,4 @@ pub fn strip_ts_ext(path: &str) -> &str {
         }
     }
     path
-}
-
-/// Quick info writes optional parameters and properties without the `undefined` their `?`
-/// adds (`c?: number`, `func?: Function`), where diagnostics keep it. Applied to printed
-/// text: each `?: T | undefined` that ends a parameter or member loses ` | undefined`, and a
-/// function type left in parentheses loses them (`c?: () => string`).
-pub fn drop_optional_undefined(s: &str) -> String {
-    const UNDEF: &str = " | undefined";
-    let b = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut copied = 0;
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'"' | b'\'' | b'`' => {
-                i = skip_quoted(b, i);
-                continue;
-            }
-            b'?' if s[i..].starts_with("?: ") => {
-                let start = i + 3;
-                let end = type_end(b, start);
-                let ty = &s[start..end];
-                if let Some(inner) = ty.strip_suffix(UNDEF) {
-                    out.push_str(&s[copied..start]);
-                    out.push_str(unparen(inner));
-                    copied = end;
-                }
-                i = end;
-                continue;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    out.push_str(&s[copied..]);
-    out
-}
-
-fn skip_quoted(b: &[u8], i: usize) -> usize {
-    let q = b[i];
-    let mut j = i + 1;
-    while j < b.len() {
-        match b[j] {
-            b'\\' => j += 2,
-            c if c == q => return j + 1,
-            _ => j += 1,
-        }
-    }
-    b.len()
-}
-
-/// Where the type starting at `i` ends: the first `,`, `;`, `)`, `]`, `}`, `>` or newline
-/// outside its own brackets (`=>` is not a bracket).
-fn type_end(b: &[u8], mut i: usize) -> usize {
-    let mut depth = 0i32;
-    while i < b.len() {
-        match b[i] {
-            b'"' | b'\'' | b'`' => {
-                i = skip_quoted(b, i);
-                continue;
-            }
-            b'=' if b.get(i + 1) == Some(&b'>') => i += 1,
-            b'(' | b'[' | b'{' | b'<' => depth += 1,
-            b')' | b']' | b'}' | b'>' => {
-                if depth == 0 {
-                    return i;
-                }
-                depth -= 1;
-            }
-            b',' | b';' | b'\n' if depth == 0 => return i,
-            _ => {}
-        }
-        i += 1;
-    }
-    b.len()
-}
-
-/// `(X)` without its parentheses when they wrap the whole text.
-fn unparen(t: &str) -> &str {
-    let Some(inner) = t.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else {
-        return t;
-    };
-    let mut depth = 0i32;
-    for ch in inner.bytes() {
-        match ch {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth < 0 {
-                    return t;
-                }
-            }
-            _ => {}
-        }
-    }
-    if depth == 0 { inner } else { t }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::drop_optional_undefined as d;
-
-    #[test]
-    fn optional_members_lose_their_undefined() {
-        assert_eq!(
-            d("function f(a: number, c?: number | undefined, d?: any): void"),
-            "function f(a: number, c?: number, d?: any): void"
-        );
-        assert_eq!(
-            d("function g(c?: (() => string) | undefined): void"),
-            "function g(c?: () => string): void"
-        );
-        assert_eq!(
-            d("(a: T) => { v: T[U]; func?: Function | undefined; }"),
-            "(a: T) => { v: T[U]; func?: Function; }"
-        );
-        assert_eq!(
-            d("f(x?: Map<string, number> | undefined)"),
-            "f(x?: Map<string, number>)"
-        );
-        // A required member and a union that only contains `undefined` stay.
-        assert_eq!(d("(x: number | undefined)"), "(x: number | undefined)");
-        assert_eq!(
-            d("(x?: (string | undefined)[])"),
-            "(x?: (string | undefined)[])"
-        );
-        assert_eq!(
-            d("(x?: \"?: a | undefined\")"),
-            "(x?: \"?: a | undefined\")"
-        );
-    }
 }

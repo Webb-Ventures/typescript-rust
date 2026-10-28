@@ -72,7 +72,6 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         }
         _ => return Value::Null,
     };
-    let display = super::quick_info::drop_optional_undefined(&display);
     let display = super::multiline::multiline_objects(&display);
     let mut value = format!("```typescript\n{display}\n```");
     if !doc.is_empty() {

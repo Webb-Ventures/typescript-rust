@@ -368,13 +368,69 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   the location (declared in another module or an ambient `declare module "m"`) is shown
   under the alias's name; a module target is `(alias) module m` (`import = require`) or
   `(alias) namespace m`.
-- Optional members and parameters lose the `| undefined` that optionality adds
-  (`c?: () => string`), and an optional chain's link (`a?.b`) shows the property's own type.
-  This is text post-processing of the checker's printed types (`drop_optional_undefined`)
-  until the printer has a quick-info mode.
+- Types and signatures print through the checker's quick-info mode
+  (`PrintMode::quick_info(at)`: names scoped to the location, aliases followed, optional
+  parameters without the `| undefined` optionality adds); no text post-processing. An
+  optional property read keeps `| undefined`; an optional method's signatures come from its
+  type without that `undefined` (`remove_optionality`); a property being assigned
+  (`o.p = 1`, `o["p"] += 1`, `o.p++`) shows its type without `missing` (the write type under
+  `exactOptionalPropertyTypes`); an optional chain's link (`a?.b`) shows the property's own
+  type.
 - Hovering the `class`, `function`, `interface`, `enum` or `default` keyword of a
   declaration describes the declaration; a string or number literal that names a member
   (`o["a"]`, `{ 1: x }`) describes that member.
+
+## Keywords and navigation (`tsr/features/keywords.rs`, `nav.rs`)
+
+Syntax-only rules for the keywords tsc 7 answers without a symbol. Learned from the fourslash
+tests and from reading `src/services/documentHighlights.ts`, `src/services/findAllReferences.ts`
+and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms on our AST.
+
+- **Highlights on a keyword** (`keyword_highlights`, tried before symbol highlights): an
+  `if`/`else` chain (an `else if` on one line is one span), a function's `return`s and the
+  `throw`s it owns (a `throw` in a `try` with a `catch` belongs to the `try`), `try`/`finally`
+  (not `catch`), a `switch` with its `case`/`default` and its own `break`s, a loop with its own
+  `break`/`continue` (labels followed), `constructor`, a `get`/`set` pair, `async`/`await`,
+  `yield`, and every occurrence of a modifier among the declarations around (none for
+  `default`, `in`, `out`). Loops use an explicit stack; walks stop at `MAX_DEPTH`.
+- **References without a symbol** (`special_references`): `this` (every `this` of the same
+  container; in a static member, every static member's `this` of that class), `super` (same
+  class, same static-ness), labels (the label is the declaration), primitive type keywords
+  (`string` across the project's own files). References of a class name also list the `this`
+  of its static members; rename skips those unless the cursor is on `this`.
+- **Go to definition on a keyword** (`keyword_definition`): `return`/`await`/`yield` go to the
+  innermost function or method (its name, a method's key, the variable an anonymous function
+  initializes, else the whole function); `case`/`default` to their `switch` keyword;
+  `export default <expr>`'s `default` to the whole statement; `break l`/`continue l` to the
+  label (nothing on the label itself); `this` to the function's `this` parameter, else the
+  class name in a class member, else nothing; `super` to the base class, plus for
+  `super(...)` the whole constructor it calls; `override` to the base member (instance: base
+  types; static: the base constructor type), else its own name; any other modifier and the
+  `function`/`class`/`interface`/`enum`/`type`/`namespace`/`const`/`let`/`var` keyword to the
+  definition of the declared name. A variable statement's modifier goes nowhere.
+  Find-all-references on such a keyword (`keyword_name`) lists the declared name's
+  references; document highlights on it do not move to the name (`const` alone has none).
+- **Property names in destructuring and literals** (`locate.rs`): a key of an object literal
+  used as an assignment target (`({ a: x } = o)`, `for ({ a } of xs)`, `[{ a }] = xs`,
+  nested) means the property of the type it takes apart, as does a binding key in
+  `for (const { a } of xs)` (the iterated type). A member of a contextually typed object
+  literal also means the contextual type's property (`Meaning::contextual`): references and
+  rename treat the two as one; an untyped literal stands alone.
+- **Literal keys** (`literal_key`): a string or numeric literal that names a member
+  (`"a": 1`, `get "42"()`, `{ "a": T }`) or indexes one (`o["a"]`, `o[0]`) is a reference
+  like a name, spelled by its cooked text (numbers in JS spelling). The reference covers
+  the text between the quotes (only when written without escapes) or the whole number.
+  Renaming a numeric index quotes the new name (`o["z"]`); a numeric key stays bare.
+  References on `get`/`set` are those of the accessor's key.
+- **Type definition** follows tsc's symbol-of-type rule: the declarations of each union
+  member's symbol (not the alias: `Pick<T, K>` goes to its mapped type), the first type
+  argument of a well-known global generic first (`Array`, `Promise`, `Map`, `Pick`, ... the
+  list in `known_type_argument`), a function's own inferred type (or the function that
+  initializes the variable) replaced by its single signature's return type, and a type-only
+  symbol whose type has no declaration going to itself. Keywords before a name stand for
+  the name.
+- `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
+  (`a|()`), as tsserver's touching-name lookup does.
 
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
@@ -786,7 +842,7 @@ features stay on ts-r (hover p50 0.12 ms).
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
   have no symbol (the checker does not type JSX yet); references do not follow renaming
-  imports (`import { a as b }`: uses of `b`) or contextually typed object literal properties.
+  imports (`import { a as b }`: uses of `b`) or members inherited across classes.
   Completions: no bracket-notation members (`o["a-b"]`), no
   accessibility filtering after `.` (private members are listed), auto-imports only from
   the project's own (non-`node_modules`) modules and never `default` exports.
