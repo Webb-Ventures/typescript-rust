@@ -17,6 +17,8 @@ pub struct ContextOpts {
     pub opts: Map<String, Value>,
     /// The rule's own default contexts, when they differ from [`jsdoc::DEFAULT_CONTEXTS`].
     pub defaults: Option<&'static [&'static str]>,
+    /// See [`Contexts::no_tracking`].
+    pub no_tracking: bool,
 }
 
 impl ContextOpts {
@@ -32,6 +34,7 @@ impl ContextOpts {
         Ok(ContextOpts {
             opts: o,
             defaults: None,
+            no_tracking: false,
         })
     }
 
@@ -70,11 +73,18 @@ impl ContextOpts {
         ContextOpts {
             opts: o,
             defaults: None,
+            no_tracking: false,
         }
     }
 
     /// The contexts in force: the option, the setting, then the rule's defaults.
     pub fn contexts(&self, settings: &Settings) -> Result<Contexts, String> {
+        let mut c = self.contexts_tracked(settings)?;
+        c.no_tracking = self.no_tracking;
+        Ok(c)
+    }
+
+    fn contexts_tracked(&self, settings: &Settings) -> Result<Contexts, String> {
         match self.defaults {
             Some(d) if !self.opts.contains_key("contexts") && settings.contexts.is_none() => {
                 let mut o = self.opts.clone();
@@ -163,6 +173,7 @@ pub fn all_blocks() -> Contexts {
         all: true,
         plain_any: true,
         additive: false,
+        no_tracking: false,
     }
 }
 
@@ -1015,6 +1026,13 @@ pub fn reject_type_names(cx: &mut Ctx<'_, '_>, rejected: &[(&str, &str)]) {
 /// closes the comment, or the block's first line when it has other tags, is blanked
 /// instead (its delimiters stay). Removing from the block's first line drops everything.
 pub fn remove_tag(b: &mut Block, idx: usize, offset: usize) {
+    remove_tag_with(b, idx, offset, false);
+}
+
+/// [`remove_tag`] with the plugin's `removeEmptyBlock`: when set, only the block's first
+/// line (with other tags present) is blanked; any other line, even one that opens or closes
+/// the comment, is dropped.
+pub fn remove_tag_with(b: &mut Block, idx: usize, offset: usize, remove_empty_block: bool) {
     let Some(tag) = b.tags.get(idx) else {
         return;
     };
@@ -1037,7 +1055,9 @@ pub fn remove_tag(b: &mut Block, idx: usize, offset: usize) {
         return;
     };
     let t = &b.lines[line].tokens;
-    if (at == 0 && b.tags.len() >= 2) || !t.end.is_empty() || t.delimiter == "/**" {
+    if (at == 0 && b.tags.len() >= 2)
+        || (!remove_empty_block && (!t.end.is_empty() || t.delimiter == "/**"))
+    {
         let t = &mut b.lines[line].tokens;
         for s in [
             &mut t.post_delimiter,
@@ -1238,10 +1258,23 @@ pub fn function_param_names(
     params: NodeList,
     default_objects: bool,
 ) -> Vec<ParamName> {
+    function_param_names_with(ast, src, params, default_objects, false)
+}
+
+/// [`function_param_names`]; with `ignore_interfaced`, a parameter with its own type
+/// annotation (and no default) expects nothing (an empty destructured root).
+pub fn function_param_names_with(
+    ast: &Ast,
+    src: &str,
+    params: NodeList,
+    default_objects: bool,
+    ignore_interfaced: bool,
+) -> Vec<ParamName> {
     let p = ParamNames {
         ast,
         src,
         default_objects,
+        ignore_interfaced,
     };
     ast.list(params).iter().map(|&id| p.param(id)).collect()
 }
@@ -1279,6 +1312,7 @@ struct ParamNames<'a> {
     ast: &'a Ast,
     src: &'a str,
     default_objects: bool,
+    ignore_interfaced: bool,
 }
 
 impl ParamNames<'_> {
@@ -1302,6 +1336,9 @@ impl ParamNames<'_> {
         else {
             return ParamName::Missing;
         };
+        if self.ignore_interfaced && type_ann.is_some() && init.is_none() {
+            return ParamName::Root(None, Box::new(Inner::Flat(Flat::default())));
+        }
         if let Some(t) = type_ann
             && let Node::TypeLiteral { members } = *ast.node(skip_paren_type(ast, t))
         {

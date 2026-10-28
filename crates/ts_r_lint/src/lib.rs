@@ -12,7 +12,10 @@ pub mod estree;
 pub mod fix;
 pub mod globals;
 pub mod jsdoc;
+pub mod jsdoc_export;
+pub mod jsdoc_tags;
 pub mod jsdoc_tree;
+pub mod jsdoc_type;
 pub mod jsdoc_util;
 pub mod lib_globals;
 #[rustfmt::skip]
@@ -20,6 +23,7 @@ pub mod lib_globals_generated;
 pub mod output;
 pub mod project;
 pub mod regex;
+pub mod regex_exec;
 pub mod registry;
 pub mod rule;
 pub mod rules;

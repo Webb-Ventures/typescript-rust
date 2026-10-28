@@ -514,7 +514,11 @@ pub fn parse_for_lint(path: &str, src: &str, env: &LintEnv) -> ts_r_parser::Pars
         SourceKind::from_path(path),
         ts_r_parser::ParseOptions {
             ts_in_js,
-            ..Default::default()
+            // espree and typescript-estree parse `sourceType: "module"` with the module goal
+            // (top-level `await` is the operator), and typescript-estree keeps parsing
+            // binary operators after `as T` / `satisfies T` as TypeScript 5 does.
+            module: env.source_type == crate::env::SourceType::Module,
+            assertion_continues: true,
         },
     )
 }
@@ -574,5 +578,28 @@ mod tests {
         let src = "/* eslint no-var: \"error\" */\nvar x = 1; console.log(x);\n";
         let r = lint_and_fix("/p/a.js", src, &fc, &NoTypeInfo, FileKey(0));
         assert!(r.output.is_some_and(|o| o.contains("let x")));
+    }
+
+    /// `sourceType: "module"` parses with the module goal: top-level `await` followed by a
+    /// line break is the operator, as espree and typescript-estree read it.
+    #[test]
+    fn parse_for_lint_module_goal() {
+        let env = LintEnv::default();
+        let parsed = parse_for_lint("/p/a.js", "await\nPromise.all([x]);\n", &env);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert!(
+            (1..parsed.ast.nodes.len() as u32)
+                .filter_map(ts_r_ast::NodeId::from_raw)
+                .any(|n| parsed.ast.kind(n) == ts_r_ast::NodeKind::Await)
+        );
+    }
+
+    /// Binary operators keep binding after `as T` (`x < 0 as any ** 2`), as TypeScript 5 and
+    /// typescript-estree parse it.
+    #[test]
+    fn parse_for_lint_assertion_continues() {
+        let env = LintEnv::default();
+        let parsed = parse_for_lint("/p/a.ts", "x < 0 as any ** 2;\n", &env);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     }
 }

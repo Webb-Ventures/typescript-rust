@@ -116,6 +116,32 @@ impl<'a> EsTree<'a> {
         self.nodes[n as usize].span
     }
 
+    /// The node in field `key` of `n` (`None` for null, a list or no such field).
+    pub fn node_field(&self, n: u32, key: &str) -> Option<u32> {
+        match self.field(n, key)? {
+            Slot::Node(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// The items of list field `key` of `n` (holes are `None`); `None` when it isn't a list.
+    pub fn list_field(&self, n: u32, key: &str) -> Option<Vec<Option<u32>>> {
+        match self.field(n, key)? {
+            Slot::List(s, l) => Some(
+                self.items[s as usize..(s + l) as usize]
+                    .iter()
+                    .map(|&m| (m != NONE).then_some(m))
+                    .collect(),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Whether `n` has a field `key` holding a node, a list or null.
+    pub fn has_field(&self, n: u32, key: &str) -> bool {
+        self.field(n, key).is_some()
+    }
+
     fn field(&self, n: u32, key: &str) -> Option<Slot> {
         let (s, l) = self.nodes[n as usize].fields;
         self.fields[s as usize..(s + l) as usize]

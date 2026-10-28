@@ -17,7 +17,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/consistent-indexed-object-style",
         "Require or disallow the `Record` type",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable()

@@ -14,7 +14,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/no-confusing-non-null-assertion",
         "Disallow non-null assertion in locations that may be confusing",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Suspicious,
     )
     .suggestions(),

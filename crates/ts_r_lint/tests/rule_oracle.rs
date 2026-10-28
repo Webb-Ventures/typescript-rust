@@ -107,10 +107,21 @@ fn config_for(rule: &str, case: &Value) -> Value {
     if let Some(opts) = case["options"].as_array() {
         value.extend(opts.iter().cloned());
     }
+    // ESLint reported (and fixed) an unused directive in this case: its fix shapes the
+    // expected output, so report them too (the messages are not compared).
+    let unused = case["messages"].as_array().is_some_and(|ms| {
+        ms.iter().any(|m| {
+            m["ruleId"].is_null()
+                && m["message"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("Unused eslint-disable directive"))
+        })
+    });
+    let report_unused = if unused { "warn" } else { "off" };
     json!([{
         "files": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"],
         "languageOptions": language,
-        "linterOptions": { "reportUnusedDisableDirectives": "off" },
+        "linterOptions": { "reportUnusedDisableDirectives": report_unused },
         "settings": case.get("settings").cloned().unwrap_or(json!({})),
         "rules": { rule: value },
     }])
@@ -216,7 +227,13 @@ fn normalize_path(p: &str) -> String {
 }
 
 fn run_case(reg: &'static Registry, rule: &str, case: &Value) -> Result<(), String> {
-    let code = case["code"].as_str().unwrap_or("");
+    let raw = case["code"].as_str().unwrap_or("");
+    // Like the CLI, lint the text without a leading BOM and keep the BOM in front of fixed
+    // output (the generator applies fixes to ESLint's BOM-less text the same way).
+    let (bom, code) = match raw.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", raw),
+    };
     let filename = case["filename"].as_str().unwrap_or("file.js");
     let typed = case["typed"].is_object();
     let cfg_json = config_for(rule, case);
@@ -260,7 +277,12 @@ fn run_case(reg: &'static Registry, rule: &str, case: &Value) -> Result<(), Stri
                 suggestions: d
                     .suggestions
                     .iter()
-                    .map(|s| (s.desc.clone(), apply_fixes(code, &[&s.fix]).0))
+                    .map(|s| {
+                        (
+                            s.desc.clone(),
+                            format!("{bom}{}", apply_fixes(code, &[&s.fix]).0),
+                        )
+                    })
                     .collect(),
             }
         })
@@ -294,12 +316,12 @@ fn run_case(reg: &'static Registry, rule: &str, case: &Value) -> Result<(), Stri
     let out = if fixes.is_empty() {
         None
     } else {
-        Some(apply_fixes(code, &fixes).0)
+        Some(format!("{bom}{}", apply_fixes(code, &fixes).0))
     };
     let exp_out = case["output"].as_str().map(str::to_owned);
     // ESLint reports `output: null` when no fix applies; a fix that changes nothing counts
     // the same.
-    let out = out.filter(|o| o != code || exp_out.is_some());
+    let out = out.filter(|o| o != raw || exp_out.is_some());
     if out != exp_out {
         return Err(format!(
             "output differs\n    expected: {exp_out:?}\n    actual:   {out:?}"

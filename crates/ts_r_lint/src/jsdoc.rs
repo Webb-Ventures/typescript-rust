@@ -171,6 +171,8 @@ pub struct Tag {
     pub description: String,
     /// Indexes into [`Block::lines`].
     pub source: Vec<usize>,
+    /// comment-parser's critical problems (`unpaired brackets`, `empty name`, ...).
+    pub problems: Vec<&'static str>,
 }
 
 /// A parsed `/** ... */` block. `lines` is an arena: the block's lines, in order, are
@@ -392,6 +394,7 @@ fn parse_spec(lines: &mut [Line], source: Vec<usize>) -> Tag {
         typ: String::new(),
         description: String::new(),
         source,
+        problems: Vec::new(),
     };
     // Tag.
     {
@@ -519,6 +522,7 @@ fn tokenize_type(lines: &mut [Line], spec: &mut Tag) -> bool {
         return true;
     }
     if curlies != 0 {
+        spec.problems.push("unpaired curlies");
         return false;
     }
     let offset = lines[parts[0].0].tokens.post_delimiter.len();
@@ -613,6 +617,7 @@ fn tokenize_name(lines: &mut [Line], spec: &mut Tag) -> bool {
         name.push(ch);
     }
     if brackets != 0 {
+        spec.problems.push("unpaired brackets");
         return false;
     }
     let token = name.clone();
@@ -625,22 +630,34 @@ fn tokenize_name(lines: &mut [Line], spec: &mut Tag) -> bool {
         let rest: Vec<&str> = parts.collect();
         let default = (!rest.is_empty()).then(|| rest.join("=").trim().to_owned());
         if name.is_empty() {
+            spec.problems.push("empty name");
             return false;
         }
-        if let Some(d) = &default
-            && (d.is_empty() || (!is_quoted(d) && find_eq(d).is_some()))
-        {
-            return false;
+        if let Some(d) = &default {
+            if d.is_empty() {
+                spec.problems.push("empty default value");
+                return false;
+            }
+            if !is_quoted(d) && find_eq(d).is_some() {
+                spec.problems.push("invalid default value syntax");
+                return false;
+            }
         }
     }
     if !optional && let Some(eq) = find_eq(&name) {
         let pre = name[..eq].trim().to_owned();
         let post = name[eq + 1..].trim().to_owned();
-        if pre.is_empty() || post.is_empty() {
+        if pre.is_empty() {
+            spec.problems.push("empty name");
+            return false;
+        }
+        if post.is_empty() {
+            spec.problems.push("empty default value");
             return false;
         }
         if identifier_eq_prefix(&name) {
             if !is_quoted(&post) && find_eq(&post).is_some() {
+                spec.problems.push("invalid default value syntax");
                 return false;
             }
             name = pre;
@@ -777,7 +794,9 @@ impl<'a> Finder<'a> {
         }
     }
 
-    fn start_of(&self, id: NodeId) -> u32 {
+    /// Where a node starts for comment lookup: its first decorator (or its parent's), else
+    /// itself.
+    pub fn start_of(&self, id: NodeId) -> u32 {
         let own = self.ast.span(id).start;
         let dec = self
             .decorators(id)
@@ -799,7 +818,8 @@ impl<'a> Finder<'a> {
         }
     }
 
-    fn find(&self, id: NodeId) -> Option<usize> {
+    /// The JSDoc block right before `id` (`findJSDocComment`), without reducing it first.
+    pub fn find(&self, id: NodeId) -> Option<usize> {
         let mut cur = self.start_of(id);
         let mut paren: Option<u32> = None;
         let cs = &self.ast.comments;
@@ -837,7 +857,8 @@ impl<'a> Finder<'a> {
         )
     }
 
-    fn reduce(&self, id: NodeId) -> NodeId {
+    /// The node whose comment documents `id` (`getReducedASTNode`).
+    pub fn reduce(&self, id: NodeId) -> NodeId {
         match self.ast.node(id) {
             Node::FunctionDecl { body: None, .. }
             | Node::ClassExpr { .. }
@@ -889,6 +910,25 @@ impl<'a> Finder<'a> {
                 .filter(|&m| matches!(self.ast.node(m), Node::MethodDef { .. }))
                 .unwrap_or(id),
             Node::VarDeclarator { type_ann, .. } if is(type_ann) => var_decl_of(p).unwrap_or(id),
+            // An arrow's return type in a variable's initializer borrows the comment of what
+            // holds the declaration (the plugin's walk goes one level past it); the
+            // program starts at its first token, which is its first statement's.
+            Node::Arrow { return_type, .. } if is(return_type) => {
+                let Some(holder) = self
+                    .parent(p)
+                    .filter(|&d| matches!(self.ast.node(d), Node::VarDeclarator { .. }))
+                    .and_then(var_decl_of)
+                    .and_then(|d| self.parent(d))
+                else {
+                    return id;
+                };
+                match *self.ast.node(holder) {
+                    Node::Program { stmts } => {
+                        self.ast.list(stmts).first().copied().unwrap_or(holder)
+                    }
+                    _ => holder,
+                }
+            }
             Node::Param {
                 type_ann, pattern, ..
             } if is(type_ann) && matches!(self.ast.node(pattern), Node::Ident { .. }) => {
@@ -1224,6 +1264,9 @@ pub struct Contexts {
     /// The plugin's `matchContext` under object `any` entries: every block is checked once
     /// per entry whose `comment` matches it (or that has none), not just the first.
     pub additive: bool,
+    /// The plugin's `noTracking`: under `any`, a block is checked once for every node it
+    /// documents (an export and its declaration both), not just the first.
+    pub no_tracking: bool,
 }
 
 pub const DEFAULT_CONTEXTS: &[&str] = &[
@@ -1312,6 +1355,7 @@ impl Contexts {
             all,
             plain_any,
             additive: false,
+            no_tracking: false,
         })
     }
 
@@ -1435,7 +1479,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
             for t in targets.into_iter().flatten() {
                 if contexts.all {
                     if let Some(c) = finder.jsdoc_of_target(t)
-                        && !claimed[c]
+                        && (!claimed[c] || contexts.no_tracking)
                     {
                         claimed[c] = true;
                         for comment in via(c) {
@@ -1760,14 +1804,21 @@ fn is_void_like_type(ast: &Ast, ty: NodeId) -> bool {
 /// `hasValueOrExecutorHasNonEmptyResolveValue`: the function returns a value, or returns a
 /// `new Promise` whose executor resolves with one (any Promise when `any_promise`).
 pub fn has_return_value(ast: &Ast, id: NodeId, any_promise: bool) -> bool {
-    returns_value(ast, id, any_promise, 0)
+    returns_value(ast, id, Some(any_promise), 0)
 }
 
-fn returns_value(ast: &Ast, id: NodeId, any_promise: bool, depth: u32) -> bool {
+/// `hasReturnValue` without a Promise filter: any `return` with a value counts.
+pub fn has_plain_return_value(ast: &Ast, id: NodeId) -> bool {
+    returns_value(ast, id, None, 0)
+}
+
+/// `promises`: `None` counts every value return; `Some(any_promise)` looks into returned
+/// `new Promise`s.
+fn returns_value(ast: &Ast, id: NodeId, promises: Option<bool>, depth: u32) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }
-    let rec = |n: NodeId| returns_value(ast, n, any_promise, depth + 1);
+    let rec = |n: NodeId| returns_value(ast, n, promises, depth + 1);
     match *ast.node(id) {
         Node::FunctionDecl {
             body: None,
@@ -1806,7 +1857,12 @@ fn returns_value(ast: &Ast, id: NodeId, any_promise: bool, depth: u32) -> bool {
         Node::Return { arg: None } => false,
         Node::Return { arg: Some(a) } => {
             let a = skip_parens(ast, a);
-            !is_new_promise(ast, a) || promise_resolves(ast, a, any_promise, depth + 1)
+            match promises {
+                None => true,
+                Some(any_promise) => {
+                    !is_new_promise(ast, a) || promise_resolves(ast, a, any_promise, depth + 1)
+                }
+            }
         }
         Node::Switch { cases, .. } => ast.list(cases).iter().any(|&c| match *ast.node(c) {
             Node::SwitchCase { body, .. } => ast.list(body).iter().any(|&s| rec(s)),
@@ -2011,6 +2067,21 @@ mod tests {
         let b = Block::parse("/**\n * @param {string foo Desc\n */");
         assert_eq!(b.tags[0].name, "");
         assert_eq!(b.tags[0].description, "");
+    }
+
+    #[test]
+    fn critical_problems_are_recorded() {
+        let problem = |text: &str| Block::parse(text).tags[0].problems.clone();
+        assert_eq!(problem("/** @param {string foo */"), ["unpaired curlies"]);
+        assert_eq!(problem("/** @param [foo */"), ["unpaired brackets"]);
+        assert_eq!(problem("/** @param [] */"), ["empty name"]);
+        assert_eq!(problem("/** @param [foo=] */"), ["empty default value"]);
+        assert_eq!(
+            problem("/** @param [foo=a=b] */"),
+            ["invalid default value syntax"]
+        );
+        assert_eq!(problem("/** @param =x */"), ["empty name"]);
+        assert!(problem("/** @param [foo=1] */").is_empty());
     }
 
     #[test]

@@ -33,6 +33,8 @@ pub enum Preset {
     TsRecommendedTypeChecked,
     /// The type-checked part of `tseslint.configs.strictTypeChecked`.
     TsStrictTypeChecked,
+    /// `tseslint.configs.stylistic` (and so the untyped part of `stylisticTypeChecked`).
+    TsStylistic,
     /// The type-checked part of `tseslint.configs.stylisticTypeChecked`.
     TsStylisticTypeChecked,
 }

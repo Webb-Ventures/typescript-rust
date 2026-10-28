@@ -242,7 +242,7 @@ fn is_ambient(ast: &Ast, decls: &[crate::semantic::Decl]) -> bool {
 
 /// The `return`, `throw` or non-delegating `yield` whose unparenthesized argument starts
 /// with `node`.
-fn keyword_argument_parent(cx: &Ctx<'_, '_>, mut node: NodeId) -> Option<NodeId> {
+pub(crate) fn keyword_argument_parent(cx: &Ctx<'_, '_>, mut node: NodeId) -> Option<NodeId> {
     let ast = cx.ast();
     for _ in 0..10_000 {
         let parent = cx.parent(node)?;
@@ -267,7 +267,7 @@ fn keyword_argument_parent(cx: &Ctx<'_, '_>, mut node: NodeId) -> Option<NodeId>
 
 /// `expr`, moved to where `typeof expr` was, would open a statement, arrow body or
 /// `export default` with a token that reads as a block or declaration there.
-fn start_needs_parens(cx: &Ctx<'_, '_>, expr: NodeId, replaced: NodeId) -> bool {
+pub(crate) fn start_needs_parens(cx: &Ctx<'_, '_>, expr: NodeId, replaced: NodeId) -> bool {
     let ast = cx.ast();
     let first = leftmost_expr(ast, expr);
     let regex = matches!(ast.node(first), Node::RegexLit { .. });

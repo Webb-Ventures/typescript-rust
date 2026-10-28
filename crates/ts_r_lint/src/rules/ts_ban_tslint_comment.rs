@@ -15,7 +15,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/ban-tslint-comment",
         "Disallow `// tslint:<rule-flag>` comments",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable(),

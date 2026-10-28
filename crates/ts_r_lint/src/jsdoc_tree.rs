@@ -119,6 +119,11 @@ fn is_space(c: char) -> bool {
     c.is_whitespace()
 }
 
+/// The tag names of a description's inline tags, in [`inline_tags`] order.
+pub fn inline_tag_names(desc: &str) -> Vec<&str> {
+    inline_tags(desc).into_iter().map(|t| t.tag).collect()
+}
+
 /// The `{@tag namepath text}` and `[text]{@tag namepath}` inline tags of a description, the
 /// prefixed ones first (`parseInlineTags`).
 fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
@@ -206,6 +211,65 @@ fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
     }
     prefixed.extend(suffixed);
     prefixed
+}
+
+/// An inline tag (`{@link Foo text}`) as `parseInlineTags` gives it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineTag {
+    pub tag: String,
+    pub namepath_or_url: String,
+    pub text: String,
+    /// The line (within the comment) reports about the tag go to: the first line whose
+    /// description mentions `{@tag`.
+    pub line: i64,
+}
+
+fn owned_inline(desc: &str, line_of: impl Fn(&str) -> i64) -> Vec<InlineTag> {
+    inline_tags(desc)
+        .into_iter()
+        .map(|t| InlineTag {
+            tag: t.tag.to_owned(),
+            namepath_or_url: t.namepath.to_owned(),
+            text: t.text.to_owned(),
+            line: line_of(t.tag),
+        })
+        .collect()
+}
+
+/// The inline tags of a block's own description (its lines before the first tag). Their
+/// line is the index of the first block line (tag lines included) mentioning the tag, or
+/// the last line.
+pub fn block_inline_tags(block: &Block) -> Vec<InlineTag> {
+    let desc: Vec<&str> = block
+        .source
+        .iter()
+        .map(|&i| &block.lines[i].tokens)
+        .take_while(|t| t.tag.is_empty())
+        .map(|t| t.description.trim())
+        .filter(|d| !d.is_empty())
+        .collect();
+    owned_inline(&desc.join(" "), |tag| {
+        let needle = format!("{{@{tag}");
+        let at = block
+            .source
+            .iter()
+            .position(|&i| block.lines[i].tokens.description.contains(&needle));
+        at.unwrap_or(block.source.len().saturating_sub(1)) as i64
+    })
+}
+
+/// The inline tags of a tag's description. Their line is the number of the first tag line
+/// mentioning the tag, or 0.
+pub fn tag_inline_tags(block: &Block, tag: usize) -> Vec<InlineTag> {
+    let t = &block.tags[tag];
+    owned_inline(&t.description, |name| {
+        let needle = format!("{{@{name}");
+        t.source
+            .iter()
+            .map(|&i| &block.lines[i])
+            .find(|l| l.tokens.description.contains(&needle))
+            .map_or(0, |l| l.number)
+    })
 }
 
 impl JsdocTree {

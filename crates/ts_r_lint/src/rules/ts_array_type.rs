@@ -13,7 +13,7 @@ pub static RULE: RuleDef = RuleDef {
     meta: meta(
         "@typescript-eslint/array-type",
         "Require consistently using either `T[]` or `Array<T>` for arrays",
-        NO_PRESET,
+        TS_STYLISTIC,
         Category::Style,
     )
     .fixable(),

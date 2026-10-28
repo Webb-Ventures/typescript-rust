@@ -296,6 +296,8 @@ function pickParserOptions(po = {}) {
 }
 
 function applyFixes(code, fixes) {
+  // Fix ranges index ESLint's text, which has no leading BOM; the BOM is kept in front.
+  if (code.startsWith('\uFEFF')) return '\uFEFF' + applyFixes(code.slice(1), fixes);
   // One pass, like RuleTester: sort by range, skip overlapping fixes.
   const sorted = fixes.filter(Boolean).sort((x, y) => x.range[0] - y.range[0] || x.range[1] - y.range[1]);
   let out = '';
@@ -365,6 +367,7 @@ function observe(ruleId, isTs, testerConfig, c) {
         ...(unicornPlugin ? { unicorn: unicornPlugin } : {}),
       },
       languageOptions,
+      linterOptions: { reportUnusedDisableDirectives: 'off' },
       settings: c.settings || {},
       rules: { [ruleId]: ['error', ...c.options] },
     },
@@ -435,6 +438,12 @@ function testFileFor(rule) {
 }
 
 fs.mkdirSync(outDir, { recursive: true });
+// A RegExp in rule options (`ignore: [/^skip/]`) is written as `{ "regex": source,
+// "flags": flags }`; plain JSON would turn it into `{}`.
+function regexToJson(key, value) {
+  return value instanceof RegExp ? { regex: value.source, flags: value.flags } : value;
+}
+
 for (const rule of rules) {
   const { files, isTs, source } = testFileFor(rule);
   if (!files.length) {
@@ -483,7 +492,7 @@ for (const rule of rules) {
   const out = { rule, source: source ?? (isTs ? 'typescript-eslint' : 'eslint'), skipped, cases };
   if (rule.startsWith('unicorn/')) out.globals = unicornGlobals;
   const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-').replace('unicorn/', 'unicorn-') + '.json';
-  fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, null, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
+  fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, regexToJson, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
   console.error(`${rule}: ${cases.length} cases, skipped ${JSON.stringify(skipped)}`);
 }
 fs.rmSync(stubDir, { recursive: true, force: true });
