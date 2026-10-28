@@ -79,12 +79,36 @@ impl Checker<'_> {
         }
         let m = self.export_of(e, &key)?;
         let v = ck.enum_members(e).into_iter().find(|x| x.0 == m)?.1?;
-        let s = ck.store();
-        match s.kind(v) {
-            TypeKind::StringLiteral(x) => Some(EnumConst::String(s.str(x).to_owned())),
-            TypeKind::NumberLiteral(..) => s.number_value(v).map(EnumConst::Number),
-            _ => None,
+        enum_const_of(&ck, v)
+    }
+
+    /// The value the checker's evaluator gives the enum member declared at `member` (an
+    /// `EnumMember` node of any enum, const or not): initializers that reach other files
+    /// (imported consts, template literals over them, members of other enums) included.
+    /// `None` when the member is computed (no constant value).
+    pub fn enum_member_value(&self, member: Loc) -> Option<EnumConst> {
+        if !matches!(
+            self.ast(member.file).node(member.node),
+            Node::EnumMember { .. }
+        ) {
+            return None;
         }
+        let m = self.sym_of_decl(member)?;
+        let e = self.sym_parent(m)?;
+        let mut ck = Ck::new(self, member.file);
+        ck.no_report += 1;
+        let v = ck.enum_members(e).into_iter().find(|x| x.0 == m)?.1?;
+        enum_const_of(&ck, v)
+    }
+}
+
+/// A literal enum member type as its constant.
+fn enum_const_of(ck: &Ck<'_, '_>, v: ts_r_types::TypeId) -> Option<EnumConst> {
+    let s = ck.store();
+    match s.kind(v) {
+        TypeKind::StringLiteral(x) => Some(EnumConst::String(s.str(x).to_owned())),
+        TypeKind::NumberLiteral(..) => s.number_value(v).map(EnumConst::Number),
+        _ => None,
     }
 }
 

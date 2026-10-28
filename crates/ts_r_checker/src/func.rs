@@ -2165,12 +2165,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let expression_body = parts.is_arrow && parts.flags.contains(FnFlags::EXPRESSION_BODY);
         let end_reachable;
         if expression_body {
-            if self.is_bare_self_call(Loc::new(decl.file, fnode), body, is_async) {
-                has_self_return = true;
-            } else {
-                let t = self.check_expr(Loc::new(decl.file, body));
-                types.push(t);
-            }
+            // An expression body is no return statement: a call to the arrow itself counts
+            // (`const f = () => f()` is circular, TS7023; tsc: getReturnTypeFromBody).
+            let t = self.check_expr(Loc::new(decl.file, body));
+            types.push(t);
             end_reachable = false;
         } else {
             let mut returns = Vec::new();

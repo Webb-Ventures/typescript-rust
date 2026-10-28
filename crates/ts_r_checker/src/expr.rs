@@ -1254,6 +1254,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                     sym = self.c.value_merged_in_alias_chain(s).unwrap_or(s);
                 }
                 Some(t) if t != s => {
+                    // `import * as ns` of a module whose `export =` is only a type (an
+                    // interface, a type alias, a namespace without values) has no value.
+                    if self.c.sym_flags(t).intersects(SymbolFlags::MODULE_FILE)
+                        && self.is_namespace_import(s)
+                        && !self.c.parent(e).is_some_and(|p| {
+                            matches!(self.c.node(p), Node::ExportAssignment { .. })
+                        })
+                        && let Some(eq) = self.c.export_of(t, "export=")
+                        && let Some(entity) = self.c.resolve_alias(eq).or(Some(eq))
+                        && !self.c.sym_flags(entity).is_empty()
+                        && !self.c.has_meaning(entity, meaning::VALUE)
+                    {
+                        if self
+                            .c
+                            .sym_flags(entity)
+                            .intersects(SymbolFlags::NAMESPACE_MODULE)
+                        {
+                            self.error(e, dg::CANNOT_USE_NAMESPACE_0_AS_A_VALUE_2708, &[name]);
+                        } else {
+                            self.error(e, type_as_value_info(name), &[name]);
+                        }
+                        return TypeId::ERROR;
+                    }
                     if let Some(v) = self.json_import_type(s, t) {
                         self.check_type_only_alias_use(e, s, t, name);
                         return v;
@@ -2583,6 +2606,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !matches!(ast.node(f.node), Node::FunctionExpr { .. }) {
             return None;
         }
+        // Only under `noImplicitThis` (or in JavaScript): otherwise `this` is `any`.
+        if !self.c.opts.no_implicit_this && !self.c.file(f.file).is_js() {
+            return None;
+        }
         let mut cur = f;
         for _ in 0..64 {
             let p = self.c.parent(cur)?;
@@ -2877,6 +2904,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// JavaScript, when `allow_self` and `ol` is in a position nothing contextually types)
     /// the widened type of `ol` itself (`any` while that type is being computed).
     fn object_literal_this(&mut self, ol: Loc, allow_self: bool) -> TypeId {
+        // Without `noImplicitThis`, a TypeScript object literal gives its methods no `this`
+        // type: it is `any` (tsc: checker.go, getContextualThisParameterType).
+        if !self.c.opts.no_implicit_this && !self.c.file(ol.file).is_js() {
+            return TypeId::ANY;
+        }
         let mut lit = ol;
         for _ in 0..64 {
             if let Some(ct) = self.contextual_type(lit)
@@ -4335,13 +4367,14 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The class or interface named by the explicit `this` parameter of the function
     /// whose `this` `l` sees (arrow functions pass through), a type parameter standing for
-    /// its constraint.
+    /// its constraint; without one, by its contextual signature's `this` parameter (tsc:
+    /// checker.go, getEnclosingClassFromThisParameter).
     fn this_parameter_class(&mut self, l: Loc) -> Option<SymId> {
         let ast = self.ast(l.file);
         let parents = self.c.file(l.file).parents();
         let mut cur = parents.parent(l.node);
         let mut guard = 0;
-        let ann = loop {
+        let t = loop {
             guard += 1;
             let n = cur?;
             if guard > 100_000 {
@@ -4353,14 +4386,25 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .list(params)
                         .iter()
                         .copied()
-                        .find(|&p| crate::nodes::is_this_param(ast, p))?;
-                    let Node::Param {
-                        type_ann: Some(t), ..
-                    } = *ast.node(p)
-                    else {
-                        return None;
-                    };
-                    break t;
+                        .find(|&p| crate::nodes::is_this_param(ast, p));
+                    match p.map(|p| *ast.node(p)) {
+                        Some(Node::Param {
+                            type_ann: Some(t), ..
+                        }) => {
+                            let mut t = self.type_from_node(Loc::new(l.file, t));
+                            if self.store().flags(t).contains(TypeFlags::TYPE_PARAMETER) {
+                                t = self.type_param_constraint(t)?;
+                            }
+                            break t;
+                        }
+                        Some(_) => return None,
+                        // Without one, the `this` parameter of the contextual signature
+                        // (`const f: (this: Foo) => void = function () { this.protec }`).
+                        None => {
+                            let sig = self.contextual_signature(Loc::new(l.file, n))?;
+                            break self.store().sig(sig).this_type?;
+                        }
+                    }
                 }
                 Node::ClassDecl { .. } | Node::ClassExpr { .. } | Node::Module { .. } => {
                     return None;
@@ -4368,10 +4412,6 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => cur = parents.parent(n),
             }
         };
-        let mut t = self.type_from_node(Loc::new(l.file, ann));
-        if self.store().flags(t).contains(TypeFlags::TYPE_PARAMETER) {
-            t = self.type_param_constraint(t)?;
-        }
         let target = match self.store().object_of(t).map(|o| o.kind) {
             Some(ts_r_types::ObjectKind::Reference { target, .. }) => target,
             _ => t,

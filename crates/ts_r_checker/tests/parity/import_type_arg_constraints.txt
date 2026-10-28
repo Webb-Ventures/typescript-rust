@@ -1,0 +1,2 @@
+file2.ts(1,35): error TS2344: Type 'T' does not satisfy the constraint 'string'.
+file2.ts(3,10): error TS2707: Generic type 'Bar<A, B>' requires between 1 and 2 type arguments.

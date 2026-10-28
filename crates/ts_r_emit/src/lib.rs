@@ -746,6 +746,15 @@ impl EmitResolver for CheckerResolver<'_, '_> {
             ts_r_checker::emit::EnumConst::String(s) => Some(ConstValue::String(s)),
         }
     }
+
+    /// Folded whatever `isolatedModules` says: tsc evaluates an enum member's initializer
+    /// across files even then (computedEnumMemberSyntacticallyString2).
+    fn enum_member_value(&self, file: FileId, member: NodeId) -> Option<ConstValue> {
+        match self.checker.enum_member_value(Loc::new(file, member))? {
+            ts_r_checker::emit::EnumConst::Number(n) => Some(ConstValue::Number(n)),
+            ts_r_checker::emit::EnumConst::String(s) => Some(ConstValue::String(s)),
+        }
+    }
 }
 
 struct Ctx<'a, 'c> {

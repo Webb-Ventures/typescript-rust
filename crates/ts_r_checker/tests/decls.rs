@@ -1034,3 +1034,38 @@ fn initializers_in_made_up_bodies() {
         .collect();
     assert_eq!(semantic, ["2:9 TS2371"]);
 }
+
+/// Type predicate errors are the checker's own, not grammar errors: a file with syntax
+/// errors still gets TS1228, TS1229 and TS1225 (typeGuardFunctionErrors).
+#[test]
+fn type_predicate_errors_through_syntax_errors() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file(
+        "/p/a.ts",
+        "class A { a = 1 }\nclass D {\n    constructor(p1: A): p1 is A {}\n}\n\
+         function b4(...a: any[]): a is A { return true; }\n\
+         function m(y: unknown): x is A { return true; }\nlet broken = (;\n",
+    );
+    fs.add_file(
+        "/p/tsconfig.json",
+        r#"{"compilerOptions": {"strict": true, "target": "es2015"}, "files": ["a.ts"]}"#,
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let result = check_program_through_syntax_errors(&program, CheckRun { threads: 1 });
+    let found: Vec<String> = result
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.code, 1225 | 1228 | 1229))
+        .map(|d| {
+            let f = &program.files[d.file.0 as usize];
+            let lc = f.lines().line_col_utf16(&f.text, d.span.start);
+            format!("{}:{} TS{}", lc.line + 1, lc.col + 1, d.code)
+        })
+        .collect();
+    assert_eq!(found, ["3:25 TS1228", "5:27 TS1229", "6:25 TS1225"]);
+}

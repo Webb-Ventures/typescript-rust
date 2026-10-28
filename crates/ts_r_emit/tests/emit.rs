@@ -710,3 +710,41 @@ __decorate([
 "#;
     assert_eq!(b.text, want);
 }
+
+/// Enum members whose initializers read another file are folded from the checker, with
+/// `isolatedModules` too (computedEnumMemberSyntacticallyString2).
+#[test]
+fn enum_members_from_other_files_are_folded() {
+    let src = "import { BAR } from './bar';\nconst LOCAL = 'LOCAL';\nenum Foo {\n  A = `${BAR}`,\n  B = LOCAL,\n  C = B,\n  D = C + 'BAR',\n  E1 = (`${BAR}`) as string,\n  E2 = `${BAR}`!,\n  F = BAR,\n  G = 2 + BAR,\n  H = A,\n  I = H + BAR,\n  J = H\n}\n";
+    for isolated in [false, true] {
+        let config = format!(
+            r#"{{"compilerOptions":{{"target":"esnext","module":"esnext","rootDir":"src","outDir":"out","types":[],"isolatedModules":{isolated}}}}}"#
+        );
+        let r = emit(&[
+            ("tsconfig.json", &config),
+            ("src/foo.ts", src),
+            ("src/bar.ts", "export const BAR = 'bar';"),
+        ]);
+        let foo = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/foo.js")
+            .unwrap();
+        for line in [
+            r#"Foo["A"] = "bar";"#,
+            r#"Foo["D"] = "LOCALBAR";"#,
+            "Foo[Foo[\"E1\"] = (`${BAR}`)] = \"E1\";",
+            "Foo[Foo[\"E2\"] = `${BAR}`] = \"E2\";",
+            r#"Foo["F"] = "bar";"#,
+            r#"Foo["G"] = "2bar";"#,
+            r#"Foo["I"] = "barbar";"#,
+            r#"Foo["J"] = "bar";"#,
+        ] {
+            assert!(
+                foo.text.contains(line),
+                "isolated {isolated}: {line}\n{}",
+                foo.text
+            );
+        }
+    }
+}

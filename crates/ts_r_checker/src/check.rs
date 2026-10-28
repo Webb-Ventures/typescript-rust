@@ -637,6 +637,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 if !misplaced {
                     self.check_isolated_export_assignment(l, expr);
                 }
+                // TS2714: in an ambient context (a `.d.ts`, `declare module`) the expression
+                // must be a dotted name (`export = 2 + 2` is not). A grammar error: none in
+                // a file with syntax errors (tsc: checker.go, checkExportAssignment).
+                if !crate::nodes::is_entity_name_expr(ast, expr)
+                    && self.is_ambient_node(l)
+                    && !self.has_syntax_errors(file)
+                {
+                    self.error(
+                        at(expr),
+                        dg::THE_EXPRESSION_OF_AN_EXPORT_ASSIGNMENT_MUST_BE_AN_IDENTIFIER_OR_QUALIFIED_NAME_I_2714,
+                        &[],
+                    );
+                }
                 // `export = X` / `export default X` of an identifier exports whatever `X`
                 // names: a type or a namespace without values is no error (TS2693/TS2708).
                 let only_type = matches!(ast.node(expr), Node::Ident { .. })
@@ -1746,6 +1759,23 @@ impl<'c, 'a> Ck<'c, 'a> {
                         Some(n) => n,
                         None => return,
                     }
+                }
+                // `const { 0n: f } = o`: a bigint key cannot index anything but `any`
+                // (observed: TS2538 naming `bigint`, bigintPropertyName).
+                Node::BigIntLit { .. } => {
+                    let parent = self.pattern_parent_type(obj_pat);
+                    let s = self.store();
+                    if parent != TypeId::UNRESOLVED
+                        && !s.is_error(parent)
+                        && !s.flags(parent).intersects(TypeFlags::ANY)
+                    {
+                        self.error(
+                            Loc::new(prop.file, key),
+                            dg::TYPE_0_CANNOT_BE_USED_AS_AN_INDEX_TYPE_2538,
+                            &["bigint"],
+                        );
+                    }
+                    return;
                 }
                 _ => return,
             },
@@ -4682,8 +4712,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                     is_typeof: false,
                     qualifier: Some(q),
                     arg,
+                    type_args,
                     ..
-                } => self.check_import_type_qualifier(Loc::new(file, n), arg, q),
+                } => {
+                    self.check_import_type_qualifier(Loc::new(file, n), arg, q);
+                    // Arity and constraints of `import("m").Foo<T>` (TS2344, TS2314).
+                    if let Some(ta) = type_args
+                        && let Some(sym) = self.import_type_symbol(Loc::new(file, n))
+                    {
+                        let n_args = match *ast.node(ta) {
+                            Node::TypeArgs { args } => ast.list(args).len(),
+                            _ => 0,
+                        };
+                        self.check_resolved_type_reference(
+                            Loc::new(file, n),
+                            q,
+                            sym,
+                            n_args,
+                            type_args,
+                        );
+                    }
+                }
                 Node::TypeParam { .. } => {
                     self.check_type_param_modifiers(file, n);
                     self.check_circular_constraint(Loc::new(file, n));
@@ -4722,6 +4771,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_generic_indexed_access_type(Loc::new(file, n), Loc::new(file, obj));
                 }
                 // A JSDoc type predicate other than a return type (`/** @type {x is T} */`).
+                Node::TypePredicate { asserts, param, ty } if !ast.is_jsdoc(n) => {
+                    self.check_type_predicate(Loc::new(file, n), asserts, param, ty);
+                }
                 Node::TypePredicate { .. } if ast.is_jsdoc(n) => {
                     let l = Loc::new(file, n);
                     if self
@@ -4784,6 +4836,130 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// `static readonly` class property (TS1331, at its name) or a `readonly` property
     /// signature (TS1330, at its name); anywhere else it is TS1335. Files with syntax
     /// errors get none of these.
+    /// A type predicate in the return type of a function, method, call signature or
+    /// function type (elsewhere the parser reports TS1228): its parameter must exist
+    /// (TS1225, or TS1230 when the name is an element of a binding pattern), not be a rest
+    /// parameter (TS1229), and its type must be assignable to the parameter's (TS2677, at
+    /// the type). (tsc: checker.go, checkTypePredicate.)
+    fn check_type_predicate(&mut self, l: Loc, _asserts: bool, param: NodeId, ty: Option<NodeId>) {
+        let file = l.file;
+        let ast = self.ast(file);
+        let Some(owner) = self.c.parent(l) else {
+            return;
+        };
+        let allowed = match *ast.node(owner.node) {
+            Node::Arrow { .. }
+            | Node::CallSignature { .. }
+            | Node::FunctionDecl { .. }
+            | Node::FunctionType { .. } => true,
+            Node::MethodSignature { kind, .. } => kind == ts_r_ast::MethodKind::Method,
+            Node::FunctionExpr { .. } => !matches!(
+                self.c.parent(owner).map(|m| ast.node(m.node)),
+                Some(Node::MethodDef { kind, .. }) if *kind != ts_r_ast::MethodKind::Method
+            ),
+            _ => false,
+        };
+        let return_type = match *ast.node(owner.node) {
+            Node::FunctionType { return_type, .. } => Some(return_type),
+            _ => fn_parts(ast, owner.node).and_then(|p| p.return_type),
+        };
+        if !allowed || return_type != Some(l.node) {
+            // The parser defers its TS1228 to a clean parse; tsc's checker reports it in any
+            // file, so a file with syntax errors gets it from here.
+            if self.has_syntax_errors(file) {
+                self.error(
+                    l,
+                    dg::A_TYPE_PREDICATE_IS_ONLY_ALLOWED_IN_RETURN_TYPE_POSITION_FOR_FUNCTIONS_AND_METHO_1228,
+                    &[],
+                );
+            }
+            return;
+        }
+        // `this is T` / `asserts this`: nothing to look up.
+        let Some(name) = ident_text(ast, param) else {
+            return;
+        };
+        let params = match *ast.node(owner.node) {
+            Node::FunctionType { params, .. } => params,
+            _ => match fn_parts(ast, owner.node) {
+                Some(p) => p.params,
+                None => return,
+            },
+        };
+        let list: Vec<NodeId> = ast
+            .list(params)
+            .iter()
+            .copied()
+            .filter(|&p| !is_this_param(ast, p))
+            .collect();
+        let found = list.iter().position(|&p| {
+            matches!(*ast.node(p), Node::Param { pattern, .. } if ident_text(ast, pattern) == Some(name)
+                && matches!(ast.node(pattern), Node::Ident { .. }))
+        });
+        let Some(index) = found else {
+            let in_pattern = list.iter().any(|&p| {
+                matches!(*ast.node(p), Node::Param { pattern, .. }
+                    if !matches!(ast.node(pattern), Node::Ident { .. })
+                        && pattern_declares(ast, pattern, name))
+            });
+            let info = if in_pattern {
+                dg::A_TYPE_PREDICATE_CANNOT_REFERENCE_ELEMENT_0_IN_A_BINDING_PATTERN_1230
+            } else {
+                dg::CANNOT_FIND_PARAMETER_0_1225
+            };
+            let name = name.to_owned();
+            self.error(Loc::new(file, param), info, &[&name]);
+            return;
+        };
+        if index + 1 == list.len()
+            && matches!(*ast.node(list[index]), Node::Param { rest: true, .. })
+        {
+            self.error(
+                Loc::new(file, param),
+                dg::A_TYPE_PREDICATE_CANNOT_REFERENCE_A_REST_PARAMETER_1229,
+                &[],
+            );
+            return;
+        }
+        let Some(ty) = ty else {
+            return;
+        };
+        let at = Loc::new(file, ty);
+        let source = self.type_from_node(at);
+        let sig = self.signature_from_decl(owner);
+        let target = match self
+            .store()
+            .sig(sig)
+            .params
+            .get(index)
+            .map(|p| (p.sym, p.ty))
+        {
+            Some((sym, _)) if !sym.is_none() => self.type_of_symbol(sym),
+            Some((_, t)) => t,
+            None => return,
+        };
+        if source == TypeId::UNRESOLVED
+            || target == TypeId::UNRESOLVED
+            || self.store().is_error(source)
+            || self.store().is_error(target)
+            || self.is_assignable(source, target)
+            || !self.reporting(file)
+        {
+            return;
+        }
+        let (mut chain, _) =
+            self.relation_error_chain(source, target, ts_r_types::RelationKind::Assignable, None);
+        for (i, level) in &mut chain.nested {
+            *i += 1;
+            *level += 1;
+        }
+        chain.push_front(
+            dg::A_TYPE_PREDICATE_S_TYPE_MUST_BE_ASSIGNABLE_TO_ITS_PARAMETER_S_TYPE_2677,
+            &[],
+        );
+        self.error_chain(at, &chain);
+    }
+
     fn check_unique_symbol_type(&mut self, l: Loc, operand: NodeId) {
         if self.has_syntax_errors(l.file) {
             return;
@@ -6041,6 +6217,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(sym) = self.c.resolve_alias(sym) else {
             return;
         };
+        self.check_resolved_type_reference(r, name, sym, n_args, type_args);
+    }
+
+    /// The arity and constraint checks of a type reference `r` (written `name`, with
+    /// `n_args` type arguments) to the type symbol `sym`; also for `import("m").Foo<T>`.
+    fn check_resolved_type_reference(
+        &mut self,
+        r: Loc,
+        name: NodeId,
+        sym: ts_r_types::SymId,
+        n_args: usize,
+        type_args: Option<NodeId>,
+    ) {
+        let file = r.file;
+        let ast = self.ast(file);
+        let nl = Loc::new(file, name);
         if !self.c.has_meaning(sym, meaning::TYPE) {
             return;
         }
@@ -6383,6 +6575,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     self.error(l, dg::CANNOT_USE_NAMESPACE_0_AS_A_TYPE_2709, &[text]);
                     return None;
+                }
+                // A UMD global (`export as namespace Foo`) names its module's `export =`,
+                // which may be a type (`export = Thing` for a class `Thing`).
+                if let Some(t) = self.umd_export_equals_type(l) {
+                    return Some(t);
                 }
                 // (`exports` and `module` are values in a CommonJS module.)
                 let commonjs_value = matches!(text, "exports" | "module")
@@ -8626,7 +8823,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             stmt = p;
         }
-        self.enclosing_namespace(file, stmt).is_some() || self.stmt_misplaced(file, stmt)
+        if self.stmt_misplaced(file, stmt) {
+            return true;
+        }
+        if self.enclosing_namespace(file, stmt).is_none() {
+            return false;
+        }
+        // `import x = require("m")` in a namespace is still resolved when `x` is used:
+        // resolving the alias looks the module up (TS2307 next to TS1147; tsc reaches it
+        // through the alias target, not the declaration check).
+        if req.kind == RequestKind::ImportEquals {
+            let b = self.c.bound(file);
+            if let Some(sym) = b.symbol_of_decl(stmt) {
+                return !b.refs.resolved.iter().any(|&(_, s)| s == sym);
+            }
+        }
+        true
     }
 
     /// An import or export statement directly in a namespace: TS1147 at the module specifier
@@ -10519,4 +10731,41 @@ fn regex_needs_target(d: &Diagnostic, target: ts_r_config::ScriptTarget) -> bool
         .nth(1)
         .and_then(ts_r_config::ScriptTarget::parse);
     needed.is_some_and(|needed| target < needed)
+}
+
+/// Whether binding pattern `pattern` declares `name` in one of its elements, at any depth
+/// (bounded).
+fn pattern_declares(ast: &ts_r_ast::Ast, pattern: NodeId, name: &str) -> bool {
+    let mut stack = vec![pattern];
+    let mut steps = 0;
+    while let Some(n) = stack.pop() {
+        steps += 1;
+        if steps > 10_000 {
+            return false;
+        }
+        match *ast.node(n) {
+            Node::ObjectPattern { props } => {
+                for &p in ast.list(props) {
+                    match *ast.node(p) {
+                        Node::BindingProperty { value: Some(v), .. } => stack.push(v),
+                        Node::BindingProperty {
+                            key, value: None, ..
+                        } => stack.push(key),
+                        Node::Rest { arg } => stack.push(arg),
+                        _ => {}
+                    }
+                }
+            }
+            Node::ArrayPattern { elements } => {
+                for &e in ast.list(elements) {
+                    stack.push(e);
+                }
+            }
+            Node::AssignPattern { left, .. } => stack.push(left),
+            Node::Rest { arg } => stack.push(arg),
+            Node::Ident { .. } if ident_text(ast, n) == Some(name) => return true,
+            _ => {}
+        }
+    }
+    false
 }

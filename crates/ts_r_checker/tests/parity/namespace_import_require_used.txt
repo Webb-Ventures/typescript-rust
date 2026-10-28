@@ -1,0 +1,6 @@
+a.ts(2,26): error TS1147: Import declarations in a namespace cannot reference a module.
+a.ts(2,26): error TS2307: Cannot find module 'not_there_1' or its corresponding type declarations.
+a.ts(6,26): error TS1147: Import declarations in a namespace cannot reference a module.
+b.ts(2,20): error TS2435: Ambient modules cannot be nested in other modules or namespaces.
+b.ts(5,24): error TS1147: Import declarations in a namespace cannot reference a module.
+b.ts(5,24): error TS2307: Cannot find module 'nested_mod' or its corresponding type declarations.

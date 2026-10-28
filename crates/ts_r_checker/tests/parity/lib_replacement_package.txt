@@ -1,0 +1,1 @@
+index.ts(6,1): error TS2304: Cannot find name 'window'.

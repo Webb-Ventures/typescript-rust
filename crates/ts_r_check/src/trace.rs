@@ -177,23 +177,13 @@ pub fn trace<F: FileSystem>(
             .clone()
             .unwrap_or_else(|| fs.cwd());
         for lib in libs {
-            let Some(spec) = lib_replacement_specifier(lib) else {
+            let Some(spec) = ts_r_checker::program::lib_replacement_specifier(lib) else {
                 continue;
             };
-            let containing = path::combine(&base, &format!("__lib_node_modules_lookup_{lib}__.ts"));
+            let containing = ts_r_checker::program::lib_replacement_lookup_file(&base, lib);
             // Always in CommonJS mode (observed under nodenext in an ESM package too).
             resolver.resolve_module_traced(&spec, &containing, ResolutionMode::Require, &mut trace);
         }
     }
     trace.take_lines()
-}
-
-/// The package a lib file is replaced by: `lib.es2015.symbol.wellknown.d.ts` →
-/// `@typescript/lib-es2015/symbol-wellknown` (observed in tsc 7's `libReplacement` traces).
-fn lib_replacement_specifier(file_name: &str) -> Option<String> {
-    let name = file_name.strip_prefix("lib.")?.strip_suffix(".d.ts")?;
-    Some(match name.split_once('.') {
-        Some((head, rest)) => format!("@typescript/lib-{head}/{}", rest.replace('.', "-")),
-        None => format!("@typescript/lib-{name}"),
-    })
 }
