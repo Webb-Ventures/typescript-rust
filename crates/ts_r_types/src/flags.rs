@@ -215,6 +215,10 @@ bitset! {
         const SYNTHETIC = 1 << 20;
         /// Evolving array (`let x = []`).
         const EVOLVING_ARRAY = 1 << 21;
+        /// The widened type of an object literal (`const o = { a: "x" }` gives
+        /// `{ a: string }`). tsc's widened literal is no longer an object literal type for
+        /// union error elaboration; the other object-literal rules still apply to it here.
+        const WIDENED_LITERAL = 1 << 22;
     }
 }
 

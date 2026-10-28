@@ -1,0 +1,53 @@
+a.ts(6,7): error TS2322: Type '{ a: string; }' is not assignable to type 'string | number | string[] | { a: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(7,7): error TS2322: Type '{ a: string; }' is not assignable to type 'number | string[] | { a: number; } | { b: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(8,7): error TS2322: Type '{ b: string; }' is not assignable to type 'number | string[] | { b: number; }'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(9,49): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'string[] | { b: number; }'.
+a.ts(10,7): error TS2322: Type '{ b: string; }' is not assignable to type 'number | number[] | { b: number; }'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(11,7): error TS2322: Type '{ b: string; }' is not assignable to type 'number | number[] | { b: number; } | undefined'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(12,7): error TS2322: Type '{ a: string; }' is not assignable to type 'string[] | { a: number; } | null'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(13,40): error TS2322: Type 'string' is not assignable to type 'number'.
+a.ts(14,33): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'string[]'.
+a.ts(15,7): error TS2322: Type '{ a: string; }' is not assignable to type 'number | string[] | { b: number; }'.
+a.ts(16,7): error TS2322: Type '{ a: string; }' is not assignable to type 'number | string[] | { b: number; } | { a: number; }'.
+  Type '{ a: string; }' is not assignable to type '{ a: number; }'.
+    Types of property 'a' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(17,7): error TS2322: Type '{ a: string; }' is not assignable to type 'string[] | { b: number; }'.
+a.ts(18,7): error TS2322: Type '{ a: string; }' is not assignable to type 'number | string[]'.
+a.ts(19,7): error TS2322: Type '{ a: string; }' is not assignable to type 'number | string[] | { a: number; }'.
+  Type '{ a: string; }' is not assignable to type '{ a: number; }'.
+    Types of property 'a' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(20,7): error TS2322: Type '{ a: string; }' is not assignable to type 'number | string[] | { [k: string]: number; }'.
+  Types of property 'a' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(21,55): error TS2353: Object literal may only specify known properties, and 'b' does not exist in type 'string[] | { a: number; }'.
+a.ts(23,7): error TS2322: Type '{ a: { b: string; }; }' is not assignable to type 'JsonN'.
+  The types of 'a.b' are incompatible between these types.
+    Type 'string' is not assignable to type 'JsonN | undefined'.
+a.ts(25,7): error TS2322: Type '{ b: string; }' is not assignable to type 'JsonM | undefined'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'JsonM | undefined'.
+a.ts(26,7): error TS2322: Type '{ b: string; }' is not assignable to type 'number | number[] | { [k: string]: number; } | undefined'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(27,85): error TS2322: Type '{ b: string; }' is not assignable to type 'number | number[] | { [k: string]: number; }'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(28,97): error TS2322: Type '{ b: string; }' is not assignable to type 'number | number[] | { [k: string]: number; } | undefined'.
+  Types of property 'b' are incompatible.
+    Type 'string' is not assignable to type 'number'.
+a.ts(33,36): error TS2353: Object literal may only specify known properties, and 'autoIncrement' does not exist in type 'StrAttr'.
+a.ts(37,38): error TS2353: Object literal may only specify known properties, and 'autoIncrement' does not exist in type 'O2O | StrAttr'.

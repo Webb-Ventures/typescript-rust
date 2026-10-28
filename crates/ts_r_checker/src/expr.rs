@@ -7331,7 +7331,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .without(TypeTraits::FRESH | TypeTraits::CONTAINS_WIDENING);
             s.literal_object(
                 sym,
-                flags,
+                flags | ObjectFlags::WIDENED_LITERAL,
                 ResolvedMembers::new(out, call, Vec::new(), index),
                 traits,
             )

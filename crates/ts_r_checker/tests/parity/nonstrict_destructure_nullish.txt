@@ -1,0 +1,10 @@
+a.ts(3,11): error TS1492: 'using' declarations may not have binding patterns.
+a.ts(3,12): error TS2339: Property 'b' does not exist on type 'null'.
+a.ts(7,12): error TS2339: Property 'd' does not exist on type 'null'.
+a.ts(8,10): error TS2339: Property 'e' does not exist on type 'undefined'.
+a.ts(9,11): error TS1492: 'using' declarations may not have binding patterns.
+a.ts(9,12): error TS2339: Property 'f' does not exist on type 'undefined'.
+a.ts(10,17): error TS1492: 'await using' declarations may not have binding patterns.
+a.ts(10,18): error TS2339: Property 'g' does not exist on type 'null'.
+a.ts(11,5): error TS2304: Cannot find name 'using'.
+a.ts(11,12): error TS2304: Cannot find name 'h'.

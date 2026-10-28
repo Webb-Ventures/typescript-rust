@@ -109,6 +109,14 @@ Files, by layer:
   JavaScript whose resolved path is under `node_modules` is loaded only within
   `maxNodeModuleJsDepth` (default 0) imports of other files, also through a relative
   import (`../../node_modules/eslint/lib/linter`); past it the import is untyped (TS7016).
+  Package deduplication (`deduplicatePackages`, default on): walking the files depth-first
+  from the roots, then the `types` entries, a file's `/// <reference>` targets before its
+  imports, the first file with a package identity (`name`, path in the package, `version`
+  with peers) keeps it; a later file of the same identity at another path is redirected to
+  it (`package_redirects`): resolutions to it point at the kept file
+  (`Resolution::redirected_from` keeps the original for TS2306's name), and neither it nor
+  what only it imports is in the program (tsc: `collectFiles` in
+  `tsc/internal/compiler/filesparser.go`).
 - Expressions: `expr.rs`, `func.rs` (function expressions, contextual typing), `call.rs`
   (calls, `new`, overload resolution, arity and TS2769 reporting), `infer.rs`, JSX:
   `jsx_check.rs` (the `JSX` namespace of an element: global, factory-scoped or from the
@@ -361,7 +369,9 @@ Files, by layer:
   `static_refs.rs`); both are checked in `resolve_type_name`. In `symbols.rs`
   `resolve_ident`, exports of a namespace merged with an enum are out of scope inside the
   enum's body (`namespace_export_in_enum`). TS2371 (initializers in signatures without
-  a body, binding-element defaults too) is in the modifier walk in `check.rs`.
+  a body, binding-element defaults too) is in the modifier walk in `check.rs`; the
+  zero-width block the parser makes up after a missing `{` (`{ foo(x = 1), }`) counts as
+  no body (`param_owner_has_body`).
 - Qualified type names (`resolve_type_name`): an export found on the left namespace that
   has no type meaning gives TS2749 (`'A.B' ... Did you mean 'typeof A.B'?`) when it is a
   value and TS2694 on the right name otherwise (an uninstantiated namespace used as a
@@ -497,6 +507,19 @@ Files, by layer:
   (`check_setters_without_getters`), a set accessor whose computed name is no literal or
   unique symbol is an accessor of its own: TS7032 names it by the key's source text
   (`[k]`) and no getter types it (tsc: tsc/internal/checker/checker.go, getTypeOfAccessors).
+- TS2312 (`check_interface_base_kinds`) at each interface `extends` entry whose reduced
+  type is not a valid base (`is_valid_base_type`): valid are object types other than
+  generic mapped types (`Partial<T>`, `Omit<T, K>` over a type parameter, a mapped type
+  with a generic `as` clause), `object`, `any`, intersections of valid types, and type
+  parameters whose base constraint is valid (`extends T` with `T extends object`).
+  Unions, primitives and unconstrained type parameters are not. Unresolved and error
+  types are skipped. `base_types` keeps exactly the valid ones, so an invalid entry adds
+  no members and no TS2430, and a type parameter base contributes its constraint's
+  apparent members. `with_this_arg` returns an intersection unchanged (alias included)
+  when no member took the `this` argument, so `type T2 = T1 & { b: number }` prints as
+  `T2`. An intersection of class references is rebuilt without its alias and prints as
+  `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
+  getTypeWithThisArgument).
 - TS2310 (`check_circular_interface_bases`): every interface declaration with an
   `extends` clause whose symbol's bases lead back to it (`has_circular_bases`). Classes
   get TS2506 instead. A class `extends` naming an interface with no value
@@ -677,6 +700,11 @@ Files, by layer:
   when that is `any`/`unknown`; any other annotation is TS1196 and the variable is an error
   type. A destructured catch variable is checked like a variable's pattern (TS2339 per
   missing key, `{}` for `unknown` without strict null checks; TS2488 for array patterns).
+  Without strict null checks an unannotated declaration initialized with `null` or
+  `undefined` widens to `any`, yet its object pattern still reads off the initializer's
+  type: `const { b } = null` (or `using`) is TS2339 on 'null'
+  (`nullish_pattern_initializer`; tsc: checker/checker.go,
+  getBindingElementTypeFromParentType).
   A `let`/`const`/`using` directly in the catch block named like the catch variable is
   TS2492 at its first such binding, for every name of a destructured catch variable and
   of a destructured declaration too (`catch ([a, b]) { const [c, b] = ... }`;
@@ -742,7 +770,16 @@ Files, by layer:
   parameters compare as signatures, overload callback to implementation callback with
   parameters only contravariant, also without strictFunctionTypes, so
   `cb: (x: 'hi') => number` against `cb: (x: string) => number` is incompatible:
-  `overload_callback_params`; tsc: checker/relater.go, compareSignaturesRelated),
+  `overload_callback_params`; tsc: checker/relater.go, compareSignaturesRelated; return
+  types that mention enums are compared like any other, so `first.E` against `second.E`
+  is TS2394, and an implementation returning `string` for a `first.E` overload too). A
+  function whose declarations sit in different containers (`declare namespace N` and
+  `namespace N`) is checked for ambience as one set: the canonical declaration is the
+  implementation when it shares a container with the first declaration, otherwise the
+  first declaration, and every declaration whose ambience differs from it gets TS2384 at
+  its name; the per-list `declare` check skips such names
+  (`check_split_overload_ambience`; tsc: checker/checker.go,
+  checkFunctionOrConstructorSymbol and getCanonicalOverload),
   `abstracts.rs` (abstract
   method bodies and unimplemented inherited abstract members: TS1245, TS2515/2650/
   2653-2656; TS2513 for `super.m` lives in `expr.rs`), `overrides.rs` (`override` and
@@ -1092,7 +1129,9 @@ Files, by layer:
   (declared, referenced, aliased) come first by name; unnamed ones (type literals, object
   literals, `typeof` types) follow by declaration position, interleaved; a written `{}` is a
   single shared type with no declaration, so it sorts after them (with mapped types); tuples
-  last (`Checker::object_sort_key`). Unique symbol types sort as enum members do, by their
+  last (`Checker::object_sort_key`). Intersections with an alias sort before unaliased
+  ones, by alias name and then alias arguments (`O2O | StrAttr`, whatever order they were
+  written in). Unique symbol types sort as enum members do, by their
   symbol's first declaration and then by name (`typeof zebra | typeof apple` when `zebra`
   is declared first). A spread's result lists its properties by where each
   was declared, ones with no declaration last by name, not left-then-right
@@ -1414,8 +1453,18 @@ Files, by layer:
   `type V = (string | V)[]`, `Array<string | V>`, `type Box2 = Box<Box2 | number>`),
   that uses no outer type parameter, is a forward to the node's type
   (`pending_node_forwards`), built and linked once the alias is published (before that
-  the union would need the alias and make it circular, silently `any`). Generic
-  aliases (`type R<T> = Array<T | R<T>>`) and class type arguments are not deferred.
+  the union would need the alias and make it circular, silently `any`). A node there that
+  names a generic alias being resolved with type arguments (`T | R<T>` in `type R<T> =
+  Array<T | R<T>>`), or uses outer type parameters, is a forward to the node's type under
+  arguments for the outer type parameters it references (`forward_node_args`, keyed by node
+  and arguments, `pending_arg_forwards`): instantiating one maps its arguments to another
+  such forward, linked at once (or once no alias is being resolved) to the node's type
+  instantiated with them, which meets the forward again and closes the cycle (`R<string>`
+  is `Array<string | R<string>>`). Arguments that keep growing (`type G<T> = Array<T |
+  G<T[]>>`) stop linking 16 levels deep (unlinked, `any`). Class type arguments are not
+  deferred. A reference that is a generic alias's whole type keeps the alias through
+  instantiation (`type A<T> = T[]`: `A<string>` prints `A<string>`; tsc defers such
+  references).
   Relations unforward both sides first (`[Traversable]` with `type Traversable = object`; `generic_constraint_args`).
   A union of an aliased union and members it already contains is that aliased union
   (`C | undefined` with `type C = undefined | ...` prints `C`; `union_origin_items`).
@@ -1506,7 +1555,19 @@ Files, by layer:
   are then related without the check (`RelState::skip_excess_props`). With only object
   members, each property must also be assignable to the union of its types in the selected
   members (index signature types, `undefined` for a member without it), reported at the
-  property (`{ foo: "x" }` against `StringKeys | NumberKeys`).
+  property (`{ foo: "x" }` against `StringKeys | NumberKeys`). Primitive members are
+  dropped first and don't skip this check (`number | { [k: string]: number } | number[] |
+  undefined` with `{ b: "x" }` is `Types of property 'b' are incompatible`); only `object`
+  or `{}` members do. For this check a discriminant never selects a primitive member
+  (`string | StrAttr | NumAttr` with `{ type: "string", autoIncrement: true }` reports
+  `autoIncrement` against `StrAttr`; `excess_discriminant_type`). Elaboration keeps
+  primitives in `matching_discriminant_type`. A union with several object members and a
+  primitive reports a fresh literal against its object members' best match
+  (`number | { a: number } | string[]` picks `{ a: number }`), and a widened object literal
+  (`const o = {...}`, `ObjectFlags::WIDENED_LITERAL`) is no longer an object literal there,
+  so it is not matched with the first non-array member (tsc: `relater.go`,
+  hasExcessProperties, getTypeOfPropertyInTypes, discriminateTypeByDiscriminableItems and
+  getBestMatchingType, read as a reference; `object_literal_union_with_primitives`).
 - **Variadic splits.** A target `[...A, ...B]` infers only once `A` has a fixed-length tuple
   candidate: `A` takes that many source elements and `B` the rest. Calls infer from a `this`
   receiver (through its base signature) before the rest arguments and again after them, so
@@ -3092,12 +3153,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-26, 687b025, wip/v1-checker on fa446e4 with v1/parser merged: TS1156 and
-  TS1084 through syntax errors, missing heritage elements, implied conditional constraints on
-  instantiation; 12750 compared variants): 12372 exact (97.0%; all diagnostics and chains),
-  12392 (97.2%) exact on first lines; 186 variants with a diagnostic tsc does not report, 10 of
-  them tests where tsc reports nothing.
-  Earlier: 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-26, f7fe53f, wip/v1-checker3 on v1/dev2 with v1/emit3 and v1/lsp3 merged:
+  package deduplication, generic recursive aliases, interface base kinds (TS2312), overload
+  enum returns and split ambience (TS2394, TS2384), made-up bodies (TS2371), non-strict
+  nullish destructuring; 12750 compared variants): 12389 exact (97.2%; all diagnostics and
+  chains), 12409 (97.3%) exact on first lines; 178 variants with a diagnostic tsc does not
+  report, 6 of them tests where tsc reports nothing.
+  Earlier: 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

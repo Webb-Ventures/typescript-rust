@@ -125,7 +125,7 @@ pub const PLAIN_JS_CODES: &[u32] = &[
 
 /// `d` as tsc 7 reports it in a plain JavaScript file, if it does: an unknown `#name`
 /// property (TS2339) is TS1111 there (observed).
-fn plain_js_diagnostic(d: Diagnostic) -> Option<Diagnostic> {
+pub fn plain_js_diagnostic(d: Diagnostic) -> Option<Diagnostic> {
     if PLAIN_JS_CODES.contains(&d.code) {
         return Some(d);
     }

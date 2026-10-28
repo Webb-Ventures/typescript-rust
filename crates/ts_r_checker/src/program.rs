@@ -579,6 +579,13 @@ pub struct Resolution {
     pub package: bool,
     /// That package's name, when known (history's lazy loader does not keep it).
     pub package_name: Option<String>,
+    /// The package identity of the resolved file (name, path in the package, version):
+    /// files of the same identity installed at several places load once (tsc's package
+    /// deduplication, [`load`]).
+    pub package_id: Option<ts_r_resolver::PackageId>,
+    /// The file the module resolved to when package deduplication replaced it by
+    /// `resolved` (the name TS2306 gives).
+    pub redirected_from: Option<String>,
     /// Declarations found ignoring `exports` for an `import` whose `exports` lead to
     /// JavaScript only ([`ts_r_resolver::ResolvedModule::alternate_result`]).
     pub alternate: Option<String>,
@@ -1006,6 +1013,11 @@ fn load<F: FileSystem>(
     let mut queued: FxHashMap<String, u32> = FxHashMap::default();
     let mut missing_types = Vec::new();
     let mut missing_type_references = Vec::new();
+    // Package identities of the files reached through `node_modules`, and where each
+    // file's `/// <reference>` targets start in its `order_edges` entry (package
+    // deduplication walks them first, as tsc does).
+    let mut package_ids: FxHashMap<String, ts_r_resolver::PackageId> = FxHashMap::default();
+    let mut reference_starts: FxHashMap<String, usize> = FxHashMap::default();
     let no_resolve = options.no_resolve() == Some(true);
     for r in roots {
         Pending {
@@ -1027,6 +1039,11 @@ fn load<F: FileSystem>(
                     js_depth: 0,
                 }
                 .enqueue(&mut queue, &mut queued);
+                note_package(
+                    &mut package_ids,
+                    &r.resolved_file_name,
+                    r.package_id.as_ref(),
+                );
                 type_roots.push(r.resolved_file_name.clone());
             }
             // A directory found through `*` that holds no declarations adds nothing.
@@ -1069,6 +1086,7 @@ fn load<F: FileSystem>(
                     && r.included
                 {
                     deps.push(r.resolved.clone());
+                    note_package(&mut package_ids, &r.resolved, r.package_id.as_ref());
                     Pending {
                         path: r.resolved.clone(),
                         external: r.external || p.external,
@@ -1093,6 +1111,7 @@ fn load<F: FileSystem>(
                         && r.included
                     {
                         deps.push(r.resolved.clone());
+                        note_package(&mut package_ids, &r.resolved, r.package_id.as_ref());
                         Pending {
                             path: r.resolved.clone(),
                             external: r.external || p.external,
@@ -1111,6 +1130,7 @@ fn load<F: FileSystem>(
                     && r.included
                 {
                     deps.push(r.resolved.clone());
+                    note_package(&mut package_ids, &r.resolved, r.package_id.as_ref());
                     Pending {
                         path: r.resolved.clone(),
                         external: r.external || p.external,
@@ -1130,6 +1150,7 @@ fn load<F: FileSystem>(
                     && r.included
                 {
                     deps.push(r.resolved.clone());
+                    note_package(&mut package_ids, &r.resolved, r.package_id.as_ref());
                     Pending {
                         path: r.resolved.clone(),
                         external: r.external || p.external,
@@ -1138,8 +1159,10 @@ fn load<F: FileSystem>(
                     .enqueue(&mut queue, &mut queued);
                 }
             }
+            reference_starts.insert(f.path.clone(), deps.len());
             for (kind, v) in &f.references {
-                if let Some(t) = reference_target(fs, &resolver, &f.path, kind, v) {
+                if let Some((t, id)) = reference_target_with_id(fs, &resolver, &f.path, kind, v) {
+                    note_package(&mut package_ids, &t, id.as_ref());
                     deps.push(t.clone());
                     Pending {
                         path: t,
@@ -1170,6 +1193,40 @@ fn load<F: FileSystem>(
         Some(l) => lib_closure(l, options, &lib_bind, &referenced),
         None => (Vec::new(), Vec::new()),
     };
+    // Package deduplication: a file whose package identity an earlier file already has
+    // (the same package version installed at two places) is replaced by that file.
+    let redirects = if options.effective().deduplicate_packages() && !package_ids.is_empty() {
+        package_redirects(
+            roots,
+            &type_roots,
+            &order_edges,
+            &reference_starts,
+            &package_ids,
+        )
+    } else {
+        FxHashMap::default()
+    };
+    if !redirects.is_empty() {
+        let retarget = |r: &mut Option<Resolution>| {
+            if let Some(r) = r
+                && let Some(t) = redirects.get(&r.resolved)
+            {
+                r.redirected_from = Some(std::mem::replace(&mut r.resolved, t.clone()));
+            }
+        };
+        resolutions.values_mut().for_each(retarget);
+        mode_resolutions.values_mut().for_each(retarget);
+        for d in type_roots
+            .iter_mut()
+            .chain(order_edges.values_mut().flatten())
+        {
+            {
+                if let Some(t) = redirects.get(d) {
+                    d.clone_from(t);
+                }
+            }
+        }
+    }
     // Order: lib files, then a depth-first post-order from the `types` entries and roots
     // (dependencies before dependents, as tsc lists them).
     let mut files: Vec<Arc<SourceFile>> = lib_files;
@@ -1212,6 +1269,83 @@ fn load<F: FileSystem>(
         ambiguous_roots: resolver.ambiguous_roots(),
         deps: order_edges,
     }
+}
+
+/// Records the package identity of `path` (the first one seen).
+fn note_package(
+    ids: &mut FxHashMap<String, ts_r_resolver::PackageId>,
+    path: &str,
+    id: Option<&ts_r_resolver::PackageId>,
+) {
+    if let Some(id) = id
+        && !ids.contains_key(path)
+    {
+        ids.insert(path.to_owned(), id.clone());
+    }
+}
+
+/// tsc's package deduplication: walking the files depth-first from the roots, then the
+/// `types` entries, each file's `/// <reference>` targets before its imports, the first
+/// file with a package identity (name, path in the package, version and peers) keeps it;
+/// a later file with the same identity at another path is redirected to it, and its own
+/// dependencies are not walked. Returns redirected path -> kept path.
+/// (tsc: `collectFiles` in tsc/internal/compiler/filesparser.go.)
+fn package_redirects(
+    roots: &[String],
+    type_roots: &[String],
+    edges: &FxHashMap<String, Vec<String>>,
+    reference_starts: &FxHashMap<String, usize>,
+    package_ids: &FxHashMap<String, ts_r_resolver::PackageId>,
+) -> FxHashMap<String, String> {
+    let mut redirects: FxHashMap<String, String> = FxHashMap::default();
+    let mut owner: FxHashMap<&ts_r_resolver::PackageId, &str> = FxHashMap::default();
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
+    let is_root = |p: &str| roots.iter().any(|r| r == p);
+    // An explicit stack of (file, next edge position); edges in walk order are the
+    // references (from `reference_starts`) followed by the imports.
+    for start in roots.iter().chain(type_roots) {
+        let mut stack: Vec<(&str, usize)> = vec![(start.as_str(), 0)];
+        while let Some((cur, i)) = stack.pop() {
+            if i == 0 {
+                if !seen.insert(cur) {
+                    continue;
+                }
+                if let Some(id) = package_ids.get(cur)
+                    && !is_root(cur)
+                {
+                    match owner.get(id) {
+                        Some(&kept) if kept != cur => {
+                            redirects.insert(cur.to_owned(), kept.to_owned());
+                            continue;
+                        }
+                        Some(_) => {}
+                        None => {
+                            owner.insert(id, cur);
+                        }
+                    }
+                }
+            }
+            let deps = edges.get(cur).map(Vec::as_slice).unwrap_or(&[]);
+            if i < deps.len() {
+                let split = reference_starts
+                    .get(cur)
+                    .copied()
+                    .unwrap_or(0)
+                    .min(deps.len());
+                let refs = deps.len() - split;
+                let d = if i < refs {
+                    &deps[split + i]
+                } else {
+                    &deps[i - refs]
+                };
+                stack.push((cur, i + 1));
+                if !seen.contains(d.as_str()) {
+                    stack.push((d.as_str(), 0));
+                }
+            }
+        }
+    }
+    redirects
 }
 
 /// How [`load_program`] resolves module request `spec` (of kind `kind`) in file `from`
@@ -1257,6 +1391,8 @@ pub fn resolve_request_in<R: FileSystem>(
             included,
             package: r.package_id.is_some(),
             package_name: r.package_id.as_ref().map(|p| p.name.clone()),
+            package_id: r.package_id.clone(),
+            redirected_from: None,
             alternate: r.alternate_result.clone(),
             reference_source: r.project_reference_source.clone(),
             ts_extension: r.resolved_using_ts_extension,
@@ -1332,6 +1468,17 @@ pub fn reference_target<F: FileSystem, R: FileSystem>(
     kind: &str,
     value: &str,
 ) -> Option<String> {
+    reference_target_with_id(fs, resolver, from, kind, value).map(|(t, _)| t)
+}
+
+/// [`reference_target`] with the package identity of a `types` target.
+fn reference_target_with_id<F: FileSystem, R: FileSystem>(
+    fs: &F,
+    resolver: &Resolver<R>,
+    from: &str,
+    kind: &str,
+    value: &str,
+) -> Option<(String, Option<ts_r_resolver::PackageId>)> {
     match kind {
         "path" => {
             let dir = ts_r_config::path::directory_of(from);
@@ -1345,7 +1492,10 @@ pub fn reference_target<F: FileSystem, R: FileSystem>(
                     cands.push(format!("{joined}{e}"));
                 }
             }
-            cands.into_iter().find(|c| fs.file_exists(c))
+            cands
+                .into_iter()
+                .find(|c| fs.file_exists(c))
+                .map(|c| (c, None))
         }
         "types" | "types-import" | "types-require" => {
             let mode = match kind {
@@ -1360,7 +1510,7 @@ pub fn reference_target<F: FileSystem, R: FileSystem>(
             };
             resolver
                 .resolve_type_reference(value, Some(from), mode)
-                .map(|r| r.resolved_file_name.clone())
+                .map(|r| (r.resolved_file_name.clone(), r.package_id.clone()))
         }
         _ => None,
     }

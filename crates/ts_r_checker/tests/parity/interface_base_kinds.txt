@@ -1,0 +1,24 @@
+a.ts(2,22): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(3,25): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(4,11): error TS2430: Interface 'I3<T>' incorrectly extends interface 'T'.
+  'I3<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'object'.
+a.ts(5,11): error TS2430: Interface 'I4<T>' incorrectly extends interface 'T'.
+  'I4<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{ a: number; }'.
+a.ts(7,22): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(9,46): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(10,25): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(13,26): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(15,23): error TS2304: Cannot find name 'Missing'.
+a.ts(17,23): error TS2552: Cannot find name 'object'. Did you mean 'Object'?
+a.ts(19,26): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+a.ts(20,11): error TS2430: Interface 'I16<T>' incorrectly extends interface 'Inter<T>'.
+  Type 'I16<T>' is not assignable to type 'T'.
+    'I16<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint '{}'.
+a.ts(23,11): error TS2430: Interface 'J2' incorrectly extends interface 'T2'.
+  Type 'J2' is not assignable to type '{ b: number; }'.
+    Types of property 'b' are incompatible.
+      Type 'string' is not assignable to type 'number'.
+a.ts(27,32): error TS2416: Property 'x' in type 'Baz' is not assignable to the same property in base type 'Foo & Bar'.
+  Type 'number' is not assignable to type 'string'.
+a.ts(28,11): error TS2430: Interface 'J3<T>' incorrectly extends interface 'T'.
+  'J3<T>' is assignable to the constraint of type 'T', but 'T' could be instantiated with a different subtype of constraint 'object'.

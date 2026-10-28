@@ -211,6 +211,61 @@ impl<'c, 'a> Ck<'c, 'a> {
         );
     }
 
+    /// TS2312 at each `extends` entry of interface declaration `l` whose type is not an
+    /// object type (or intersection of them) with statically known members: a union, a
+    /// primitive, a type parameter without an object constraint, a generic mapped type.
+    pub(crate) fn check_interface_base_kinds(&mut self, l: Loc) {
+        if !self.reporting(l.file) {
+            return;
+        }
+        let Node::Interface { extends, .. } = *self.node(l) else {
+            return;
+        };
+        let entries: Vec<_> = self.ast(l.file).list(extends).to_vec();
+        for e in entries {
+            let at = Loc::new(l.file, e);
+            let t = self.type_from_node(at);
+            if self.store().is_error(t) || t == TypeId::UNRESOLVED {
+                continue;
+            }
+            let t = self.reduced_type(t);
+            if !self.is_valid_base_type(t, 0) {
+                self.error(
+                    at,
+                    dg::AN_INTERFACE_CAN_ONLY_EXTEND_AN_OBJECT_TYPE_OR_INTERSECTION_OF_OBJECT_TYPES_WITH_2312,
+                    &[],
+                );
+            }
+        }
+    }
+
+    /// Whether `t` may be an interface's base type (tsc: checker/checker.go,
+    /// isValidBaseType): an object type that is not a generic mapped type, `object`, `any`,
+    /// an intersection of valid types, or a type parameter whose base constraint is one.
+    pub(crate) fn is_valid_base_type(&mut self, t: TypeId, depth: u32) -> bool {
+        if depth > 32 {
+            return true;
+        }
+        let f = self.store().flags(t);
+        if f.contains(TypeFlags::TYPE_PARAMETER) {
+            let c = self.base_constraint(t);
+            if c != t && c != TypeId::UNRESOLVED && c != TypeId::UNKNOWN {
+                return self.is_valid_base_type(c, depth + 1);
+            }
+            return false;
+        }
+        if f.intersects(TypeFlags::OBJECT | TypeFlags::NON_PRIMITIVE | TypeFlags::ANY) {
+            return !self.is_generic_mapped_type(t);
+        }
+        if f.contains(TypeFlags::INTERSECTION) {
+            let members = self.store().members_of_union(t).to_vec();
+            return members
+                .into_iter()
+                .all(|m| self.is_valid_base_type(m, depth + 1));
+        }
+        false
+    }
+
     /// Whether `t` can't take part in a heritage comparison (`any`, errors, unresolved).
     fn heritage_skip(&self, t: TypeId) -> bool {
         self.store().is_error(t)

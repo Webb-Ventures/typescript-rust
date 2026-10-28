@@ -677,6 +677,13 @@ pub struct Ck<'c, 'a> {
     /// an alias being resolved, `type V = (string | V)[]`): resolved and linked like
     /// `pending_forwards`.
     pub(crate) pending_node_forwards: Vec<Loc>,
+    /// Forward references to a type node under type arguments (a deferred position naming
+    /// a generic alias being resolved, `type R<T> = Array<T | R<T>>`, and their
+    /// instantiations made meanwhile): linked like `pending_forwards`.
+    pub(crate) pending_arg_forwards: Vec<TypeId>,
+    /// Nesting of [`Ck::link_arg_forward`]: instantiations that keep making new
+    /// arguments (`type R<T> = Array<T | R<T[]>>`) stop linking there.
+    pub(crate) arg_forward_depth: u32,
     pub(crate) assigned_syms: FxHashSet<SymId>,
     /// Assigned symbols with at least one non-compound assignment (`x = ...`, not `x++`).
     pub(crate) definitely_assigned_syms: FxHashSet<SymId>,
@@ -894,6 +901,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             deferred_alias_ref: false,
             pending_forwards: Vec::new(),
             pending_node_forwards: Vec::new(),
+            pending_arg_forwards: Vec::new(),
+            arg_forward_depth: 0,
             assigned_syms: FxHashSet::default(),
             definitely_assigned_syms: FxHashSet::default(),
             last_assignment: FxHashMap::default(),
