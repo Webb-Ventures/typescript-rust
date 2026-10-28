@@ -743,6 +743,121 @@ fn missing_import_is_an_error() {
 }
 
 #[test]
+fn dynamic_import_of_top_level_await_waits_through_cycles() {
+    // The wrappers of `main`, `a` and `b` become async because `dep` awaits; the cycle
+    // between `a` and `b` must not deadlock (esbuild issue 4498).
+    let fs = project(&[
+        (
+            "src/entry.mjs",
+            "await import('./main.mjs');\nconsole.log('done');\n",
+        ),
+        (
+            "src/main.mjs",
+            "import { a } from './a.mjs';\nconsole.log(a());\n",
+        ),
+        (
+            "src/a.mjs",
+            "import { b } from './b.mjs';\nimport { tla } from './dep.mjs';\nexport function a() { return b() + tla; }\n",
+        ),
+        (
+            "src/b.mjs",
+            "import { a } from './a.mjs';\nexport function b() { return typeof a; }\n",
+        ),
+        (
+            "src/dep.mjs",
+            "export const tla = await Promise.resolve('x');\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.mjs"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("async () =>"), "{code}");
+    if have_node() {
+        assert_eq!(run_node("tla-cycle", &r, "entry.js"), "functionx\ndone\n");
+    }
+}
+
+#[test]
+fn require_of_a_transitive_top_level_await_is_an_error() {
+    let fs = project(&[
+        ("src/entry.js", "require('./a');\n"),
+        ("src/a.js", "import './b';\n"),
+        ("src/b.js", "await 0;\n"),
+    ]);
+    let ctx = BuildContext::new(opts(&["src/entry.js"]), Arc::new(fs)).expect("options");
+    let r = ctx.build();
+    assert!(r.has_errors());
+    assert!(
+        r.messages
+            .iter()
+            .any(|m| m.text.contains("transitive dependency") && m.text.contains("b.js")),
+        "{:?}",
+        r.messages
+    );
+}
+
+#[test]
+fn imports_of_commonjs_run_in_order_between_inlined_modules() {
+    // `cjs.js` runs before `esm.js`, and `late.js` after it: the entry's `require_x()` calls
+    // go between the inlined modules, as an ES module evaluates its imports in order.
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import './cjs.js';\nimport './esm.js';\nimport './late.js';\nconsole.log('entry');\n",
+        ),
+        ("src/cjs.js", "console.log('cjs', typeof module);\n"),
+        ("src/esm.js", "export const x = 1;\nconsole.log('esm');\n"),
+        (
+            "src/late.js",
+            "console.log('late', this === module.exports);\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    let (cjs, esm, late) = (
+        code.find("require_cjs();").expect("cjs call"),
+        code.find("// src/esm.js").expect("esm code"),
+        code.find("require_late();").expect("late call"),
+    );
+    assert!(cjs < esm && esm < late, "{code}");
+    if have_node() {
+        assert_eq!(
+            run_node("import-order", &r, "entry.js"),
+            "cjs object\nesm\nlate true\nentry\n"
+        );
+    }
+}
+
+#[test]
+fn top_level_this_is_exports_unless_the_file_exports_or_uses_import_meta() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import './imports.js';\nimport './exports.js';\nimport './meta.js';\n",
+        ),
+        ("src/dummy.js", "export const d = 1;\n"),
+        (
+            "src/imports.js",
+            "import './dummy.js';\nconsole.log(typeof this);\n",
+        ),
+        (
+            "src/exports.js",
+            "export const e = 1;\nconsole.log(typeof this);\n",
+        ),
+        ("src/meta.js", "import.meta;\nconsole.log(typeof this);\n"),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    if have_node() {
+        assert_eq!(
+            run_node("this-es6", &r, "entry.js"),
+            "object\nundefined\nundefined\n"
+        );
+    } else {
+        let code = file(&r, "/proj/out/entry.js");
+        assert!(code.contains("require_imports"), "{code}");
+    }
+}
+
+#[test]
 fn side_effects_false_keeps_effects_of_used_files() {
     let fs = project(&[
         (
@@ -2102,4 +2217,90 @@ fn exported_const_enums_keep_their_object() {
     ]);
     let r = run_build(&fs, opts(&["foo.ts"]));
     assert_eq!(run_node("const-enum-export", &r, "foo.js"), "1 y 3 1 2\n");
+}
+
+#[test]
+fn namespace_import_of_commonjs_names_the_import_after_the_alias() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import * as ns from './cjs.js';\nconsole.log(ns.x);\n",
+        ),
+        ("src/cjs.js", "exports.x = 1;\n"),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(
+        code.contains("var ns = __tsrToEsm(require_cjs())"),
+        "{code}"
+    );
+    assert!(!code.contains("import_cjs"), "{code}");
+}
+
+#[test]
+fn every_commonjs_entry_runs_unwrapped_in_cjs_format() {
+    let fs = project(&[
+        ("src/a.js", "module.exports = { a: 1 };\n"),
+        ("src/b.js", "exports.b = 2;\nconsole.log(typeof module);\n"),
+    ]);
+    let mut o = opts(&["src/a.js", "src/b.js"]);
+    o.format = Some(Format::Cjs);
+    let r = run_build(&fs, o);
+    for (path, text) in [
+        ("/proj/out/a.js", "module.exports = { a: 1 };"),
+        ("/proj/out/b.js", "exports.b = 2;"),
+    ] {
+        let code = file(&r, path);
+        assert!(code.contains(text), "{code}");
+        assert!(!code.contains("__tsrCjs"), "{code}");
+    }
+}
+
+#[test]
+fn top_level_let_const_and_class_become_var() {
+    let fs = project(&[
+        (
+            "src/entry.js",
+            "import { Foo, Bar, n } from './lib.js';\nconsole.log(new Foo().constructor.name, Bar.self === Bar, n);\n",
+        ),
+        (
+            "src/lib.js",
+            "export class Foo {}\nexport class Bar { static self = Bar; }\nexport let n = 1;\nexport const m = 2;\nfor (const i of [m]) n += i;\n{ const inner = 3; n += inner; }\n",
+        ),
+    ]);
+    let r = run_build(&fs, opts(&["src/entry.js"]));
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(code.contains("var Foo = class {"), "{code}");
+    assert!(code.contains("var Bar = class _Bar {"), "{code}");
+    assert!(code.contains("static self = _Bar;"), "{code}");
+    assert!(code.contains("var n = 1;"), "{code}");
+    assert!(code.contains("var m = 2;"), "{code}");
+    assert!(code.contains("for (const i of [m])"), "{code}");
+    assert!(code.contains("const inner = 3;"), "{code}");
+    if have_node() {
+        assert_eq!(run_node("class-var", &r, "entry.js"), "Foo true 6\n");
+    }
+}
+
+#[test]
+fn defines_match_import_meta_optional_chains_string_keys_and_name_writes() {
+    let fs = project(&[(
+        "src/entry.js",
+        "console.log(import.meta.foo, import.meta.foo.baz, a?.b, a['b'], c = 0, e.f = 0, g = 0);\n",
+    )]);
+    let mut o = opts(&["src/entry.js"]);
+    o.define = vec![
+        ("import.meta.foo".into(), "2".into()),
+        ("a.b".into(), "1".into()),
+        ("c".into(), "ident".into()),
+        ("e.f".into(), "ident".into()),
+        ("g".into(), "null".into()),
+    ];
+    let r = run_build(&fs, o);
+    let code = file(&r, "/proj/out/entry.js");
+    assert!(
+        code.contains("console.log(2, 2 .baz, 1, 1, ident = 0, ident = 0, g = 0)")
+            || code.contains("console.log(2, 2..baz, 1, 1, ident = 0, ident = 0, g = 0)"),
+        "{code}"
+    );
 }

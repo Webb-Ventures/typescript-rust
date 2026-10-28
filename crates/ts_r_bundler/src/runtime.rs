@@ -5,7 +5,8 @@
 //! Semantics (documented interop behaviour shared by Node, esbuild and Rollup):
 //! - `__tsrCjs(fn)` returns a `require_x()` that runs `fn.call(exports, exports, module)`
 //!   once and returns `module.exports`.
-//! - `__tsrEsm(fn)` returns an `init_x()` that runs `fn` once.
+//! - `__tsrEsm(fn)` returns an `init_x()` that runs `fn` once and returns its result (the
+//!   promise of an `async` wrapper).
 //! - `__tsrExport(ns, getters)` defines enumerable getters (live bindings).
 //! - `__tsrCopy(to, from, skip)` copies `from`'s own properties onto `to` as getters, except
 //!   names `to` already has and `skip`.
@@ -132,9 +133,11 @@ impl Helpers {
             );
         }
         if self.used[Helper::Esm.index()] {
-            let _ = write!(
+            // `body(body = 0)` clears `body` before it runs, so a cycle back into `init_x()`
+            // returns at once; the result is the body's promise when the wrapper is async.
+            let _ = writeln!(
                 s,
-                "var {esm} = (body, done) => () => {{\n  done || (done = 1, body());\n}};\n"
+                "var {esm} = (body, res) => () => (body && (res = body(body = 0)), res);"
             );
         }
         if self.used[Helper::Export.index()] {

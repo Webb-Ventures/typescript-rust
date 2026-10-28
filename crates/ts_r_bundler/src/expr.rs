@@ -22,6 +22,8 @@ pub enum Expr {
     Import(String),
     /// `void 0`
     Undefined,
+    /// `await e`
+    Await(Box<Expr>),
 }
 
 impl Expr {
@@ -45,6 +47,15 @@ impl Expr {
         );
         Expr::Call(
             Box::new(Expr::member(resolve, "then")),
+            vec![Expr::Arrow(Box::new(e))],
+        )
+    }
+
+    /// `Promise.resolve().then(() => init()).then(() => e)`: waits for an `async` wrapper
+    /// (and still works when `init()` returns nothing, as in a cycle).
+    pub fn promise_then_after(init: Expr, e: Expr) -> Expr {
+        Expr::Call(
+            Box::new(Expr::member(Expr::promise_then(init), "then")),
             vec![Expr::Arrow(Box::new(e))],
         )
     }
@@ -99,6 +110,10 @@ impl Expr {
                 )
             }
             Expr::Undefined => build::undefined(ast, at),
+            Expr::Await(e) => {
+                let arg = e.build(ast, at);
+                ast.add(ts_r_ast::Node::Await { arg }, ts_r_ast::Span::new(at, at))
+            }
         }
     }
 
@@ -179,6 +194,10 @@ impl Expr {
                 out.push(')');
             }
             Expr::Undefined => out.push_str("void 0"),
+            Expr::Await(e) => {
+                out.push_str("await ");
+                e.render_operand(out, compact);
+            }
         }
     }
 
@@ -191,7 +210,7 @@ impl Expr {
     /// As a callee or member object (needs parens unless primary).
     fn render_operand(&self, out: &mut String, compact: bool) {
         match self {
-            Expr::Arrow(_) | Expr::Object(_) | Expr::Undefined => {
+            Expr::Arrow(_) | Expr::Object(_) | Expr::Undefined | Expr::Await(_) => {
                 out.push('(');
                 self.render(out, compact);
                 out.push(')');

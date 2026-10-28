@@ -56,6 +56,8 @@ pub enum PrologueStmt {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ModulePlan {
     pub wrap: Wrap,
+    /// The `init_x()` wrapper is an `async` arrow (see [`Link::async_init`]).
+    pub wrap_async: bool,
     /// `require_x` / `init_x` (empty when not wrapped).
     pub wrapper_name: String,
     /// Live parts.
@@ -133,6 +135,9 @@ pub struct Chunk {
     pub star_reexports: Vec<String>,
     /// Start the file with `"use strict";` (an unwrapped strict CommonJS entry).
     pub use_strict: bool,
+    /// Statements to print before a module's code: an importer's `require_x()` / `init_x()`
+    /// calls that must run before the module (`(importer, statement)`, in order).
+    pub before: FxHashMap<ModuleId, Vec<(ModuleId, String)>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -264,45 +269,63 @@ struct Planner<'a> {
     /// name -> owning module (for cross-chunk imports).
     owner: FxHashMap<String, ModuleId>,
     helper_names: [String; 6],
-    /// A CommonJS entry printed at the top level of a CommonJS chunk (see [`unwrapped_entry`]).
-    unwrapped: Option<ModuleId>,
+    /// CommonJS entries printed at the top level of their CommonJS chunk (see
+    /// [`unwrapped_entries`]).
+    unwrapped: Vec<ModuleId>,
+    /// Global evaluation order, and each module's position in it.
+    order: Vec<ModuleId>,
+    position: Vec<usize>,
+    /// Per importer: `(record index, position)` where it first reached an unwrapped module
+    /// (see [`module_order_with_boundaries`]).
+    boundaries: Vec<Vec<(usize, usize)>>,
+    /// Import statements moved out of an importer, to print before a module of its chunk.
+    before: FxHashMap<ModuleId, Vec<(ModuleId, String)>>,
 }
 
-/// The CommonJS entry that can run directly at the top of a CommonJS output file, with
+/// The CommonJS entries that can run directly at the top of their CommonJS output file, with
 /// Node's own `module`, `exports` and `require`, instead of through a `require_x` wrapper:
-/// one entry, nothing requires it (no cycle back to it), no top-level `return` or `arguments`,
-/// no direct `eval`, and its `"use strict"` (written first in the file) suits every other
-/// module of the bundle. It is the last module, where the wrapper call used to run.
-fn unwrapped_entry(input: &PlanInput<'_>, format: Format) -> Option<ModuleId> {
+/// nothing requires the entry (no cycle back to it, no other entry), no top-level `return` or
+/// `arguments`, no direct `eval`, and its `"use strict"` (written first in the file) suits
+/// every other module of the bundle. It is the last module, where the wrapper call used to run.
+fn unwrapped_entries(input: &PlanInput<'_>, format: Format) -> Vec<ModuleId> {
     let (g, l, o) = (input.graph, input.link, input.opts);
-    let [e] = *input.entries else {
-        return None;
-    };
-    let ei = e as usize;
-    if format != Format::Cjs
-        || o.splitting
-        || !input.dynamic_entries.is_empty()
-        || l.kinds[ei] != Kind::Cjs
-        || l.wrap[ei] != Wrap::Cjs
-    {
-        return None;
+    if format != Format::Cjs || o.splitting || !input.dynamic_entries.is_empty() {
+        return Vec::new();
     }
-    let meta = &g.modules[ei].meta;
-    if meta.needs_function || meta.has_direct_eval || meta.use_strict && !strict_file_ok(input, e) {
-        return None;
-    }
-    for (i, m) in g.modules.iter().enumerate() {
-        if l.included[i] && m.targets.contains(&Target::Module(e)) {
-            return None;
+    let mut out: Vec<ModuleId> = Vec::new();
+    for &e in input.entries {
+        if out.contains(&e) || input.entries.iter().filter(|&&x| x == e).count() > 1 {
+            continue;
+        }
+        let ei = e as usize;
+        if l.kinds[ei] != Kind::Cjs || l.wrap[ei] != Wrap::Cjs {
+            continue;
+        }
+        let meta = &g.modules[ei].meta;
+        if meta.needs_function
+            || meta.has_direct_eval
+            || meta.use_strict && !strict_file_ok(input, e)
+        {
+            continue;
+        }
+        if g.modules
+            .iter()
+            .enumerate()
+            .any(|(i, m)| l.included[i] && m.targets.contains(&Target::Module(e)))
+        {
+            continue;
+        }
+        // Only when it is smaller: the wrapper (`var a=b((c,d)=>{`, `});`,
+        // `module.exports=a();`) and, when no other module needs it, the CommonJS helper go;
+        // the free `module` and `exports` references lose their one-letter parameter names.
+        let helper_elsewhere =
+            (0..g.modules.len()).any(|i| i != ei && l.included[i] && l.wrap[i] == Wrap::Cjs);
+        let saved = 38 + if helper_elsewhere { 0 } else { 75 };
+        if meta.cjs_ref_bytes < saved {
+            out.push(e);
         }
     }
-    // Only when it is smaller: the wrapper (`var a=b((c,d)=>{`, `});`, `module.exports=a();`)
-    // and, when no other module needs it, the CommonJS helper go; the free `module` and
-    // `exports` references lose their one-letter parameter names.
-    let helper_elsewhere =
-        (0..g.modules.len()).any(|i| i != ei && l.included[i] && l.wrap[i] == Wrap::Cjs);
-    let saved = 38 + if helper_elsewhere { 0 } else { 75 };
-    (meta.cjs_ref_bytes < saved).then_some(e)
+    out
 }
 
 /// Whether a `"use strict"` at the top of a CommonJS output file (the entry's directive,
@@ -326,7 +349,20 @@ fn strict_file_ok(input: &PlanInput<'_>, e: ModuleId) -> bool {
 
 /// Global evaluation order: depth-first post-order from the entries over every record.
 pub fn module_order(g: &Graph, link: &Link, roots: &[ModuleId]) -> Vec<ModuleId> {
+    module_order_with_boundaries(g, link, roots).0
+}
+
+/// [`module_order`], plus where each module first reached an unwrapped module: `(importer,
+/// record index, position in the order)`, in visiting order. The code of that module's
+/// subtree starts at that position, so the importer's `require_x()` / `init_x()` calls for
+/// its earlier imports must run there (as an ES module evaluates its imports in order).
+fn module_order_with_boundaries(
+    g: &Graph,
+    link: &Link,
+    roots: &[ModuleId],
+) -> (Vec<ModuleId>, Vec<(ModuleId, usize, usize)>) {
     let n = g.modules.len();
+    let mut boundaries = Vec::new();
     let mut visited = vec![false; n];
     let mut order = Vec::new();
     for &r in roots {
@@ -345,6 +381,9 @@ pub fn module_order(g: &Graph, link: &Link, roots: &[ModuleId]) -> Vec<ModuleId>
                     && !visited[*u as usize]
                     && link.included[*u as usize]
                 {
+                    if link.wrap[*u as usize] == Wrap::None {
+                        boundaries.push((m, *i - 1, order.len()));
+                    }
                     visited[*u as usize] = true;
                     stack.push((*u, 0));
                 }
@@ -354,7 +393,7 @@ pub fn module_order(g: &Graph, link: &Link, roots: &[ModuleId]) -> Vec<ModuleId>
             }
         }
     }
-    order
+    (order, boundaries)
 }
 
 /// Builds the plan.
@@ -390,7 +429,11 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         ext_locals: FxHashMap::default(),
         owner: FxHashMap::default(),
         helper_names: Default::default(),
-        unwrapped: unwrapped_entry(input, format),
+        unwrapped: unwrapped_entries(input, format),
+        order: Vec::new(),
+        position: vec![usize::MAX; n],
+        boundaries: vec![Vec::new(); n],
+        before: FxHashMap::default(),
     };
     for h in Helper::ALL {
         p.helper_names[h as usize] = p.names.alloc(h.name());
@@ -401,10 +444,17 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
         .chain(input.dynamic_entries)
         .copied()
         .collect();
-    let order = module_order(g, l, &roots);
+    let (order, boundaries) = module_order_with_boundaries(g, l, &roots);
     for &m in &order {
         p.name_module(m);
     }
+    for (i, &m) in order.iter().enumerate() {
+        p.position[m as usize] = i;
+    }
+    for (m, ri, at) in boundaries {
+        p.boundaries[m as usize].push((ri, at));
+    }
+    p.order = order.clone();
     // Chunks.
     let chunks = p.make_chunks(input, &order);
     let mut module_chunk = vec![None; n];
@@ -455,6 +505,11 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
             }
             out.plans[m as usize] = Some(mp);
         }
+        for &m in &mods {
+            if let Some(b) = p.before.remove(&m) {
+                out.chunks[ci].before.insert(m, b);
+            }
+        }
         // Namespace objects of this chunk's modules.
         let mut ns_objects = Vec::new();
         for &m in &mods {
@@ -483,7 +538,7 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
             let is_user = c.user_entry.is_some();
             let keep = !is_user || format != Format::Iife || o.global_name.is_some();
             match (l.kinds[ei], l.wrap[ei]) {
-                (Kind::Cjs, _) if p.unwrapped == Some(e) => {
+                (Kind::Cjs, _) if p.unwrapped.contains(&e) => {
                     out.chunks[ci].use_strict = g.modules[ei].meta.use_strict;
                 }
                 (Kind::Cjs, _) => {
@@ -517,7 +572,8 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
                     }
                     if wrap == Wrap::Esm {
                         refs.insert(p.wrapper[ei].clone());
-                        tail.push(format!("{}();", p.wrapper[ei]));
+                        let wait = if l.async_init[ei] { "await " } else { "" };
+                        tail.push(format!("{wait}{}();", p.wrapper[ei]));
                     }
                     if keep && (format == Format::Esm || l.needs_ns[ei]) {
                         match format {
@@ -718,12 +774,14 @@ pub fn plan(input: &PlanInput<'_>) -> Plan {
     }
     // The unwrapped entry names its own top-level bindings (nothing imports them): they
     // only have to stay clear of every other top-level name of the file.
-    if let Some(e) = p.unwrapped
-        && let Some(mp) = &mut out.plans[e as usize]
-    {
+    if !p.unwrapped.is_empty() {
         let mut all: Vec<String> = p.names.taken.iter().cloned().collect();
         all.sort();
-        mp.top_reserved = all;
+        for &e in &p.unwrapped {
+            if let Some(mp) = &mut out.plans[e as usize] {
+                mp.top_reserved = all.clone();
+            }
+        }
     }
     out
 }
@@ -744,7 +802,7 @@ impl Planner<'_> {
             return;
         }
         let stem = self.stem(m);
-        let unwrapped = self.unwrapped == Some(m);
+        let unwrapped = self.unwrapped.contains(&m);
         // esbuild declares an empty object per module for `import.meta` where the output
         // can't have it, and warns at each use (`prepare.rs`).
         if self.g.modules[mi].meta.uses_import_meta
@@ -806,11 +864,36 @@ impl Planner<'_> {
         }
     }
 
+    /// `init_x()`, or `await init_x()` when `x`'s wrapper is async.
+    fn init_call(&self, t: ModuleId) -> Expr {
+        let call = Expr::call(&self.wrapper[t as usize], vec![]);
+        if self.l.async_init[t as usize] {
+            Expr::Await(Box::new(call))
+        } else {
+            call
+        }
+    }
+
     fn import_var(&mut self, importer: ModuleId, t: ModuleId) -> String {
         if let Some(n) = self.import_vars.get(&(importer, t)) {
             return n.clone();
         }
-        let n = self.names.alloc(&format!("import_{}", self.stem(t)));
+        // `import * as ns from "./cjs"` names the variable `ns`, as esbuild does.
+        let module = &self.g.modules[importer as usize];
+        let alias = module
+            .meta
+            .imports
+            .iter()
+            .find(|b| {
+                b.name == Imported::Namespace
+                    && module.targets.get(b.record as usize) == Some(&Target::Module(t))
+            })
+            .and_then(|b| module.meta.syms.iter().find(|s| s.sym == b.sym))
+            .map(|s| s.name.clone());
+        let n = match alias {
+            Some(a) => self.names.alloc(&a),
+            None => self.names.alloc(&format!("import_{}", self.stem(t))),
+        };
         self.owner.insert(n.clone(), importer);
         self.import_vars.insert((importer, t), n.clone());
         n
@@ -906,7 +989,7 @@ impl Planner<'_> {
     fn module_plan(
         &mut self,
         m: ModuleId,
-        _chunk: usize,
+        chunk: usize,
         out: &Plan,
         helpers: &mut Helpers,
         chunk_refs: &mut FxHashSet<String>,
@@ -1036,10 +1119,13 @@ impl Planner<'_> {
                             Kind::Esm => {
                                 refs.insert(self.wrapper[ti].clone());
                                 refs.insert(self.ns_name[ti].clone());
-                                Expr::promise_then(Expr::Seq(vec![
-                                    Expr::call(&self.wrapper[ti], vec![]),
-                                    Expr::ident(&self.ns_name[ti]),
-                                ]))
+                                let init = Expr::call(&self.wrapper[ti], vec![]);
+                                let ns = Expr::ident(&self.ns_name[ti]);
+                                if l.async_init[ti] {
+                                    Expr::promise_then_after(init, ns)
+                                } else {
+                                    Expr::promise_then(Expr::Seq(vec![init, ns]))
+                                }
                             }
                             Kind::Css => Expr::promise_then(Expr::Object(Vec::new())),
                         })
@@ -1069,6 +1155,12 @@ impl Planner<'_> {
                 (RecordKind::Require, Target::External(_)) => {
                     *require_shim = true;
                     None
+                }
+                // `BuildOptions::dynamic_import_url` turned the file into a URL.
+                (RecordKind::Dynamic, Target::External(x))
+                    if self.o.dynamic_import_url.is_some() && *x != r.spec =>
+                {
+                    Some(Expr::Import(x.clone()))
                 }
                 _ => None,
             };
@@ -1105,7 +1197,50 @@ impl Planner<'_> {
             refs.insert(v.clone());
             prologue.push(PrologueStmt::Var(v, Expr::call(&to_esm, args)));
         };
+        // An unwrapped ES module's imports run in order, between the unwrapped modules it
+        // imports: the calls for imports before one go in front of that module's code.
+        let mut hoist = l.kinds[mi] == Kind::Esm
+            && l.wrap[mi] == Wrap::None
+            && !self.unwrapped.contains(&m)
+            && !self.boundaries[mi].is_empty();
+        let bounds = std::mem::take(&mut self.boundaries[mi]);
+        let mut next_bound = 0;
+        let stub_start = prologue.len();
+        let mut stub_targets: Vec<ModuleId> = Vec::new();
+        let compact = self.o.minify_whitespace;
         for (ri, r) in meta.records.iter().enumerate() {
+            while hoist && next_bound < bounds.len() && bounds[next_bound].0 <= ri {
+                let at = bounds[next_bound].1;
+                next_bound += 1;
+                if prologue.len() == stub_start {
+                    continue;
+                }
+                let Some(&first) = self.order.get(at) else {
+                    hoist = false;
+                    break;
+                };
+                if first == m
+                    || out.module_chunk[first as usize] != Some(chunk)
+                    || stub_targets
+                        .iter()
+                        .any(|&t| self.position[t as usize] >= at)
+                {
+                    hoist = false;
+                    break;
+                }
+                let sp = if compact { "" } else { " " };
+                let moved = prologue.split_off(stub_start).into_iter().map(|st| {
+                    let text = match st {
+                        PrologueStmt::Expr(e) => format!("{};", e.to_text(compact)),
+                        PrologueStmt::Var(n, e) => {
+                            format!("var {n}{sp}={sp}{};", e.to_text(compact))
+                        }
+                    };
+                    (m, text)
+                });
+                self.before.entry(first).or_default().extend(moved);
+                stub_targets.clear();
+            }
             if !matches!(r.kind, RecordKind::Import | RecordKind::ReExport) {
                 continue;
             }
@@ -1115,6 +1250,9 @@ impl Planner<'_> {
             let ti = t as usize;
             if !l.included[ti] {
                 continue;
+            }
+            if l.wrap[ti] != Wrap::None {
+                stub_targets.push(t);
             }
             match l.wrap[ti] {
                 Wrap::Cjs => {
@@ -1133,7 +1271,7 @@ impl Planner<'_> {
                 Wrap::Esm => {
                     if inited.insert(t) {
                         refs.insert(self.wrapper[ti].clone());
-                        prologue.push(PrologueStmt::Expr(Expr::call(&self.wrapper[ti], vec![])));
+                        prologue.push(PrologueStmt::Expr(self.init_call(t)));
                     }
                 }
                 Wrap::None => {}
@@ -1147,10 +1285,7 @@ impl Planner<'_> {
         for t in inits {
             if inited.insert(t) {
                 refs.insert(self.wrapper[t as usize].clone());
-                prologue.push(PrologueStmt::Expr(Expr::call(
-                    &self.wrapper[t as usize],
-                    vec![],
-                )));
+                prologue.push(PrologueStmt::Expr(self.init_call(t)));
             }
         }
         if l.needs_ns[mi] {
@@ -1208,7 +1343,7 @@ impl Planner<'_> {
                 }
             }
         }
-        let wrap = if self.unwrapped == Some(m) {
+        let wrap = if self.unwrapped.contains(&m) {
             Wrap::None
         } else {
             l.wrap[mi]
@@ -1247,6 +1382,7 @@ impl Planner<'_> {
             .collect();
         ModulePlan {
             wrap,
+            wrap_async: wrap == Wrap::Esm && l.async_init[mi],
             wrapper_name: self.wrapper[mi].clone(),
             live,
             names,
@@ -1258,7 +1394,7 @@ impl Planner<'_> {
             reserved,
             helper_cjs: self.helper_names[Helper::Cjs as usize].clone(),
             helper_esm: self.helper_names[Helper::Esm as usize].clone(),
-            own_top_level: self.unwrapped == Some(m),
+            own_top_level: self.unwrapped.contains(&m),
             top_reserved: Vec::new(),
             import_meta: self.import_meta[mi].clone(),
             mangle: self.o.minify_identifiers,

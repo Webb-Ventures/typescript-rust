@@ -31,7 +31,10 @@ rename, wrap, compress, print one module to a `Fragment`) → `chunk.rs` (assemb
 `runtime.rs` holds our interop helpers; `cjs_exports.rs` detects CommonJS export names;
 `hmr.rs` (feature `hmr`) is the dev server's `DepBundler` (per-specifier `bundle` and the
 code-split `batch` that `ts-r-dev` uses, with source maps whose `sources` are relative to
-the served URL when `DepBundle::serve_root` is set, and CSS outputs passed through);
+the served URL when `DepBundle::serve_root` is set, and CSS outputs passed through; an entry
+is ESM when it has module syntax or Node would load it as a module (`.mjs`, `"type": "module"`),
+and a dependency's dynamic `import()` of a stylesheet stays external as the served URL of the
+original file, through `BuildOptions::dynamic_import_url`, as Vite does);
 `data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
 expression builder for generated code; `pool.rs` is the std-thread pool.
 
@@ -46,6 +49,29 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   TypeScript file under a tsconfig that sets `alwaysStrict` or `strict`); writes to `const`
   and `using` bindings fail when bundling or minifying syntax, writes to imports when
   bundling; a top-level `return` fails in a file with top-level `await`.
+- **Top-level await** (`link.rs` `compute_async`): a file with top-level `await` is an ES
+  module. A wrapped ES module whose own body or any statically imported wrapped module
+  awaits gets an `async` `init_x()`, which callers `await` and `import()` waits for
+  (`__tsrEsm` returns the body's promise; a cycle back into a running wrapper returns at
+  once). A `require()` that reaches one is an error naming the file that awaits.
+- **Imports run in order** (`plan.rs` `module_order_with_boundaries`): an unwrapped ES
+  module's `require_x()` / `init_x()` calls for the imports before an unwrapped module it
+  imports are printed in front of that module's code (`Chunk::before`), so a CommonJS
+  import runs between the inlined modules as written. They stay in the importer when the
+  target is in another chunk or the called module is not yet defined there (a cycle).
+- **Top-level `this`** (`prepare.rs`): `undefined` in a file that exports something or uses
+  `import.meta`; when bundling, the `exports` object (a CommonJS file) otherwise, even in
+  a file with `import` statements, as esbuild does.
+- **Top-level `let`, `const` and `class` become `var`** (`print.rs` `class_to_var`) in every
+  bundled module, as esbuild prints them: `var C = class {}`, or `var C = class _C {}` with
+  the class's references to itself renamed `_C` (the same short name when mangling).
+  Decorated classes and nested declarations stay as written; transform mode never does it.
+- **Every CommonJS entry runs unwrapped** in `cjs` format without splitting when nothing
+  else imports it (`plan.rs` `unwrapped_entries`), and `import * as ns` of a CommonJS file
+  names its import `ns`, as esbuild does.
+- **`define` keys** (`prepare.rs` `apply_defines`) match `a.b`, `a?.b` and `a["b"]` alike,
+  and may start at `import.meta`; a write keeps its target unless the value is a name
+  (`d = 0` with `d=ident` becomes `ident = 0`), as in esbuild.
 - **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
   esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
 - **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:

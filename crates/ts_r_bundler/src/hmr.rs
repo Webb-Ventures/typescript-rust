@@ -7,7 +7,11 @@
 //! package's own other entry points) stays external, so the browser loads one copy of each
 //! package: the server rewrites those imports to `/@modules/…` like any other.
 //!
-//! - ESM entries keep their exports.
+//! - ESM entries keep their exports. An entry is ESM when it has `import`/`export` syntax or
+//!   Node would load it as a module (`.mjs`, `"type": "module"`), even if its only imports
+//!   are dynamic.
+//! - A dynamic `import()` of a stylesheet stays external, as the URL the server serves the
+//!   original file at (when [`DepBundle::serve_root`] is set), as Vite does.
 //! - CommonJS entries get a generated ESM facade: `default` (with the usual `__esModule`
 //!   interop), a named export per statically detected export name ([`crate::cjs_exports`],
 //!   following `module.exports = require("./x")` chains such as React's
@@ -38,7 +42,7 @@ use ts_r_config::fs::{DirEntry, EntryKind};
 use ts_r_config::{FileSystem, RealFs, path};
 use ts_r_hmr::{DepBatch, DepBundler, DepRequest, TransformError, TransformOutput};
 
-use crate::options::{BuildOptions, EntryPoint, Format, Platform, SourceMapMode};
+use crate::options::{BuildOptions, DynamicImportUrl, EntryPoint, Format, Platform, SourceMapMode};
 use crate::resolve::{Resolution, ResolveKind, Resolver};
 use crate::{BuildContext, cjs_exports};
 
@@ -102,7 +106,11 @@ impl DepBundle {
     /// resolves to `/node_modules/react/index.js`, and no absolute path is in the output.
     /// Dependency CSS is read with `@import`s inlined and `url()`s rewritten to the URLs the
     /// server serves those files at (`ts_r_hmr::css`).
+    ///
+    /// A Windows verbatim root (`\\?\C:\x`, as `fs::canonicalize` returns) is used in its
+    /// plain form, so it shares a prefix with the resolver's file paths.
     pub fn serve_root(mut self, root: &std::path::Path) -> DepBundle {
+        let root = ts_r_hmr::paths::strip_verbatim(root.to_path_buf());
         let root = path::normalize_slashes(&root.to_string_lossy());
         self.out_dir = format!("{}/@ts-r/deps", root.trim_end_matches('/'));
         self.root = Some(std::path::PathBuf::from(root));
@@ -141,8 +149,35 @@ impl DepBundle {
             write: false,
             threads: 2,
             persistent_cache: false,
+            dynamic_import_url: self.root.clone().map(|root| {
+                DynamicImportUrl(Arc::new(move |file: &str| {
+                    is_style_file(file)
+                        .then(|| ts_r_hmr::css::asset_url(&root, std::path::Path::new(file)))
+                }))
+            }),
             ..BuildOptions::default()
         }
+    }
+
+    /// The entry is an ES module: it has `import`/`export` syntax, or Node would load it as
+    /// one (`.mjs`, or `.js` in a `"type": "module"` package) even though its only imports
+    /// are dynamic. Anything else gets the CommonJS facade.
+    fn is_esm(&self, file: &str, source: &str) -> bool {
+        if ts_r_hmr::scan::scan(source).has_module_syntax {
+            return true;
+        }
+        let lower = file.to_ascii_lowercase();
+        if lower.ends_with(".mjs") || lower.ends_with(".mts") {
+            return true;
+        }
+        if lower.ends_with(".cjs") || lower.ends_with(".cts") {
+            return false;
+        }
+        let dir = path::directory_of(file);
+        let opts = self.options(dir, file);
+        Resolver::new(Arc::clone(&self.fs), &opts)
+            .package_scope(dir)
+            .is_some_and(|p| p.is_module)
     }
 
     /// Export names of a CommonJS file, following re-export chains (bare re-exports are
@@ -260,7 +295,7 @@ impl DepBundle {
                 )));
             };
             let i = entry_points.len();
-            let entry = if ts_r_hmr::scan::scan(&source).has_module_syntax {
+            let entry = if self.is_esm(&file, &source) {
                 file.clone()
             } else {
                 let dir = path::directory_of(&file);
@@ -376,6 +411,19 @@ impl DepBundle {
     }
 }
 
+/// Stylesheets the dev server serves (and transforms) itself: a dependency's dynamic
+/// `import()` of one stays a request for the original file, as in Vite.
+fn is_style_file(file: &str) -> bool {
+    let lower = split_query_free(file).to_ascii_lowercase();
+    [".css", ".scss", ".sass", ".less", ".styl", ".stylus"]
+        .iter()
+        .any(|e| lower.ends_with(e))
+}
+
+fn split_query_free(file: &str) -> &str {
+    file.split(['?', '#']).next().unwrap_or(file)
+}
+
 /// `react-dom/client` → `react-dom_client`; `@scope/pkg` → `@scope_pkg`; unique in `used`
 /// (case-insensitively, for case-insensitive file systems and URLs alike).
 fn unique_name(used: &mut FxHashSet<String>, specifier: &str) -> String {
@@ -434,7 +482,7 @@ impl DepBundler for DepBundle {
         let file = path::normalize_slashes(&dep.file.to_string_lossy());
         let file = self.fs.realpath(&file);
         let dir = path::directory_of(&file).to_owned();
-        let esm = ts_r_hmr::scan::scan(source).has_module_syntax;
+        let esm = self.is_esm(&file, source);
         let (fs, entry): (Arc<dyn FileSystem>, String) = if esm {
             (Arc::clone(&self.fs), file.clone())
         } else {

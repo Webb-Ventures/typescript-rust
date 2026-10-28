@@ -212,6 +212,23 @@ pub struct BuildOptions {
     /// dev server's dependency adapter uses this so CommonJS packages can require their
     /// peers in the browser.
     pub require_to_import: bool,
+    /// Not an esbuild option: a dynamic `import()` whose resolved file this maps to `Some(url)`
+    /// stays external, importing `url`. The dev server's dependency adapter keeps
+    /// `import("./x.css")` in a package as a request for the original file this way.
+    pub dynamic_import_url: Option<DynamicImportUrl>,
+}
+
+/// See [`BuildOptions::dynamic_import_url`]: resolved file path to URL, or `None` to bundle.
+#[derive(Clone)]
+pub struct DynamicImportUrl(pub std::sync::Arc<UrlFn>);
+
+/// The function behind [`DynamicImportUrl`].
+pub type UrlFn = dyn Fn(&str) -> Option<String> + Send + Sync;
+
+impl std::fmt::Debug for DynamicImportUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DynamicImportUrl(..)")
+    }
 }
 
 impl Default for BuildOptions {
@@ -262,6 +279,7 @@ impl Default for BuildOptions {
             persistent_cache: false,
             legal_comments_inline: true,
             require_to_import: false,
+            dynamic_import_url: None,
         }
     }
 }

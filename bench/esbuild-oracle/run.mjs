@@ -197,7 +197,7 @@ function loadCases() {
             try {
               const p = new Parser(toks, k + 1);
               const lit = p.composite('bundled');
-              cases.push({ file: f, name, kind: t.v, spec: asObject(lit) });
+              cases.push({ file: f, name, kind: t.v, spec: asObject(lit), defines: localDefines(toks, i, j) });
             } catch (e) {
               cases.push({ file: f, name, error: `parse: ${e.message}` });
             }
@@ -208,6 +208,43 @@ function loadCases() {
     }
   }
   return cases;
+}
+
+// `defines := config.ProcessDefines([]config.DefineData{...})` between tokens `from` and `to`
+// (the test function's own defines, referred to as `Defines: &defines`).
+function localDefines(toks, from, to) {
+  for (let k = from; k < to; k++) {
+    if (toks[k].v === 'defines' && toks[k + 1]?.v === ':' && toks[k + 2]?.v === '=' && toks[k + 3]?.v === 'config'
+      && toks[k + 5]?.v === 'ProcessDefines' && toks[k + 6]?.v === '(') {
+      try { return new Parser(toks, k + 7).value(); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+// One `config.DefineData` as `--define:key=value`, or null when the CLI can't express it.
+function defineFlag(key, data) {
+  const d = asObject(data);
+  if (Object.keys(d).some((k) => k !== 'KeyParts' && k !== 'DefineExpr')) return null;
+  if (key === null) key = d.KeyParts ? asList(d.KeyParts).join('.') : null;
+  const e = d.DefineExpr ? asObject(d.DefineExpr) : null;
+  if (!key || !e) return null;
+  let value = null;
+  if (e.Parts && Object.keys(e).length === 1) value = asList(e.Parts).join('.');
+  else if (e.Constant && Object.keys(e).length === 1) {
+    const c = e.Constant;
+    const shared = { 'js_ast.ENullShared': 'null', 'js_ast.EUndefinedShared': 'undefined', 'js_ast.ETrueShared': 'true', 'js_ast.EFalseShared': 'false' };
+    if (c.ident && shared[c.ident]) value = shared[c.ident];
+    else if (c.type === '&js_ast.ENumber') value = String(asObject(c).Value);
+    else if (c.type === '&js_ast.EBoolean') value = String(asObject(c).Value === true);
+    else if (c.type === '&js_ast.ENull') value = 'null';
+    else if (c.type === '&js_ast.EUndefined') value = 'undefined';
+    else if (c.type === '&js_ast.EString') {
+      const v = asObject(c).Value;
+      if (v?.call === 'helpers.StringToUTF16' && v.args.length === 1 && v.args[0].t === 'str') value = JSON.stringify(v.args[0].v);
+    }
+  }
+  return value === null ? null : `--define:${key}=${value}`;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -329,6 +366,20 @@ function flagsFor(c) {
         break;
       }
       case 'OutputExtensionJS': flags.push(`--out-extension:.js=${v}`); break;
+      // `Defines: &defines` (the function's `config.ProcessDefines(...)` list), or an inline
+      // `&config.ProcessedDefines{IdentifierDefines: ...}`.
+      case 'Defines': {
+        let list = null;
+        if (v?.ident === '&defines' && c.defines?.items) list = c.defines.items.map((it) => [null, it.value]);
+        else if (v?.type === '&config.ProcessedDefines') {
+          const pd = asObject(v);
+          if (Object.keys(pd).every((x) => x === 'IdentifierDefines')) list = pd.IdentifierDefines.items.map((it) => [it.key, it.value]);
+        }
+        const fl = list?.map(([key, d]) => defineFlag(key, d));
+        if (!fl || fl.some((x) => x === null)) { why.push(k); break; }
+        flags.push(...fl);
+        break;
+      }
       // The input root is only known per tool run: buildAndRun fills it in.
       case 'TSConfigPath': flags.push(`--tsconfig=\0IN${v}`); break;
       default: why.push(k);

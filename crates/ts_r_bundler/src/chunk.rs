@@ -330,7 +330,24 @@ pub fn assemble(
     });
     out.code
         .reserve(frags.iter().map(|(_, f)| f.code.len()).sum::<usize>() + 64);
-    for ((m, _), (code, size, fmap)) in frags.iter().zip(measured) {
+    let mut printed = frags.iter().zip(measured).peekable();
+    for &cm in &c.modules {
+        if let Some(stmts) = c.before.get(&cm) {
+            let mut last = None;
+            for (importer, s) in stmts {
+                if !compact && last != Some(*importer) {
+                    out.line(&format!("// {}", graph.modules[*importer as usize].pretty));
+                }
+                last = Some(*importer);
+                out.stmt(s);
+            }
+        }
+        if printed.peek().is_none_or(|((m, _), _)| *m != cm) {
+            continue;
+        }
+        let Some(((m, _), (code, size, fmap))) = printed.next() else {
+            continue;
+        };
         let module = &graph.modules[*m as usize];
         if !compact {
             out.line(&format!("// {}", module.pretty));
