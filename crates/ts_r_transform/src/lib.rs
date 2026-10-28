@@ -27,6 +27,7 @@ mod namespace;
 mod options;
 pub mod resolver;
 mod scope;
+mod static_privates;
 mod transform;
 
 #[cfg(feature = "hmr")]

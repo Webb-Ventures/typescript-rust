@@ -728,9 +728,24 @@ impl Walker<'_> {
         }
     }
 
-    /// A statement in a single-statement position (if/loop body).
+    /// A statement in a single-statement position (if/loop body). An `import` or `export`
+    /// there (a syntax error) does not make the file a module: tsc looks only at top-level
+    /// statements (observed: `if (true) export type {};` keeps `"use strict"`).
     fn sub_stmt(&mut self, id: NodeId, scope: u32) {
+        let before = self.out.has_module_syntax;
+        let direct = match *self.ast.node(id) {
+            Node::ImportDecl { .. }
+            | Node::ExportNamed { .. }
+            | Node::ExportAll { .. }
+            | Node::NamespaceExport { .. }
+            | Node::ExportDefaultExpr { .. }
+            | Node::ExportAssignment { .. } => true,
+            ref n => n.modifiers().contains(Modifiers::EXPORT),
+        };
         self.stmt(id, scope, &[]);
+        if direct {
+            self.out.has_module_syntax = before;
+        }
     }
 
     fn for_init(&mut self, id: NodeId, scope: u32) {

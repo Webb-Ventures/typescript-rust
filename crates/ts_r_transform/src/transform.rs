@@ -43,6 +43,9 @@ pub(crate) struct Tx<'a> {
     /// Names generated so far.
     pub taken: FxHashSet<String>,
     pub ns_stack: Vec<NsFrame>,
+    /// Value bindings by name (built on the first namespace body; see
+    /// `namespace::param_name`).
+    pub value_bindings_by_name: Option<FxHashMap<Atom, Vec<BindingId>>>,
     /// Evaluated enums of this file, by binding.
     pub enums: FxHashMap<BindingId, EnumInfo>,
     /// Whether a member receiver chain starts at an import binding.
@@ -148,6 +151,7 @@ pub(crate) fn run(
         marker: None,
         taken: FxHashSet::default(),
         ns_stack: Vec::new(),
+        value_bindings_by_name: None,
         enums: FxHashMap::default(),
         enum_import_roots: FxHashMap::default(),
         enum_declared: FxHashSet::default(),
@@ -700,7 +704,10 @@ impl<'a> Tx<'a> {
                         return;
                     }
                 }
-                self.expr(expr);
+                let hint = self
+                    .is_anonymous_class(expr)
+                    .then(|| self.ast.intern("default"));
+                self.expr_named(expr, hint);
                 if self.opts.is_cjs() {
                     crate::cjs::export_default_expr(self, id, out);
                 } else {
@@ -903,6 +910,53 @@ impl<'a> Tx<'a> {
         }
     }
 
+    /// True if `e`, under parentheses, is a class expression without a name.
+    pub(crate) fn is_anonymous_class(&self, mut e: NodeId) -> bool {
+        loop {
+            match self.n(e) {
+                Node::Paren { expr } => e = expr,
+                Node::ClassExpr { name, .. } => return name.is_none(),
+                _ => return false,
+            }
+        }
+    }
+
+    /// The name an anonymous class `value` takes from the property key it is the value of
+    /// (named evaluation): an identifier, string or number key, or a computed one that is a
+    /// string or number literal. An object literal's non-computed `__proto__` sets the
+    /// prototype and names nothing (`proto_special`).
+    pub(crate) fn key_class_hint(
+        &mut self,
+        key: NodeId,
+        value: NodeId,
+        proto_special: bool,
+    ) -> Option<Atom> {
+        if !self.is_anonymous_class(value) {
+            return None;
+        }
+        let literal = |tx: &mut Self, e: NodeId| match tx.n(e) {
+            Node::StringLit { value } => Some(value),
+            Node::NumberLit { value } => {
+                let s = ts_r_codegen::literals::js_number(value.get());
+                Some(tx.ast.intern(&s))
+            }
+            _ => None,
+        };
+        let name = match self.n(key) {
+            Node::Ident { name } => Some(name),
+            Node::ComputedKey { expr } => return literal(self, expr),
+            _ => literal(self, key),
+        }?;
+        (!(proto_special && self.ast.atom(name) == "__proto__")).then_some(name)
+    }
+
+    /// Transforms `value` with `hint` as the name of the anonymous class it is.
+    pub(crate) fn expr_named(&mut self, value: NodeId, hint: Option<Atom>) {
+        self.class_name_hint = hint;
+        self.expr(value);
+        self.class_name_hint = None;
+    }
+
     pub fn var_decl(&mut self, id: NodeId) {
         let Node::VarDecl { decls, .. } = self.n(id) else {
             return;
@@ -956,12 +1010,21 @@ impl<'a> Tx<'a> {
                     self.pattern(v);
                 }
                 if let Some(i) = init {
-                    self.expr(i);
+                    let target = value.unwrap_or(key);
+                    let hint = match self.n(target) {
+                        Node::Ident { name } if self.is_anonymous_class(i) => Some(name),
+                        _ => None,
+                    };
+                    self.expr_named(i, hint);
                 }
             }
             Node::AssignPattern { left, right } => {
                 self.pattern(left);
-                self.expr(right);
+                let hint = match self.n(left) {
+                    Node::Ident { name } if self.is_anonymous_class(right) => Some(name),
+                    _ => None,
+                };
+                self.expr_named(right, hint);
             }
             Node::Rest { arg } => self.pattern(arg),
             _ => {}
@@ -1392,10 +1455,11 @@ impl<'a> Tx<'a> {
     fn object_member(&mut self, p: NodeId) {
         match self.n(p) {
             Node::Property { key, value, .. } => {
+                let hint = self.key_class_hint(key, value, true);
                 if let Node::ComputedKey { expr } = self.n(key) {
                     self.expr(expr);
                 }
-                self.expr(value);
+                self.expr_named(value, hint);
             }
             Node::ShorthandProp {
                 modifiers,
@@ -1405,9 +1469,13 @@ impl<'a> Tx<'a> {
                 // `{ x }` where `x` is rewritten (namespace export, CJS import): expand.
                 let at = self.at(p);
                 let key = crate::builder::clone_node(self.ast, name);
+                let hint = match (self.n(name), init) {
+                    (Node::Ident { name }, Some(i)) if self.is_anonymous_class(i) => Some(name),
+                    _ => None,
+                };
                 self.ident_ref(name);
                 if let Some(i) = init {
-                    self.expr(i);
+                    self.expr_named(i, hint);
                 }
                 if self.kind(name) != NodeKind::Ident {
                     self.cjs.detached.remove(&name);
@@ -1492,8 +1560,9 @@ impl<'a> Tx<'a> {
             }
             Node::Spread { arg } => self.assign_target(arg),
             Node::Assign { left, right, .. } => {
+                let hint = self.anonymous_class_name(left, right);
                 self.assign_target(left);
-                self.expr(right);
+                self.expr_named(right, hint);
             }
             _ => self.expr(id),
         }

@@ -489,6 +489,7 @@ pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
                     continue;
                 }
                 tx.erase_opt(type_ann);
+                let hint = value.and_then(|v| tx.key_class_hint(key, v, false));
                 member_key(tx, key);
                 for d in tx.items(decorators) {
                     if let Node::Decorator { expr } = tx.n(d) {
@@ -496,7 +497,7 @@ pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
                     }
                 }
                 if let Some(v) = value {
-                    tx.expr(v);
+                    tx.expr_named(v, hint);
                 }
                 let is_static = modifiers.contains(Modifiers::STATIC);
                 let mut mm = Modifiers::NONE;

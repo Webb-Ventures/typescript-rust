@@ -262,23 +262,33 @@ pub fn root_dir_diagnostics(
             "File '{}' is not under 'rootDir' '{}'. 'rootDir' is expected to contain all source files.",
             f.path, rules.root_dir
         );
-        if root {
-            let reason = cfg
-                .config
-                .map(|c| inclusion_reason(c, &f.path, cfg.case_sensitive));
-            let mut d = ConfigDiagnostic::global(6059, message);
-            if let Some(r) = reason {
-                d.related = vec![
-                    "The file is in the program because:".to_owned(),
-                    format!("  {r}"),
-                ];
-            }
-            config.push(d);
-        } else if explicit
-            && let Some(&(from, node)) = importers
+        let root_reason = if root {
+            cfg.config
+                .map(|c| inclusion_reason(c, &f.path, cfg.case_sensitive))
+        } else {
+            None
+        };
+        // An imported file is reported at its first import, also when `include` matches it
+        // too; the chain lists every reason when there is more than one (tsc 7.0.2).
+        let first = if explicit {
+            importers
                 .get_or_insert_with(|| first_importers(program))
                 .get(f.path.as_str())
-        {
+                .copied()
+        } else {
+            None
+        };
+        if let Some((from, node)) = first {
+            let mut reasons = import_reasons(program, &f.path, cfg.case_sensitive);
+            reasons.extend(root_reason);
+            let mut message = message;
+            if reasons.len() > 1 {
+                message.push_str("\n  The file is in the program because:");
+                for r in &reasons {
+                    message.push_str("\n    ");
+                    message.push_str(r);
+                }
+            }
             let span = program.files[from].ast.span(node);
             located.push(Diagnostic {
                 code: 6059,
@@ -288,6 +298,15 @@ pub fn root_dir_diagnostics(
                 span: Span::new(span.start, span.end),
                 related: Vec::new(),
             });
+        } else if root {
+            let mut d = ConfigDiagnostic::global(6059, message);
+            if let Some(r) = root_reason {
+                d.related = vec![
+                    "The file is in the program because:".to_owned(),
+                    format!("  {r}"),
+                ];
+            }
+            config.push(d);
         }
     }
     if !explicit
@@ -411,11 +430,68 @@ fn inclusion_reason(c: &ParsedConfig, file: &str, cs: bool) -> String {
                 ts_r_config::glob::Pattern::new(&abs, true).matches(file, cs)
             });
             match spec {
-                Some(s) => format!("Matched by include pattern '{s}' in '{name}'"),
+                // The config's absolute path here, its file name for `files` (tsc 7.0.2).
+                Some(s) => format!("Matched by include pattern '{s}' in '{}'", c.config_path),
                 None => "Matched by default include pattern '**/*'".to_owned(),
             }
         }
     }
+}
+
+/// The "Imported via" reasons for `target`, in the order tsc finds them: depth first from
+/// each root in root order, each file's imports in source order (absolute paths).
+fn import_reasons(program: &ProgramFiles, target: &str, cs: bool) -> Vec<String> {
+    let index: std::collections::HashMap<String, usize> = program
+        .files
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (path::key(&f.path, cs), i))
+        .collect();
+    let find = |p: &str| index.get(&path::key(p, cs)).copied();
+    let target = path::key(target, cs);
+    let mut out = Vec::new();
+    let mut visited = vec![false; program.files.len()];
+    // (file, the next module request to follow): an explicit stack, no recursion.
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for root in &program.roots {
+        let Some(start) = find(root) else { continue };
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        stack.push((start, 0));
+        while let Some((i, next)) = stack.last_mut() {
+            let f = &program.files[*i];
+            let Some(req) = f.bound.module_requests.get(*next) else {
+                stack.pop();
+                continue;
+            };
+            *next += 1;
+            let spec = f.ast.atom(req.specifier);
+            let Some(Some(r)) = program.resolutions.get(&(f.path.clone(), spec.to_owned())) else {
+                continue;
+            };
+            let Some(t) = find(&r.resolved).filter(|_| r.included) else {
+                continue;
+            };
+            if path::key(&r.resolved, cs) == target {
+                let start = f.ast.span(req.node).start as usize;
+                let quote = match f.text.as_bytes().get(start) {
+                    Some(b'\'') => '\'',
+                    _ => '"',
+                };
+                out.push(format!(
+                    "Imported via {quote}{spec}{quote} from file '{}'",
+                    f.path
+                ));
+            }
+            if !visited[t] && !program.files[t].is_lib {
+                visited[t] = true;
+                stack.push((t, 0));
+            }
+        }
+    }
+    out
 }
 
 /// Each target's first importer in program order, and the specifier node.

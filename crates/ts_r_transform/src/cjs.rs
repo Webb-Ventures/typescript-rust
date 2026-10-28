@@ -47,6 +47,10 @@ pub(crate) struct State {
     local_exports: FxHashMap<BindingId, Vec<String>>,
     /// The same aliases, kept: assignments to the local update them too.
     live_exports: FxHashMap<BindingId, Vec<String>>,
+    /// `export { }` list aliases of every local value binding (functions included), kept:
+    /// each namespace and enum declaration of that name assigns them in its IIFE argument
+    /// (`N || (exports.B = exports.N = N = {})`).
+    list_aliases: FxHashMap<BindingId, Vec<String>>,
     /// The expression of the expression statement being transformed (its value is unused).
     pub stmt_expr: Option<NodeId>,
     /// `export { imported as alias }`: getters emitted after the import.
@@ -130,6 +134,15 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
                     let Some(name) = tx.atom_of(local) else {
                         continue;
                     };
+                    if let Some(b) = tx.sc.module_binding(name)
+                        && tx.sc.binding(b).kind != BindingKind::Import
+                    {
+                        tx.cjs
+                            .list_aliases
+                            .entry(b)
+                            .or_default()
+                            .push(exported_name.clone());
+                    }
                     match tx.sc.module_binding(name) {
                         Some(b) => match tx.sc.binding(b).kind {
                             BindingKind::Import => {
@@ -908,12 +921,17 @@ fn decl_names(tx: &Tx, id: NodeId) -> Vec<NodeId> {
 }
 
 /// `exports.alias = local;` after a declaration exported by an `export { }` list.
+/// Namespaces and (non-const) enums assign their aliases in the IIFE argument instead
+/// ([`list_aliases`]).
 fn local_exports(tx: &mut Tx, names: &[NodeId], out: &mut Vec<NodeId>) {
     for &n in names {
         let Some(&b) = tx.sc.decl_of.get(&n) else {
             continue;
         };
-        if tx.sc.binding(b).kind == BindingKind::Function {
+        if matches!(
+            tx.sc.binding(b).kind,
+            BindingKind::Function | BindingKind::Namespace | BindingKind::Enum
+        ) {
             continue;
         }
         let Some(aliases) = tx.cjs.local_exports.remove(&b) else {
@@ -933,6 +951,21 @@ impl State {
     pub(crate) fn export_assignment(&self) -> bool {
         self.export_assignment
     }
+}
+
+/// The `export { }` list aliases of the top-level value named `name`, in list order, for a
+/// namespace or enum IIFE argument: `N || (exports.B = exports.N = N = {})` on every
+/// declaration of the name, whatever declared it first (observed, tsc 7.0.2
+/// `exportDeclarationForModuleOrEnumWithMemberOfSameName`). None under `export =`.
+pub(crate) fn list_aliases(tx: &Tx, name: Atom) -> Vec<String> {
+    if tx.cjs.export_assignment {
+        return Vec::new();
+    }
+    tx.sc
+        .module_binding(name)
+        .and_then(|b| tx.cjs.list_aliases.get(&b))
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// The name given to an anonymous `export default` function or class (`default_1`).

@@ -300,7 +300,7 @@ fn main() {
             .find(|(n, _)| base(n) == "tsconfig.json")
             .map(|(_, t)| t.as_str());
         let options_for = |name: &str, cjs: bool| -> TransformOptions {
-            match tsconfig {
+            let mut opts = match tsconfig {
                 None => TransformOptions::from_json_format(&json, name, cjs),
                 Some(t) => {
                     let mut fs = ts_r_config::MemoryFs::new();
@@ -312,7 +312,10 @@ fn main() {
                     let parsed = ts_r_config::load_tsconfig(&fs, "/test/oracle.json");
                     TransformOptions::from_compiler_options(&parsed.options, name, cjs)
                 }
-            }
+            };
+            // tsc's emit, as program emit does: no `export {}` marker under `preserve`.
+            opts.preserve_module_marker = false;
+            opts
         };
         if tsconfig.is_some() && options_for("a.ts", false).target < ScriptTarget::ES2022 {
             skipped_tests += 1;

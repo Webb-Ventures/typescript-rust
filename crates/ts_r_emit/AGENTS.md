@@ -90,8 +90,10 @@ cost both. It never mutates the checker's AST.
   the common source directory differs from the config directory; anchored at the `outDir`
   key; not under `noEmit`. TS6059: explicit `rootDir` (or `composite` with a tsconfig, whose
   `rootDir` is the config directory) — every emitted file outside it (roots: a global error
-  with the "The file is in the program because:" chain; imported files: at the import
-  specifier); default `rootDir` with `outDir`/`declarationDir` — roots only. Both are option
+  with the "The file is in the program because:" chain; imported files: at the first import
+  specifier in program order, also when `include` matches them too, and then with the chain
+  listing every reason: each import, then "Matched by include pattern 'p' in '<abs
+  tsconfig>'"; checked against tsc 7.0.2 output); default `rootDir` with `outDir`/`declarationDir` — roots only. Both are option
   errors: no syntactic or semantic diagnostics are reported, emit still happens.
 - TS5055 / TS5056 (`output_path_conflicts`; `tsc/internal/compiler/program.go`, the output
   path check): not under `noEmit`; for each emitted source in program order, its outputs

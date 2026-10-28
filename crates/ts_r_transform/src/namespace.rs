@@ -13,10 +13,11 @@
 //! Exported variables live only on the namespace object, so references to them are rewritten
 //! to `N.a` (see `Tx::ident_ref`). Non-instantiated namespaces (types only) are erased.
 
+use rustc_hash::FxHashMap;
 use ts_r_ast::{Atom, Modifiers, ModuleKind, Node, NodeId, NodeKind, VarKind};
 
 use crate::builder::Build;
-use crate::scope::{BindingId, BindingKind};
+use crate::scope::{BindingId, BindingKind, ScopeKind};
 use crate::transform::{NsFrame, Tx};
 
 pub(crate) fn module_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
@@ -127,7 +128,7 @@ fn emit(
     }
 
     // Body.
-    let param = name_atom;
+    let param = param_name(tx, scope, name_atom, &name);
     tx.ns_stack.push(NsFrame { scope, param });
     let stmts: Vec<NodeId> = if idx + 1 < segs.len() {
         let mut inner = Vec::new();
@@ -185,6 +186,12 @@ fn emit(
                 tx.map_range(prop, name_span);
             }
             rhs = tx.assign(em, rhs, at);
+        } else if top_level && idx == 0 && tx.opts.is_cjs() {
+            for alias in crate::cjs::list_aliases(tx, name_atom) {
+                let e = tx.ident("exports", at);
+                let em = tx.member_or_index(e, &alias, at);
+                rhs = tx.assign(em, rhs, at);
+            }
         }
         let pa = tx.paren(rhs, at);
         map_names(tx, &[l, n2], name_span);
@@ -193,6 +200,61 @@ fn emit(
     let iife = iife(tx, param, &stmts, arg, at);
     map_iife(tx, iife, decl_span, name_span, block);
     out.push(iife);
+}
+
+/// The IIFE parameter: the namespace's name, or a unique `N_1` when a value named `N` is
+/// declared anywhere inside the body (any nested scope: `const N`, a parameter, a catch
+/// variable, an inner namespace `N`, an `import N =` alias; not types, enum members or
+/// names merged from another declaration). Observed, tsc 7.0.2
+/// (`exportDeclarationForModuleOrEnumWithMemberOfSameName`); keeping `N` would make
+/// `(function (N) { const N = 0; })` a SyntaxError.
+fn param_name(tx: &mut Tx, scope: u32, name_atom: Atom, name: &str) -> Atom {
+    if scope == 0 || name_atom == Atom::EMPTY {
+        return name_atom;
+    }
+    if tx.value_bindings_by_name.is_none() {
+        let mut by_name: FxHashMap<Atom, Vec<BindingId>> = FxHashMap::default();
+        for (i, b) in tx.sc.bindings.iter().enumerate() {
+            if !matches!(
+                b.kind,
+                BindingKind::TypeImport | BindingKind::EnumMember | BindingKind::MergedNsExport
+            ) {
+                by_name.entry(b.name).or_default().push(i as BindingId);
+            }
+        }
+        tx.value_bindings_by_name = Some(by_name);
+    }
+    let candidates = tx
+        .value_bindings_by_name
+        .as_ref()
+        .and_then(|m| m.get(&name_atom))
+        .cloned()
+        .unwrap_or_default();
+    let declared = candidates.into_iter().any(|b| {
+        let binding = &tx.sc.bindings[b as usize];
+        if binding.kind == BindingKind::Namespace && !is_instantiated_ns(tx, b) {
+            return false;
+        }
+        // Inside the body: the binding's scope is `scope` or nested in it.
+        let mut s = Some(binding.scope);
+        let mut steps = 0usize;
+        while let Some(cur) = s {
+            if cur == scope {
+                return true;
+            }
+            steps += 1;
+            if steps > tx.sc.scopes.len() {
+                return false;
+            }
+            s = tx.sc.scopes.get(cur as usize).and_then(|sc| sc.parent);
+        }
+        false
+    });
+    if declared {
+        tx.fresh(name, true)
+    } else {
+        name_atom
+    }
 }
 
 /// `(function (param) { stmts })(arg);`
@@ -553,6 +615,24 @@ fn stmt_instantiates(tx: &Tx, s: NodeId) -> bool {
 }
 
 /// True if any declaration of namespace binding `b` is instantiated.
+/// Whether namespace binding `b`, declared at any depth, has an instantiated declaration
+/// (a namespace with only types or empty namespaces gets no IIFE and no runtime name).
+fn is_instantiated_ns(tx: &Tx, b: BindingId) -> bool {
+    let mut found = false;
+    for (&segment, &scope) in &tx.sc.ns_scope_of {
+        if tx.sc.decl_of.get(&segment) != Some(&b) {
+            continue;
+        }
+        if let Some(ScopeKind::Namespace(m)) = tx.sc.scopes.get(scope as usize).map(|s| s.kind) {
+            found = true;
+            if is_instantiated(tx, m) {
+                return true;
+            }
+        }
+    }
+    !found
+}
+
 pub(crate) fn is_instantiated_binding(tx: &Tx, b: BindingId) -> bool {
     let Node::Program { stmts } = tx.n(tx.ast.root) else {
         return true;
