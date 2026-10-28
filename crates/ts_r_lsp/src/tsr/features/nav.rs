@@ -1196,16 +1196,23 @@ impl Target {
     }
 }
 
-/// Whether a numeric literal indexing an element access (`o[0]`) starts at `offset`.
-fn is_numeric_index(c: &ts_r_checker::Checker, f: FileId, offset: u32) -> bool {
+/// The starts of the numeric literals indexing an element access (`o[0]`) in file `f`.
+fn numeric_index_starts(c: &ts_r_checker::Checker, f: FileId) -> HashSet<u32> {
+    struct V(HashSet<u32>);
+    impl ts_r_ast::visit::Visitor for V {
+        fn enter(&mut self, ast: &ts_r_ast::Ast, id: NodeId) -> ts_r_ast::visit::Walk {
+            if let Node::Index { index, .. } = *ast.node(id)
+                && matches!(ast.node(index), Node::NumberLit { .. })
+            {
+                self.0.insert(ast.span(index).start);
+            }
+            ts_r_ast::visit::Walk::Continue
+        }
+    }
     let ast = c.ast(f);
-    node_at(ast, offset).is_some_and(|n| {
-        matches!(ast.node(n), Node::NumberLit { .. })
-            && c.file(f)
-                .parents()
-                .parent(n)
-                .is_some_and(|p| matches!(ast.node(p), Node::Index { index, .. } if *index == n))
-    })
+    let mut v = V(HashSet::new());
+    ts_r_ast::visit::walk(ast, ast.root, &mut v);
+    v.0
 }
 
 /// The string or numeric literal key at `offset` (`"a": 1`, `o["a"]`, `o[0]`).
@@ -1323,7 +1330,8 @@ fn references_with(
         }
         return string_literal_references(cx, ck, offset, scope).unwrap_or_default();
     };
-    if scope == Scope::Project {
+    // Not for a rename: `constructor` is not renamed (see [`is_constructor_key`]).
+    if scope == Scope::Project && !rename {
         let files: Vec<FileId> = project_files(cx).collect();
         if let Some(refs) = super::constructor_refs::constructor_references(cx, ck, &files, n) {
             return refs;
@@ -1413,6 +1421,9 @@ fn scan_target(
         .decls
         .iter()
         .any(|d| c.file(d.file).path.contains("/node_modules/"));
+    // A numeric name (`255`) may be spelled otherwise in a file (`0xff`, `2.55e2`): any
+    // file with a digit may hold it.
+    let numeric = target.name.starts_with(|ch: char| ch.is_ascii_digit());
     let files: Vec<FileId> = match scope {
         Scope::File => vec![cx.file],
         Scope::Project => (0..c.files.len())
@@ -1422,6 +1433,7 @@ fn scan_target(
                 !sf.is_lib
                     && (in_packages || !sf.path.contains("/node_modules/"))
                     && (sf.text.contains(&target.name)
+                        || (numeric && sf.text.bytes().any(|b| b.is_ascii_digit()))
                         || target
                             .alias_names
                             .iter()
@@ -1530,7 +1542,7 @@ fn scan_target(
                 end,
                 is_decl: m.is_decl,
                 is_write: if m.is_decl {
-                    decl_is_write(ck, access)
+                    decl_is_write(ck, l)
                 } else {
                     is_write(ck, access)
                 },
@@ -1932,6 +1944,19 @@ fn is_default_specifier_name(cx: &Ctx<'_, '_>, n: NodeId) -> bool {
         })
 }
 
+/// Whether `n` is the `constructor` key of a constructor, which is not renamed (tsc 7 only
+/// renames identifiers, string and numeric literal names, private names and `this`).
+fn is_constructor_key(cx: &Ctx<'_, '_>, n: NodeId) -> bool {
+    let c = cx.checker;
+    let ast = c.ast(cx.file);
+    c.file(cx.file).parents().parent(n).is_some_and(|p| {
+        matches!(
+            *ast.node(p),
+            Node::MethodDef { kind: MethodKind::Constructor, key, .. } if key == n
+        )
+    })
+}
+
 pub fn prepare_rename(
     cx: &Ctx<'_, '_>,
     ck: &mut Ck<'_, '_>,
@@ -1942,7 +1967,7 @@ pub fn prepare_rename(
     let ast = c.ast(cx.file);
     let text = c.file(cx.file).text.as_str();
     let n = rename_name_at(cx, offset);
-    if n.is_some_and(|n| is_default_specifier_name(cx, n)) {
+    if n.is_some_and(|n| is_default_specifier_name(cx, n) || is_constructor_key(cx, n)) {
         return Ok(Value::Null);
     }
     let Some(n) = n else {
@@ -1978,10 +2003,17 @@ pub fn prepare_rename(
             return Err((codes::REQUEST_FAILED, why.to_string()));
         }
     }
-    let span = ast.span(n);
+    // A string literal key renames the text between its quotes (as rename edits it).
+    let (start, end) = match ast.node(n) {
+        Node::StringLit { .. } | Node::TemplateLit { .. } => super::string_refs::inner_span(ast, n),
+        _ => {
+            let span = ast.span(n);
+            (span.start, span.end)
+        }
+    };
     Ok(json!({
-        "range": lines.range(text, span.start, span.end),
-        "placeholder": span.text(text),
+        "range": lines.range(text, start, end),
+        "placeholder": text.get(start as usize..end as usize).unwrap_or(""),
     }))
 }
 
@@ -1994,7 +2026,9 @@ pub fn rename(
     let c = cx.checker;
     let ast = c.ast(cx.file);
     let on_this = match rename_name_at(cx, offset) {
-        Some(n) if is_default_specifier_name(cx, n) => return Ok(Value::Null),
+        Some(n) if is_default_specifier_name(cx, n) || is_constructor_key(cx, n) => {
+            return Ok(Value::Null);
+        }
         Some(n) => {
             if !is_label(cx, offset) && !is_jsx_attr_name(c, Loc::new(cx.file, n)) {
                 let m = meaning_at(ck, Loc::new(cx.file, n));
@@ -2036,6 +2070,8 @@ pub fn rename(
     let mut lc = LinesCache::default();
     let mut changes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut idents = super::rename_alias::Idents::new();
+    // Per file, computed on first use.
+    let mut numeric_index: BTreeMap<FileId, HashSet<u32>> = BTreeMap::new();
     for r in refs {
         let f = c.file(r.file);
         let old = &f.text[r.start as usize..r.end as usize];
@@ -2069,7 +2105,10 @@ pub fn rename(
             // A numeric index (`o[0]`) becomes a string one; a numeric key stays bare.
             None if old.starts_with(|ch: char| ch.is_ascii_digit())
                 && !new_name.starts_with(|ch: char| ch.is_ascii_digit())
-                && is_numeric_index(c, r.file, r.start) =>
+                && numeric_index
+                    .entry(r.file)
+                    .or_insert_with(|| numeric_index_starts(c, r.file))
+                    .contains(&r.start) =>
             {
                 format!("\"{new_name}\"")
             }

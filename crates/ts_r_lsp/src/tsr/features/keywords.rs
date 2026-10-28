@@ -111,7 +111,7 @@ impl<'a> Doc<'a> {
     }
 
     /// `kw` when it is the word at the start of `n`.
-    fn keyword_at_start(&self, n: NodeId, kw: &str) -> Option<(u32, u32)> {
+    pub(super) fn keyword_at_start(&self, n: NodeId, kw: &str) -> Option<(u32, u32)> {
         let s = self.span(n).start;
         let w = self.next_word(s)?;
         (w.0 == s && self.word(w) == kw).then_some(w)
@@ -122,7 +122,7 @@ impl<'a> Doc<'a> {
     }
 
     /// The word after `pos` when it is `kw`.
-    fn keyword_after(&self, pos: u32, kw: &str) -> Option<(u32, u32)> {
+    pub(super) fn keyword_after(&self, pos: u32, kw: &str) -> Option<(u32, u32)> {
         let w = self.next_word(pos)?;
         (self.word(w) == kw).then_some(w)
     }
@@ -959,8 +959,21 @@ pub enum KeywordTarget {
 
 /// Go to definition on a keyword: `return`/`await`/`yield` go to their function, `case` and
 /// `default` to their `switch`, `this` to its declaration, a modifier to the declaration it
-/// modifies. `None` when the cursor is not on such a keyword.
+/// modifies. `None` when the cursor is not on such a keyword: a word that is itself the
+/// declared name (`let` of `var let = 1`) is a name, never a keyword standing for one.
 pub fn keyword_definition(d: &Doc<'_>, offset: u32) -> Option<KeywordTarget> {
+    let t = keyword_definition_at(d, offset)?;
+    if let KeywordTarget::Name(n) | KeywordTarget::Override { name: n, .. } = t
+        && let Some(w) = d.word_at(offset)
+        && d.span(n).start < w.1
+        && w.0 < d.span(n).end
+    {
+        return None;
+    }
+    Some(t)
+}
+
+fn keyword_definition_at(d: &Doc<'_>, offset: u32) -> Option<KeywordTarget> {
     if let Some(n) = node_at(d.ast, offset) {
         match d.node(n) {
             Node::Super {} => return Some(KeywordTarget::Super(n)),
@@ -1957,6 +1970,19 @@ mod tests {
             }
             KeywordTarget::Super(_) => Some(vec!["super".into()]),
         }
+    }
+
+    /// A declared name spelled like a keyword is a name: go to definition on it does not
+    /// redirect to itself (which looped forever).
+    #[test]
+    fn a_name_spelled_like_a_keyword_is_not_redirected() {
+        assert_eq!(definition("var let = 1;", "let"), None);
+        assert_eq!(definition("var let;", "let"), None);
+        assert_eq!(
+            definition("var let = 1;", "var"),
+            Some(vec!["name let".into()])
+        );
+        assert_eq!(definition("let x = 1;", "let"), Some(vec!["name x".into()]));
     }
 
     #[test]

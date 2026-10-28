@@ -448,11 +448,14 @@ fn code_block(out: &mut String, lang: &str, code: &str) {
     if code.is_empty() {
         return;
     }
-    let mut ticks = 3;
-    while code.contains(&"`".repeat(ticks)) {
-        ticks += 1;
+    // One more backtick than the longest run in the code, at least three.
+    let mut longest = 0;
+    let mut run = 0;
+    for b in code.bytes() {
+        run = if b == b'`' { run + 1 } else { 0 };
+        longest = longest.max(run);
     }
-    let fence = "`".repeat(ticks);
+    let fence = "`".repeat((longest + 1).max(3));
     out.push_str(&fence);
     out.push_str(lang);
     out.push('\n');
@@ -561,6 +564,24 @@ mod tests {
 
     fn md(raw: &str) -> String {
         render(&parse(raw), &mut |_| None)
+    }
+
+    /// The fence is one backtick longer than the longest run in the code (at least three),
+    /// found in one pass: a long run of backticks renders at once.
+    #[test]
+    fn example_fences_outgrow_the_code() {
+        let block = |code: &str| {
+            let mut out = String::new();
+            code_block(&mut out, "tsx", code);
+            out
+        };
+        assert_eq!(block("a"), "```tsx\na\n```\n");
+        assert_eq!(block("a ``` b `` c"), "````tsx\na ``` b `` c\n````\n");
+        let long = format!("{}x", "`".repeat(200_000));
+        let t = std::time::Instant::now();
+        let out = block(&long);
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert!(out.starts_with(&format!("{}tsx\n", "`".repeat(200_001))));
     }
 
     #[test]

@@ -956,18 +956,24 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 });
                 if !plain {
                     // `o.|` for a member that is not an identifier becomes `o["a b"]`: the
-                    // edit replaces the dot (tsc 7 does the same).
+                    // edit replaces the dot (tsc 7 does the same); `o?.|` keeps its `?.`
+                    // (`o?.["a b"]`), the edit replacing both.
                     let (ws, _) = word_before(text, offset);
                     let b = text.as_bytes();
                     let mut dot = ws as usize;
                     while dot > 0 && b[dot - 1].is_ascii_whitespace() {
                         dot -= 1;
                     }
-                    let dot = dot.saturating_sub(1) as u32;
+                    let dot = dot.saturating_sub(if question_dot { 2 } else { 1 }) as u32;
                     let quoted = serde_json::to_string(&name).unwrap_or_default();
                     let lines = LspLines::new(text);
-                    let insert = format!("[{quoted}]");
-                    item["filterText"] = json!(format!(".{name}"));
+                    let insert = if question_dot {
+                        format!("?.[{quoted}]")
+                    } else {
+                        format!("[{quoted}]")
+                    };
+                    let lead = if question_dot { "?." } else { "." };
+                    item["filterText"] = json!(format!("{lead}{name}"));
                     item["insertText"] = json!(insert);
                     item["textEdit"] = json!({
                         "range": lines.range(text, dot, offset),

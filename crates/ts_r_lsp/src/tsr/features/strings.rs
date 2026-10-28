@@ -579,31 +579,21 @@ fn is_relative(spec: &str) -> bool {
     spec.starts_with("./") || spec.starts_with("../")
 }
 
+/// The directory part of `p`, keeping its root (`/`, `c:/`, `//server/`). A trailing `/` is
+/// a separator of its own: `dir_of("sub/")` is `sub`.
 fn dir_of(p: &str) -> &str {
+    let root = ts_r_config::path::root_length(p);
     match p.rfind('/') {
-        Some(0) => "/",
-        Some(i) => &p[..i],
+        Some(i) if i >= root => &p[..i],
+        Some(_) => &p[..root],
         None => "",
     }
 }
 
-/// Joins `dir` and a relative `rel` (which may hold `.` and `..` segments).
+/// Joins `dir` and a relative `rel` (which may hold `.` and `..` segments), keeping the
+/// root of either (a POSIX, drive or UNC root).
 fn join(dir: &str, rel: &str) -> String {
-    let mut parts: Vec<&str> = if rel.starts_with('/') {
-        Vec::new()
-    } else {
-        dir.split('/').filter(|s| !s.is_empty()).collect()
-    };
-    for seg in rel.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            s => parts.push(s),
-        }
-    }
-    format!("/{}", parts.join("/"))
+    ts_r_config::path::resolve(dir, rel)
 }
 
 /// Entries of the directory `dir`: `(name, is_dir)`, sorted.
@@ -818,11 +808,39 @@ fn matching_suffixes(suffix: &str) -> Vec<String> {
     out
 }
 
+/// Directories [`files_below`] lists at most in one search.
+const MAX_DIRS: u32 = 4096;
+
 /// Files under `dir` (depth-first, files of a directory before its subdirectories), leaving
-/// out `node_modules` and hidden entries. At most `MAX_ENTRIES` files, `MAX_DEPTH` levels.
-fn files_below(dir: &str, depth: u32, out: &mut Vec<String>) {
+/// out `node_modules` and hidden entries. At most `MAX_ENTRIES` files, `MAX_DEPTH` levels and
+/// `MAX_DIRS` directory listings; a directory reached again through a link (same real path)
+/// is not listed twice.
+fn files_below(dir: &str, out: &mut Vec<String>) {
+    let mut walk = Walk {
+        seen: BTreeSet::new(),
+        dirs: 0,
+    };
+    walk_files(dir, 0, &mut walk, out);
+}
+
+/// The state of one [`files_below`] search.
+struct Walk {
+    /// Real paths of the directories listed.
+    seen: BTreeSet<std::path::PathBuf>,
+    /// Directories listed so far.
+    dirs: u32,
+}
+
+fn walk_files(dir: &str, depth: u32, walk: &mut Walk, out: &mut Vec<String>) {
     const MAX_DEPTH: u32 = 16;
-    if depth > MAX_DEPTH || out.len() >= MAX_ENTRIES {
+    if depth > MAX_DEPTH || out.len() >= MAX_ENTRIES || walk.dirs >= MAX_DIRS {
+        return;
+    }
+    walk.dirs += 1;
+    let Ok(real) = std::fs::canonicalize(dir) else {
+        return;
+    };
+    if !walk.seen.insert(real) {
         return;
     }
     let entries = read_dir(dir);
@@ -840,7 +858,7 @@ fn files_below(dir: &str, depth: u32, out: &mut Vec<String>) {
                 "node_modules" | "bower_components" | "jspm_packages"
             )
         {
-            files_below(&format!("{dir}/{name}"), depth + 1, out);
+            walk_files(&format!("{dir}/{name}"), depth + 1, walk, out);
         }
     }
 }
@@ -1107,7 +1125,7 @@ impl Modules<'_> {
                         .map(|(n, _)| format!("{d}/{n}")),
                 );
             } else {
-                files_below(dir, 0, &mut files);
+                files_below(dir, &mut files);
             }
             for f in files {
                 let name = f.rsplit('/').next().unwrap_or(&f);
@@ -1493,6 +1511,55 @@ mod tests {
         assert_eq!(join("/p/src", "/x/"), "/x");
         assert_eq!(dir_of("/p/a.ts"), "/p");
         assert_eq!(dir_of("/a.ts"), "/");
+        assert_eq!(dir_of("sub/"), "sub");
+    }
+
+    /// Drive and UNC roots survive a join (`import "./|"` in `c:/project/src/main.ts`).
+    #[test]
+    fn joins_keep_windows_roots() {
+        assert_eq!(join("C:/project/src", "./"), "C:/project/src");
+        assert_eq!(join("C:/project/src", "../lib/"), "C:/project/lib");
+        assert_eq!(join("C:/", "../"), "C:/");
+        assert_eq!(join("//server/share/src", "./a/"), "//server/share/src/a");
+        assert_eq!(dir_of("C:/project/main.ts"), "C:/project");
+        assert_eq!(dir_of("C:/main.ts"), "C:/");
+        assert_eq!(ancestors("C:/project"), vec!["C:/project", "C:/"]);
+        assert_eq!(
+            ancestors("//server/share/x"),
+            vec!["//server/share/x", "//server/share", "//server/"]
+        );
+    }
+
+    /// A directory linked back to itself is listed once, and links that never reach a file
+    /// stop at the directory budget instead of listing every path through them.
+    #[cfg(unix)]
+    #[test]
+    fn files_below_lists_each_real_directory_once() {
+        let dir = std::env::temp_dir().join(format!("tsr-files-below-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let src = dir.join("src");
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::write(src.join("x.ts"), "").unwrap();
+        std::fs::write(src.join("sub/y.ts"), "").unwrap();
+        std::os::unix::fs::symlink(".", src.join("loop")).unwrap();
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        for l in ["a", "b", "c"] {
+            std::os::unix::fs::symlink(".", empty.join(l)).unwrap();
+        }
+        let root = src.to_str().unwrap().to_string();
+        let mut files = Vec::new();
+        files_below(&root, &mut files);
+        assert_eq!(
+            files,
+            vec![format!("{root}/x.ts"), format!("{root}/sub/y.ts")]
+        );
+        let t = std::time::Instant::now();
+        let mut none = Vec::new();
+        files_below(empty.to_str().unwrap(), &mut none);
+        assert!(none.is_empty());
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

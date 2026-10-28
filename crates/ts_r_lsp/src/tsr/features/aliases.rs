@@ -236,6 +236,29 @@ pub fn alias_names(c: &Checker<'_>, files: &[FileId], s: SymId, name: &str) -> V
     out
 }
 
+/// The span of the `default` keyword of `export default ...` (an expression statement, or
+/// a function or class declaration with the modifier): the modifier token, or the word
+/// after the statement's `export`, never a `default` in a comment or string.
+fn default_keyword_span(c: &Checker<'_>, file: FileId, n: NodeId) -> Option<(u32, u32)> {
+    let ast = c.ast(file);
+    match *ast.node(n) {
+        Node::ExportDefaultExpr { .. } => {
+            let d = super::keywords::Doc::new(c, file);
+            let export = d.keyword_at_start(n, "export")?;
+            d.keyword_after(export.1, "default")
+        }
+        Node::FunctionDecl { modifiers, .. } | Node::ClassDecl { modifiers, .. }
+            if modifiers.contains(Modifiers::DEFAULT) =>
+        {
+            ast.modifier_tokens_of(n)
+                .iter()
+                .find(|m| m.flag == Modifiers::DEFAULT)
+                .map(|m| (m.span.start, m.span.end))
+        }
+        _ => None,
+    }
+}
+
 /// On the `default` keyword of `export default ...`: the declaration (or `export default`
 /// statement) it belongs to and the keyword's span.
 pub fn default_keyword_at(c: &Checker<'_>, file: FileId, offset: u32) -> Option<(Loc, u32, u32)> {
@@ -256,47 +279,25 @@ pub fn default_keyword_at(c: &Checker<'_>, file: FileId, offset: u32) -> Option<
     let ast = c.ast(file);
     let mut n = super::locate::node_at(ast, s as u32)?;
     for _ in 0..4 {
-        let sp = ast.span(n);
-        if sp.start <= s as u32 {
-            match *ast.node(n) {
-                Node::ExportDefaultExpr { .. } => {
-                    return Some((Loc::new(file, n), s as u32, e as u32));
-                }
-                Node::FunctionDecl { modifiers, .. } | Node::ClassDecl { modifiers, .. }
-                    if modifiers.contains(Modifiers::DEFAULT) =>
-                {
-                    return Some((Loc::new(file, n), s as u32, e as u32));
-                }
-                _ => {}
-            }
+        if default_keyword_span(c, file, n) == Some((s as u32, e as u32)) {
+            return Some((Loc::new(file, n), s as u32, e as u32));
         }
         n = c.file(file).parents().parent(n)?;
     }
     None
 }
 
-/// The `default` keyword of the declaration `d` when `d` is `export default ...`.
+/// The `default` keyword of the declaration `d` when `d` is an anonymous `export default ...`.
 pub fn default_keyword_of(c: &Checker<'_>, d: Loc) -> Option<(u32, u32)> {
     let ast = c.ast(d.file);
     let named = match *ast.node(d.node) {
-        Node::ExportDefaultExpr { .. } => false,
-        Node::FunctionDecl {
-            modifiers, name, ..
-        }
-        | Node::ClassDecl {
-            modifiers, name, ..
-        } if modifiers.contains(Modifiers::DEFAULT) => name.is_some(),
-        _ => return None,
+        Node::FunctionDecl { name, .. } | Node::ClassDecl { name, .. } => name.is_some(),
+        _ => false,
     };
     if named {
         return None;
     }
-    let sp = ast.span(d.node);
-    let text = c.file(d.file).text.as_str();
-    let head = text.get(sp.start as usize..sp.end as usize)?;
-    let i = head.find("default")?;
-    let s = sp.start + i as u32;
-    Some((s, s + 7))
+    default_keyword_span(c, d.file, d.node)
 }
 
 /// What a JavaScript variable bound by `require` stands for (tsc treats it as an import):

@@ -119,36 +119,41 @@ pub fn location_meaning(ck: &Ck<'_, '_>, l: Loc) -> u8 {
             _ => {}
         }
     }
-    // Namespace qualifiers: `A` of `A.B.T` in a type (an import type's qualifier too) or
-    // of `A.B` in `implements A.B`.
-    if matches!(*c.node(p), Node::QualifiedName { left, .. } if left == l.node) {
+    // Namespace qualifiers: every component but the last of `A.B.T` in a type (an import
+    // type's qualifier too) or of `A.B.C` in `implements A.B.C`.
+    if matches!(*c.node(p), Node::QualifiedName { .. }) {
         let mut root = p;
         while let Some(q) = c.parent(root)
             && matches!(c.node(q), Node::QualifiedName { .. })
         {
             root = q;
         }
-        if c.parent(root).is_some_and(|r| match *c.node(r) {
-            Node::TypeRef { .. } => true,
-            // `import("m").A.T`: `A` names a namespace too.
-            Node::ImportType {
-                is_typeof: false,
-                qualifier: Some(q),
-                ..
-            } => q == root.node,
-            _ => false,
-        }) {
+        let last = matches!(*c.node(root), Node::QualifiedName { right, .. } if right == l.node);
+        if !last
+            && c.parent(root).is_some_and(|r| match *c.node(r) {
+                Node::TypeRef { .. } => true,
+                // `import("m").A.T`: `A` names a namespace too.
+                Node::ImportType {
+                    is_typeof: false,
+                    qualifier: Some(q),
+                    ..
+                } => q == root.node,
+                _ => false,
+            })
+        {
             return meaning::NAMESPACE;
         }
     }
-    if matches!(*c.node(p), Node::Member { obj, .. } if obj == l.node) {
+    if matches!(*c.node(p), Node::Member { .. }) {
         let mut root = p;
         while let Some(q) = c.parent(root)
             && matches!(c.node(q), Node::Member { .. })
         {
             root = q;
         }
-        if let Some(r) = c.parent(root)
+        let last = matches!(*c.node(root), Node::Member { prop, .. } if prop == l.node);
+        if !last
+            && let Some(r) = c.parent(root)
             && matches!(c.node(r), Node::ExprWithTypeArgs { .. })
             && in_type_heritage(ck, r)
         {

@@ -193,6 +193,11 @@ fn call_help(
         }
         _ => (None, Vec::new(), false),
     };
+    // In a type argument list `count` counts type arguments, but whether a signature
+    // applies depends on the value arguments written after them (`resolved_applies` checks
+    // the type argument count itself). The fallback and the expanded-rest choice below
+    // still use `count`.
+    let arity = if type_list { args.len() as u32 } else { count };
     let mut shown = sigs.clone();
     let mut active = None;
     if args
@@ -208,10 +213,10 @@ fn call_help(
                 .is_empty();
             let fits = if generic {
                 let shown_sig = instantiate_for_failure(ck, file, s, type_args, &args);
-                resolved_applies(ck, file, shown_sig, None, count, incomplete, &[])
+                resolved_applies(ck, file, shown_sig, None, arity, incomplete, &[])
                     .then_some(shown_sig)
             } else {
-                resolved_applies(ck, file, s, type_args, count, incomplete, &args).then_some(s)
+                resolved_applies(ck, file, s, type_args, arity, incomplete, &args).then_some(s)
             };
             if let Some(f) = fits {
                 shown[i] = f;
@@ -220,7 +225,7 @@ fn call_help(
             }
         }
     } else if let Some(r) = ck.resolved_signature(at(call))
-        && resolved_applies(ck, file, r, type_args, count, incomplete, &args)
+        && resolved_applies(ck, file, r, type_args, arity, incomplete, &args)
         && let Some(i) = sigs.iter().position(|&s| derives_from(ck, r, s))
     {
         shown[i] = r;

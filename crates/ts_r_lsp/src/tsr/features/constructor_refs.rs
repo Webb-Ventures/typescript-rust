@@ -18,7 +18,7 @@ use super::Ctx;
 use super::keywords::{self, Doc};
 use super::locate::meaning_at;
 use super::nav::Ref;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use ts_r_ast::{Ast, HeritageKind, MethodKind, Node, NodeId};
 use ts_r_checker::{Ck, Loc};
 use ts_r_diagnostics::FileId;
@@ -86,24 +86,27 @@ pub fn constructor_references(
         supers.extend(v.supers.into_iter().map(|n| (f, n)));
     }
 
-    // The classes this constructor builds.
-    let mut built: Vec<SymId> = vec![own];
+    // The classes this constructor builds: its own, then (breadth first over a base ->
+    // derived map) each constructorless class extending one already built.
+    let mut derived: HashMap<SymId, Vec<usize>> = HashMap::new();
+    for (i, k) in classes.iter().enumerate() {
+        if let Some(b) = k.base
+            && !k.has_ctor
+        {
+            derived.entry(b).or_default().push(i);
+        }
+    }
+    let mut built: HashSet<SymId> = HashSet::from([own]);
     let mut built_at: Vec<Loc> = vec![Loc::new(cx.file, class)];
-    let mut added = true;
-    let mut rounds = 0;
-    while added && rounds <= classes.len() {
-        added = false;
-        rounds += 1;
-        for k in &classes {
-            if k.has_ctor || !k.base.is_some_and(|b| built.contains(&b)) {
-                continue;
-            }
+    let mut queue: VecDeque<SymId> = VecDeque::from([own]);
+    while let Some(b) = queue.pop_front() {
+        for &i in derived.get(&b).map(Vec::as_slice).unwrap_or_default() {
+            let k = &classes[i];
             if let Some(s) = k.sym
-                && !built.contains(&s)
+                && built.insert(s)
             {
-                built.push(s);
                 built_at.push(k.at);
-                added = true;
+                queue.push_back(s);
             }
         }
     }

@@ -209,7 +209,7 @@ fn body_position(
         }
         _ => {}
     }
-    let open = text[head_end as usize..].find('{')? as u32 + head_end;
+    let open = brace_after(ast, text, head_end)?;
     let end = ast.span(container).end;
     // A body the parser closed at the end of the file without its `}` (`Bar<{|`) holds the
     // position right after it too.
@@ -228,6 +228,21 @@ fn body_position(
         return None;
     }
     Some((container, open))
+}
+
+/// The first `{` at or after `from` that is not inside a comment.
+fn brace_after(ast: &ts_r_ast::Ast, text: &str, from: u32) -> Option<u32> {
+    let mut at = from as usize;
+    // Each round steps past one comment, so this ends after one round per comment.
+    for _ in 0..=ast.comments.len() {
+        let i = text.get(at..)?.find('{')? + at;
+        let k = ast.comments.partition_point(|c| (c.span.end as usize) <= i);
+        match ast.comments.get(k) {
+            Some(c) if (c.span.start as usize) <= i => at = c.span.end as usize,
+            _ => return Some(i as u32),
+        }
+    }
+    None
 }
 
 /// Whether the word starting at `word` is in a class or interface body outside any member

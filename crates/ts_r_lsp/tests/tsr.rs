@@ -4208,3 +4208,286 @@ fn references_declared_exports_spaced_import_type_unclosed_param() {
     let ue = env.uri("src/e.ts");
     assert_eq!(refs_at(&mut c, &ue, 20_002, 0).len(), 2);
 }
+
+/// `(line, character)` of each location's start in an LSP location list.
+fn starts(r: &Value) -> Vec<(u64, u64)> {
+    r.as_array()
+        .map(|a| {
+            a.iter()
+                .map(|l| {
+                    let s = &l["range"]["start"];
+                    (
+                        s["line"].as_u64().unwrap(),
+                        s["character"].as_u64().unwrap(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn refs_from(c: &mut ScriptedClient, uri: &str, (line, ch): (u32, u32)) -> Vec<(u64, u64)> {
+    let r = result(
+        c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch},
+               "context": {"includeDeclaration": true}}),
+    );
+    starts(&r)
+}
+
+/// Completion corners: a comment holding `{` between a class head and its body, a member
+/// that is not an identifier after `?.`.
+#[test]
+fn completion_class_body_after_comment_and_optional_bracket_members() {
+    if !libs_present() {
+        return;
+    }
+    let (text, m) = marked(
+        "class B { m() {} }\nclass C extends B /* { */ { ¦ }\n\
+         declare const o: { 'a b': number } | undefined;\no?.¦;\n",
+    );
+    let env = Env::new(
+        "complete-review",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", &text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let u = env.uri("src/c.ts");
+    let l = completion_labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&u, m[0].0, m[0].1),
+    ));
+    for want in ["m", "constructor"] {
+        assert!(l.iter().any(|x| x == want), "{want} missing: {l:?}");
+    }
+    let r = result(&mut c, "textDocument/completion", at(&u, m[1].0, m[1].1));
+    let item = r["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["label"] == "a b")
+        .cloned()
+        .expect("a b offered");
+    // `o?.|` becomes `o?.["a b"]`: the edit replaces `?.`.
+    assert_eq!(item["textEdit"]["newText"], "?.[\"a b\"]", "{item}");
+    assert_eq!(item["textEdit"]["range"]["start"]["character"], 1, "{item}");
+    assert_eq!(item["textEdit"]["range"]["end"]["character"], 3, "{item}");
+    c.shutdown();
+}
+
+/// Signature help in a type argument list keeps the overload the call resolves to by its
+/// value arguments.
+#[test]
+fn signature_help_in_type_arguments_keeps_the_resolved_overload() {
+    if !libs_present() {
+        return;
+    }
+    let (text, m) = marked(
+        "declare function f<T>(x: string): \"bad\";\n\
+         declare function f<T, U>(x: number): \"ok\";\nf<number, ¦string>(1);\n",
+    );
+    let env = Env::new(
+        "sighelp-review",
+        &[("tsconfig.json", TSCONFIG), ("src/s.ts", &text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/s.ts");
+    let u = env.uri("src/s.ts");
+    let r = result(&mut c, "textDocument/signatureHelp", at(&u, m[0].0, m[0].1));
+    assert_eq!(r["activeSignature"], 1, "{r}");
+    c.shutdown();
+}
+
+/// Navigation corners: prepareRename on a quoted key, numeric keys spelled in hex, the
+/// highlight kind of signature literal keys, `constructor` (not renamed), go to
+/// definition on a name spelled `let`, qualified namespace components and `default` in a
+/// string or comment.
+#[test]
+fn navigation_review_corners() {
+    if !libs_present() {
+        return;
+    }
+    let (text, m) = marked(
+        "const o = { \"¦s\": 1 }; o[\"s\"];\n\
+         const lit = { ¦0xff: true }; lit[0xff];\n\
+         interface I { \"¦x\": number }\ndeclare const i: I; i[\"x\"];\n\
+         class A { ¦constructor() {} }\nnew A();\n\
+         var ¦let = 1;\n\
+         namespace N { export namespace ¦M { export interface T {} } }\nlet x: N.M.T;\n",
+    );
+    let (dtext, dm) =
+        marked("export /* default */ ¦default function () { return \"¦default\"; }\n");
+    let env = Env::new(
+        "nav-review",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/n.ts", &text),
+            ("src/d.ts", &dtext),
+            ("src/e.ts", "import g from \"./d.js\";\ng();\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/n.ts");
+    env.open(&mut c, "src/d.ts");
+    let u = env.uri("src/n.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    // prepareRename on `"s"` offers the text between the quotes, as rename edits it.
+    let r = result(&mut c, "textDocument/prepareRename", at(&u, m[0].0, m[0].1));
+    assert_eq!(r["placeholder"], "s", "{r}");
+    assert_eq!(r["range"]["start"]["character"], 13, "{r}");
+    assert_eq!(r["range"]["end"]["character"], 14, "{r}");
+    // `0xff` is the key `255`: both spellings are found in a project search.
+    assert_eq!(refs_from(&mut c, &u, m[1]), vec![(1, 14), (1, 32)]);
+    // A literal key of an interface is a declaration that stores nothing (a read).
+    let r = result(
+        &mut c,
+        "textDocument/documentHighlight",
+        at(&u, m[2].0, m[2].1),
+    );
+    let kinds: Vec<u64> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["kind"].as_u64().unwrap_or(1))
+        .collect();
+    assert_eq!(kinds, vec![2, 2], "{r}");
+    // `constructor` is not renamed (it would rename the `new` callee and keep the class).
+    let r = result(&mut c, "textDocument/prepareRename", at(&u, m[3].0, m[3].1));
+    assert!(r.is_null(), "{r}");
+    let r = result(
+        &mut c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": u}, "position": {"line": m[3].0, "character": m[3].1},
+               "newName": "B"}),
+    );
+    assert!(r.is_null(), "{r}");
+    // Go to definition on the variable `let` answers (it looped).
+    let r = result(&mut c, "textDocument/definition", at(&u, m[4].0, m[4].1));
+    assert_eq!(starts(&r), vec![(m[4].0 as u64, m[4].1 as u64)], "{r}");
+    // `M` in `N.M.T` is a namespace use of the namespace `M`.
+    assert_eq!(refs_from(&mut c, &u, m[5]), vec![(7, 31), (8, 9)]);
+    assert_eq!(refs_from(&mut c, &u, (8, 9)), vec![(7, 31), (8, 9)]);
+    // `default` in a string is no `export default`; the keyword after a comment is.
+    let ud = env.uri("src/d.ts");
+    let kw = (dm[0].0 as u64, dm[0].1 as u64);
+    // From the string: not the default export's references (the keyword, the import).
+    let from_string = refs_from(&mut c, &ud, dm[1]);
+    assert!(!from_string.contains(&kw), "{from_string:?}");
+    let ue = env.uri("src/e.ts");
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": ud}, "position": {"line": dm[1].0, "character": dm[1].1},
+               "context": {"includeDeclaration": true}}),
+    );
+    assert!(
+        r.as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["uri"] != ue.as_str()),
+        "{r}"
+    );
+    // From the keyword after the comment: the keyword itself and the import.
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": ud}, "position": {"line": dm[0].0, "character": dm[0].1},
+               "context": {"includeDeclaration": true}}),
+    );
+    let mine: Vec<(u64, u64)> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|l| l["uri"] == ud.as_str())
+        .map(|l| {
+            let s = &l["range"]["start"];
+            (
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(mine, vec![kw], "{r}");
+    assert!(
+        r.as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["uri"] == ue.as_str()),
+        "{r}"
+    );
+    // From the import: the declaration's `default` is the keyword, not the comment's word.
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": ue}, "position": {"line": 0, "character": 7},
+               "context": {"includeDeclaration": true}}),
+    );
+    let in_d: Vec<(u64, u64)> = starts(&Value::Array(
+        r.as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["uri"] == ud.as_str())
+            .cloned()
+            .collect(),
+    ));
+    assert_eq!(in_d, vec![kw], "{r}");
+    c.shutdown();
+}
+
+/// Constructor references through a long chain of constructorless classes declared in
+/// reverse order, and hover documentation through shared base interfaces, answer at once.
+#[test]
+fn constructor_chains_and_shared_bases_stay_linear() {
+    if !libs_present() {
+        return;
+    }
+    let n = 400;
+    let mut text = String::new();
+    for i in (1..n).rev() {
+        text.push_str(&format!("class C{i} extends C{} {{}}\n", i - 1));
+    }
+    text.push_str("class C0 {\n    constructor() {}\n}\n");
+    text.push_str(&format!("new C{}();\n", n - 1));
+    let ctor_line = n as u32;
+    // Ten undocumented interfaces, nine layers of ten each extending all ten before, and
+    // one extending the last layer: 10^10 paths to an undocumented `m`.
+    let mut docs = String::new();
+    for j in 0..10 {
+        docs.push_str(&format!("interface L0_{j} {{ m: number }}\n"));
+    }
+    for layer in 1..10 {
+        let bases: Vec<String> = (0..10).map(|j| format!("L{}_{j}", layer - 1)).collect();
+        for j in 0..10 {
+            docs.push_str(&format!(
+                "interface L{layer}_{j} extends {} {{ m: number }}\n",
+                bases.join(", ")
+            ));
+        }
+    }
+    let last: Vec<String> = (0..10).map(|j| format!("L9_{j}")).collect();
+    docs.push_str(&format!(
+        "interface Top extends {} {{ m: number }}\ndeclare const x: Top;\nx.m;\n",
+        last.join(", ")
+    ));
+    let env = Env::new(
+        "linear-review",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/k.ts", &text),
+            ("src/h.ts", &docs),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/k.ts");
+    env.open(&mut c, "src/h.ts");
+    let u = env.uri("src/k.ts");
+    let refs = refs_from(&mut c, &u, (ctor_line, 4));
+    assert_eq!(refs, vec![(ctor_line as u64, 4), (ctor_line as u64 + 2, 4)]);
+    let uh = env.uri("src/h.ts");
+    let (l, ch) = pos_of(&docs, "x.m;", 2);
+    let h = hover_text(&mut c, &uh, l, ch);
+    assert!(h.contains("m: number"), "{h}");
+    c.shutdown();
+}
