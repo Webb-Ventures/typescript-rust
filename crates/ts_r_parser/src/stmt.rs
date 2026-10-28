@@ -517,8 +517,10 @@ impl<'a> Parser<'a> {
         if let Some(left) = init {
             if self.at_contextual(T::Of) {
                 // `for (async of x)` (also with an escaped `async`, not `for await` or
-                // `(async)`): TS1106. A grammar error in tsc 7.
+                // `(async)`): TS1106. A grammar error in tsc 7, not reported where `await`
+                // is an operator (an async function: observed with tsc 7.0.2).
                 if !is_await
+                    && !self.ctx.has(Ctx::AWAIT)
                     && let Node::Ident { name } = *self.ast.node(left)
                     && self.ast.atom(name) == "async"
                 {
@@ -1879,10 +1881,10 @@ impl<'a> Parser<'a> {
         // statement turns out to be an export form rather than an exported declaration.
         let export_token = self.ast.modifier_tokens.len();
         self.bump_modifier(Modifiers::EXPORT);
-        // `export @dec class`
+        // `export @dec class` (`@a export @b class` keeps both groups)
         let decorators = if self.at(T::At) {
-            let d = self.parse_decorators();
-            if decorators.is_empty() { d } else { decorators }
+            let after = self.parse_decorators();
+            self.join_decorators(decorators, after)
         } else {
             decorators
         };
@@ -1951,6 +1953,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The decorators before `export` and those after it, in source order (`@a export @b
+    /// class X {}` keeps both; tsc's checker reports TS8038 at `@b`).
+    fn join_decorators(&mut self, before: NodeList, after: NodeList) -> NodeList {
+        if before.is_empty() {
+            return after;
+        }
+        if after.is_empty() {
+            return before;
+        }
+        let mut all = self.ast.list(before).to_vec();
+        all.extend_from_slice(self.ast.list(after));
+        self.ast.add_list(&all)
+    }
+
     /// At `import` after `export`: is this an import declaration (`{ a } from`, `* as ns`,
     /// `x from`, `x, { y } from`, `"m"`) rather than `export import x = ...`?
     fn is_import_declaration_after_export(&mut self) -> bool {
@@ -1977,7 +1993,8 @@ impl<'a> Parser<'a> {
     ) -> NodeId {
         let m = Modifiers::EXPORT | Modifiers::DEFAULT;
         let decorators = if self.at(T::At) {
-            self.parse_decorators()
+            let after = self.parse_decorators();
+            self.join_decorators(decorators, after)
         } else {
             decorators
         };

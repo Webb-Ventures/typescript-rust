@@ -604,9 +604,11 @@ impl<'a> Doc<'a> {
             self.insert_statements(doc, hosts, &typedefs);
         }
         if !imports.is_empty() {
+            // Hoisted to the file, before the top-level statement the comment is in.
             let root = self.p.ast.root;
+            let before = self.statement_start_around(root, doc.start);
             for imp in imports {
-                self.inserts.push((root, doc.start, imp));
+                self.inserts.push((root, before, imp));
             }
         }
         // `@this {T}` on an arrow function: TS2730 at the tag name (tsc 7).
@@ -743,6 +745,49 @@ impl<'a> Doc<'a> {
         let text = self.seg_text(span);
         let name = self.p.ast.intern(&text);
         self.p.ast.add(Node::Ident { name }, span)
+    }
+
+    /// The end of the identifier part characters from `i` (possibly `i`).
+    fn ident_part_end(&self, i: u32, end: u32) -> u32 {
+        let Some(s) = self.src.get(i as usize..end as usize) else {
+            return i;
+        };
+        let mut k = 0;
+        while k < s.len() {
+            let (c, len) = match unicode_escape(&s[k..]) {
+                Some(x) => x,
+                None => match s[k..].chars().next() {
+                    Some(c) => (c, c.len_utf8()),
+                    None => break,
+                },
+            };
+            if !is_id_part(c) {
+                break;
+            }
+            k += len;
+        }
+        i + k as u32
+    }
+
+    /// A `@property` name: an identifier, or a string key when the name has a `-`.
+    fn property_key(&mut self, span: Span) -> NodeId {
+        let text = self.seg_text(span);
+        if text.contains('-') {
+            let value = self.p.ast.intern(&text);
+            return self.p.ast.add(Node::StringLit { value }, span);
+        }
+        self.ident(span)
+    }
+
+    /// A parameter name from `@param`: a `-` becomes `_` (`[props-like]` is the parameter
+    /// `props_like`, observed with tsc 7.0.2).
+    fn param_ident(&mut self, span: Span) -> NodeId {
+        let text = self.seg_text(span);
+        if text.contains('-') {
+            let name = self.p.ast.intern(&text.replace('-', "_"));
+            return self.p.ast.add(Node::Ident { name }, span);
+        }
+        self.ident(span)
     }
 
     /// The diagnostics the parser produced since `d0`/`l0`, kept when inside `doc`.
@@ -904,7 +949,12 @@ impl<'a> Doc<'a> {
         }
         let mut segments = Vec::new();
         loop {
-            let e = self.ident_end(i, end)?;
+            let mut e = self.ident_end(i, end)?;
+            // JSDoc names may contain `-` (`@property {T} [data-test-name]`, as tsc's
+            // JSDoc scanner reads identifiers).
+            while e < end && b.get(e as usize) == Some(&b'-') {
+                e = self.ident_part_end(e + 1, end);
+            }
             segments.push(Span::new(i, e));
             i = e;
             if b.get(i as usize) == Some(&b'[') && b.get(i as usize + 1) == Some(&b']') {
@@ -1444,7 +1494,7 @@ impl<'a> Doc<'a> {
         let (types, _) = self.nested_types(&params, true);
         for &k in &tops {
             let seg = params[k].name.segments[0];
-            let pattern = self.ident(seg);
+            let pattern = self.param_ident(seg);
             let ty = types[k];
             let (ty, rest, optional) = self.unwrap_param_type(ty);
             let optional = optional || params[k].name.optional;
@@ -1656,7 +1706,7 @@ impl<'a> Doc<'a> {
                 break;
             }
             let segs = &tags[k].name.segments;
-            let key = self.ident(segs[segs.len() - 1]);
+            let key = self.property_key(segs[segs.len() - 1]);
             let mut ty = types[k];
             let mut optional = tags[k].name.optional;
             if let Some(t) = ty
@@ -2474,10 +2524,31 @@ impl<'a> Doc<'a> {
                     None => (self.p.ast.root, doc.start),
                 }
             }
-            None => (self.owner_at(doc.start), doc.start),
+            None => {
+                // An unattached comment inside a statement that holds no statement list
+                // here (a class body): before that statement.
+                let owner = self.owner_at(doc.start);
+                (owner, self.statement_start_around(owner, doc.start))
+            }
         };
         for &s in stmts {
             self.inserts.push((owner, before, s));
+        }
+    }
+
+    /// The start of the statement of `owner`'s list whose span contains `pos`, else `pos`.
+    fn statement_start_around(&self, owner: NodeId, pos: u32) -> u32 {
+        let ast = &self.p.ast;
+        let list = match *ast.node(owner) {
+            Node::Program { stmts } | Node::Block { stmts } | Node::ModuleBlock { stmts } => stmts,
+            Node::StaticBlock { body } | Node::SwitchCase { body, .. } => body,
+            _ => return pos,
+        };
+        let stmts = ast.list(list);
+        let i = stmts.partition_point(|&s| ast.span(s).end <= pos);
+        match stmts.get(i) {
+            Some(&s) if ast.span(s).start < pos => ast.span(s).start,
+            _ => pos,
         }
     }
 
@@ -2771,6 +2842,45 @@ mod tests {
         let dump = ast.dump();
         assert!(dump.contains("TypeAlias"), "{dump}");
         assert!(dump.contains("PropertySignature"), "{dump}");
+    }
+
+    #[test]
+    fn hyphenated_names_are_whole() {
+        // `[data-test-name]` is one name (a string key), not `data` (jsDocTagsWithHyphen);
+        // a `@callback` parameter's `-` is `_`.
+        let (ast, d) = run(
+            "/**\n * @typedef {Object} P\n * @property {boolean} high-top some text\n */\n\
+             /**\n * @callback C\n * @param {P} [props-like]\n */\nvar x;\n",
+        );
+        assert!(d.is_empty(), "{d:?}");
+        let dump = ast.dump();
+        assert!(
+            dump.contains("StringLit") && dump.contains("\"high-top\""),
+            "{dump}"
+        );
+        assert!(dump.contains("name=\"props_like\""), "{dump}");
+        assert!(!dump.contains("name=\"high\""), "{dump}");
+    }
+
+    #[test]
+    fn typedef_in_a_class_body_is_hoisted_before_the_class() {
+        let (ast, _) = run(
+            "var a;\nclass C {\n  /** @typedef {string} A */\n  ;\n  /** @import { B } from \"./b\" */\n  x = 1;\n}\n",
+        );
+        let Node::Program { stmts } = *ast.node(ast.root) else {
+            panic!("no program");
+        };
+        let kinds: Vec<&str> = ast
+            .list(stmts)
+            .iter()
+            .map(|&s| match ast.node(s) {
+                Node::TypeAlias { .. } => "alias",
+                Node::ImportDecl { .. } => "import",
+                Node::ClassDecl { .. } => "class",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["other", "alias", "import", "class"]);
     }
 
     #[test]

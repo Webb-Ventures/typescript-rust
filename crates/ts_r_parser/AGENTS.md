@@ -41,7 +41,13 @@ let r = ts_r_parser::parse_with(src, SourceKind::Js, opts);
 `ParseOptions { module: true, .. }` parses with the module goal even when the file has no
 `import`/`export` (top-level `await` is always the operator, as espree's `sourceType:
 "module"` and typescript-estree; request from lint). The default (`false`) is tsc's: the
-file's own syntax decides.
+file's own syntax decides. Under it the file is parsed once without the module goal and
+again with it only when an `await` outside functions was read as a name; a simple arrow's
+`await` parameter (`promise.then(await => await)`) does not count, as TypeScript 5 (which
+typescript-estree runs) only reparses statements with an `await` outside functions
+(unicorn/prefer-await; tsc 7's own module reparse still reports TS1109 there).
+`@a export @b class X {}` keeps both decorator groups in source order (tsc's checker
+reports TS8038 at `@b`).
 
 `ParseOptions { assertion_continues: true, .. }` keeps taking tighter operators after
 `a ## b as T` / `satisfies T` (`a < 0 as any ** 2` is `((a < 0) as any) ** 2`), as
@@ -124,6 +130,12 @@ Files:
   `Object`/`object` (or an array of it) has no children: a `@type` after it is the host's. A tag type may be a type predicate
   (`{x is T}`; the checker reports TS1228 outside return types). `@type` on a shorthand
   property is recorded on it.
+  `@param`/`@property` names may contain `-` (tsc's JSDoc scanner reads it as part of the
+  name, jsDocTagsWithHyphen): such a `@property` key is a string literal (`"high-top"`,
+  span without quotes), a `@callback` parameter `props-like` is `props_like`, and a
+  function's `@param a-b` matches no parameter. Aliases and `@import`s from a comment with
+  no host inside a class body (and every `@import`) are inserted before the statement of
+  the enclosing list that holds the comment, not after it.
 - `grammar.rs`: statement grammar errors tsc's checker reports, deferred (jump targets,
   `return`, ambient statements, labelled declarations).
 
@@ -495,7 +507,8 @@ Files:
     attributes, which declaration emit writes as `{ with: {} }` (tsc's recovered node).
 - **Invalid syntax gets tsc's code** even where the tree stays as parsed: TS1209 (`new a?.b()`),
   TS17006/TS17007 (`-a ** b`, `<T>a ** b`). tsc reports these as syntax errors. TS5076
-  (`??` mixed with `||`/`&&`), TS1106 (`for (async of x)`), TS1497 (a decorator that is not an
+  (`??` mixed with `||`/`&&`), TS1106 (`for (async of x)`, not where `await` is an
+  operator, as in an async function), TS1497 (a decorator that is not an
   identifier/member chain, optionally called once, or parenthesised) and TS18007 (`{a, b}`
   in JSX) come from tsc's grammar check, which reports them next to semantic errors. We
   report them here with `grammar_error_at` (they do not fail speculation) so tools treat the
