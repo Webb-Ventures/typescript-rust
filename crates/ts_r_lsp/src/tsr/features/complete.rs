@@ -123,12 +123,19 @@ enum Context {
     String { lit: NodeId },
     /// Inside a comment: only `/// <reference path="|"` offers anything.
     Reference,
+    /// A name being declared that may start with a keyword (a constructor parameter).
+    Keywords(&'static [&'static str]),
     /// Nothing.
     None,
 }
 
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// Where the identifier being typed at `offset` starts.
+fn ws_of(c: &Checker<'_>, file: FileId, offset: u32) -> u32 {
+    word_before(&c.file(file).text, offset).0
 }
 
 /// The identifier prefix being typed: `(start, text)`.
@@ -248,6 +255,13 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     if super::class_items::in_body(c, file, word_node, ws) {
         return (Context::None, prefix);
     }
+    // A name being written (`var |`, `function f(|`, `import * as |`): nothing, or keywords.
+    match super::definitions::definition_spot(c, file, word_node, ws, ws < offset) {
+        Some(super::definitions::Spot::Nothing) => return (Context::None, prefix),
+        Some(super::definitions::Spot::Keywords(k)) => return (Context::Keywords(k), prefix),
+        None => {}
+    }
+    let anchor = scope_anchor(c, file, offset, ws, anchor);
     let parent = c.file(file).parents().parent(anchor);
     // A name being declared (`var a|`, `function f|`, `catch (e|`) gets no list.
     if let Some(p) = parent
@@ -275,6 +289,136 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     )
 }
 
+/// The node whose scope an empty word at `offset` completes from. After a closing `}`, `)`,
+/// `;` or `]` it is the innermost node that holds the position strictly (`f() {}|` is outside
+/// `f`); after anything else, the node the token before ends (`(p) => |` at the end of the
+/// file is in the arrow function, though the parser's placeholder body has no width).
+fn scope_anchor(c: &Checker<'_>, file: FileId, offset: u32, ws: u32, anchor: NodeId) -> NodeId {
+    if ws < offset {
+        return anchor;
+    }
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let parents = c.file(file).parents();
+    let Some((at, tok)) = super::position::token_before(ast, text, ws) else {
+        return anchor;
+    };
+    if matches!(tok, "}" | ")" | ";" | "]") {
+        let mut n = anchor;
+        for _ in 0..10_000 {
+            if n == ast.root || ast.span(n).end > offset {
+                break;
+            }
+            match parents.parent(n) {
+                Some(p) => n = p,
+                None => break,
+            }
+        }
+        return n;
+    }
+    let Some(deeper) = node_at(ast, at + tok.len() as u32) else {
+        return anchor;
+    };
+    // Only a node inside the anchor (the anchor is where the cursor is, at least), and only
+    // when a scope opens between the two (`public d = |` stays in the class body).
+    let b = c.bound(file);
+    let mut cur = Some(deeper);
+    let mut scoped = false;
+    for _ in 0..10_000 {
+        let Some(n) = cur else { break };
+        if n == anchor {
+            return if scoped { deeper } else { anchor };
+        }
+        scoped |= b.scope_of(n).is_some();
+        cur = parents.parent(n);
+    }
+    anchor
+}
+
+/// The node the token before an empty word ends (the word's own node otherwise).
+fn token_node(c: &Checker<'_>, file: FileId, offset: u32, anchor: NodeId) -> NodeId {
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let (ws, _) = word_before(text, offset);
+    if ws < offset {
+        return anchor;
+    }
+    super::position::token_before(ast, text, ws)
+        .and_then(|(at, tok)| node_at(ast, at + tok.len() as u32))
+        .unwrap_or(anchor)
+}
+
+/// Names of the parameters not yet declared at `l`: inside a parameter's type or default,
+/// that parameter's and the later ones' (`f(a, b = |, c)` offers `a` only).
+fn later_params(c: &Checker<'_>, l: Loc) -> HashSet<String> {
+    let ast = c.ast(l.file);
+    let parents = c.file(l.file).parents();
+    let mut out = HashSet::new();
+    let mut child = None;
+    let mut cur = Some(l.node);
+    for _ in 0..10_000 {
+        let Some(n) = cur else { break };
+        match *ast.node(n) {
+            Node::Param { pattern, .. } if Some(pattern) != child => {
+                let Some(func) = parents.parent(n) else { break };
+                let params = match *ast.node(func) {
+                    Node::FunctionDecl { params, .. }
+                    | Node::FunctionExpr { params, .. }
+                    | Node::Arrow { params, .. } => params,
+                    _ => break,
+                };
+                let list = ast.list(params);
+                if let Some(i) = list.iter().position(|&p| p == n) {
+                    for &p in &list[i..] {
+                        if let Node::Param { pattern, .. } = *ast.node(p) {
+                            binding_names(ast, pattern, &mut out, 0);
+                        }
+                    }
+                }
+                break;
+            }
+            Node::FunctionDecl { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::ClassDecl { .. }
+            | Node::ClassExpr { .. }
+            | Node::Block { .. } => break,
+            _ => {}
+        }
+        child = Some(n);
+        cur = parents.parent(n);
+    }
+    out
+}
+
+/// The names a binding pattern declares.
+fn binding_names(ast: &Ast, n: NodeId, out: &mut HashSet<String>, depth: u32) {
+    if depth > 64 {
+        return;
+    }
+    match *ast.node(n) {
+        Node::Ident { name } => {
+            out.insert(ast.atom(name).to_string());
+        }
+        Node::ObjectPattern { props } => {
+            for &p in ast.list(props) {
+                binding_names(ast, p, out, depth + 1);
+            }
+        }
+        Node::ArrayPattern { elements } => {
+            for &p in ast.list(elements) {
+                binding_names(ast, p, out, depth + 1);
+            }
+        }
+        Node::BindingProperty { key, value, .. } => {
+            binding_names(ast, value.unwrap_or(key), out, depth + 1);
+        }
+        Node::AssignPattern { left, .. } => binding_names(ast, left, out, depth + 1),
+        Node::Rest { arg } => binding_names(ast, arg, out, depth + 1),
+        _ => {}
+    }
+}
+
 /// Whether `name` is the name a declaration `parent` introduces.
 fn declares(parent: &Node, name: NodeId) -> bool {
     match *parent {
@@ -282,7 +426,6 @@ fn declares(parent: &Node, name: NodeId) -> bool {
         | Node::Interface { name: n, .. }
         | Node::TypeAlias { name: n, .. }
         | Node::Enum { name: n, .. }
-        | Node::Module { name: n, .. }
         | Node::TypeParam { name: n, .. }
         | Node::Param { pattern: n, .. } => n == name,
         Node::FunctionDecl { name: n, .. }
@@ -360,6 +503,11 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let mut incomplete = false;
     match ctx {
         Context::None => {}
+        Context::Keywords(words) => {
+            for k in words {
+                items.push(json!({"label": k, "kind": 14, "sortText": SORT_KEYWORD}));
+            }
+        }
         Context::String { lit } => {
             let template = super::strings::is_template(c.ast(cx.file), lit);
             let found = super::strings::string_items(cx, ck, lit, offset).unwrap_or_default();
@@ -387,6 +535,25 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             }
         }
         Context::ClassMember { slot } => {
+            // A type literal in a type argument: what the argument is expected to have.
+            if !slot.is_class
+                && let Some(found) =
+                    super::expected::type_literal_items(ck, cx.file, slot.container)
+            {
+                for (name, s) in found {
+                    let optional = is_optional(c, s);
+                    let mut item = json!({
+                        "label": name,
+                        "kind": item_kind(c, s),
+                        "sortText": if optional { SORT_OPTIONAL } else { SORT_MEMBER },
+                    });
+                    if optional {
+                        mark_optional(&mut item, &name);
+                    }
+                    items.push(item);
+                }
+                return json!({"isIncomplete": false, "items": items});
+            }
             for (name, s) in super::class_items::inherited_items(ck, cx.file, &slot, offset) {
                 if !is_identifier_name(&name) {
                     continue;
@@ -411,8 +578,22 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             }
         }
         Context::Member { obj, qualified } => {
+            let text = c.file(cx.file).text.as_str();
+            // After `?.` private names are not offered (`a?.#x` is not written).
+            let question_dot = {
+                let b = text.as_bytes();
+                let mut d = word_before(text, offset).0 as usize;
+                while d > 0 && b[d - 1].is_ascii_whitespace() {
+                    d -= 1;
+                }
+                d >= 2 && b[d - 2] == b'?'
+            };
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
-                if !is_identifier_name(&name) && !is_private_name(&name) {
+                let plain = is_identifier_name(&name) || is_private_name(&name);
+                if !plain && (qualified || name.is_empty()) {
+                    continue;
+                }
+                if question_dot && is_private_name(&name) {
                     continue;
                 }
                 let mut item = json!({
@@ -421,7 +602,26 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                     "sortText": SORT_MEMBER,
                     "data": data("m", &name),
                 });
-                if is_optional(c, s) {
+                if !plain {
+                    // `o.|` for a member that is not an identifier becomes `o["a b"]`: the
+                    // edit replaces the dot (tsc 7 does the same).
+                    let (ws, _) = word_before(text, offset);
+                    let b = text.as_bytes();
+                    let mut dot = ws as usize;
+                    while dot > 0 && b[dot - 1].is_ascii_whitespace() {
+                        dot -= 1;
+                    }
+                    let dot = dot.saturating_sub(1) as u32;
+                    let quoted = serde_json::to_string(&name).unwrap_or_default();
+                    let lines = LspLines::new(text);
+                    let insert = format!("[{quoted}]");
+                    item["filterText"] = json!(format!(".{name}"));
+                    item["insertText"] = json!(insert);
+                    item["textEdit"] = json!({
+                        "range": lines.range(text, dot, offset),
+                        "newText": insert,
+                    });
+                } else if is_optional(c, s) {
                     mark_optional(&mut item, &name);
                 }
                 items.push(item);
@@ -494,9 +694,18 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 meaning::ALL
             };
             let mut seen: HashSet<String> = HashSet::new();
+            // Literal values the position expects (`"a"`, `2`).
+            for label in
+                super::expected::literal_labels(ck, cx.file, anchor, ws_of(c, cx.file, offset))
+            {
+                if seen.insert(label.clone()) {
+                    items.push(json!({"label": label, "kind": 21, "sortText": SORT_LOCAL}));
+                }
+            }
             let own = own_initializer(c, Loc::new(cx.file, anchor), offset, !prefix.is_empty());
+            let later = later_params(c, Loc::new(cx.file, token_node(c, cx.file, offset, anchor)));
             for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
-                if !has_meaning_through_alias(c, s, want) {
+                if !has_meaning_through_alias(c, s, want) || later.contains(&name) {
                     continue;
                 }
                 if !seen.insert(name.clone()) || own.as_deref() == Some(name.as_str()) {
@@ -668,6 +877,8 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
         return Vec::new();
     }
     let t = ck.check_expr(obj);
+    // `o.|` and `o?.|` on a possibly undefined value list the defined value's members.
+    let t = ck.non_nullable(t);
     let a = ck.apparent_type(t);
     let mut props = ck.properties_of(a);
     // Callable and constructable values also have `Function`'s members (`apply`, `bind`,
@@ -1301,6 +1512,11 @@ impl ImportStyle {
             }
         }
         st
+    }
+
+    /// The quote the file's imports use (`"` when it has none).
+    pub(super) fn quote_char(&self) -> char {
+        self.quote
     }
 
     /// Relative specifier from `from` (a file) to `to`.

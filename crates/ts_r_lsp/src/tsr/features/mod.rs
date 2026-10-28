@@ -5,6 +5,9 @@
 pub mod actions;
 mod class_items;
 mod complete;
+mod constructor_refs;
+mod definitions;
+mod expected;
 mod hover;
 mod jsx_items;
 mod keywords;
@@ -15,7 +18,9 @@ mod outline;
 mod position;
 mod quick_info;
 mod signature;
+mod signature_site;
 mod strings;
+mod type_args;
 
 use super::convert::LspLines;
 use crate::jsonrpc::codes;

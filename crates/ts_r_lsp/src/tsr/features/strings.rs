@@ -275,54 +275,14 @@ fn type_position_items(ck: &mut Ck<'_, '_>, parent: Loc, child: NodeId) -> Optio
             items.retain(|(n, _)| !used.contains(n));
             Some(items)
         }
-        Node::TypeArgs { args } => {
-            let i = ast.list(args).iter().position(|&a| a == child)?;
-            let owner = c.parent(parent)?;
-            let params = match *ast.node(owner.node) {
-                Node::TypeRef { name, .. } => {
-                    let s = super::locate::entity_symbol(ck, Loc::new(parent.file, name))?;
-                    let s = c.resolve_alias(s).unwrap_or(s);
-                    ck.local_type_params(s)
-                }
-                Node::ExprWithTypeArgs { expr, .. } => {
-                    let s = super::locate::entity_symbol(ck, Loc::new(parent.file, expr))?;
-                    let s = c.resolve_alias(s).unwrap_or(s);
-                    ck.local_type_params(s)
-                }
-                Node::Call { callee, .. } | Node::New { callee, .. } => {
-                    let kind = if matches!(ast.node(owner.node), Node::New { .. }) {
-                        SigKind::Construct
-                    } else {
-                        SigKind::Call
-                    };
-                    let t = ck.check_expr(Loc::new(parent.file, callee));
-                    let sigs = ck.signatures_of(t, kind);
-                    let mut out = Vec::new();
-                    for s in sigs {
-                        let tps = ck
-                            .store()
-                            .list_items(ck.store().sig(s).type_params)
-                            .to_vec();
-                        if let Some(&tp) = tps.get(i) {
-                            out.push(tp);
-                        }
-                    }
-                    let mut items = Vec::new();
-                    for tp in out {
-                        if let Some(k) = ck.type_param_constraint(tp) {
-                            for it in literal_items(ck, k, &[]) {
-                                if !items.contains(&it) {
-                                    items.push(it);
-                                }
-                            }
-                        }
-                    }
-                    return Some(items);
-                }
-                _ => return None,
-            };
-            let tp = *params.get(i)?;
-            let k = ck.type_param_constraint(tp)?;
+        // `G<"|">`: the type parameter's constraint (`tsc: tsc/internal/checker/services.go`).
+        Node::TypeArgs { .. } => {
+            let k = super::type_args::argument_constraint(ck, Loc::new(parent.file, child))?;
+            Some(literal_items(ck, k, &[]))
+        }
+        // `G<{ x: "|" }>`: what the property is expected to be.
+        Node::PropertySignature { type_ann, .. } if type_ann == Some(child) => {
+            let k = super::type_args::expected_type(ck, parent)?;
             Some(literal_items(ck, k, &[]))
         }
         _ => None,

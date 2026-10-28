@@ -338,6 +338,28 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   the cursor is past the initializer's end with nothing typed, or inside a JSX tag; blocks,
   arrows and patterns end the search. A CommonJS JavaScript file (one that refers to
   `require`, `module` or `exports` freely) has `module` and `exports` as locals.
+- Expected types (`type_args.rs`, `expected.rs`): a type literal in a type argument
+  (directly, as a property type below one, or in a union or intersection there) offers the
+  members of the type parameter's constraint not yet declared (for calls, the union of the
+  constraints across the callee's signatures, uninstantiated). Literal entries (`"a"`, `2`,
+  `3n`, never enum members) come from the expected type: a property's or tuple element's
+  expected type in such a literal; in an expression, the contextual type (every signature's
+  parameter at a call argument, the declared type after `=`, the other side of `===`, the
+  switched value after `case`). Strings take the quote of the file's first import.
+- Definition locations (`definitions.rs`): where a new name is being written (`var |`,
+  `class |`, `function f(|`, a declaration's `<|`, `catch (|`, an enum body after `{`/`,`,
+  `[|` of an array pattern, `import |`, `{ a as | }`) nothing is offered; a constructor's
+  parameter list offers only the parameter-property modifiers. At the start of an existing
+  name the token before it decides, and a JSDoc comment in between lifts the block.
+- Scope anchor (`complete.rs`): an empty word completes from the node the token before it
+  ends (`(p) => |` at the end of the file is inside the arrow), except after `}`/`)`/`;`/`]`
+  where it is the innermost node holding the position strictly (`f() {}|` is outside `f`);
+  a body the parser closed at the end of the file holds the position after it.
+- Parameters: inside a parameter's type or default the parameter itself and the later ones
+  are not offered (`f(a, b = |, c)` offers `a`).
+- Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
+  a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
+  dot; after `?.` private names are not offered.
 
 ## Quick info (`tsr/features/quick_info.rs`)
 
@@ -431,6 +453,37 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   the name.
 - `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
   (`a|()`), as tsserver's touching-name lookup does.
+- **Constructor references** (`constructor_refs.rs`): find-all-references on a
+  `constructor` keyword (or a modifier before it) lists the class's constructor keywords as
+  declarations, then the callee name of each `new` of a class the constructor builds (its
+  own class and, followed through any depth, derived classes that declare no constructor;
+  through imports and qualified names, not through a variable holding the class), `this`
+  of `new this()` in those classes' static members, and `super` of `super(...)` calls made
+  by constructors (arrows in between allowed, not other functions or methods) of classes
+  extending one of them. `implements` does not count.
+
+## Signature help (`tsr/features/signature_site.rs`, `signature.rs`)
+
+Rules from tsc 7's fourslash answers and `tsc: tsc/internal/ls/signaturehelp.go`, the
+module docs give them in full:
+
+- Sites: arguments or type arguments of a call, `new`, tagged template (the template is
+  argument 0, each substitution the next) or `super(...)`; a `<` list that did not parse as
+  type arguments (`f<|`, `let x: C<|`, read backwards over balanced brackets, the `<` after a
+  name that is not being declared); a function's or parenthesized expression's parameter
+  list whose contextual type has a call signature. The innermost opener wins; an unclosed
+  list retries from the node before the cursor.
+- Index: top-level commas before the cursor (a spread tuple counts its fixed elements);
+  count: commas plus one, zero for an empty list.
+- Candidates: the callee's signatures; the resolved one (only when it really applies:
+  arity, assignable arguments, type argument count) replaces its declaration and is
+  active. Otherwise the first candidate with a rest parameter or enough parameters, else the
+  longest, instantiated from written type arguments (default, constraint, `unknown`; `any`
+  in JS) or from inference over the written arguments.
+- Rest tuples expand into parameters (a union of tuples into one signature each); unnamed
+  elements take `name_i`, duplicates `_1`, `_2`. Labels print in quick-info mode, string
+  literal annotations as written, `?` parameters without the added `undefined`.
+- A private or protected constructor used outside its class gets no help.
 
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
@@ -843,9 +896,10 @@ features stay on ts-r (hover p50 0.12 ms).
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
   have no symbol (the checker does not type JSX yet); references do not follow renaming
   imports (`import { a as b }`: uses of `b`) or members inherited across classes.
-  Completions: no bracket-notation members (`o["a-b"]`), no
-  accessibility filtering after `.` (private members are listed), auto-imports only from
-  the project's own (non-`node_modules`) modules and never `default` exports.
+  Completions: no accessibility filtering after `.` (private members are listed),
+  auto-imports only from the project's own (non-`node_modules`) modules and never
+  `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no
+  JSDoc `@overload`.
 - Input watching is per directory and add-only (directories stay watched after their files
   leave the program); a project inside a directory named `target` is not watched;
   `node_modules` changes (installs) need "Reload Project" or a restart.

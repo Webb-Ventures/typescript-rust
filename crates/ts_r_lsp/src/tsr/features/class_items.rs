@@ -211,7 +211,12 @@ fn body_position(
     }
     let open = text[head_end as usize..].find('{')? as u32 + head_end;
     let end = ast.span(container).end;
-    if word <= open || word >= end {
+    // A body the parser closed at the end of the file without its `}` (`Bar<{|`) holds the
+    // position right after it too.
+    let unclosed = text[end as usize..].trim().is_empty()
+        && !(end > open + 1 && text.as_bytes()[end as usize - 1] == b'}');
+    let trailing = text.get(end as usize..word as usize).unwrap_or("x");
+    if word <= open || (word >= end && !(unclosed && trailing.trim().is_empty())) {
         return None;
     }
     // No other member holds the word.
@@ -503,7 +508,7 @@ pub fn member_visible(ck: &mut Ck<'_, '_>, s: SymId, name: &str, at: Loc) -> boo
     let decls = c.decls(s);
     for d in decls.iter() {
         let m = c.ast(d.file).node(d.node).modifiers();
-        let private = m.contains(Modifiers::PRIVATE) || name.starts_with('#');
+        let private = m.contains(Modifiers::PRIVATE) || (name.starts_with('#') && name.len() > 1);
         let protected = m.contains(Modifiers::PROTECTED);
         if !private && !protected {
             continue;

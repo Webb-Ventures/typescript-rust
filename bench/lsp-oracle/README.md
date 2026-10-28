@@ -42,22 +42,23 @@ every skip reason.
 
 ## Results
 
-7068c74 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**1562 of 2540 compared tests pass (61.5%)**; 6555 of 9030 queries agree.
-3779 of the 6319 test files are skipped (3698 verify no compared feature, 131 get no answer
-from either server). Up from 1309 of 2541 at eb039ec: 254 tests fixed (references, rename,
-highlights, definition and type definition), none lost; one test drops out of the compared
-set because tsc did not answer in time (`findAllRefsDefaultImport`, which passes when run
-again).
+1960c24 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**1706 of 2517 compared tests pass (67.8%)**; 6940 of 8972 queries agree.
+3802 of the 6319 test files are skipped (3698 verify no compared feature, 154 get no answer
+from either server). Up from 1562 of 2540 at 7068c74: 148 tests fixed (completion,
+signature help, references), none lost. 23 tests leave the compared set: completion now
+answers nothing where tsc answers nothing (names being declared), and two tests drop out
+because tsc did not answer in time (`completionForStringLiteralNonrelativeImport16`,
+`pathCompletionsPackageJsonImportsWildcard8`, which pass when run again).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
 | hover | 304 | 215 | 19 | 2020 / 2514 |
-| completion | 712 | 338 | 83 | 2187 / 2855 |
-| references | 155 | 188 | 14 | 842 / 1440 |
+| completion | 789 | 239 | 105 | 2325 / 2797 |
+| references | 164 | 180 | 13 | 858 / 1442 |
 | rename | 106 | 70 | 13 | 318 / 549 |
 | definition | 96 | 71 | 25 | 376 / 528 |
-| signatureHelp | 78 | 74 | 24 | 406 / 658 |
+| signatureHelp | 136 | 14 | 26 | 637 / 656 |
 | highlights | 98 | 19 | 20 | 354 / 431 |
 | typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
@@ -85,7 +86,7 @@ Remaining failures by cause (example tests in parentheses):
 - **References and rename (ts_r_lsp)**: default exports (`findAllRefsForDefaultExport*`),
   members inherited or overridden across classes and interfaces
   (`referencesForInheritedProperties*`, `referencesForOverrides`), merged declarations,
-  constructors (`findAllRefsOfConstructor2`), JSDoc `@link` and `@import`, import types
+  constructors reached through export specifiers (`findAllRefsOfConstructor_multipleFiles`), JSDoc `@link` and `@import`, import types
   (`findAllRefs_importType_named`), re-exports, CommonJS `require`, dynamic `import()`, JSX
   (`tsxFindAllReferences*`), string literal types (`renameStringLiteralTypes2`), private
   names, the extra edits tsc makes when renaming a default import.
@@ -94,21 +95,18 @@ Remaining failures by cause (example tests in parentheses):
   literal properties, constructors, meta properties (`goToDefinitionMetaProperty`), a
   `yield` and a `case` edge (`goToDefinitionYield3`, `goToDefinitionSwitchCase6`), JSX.
 - **Completion (ts_r_lsp)**: JSX in tags the parser closes early
-  (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers (`completionsThisPropertiesInPropertyDeclaration2`) and
-  contextual `this` (`memberListOnContextualThis`), type literals in type arguments
-  (`completionListInTypeLiteralInTypeParameter*`), names
-  being declared where tsc gives no list (`completionListAtIdentifierDefinitionLocations_*`),
-  scope lists in unclosed functions and parameter lists (`completionListInUnclosedFunction*`),
-  `import |` statement and import-type completions (`importStatementCompletions*`,
-  `importTypeCompletions*`), object literals in overloaded or generic calls
-  (`completionListInObjectLiteral7`), protected and private members after `.`, keyword sets
-  by position.
-- **Signature help (ts_r_lsp)**: type-argument help (`f<|`, `signatureHelpTypeArguments`),
-  `super(` calls (`signatureHelpForSuperCalls1`), JSX (`tsxSignatureHelp1`), rest tuples
-  expanded into parameters (`signatureHelpExpandedRestTuples`), contextual signatures for a
-  callback argument (`signatureHelp_contextual`), the active overload after an argument that
-  rules one out (`signatureHelpOnOverloadsDifferentArity`), generic overloads other than the
-  resolved one shown uninstantiated.
+  (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers
+  (`completionsThisPropertiesInPropertyDeclaration2`) and contextual `this`
+  (`memberListOnContextualThis`), `import |` statement and import-type completions
+  (`importStatementCompletions*`, `importTypeCompletions*`), object literals in overloaded
+  or generic calls (`completionListInObjectLiteral7`), protected and private members after
+  `.`, keyword sets by position, auto-import details.
+- **Signature help (ts_r_lsp)**: JSX (`tsxSignatureHelp1`, `signatureHelpJSX`), `... N
+  more ...` truncation (`quickInfoCanBeTruncated`), JSDoc `@overload`
+  (`quickInfoJsDocTags13`), JavaScript fallbacks (`signatureHelpJSMissingPropertyAccess`),
+  contextual generic callbacks (`callback(y3: T)`), the overload order of string literal
+  overloads (`overloadOnConst`), argument names in calls of unions of dissimilar signatures
+  (`calledUnionsOfDissimilarTyeshaveGoodDisplay`), the file order of a multi-file test.
 - **Type definition (ts_r_lsp)**: `import.meta` (`goToTypeDefinitionImportMeta`) and JSDoc
   `@typedef` (`goToTypeDefinition_typedef`, `jsDocServices`).
 
@@ -121,3 +119,4 @@ Remaining failures by cause (example tests in parentheses):
 | f591d51 | 2026-10-26 | 1048 | 2543 | 41.2% | Completions in string literals and module specifiers (package `exports`/`imports`/`typesVersions`, `paths`), object literal and binding pattern properties, `name?` labels for optional members, own-initializer and CommonJS scope rules |
 | 88dfde6 | 2026-10-26 | 1308 | 2541 | 51.5% | tsc 7 quick info in hover (a line per meaning and overload, resolved signatures at calls, owners with type arguments, `(alias)` lines, multi-line object types); completions in class, interface and type literal bodies, `this` members, JSX attributes, closing tags and intrinsic tags |
 | 7068c74 | 2026-10-26 | 1562 | 2540 | 61.5% | tsc 7 quick-info printing mode in hover; references, rename and highlights on declaration keywords and modifiers, `get`/`set`, through destructuring targets, `for`-`of` bindings, contextually typed object literals and string or numeric literal keys; keyword highlights (`switch`/`case`/`break`, `if`/`else`, `try`, `async`/`await`, `return`, modifiers); definition at `override` and keywords; tsc's type definition rule (declaration names, modules, enum members) |
+| 1960c24 | 2026-10-26 | 1706 | 2517 | 67.8% | Completions from expected types (type literals in type arguments offer the constraint's members, string, number and bigint literal entries), no list where a name is being declared, the scope of unclosed bodies, members of possibly undefined values and non-identifier members; signature help at type argument lists, `super(`, contextually typed parameter lists and tagged templates, the resolved or best candidate instantiated, rest tuples expanded; references on constructors |
