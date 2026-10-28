@@ -584,6 +584,65 @@ fn semantic_checks_run_through_syntax_errors() {
     }
 }
 
+/// Rules that depend on what the parser recovered (expectations from tsc 7.0.2's
+/// baselines, which report semantic errors through syntax errors).
+#[test]
+fn checks_after_recovered_syntax() {
+    let loose = "\"strict\": false, \"target\": \"es2022\"";
+    let cases: [(&str, &[&str]); 4] = [
+        // TS2410 only in a file that parsed cleanly (missingCloseParenStatements).
+        (
+            "var x = {};\nwith (x) { }\nlet y = ;\n",
+            &[
+                "2:1 TS1101: 'with' statements are not allowed in strict mode.",
+                "3:9 TS1109: Expression expected.",
+            ],
+        ),
+        // Nothing under a `return` outside a function is checked, not even annotations
+        // (multiLinePropertyAccessAndArrowFunctionIndent1).
+        (
+            "return this.edit(role)\n    .then((role: Role) => role);\n",
+            &["1:1 TS1108: A 'return' statement can only be used within a function body."],
+        ),
+        // A skipped token between declarations ends an overload group, and a body the
+        // parser made up is none (overloadConsecutiveness).
+        (
+            "function f1(), function f1();\nfunction f2(), function f2() {}\nfunction f3() {}, function f3();\n",
+            &[
+                "1:10 TS2391: Function implementation is missing or not immediately following the declaration.",
+                "1:14 TS1144: '{' or ';' expected.",
+                "1:25 TS2391: Function implementation is missing or not immediately following the declaration.",
+                "2:10 TS2391: Function implementation is missing or not immediately following the declaration.",
+                "2:14 TS1144: '{' or ';' expected.",
+                "3:10 TS2391: Function implementation is missing or not immediately following the declaration.",
+                "3:17 TS1128: Declaration or statement expected.",
+                "3:28 TS2391: Function implementation is missing or not immediately following the declaration.",
+            ],
+        ),
+        // No missing-return errors for bodies the parser made up (typeGuardFunctionErrors,
+        // objectLiteralShorthandPropertiesErrorFromNotUsingIdentifier); `!T` is reported
+        // from the `!` (parseInvalidNonNullableTypes); a second `implements` clause is
+        // not checked (parserClassDeclaration2).
+        (
+            "class A {}\nfunction g(x): x is x is A {\n    return true;\n}\nvar y = { get e, };\nfunction f8(): !string {}\nclass C implements A implements B {}\n",
+            &[
+                "2:21 TS2749: 'x' refers to a value, but is being used as a type here. Did you mean 'typeof x'?",
+                "2:23 TS1144: '{' or ';' expected.",
+                "2:23 TS2304: Cannot find name 'is'.",
+                "2:26 TS1434: Unexpected keyword or identifier.",
+                "5:16 TS1005: '(' expected.",
+                "6:16 TS2355: A function whose declared type is neither 'undefined', 'void', nor 'any' must return a value.",
+            ],
+        ),
+    ];
+    for (src, want) in cases {
+        let Some(out) = check_through("a.ts", loose, src) else {
+            return;
+        };
+        assert_eq!(out, want, "{src:?}");
+    }
+}
+
 /// A body read as a destructuring pattern (`( { return 'thing'; }`) renames properties to
 /// names the parser had to invent: TS2842 prints them as `(Missing)` (tsc 7.0.2,
 /// parametersSyntaxErrorNoCrash2).

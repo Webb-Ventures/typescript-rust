@@ -5,12 +5,13 @@ use rustc_hash::FxHashMap;
 use ts_r_ast::{HeritageKind, MethodKind, Modifiers, Node, NodeId};
 use ts_r_binder::{SymbolFlags, meaning};
 use ts_r_types::{
-    IndexInfo, MapperId, ObjectFlags, ObjectKind, ResolvedMembers, SymId, TupleElement, TypeFlags,
-    TypeId, TypeTraits,
+    IndexInfo, MapperId, ObjectFlags, ObjectKind, ResolvedMembers, SigId, SymId, TupleElement,
+    TypeFlags, TypeId, TypeTraits,
 };
 
 use crate::checker::{Ck, GlobalType, Loc, Resolving};
 use crate::declared::anon;
+use crate::diag::{Chain, dg};
 use crate::nodes::{fn_parts, key_text, skip_parens};
 use crate::symbols::{SynthSym, check_flags};
 
@@ -76,6 +77,15 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let t = self.compute_type_of_symbol(s);
         if !self.pop_resolution() {
+            // A variable whose initializer needs its own type is `any` from then on
+            // (TS7022), not the type a later resolution would read from the initializer's
+            // cached type (tsc: getTypeOfVariableOrParameterOrProperty).
+            if owner.is_none()
+                && self.is_circular_variable(s)
+                && let Some(l) = self.c.sym_links(s)
+            {
+                let _ = l.ty.set(TypeId::ANY);
+            }
             return TypeId::ANY;
         }
         if let Some(f) = owner {
@@ -131,8 +141,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Under the Node module kinds, the type of alias `s` of JSON module `t` when it is
-    /// not the module's own: a default import or import-equals is the value, and a
-    /// CommonJS file's `import * as ns` sees the value's properties and `default: value` (observed).
+    /// not the module's own: a default import or import-equals is the value, and so is a
+    /// CommonJS file's `import * as ns`, except that a value with its own `default`
+    /// property gets the value's properties and `default: value` (tsc adds the synthetic
+    /// default to a value with signatures or a `default` property, `resolveESModuleSymbol`;
+    /// nodeModulesJson, nodeModulesResolveJsonModule).
     pub(crate) fn json_import_type(&mut self, s: SymId, t: SymId) -> Option<TypeId> {
         if !self.node_module_kind() {
             return None;
@@ -156,6 +169,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         match kind {
             Some(Node::ImportDefaultSpecifier { .. } | Node::ImportEquals { .. }) => Some(v),
             Some(Node::ImportNamespaceSpecifier { .. }) if !self.c.file(d.file).esm_format => {
+                if self.property_of_type(v, "default").is_none() {
+                    return Some(v);
+                }
                 let props = self.properties_of(v);
                 Some(self.json_with_default(v, &props))
             }
@@ -1667,6 +1683,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             res = self.awaited_type(res);
             // A `next()` thenable that can't be awaited (`{ then() {} }`) is tsc's TS1320,
             // not a missing async iterator; it iterates nothing.
+            if self.is_invalid_thenable(raw) {
+                notes.invalid_thenable = true;
+                return Some(TypeId::NEVER);
+            }
             if res == TypeId::NEVER
                 || (res == raw
                     && self
@@ -1833,11 +1853,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let tt = self.type_of_symbol(then);
             let sigs = self.signatures_of(tt, crate::members::SigKind::Call);
-            let Some(&sig) = sigs.first() else {
+            if sigs.is_empty() {
                 return cur;
+            }
+            let (candidates, _) = self.then_candidates(cur, &sigs);
+            let Some(&sig) = candidates.first() else {
+                return TypeId::UNRESOLVED;
             };
+            // A `then` without an `onfulfilled` parameter: a thenable that is no valid
+            // promise, with no awaited type (tsc: getPromisedTypeOfPromise, TS1058/TS1320).
             let Some(cb) = self.store().sig(sig).params.first().map(|p| p.ty) else {
-                return cur;
+                return TypeId::UNRESOLVED;
             };
             let cb = self.non_nullable(cb);
             let cbsigs = self.signatures_of(cb, crate::members::SigKind::Call);
@@ -1849,6 +1875,86 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             cur = v;
         }
+    }
+
+    /// Whether `t` (or a member of the union `t`) is a thenable that is no valid promise:
+    /// its `then` is callable, but no signature of it takes an `onfulfilled` callback
+    /// (tsc: getAwaitedTypeNoAlias, isThenableType).
+    pub(crate) fn is_invalid_thenable(&mut self, t: TypeId) -> bool {
+        let members = if self.store().flags(t).contains(TypeFlags::UNION) {
+            self.store().members_of_union(t).to_vec()
+        } else {
+            vec![t]
+        };
+        members.into_iter().any(|m| {
+            let f = self.store().flags(m);
+            if !f.contains(TypeFlags::OBJECT) || f.intersects(TypeFlags::INSTANTIABLE) {
+                return false;
+            }
+            let Some(then) = self.quietly(|ck| ck.property_of_type(m, "then")) else {
+                return false;
+            };
+            let tt = self.type_of_symbol(then);
+            let tt = self.non_nullable(tt);
+            let sigs = self.signatures_of(tt, crate::members::SigKind::Call);
+            if sigs.is_empty() {
+                return false;
+            }
+            let (candidates, _) = self.then_candidates(m, &sigs);
+            candidates.is_empty()
+                || candidates.iter().all(|&s| {
+                    let Some(cb) = self.store().sig(s).params.first().map(|p| p.ty) else {
+                        return true;
+                    };
+                    let cb = self.non_nullable(cb);
+                    !self.store().flags(cb).intersects(TypeFlags::ANY)
+                        && self
+                            .signatures_of(cb, crate::members::SigKind::Call)
+                            .is_empty()
+                })
+        })
+    }
+
+    /// The signatures of `t`'s `then` whose `this` parameter `t` satisfies, and the `this`
+    /// type of one it does not (tsc: getPromisedTypeOfPromise).
+    fn then_candidates(&mut self, t: TypeId, sigs: &[SigId]) -> (Vec<SigId>, Option<TypeId>) {
+        let mut candidates = Vec::with_capacity(sigs.len());
+        let mut failed = None;
+        for &sig in sigs {
+            match self.store().sig(sig).this_type {
+                Some(this) if this != TypeId::VOID && !self.is_subtype(t, this) => {
+                    failed = Some(this);
+                }
+                _ => candidates.push(sig),
+            }
+        }
+        (candidates, failed)
+    }
+
+    /// The `this` type of `t`'s `then` that `t` does not satisfy, when no signature of
+    /// `then` accepts `t` as `this` (the elaboration under TS1320 and TS1058).
+    pub(crate) fn thenable_this_error(&mut self, t: TypeId) -> Option<TypeId> {
+        let then = self.quietly(|ck| ck.property_of_type(t, "then"))?;
+        let tt = self.type_of_symbol(then);
+        let tt = self.non_nullable(tt);
+        let sigs = self.signatures_of(tt, crate::members::SigKind::Call);
+        let (candidates, failed) = self.then_candidates(t, &sigs);
+        if candidates.is_empty() { failed } else { None }
+    }
+
+    /// Reports `info` (TS1320 or TS1058) at `l` for the invalid thenable `t`, elaborated with
+    /// TS2684 when its `then` rejects `t` as `this`.
+    pub(crate) fn report_invalid_thenable(&mut self, l: Loc, info: dg::DiagnosticInfo, t: TypeId) {
+        let mut chain = Chain::new();
+        chain.push_back(info, &[]);
+        if let Some(this) = self.thenable_this_error(t) {
+            let (ts, ths) = (self.type_to_string(t), self.type_to_string(this));
+            chain.push_back(
+                dg::THE_THIS_CONTEXT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_METHOD_S_THIS_OF_TYPE_1_2684,
+                &[&ts, &ths],
+            );
+        }
+        self.error_chain(l, &chain);
     }
 
     /// Promise<T> (or unresolved without lib).
@@ -2680,4 +2786,6 @@ pub(crate) struct IterNotes {
     pub no_value: bool,
     /// A `return` or `throw` member that is not a method (TS2767).
     pub not_method: Option<&'static str>,
+    /// An async iterator's `next()` returns a thenable that is no valid promise (TS1320).
+    pub invalid_thenable: bool,
 }

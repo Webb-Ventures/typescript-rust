@@ -13,6 +13,10 @@ use rustc_hash::FxHashMap;
 use ts_r_ast::{Node, NodeId};
 use ts_r_binder::program::{ModuleTarget, Program, SymbolRef};
 use ts_r_binder::{Name, SymbolFacts, SymbolFlags, SymbolId, TableId, meaning};
+
+/// The flags a parameter's symbol has as a parameter.
+const PARAMETER_FLAGS: SymbolFlags =
+    SymbolFlags::PARAMETER.union(SymbolFlags::FUNCTION_SCOPED_VARIABLE);
 use ts_r_diagnostics::FileId;
 use ts_r_types::{MapperId, StrId, SymId, TypeId, index_of, level_of};
 
@@ -1321,14 +1325,20 @@ impl<'a> Checker<'a> {
                 let sc = b.scopes[scope.0 as usize];
                 // Parameters and the return type do not see the body's own declarations
                 // (as in the binder's reference resolution).
-                let outside_body = sc.kind == ts_r_binder::ScopeKind::Function
-                    && prev != node
-                    && crate::nodes::fn_parts(ast, node).is_some_and(|p| p.body != Some(prev));
+                let parts = (sc.kind == ts_r_binder::ScopeKind::Function && prev != node)
+                    .then(|| crate::nodes::fn_parts(ast, node))
+                    .flatten();
+                let outside_body = parts.is_some_and(|p| p.body != Some(prev));
+                // Nor do the type parameters see the parameters (`<T extends typeof a>(a: T)`).
+                let in_type_params = parts.is_some_and(|p| p.type_params == Some(prev));
                 if let Some(s) = b.lookup(sc.locals, n) {
                     let id = self.sym(l.file, s);
                     let f = self.sym_flags(id);
                     if symbol_meaning(f) & meaning != 0
                         && !(outside_body && ts_r_binder::is_body_local(f))
+                        && !(in_type_params
+                            && f.intersects(SymbolFlags::PARAMETER)
+                            && symbol_meaning(f.without(PARAMETER_FLAGS)) & meaning == 0)
                         && !self.alias_lacks_meaning(id, meaning)
                     {
                         return Some(id);

@@ -1548,6 +1548,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
                         && ts_r_checker::program::needs_arbitrary_extensions(
                             &self.paths.abs(&x.path),
                             &abs[i],
+                            &r.spec,
                         ),
                 });
                 if let Some(mode) = r.mode {

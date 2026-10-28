@@ -992,6 +992,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return q;
                 }
                 let shown = &params[params.len() - local.len().min(params.len())..];
+                // The generic `Array`'s own declared type prints as an array (`T[]`).
+                if self.c.is_array_symbol(sym) && shown.len() == 1 {
+                    let el = self.print_postfix_operand(shown[0], depth + 1, stack);
+                    return if self.c.is_readonly_array_symbol(sym) {
+                        format!("readonly {el}[]")
+                    } else {
+                        format!("{el}[]")
+                    };
+                }
                 let parts: Vec<String> = shown
                     .iter()
                     .map(|&a| self.print_type(a, depth + 1, stack))

@@ -955,14 +955,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.union(&lits)
         };
         let len_name = s.intern_str("length");
+        // `length` is read-only only in a readonly tuple (`t.length = 0` of a `[number]`
+        // is TS2322 against `1`; tsc: createTupleTargetType).
+        let len_flags = if shape.readonly {
+            check_flags::TUPLE | check_flags::READONLY
+        } else {
+            check_flags::TUPLE
+        };
         let lp = self.c.new_synth(
-            SynthSym::new(
-                len_name,
-                SymbolFlags::PROPERTY,
-                check_flags::TUPLE | check_flags::READONLY,
-            )
-            .with_type(len_ty)
-            .with_parent(Some(t)),
+            SynthSym::new(len_name, SymbolFlags::PROPERTY, len_flags)
+                .with_type(len_ty)
+                .with_parent(Some(t)),
         );
         props.push((len_name, lp));
         let elem = self.union(&elem_types);
@@ -1955,7 +1958,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         ) {
             flags |= SigFlags::ABSTRACT;
         }
-        let (params, this_type, mut min_args, has_rest) = self.params_of(l.file, parts.params);
+        let (mut params, this_type, mut min_args, has_rest) = self.params_of(l.file, parts.params);
         // An immediately invoked function: unannotated parameters past the call's written
         // arguments (a spread counts as one) are optional (`((a, b) => {})(1)`).
         if let Some(call) = self.iife_call(l)
@@ -1985,6 +1988,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                 i += 1;
             }
             min_args = min_args.min(last_required as u32);
+            // They print as optional too (`function foo(x: number, y?: undefined)`; tsc:
+            // isOptionalParameter).
+            let fixed = params.len() - usize::from(has_rest);
+            for p in params.iter_mut().take(fixed).skip(min_args as usize) {
+                p.optional = true;
+            }
         }
         // A JavaScript function without parameter types takes any number of arguments.
         if self.is_untyped_js_signature(l) {

@@ -1,0 +1,5 @@
+a.ts(14,5): error TS1320: Type of 'await' operand must either be a valid promise or must not contain a callable 'then' member.
+  The 'this' context of type 'P<number, string>' is not assignable to method's 'this' of type 'P<never, string>'.
+a.ts(22,12): error TS1320: Type of 'await' operand must either be a valid promise or must not contain a callable 'then' member.
+a.ts(24,5): error TS7022: 'x' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+a.ts(25,5): error TS7022: 'c' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.

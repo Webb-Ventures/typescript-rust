@@ -2568,6 +2568,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         )
     }
 
+    /// The element `T` of a single-element variadic tuple `[...T]`, and whether the tuple
+    /// is readonly.
+    fn single_generic_tuple_element(&mut self, t: TypeId) -> Option<(TypeId, bool)> {
+        let st = self.store();
+        let shape = st.tuple_shape_of(t)?;
+        if shape.elements.len() != 1 || shape.elements[0].kind != ts_r_types::TupleElement::VARIADIC
+        {
+            return None;
+        }
+        let readonly = shape.readonly;
+        let e = *self.c.type_args_of_tuple(t).first()?;
+        Some((e, readonly))
+    }
+
     fn structured_related(
         &mut self,
         s: TypeId,
@@ -2593,6 +2607,30 @@ impl<'c, 'a> Ck<'c, 'a> {
             && !self.is_empty_object_type(s)
         {
             return false;
+        }
+        // For a generic `T`: a mutable `[...T]` relates to what `T` relates to, and a
+        // source relates to `[...T]` when it relates to `T` and the target is readonly or
+        // the source (its constraint) is a mutable array or tuple (tsc: relater.go,
+        // structuredTypeRelatedToWorker, isSingleElementGenericTupleType).
+        if let Some((e, readonly)) = self.single_generic_tuple_element(s)
+            && !readonly
+            && self.related_to(e, t, rel, false, None)
+        {
+            return true;
+        }
+        if let Some((e, readonly)) = self.single_generic_tuple_element(t)
+            && (readonly || {
+                let c = self.base_constraint(s);
+                let c = if c == TypeId::UNRESOLVED || c == TypeId::UNKNOWN {
+                    s
+                } else {
+                    c
+                };
+                self.c.is_array_like_type(c) && !self.is_readonly_array_like(c)
+            })
+            && self.related_to(s, e, rel, false, None)
+        {
+            return true;
         }
         if tf.contains(TypeFlags::UNION)
             && let Some(r) = self.conditional_source_related(s, t, rel, report)
@@ -3109,6 +3147,30 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return true;
             }
             if let TypeKind::Index(x) = st.kind(t) {
+                // `keyof` a tuple with a variadic element (`keyof [1, ...T]`): the tuple's
+                // known keys, its fixed indexes and the keys of `Array` (`ReadonlyArray`)
+                // (tsc: relater.go, getKnownKeysOfTupleType).
+                if let Some(shape) = st.tuple_shape_of(x) {
+                    let (fixed, readonly) = (shape.fixed_length(), shape.readonly);
+                    let mut keys: Vec<TypeId> = (0..fixed)
+                        .map(|i| self.store().string_literal(&i.to_string(), false))
+                        .collect();
+                    let g = if readonly {
+                        crate::checker::GlobalType::ReadonlyArray
+                    } else {
+                        crate::checker::GlobalType::Array
+                    };
+                    if let Some(a) = self.global_type(g) {
+                        keys.push(self.keyof_type(a));
+                    }
+                    let kk = self.union(&keys);
+                    if self.related_to(s, kk, rel, report, None) {
+                        return true;
+                    }
+                    if report {
+                        return false;
+                    }
+                }
                 // `keyof T` accepts keys of T's constraint only when T is generic; be permissive
                 // for literal keys of the constraint.
                 let c = self.base_constraint(x);
@@ -3902,8 +3964,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A subtype of an object literal type has no other properties (except
         // `undefined` ones): `User` is not a subtype of `{ name: string }`, so the common
         // supertype of the two is `User`.
+        // A widened literal (a variable's declared type) is no object literal here: `[a, b]`
+        // of `var a = { n: "" }, b = { n: "", d: 1 }` is `{ n: string }[]` (tsc drops the
+        // literal flag when widening: getWidenedTypeOfObjectLiteral).
         if matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
             && self.object_flags(t).contains(ObjectFlags::OBJECT_LITERAL)
+            && !self.object_flags(t).contains(ObjectFlags::WIDENED_LITERAL)
         {
             for (n, sp) in self.properties_of(s) {
                 if excluded.contains(&n) || self.property_of_type_id(t, n).is_some() {
@@ -3930,7 +3996,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             return true;
         }
         let require_optional = matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
-            && !self.object_flags(s).contains(ObjectFlags::OBJECT_LITERAL)
+            && (!self.object_flags(s).contains(ObjectFlags::OBJECT_LITERAL)
+                || self.object_flags(s).contains(ObjectFlags::WIDENED_LITERAL))
             && !self.c.is_tuple_type(s);
         if rel != RelationKind::Identity {
             // Missing properties.

@@ -38,6 +38,8 @@ pub(crate) struct PendingRef {
     pub write: bool,
     /// In the parameter list of the function whose scope is `scope`.
     pub in_params: bool,
+    /// In the type parameter list of the function whose scope is `scope`.
+    pub in_type_params: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -101,6 +103,8 @@ struct Ctx {
     in_global_augmentation: bool,
     /// Binding the parameter list of the function with this scope.
     params_of: Option<ScopeId>,
+    /// Binding the type parameter list of the function with this scope.
+    type_params_of: Option<ScopeId>,
 }
 
 pub(crate) struct Binder<'a> {
@@ -118,6 +122,8 @@ pub(crate) struct Binder<'a> {
     scopes: Vec<Scope>,
     /// Per scope: created inside its parent function's parameter list.
     scope_in_params: Vec<bool>,
+    /// Per scope: created inside its parent function's type parameter list.
+    scope_in_type_params: Vec<bool>,
     scope_of_node: Vec<(NodeId, ScopeId)>,
     symbol_of_decl: Vec<(NodeId, SymbolId)>,
     decl_members: Vec<(NodeId, TableId)>,
@@ -244,6 +250,7 @@ impl<'a> Binder<'a> {
             module_export_tables: Vec::new(),
             scopes: Vec::new(),
             scope_in_params: Vec::new(),
+            scope_in_type_params: Vec::new(),
             scope_of_node: Vec::new(),
             symbol_of_decl: Vec::new(),
             decl_members: Vec::new(),
@@ -271,6 +278,7 @@ impl<'a> Binder<'a> {
                 in_ambient_module: false,
                 in_global_augmentation: false,
                 params_of: None,
+                type_params_of: None,
             },
             refs: Vec::new(),
             aliases: Vec::new(),
@@ -661,6 +669,8 @@ impl<'a> Binder<'a> {
         });
         self.scope_in_params
             .push(parent.is_some() && self.ctx.params_of == parent);
+        self.scope_in_type_params
+            .push(parent.is_some() && self.ctx.type_params_of == parent);
         self.scope_of_node.push((node, id));
         id
     }
@@ -830,6 +840,7 @@ impl<'a> Binder<'a> {
             meaning,
             write,
             in_params: self.ctx.params_of == Some(self.ctx.scope),
+            in_type_params: self.ctx.type_params_of == Some(self.ctx.scope),
         });
     }
 
@@ -2046,6 +2057,11 @@ impl<'a> Binder<'a> {
         }
     }
 
+    /// A destructuring assignment target. Its defaults (`[x = d] = v`, `{ x = d } = v`) are
+    /// bound in order, without the branch a binding pattern's defaults get: tsc's flow for
+    /// an assignment pattern evaluates each default, then its target
+    /// (controlFlowAssignmentPatternOrder; tsc: binder.go, the destructuring assignment
+    /// flow).
     fn bind_assign_target(&mut self, target: NodeId, simple: bool) {
         if !self.enter(target) {
             self.depth -= 1;
@@ -2097,7 +2113,7 @@ impl<'a> Binder<'a> {
                             op: AssignOp::Assign,
                             right,
                         } => {
-                            self.bind_default(right);
+                            self.bind_expr(right);
                             self.bind_assign_target(left, false);
                         }
                         Node::Hole {} => {}
@@ -2118,7 +2134,7 @@ impl<'a> Binder<'a> {
                                     op: AssignOp::Assign,
                                     right,
                                 } => {
-                                    self.bind_default(right);
+                                    self.bind_expr(right);
                                     self.bind_assign_target(left, false);
                                 }
                                 _ => self.bind_assign_target(value, false),
@@ -2126,7 +2142,7 @@ impl<'a> Binder<'a> {
                         }
                         Node::ShorthandProp { name, init, .. } => {
                             if let Some(i) = init {
-                                self.bind_default(i);
+                                self.bind_expr(i);
                             }
                             self.bind_assign_target(name, false);
                         }
@@ -2968,7 +2984,10 @@ impl<'a> Binder<'a> {
         self.ctx.scope = fscope;
         self.ctx.var_scope = fscope;
         if let Some(tp) = type_params {
+            // The type parameters do not see the parameters (`<T extends typeof a>(a: T)`).
+            self.ctx.type_params_of = Some(fscope);
             self.declare_type_params(tp);
+            self.ctx.type_params_of = None;
         }
         self.ctx.export_container = None;
         self.ctx.implicit_export = false;
@@ -5184,6 +5203,9 @@ impl<'a> Binder<'a> {
     }
     pub(crate) fn scope_in_params(&self, s: ScopeId) -> bool {
         self.scope_in_params[s.0 as usize]
+    }
+    pub(crate) fn scope_in_type_params(&self, s: ScopeId) -> bool {
+        self.scope_in_type_params[s.0 as usize]
     }
     pub(crate) fn symbol_ref(&self, s: SymbolId) -> &Symbol {
         &self.symbols[s.index()]

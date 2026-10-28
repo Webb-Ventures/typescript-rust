@@ -45,6 +45,7 @@ pub(crate) fn resolve_refs(b: &mut Binder<'_>) -> Refs {
     for r in pending {
         let mut scope = Some(r.scope);
         let mut in_params = r.in_params;
+        let mut in_type_params = r.in_type_params;
         let mut found = None;
         // Bounded by the number of scopes: each step moves to a strictly earlier scope.
         while let Some(s) = scope {
@@ -54,6 +55,13 @@ pub(crate) fn resolve_refs(b: &mut Binder<'_>) -> Refs {
                 && !(in_params
                     && sc.kind == ScopeKind::Function
                     && is_body_local(b.symbol_ref(sym).flags))
+                && !(in_type_params
+                    && sc.kind == ScopeKind::Function
+                    && (is_body_local(b.symbol_ref(sym).flags)
+                        || symbol_meaning(b.symbol_ref(sym).flags.without(
+                            SymbolFlags::PARAMETER | SymbolFlags::FUNCTION_SCOPED_VARIABLE,
+                        )) & r.meaning
+                            == 0))
             {
                 found = Some(sym);
                 break;
@@ -83,6 +91,7 @@ pub(crate) fn resolve_refs(b: &mut Binder<'_>) -> Refs {
                 }
             }
             in_params = b.scope_in_params(s);
+            in_type_params = b.scope_in_type_params(s);
             scope = sc.parent.filter(|p| p.0 < s.0);
         }
         match found {

@@ -2976,6 +2976,63 @@ Files, by layer:
     through `string | number | symbol` down to `string`.
   - Sources: tsc relater.go, structuredTypeRelatedToWorker and mappedTypeRelatedTo; checker.go,
     getCombinedMappedTypeOptionality. Fixture: `generic_mapped_pair_relation`.
+- **Rules from the v1 checker round 5** (each with a test; tsc sources read as a reference):
+  - JSON modules under `node16`..`nodenext`: an ES module (or a `.d.json.ts` declaration)
+    only imports JSON as a default. A named import is TS1544. A value import without
+    `with { type: "json" }` is TS1543 under `node18`..`nodenext` (not `node16`). A CommonJS
+    file's named imports are the value's properties, and its `import * as ns` is the value.
+    Only a value with its own `default` property gets the synthetic `{ ...props, default }`
+    (tsc: checker.go isOnlyImportableAsDefault, checkImportDeclaration,
+    resolveESModuleSymbol). TS6263 is only for the resolver's `x.d.html.ts` lookup of a
+    specifier `x.html`. An `exports` target written `./typed.d.json.ts` is a `.ts` file
+    (`program::needs_arbitrary_extensions`; tsc: module/util.go GetResolutionDiagnostic).
+  - TS2410 (`with`) only in a file that parsed cleanly (checkWithStatement). Under a
+    `return` outside a function nothing is checked, not even annotations.
+  - Overloads (`overloads.rs`): a zero-width body made up by the parser is no body. A
+    group only continues across trivia. An implementation followed later, not
+    consecutively, by a body-less declaration of the same member is TS2391 too
+    (checkFunctionOrConstructorSymbol).
+  - A function's type parameters do not see its parameters (`<T extends typeof a>(a: T)`
+    is TS2304) or its body's locals. This applies in the binder's reference resolution
+    and in `lookup_in_scope_chain`. A name that is both a type parameter and a parameter
+    keeps its type meaning.
+  - TS2690 ("did you mean `P in K`") replaces TS2693 for a type read as the only computed
+    key of a type literal when the type is a union of string-like or number-like types
+    (maybeMappedType).
+  - `import m = A.B` resolves `A.B` through every declaration of a global namespace `A`.
+    So an alias written inside `namespace A.C` of one file finds `B` declared in another
+    file's `namespace A` (binder `resolve_entity_in`; `tests/const_enum_access.rs`).
+  - A tuple's `length` is read-only only on a readonly tuple (`members.rs`).
+  - A thenable whose `then` has no onfulfilled parameter is not a valid promise. Its
+    awaited type is unresolved: TS1320 at an `await` of it, and TS1058 at an async
+    function's `return` of it (at the name when the function has no return annotation).
+    The TS1064 hint then suggests `Promise<void>` (checkAwaitedType, getAwaitedType).
+  - Generic tuples (`relate.rs`): a mutable `[...T]` relates to other types through `T`.
+    A target `[...T]` accepts a source that relates to `T` when the target is readonly or
+    the source's constraint is a mutable array or tuple. `keyof <tuple>` as a target is
+    the fixed indexes plus `keyof` the global `Array` (or `ReadonlyArray`) type. The
+    generic `Array` type prints as `T[]`. Fixture:
+    `tests/parity/thenables_tuples_and_pattern_defaults`.
+  - A `then` whose every signature declares a `this` that the thenable is not a subtype of
+    makes it no valid promise either: TS1320 is elaborated with TS2684. An async iterator's
+    `next()` returning an invalid thenable is TS1320 at the `yield*` or `for await` operand
+    (`IterNotes::invalid_thenable`; tsc: getPromisedTypeOfPromise, the async iteration
+    resolver). Fixture: `tests/parity/await_this_and_circular_vars`.
+  - A variable that `circular_annotations::is_circular_variable` accepts (the TS7022 kind)
+    is cached as `any` once its resolution is found circular. Otherwise a later resolution
+    would read the initializer's cached type (`var x = { [x]: 1 }` is no TS2464).
+  - Bodies the parser made up (zero width) get no TS2355, TS2366, TS7030 or TS2378. A
+    return type written `!T` or `T!` reports them over the `!` too. Only a class's first
+    `implements` clause is checked (tsc: ast/utilities.go GetHeritageClause).
+  - A widened object literal (`ObjectFlags::WIDENED_LITERAL`, a variable's declared type)
+    is no object literal for the subtype relations. A subtype of it may have other
+    properties, and as a source it must have the target's optional properties. So
+    `[a1, b1]` reduces to `a1`'s type (tsc drops the literal flag in
+    getWidenedTypeOfObjectLiteral). The unannotated parameters of an IIFE past its
+    arguments are optional in the signature (`y?: undefined`). Fixture:
+    `tests/parity/widened_literal_subtypes_and_iife_params`.
+  - `import<T>` resolves its type arguments. `export default X` of a local type `X` and an
+    exported value `X` is a value for `alias_is_value` (`tests/alias_is_value.rs`).
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 
@@ -3165,14 +3222,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-26, fb99a81, wip/v1-checker4 on v1/lsp4 with v1/lint4 and v1/emit4 merged:
-  namespace import-equals and type-only `export =` namespace imports, libReplacement,
-  `import("m").T<A>` argument checks, UMD globals as types, ambient export assignments
-  (TS2714), type predicate checks (TS2677, TS1225, TS1229, TS1230); 12750 compared
-  variants): 12408 exact (97.3%; all diagnostics and chains), 12428 (97.5%) exact on first
-  lines; 173 variants with a diagnostic tsc does not report, 6 of them tests where tsc
-  reports nothing.
-  Earlier: 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-27, 31b97a8, wip/v1-checker5 on v1/lint5 with v1/build5, v1/emit5 and
+  v1/lsp5 merged: JSON imports under node16+, overload adjacency, type-parameter scope,
+  invalid thenables (TS1058, TS1320), generic tuple relations, circular variables as `any`,
+  recovered bodies; 12750 compared variants): 12428 exact (97.5%; all diagnostics and
+  chains), 12448 (97.6%) exact on first lines; 154 variants with a diagnostic tsc does not
+  report, 5 of them tests where tsc reports nothing.
+  Earlier: 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

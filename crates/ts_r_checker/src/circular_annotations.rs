@@ -261,6 +261,43 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// `n` is inside a loop of its function (flow analysis of loops resolves variable
     /// types in an order tsc does not).
+    /// Whether `s` is a variable whose type is `any` after a cycle through its initializer:
+    /// declared once, unannotated, outside loops, with an initializer that has no
+    /// function, method, class or `this` (the TS7022 declarations above).
+    pub(crate) fn is_circular_variable(&self, s: SymId) -> bool {
+        if !self.c.sym_flags(s).intersects(SymbolFlags::VARIABLE) {
+            return false;
+        }
+        let decls = self.c.decls(s);
+        let [d] = decls[..] else {
+            return false;
+        };
+        let d = match self.ast(d.file).node(d.node) {
+            Node::Ident { .. } => match self.c.parent(d) {
+                Some(p) => p,
+                None => return false,
+            },
+            _ => d,
+        };
+        if self.c.file(d.file).is_js() {
+            return false;
+        }
+        let ast = self.ast(d.file);
+        match *ast.node(d.node) {
+            Node::VarDeclarator {
+                name,
+                type_ann: None,
+                init: Some(init),
+                ..
+            } => {
+                matches!(ast.node(name), Node::Ident { .. })
+                    && !self.in_loop(d.file, d.node)
+                    && !has_function(ast, init, true)
+            }
+            _ => false,
+        }
+    }
+
     fn in_loop(&self, file: FileId, n: NodeId) -> bool {
         let ast = self.ast(file);
         let parents = self.c.file(file).parents();
