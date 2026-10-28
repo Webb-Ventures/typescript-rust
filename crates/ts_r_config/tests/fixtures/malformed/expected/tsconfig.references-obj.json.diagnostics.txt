@@ -1,0 +1,1 @@
+tsconfig.references-obj.json(1,17): error TS5024: Compiler option 'references' requires a value of type Array.

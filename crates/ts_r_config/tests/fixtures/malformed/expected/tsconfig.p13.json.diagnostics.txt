@@ -1,0 +1,3 @@
+tsconfig.p13.json(1,39): error TS1005: ',' expected.
+
+tsconfig.p13.json(1,42): error TS1005: '}' expected.

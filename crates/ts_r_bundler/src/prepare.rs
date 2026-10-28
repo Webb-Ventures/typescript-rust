@@ -129,7 +129,7 @@ pub fn load(
             let text = read_text()?;
             let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
             let parsed = jsonc::parse(text, path);
-            if let Some(d) = parsed.diagnostics.first() {
+            if let Some(d) = parsed.errors_except_bigints().next() {
                 return Err(format!("{path}: invalid JSON: {}", d.message));
             }
             if let Some(lit) = json_bigint(text) {
@@ -421,6 +421,8 @@ pub enum DefineValue {
     Json(Value),
     /// `globalThis`, `window.foo`.
     Path(Vec<String>),
+    /// A decimal BigInt literal's digits (`1n`), which esbuild also accepts.
+    BigInt(String),
 }
 
 /// Parsed `define` table.
@@ -482,6 +484,7 @@ impl Defines {
             match v {
                 DefineValue::Json(j) => s.push_str(&j.to_json()),
                 DefineValue::Path(p) => s.push_str(&p.join(".")),
+                DefineValue::BigInt(d) => s.push_str(&format!("{d}n")),
             }
             s.push('\n');
         }
@@ -503,6 +506,12 @@ fn parse_define_value(v: &str) -> Result<DefineValue, String> {
         && !matches!(t, "true" | "false" | "null")
     {
         return Ok(DefineValue::Path(t.split('.').map(str::to_owned).collect()));
+    }
+    if let Some(d) = t.strip_suffix('n')
+        && (d == "0"
+            || (!d.starts_with('0') && !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())))
+    {
+        return Ok(DefineValue::BigInt(d.to_owned()));
     }
     let parsed = jsonc::parse(t, "<define>");
     match parsed.root {
@@ -526,6 +535,10 @@ fn build_define_value(ast: &mut Ast, v: &DefineValue, at: u32) -> NodeId {
             e
         }
         DefineValue::Json(j) => build_json(ast, j, at, 0),
+        DefineValue::BigInt(d) => {
+            let value = ast.intern(d);
+            ast.add(Node::BigIntLit { value }, Span::new(at, at))
+        }
     }
 }
 

@@ -1,0 +1,1 @@
+tsconfig.p10.json(1,24): error TS1327: String literal with double quotes expected.

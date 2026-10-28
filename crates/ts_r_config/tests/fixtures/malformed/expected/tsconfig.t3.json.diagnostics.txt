@@ -1,0 +1,13 @@
+tsconfig.t3.json(1,34): error TS5024: Compiler option 'enable' requires a value of type boolean.
+
+tsconfig.t3.json(1,43): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.t3.json(1,44): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.t3.json(1,59): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.t3.json(1,59): error TS5024: Compiler option 'include' requires a value of type Array.
+
+tsconfig.t3.json(1,73): error TS5024: Compiler option 'exclude' requires a value of type Array.
+
+tsconfig.t3.json(1,74): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

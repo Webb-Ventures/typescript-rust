@@ -1,0 +1,1 @@
+tsconfig.wrong-type-include.json(1,14): error TS5024: Compiler option 'include' requires a value of type Array.

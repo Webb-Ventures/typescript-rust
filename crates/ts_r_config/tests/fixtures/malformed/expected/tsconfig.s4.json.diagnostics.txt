@@ -1,0 +1,1 @@
+tsconfig.s4.json(1,34): error TS5024: Compiler option 'strict' requires a value of type boolean.

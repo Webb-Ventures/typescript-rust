@@ -1,0 +1,5 @@
+tsconfig.eq-sign.json(1,32): error TS5024: Compiler option 'strict' requires a value of type boolean.
+
+tsconfig.eq-sign.json(1,33): error TS1005: ':' expected.
+
+tsconfig.eq-sign.json(1,33): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

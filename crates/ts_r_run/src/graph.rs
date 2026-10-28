@@ -20,7 +20,7 @@ pub const CACHE_FORMAT: u32 = 3;
 pub struct Engine {
     pub project: Project,
     /// Expands `parse<T>` call sites (validators inlined per file).
-    guard: ts_r_guard::Expander,
+    pub guard: ts_r_guard::Expander,
     /// The file `[sound.guard]` was read from, an input of every run.
     guard_config: Option<String>,
     cache: Option<Cache>,

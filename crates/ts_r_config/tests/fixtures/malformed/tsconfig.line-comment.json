@@ -1,0 +1,3 @@
+{ // c
+ "compilerOptions": { "strict": true } // tail
+}

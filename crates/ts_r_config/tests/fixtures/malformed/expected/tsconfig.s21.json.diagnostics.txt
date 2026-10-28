@@ -1,0 +1,3 @@
+tsconfig.s21.json(1,51): error TS1005: ',' expected.
+
+tsconfig.s21.json(1,51): error TS1136: Property assignment expected.

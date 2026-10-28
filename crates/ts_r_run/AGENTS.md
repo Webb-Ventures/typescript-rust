@@ -16,6 +16,10 @@ loaded with `require()`: an ES module comes out as CommonJS unless it has top-le
 `--resolve <parent> <specifier>` (prints the
 tsconfig `paths`/`baseUrl` target or nothing; used by the preload for plain JavaScript
 parents) and `--serve` (the hook strategy's compiler).
+`ts-r-run [node flags] -e|--eval|-p|--print <code> [args...]` runs code instead of a file, and
+with no file (or the file `-`) code piped to stdin (`run_eval`); "no file given" when stdin is a
+terminal (tsx starts its REPL there). Every argument after the code is the program's, `-`
+included, as under Node.
 `ts-r-run --test [node flags]` with no file runs Node's test runner on its default patterns
 (which include `.ts` files, as Node strips types by default; not with `--watch`): there is no
 graph to build, so the preload, which each test process inherits, compiles every file when it
@@ -133,6 +137,20 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   - Plain JavaScript outside node_modules that calls `import(` (ES or CommonJS, `.cjs`
     included) is compiled (`interopJs`), so its `import()` gets the same unwrap as compiled
     code.
+- **Eval and stdin code runs as tsx runs it** (`run_eval`, observed with tsx 4.23.15): the code
+  is compiled as a file named `[eval].ts` (`[stdin].ts`) in the working directory (its
+  tsconfig and imports are looked up from there; no source map), then handed to Node with
+  `--eval`/`--print`, or on Node's stdin from a temporary file in the state directory (deleted
+  after the run) so the module is `[stdin]`. It is CommonJS unless `--input-type=module` (or
+  `module-typescript`) is given: an `import` becomes `require`, as under tsx, and the code is
+  compiled as if `require()`d, so only top-level `await` keeps it an ES module (tsx refuses
+  such code; ts-r-run runs it). `--input-type=commonjs[-typescript]` compiles it as `.cts`.
+  `--input-type` is taken out of the Node flags and given again with the plain format of the
+  output (`module`/`commonjs`; Node must not strip types from JavaScript). There is no graph:
+  files the code loads are compiled by the preload when they load, as with `--test`. A syntax
+  error is printed tsc-style (`[eval].ts:1:10`) and exits 1 before Node starts.
+  `import.meta` in default (CommonJS) eval code is emulated as in any CommonJS output (tsx
+  leaves it `undefined` there).
 - **Node never strips types from what the preload returns**: a `Module.prototype._compile`
   wrapper maps the `*-typescript` formats Node's CommonJS loader gives a `.ts` file to the
   plain ones for compiled files (Node refuses type stripping inside node_modules, and the code
@@ -194,7 +212,7 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   top-level `await`, the `import()` unwrap, JSON named exports, TypeScript in packages,
   `require('..')` in a package, `--test` without files, `require()` of ES modules as one
   CommonJS instance, source maps of a file both imported and required, a `?query` import
-  after a plain one in CommonJS, `require` through an `imports` map, `--compile-cjs`).
+  after a plain one in CommonJS, `require` through an `imports` map, `--compile-cjs`, `-e`/`-p`/stdin).
   Skipped when Node is missing.
 - Parity oracle: [`bench/run-oracle`](../../bench/run-oracle/README.md) runs tsx's own suite and
   Node's TypeScript tests against ts-r-run (`node bench/run-oracle/run.mjs`; numbers there).
@@ -252,3 +270,9 @@ install a signal handler, and the crate denies `unsafe`). Dev: `ts_r_testing`.
   - Hook strategy: the preload's resolve fallback, lenient `.js` and `--resolve` are only in
     the prebuild preload (`js/hooks.mjs`).
   - `require` isn't defined in ES output (tsx defines it).
+  - `await` inside a function that isn't `async` is not a syntax error before the run (it is
+    accepted by `ts_r_transform::build_errors`); Node then throws a `SyntaxError` when the
+    module loads. tsx (esbuild) and Node's type stripping refuse it before running. Two node
+    eval cases (`test-typescript-eval.mjs` lines 227 and 237) show it; they are skipped because
+    Node and tsx differ, and ts-r-run matches neither. The fix belongs in the parser or
+    transform crates.

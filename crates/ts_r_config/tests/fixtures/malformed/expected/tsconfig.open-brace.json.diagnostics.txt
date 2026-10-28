@@ -1,0 +1,1 @@
+tsconfig.open-brace.json(1,2): error TS1005: '}' expected.

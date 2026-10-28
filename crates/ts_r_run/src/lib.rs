@@ -38,6 +38,8 @@ const RELAY: &str = include_str!("js/relay.mjs");
 const HELP: &str = "ts-r-run: run a TypeScript file with Node
 
 Usage: ts-r-run [options] [node options] <file> [args...]
+       ts-r-run [options] [node options] -e|-p <code> [args...]
+       <command> | ts-r-run [options] [node options] [-] [args...]
        ts-r-run [options] --test [node options]   (Node's test runner, default files)
 
 Options:
@@ -48,6 +50,9 @@ Options:
   --strategy <s>        prebuild (default): compile the graph, then start Node
                         hook: compile on demand from Node's module.register hooks
   --node <path>         Node binary (default: node on PATH)
+  -e, --eval <code>     Run TypeScript code (CommonJS unless --input-type=module
+                        or top-level await); with no file, code is read from stdin
+  -p, --print <code>    The same, printing the value of the last expression
   -h, --help            Show this help
   -V, --version         Show the version
 
@@ -80,6 +85,24 @@ pub enum Mode {
     Serve,
 }
 
+/// Where the code of an eval run comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvalSource {
+    /// `-e`/`--eval`/`-p`/`--print` on the command line.
+    Arg(String),
+    /// Read from stdin: no file was given (or the file is `-`).
+    Stdin,
+}
+
+/// Code run instead of a file, as `node --eval` runs it (tsx's `--eval`, `--print` and
+/// piped input).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Eval {
+    pub source: EvalSource,
+    /// `-p`/`--print`: Node prints the value of the last expression.
+    pub print: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cli {
     pub mode: Mode,
@@ -92,6 +115,8 @@ pub struct Cli {
     pub node_args: Vec<String>,
     pub entry: String,
     pub args: Vec<String>,
+    /// Code to run instead of `entry` (which is then empty).
+    pub eval: Option<Eval>,
 }
 
 impl Cli {
@@ -114,6 +139,7 @@ const NODE_VALUE_FLAGS: &[&str] = &[
     "--conditions",
     "--inspect-port",
     "--title",
+    "--input-type",
 ];
 
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
@@ -128,6 +154,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
         node_args: Vec::new(),
         entry: String::new(),
         args: Vec::new(),
+        eval: None,
     };
     let mut i = 0;
     let value = |i: &mut usize, flag: &str| -> Result<String, String> {
@@ -149,6 +176,17 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "-h" | "--help" => cli.mode = Mode::Help,
             "-V" | "--version" => cli.mode = Mode::Version,
             "--serve" => cli.mode = Mode::Serve,
+            "-e" | "--eval" | "-p" | "--print" | "-pe" | "-ep" => {
+                let code = match inline {
+                    Some(v) => v,
+                    None => value(&mut i, flag)?,
+                };
+                let print = flag.contains('p') || cli.eval.as_ref().is_some_and(|e| e.print);
+                cli.eval = Some(Eval {
+                    source: EvalSource::Arg(code),
+                    print,
+                });
+            }
             "--tsconfig" | "--strategy" | "--node" | "--compile" | "--compile-cjs"
             | "--resolve" => {
                 let v = match inline {
@@ -184,12 +222,28 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
         }
         i += 1;
     }
-    if let Some(entry) = args.get(i) {
+    if cli.mode == Mode::Run && cli.eval.is_none() && args.get(i).is_none_or(|a| a == "-") {
+        if cli.watch {
+            return Err(format!("ts-r-run: no file given\n\n{HELP}"));
+        }
+        // Node's test runner finds the test files itself; otherwise the code comes from
+        // stdin (`run_eval` says "no file given" when stdin is a terminal).
+        if !cli.runs_tests() || args.get(i).is_some() {
+            cli.eval = Some(Eval {
+                source: EvalSource::Stdin,
+                print: false,
+            });
+        }
+    }
+    if cli.eval.is_some() && cli.mode == Mode::Run {
+        if cli.watch {
+            return Err("ts-r-run: --watch needs a file, not --eval or stdin".to_owned());
+        }
+        // As under Node: every argument after the code is the program's (`-` included).
+        cli.args = args[i.min(args.len())..].to_vec();
+    } else if let Some(entry) = args.get(i) {
         cli.entry = entry.clone();
         cli.args = args[i + 1..].to_vec();
-    } else if cli.mode == Mode::Run && (cli.watch || !cli.runs_tests()) {
-        // Only Node's test runner runs without a file: it finds the test files itself.
-        return Err(format!("ts-r-run: no file given\n\n{HELP}"));
     }
     Ok(cli)
 }
@@ -303,6 +357,20 @@ pub struct Launch<'a> {
     pub entry: &'a str,
     pub preload: PathBuf,
     pub manifest: Option<PathBuf>,
+    /// Compiled code Node runs in place of the entry; `entry` then only locates the
+    /// tsconfig of files the preload compiles.
+    pub eval: Option<Code>,
+}
+
+/// Compiled code given to Node instead of a file.
+#[derive(Debug)]
+pub enum Code {
+    /// `--eval <code>`.
+    Eval(String),
+    /// `--print <code>`.
+    Print(String),
+    /// On Node's stdin (the caller sets it), so the module is `[stdin]` as under tsx.
+    Stdin,
 }
 
 impl Launch<'_> {
@@ -316,8 +384,18 @@ impl Launch<'_> {
         }
         c.args(&self.cli.node_args);
         c.arg("--import").arg(import_specifier(&self.preload));
-        if !self.entry.is_empty() {
-            c.arg(self.entry);
+        match &self.eval {
+            Some(Code::Eval(code)) => {
+                c.arg("--eval").arg(code);
+            }
+            Some(Code::Print(code)) => {
+                c.arg("--print").arg(code);
+            }
+            Some(Code::Stdin) => {}
+            None if !self.entry.is_empty() => {
+                c.arg(self.entry);
+            }
+            None => {}
         }
         c.args(&self.cli.args);
         if let Some(m) = &self.manifest {
@@ -430,6 +508,9 @@ pub fn prepare(
 }
 
 fn run(cli: &Cli) -> i32 {
+    if let Some(ev) = &cli.eval {
+        return run_eval(cli, ev);
+    }
     if cli.entry.is_empty() {
         return run_tests(cli);
     }
@@ -455,6 +536,7 @@ fn run(cli: &Cli) -> i32 {
             entry: &entry,
             preload: hooks.join("preload-async.mjs"),
             manifest: None,
+            eval: None,
         };
         return run_node(launch.command());
     }
@@ -468,6 +550,7 @@ fn run(cli: &Cli) -> i32 {
                 entry: &entry,
                 preload,
                 manifest: Some(m),
+                eval: None,
             };
             return run_node(launch.command());
         }
@@ -493,10 +576,179 @@ fn run(cli: &Cli) -> i32 {
         entry: &entry,
         preload,
         manifest: Some(manifest),
+        eval: None,
     };
     let code = run_node(launch.command());
     if !cli.cache {
         // Nothing may stay behind: delete the temporary directory.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    code
+}
+
+/// The module format `--input-type` asks for, and the value Node is given in its place (the
+/// code is JavaScript once compiled, so `*-typescript` becomes the plain type).
+fn input_type(value: &str) -> Option<compile::Format> {
+    match value {
+        "module" | "module-typescript" => Some(compile::Format::Esm),
+        "commonjs" | "commonjs-typescript" => Some(compile::Format::Cjs),
+        _ => None,
+    }
+}
+
+/// Splits `--input-type` out of the Node flags: the format it names (when it is one Node
+/// knows) and the other flags. An unknown value stays for Node to reject.
+fn split_input_type(node_args: &[String]) -> (Option<compile::Format>, Vec<String>) {
+    let mut format = None;
+    let mut rest = Vec::with_capacity(node_args.len());
+    let mut i = 0;
+    while i < node_args.len() {
+        let a = &node_args[i];
+        let (value, width) = match a.strip_prefix("--input-type=") {
+            Some(v) => (Some(v), 1),
+            None if a == "--input-type" => (node_args.get(i + 1).map(String::as_str), 2),
+            None => (None, 1),
+        };
+        match value.and_then(input_type) {
+            Some(f) => format = Some(f),
+            None => rest.extend(
+                node_args[i..(i + width).min(node_args.len())]
+                    .iter()
+                    .cloned(),
+            ),
+        }
+        i += width;
+    }
+    (format, rest)
+}
+
+/// `-e`/`--eval`, `-p`/`--print` or code piped to stdin, as tsx runs them: the code is
+/// compiled as a TypeScript file named `[eval]` (`[stdin]`) in the working directory, which
+/// is where its imports and its tsconfig are looked up from, and Node gets the JavaScript
+/// with `--eval`/`--print`. It is CommonJS (an `import` becomes `require`) unless
+/// `--input-type=module` (or `module-typescript`) is given or it has top-level `await`;
+/// Node is told which with `--input-type`. Files it loads are compiled by the preload when
+/// they load (there is no graph to build first, as with `--test`).
+fn run_eval(cli: &Cli, ev: &Eval) -> i32 {
+    use std::io::{IsTerminal as _, Read as _};
+    let (name, code) = match &ev.source {
+        EvalSource::Arg(code) => ("[eval]", code.clone()),
+        EvalSource::Stdin => {
+            let mut stdin = std::io::stdin();
+            if stdin.is_terminal() {
+                eprintln!("ts-r-run: no file given\n\n{HELP}");
+                return 2;
+            }
+            let mut code = String::new();
+            if let Err(e) = stdin.read_to_string(&mut code) {
+                eprintln!("ts-r-run: cannot read stdin: {e}");
+                return 1;
+            }
+            ("[stdin]", code)
+        }
+    };
+    let (asked, node_args) = split_input_type(&cli.node_args);
+    let ext = match asked {
+        Some(compile::Format::Esm) => "mts",
+        Some(compile::Format::Cjs) => "cts",
+        None => "ts",
+    };
+    // The working directory as every other path here is written (`/` separators).
+    let path = absolute(&format!("{name}.{ext}"));
+    let compiled = {
+        let project = Project::load(&path, cli.tsconfig.as_deref());
+        if !project.config_errors.is_empty() {
+            eprint!("{}", project.config_errors);
+            return 1;
+        }
+        // No source map: there is no file for Node to map the code back to.
+        let engine = Engine::new(project, cli.cache, false);
+        // `parse<T>` call sites are expanded as in a file (`Engine::compile_file`).
+        let code = match engine.guard.expand(&path, &code) {
+            Some(x) if !x.errors.is_empty() => {
+                x.errors
+                    .iter()
+                    .for_each(|e| eprintln!("{}", e.render(&path)));
+                return 1;
+            }
+            Some(x) => x.code,
+            None => code,
+        };
+        let compiled = engine.compile_source(
+            &path,
+            &code,
+            compile::PackageType::Unspecified,
+            asked.is_none(),
+        );
+        engine.flush();
+        match compiled {
+            Ok(c) => c,
+            Err(e) => {
+                eprint!("{e}");
+                return 1;
+            }
+        }
+    };
+    let dir = state_dir(cli);
+    let hooks = match hooks_dir(&dir) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("ts-r-run: cannot write to {}: {e}", dir.display());
+            return 1;
+        }
+    };
+    let preload = match cli.strategy {
+        Strategy::Prebuild => hooks.join("hooks.mjs"),
+        Strategy::Hook => hooks.join("preload-async.mjs"),
+    };
+    let mut cli = cli.clone();
+    cli.node_args = node_args;
+    cli.node_args.push(format!(
+        "--input-type={}",
+        match compiled.format {
+            compile::Format::Esm => "module",
+            compile::Format::Cjs => "commonjs",
+        }
+    ));
+    // Piped code goes back to Node on its stdin (from a file, which is deleted after the
+    // run), so `__filename` and stack traces say `[stdin]`, as under Node and tsx.
+    let stdin_file = dir.join(format!("stdin-{}.js", std::process::id()));
+    let eval = match (&ev.source, ev.print) {
+        (EvalSource::Stdin, _) => {
+            if let Err(e) = std::fs::write(&stdin_file, &compiled.code) {
+                eprintln!("ts-r-run: cannot write {}: {e}", stdin_file.display());
+                return 1;
+            }
+            Code::Stdin
+        }
+        (EvalSource::Arg(_), true) => Code::Print(compiled.code),
+        (EvalSource::Arg(_), false) => Code::Eval(compiled.code),
+    };
+    let piped = matches!(eval, Code::Stdin);
+    let launch = Launch {
+        cli: &cli,
+        entry: &path,
+        preload,
+        manifest: None,
+        eval: Some(eval),
+    };
+    let mut cmd = launch.command();
+    if piped {
+        match std::fs::File::open(&stdin_file) {
+            Ok(f) => {
+                cmd.stdin(f);
+            }
+            Err(e) => {
+                eprintln!("ts-r-run: cannot read {}: {e}", stdin_file.display());
+                return 1;
+            }
+        }
+    }
+    let code = run_node(cmd);
+    if piped {
+        let _ = std::fs::remove_file(&stdin_file);
+    }
+    if !cli.cache {
         let _ = std::fs::remove_dir_all(&dir);
     }
     code
@@ -523,6 +775,7 @@ fn run_tests(cli: &Cli) -> i32 {
         entry: "",
         preload,
         manifest: None,
+        eval: None,
     };
     let code = run_node(launch.command());
     if !cli.cache {
@@ -585,6 +838,7 @@ mod tests {
                 entry: "/p/t.ts",
                 preload: PathBuf::from("/h/hooks.mjs"),
                 manifest: None,
+                eval: None,
             };
             let c = launch.command();
             c.get_args()
@@ -612,6 +866,7 @@ mod tests {
             entry: "",
             preload: PathBuf::from("/h/hooks.mjs"),
             manifest: None,
+            eval: None,
         };
         let a: Vec<String> = launch
             .command()
@@ -621,6 +876,69 @@ mod tests {
         // The preload is the last argument: no entry follows it.
         assert!(a.last().is_some_and(|l| l.ends_with("hooks.mjs")), "{a:?}");
         assert!(parse_args(&args("--watch --test")).is_err());
-        assert!(parse_args(&args("--inspect")).is_err());
+        assert_eq!(c.eval, None);
+    }
+
+    #[test]
+    fn eval_print_and_stdin() {
+        let c = parse_args(&args("--inspect -e 1+1 a -x")).unwrap();
+        let arg = |code: &str, print| {
+            Some(Eval {
+                source: EvalSource::Arg(code.to_owned()),
+                print,
+            })
+        };
+        assert_eq!(c.eval, arg("1+1", false));
+        assert_eq!((c.entry.as_str(), c.args.clone()), ("", args("a -x")));
+        assert_eq!(c.node_args, args("--inspect"));
+        assert_eq!(parse_args(&args("--print=x")).unwrap().eval, arg("x", true));
+        assert_eq!(parse_args(&args("-pe x")).unwrap().eval, arg("x", true));
+        let stdin = Some(Eval {
+            source: EvalSource::Stdin,
+            print: false,
+        });
+        // No file: the code comes from stdin, and `-` is an argument of the program.
+        assert_eq!(parse_args(&args("--inspect")).unwrap().eval, stdin);
+        let c = parse_args(&args("- q")).unwrap();
+        assert_eq!((c.eval, c.args), (stdin, args("- q")));
+        assert!(parse_args(&args("--watch -e 1")).is_err());
+        assert!(parse_args(&args("-e")).is_err());
+        let c = parse_args(&args("--input-type module -e 1")).unwrap();
+        assert_eq!(c.node_args, args("--input-type module"));
+        assert_eq!(c.entry, "");
+    }
+
+    #[test]
+    fn input_type_is_taken_from_node_flags() {
+        let (f, rest) = split_input_type(&args("--a --input-type=module-typescript --b"));
+        assert_eq!((f, rest), (Some(compile::Format::Esm), args("--a --b")));
+        let (f, rest) = split_input_type(&args("--input-type commonjs"));
+        assert_eq!((f, rest), (Some(compile::Format::Cjs), vec![]));
+        // Unknown values (and a missing one) are left for Node to report.
+        let (f, rest) = split_input_type(&args("--input-type=wasm --input-type"));
+        assert_eq!((f, rest), (None, args("--input-type=wasm --input-type")));
+    }
+
+    #[test]
+    fn eval_code_takes_the_place_of_the_entry() {
+        let c = parse_args(&args("-p 1 a")).unwrap();
+        let launch = Launch {
+            cli: &c,
+            entry: "/p/[eval].ts",
+            preload: PathBuf::from("/h/hooks.mjs"),
+            manifest: None,
+            eval: Some(Code::Print("1;".to_owned())),
+        };
+        let a: Vec<String> = launch
+            .command()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        // The preload as the code passes it (a `file:///D:/...` URL on Windows).
+        let preload = import_specifier(Path::new("/h/hooks.mjs"))
+            .to_string_lossy()
+            .into_owned();
+        let want = ["--import", &preload, "--print", "1;", "a"];
+        assert_eq!(a, want);
     }
 }

@@ -1,0 +1,7 @@
+tsconfig.q7.json(1,15): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.q7.json(1,15): error TS5024: Compiler option 'include' requires a value of type Array.
+
+tsconfig.q7.json(1,29): error TS5024: Compiler option 'exclude' requires a value of type Array.
+
+tsconfig.q7.json(1,30): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

@@ -1,0 +1,1 @@
+tsconfig.unterminated-block-comment-end.json(1,50): error TS1010: '*/' expected.

@@ -1,0 +1,7 @@
+tsconfig.q16.json(1,24): error TS1327: String literal with double quotes expected.
+
+tsconfig.q16.json(1,25): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.
+
+tsconfig.q16.json(1,26): error TS1005: ':' expected.
+
+tsconfig.q16.json(1,26): error TS1328: Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.

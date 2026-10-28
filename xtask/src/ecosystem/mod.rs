@@ -631,22 +631,9 @@ fn prepare_binaries(opts: &Options) -> Result<PathBuf> {
     build_binaries(opts.no_build, &opts.stages)
 }
 
-/// Cargo's target directory for builds started from the repo root: `CARGO_TARGET_DIR` when
-/// it is set and not empty (a relative value resolves against the repo root, as cargo does
-/// for a build run there), otherwise `<root>/target`.
-fn target_dir_in(root: &Path, env: Option<std::ffi::OsString>) -> PathBuf {
-    match env.filter(|v| !v.is_empty()) {
-        Some(v) => {
-            let p = PathBuf::from(v);
-            if p.is_absolute() { p } else { root.join(p) }
-        }
-        None => root.join("target"),
-    }
-}
-
 /// Where `cargo build --release` puts the worker and the ts-r binaries.
 pub(crate) fn release_dir() -> PathBuf {
-    target_dir_in(&root(), std::env::var_os("CARGO_TARGET_DIR")).join("release")
+    crate::util::release_dir()
 }
 
 /// The default `--bin-dir`: the release directory of the cargo target dir.
@@ -738,22 +725,6 @@ fn report_cmd(mut args: Args) -> Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn target_dir_follows_cargo_target_dir() {
-        let root = Path::new("/repo");
-        assert_eq!(target_dir_in(root, None), Path::new("/repo/target"));
-        assert_eq!(
-            target_dir_in(root, Some("".into())),
-            Path::new("/repo/target")
-        );
-        assert_eq!(
-            target_dir_in(root, Some("build/out".into())),
-            Path::new("/repo/build/out")
-        );
-        let abs = std::env::temp_dir().join("ts-r-target");
-        assert_eq!(target_dir_in(root, Some(abs.clone().into())), abs);
-    }
 
     #[test]
     fn options() {

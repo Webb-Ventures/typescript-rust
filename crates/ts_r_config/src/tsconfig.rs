@@ -10,7 +10,7 @@ use crate::enums::{
 };
 use crate::fs::FileSystem;
 use crate::glob::{self, MatchInput};
-use crate::jsonc::{self, Value, ValueKind};
+use crate::jsonc::{self, KeyForm, Value, ValueKind};
 use crate::options::{
     CompilerOptions, OptionDecl, OptionId, OptionType, OptionValue, Origin, PathsMap, find_option,
     find_option_ignore_case, flags,
@@ -1009,11 +1009,34 @@ fn parse_raw(text: &str, file: &str) -> RawFile {
         out: &mut raw.diagnostics,
     };
 
+    // Keys tsc does not know are free-form JSON: only what is not JSON in them is reported.
+    for m in root.as_object().unwrap_or_default() {
+        match m.key_form {
+            KeyForm::Shorthand => d.free_form_member(m),
+            KeyForm::Computed => d.free_form(&m.value),
+            KeyForm::Quoted | KeyForm::Unquoted if !ROOT_KEYS.contains(&m.key.as_str()) => {
+                d.free_form(&m.value)
+            }
+            _ => {}
+        }
+    }
+
     if let Some(m) = root.member("compilerOptions") {
         raw.compiler_options_key = Some(m.key_span);
         match &m.value.kind {
             ValueKind::Object(members) => {
                 for member in members {
+                    match member.key_form {
+                        KeyForm::Shorthand => {
+                            d.free_form_member(member);
+                            continue;
+                        }
+                        KeyForm::Computed => {
+                            d.free_form(&member.value);
+                            continue;
+                        }
+                        KeyForm::Quoted | KeyForm::Unquoted => {}
+                    }
                     if let Some((id, value)) = convert_option(member, &dir, &mut d) {
                         if id == OptionId::Paths {
                             raw.sets_paths = Some(value.is_some());
@@ -1061,11 +1084,21 @@ fn parse_raw(text: &str, file: &str) -> RawFile {
                             18051,
                             "Compiler option 'extends' cannot be given an empty string.".into(),
                         ),
+                        ValueKind::Invalid => d.type_error(it, "extends", "string or Array"),
                         _ => d.type_error(it, "extends", "string"),
                     }
                 }
             }
             ValueKind::Null => {}
+            ValueKind::Invalid => {
+                // tsc reports it twice: at the full start and at the token (observed).
+                d.type_error(v, "extends", "string or Array");
+                d.at(
+                    v.span,
+                    5024,
+                    "Compiler option 'extends' requires a value of type string or Array.".into(),
+                );
+            }
             _ => d.type_error(v, "extends", "string or Array"),
         }
     }
@@ -1077,25 +1110,36 @@ fn parse_raw(text: &str, file: &str) -> RawFile {
             ValueKind::Array(items) => {
                 let mut specs = Vec::new();
                 let mut invalid = Vec::new();
+                let mut dropped = 0;
                 for (i, it) in items.iter().enumerate() {
                     match &it.kind {
                         ValueKind::String(s) => specs.push(path::normalize_slashes(s)),
+                        // Not JSON: reported and dropped, not kept as written (observed).
+                        ValueKind::Invalid => {
+                            d.type_error(it, key, "Array");
+                            dropped += 1;
+                        }
                         _ => {
-                            d.type_error(it, key, "string");
+                            d.type_error(list_anchor(items, i, dropped), key, "string");
                             let raw = text
                                 .get(it.span.0 as usize..it.span.1 as usize)
                                 .unwrap_or_default();
-                            invalid.push((i, raw.to_owned()));
+                            invalid.push((i - dropped, raw.to_owned()));
                         }
                     }
                 }
-                Field::Specs(SpecList {
-                    specs,
-                    base_dir: dir.clone(),
-                    file: file_arc.clone(),
-                    span: m.value.span,
-                    invalid,
-                })
+                if !items.is_empty() && items.iter().all(|it| it.kind == ValueKind::Invalid) {
+                    // Only elements that are not JSON: as if the key were absent (observed).
+                    Field::Absent
+                } else {
+                    Field::Specs(SpecList {
+                        specs,
+                        base_dir: dir.clone(),
+                        file: file_arc.clone(),
+                        span: m.value.span,
+                        invalid,
+                    })
+                }
             }
             _ => {
                 d.type_error(&m.value, key, "Array");
@@ -1115,7 +1159,12 @@ fn parse_raw(text: &str, file: &str) -> RawFile {
             ValueKind::Array(items) => {
                 for it in items {
                     let Some(_) = it.as_object() else {
-                        d.type_error(it, "references", "object");
+                        let ty = if it.kind == ValueKind::Invalid {
+                            "Array"
+                        } else {
+                            "object"
+                        };
+                        d.type_error(it, "references", ty);
                         continue;
                     };
                     match it.get("path") {
@@ -1141,25 +1190,56 @@ fn parse_raw(text: &str, file: &str) -> RawFile {
         }
     }
 
-    if let Some(v) = root.get("compileOnSave")
-        && let Some(b) = v.as_bool()
-    {
-        raw.compile_on_save = Some(b);
+    if let Some(v) = root.get("compileOnSave") {
+        match v.kind {
+            ValueKind::Bool(b) => raw.compile_on_save = Some(b),
+            ValueKind::Null => {}
+            _ => d.type_error(v, "compileOnSave", "boolean"),
+        }
     }
 
-    if let Some(v) = root.get("watchOptions")
-        && let Some(members) = v.as_object()
-    {
-        raw.watch = Some(parse_watch_options(members, &dir));
+    if let Some(v) = root.get("watchOptions") {
+        // Not type-checked by tsc 7: only what is not JSON is reported (observed).
+        d.free_form(v);
+        if let Some(members) = v.as_object() {
+            raw.watch = Some(parse_watch_options(members, &dir));
+        }
     }
 
-    if let Some(v) = root.get("typeAcquisition")
-        && let Some(members) = v.as_object()
-    {
-        raw.type_acquisition = Some(parse_type_acquisition(members, &mut d));
+    if let Some(v) = root.get("typeAcquisition") {
+        match v.as_object() {
+            Some(members) => {
+                raw.type_acquisition = Some(parse_type_acquisition(members, &mut d));
+            }
+            None if v.is_null() => {}
+            None => d.type_error(v, "typeAcquisition", "object"),
+        }
     }
     raw
 }
+
+/// Where tsc reports a problem with list element `i`: it drops the elements that are not
+/// JSON first and then points at the written element with the index the problem has in
+/// what is left (`[x, 1]` reports the `1` at `x`; observed).
+fn list_anchor(items: &[Value], i: usize, dropped: usize) -> &Value {
+    let fallback = &items[i.min(items.len().saturating_sub(1))];
+    items.get(i.saturating_sub(dropped)).unwrap_or(fallback)
+}
+
+/// The root keys tsc reads; values under any other key are free-form JSON.
+const ROOT_KEYS: &[&str] = &[
+    "compilerOptions",
+    "extends",
+    "files",
+    "include",
+    "exclude",
+    "references",
+    "compileOnSave",
+    "watchOptions",
+    "typeAcquisition",
+];
+
+const VALUE_MESSAGE: &str = "Property value can only be string literal, numeric literal, 'true', 'false', 'null', object literal or array literal.";
 
 struct Diags<'a> {
     file: &'a str,
@@ -1170,6 +1250,32 @@ impl Diags<'_> {
     fn at(&mut self, span: (u32, u32), code: u32, msg: String) {
         self.out
             .push(ConfigDiagnostic::at(code, msg, self.file, span));
+    }
+
+    /// What is not JSON inside a value no option type applies to (an unknown key, a
+    /// free-form object such as a plugin entry): tsc's option pass reports it again, at its
+    /// full start (TS1328; TS1136 for a shorthand property). The parser has already
+    /// reported it at its token.
+    fn free_form(&mut self, v: &Value) {
+        match &v.kind {
+            ValueKind::Invalid => self.at((v.full_start, v.span.1), 1328, VALUE_MESSAGE.into()),
+            ValueKind::Array(items) => items.iter().for_each(|it| self.free_form(it)),
+            ValueKind::Object(members) => members.iter().for_each(|m| self.free_form_member(m)),
+            _ => {}
+        }
+    }
+
+    fn free_form_member(&mut self, m: &jsonc::Member) {
+        if m.key_form == KeyForm::Shorthand {
+            let v = &m.value;
+            self.at(
+                (v.full_start, v.span.1),
+                1136,
+                "Property assignment expected.".into(),
+            );
+        } else {
+            self.free_form(&m.value);
+        }
     }
 
     /// TS5024 anchored like tsc: at the token for literals, at the full start (including
@@ -1209,6 +1315,12 @@ fn convert_option(
     d: &mut Diags<'_>,
 ) -> Option<(OptionId, Option<OptionValue>)> {
     let Some(decl) = find_option(&m.key) else {
+        if m.value.kind == ValueKind::Invalid {
+            // An unknown option whose value is not JSON: only the value (observed).
+            d.free_form(&m.value);
+            return None;
+        }
+        d.free_form(&m.value);
         match find_option_ignore_case(&m.key) {
             Some(s) => d.at(
                 m.key_span,
@@ -1286,7 +1398,8 @@ fn convert_value(
             }
         },
         OptionType::Number => match v.kind {
-            ValueKind::Number(n) => Some(OptionValue::Number(n)),
+            // tsc 7 keeps numbers as integers: truncated, saturating (`1.5` is 1, observed).
+            ValueKind::Number(n) => Some(OptionValue::Number(n as i64 as f64)),
             _ => {
                 d.type_error(v, name, "number");
                 None
@@ -1312,7 +1425,9 @@ fn convert_value(
                 return None;
             };
             let mut out = Vec::new();
-            for it in items {
+            let mut dropped = 0;
+            for (i, it) in items.iter().enumerate() {
+                let at = list_anchor(items, i, dropped);
                 match &it.kind {
                     ValueKind::String(s) => match decl.ty {
                         OptionType::PathList => out.push(resolve_path_value(dir, s)),
@@ -1321,14 +1436,23 @@ fn convert_value(
                                 out.push(s.to_ascii_lowercase());
                             } else {
                                 let valid: Vec<&str> = LIBS.iter().map(|(n, _)| *n).collect();
-                                enum_error(d, it, name, &valid);
+                                enum_error(d, at, name, &valid);
                             }
                         }
                         _ => out.push(s.clone()),
                     },
-                    ValueKind::Invalid => d.type_error(it, name, "Array"),
-                    _ => d.type_error(it, name, "string"),
+                    ValueKind::Invalid => {
+                        d.type_error(it, name, "Array");
+                        dropped += 1;
+                    }
+                    _ if decl.ty == OptionType::Lib => d.type_error(at, name, "enum"),
+                    _ => d.type_error(at, name, "string"),
                 }
+            }
+            // Elements that are not JSON are dropped; a list of nothing else is not set
+            // (`"types": [x]` keeps the default, observed).
+            if !items.is_empty() && items.iter().all(|it| it.kind == ValueKind::Invalid) {
+                return None;
             }
             Some(OptionValue::List(out))
         }
@@ -1381,6 +1505,20 @@ fn convert_value(
             };
             let mut map = Vec::new();
             for m in members {
+                match m.key_form {
+                    KeyForm::Shorthand => {
+                        d.free_form_member(m);
+                        continue;
+                    }
+                    KeyForm::Computed => {
+                        d.free_form(&m.value);
+                        continue;
+                    }
+                    KeyForm::Quoted | KeyForm::Unquoted => {}
+                }
+                if m.value.kind == ValueKind::Invalid {
+                    d.free_form(&m.value);
+                }
                 if m.key.matches('*').count() > 1 {
                     d.at(
                         m.key_span,
@@ -1409,7 +1547,17 @@ fn convert_value(
                                 subs.push(s.clone());
                             }
                         }
-                        if subs.is_empty() {
+                        if items.iter().any(|it| it.kind == ValueKind::Invalid) {
+                            // An element that is not JSON: the array is not one (observed).
+                            d.at(
+                                m.value.span,
+                                5063,
+                                format!(
+                                    "Substitutions for pattern '{}' should be an array.",
+                                    m.key
+                                ),
+                            );
+                        } else if subs.is_empty() {
                             d.at(
                                 m.value.span,
                                 5066,
@@ -1441,7 +1589,10 @@ fn convert_value(
             let mut out = Vec::new();
             for it in items {
                 if it.as_object().is_some() {
+                    d.free_form(it);
                     out.push(it.clone());
+                } else if it.kind == ValueKind::Invalid {
+                    d.type_error(it, name, "Array");
                 } else {
                     d.type_error(it, "plugin", "object");
                 }
@@ -1482,26 +1633,61 @@ fn parse_watch_options(members: &[jsonc::Member], dir: &str) -> WatchOptions {
 
 fn parse_type_acquisition(members: &[jsonc::Member], d: &mut Diags<'_>) -> TypeAcquisition {
     let mut t = TypeAcquisition::default();
-    let strings = |v: &Value| {
-        v.as_array().map(|a| {
-            a.iter()
-                .filter_map(|i| i.as_str().map(str::to_owned))
-                .collect()
-        })
+    let boolean = |d: &mut Diags<'_>, m: &jsonc::Member| match m.value.kind {
+        ValueKind::Bool(b) => Some(b),
+        ValueKind::Null => None,
+        _ => {
+            d.type_error(&m.value, &m.key, "boolean");
+            None
+        }
+    };
+    let strings = |d: &mut Diags<'_>, m: &jsonc::Member| -> Option<Vec<String>> {
+        let v = &m.value;
+        let Some(items) = v.as_array() else {
+            if !v.is_null() {
+                d.type_error(v, &m.key, "Array");
+            }
+            return None;
+        };
+        let mut out = Vec::new();
+        for it in items {
+            match &it.kind {
+                ValueKind::String(s) => out.push(s.clone()),
+                ValueKind::Invalid => d.type_error(it, &m.key, "Array"),
+                _ => d.type_error(it, &m.key, "string"),
+            }
+        }
+        Some(out)
     };
     for m in members {
-        match m.key.as_str() {
-            "enable" => t.enable = m.value.as_bool(),
-            "include" => t.include = strings(&m.value),
-            "exclude" => t.exclude = strings(&m.value),
-            "disableFilenameBasedTypeAcquisition" => {
-                t.disable_filename_based_type_acquisition = m.value.as_bool()
+        match m.key_form {
+            KeyForm::Shorthand => {
+                d.free_form_member(m);
+                continue;
             }
-            other => d.at(
-                m.key_span,
-                17010,
-                format!("Unknown type acquisition option '{other}'."),
-            ),
+            KeyForm::Computed => {
+                d.free_form(&m.value);
+                continue;
+            }
+            KeyForm::Quoted | KeyForm::Unquoted => {}
+        }
+        match m.key.as_str() {
+            "enable" => t.enable = boolean(d, m),
+            "include" => t.include = strings(d, m),
+            "exclude" => t.exclude = strings(d, m),
+            "disableFilenameBasedTypeAcquisition" => {
+                t.disable_filename_based_type_acquisition = boolean(d, m)
+            }
+            // An unknown key whose value is not JSON: only the value (as for compilerOptions).
+            _ if m.value.kind == ValueKind::Invalid => d.free_form(&m.value),
+            other => {
+                d.free_form(&m.value);
+                d.at(
+                    m.key_span,
+                    17010,
+                    format!("Unknown type acquisition option '{other}'."),
+                )
+            }
         }
     }
     t

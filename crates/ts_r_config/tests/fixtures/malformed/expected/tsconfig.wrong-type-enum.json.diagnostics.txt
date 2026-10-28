@@ -1,0 +1,1 @@
+tsconfig.wrong-type-enum.json(1,34): error TS5024: Compiler option 'target' requires a value of type enum.

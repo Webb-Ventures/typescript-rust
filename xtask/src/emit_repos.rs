@@ -144,7 +144,9 @@ pub fn run(mut args: Args) -> Result<ExitCode> {
     };
     let ours = match args.opt("bin")? {
         Some(b) => PathBuf::from(b),
-        None => root().join("target/release/ts-r-check"),
+        None => {
+            crate::util::release_dir().join(format!("ts-r-check{}", std::env::consts::EXE_SUFFIX))
+        }
     };
     args.finish()?;
     if !ours.is_file() {

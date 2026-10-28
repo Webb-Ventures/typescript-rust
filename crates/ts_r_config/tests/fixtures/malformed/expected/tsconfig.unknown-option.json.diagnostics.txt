@@ -1,0 +1,1 @@
+tsconfig.unknown-option.json(1,24): error TS5023: Unknown compiler option 'strictt'.

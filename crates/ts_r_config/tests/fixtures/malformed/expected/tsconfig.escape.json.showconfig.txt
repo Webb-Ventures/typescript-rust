@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "outDir": "./dq"
+    },
+    "files": [
+        "./a.ts"
+    ],
+    "exclude": [
+        "${FIXTURE}/dq"
+    ]
+}

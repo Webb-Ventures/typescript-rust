@@ -1,0 +1,1 @@
+tsconfig.wrong-type-files.json(1,12): error TS5024: Compiler option 'files' requires a value of type Array.

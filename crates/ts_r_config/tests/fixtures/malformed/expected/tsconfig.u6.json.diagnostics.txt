@@ -1,0 +1,1 @@
+tsconfig.u6.json(1,39): error TS5024: Compiler option 'lib' requires a value of type enum.

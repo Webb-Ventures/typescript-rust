@@ -1,0 +1,1 @@
+tsconfig.double-comma-obj.json(1,39): error TS1136: Property assignment expected.

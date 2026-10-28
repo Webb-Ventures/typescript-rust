@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "outDir": "./a/u{110000}"
+    },
+    "files": [
+        "./a.ts"
+    ],
+    "exclude": [
+        "${FIXTURE}/a/u{110000}"
+    ]
+}

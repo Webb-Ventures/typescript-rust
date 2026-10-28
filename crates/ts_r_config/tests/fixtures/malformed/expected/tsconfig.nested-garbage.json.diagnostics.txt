@@ -1,0 +1,3 @@
+tsconfig.nested-garbage.json(1,41): error TS1136: Property assignment expected.
+
+tsconfig.nested-garbage.json(1,42): error TS1136: Property assignment expected.

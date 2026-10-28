@@ -1,0 +1,3 @@
+tsconfig.dash-key.json(1,24): error TS1136: Property assignment expected.
+
+tsconfig.dash-key.json(1,25): error TS1327: String literal with double quotes expected.

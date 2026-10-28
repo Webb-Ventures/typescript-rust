@@ -1,0 +1,5 @@
+tsconfig.r4.json(1,1): error TS1005: '{' expected.
+
+tsconfig.r4.json(1,1): error TS1327: String literal with double quotes expected.
+
+tsconfig.r4.json(1,6): error TS1005: '}' expected.

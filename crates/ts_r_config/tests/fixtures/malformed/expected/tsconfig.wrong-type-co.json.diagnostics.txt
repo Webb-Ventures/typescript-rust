@@ -1,0 +1,1 @@
+tsconfig.wrong-type-co.json(1,22): error TS5024: Compiler option 'compilerOptions' requires a value of type object.

@@ -1,0 +1,1 @@
+tsconfig.trailing-comment-unterminated-in-string.json(1,42): error TS5059: Invalid value for '--reactNamespace'. '/* x' is not a valid identifier.

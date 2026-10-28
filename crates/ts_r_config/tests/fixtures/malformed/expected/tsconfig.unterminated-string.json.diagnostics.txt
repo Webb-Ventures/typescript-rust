@@ -1,0 +1,1 @@
+tsconfig.unterminated-string.json(1,43): error TS1002: Unterminated string literal.

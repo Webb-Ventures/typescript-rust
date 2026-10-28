@@ -1,0 +1,9 @@
+tsconfig.ident-dash-key.json(1,23): error TS1136: Property assignment expected.
+
+tsconfig.ident-dash-key.json(1,24): error TS1136: Property assignment expected.
+
+tsconfig.ident-dash-key.json(1,26): error TS1005: ',' expected.
+
+tsconfig.ident-dash-key.json(1,27): error TS1327: String literal with double quotes expected.
+
+tsconfig.ident-dash-key.json(1,27): error TS5023: Unknown compiler option 'emit'.

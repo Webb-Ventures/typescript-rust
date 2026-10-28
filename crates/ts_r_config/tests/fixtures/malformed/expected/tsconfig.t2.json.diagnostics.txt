@@ -1,0 +1,1 @@
+tsconfig.t2.json(1,18): error TS5024: Compiler option 'references' requires a value of type object.

@@ -4,7 +4,7 @@
 //! from JavaScript parents, fatal `--tsconfig` errors, `--test` locations, the signal relay,
 //! `import.meta` and the `__esModule` marker in CommonJS output, `?query` instances, syntax
 //! errors behind `import()`, `require` of top-level `await`, the `import()` default unwrap,
-//! JSON named exports, TypeScript inside packages, and `--test` without files. Each case writes its files to a scratch
+//! JSON named exports, TypeScript inside packages, `--test` without files, and `-e`/`-p`/stdin. Each case writes its files to a scratch
 //! directory and runs under `scripts/limit.sh`. Skipped when Node is missing.
 
 use std::path::PathBuf;
@@ -633,4 +633,80 @@ fn compile_cjs_prints_an_es_module_as_commonjs() {
         return;
     };
     assert!(stdout(&out).starts_with("esm\n"));
+}
+
+#[test]
+fn eval_print_and_stdin_run_typescript_like_tsx() {
+    if !have_node() {
+        eprintln!("skipped: node not found");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("run-node-eval");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(
+        dir.join("lib.ts"),
+        "export const twice = (n: number): number => n * 2;\n",
+    )
+    .expect("write");
+    let input = dir.join("input.txt");
+    std::fs::write(
+        &input,
+        "const s: string = __filename;\nconsole.log(s, process.argv.slice(1).join());\n",
+    )
+    .expect("write");
+    let ts_r_run = |args: &[&str], stdin: Option<&PathBuf>| -> Output {
+        let mut c = ts_r_testing::limited(env!("CARGO_BIN_EXE_ts-r-run"), 1024, 120);
+        c.args(args)
+            .current_dir(&dir)
+            .env("TS_R_CACHE_DIR", dir.join(".cache"));
+        if let Some(f) = stdin {
+            c.stdin(std::fs::File::open(f).expect("open"));
+        }
+        c.output().expect("ts-r-run runs")
+    };
+    // CommonJS by default, as under tsx: an `import` is a `require`, the module is `[eval]`.
+    let out = ts_r_run(
+        &[
+            "-e",
+            "import { twice } from './lib'; const n: number = twice(2); console.log(n, typeof require, __filename, process.argv.slice(1).join())",
+            "a",
+            "b",
+        ],
+        None,
+    );
+    assert_eq!(stdout(&out), "4 function [eval] a,b\n");
+    let out = ts_r_run(
+        &[
+            "--input-type=module-typescript",
+            "--eval",
+            "import { twice } from './lib.ts'; console.log(twice(3), typeof require)",
+        ],
+        None,
+    );
+    assert_eq!(stdout(&out), "6 undefined\n");
+    // Top-level `await` makes an ES module (tsx rejects it).
+    let out = ts_r_run(
+        &["-e", "console.log(await Promise.resolve(7) as number)"],
+        None,
+    );
+    assert_eq!(stdout(&out), "7\n");
+    let out = ts_r_run(&["-p", "enum E { A = 3 } E.A as number"], None);
+    assert_eq!(stdout(&out), "3\n");
+    let out = ts_r_run(&["--print=require('./lib.ts').twice(5)"], None);
+    assert_eq!(stdout(&out), "10\n");
+    // Piped code is `[stdin]`, and `-` is the program's first argument, as under Node.
+    let out = ts_r_run(&["-", "q"], Some(&input));
+    assert_eq!(stdout(&out), "[stdin] -,q\n");
+    let out = ts_r_run(&[], Some(&input));
+    assert_eq!(stdout(&out), "[stdin] \n");
+    // A syntax error stops the run before Node starts, tsc-style.
+    let out = ts_r_run(&["-e", "const x: = 1"], None);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("[eval].ts:1:10") && err.contains("error TS1110"),
+        "{err}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
