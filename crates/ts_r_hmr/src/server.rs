@@ -36,7 +36,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ts_r_cache::{Key, KeyBuilder};
 
-use crate::cache::TransformCache;
+use crate::cache::{Computed, TransformCache};
 use crate::cors::Cors;
 use crate::deps::{DepEntry, Deps};
 use crate::env::{Env, EnvOptions};
@@ -3137,83 +3137,110 @@ pub(crate) fn cached_transform(
     hash: Key,
     deps: Vec<PathBuf>,
 ) -> Result<(Arc<TransformOutput>, Vec<PathBuf>), TransformError> {
-    let mut watch_deps = deps;
-    // What plugin hooks watched for this module last time (`this.addWatchFile`).
-    let (load_watch, known_watch) = shared
-        .plugin_watch
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(file)
-        .map(|w| (w.load.clone(), w.transform.clone()))
-        .unwrap_or_default();
-    let base_deps = watch_deps.len();
-    for d in load_watch.into_iter().chain(known_watch.iter().cloned()) {
-        if !watch_deps.contains(&d) {
-            watch_deps.push(d);
-        }
-    }
-    let plugin_transforms = transform_plugins(shared);
-    let cache_id = transform_cache_id(shared, transform);
-    let key_for = |deps: &[PathBuf]| {
-        let content = deps_content_key(shared, hash, deps);
-        TransformCache::key(&cache_id, Mode::Dev, input.id, &content)
-    };
-    let key = key_for(&watch_deps);
-    let output = shared.cache.get_or_insert_rekeyed(key, || {
-        let mut added = Vec::new();
-        let out = run_transform(
-            shared,
-            plugin_transforms,
-            transform,
-            input,
-            id_str,
-            &mut added,
-        )?;
-        let added = plugin_watch_paths(&added);
-        if added == known_watch {
-            return Ok((out, None));
-        }
-        // The hooks watched other files than last time: store the output under the key
-        // their contents make, so a later request (or a restart) never reuses it for
-        // other contents.
-        let mut deps = watch_deps[..base_deps].to_vec();
-        for d in shared
-            .plugin_watch
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(file)
-            .map(|w| w.load.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .chain(added.iter().cloned())
-        {
-            if !deps.contains(&d) {
-                deps.push(d);
+    let base_deps = deps.len();
+    let mut attempt = 1;
+    let (output, mut watch_deps) = loop {
+        let mut watch_deps = deps.clone();
+        // What plugin hooks watched for this module last time (`this.addWatchFile`).
+        let (load_watch, known_watch) = plugin_watch_of(shared, file);
+        for d in load_watch.into_iter().chain(known_watch.iter().cloned()) {
+            if !watch_deps.contains(&d) {
+                watch_deps.push(d);
             }
         }
-        let rekey = key_for(&deps);
-        // Recorded before the output is published: a caller that waited for this run (the
-        // deps scan and a request at once) reads the files below as soon as it wakes, and
-        // must see this run's list, or its module never learns about them (a Windows CI
-        // flake: editing the file never re-ran the hooks).
-        set_plugin_watch(shared, file, |w| w.transform = added);
-        Ok((out, Some(rekey)))
-    })?;
+        let plugin_transforms = transform_plugins(shared);
+        let cache_id = transform_cache_id(shared, transform);
+        let key_for = |deps: &[PathBuf]| {
+            let content = deps_content_key(shared, hash, deps);
+            TransformCache::key(&cache_id, Mode::Dev, input.id, &content)
+        };
+        let key = key_for(&watch_deps);
+        let check_stale = attempt < MAX_TRANSFORM_ATTEMPTS;
+        let result = shared.cache.get_or_insert_rekeyed(key, || {
+            // Another caller's run (the deps scan and a request at once) finished after this
+            // key was made and before this caller looked it up, and its hooks watched other
+            // files: its output is stored under the key those files make, which this one
+            // misses. Running again would run the hooks twice for one edit (a plugin that
+            // counts its runs sees two); the key made from what they watch now finds it.
+            if check_stale && plugin_watch_of(shared, file).1 != known_watch {
+                return Err(Attempt::Stale);
+            }
+            let mut added = Vec::new();
+            let out = run_transform(
+                shared,
+                plugin_transforms,
+                transform,
+                input,
+                id_str,
+                &mut added,
+            )
+            .map_err(Attempt::Failed)?;
+            let added = plugin_watch_paths(&added);
+            if added == known_watch {
+                return Ok(Computed::new(out));
+            }
+            // The hooks watched other files than last time: store the output under the key
+            // their contents make, so a later request (or a restart) never reuses it for
+            // other contents.
+            let mut deps = watch_deps[..base_deps].to_vec();
+            for d in plugin_watch_of(shared, file)
+                .0
+                .into_iter()
+                .chain(added.iter().cloned())
+            {
+                if !deps.contains(&d) {
+                    deps.push(d);
+                }
+            }
+            Ok(Computed {
+                out,
+                rekey: Some(key_for(&deps)),
+                // Recorded once the output is stored under the new key (a caller that reads
+                // this list and makes that key finds it; recorded earlier, it misses and runs
+                // the hooks again), and before callers that waited for this run wake: they
+                // read the list at once, and must see this run's, or the module never learns
+                // about the files (a Windows CI flake: editing one never re-ran the hooks).
+                stored: Some(Box::new(move || {
+                    set_plugin_watch(shared, file, |w| w.transform = added)
+                })),
+            })
+        });
+        match result {
+            Ok(output) => break (output, watch_deps),
+            Err(Attempt::Failed(e)) => return Err(e),
+            Err(Attempt::Stale) => attempt += 1,
+        }
+    };
     // What the hooks watch now: this call's run, or the run another caller (the deps scan
     // and a request) did while this one waited for it.
-    let now = shared
-        .plugin_watch
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(file)
-        .map(|w| w.transform.clone())
-        .unwrap_or_default();
-    for d in now {
+    for d in plugin_watch_of(shared, file).1 {
         if !watch_deps.contains(&d) {
             watch_deps.push(d);
         }
     }
     Ok((output, watch_deps))
+}
+
+/// How often [`cached_transform`] makes its key again because another run changed the files
+/// the hooks watch; the last attempt runs the transform whatever happened meanwhile.
+const MAX_TRANSFORM_ATTEMPTS: u32 = 4;
+
+/// Why one [`cached_transform`] attempt produced no output.
+enum Attempt {
+    Failed(TransformError),
+    /// The key went stale before the run (see [`cached_transform`]): make it again.
+    Stale,
+}
+
+/// The files plugin hooks last watched for `file`: `(load, transform)`.
+fn plugin_watch_of(shared: &Shared, file: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    shared
+        .plugin_watch
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(file)
+        .map(|w| (w.load.clone(), w.transform.clone()))
+        .unwrap_or_default()
 }
 
 /// The cache key part for a module's content and the files its output also depends on.

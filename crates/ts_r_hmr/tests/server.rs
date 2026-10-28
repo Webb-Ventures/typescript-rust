@@ -334,9 +334,14 @@ fn keep_alive_serves_several_requests_on_one_connection() {
     assert_eq!(statuses, ["HTTP/1.1 200 OK"; 3]);
 }
 
+/// No watcher: only the creation this test sends. The real watcher also reports the write of
+/// `needs.js`; when that lands after the request and before the client connects, the module
+/// fails again with nothing importing it, the page reloads (a message sent before the
+/// client is there) and the module waits for the page to ask for it again, so the creation
+/// below retries nothing (a Windows CI flake: no message until the connection closed).
 #[test]
 fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
-    let f = start();
+    let f = start_with_watch(false);
     f.app.write(
         "src/needs.js",
         "import { x } from './later.js';\nexport const y = x;\n",
