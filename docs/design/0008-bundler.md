@@ -195,7 +195,7 @@ linked batch runs under Node.
 
 ### Results (M3, Apple M-series, 4 threads)
 
-- esbuild oracle: 931 of 957 compared cases pass (97.3%), 13 of the 26 failures intended
+- esbuild oracle: 938 of 964 compared cases pass (97.3%), 13 of the 26 failures intended
   differences where ts-r-build follows tsc 7; see the oracle README.
 - A private app's server-rendered smoke entry (1983 modules; historical, no longer run):
   ts-r-build 65 ms without and 55 ms with the persistent cache, esbuild 86 ms; +2.7% size.
@@ -223,7 +223,7 @@ linked batch runs under Node.
 - IIFE output is not re-indented; runtime helpers are repeated per chunk.
 - With several entries and no splitting, tree-shaking liveness is shared across entries.
 - `var` declarations nested in blocks of a lazily wrapped ESM module stay inside its closure.
-- No `--mangle-props`, no `--drop`, no `--pure`, no `--keep-names`.
+- No `--mangle-props`, no `--drop`, no `--pure`.
 - Not implemented: `import defer`/`import source`, glob `require`/`import()` of template
   strings, Yarn PnP module resolution (only a tsconfig `extends` goes through PnP). Missing
   diagnostics: assignments to imports and constants, export cycles, strict `package.json`

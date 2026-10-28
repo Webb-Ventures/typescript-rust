@@ -78,6 +78,8 @@ pub struct ModulePlan {
     /// Helper names (for wrappers).
     pub helper_cjs: String,
     pub helper_esm: String,
+    /// `--keep-names`: the `__tsrName` helper's name (empty = off).
+    pub keep_names: String,
     /// The module runs unwrapped at the top of the file but names its own top-level
     /// bindings, around `top_reserved` (every other top-level name of the file).
     pub own_top_level: bool,
@@ -153,7 +155,7 @@ pub struct Plan {
     pub chunks: Vec<Chunk>,
     pub plans: Vec<Option<ModulePlan>>,
     pub module_chunk: Vec<Option<usize>>,
-    pub helper_names: [String; 6],
+    pub helper_names: [String; 7],
     pub format: Format,
     /// Output directory (absolute).
     pub outdir: String,
@@ -270,7 +272,7 @@ struct Planner<'a> {
     ext_locals: FxHashMap<(u32, Imported), String>,
     /// name -> owning module (for cross-chunk imports).
     owner: FxHashMap<String, ModuleId>,
-    helper_names: [String; 6],
+    helper_names: [String; 7],
     /// CommonJS entries printed at the top level of their CommonJS chunk (see
     /// [`unwrapped_entries`]).
     unwrapped: Vec<ModuleId>,
@@ -1363,6 +1365,11 @@ impl Planner<'_> {
             Wrap::Esm => helpers.mark(Helper::Esm),
             Wrap::None => {}
         }
+        // Renames are only known when the module prints: with `--keep-names`, every chunk
+        // that has modules defines the helper.
+        if self.o.keep_names {
+            helpers.mark(Helper::Name);
+        }
         if !self.wrapper[mi].is_empty() {
             refs.insert(self.wrapper[mi].clone());
         }
@@ -1404,6 +1411,11 @@ impl Planner<'_> {
             reserved,
             helper_cjs: self.helper_names[Helper::Cjs as usize].clone(),
             helper_esm: self.helper_names[Helper::Esm as usize].clone(),
+            keep_names: if self.o.keep_names {
+                self.helper_names[Helper::Name as usize].clone()
+            } else {
+                String::new()
+            },
             own_top_level: self.unwrapped.contains(&m),
             top_reserved: Vec::new(),
             import_meta: self.import_meta[mi].clone(),

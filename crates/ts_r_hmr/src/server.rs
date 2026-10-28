@@ -94,11 +94,17 @@ pub struct DevConfig {
     /// Bare specifiers pre-bundled even if the scan doesn't find them (Vite's
     /// `optimizeDeps.include`), resolved from the root.
     pub optimize_include: Vec<String>,
+    /// Bare specifiers never pre-bundled (Vite's `optimizeDeps.exclude`): a package named
+    /// here (or a subpath of it) is served file by file as source modules.
+    pub optimize_exclude: Vec<String>,
     /// Ignore the cached dependency batch and pre-bundle again (Vite's `--force`).
     pub force_deps: bool,
     /// HTML inserted into every page right after the client `<script>` (before the app's
     /// own scripts), e.g. a framework's runtime preamble.
     pub html_inject: Vec<String>,
+    /// Vite's `html.cspNonce`: pages get a `<meta property="csp-nonce">` and every script,
+    /// style and stylesheet/preload link a `nonce` attribute (see [`render::with_nonce`]).
+    pub csp_nonce: Option<String>,
     /// Modules served from memory: `(url, code)`. Imports are resolved from the root and
     /// rewritten like a source module's.
     pub virtual_modules: Vec<(String, String)>,
@@ -128,6 +134,9 @@ pub struct DevConfig {
     /// `build.assetsInlineLimit`: SVGs smaller than this many bytes are inlined as data
     /// URLs (the only assets Vite inlines in dev).
     pub assets_inline_limit: u64,
+    /// `build.assetsInlineLimit` given as a function: asked first for each SVG (`Some`
+    /// decides; `None` falls back to the default limit, as Vite does).
+    pub assets_inline_fn: Option<crate::assets::InlineFn>,
     /// `experimental.hmrPartialAccept`: an update of a module that accepts some of its
     /// exports (`import.meta.hot.acceptExports`) skips the importers that only use those.
     pub hmr_partial_accept: bool,
@@ -164,6 +173,7 @@ impl std::fmt::Debug for DevConfig {
             .field("resolver", &self.resolver)
             .field("dep_bundler", &self.dep_bundler)
             .field("optimize_include", &self.optimize_include)
+            .field("optimize_exclude", &self.optimize_exclude)
             .field("force_deps", &self.force_deps)
             .field("plugins", &self.plugins)
             .field("cache", &self.cache)
@@ -195,8 +205,10 @@ impl DevConfig {
             resolver: None,
             dep_bundler: Arc::new(UnbundledDeps),
             optimize_include: Vec::new(),
+            optimize_exclude: Vec::new(),
             force_deps: false,
             html_inject: Vec::new(),
+            csp_nonce: None,
             virtual_modules: Vec::new(),
             plugins: None,
             cache: CacheMode::Default,
@@ -212,6 +224,7 @@ impl DevConfig {
             public_dir: Some(PathBuf::from("public")),
             assets_include: crate::glob::PathFilter::default(),
             assets_inline_limit: crate::assets::SVG_INLINE_LIMIT as u64,
+            assets_inline_fn: None,
             hmr_partial_accept: false,
             css_module_naming: crate::css_modules::Naming::default(),
             headers: Vec::new(),
@@ -308,6 +321,7 @@ pub(crate) struct Shared {
     pub public_dir: Option<PathBuf>,
     pub assets_include: crate::glob::PathFilter,
     pub assets_inline_limit: u64,
+    pub assets_inline_fn: Option<crate::assets::InlineFn>,
     pub hmr_partial_accept: bool,
     pub css_module_naming: crate::css_modules::Naming,
     pub base: String,
@@ -341,7 +355,9 @@ pub(crate) struct Shared {
     pub dep_cache: Mutex<HashMap<String, Arc<(String, String)>>>,
     pub deps: Deps,
     pub optimize_include: Vec<String>,
+    pub optimize_exclude: Vec<String>,
     pub html_inject: String,
+    pub csp_nonce: Option<String>,
     pub virtual_modules: HashMap<String, String>,
     pub plugins: Option<Arc<dyn PluginHost>>,
     /// What plugins' `load` returned, by module id: kept until the module is invalidated
@@ -375,6 +391,30 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    /// `optimizeDeps.exclude`: the specifier is an excluded package or a subpath of one.
+    pub(crate) fn excluded_dep(&self, specifier: &str) -> bool {
+        self.optimize_exclude.iter().any(|e| {
+            specifier == e
+                || specifier
+                    .strip_prefix(e.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+    }
+
+    /// Whether an asset of `ext` with `len` bytes is inlined as a data URL in dev: an SVG
+    /// the `assetsInlineLimit` function accepts, or one under the limit.
+    pub(crate) fn inlines(&self, file: &Path, ext: &str, len: u64) -> bool {
+        if ext != "svg" {
+            return false;
+        }
+        if let Some(f) = &self.assets_inline_fn
+            && let Some(yes) = f(file)
+        {
+            return yes;
+        }
+        crate::assets::inline_under(ext, len, self.assets_inline_limit)
+    }
+
     pub fn log(&self, line: &str) {
         if let Some(l) = &self.logger {
             l(line);
@@ -609,6 +649,7 @@ impl DevServer {
             public_dir: config.public_dir.as_ref().map(|d| root.join(d)),
             assets_include: config.assets_include.clone(),
             assets_inline_limit: config.assets_inline_limit,
+            assets_inline_fn: config.assets_inline_fn.clone(),
             hmr_partial_accept: config.hmr_partial_accept,
             css_module_naming: config.css_module_naming,
             base,
@@ -635,7 +676,16 @@ impl DevServer {
             dep_cache: Mutex::default(),
             deps,
             optimize_include: config.optimize_include.clone(),
-            html_inject: config.html_inject.concat(),
+            optimize_exclude: config.optimize_exclude.clone(),
+            html_inject: match &config.csp_nonce {
+                Some(n) => format!(
+                    "{}<meta property=\"csp-nonce\" nonce=\"{}\" />",
+                    config.html_inject.concat(),
+                    render::attr_escape(n)
+                ),
+                None => config.html_inject.concat(),
+            },
+            csp_nonce: config.csp_nonce.clone(),
             virtual_modules: config.virtual_modules.iter().cloned().collect(),
             plugins: config.plugins.clone(),
             plugin_loads: Mutex::default(),
@@ -710,7 +760,12 @@ impl DevServer {
         } else {
             self.addr.ip().to_string()
         };
-        format!("{scheme}://{host}:{}{}", self.addr.port(), self.shared.base)
+        // The base as a URL (`/foo bar/` is `/foo%20bar/`), as Vite prints it.
+        format!(
+            "{scheme}://{host}:{}{}",
+            self.addr.port(),
+            http::encode_uri(&self.shared.base)
+        )
     }
 
     /// The canonical root.
@@ -1508,13 +1563,12 @@ fn serve_html(shared: &Shared, req: &Request, file: &Path) -> Response {
             }
             // Pages are `text/html` with no charset, as Vite sends them (the page's own
             // `<meta charset>` decides).
-            cacheable(
-                req,
-                "text/html",
-                render::inject_client_at(&html, &shared.client_url(), &shared.html_inject)
-                    .into_bytes(),
-                "no-cache",
-            )
+            let html = render::inject_client_at(&html, &shared.client_url(), &shared.html_inject);
+            let html = match &shared.csp_nonce {
+                Some(n) => render::with_nonce(&html, n),
+                None => html,
+            };
+            cacheable(req, "text/html", html.into_bytes(), "no-cache")
         }
         Err(_) => Response::text(404, "Not found"),
     }
@@ -1668,7 +1722,20 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         as_script && !is_module_ext(shared, file, &ext) && ext != "css" && ext != "json";
     if req.has_query("url") || asset_import {
         ensure_asset(shared, file, &url);
-        let out = asset_export_url(shared, file, &url, &req.query);
+        let mut out = asset_export_url(shared, file, &url, &req.query);
+        // An asset a hot update changed: its URL carries the update's time, so the page
+        // fetches the new file (`vite: packages/vite/src/node/plugins/asset.ts`, `load`).
+        if !out.starts_with("data:") {
+            let t = {
+                let g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+                g.by_file(file)
+                    .map_or(0, |id| g.node(id).last_hmr_timestamp)
+            };
+            if t > 0 {
+                out.push(if out.contains('?') { '&' } else { '?' });
+                out.push_str(&format!("t={t}"));
+            }
+        }
         return js_response(req, crate::assets::default_export(&out));
     }
     match ext.as_str() {
@@ -1780,7 +1847,7 @@ fn asset_url(shared: &Shared, file: &Path, url: &str) -> String {
     let ext = ext_of(file);
     if ext == "svg"
         && let Ok(meta) = fs::metadata(file)
-        && crate::assets::inline_under(&ext, meta.len(), shared.assets_inline_limit)
+        && shared.inlines(file, &ext, meta.len())
         && let Ok(bytes) = fs::read(file)
     {
         return crate::assets::data_url(&ext, render::content_type(&ext), &bytes);
@@ -2226,8 +2293,17 @@ pub(crate) fn prepare_script(
     let asset_urls: Vec<Option<String>> = hot
         .asset_urls
         .iter()
-        .map(|rec| {
-            let (url, file) = new_url_asset(shared, &rec.specifier, real)?;
+        .enumerate()
+        .map(|(i, rec)| {
+            let worker = hot.asset_url_workers.get(i).copied().flatten();
+            let (url, file) = match worker {
+                // A worker script is never inlined: its URL, with the worker query first.
+                Some(ty) => {
+                    let (url, file) = new_url_asset(shared, &rec.specifier, real, false)?;
+                    (crate::worker::inject_worker_query(&url, ty), file)
+                }
+                None => new_url_asset(shared, &rec.specifier, real, true)?,
+            };
             asset_files.extend(file);
             Some(url)
         })
@@ -2546,11 +2622,13 @@ fn literal_body(s: &str, quote: u8) -> String {
 
 /// The URL a `new URL('<spec>', import.meta.url)` literal becomes, and the project file
 /// behind it: a project file's URL (a data URL for a small SVG) or a public file's (no
-/// file), under the base. `None` when the file doesn't exist.
+/// file), under the base. `None` when the file doesn't exist. `inline: false` (a worker
+/// script) never gives a data URL.
 fn new_url_asset(
     shared: &Shared,
     spec: &str,
     importer: &Path,
+    inline: bool,
 ) -> Option<(String, Option<PathBuf>)> {
     let clean = spec.split(['?', '#']).next().unwrap_or(spec);
     let suffix = &spec[clean.len()..];
@@ -2574,7 +2652,10 @@ fn new_url_asset(
         false => app_css::resolve_ref(shared, clean, importer, true)?,
     };
     let url = url_for_file(&shared.root, &file);
-    let out = asset_url(shared, &file, &url);
+    let out = match inline {
+        true => asset_url(shared, &file, &url),
+        false => shared.public_url(&url),
+    };
     let out = if out.starts_with("data:") {
         out
     } else {
@@ -2675,7 +2756,9 @@ fn resolve_target(shared: &Shared, specifier: &str, importer: &Path) -> Result<P
             file,
             package,
         } => {
-            if shared.deps.enabled()
+            if shared.excluded_dep(&specifier) {
+                file_pending(shared, file, spec_query)
+            } else if shared.deps.enabled()
                 && spec_query.is_empty()
                 && kind_for(&file) == ModuleKind::Script
             {
@@ -2982,6 +3065,9 @@ pub(crate) fn resolve_for_scan(
     specifiers
         .iter()
         .map(|s| match shared.resolver.resolve(s, importer).ok()? {
+            Resolved::Dep {
+                specifier, file, ..
+            } if shared.excluded_dep(&specifier) => Some(ScanHit::File(file)),
             Resolved::Dep {
                 package,
                 specifier,
@@ -3495,6 +3581,10 @@ fn node_modules_url(shared: &Shared, path: &Path) -> Option<String> {
     if rest.len() <= pkg_len {
         return None;
     }
+    // An `optimizeDeps.exclude` package's files are source modules, served by path.
+    if shared.excluded_dep(&rest[..pkg_len].join("/")) {
+        return None;
+    }
     Some(dep_url(shared, &rest.join("/"), path))
 }
 
@@ -3607,13 +3697,21 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: 
         });
     }
     let mut prelude = extra.to_owned();
+    // A classic worker (`importScripts` prelude) can't have `import` statements: no hot
+    // context or env import, and its own `injectQuery` appended at the end.
+    let classic = extra.starts_with("importScripts");
+    let mut footer = "";
     // `import(expr)`: `?import` added at runtime (Vite's `injectQuery`), so a variable
     // import gets the module an explicit import of the same file would.
-    if !p.hot.dynamic_exprs.is_empty() && !extra.starts_with("importScripts") {
-        prelude.push_str(&format!(
-            "import {{ injectQuery as __vite__injectQuery }} from {};",
-            render::js_string(&shared.client_url())
-        ));
+    if !p.hot.dynamic_exprs.is_empty() {
+        if classic {
+            footer = crate::worker::CLASSIC_INJECT_QUERY;
+        } else {
+            prelude.push_str(&format!(
+                "import {{ injectQuery as __vite__injectQuery }} from {};",
+                render::js_string(&shared.client_url())
+            ));
+        }
         for &(start, end) in &p.hot.dynamic_exprs {
             edits.push(render::Edit {
                 start,
@@ -3627,7 +3725,7 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: 
             });
         }
     }
-    if p.hot.uses_hot {
+    if p.hot.uses_hot && !classic {
         prelude.push_str(&render::hot_prelude_at(
             &shared.client_url(),
             &g.node(id).url,
@@ -3635,7 +3733,7 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: 
     }
     drop(g);
     let env = shared.env();
-    if p.hot.uses_env {
+    if p.hot.uses_env && !classic {
         prelude.push_str(&env.prelude);
     }
     for &(start, end) in &p.hot.node_env {
@@ -3661,6 +3759,7 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: 
         }
     }
     let mut code = render::apply_edits(&p.output.code, &prelude, &mut edits);
+    code.push_str(footer);
     if let Some(map) = &p.output.map {
         // `apply_edits` sorted the edits; it skips overlapping ones, and so must the map.
         let mut text_edits: Vec<crate::sourcemap::TextEdit<'_>> = Vec::with_capacity(edits.len());

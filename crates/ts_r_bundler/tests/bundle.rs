@@ -2497,3 +2497,39 @@ fn copy_loader_imports_stay_imports_of_the_copy() {
     let css = file(&r, "/proj/out/entry.css");
     assert!(css.contains(&format!("url(\"./{a_name}\")")), "{css}");
 }
+
+/// `--keep-names`: functions and classes keep `name` when minification or deconflicting
+/// renames their bindings, in bundles and in transform mode.
+#[test]
+fn keep_names_survives_renaming() {
+    let main = "import { other } from './b.js'\nfunction foo() {}\nclass Bar { static self() { return Bar } }\nconst baz = () => {}\nlet q = function named() {}\nfunction outer() { function inner() {} return inner }\nfunction g(cb = function () {}) { return cb }\nclass N { static name = 'own' }\nconsole.log([foo, Bar, Bar.self(), baz, q, outer(), g(), N, other].map((f) => f.name).join(','))\n";
+    let other = "function foo() {}\nexport const other = foo\n";
+    let expected = "foo,Bar,Bar,baz,named,inner,cb,own,foo\n";
+    for (case, minify, bundle) in [
+        ("bundle-min", true, true),
+        ("bundle", false, true),
+        ("transform-min", true, false),
+    ] {
+        let fs = project(&[("a.js", main), ("b.js", other)]);
+        let mut o = opts(&["a.js"]);
+        o.keep_names = true;
+        o.minify_identifiers = minify;
+        o.minify_syntax = minify;
+        o.bundle = bundle;
+        if !bundle {
+            o.format = None;
+        }
+        let r = run_build(&fs, o);
+        let text = file(&r, "/proj/out/a.js");
+        if minify {
+            assert!(text.contains("\"Bar\")"), "{case}: {text}");
+        }
+        if have_node() && bundle {
+            assert_eq!(
+                run_node(&format!("keep-names-{case}"), &r, "a.js"),
+                expected,
+                "{text}"
+            );
+        }
+    }
+}

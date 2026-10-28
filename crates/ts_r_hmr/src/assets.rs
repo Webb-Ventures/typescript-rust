@@ -71,6 +71,10 @@ pub fn svg_data_url(svg: &str) -> Option<String> {
     Some(out)
 }
 
+/// `build.assetsInlineLimit` as a function of the asset's path: `Some(inline)` decides,
+/// `None` leaves it to the default limit.
+pub type InlineFn = std::sync::Arc<dyn Fn(&std::path::Path) -> Option<bool> + Send + Sync>;
+
 /// Whether an asset import of `ext` with `len` bytes is inlined by default in dev, with
 /// the default limit.
 pub fn inline_by_default(ext: &str, len: u64) -> bool {

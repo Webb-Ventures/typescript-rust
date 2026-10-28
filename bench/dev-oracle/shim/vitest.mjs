@@ -116,7 +116,8 @@ const matchers = {
     `expected ${show(a)} to match ${show(b)}`,
   ],
   toContain: (a, b) => [
-    a != null && (typeof a === 'string' ? a.includes(b) : [...a].includes(b)),
+    // A string and anything else: chai's `indexOf` (a RegExp is compared as its text).
+    a != null && (typeof a === 'string' ? a.indexOf(b) !== -1 : [...a].includes(b)),
     `expected ${show(a)} to contain ${show(b)}`,
   ],
   toContainEqual: (a, b) => [a != null && [...a].some((x) => equals(x, b)), `expected ${show(a)} to contain equal ${show(b)}`],

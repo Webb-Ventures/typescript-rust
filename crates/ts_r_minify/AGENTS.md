@@ -21,13 +21,20 @@ fold::fold(&mut ast, src, &scopes);            // returns true when the tree cha
 compress::compress(&mut ast, src, &scopes, &CompressOptions::default());
 let names = rename::compute(&ast, &scopes, &RenameOptions { mode, fixed, include_module_scope, reserved, module_reserved });
 rename::apply(&mut ast, &scopes, &names);
+keep_names::apply(&mut ast, &scopes, "__name", KeepNamesOptions { program, top_classes }); // --keep-names
+ts_r_minify::minify_ast_keep_names(&mut ast, src, &opts, strict, Some("__name")); // all of it
 ```
 
 Files: `scope.rs` (scopes, symbols, references, hoisting, `eval`/`with` detection),
 `purity.rs` (side-effect analysis, `/*#__PURE__*/`), `fold.rs` (constant folding,
 dead branches, the handler of an empty `try`), `compress.rs` (size rewrites), `rename.rs` (mangle/deconflict), `private.rs`
 (`#private` member names, per class; untouched when a direct `eval` exists), `names.rs`
-(short-name sequence, reserved words, sanitising), `build.rs` (synthesized node helpers).
+(short-name sequence, reserved words, sanitising), `build.rs` (synthesized node helpers),
+`keep_names.rs` (esbuild's `--keep-names`, from its docs and observed output: after renaming,
+a function or class whose binding was renamed gets `helper(f, "f")` after its declaration, and
+a named or binding-named function, arrow or class expression is wrapped as
+`helper(expr, "name")`; a class with a static `name` member is left alone; the caller defines
+the helper and reserves its name).
 
 ## Invariants
 

@@ -39,7 +39,7 @@ pushes the update to the browser. It speaks Vite's hot-reload protocol, so code 
 
 - No CSS preprocessors (Sass, Less, Stylus).
 - Some `vite.config` options aren't applied: `css.*`, `server.hmr`, `server.fs`,
-  `server.watch`, `optimizeDeps.exclude`, and proxy `configure`/`bypass`. Plugins calling
+  `server.watch`, and proxy `configure`/`bypass`. Plugins calling
   `this.parse`, `this.load` or `ssrLoadModule` get an error.
 - CSS modules (`.module.css`) and preprocessor `@import`s in app CSS aren't handled.
 - Non-literal `import(expr)` isn't rewritten.

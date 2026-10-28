@@ -285,7 +285,7 @@ Plain std threads; no async runtime.
   `this.addWatchFile`/`emitFile`; `this.parse`, `this.load` and `ssrLoadModule` throw;
   `server.moduleGraph` is a stub. Middlewares run only for requests no built-in route serves,
   with buffered bodies. Not read from the config: `css.*`, `server.hmr`, `server.fs`,
-  `server.watch`, `optimizeDeps.exclude`/`esbuildOptions`, proxy `configure`/`bypass`,
+  `server.watch`, `optimizeDeps.esbuildOptions`, proxy `configure`/`bypass`,
   `cors.origin` functions.
 - Dependency scan: only `<script type="module" src>` in `index.html`. Non-literal `import(expr)`
   is found only on request (re-batch and reload) and isn't rewritten. Without a batch-capable

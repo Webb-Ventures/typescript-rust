@@ -618,3 +618,114 @@ fn wasm_workers_and_dynamic_imports_like_vite() {
         "import \"/@vite/env\"\n;\nself.onmessage = () => {}\n"
     );
 }
+
+/// `new Worker(new URL('./w.js', import.meta.url), opts)`: the URL gets `worker_file` and the
+/// type the options give; a classic worker has no `import` statements (its own
+/// `injectQuery`); an `optimizeDeps.exclude` package is served file by file, so a worker
+/// URL inside it is rewritten too; `assetsInlineLimit` as a function decides inlining.
+#[test]
+fn worker_constructor_urls_classic_workers_and_excluded_deps() {
+    let app = TempDir::new("cfg-worker-url");
+    app.write(
+        "index.html",
+        "<!doctype html><script type=\"module\" src=\"/src/a.js\"></script>\n",
+    );
+    app.write(
+        "src/a.js",
+        "import { start } from 'dep'\nimport logo from './logo.svg'\nnew Worker(new URL('./c.js', import.meta.url))\nnew Worker(new URL('./m.js?x=1', import.meta.url), { type: 'module' })\nconsole.log(start, logo)\n",
+    );
+    app.write(
+        "src/c.js",
+        "importScripts('/lib.js')\nconst p = '/e.js'\nimport(/* @vite-ignore */ p)\n",
+    );
+    app.write("src/m.js", "self.onmessage = () => {}\n");
+    app.write(
+        "src/logo.svg",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    );
+    app.write(
+        "node_modules/dep/package.json",
+        "{\"name\": \"dep\", \"type\": \"module\", \"main\": \"index.js\"}",
+    );
+    app.write(
+        "node_modules/dep/index.js",
+        "export function start() { return new Worker(new URL('./w.js', import.meta.url), { type: 'module' }) }\n",
+    );
+    app.write("node_modules/dep/w.js", "self.onmessage = () => {}\n");
+    let mut config = base_config(&app);
+    config.optimize_exclude = vec!["dep".to_owned()];
+    config.assets_inline_fn = Some(std::sync::Arc::new(|f: &std::path::Path| {
+        f.ends_with("logo.svg").then_some(false)
+    }));
+    let server = DevServer::start(config).expect("server starts");
+    let (_, _, a) = get(&server, "/src/a.js");
+    assert!(
+        a.contains("new URL('/src/c.js?worker_file&type=classic', import.meta.url)"),
+        "{a}"
+    );
+    assert!(
+        a.contains("new URL('/src/m.js?worker_file&type=module&x=1', import.meta.url)"),
+        "{a}"
+    );
+    assert!(a.contains("from '/node_modules/dep/index.js'"), "{a}");
+    let (_, _, logo) = get(&server, "/src/logo.svg?import");
+    assert_eq!(logo, "export default \"/src/logo.svg\";\n");
+    let (_, _, c) = get(&server, "/src/c.js?worker_file&type=classic");
+    assert!(c.starts_with("importScripts(\"/@vite/env\")\n;\n"), "{c}");
+    assert!(!c.contains("import {"), "{c}");
+    assert!(
+        c.contains("import(/* @vite-ignore */ __vite__injectQuery(p, 'import'))"),
+        "{c}"
+    );
+    assert!(
+        c.contains("function __vite__injectQuery(url, query)"),
+        "{c}"
+    );
+    let (_, _, dep) = get(&server, "/node_modules/dep/index.js");
+    assert!(
+        dep.contains("new URL('/node_modules/dep/w.js?worker_file&type=module', import.meta.url)"),
+        "{dep}"
+    );
+}
+
+/// A base with a space is printed as a URL (`/foo%20bar/`), as Vite prints it.
+#[test]
+fn server_url_encodes_the_base() {
+    let app = TempDir::new("cfg-encoded-base");
+    app.write("index.html", "<!doctype html>\n");
+    let mut config = base_config(&app);
+    config.base = ts_r_hmr::server::normalize_base("/foo bar/");
+    let server = DevServer::start(config).expect("server starts");
+    assert!(server.url().ends_with("/foo%20bar/"), "{}", server.url());
+}
+
+#[test]
+fn csp_nonce_meta_and_attributes_like_vite() {
+    let app = TempDir::new("cfg-csp-nonce");
+    app.write(
+        "index.html",
+        "<link rel=\"stylesheet\" href=\"./a.css\" />\n<style>p {}</style>\n<script nonce=\"#N#\">1</script>\n<script type=\"module\" src=\"./main.js\"></script>\n",
+    );
+    app.write("a.css", "p { color: red }\n");
+    app.write("main.js", "export {}\n");
+    let mut config = base_config(&app);
+    config.csp_nonce = Some("#N#".to_owned());
+    let server = DevServer::start(config).expect("server starts");
+    let (status, _, html) = get(&server, "/");
+    assert_eq!(status, 200);
+    assert!(
+        html.contains("<meta property=\"csp-nonce\" nonce=\"#N#\" />"),
+        "{html}"
+    );
+    assert!(
+        html.contains("<link nonce=\"#N#\" rel=\"stylesheet\""),
+        "{html}"
+    );
+    assert!(html.contains("<style nonce=\"#N#\">"), "{html}");
+    assert!(html.contains("<script nonce=\"#N#\">1</script>"), "{html}");
+    assert!(
+        html.contains("<script nonce=\"#N#\" type=\"module\" src=\"/@vite/client\">"),
+        "{html}"
+    );
+    assert!(!html.contains("nonce=\"#N#\" nonce"), "{html}");
+}

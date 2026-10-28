@@ -30,23 +30,21 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-v1 build4 at 955b2a9 (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**931 of 957 compared cases pass (97.3%)**; 113 of the 1070 cases are skipped. Of the 26 failures, 13 are
+v1 build5 at af89821 (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**938 of 964 compared cases pass (97.3%)**; 106 of the 1070 cases are skipped. Of the 26 failures, 13 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
 artifacts; the other 5 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-Since 8a3356f (858 of 885): ts-r-build bundles CSS (`@import` ordering with layers, media and
-supports conditions, `url()` assets, CSS modules with `composes` and `:local` / `:global`,
-`--minify-syntax` colors and duplicate rules, `@charset` hoisting), and has the `copy`,
-`local-css` and `global-css` loaders. The runner compares CSS outputs and maps
-`Loader=copy` / `localcss` / `globalcss`, so 72 more cases are compared (69 pass), and 4 of
-the 5 earlier CSS failures pass.
+Since 955b2a9 (931 of 957): ts-r-build has `--keep-names` (functions and classes whose
+binding the minifier or the bundler renamed get their `name` back through a `__name`
+helper), and the runner maps `KeepNames`: 7 of its 8 cases are compared and pass, and the
+eighth prints `Math.random()` results (nondeterministic, skipped).
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
 | bundler_css_test.go | 48 | 4 | 10 |
-| bundler_dce_test.go | 115 | 0 | 6 |
-| bundler_default_test.go | 250 | 1 | 52 |
+| bundler_dce_test.go | 116 | 0 | 5 |
+| bundler_default_test.go | 253 | 1 | 49 |
 | bundler_glob_test.go | 1 | 0 | 9 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
@@ -55,7 +53,7 @@ the 5 earlier CSS failures pass.
 | bundler_lower_test.go | 73 | 11 | 0 |
 | bundler_packagejson_test.go | 93 | 2 | 1 |
 | bundler_splitting_test.go | 22 | 1 | 0 |
-| bundler_ts_test.go | 66 | 4 | 18 |
+| bundler_ts_test.go | 69 | 4 | 15 |
 | bundler_tsconfig_test.go | 68 | 3 | 9 |
 | bundler_yarnpnp_test.go | 2 | 0 | 1 |
 
@@ -113,10 +111,10 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
 - **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
   the enum, so `c = d` with `d=b` refers to the member `b`; ts-r substitutes after.
 
-### Skipped (113)
+### Skipped (106)
 
 `MangleProps` / `MangleQuoted` / `ReserveProps` (35), `InjectPaths` (17), nondeterministic
-(11), Go-only TypeScript options (10), `External.PostResolve` (8), `KeepNames` (8),
+(12), Go-only TypeScript options (10), `External.PostResolve` (8),
 `UnsupportedCSSFeatures` (7), cases sharing a Go variable (6), `OriginalTargetEnv` (5), no
 output path (4), `Defines` with call flags (`--pure`, 2), and 1-2 each for Windows paths,
 stdout, a non-string file, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
@@ -138,3 +136,4 @@ stdout, a non-string file, JSX options and absolute node paths. `Plugins` (1) ne
 | v1 resolve parity at 45ab2ad: tsconfig `extends` of a package through Yarn PnP's `.pnp.data.json` | 1070 | 881 | 854 | 27 | 189 | 96.9% |
 | v1 build3 at 8a3356f: `--alias`, `--drop-labels`; runner maps `PackageAliases` and `DropLabels` | 1070 | 885 | 858 | 27 | 185 | 96.9% |
 | v1 build4 at 955b2a9: CSS bundling and CSS modules, `copy` / `local-css` / `global-css` loaders; runner compares CSS and maps those loaders | 1070 | 957 | 931 | 26 | 113 | 97.3% |
+| v1 build5 at af89821: `--keep-names`; runner maps `KeepNames` | 1070 | 964 | 938 | 26 | 106 | 97.3% |

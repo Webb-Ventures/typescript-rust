@@ -85,6 +85,12 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   paths are aliased; the longest matching key wins (`key` exactly or `key/rest`, which keeps
   `/rest`); the substitution resolves from the working directory, and `external` patterns
   see the substituted path, as esbuild's CLI does.
+- **`keep_names`** (`--keep-names`, `ts_r_minify::keep_names`): after each module's renaming,
+  functions and classes whose binding changed get their `name` back through the `__name`
+  runtime helper (`Helper::Name`, `Object.defineProperty(target, "name", { value,
+  configurable: true })`); a top-level class always does, because `var C = class _C {}`
+  would be named `_C`. The calls for a top-level declaration are printed right after it.
+  Transform mode uses `__name`, defined in the prelude when a call was added.
 - **`drop_labels`** turns labeled statements whose label is in the set into empty statements
   right after parsing (`prepare.rs` `drop_labels`), so their imports are never resolved.
 - **Implicit extensions inside `node_modules` try JavaScript first** (`javascript_first`:

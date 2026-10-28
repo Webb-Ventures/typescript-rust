@@ -18,6 +18,8 @@
 //! - `__tsrToCjs(ns)` views an ES namespace as CommonJS exports (`__esModule: true`); cached
 //!   so `require()` returns the same object every time. A namespace with a
 //!   `"module.exports"` export returns that value instead (Node's `require(esm)` rule).
+//! - `__tsrName(target, value)` (`--keep-names`) defines `target.name` as `value`
+//!   (configurable) and returns `target`.
 
 use std::fmt::Write as _;
 
@@ -29,16 +31,19 @@ pub enum Helper {
     Copy,
     ToEsm,
     ToCjs,
+    /// `--keep-names`: `__tsrName(fn, "name")` sets a renamed function's or class's `name`.
+    Name,
 }
 
 impl Helper {
-    pub const ALL: [Helper; 6] = [
+    pub const ALL: [Helper; 7] = [
         Helper::Cjs,
         Helper::Esm,
         Helper::Export,
         Helper::Copy,
         Helper::ToEsm,
         Helper::ToCjs,
+        Helper::Name,
     ];
 
     /// Preferred name.
@@ -50,6 +55,7 @@ impl Helper {
             Helper::Copy => "__tsrCopy",
             Helper::ToEsm => "__tsrToEsm",
             Helper::ToCjs => "__tsrToCjs",
+            Helper::Name => "__tsrName",
         }
     }
 
@@ -68,14 +74,14 @@ impl Helper {
 /// A set of helpers with their final names.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Helpers {
-    pub used: [bool; 6],
-    pub names: [String; 6],
+    pub used: [bool; 7],
+    pub names: [String; 7],
 }
 
 impl Helpers {
-    pub fn with_names(names: [String; 6]) -> Helpers {
+    pub fn with_names(names: [String; 7]) -> Helpers {
         Helpers {
-            used: [false; 6],
+            used: [false; 7],
             names,
         }
     }
@@ -115,6 +121,7 @@ impl Helpers {
         let copy = n(Helper::Copy);
         let to_esm = n(Helper::ToEsm);
         let to_cjs = n(Helper::ToCjs);
+        let name = n(Helper::Name);
         // Each helper is a self-contained `var`; locals use names that can't collide with
         // the helper names (those are reserved for the whole chunk). `__tsrCjs` and `__tsrEsm`
         // keep their state in a second parameter that callers never pass (shorter than a
@@ -156,6 +163,12 @@ impl Helpers {
             let _ = write!(
                 s,
                 "var {to_cjs} = /* @__PURE__ */ ((cache) => (ns) => {{\n  if (\"module.exports\" in ns) return ns[\"module.exports\"];\n  let mod = cache.get(ns);\n  if (!mod) cache.set(ns, mod = {copy}(Object.defineProperty({{}}, \"__esModule\", {{ value: true }}), ns));\n  return mod;\n}})(new WeakMap());\n"
+            );
+        }
+        if self.used[Helper::Name.index()] {
+            let _ = writeln!(
+                s,
+                "var {name} = (target, value) => Object.defineProperty(target, \"name\", {{ value, configurable: true }});"
             );
         }
         if minify && !s.is_empty() {

@@ -11,14 +11,15 @@ Design record: [0010](../../docs/design/0010-dev-server.md).
 
 ## CLI
 
-`ts-r-dev [root] [--port <n>] [--strict-port] [--host [addr]] [--mode|-m <mode>] [--base <path>]
+`ts-r-dev [root] [--config|-c <file>] [--port <n>] [--strict-port] [--host [addr]] [--mode|-m <mode>] [--base <path>]
 [--open [path]] [--no-cache] [--cache-dir <dir>] [--debounce <ms>] [--no-watch] [--force]
 [--no-react-refresh] [--no-plugins] [--quiet]` (`--opt=value` works too). Defaults: root `.`,
 `127.0.0.1:5173` (next free port unless `--strict-port`; `--port 0` = any; `--host` alone =
 `0.0.0.0`), mode `development`, transform cache in `~/.cache/ts-r/dev-transform`,
 dependency batch in `~/.cache/ts-r/dev-deps` (`--force` rebuilds it and re-reads the plugin
 manifest). Flags override `vite.config` (`server.host`/`port`/`strictPort`/`open`, `base`,
-`mode`). `--open` launches `$BROWSER` or the system opener (`open`/`xdg-open`/`start`; `BROWSER=none`
+`mode`). `--config` names the Vite config file instead of `vite.config.*` in the root (a
+missing file is a startup failure). `--open` launches `$BROWSER` or the system opener (`open`/`xdg-open`/`start`; `BROWSER=none`
 skips it).
 Prints `Local: http://…/` once listening; update lines (with the per-step latency breakdown)
 go to stdout. Exit codes: 0 help/version, 2 usage error, 1 startup failure.
@@ -113,7 +114,10 @@ from the documented plugin API (no Vite code).
   `configResolved`): `mode`, `base`, `define` (expression text; non-string values JSON-encoded), `envPrefix`, `envDir`,
   `publicDir`, `server.{host,port,strictPort,open,headers,cors,proxy,https}`,
   `experimental.hmrPartialAccept` (as `hmrPartialAccept`), `css.transformer` (as
-  `cssTransformer`, the shape of CSS modules' class names), applied by
+  `cssTransformer`, the shape of CSS modules' class names), `build.assetsInlineLimit`
+  (a number, or `"function"`: each asset then asks the sidecar's `inlineLimit` op, which
+  reads the file and calls the function), `optimizeDeps.exclude` (as `optimizeExclude`),
+  `html.cspNonce` (as `cspNonce`), applied by
   `apply_dev_options`. `envDir`/`publicDir` are kept relative to the root when given relative
   or inside it (checkouts with the same config share the cached manifest) and resolved
   against ts-r-dev's root. A proxy `rewrite` function stays in Node: the rule records its index and
@@ -216,7 +220,7 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
   sees changes that reach `handleHotUpdate`. The sidecar costs ~25 ms to start with inline plugins and
   ~80–440 ms when the config imports `vite` (cold disk cache); with a cached manifest that happens in the background after "ready".
 - From `vite.config`: no `css.*` (preprocessor options, CSS modules), `server.hmr`,
-  `server.fs`, `server.watch`, `optimizeDeps.exclude`/`esbuildOptions`, proxy
+  `server.fs`, `server.watch`, `optimizeDeps.esbuildOptions`, proxy
   `configure`, `cors.origin` functions. A changed certificate file is picked up only
   when the manifest key changes (config, `package.json`, lockfile) or with `--force`. No Ctrl-C cleanup beyond the
   OS reclaiming resources (the transform cache flushes on drop only when the server stops
