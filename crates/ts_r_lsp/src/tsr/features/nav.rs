@@ -10,7 +10,7 @@ use super::{Ctx, LinesCache, LspLines, decl_span};
 use crate::jsonrpc::codes;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
-use ts_r_ast::{MethodKind, Node, NodeId};
+use ts_r_ast::{MetaPropKind, MethodKind, Node, NodeId};
 use ts_r_binder::SymbolFlags;
 use ts_r_checker::{Checker, Ck, Loc};
 use ts_r_diagnostics::FileId;
@@ -21,6 +21,22 @@ use ts_r_types::{ObjectKind, SymId, TypeId, TypeKind};
 pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let c = cx.checker;
     let ast = c.ast(cx.file);
+    if let Some(n) = node_at(ast, offset)
+        && let Node::MetaProperty {
+            kind: MetaPropKind::NewTarget,
+        } = *ast.node(n)
+    {
+        return new_target_definition(cx, n, offset);
+    }
+    // A stray `default` (in no statement) of a module: the module, the whole file.
+    let d = Doc::new(c, cx.file);
+    if d.is_module
+        && node_at(ast, offset) == Some(ast.root)
+        && d.word_at(offset).is_some_and(|w| d.word(w) == "default")
+    {
+        let end = c.file(cx.file).text.len() as u32;
+        return json!([LinesCache::default().location(c, cx.file, 0, end)]);
+    }
     if let Some(n) = node_at(ast, offset)
         && let Node::StringLit { value } = *ast.node(n)
     {
@@ -632,7 +648,7 @@ pub fn type_definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Va
     };
     let l = Loc::new(cx.file, n);
     let (t, sym) = match ast.node(n) {
-        Node::This {} => (ck.check_expr(l), None),
+        Node::This {} | Node::MetaProperty { .. } => (ck.check_expr(l), None),
         _ => {
             let Some(s) = meaning_at(ck, l).primary else {
                 return Value::Null;
@@ -852,7 +868,7 @@ fn decl_locations(cx: &Ctx<'_, '_>, decls: Vec<Loc>) -> Value {
                     let sp = c.ast(n.file).span(n.node);
                     (sp.start, sp.end)
                 }
-                None => decl_span(c, d),
+                None => jsdoc_literal_span(c, d).unwrap_or_else(|| decl_span(c, d)),
             },
         };
         if seen.insert((d.file, s, e)) {
@@ -860,6 +876,113 @@ fn decl_locations(cx: &Ctx<'_, '_>, decls: Vec<Loc>) -> Value {
         }
     }
     Value::Array(out)
+}
+
+/// `target` of `new.target`: the name of the function it is read in (arrows skipped), or
+/// of the class for a constructor; nothing on `new`.
+fn new_target_definition(cx: &Ctx<'_, '_>, n: NodeId, offset: u32) -> Value {
+    let c = cx.checker;
+    let ast = c.ast(cx.file);
+    if offset + 6 < ast.span(n).end {
+        return Value::Null;
+    }
+    let parents = c.file(cx.file).parents();
+    let mut name = None;
+    for p in std::iter::successors(parents.parent(n), |&p| parents.parent(p)).take(256) {
+        match *ast.node(p) {
+            Node::FunctionDecl { name: x, .. } | Node::FunctionExpr { name: x, .. } => {
+                name = x.or_else(|| {
+                    let m = parents.parent(p)?;
+                    let Node::MethodDef {
+                        kind: MethodKind::Constructor,
+                        ..
+                    } = *ast.node(m)
+                    else {
+                        return None;
+                    };
+                    match *ast.node(parents.parent(m)?) {
+                        Node::ClassDecl { name, .. } | Node::ClassExpr { name, .. } => name,
+                        _ => None,
+                    }
+                });
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(x) = name else {
+        return Value::Null;
+    };
+    let sp = ast.span(x);
+    json!([LinesCache::default().location(c, cx.file, sp.start, sp.end)])
+}
+
+/// Every `meta` of `import.meta` in `scope`, when the cursor is on one.
+fn import_meta_references(cx: &Ctx<'_, '_>, offset: u32, scope: Scope) -> Option<Vec<Ref>> {
+    let c = cx.checker;
+    let ast = c.ast(cx.file);
+    let n = node_at(ast, offset)?;
+    let is_meta = |ast: &ts_r_ast::Ast, n: NodeId| {
+        matches!(
+            ast.node(n),
+            Node::MetaProperty {
+                kind: MetaPropKind::ImportMeta
+            }
+        )
+    };
+    if !is_meta(ast, n) || offset + 4 < ast.span(n).end {
+        return None;
+    }
+    let files: Vec<FileId> = match scope {
+        Scope::File => vec![cx.file],
+        Scope::Project => project_files(cx)
+            .filter(|&f| c.file(f).text.contains("meta"))
+            .collect(),
+    };
+    let mut out = Vec::new();
+    for f in files {
+        let ast = c.ast(f);
+        for k in 1..ast.node_count() {
+            if let Some(m) = NodeId::from_raw(k as u32)
+                && is_meta(ast, m)
+            {
+                let end = ast.span(m).end;
+                out.push(Ref {
+                    file: f,
+                    start: end.saturating_sub(4),
+                    end,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                });
+            }
+        }
+    }
+    Some(out)
+}
+
+/// A `@typedef`'s type literal of `@property` tags: from the first tag's `@` to the line
+/// end after the last (tsc's JSDoc type literal), not the `@typedef` tag.
+fn jsdoc_literal_span(c: &ts_r_checker::Checker, d: Loc) -> Option<(u32, u32)> {
+    let ast = c.ast(d.file);
+    let Node::TypeLiteral { members } = *c.node(d) else {
+        return None;
+    };
+    if !ast.is_jsdoc(d.node) {
+        return None;
+    }
+    let (first, last) = (ast.list(members).first()?, ast.list(members).last()?);
+    let (start, end) = (ast.span(*first).start, ast.span(*last).end);
+    // Back off over the closing line's ` *` to just after its newline.
+    let text = c.file(d.file).text.as_str();
+    let tail = text.get(start as usize..end as usize)?;
+    let trimmed = tail.trim_end_matches([' ', '\t', '*', '/']);
+    let end = if trimmed.ends_with('\n') {
+        start + trimmed.len() as u32
+    } else {
+        end
+    };
+    Some((start, end))
 }
 
 /// Where to look for references.
@@ -942,7 +1065,7 @@ impl Target {
         if super::aliases::is_alias(c, start) && also.is_none() && m.contextual.is_none() {
             return Some(Target::of_alias(ck, l, name, start, rename));
         }
-        let s = c.resolve_alias(start).unwrap_or(start);
+        let s = super::aliases::resolve(c, start);
         // `const { a } = require("m")`: also the module's export `a` (and, for a shorthand
         // `module.exports = { a }`, the variable it holds).
         let required = (!rename)
@@ -1042,7 +1165,7 @@ impl Target {
             return super::aliases::is_alias(c, s)
                 && super::aliases::chain(c, s).contains(&self.syms[0]);
         }
-        let mut s = c.resolve_alias(s).unwrap_or(s);
+        let mut s = super::aliases::resolve(c, s);
         if self.syms.contains(&s) {
             return true;
         }
@@ -1112,6 +1235,9 @@ fn references_with(
 ) -> Vec<Ref> {
     let c = cx.checker;
     if let Some(refs) = special_references(cx, offset, scope) {
+        return refs;
+    }
+    if !rename && let Some(refs) = import_meta_references(cx, offset, scope) {
         return refs;
     }
     // For find-all-references, a modifier or declaration keyword stands for the declared
@@ -1282,6 +1408,11 @@ fn scan_target(
     scope: Scope,
 ) -> Vec<Ref> {
     let c = cx.checker;
+    // `node_modules` files are searched for a symbol declared there.
+    let in_packages = target
+        .decls
+        .iter()
+        .any(|d| c.file(d.file).path.contains("/node_modules/"));
     let files: Vec<FileId> = match scope {
         Scope::File => vec![cx.file],
         Scope::Project => (0..c.files.len())
@@ -1289,7 +1420,7 @@ fn scan_target(
             .filter(|&f| {
                 let sf = c.file(f);
                 !sf.is_lib
-                    && !sf.path.contains("/node_modules/")
+                    && (in_packages || !sf.path.contains("/node_modules/"))
                     && (sf.text.contains(&target.name)
                         || target
                             .alias_names
@@ -1728,10 +1859,23 @@ pub fn locations(cx: &Ctx<'_, '_>, spans: impl Iterator<Item = (FileId, u32, u32
     )
 }
 
-/// Why a symbol cannot be renamed (tsserver's messages).
-fn rename_blocker(ck: &Ck<'_, '_>, s: SymId) -> Option<&'static str> {
+/// Why a symbol cannot be renamed from `file` (tsserver's messages): a lib declaration, or
+/// one in a package other than `file`'s. An alias stands for itself (tsc 7's default
+/// `useAliasesForRename`; `tsc: tsc/internal/ls/rename.go`, `wouldRenameInOtherNodeModules`).
+fn rename_blocker(ck: &Ck<'_, '_>, file: FileId, s: SymId) -> Option<&'static str> {
     let c = ck.c;
-    let s = c.resolve_alias(s).unwrap_or(s);
+    // The package directory of a path inside `node_modules` (`node_modules/@s/p`).
+    let package = |path: &str| -> Option<String> {
+        let i = path.rfind("/node_modules/")? + "/node_modules/".len();
+        let rest = &path[i..];
+        let n = if rest.starts_with('@') { 2 } else { 1 };
+        let end = rest
+            .match_indices('/')
+            .nth(n - 1)
+            .map_or(rest.len(), |(j, _)| j);
+        Some(path[..i + end].to_string())
+    };
+    let own = package(&c.file(file).path);
     for d in c.decls(s) {
         let f = c.file(d.file);
         if f.is_lib {
@@ -1739,8 +1883,18 @@ fn rename_blocker(ck: &Ck<'_, '_>, s: SymId) -> Option<&'static str> {
                 "You cannot rename elements that are defined in the standard TypeScript library.",
             );
         }
-        if f.path.contains("/node_modules/") {
-            return Some("You cannot rename elements that are defined in a 'node_modules' folder.");
+        match (&own, package(&f.path)) {
+            (None, Some(_)) => {
+                return Some(
+                    "You cannot rename elements that are defined in a 'node_modules' folder.",
+                );
+            }
+            (Some(o), Some(p)) if *o != p => {
+                return Some(
+                    "You cannot rename elements that are defined in another 'node_modules' folder.",
+                );
+            }
+            _ => {}
         }
     }
     None
@@ -1807,7 +1961,7 @@ pub fn prepare_rename(
         let Some((start, end, s)) = super::doc_links::at(ck, cx.file, offset) else {
             return Ok(Value::Null);
         };
-        if let Some(why) = rename_blocker(ck, s) {
+        if let Some(why) = rename_blocker(ck, cx.file, s) {
             return Err((codes::REQUEST_FAILED, why.to_string()));
         }
         return Ok(json!({
@@ -1820,7 +1974,7 @@ pub fn prepare_rename(
         let Some(s) = m.primary.or(m.shorthand) else {
             return Ok(Value::Null);
         };
-        if let Some(why) = rename_blocker(ck, s) {
+        if let Some(why) = rename_blocker(ck, cx.file, s) {
             return Err((codes::REQUEST_FAILED, why.to_string()));
         }
     }
@@ -1847,7 +2001,7 @@ pub fn rename(
                 let Some(s) = m.primary.or(m.shorthand) else {
                     return Ok(Value::Null);
                 };
-                if let Some(why) = rename_blocker(ck, s) {
+                if let Some(why) = rename_blocker(ck, cx.file, s) {
                     return Err((codes::REQUEST_FAILED, why.to_string()));
                 }
             }
@@ -1867,7 +2021,7 @@ pub fn rename(
                 let Some((_, _, s)) = super::doc_links::at(ck, cx.file, offset) else {
                     return Ok(Value::Null);
                 };
-                if let Some(why) = rename_blocker(ck, s) {
+                if let Some(why) = rename_blocker(ck, cx.file, s) {
                     return Err((codes::REQUEST_FAILED, why.to_string()));
                 }
                 false

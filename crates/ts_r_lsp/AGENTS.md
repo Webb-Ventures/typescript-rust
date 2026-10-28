@@ -437,10 +437,12 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
 - The location's meaning (value, type or namespace position; a declaration name is all
   three) picks which of a merged symbol's meanings get a line; when none match, all are
   shown. Each meaning is its own line: `(local) var`, `(property)`, `(accessor)` (also
-  `accessor` fields), `(method)`, `function`, `constructor`, `class`/`(local class)`/
+  `accessor` fields and object literal getters and setters), `(method)`, `function`, `constructor`, `class`/`(local class)`/
   `abstract class`, `interface`, `enum`/`const enum`, `(enum member) E.m = 0`,
   `namespace`/`module`, `(type parameter) T in C<T>`/`in f<T>(x: T): void`/
   `in type A<T>`, `type A<T> = <body>`.
+  With no symbol: `(property) arguments: IArguments`, `(property) undefined: undefined`,
+  and `any` on an intrinsic JSX tag `JSX.IntrinsicElements` does not declare.
 - A type alias's body is its declared type printed with `PrintMode::quick_info_alias`
   (tsc's `InTypeAlias`: the outermost type without its own alias), so `type B = Exclude<A,
   "a">` shows the union it makes and a JSDoc `@typedef`/`@callback` its object or function
@@ -638,6 +640,25 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   default a` / `export = a` stand for the specifier's immediate target. From the `default`
   keyword: the keyword, the export's imports and their uses; an anonymous default export's
   keyword is its declaration.
+- **`export =`** (`aliases.rs`): a namespace import of a module whose `export = N` names
+  `N` (`aliases::resolve`; the binder's link stops at the module). An import of such a
+  module (`import x = require`, `import * as x`, a default import) under `N`'s own name
+  starts the search at `N`; under another name it is a local of its own. The `export` of
+  `export = N` renames `N`. Import clauses complete `N`'s exports, and for a value the
+  properties of its type (each name once).
+- **Packages**: `node_modules` files are searched only for a symbol declared in one. An
+  open package file no config lists belongs to the nearest config above its
+  `node_modules`, not as a root (it is in the program only when imported; the inferred
+  project answers it meanwhile, and the config takes it back once its program reads it). Rename is
+  blocked by a lib declaration, or by one in a package other than the file's; an alias
+  stands for itself (`tsc: tsc/internal/ls/rename.go`).
+- **Meta properties and odd keywords**: `meta` of `import.meta` finds every `import.meta`,
+  hovers and goes to (type definition) `ImportMeta`; `target` of `new.target` goes to the
+  enclosing non-arrow function's name (a constructor's class). A stray `default` in a
+  module goes to the whole file. Type definition of a `@typedef` of `@property` tags
+  shows the tags, from the first `@` to the end of the last tag's line.
+- **JSX tags**: highlights on the tag name of an opening or closing tag are the two tags
+  (`tsc: tsc/internal/ls/documenthighlights.go`); a self-closing tag has none.
 - **CommonJS** (tsc 7's answers on `findAllRefsCommonJsRequire*`, `renameJsExports0*`):
   `const { a } = require("m")` reads the export `a` (and, for `module.exports = { a }`, the
   variable `a`), searched both ways; `const A = require("m")` is found from what
@@ -1122,9 +1143,9 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 2175 of 2513 tests at ef3e4a7, lists the rest by cause:
+- Features (the fourslash oracle, 2211 of 2513 tests at a191679, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
-  or meta-property hovers (`arguments`, `import.meta`, `new`); it
+  or meta-property hovers (`new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); references do not go back up from a

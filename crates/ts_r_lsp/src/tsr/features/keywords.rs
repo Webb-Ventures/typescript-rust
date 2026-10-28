@@ -61,7 +61,7 @@ impl<'a> Doc<'a> {
     }
 
     /// The word (identifier or keyword) containing `offset`, or ending at it.
-    fn word_at(&self, offset: u32) -> Option<(u32, u32)> {
+    pub(super) fn word_at(&self, offset: u32) -> Option<(u32, u32)> {
         let b = self.bytes();
         let o = (offset as usize).min(b.len());
         let mut s = o;
@@ -117,7 +117,7 @@ impl<'a> Doc<'a> {
         (w.0 == s && self.word(w) == kw).then_some(w)
     }
 
-    fn word(&self, w: (u32, u32)) -> &'a str {
+    pub(super) fn word(&self, w: (u32, u32)) -> &'a str {
         self.text.get(w.0 as usize..w.1 as usize).unwrap_or("")
     }
 
@@ -244,6 +244,34 @@ fn is_static(n: &Node) -> bool {
 
 /// The keyword occurrences to highlight for the keyword at `offset`, or `None` when the
 /// cursor is not on a keyword these rules know (then highlights come from references).
+/// Highlights on the tag name of a JSX element's opening or closing tag: the two tags
+/// (`tsc: tsc/internal/ls/documenthighlights.go`); none for a self-closing element.
+pub fn jsx_tag_highlights(d: &Doc<'_>, offset: u32) -> Option<Vec<(u32, u32)>> {
+    let n = node_around(d, d.word_at(offset)?)?;
+    let tag = d.parent(n)?;
+    match d.node(tag) {
+        Node::JsxOpening {
+            name,
+            self_closing: false,
+            ..
+        } if name == n => {}
+        Node::JsxClosing { name } if name == n => {}
+        _ => return None,
+    }
+    let Node::JsxElement {
+        opening, closing, ..
+    } = d.node(d.parent(tag)?)
+    else {
+        return Some(Vec::new());
+    };
+    Some(
+        std::iter::once(opening)
+            .chain(closing)
+            .map(|t| (d.span(t).start, d.span(t).end))
+            .collect(),
+    )
+}
+
 pub fn keyword_highlights(d: &Doc<'_>, offset: u32) -> Option<Vec<(u32, u32)>> {
     let w = d.word_at(offset)?;
     let word = d.word(w);
@@ -1033,7 +1061,24 @@ pub fn keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
     match keyword_definition(d, offset) {
         Some(KeywordTarget::Name(n) | KeywordTarget::Override { name: n, .. }) => Some(n),
         Some(_) => None,
-        None => accessor_keyword_name(d, offset),
+        None => accessor_keyword_name(d, offset).or_else(|| export_equals_name(d, offset)),
+    }
+}
+
+/// The `export` of `export = N`: the name `N` (renamed with it, as tsc 7 does).
+fn export_equals_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
+    let w = d.word_at(offset)?;
+    if d.word(w) != "export" {
+        return None;
+    }
+    let n = node_around(d, w)?;
+    match d.node(n) {
+        Node::ExportAssignment { expr }
+            if d.span(n).start == w.0 && matches!(d.node(expr), Node::Ident { .. }) =>
+        {
+            Some(expr)
+        }
+        _ => None,
     }
 }
 
@@ -1693,6 +1738,25 @@ mod tests {
             .collect();
         v.sort();
         v
+    }
+
+    #[test]
+    fn jsx_tag_names_highlight_both_tags() {
+        let src = "const a = <div><div>x</div></div>;\nconst b = <div />;";
+        let ast = ts_r_parser::parse(src, ts_r_ast::SourceKind::Tsx).ast;
+        let parents = ParentMap::build(&ast);
+        let d = doc_of(&ast, &parents, src);
+        let at = |needle: &str| src.find(needle).unwrap() as u32 + 2;
+        let words = |v: Vec<(u32, u32)>| -> Vec<&str> {
+            v.iter()
+                .map(|&(s, e)| &src[s as usize..e as usize])
+                .collect()
+        };
+        let inner = words(jsx_tag_highlights(&d, at("<div>x")).unwrap());
+        assert_eq!(inner, ["<div>", "</div>"]);
+        let outer = jsx_tag_highlights(&d, at("</div>;")).unwrap();
+        assert_eq!(outer, vec![(10, 15), (27, 33)]);
+        assert_eq!(jsx_tag_highlights(&d, at("<div />")), None);
     }
 
     #[test]

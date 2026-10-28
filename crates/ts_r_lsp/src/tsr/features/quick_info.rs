@@ -295,8 +295,14 @@ impl Writer {
         let c = ck.c;
         self.line();
         let auto_accessor = c.decls(s).iter().any(|d| {
-            matches!(*c.node(*d), Node::PropertyDef { modifiers, .. }
-                if modifiers.contains(ts_r_ast::Modifiers::ACCESSOR))
+            match *c.node(*d) {
+                Node::PropertyDef { modifiers, .. } => {
+                    modifiers.contains(ts_r_ast::Modifiers::ACCESSOR)
+                }
+                // An object literal's getter or setter.
+                Node::MethodDef { kind, .. } => matches!(kind, MethodKind::Get | MethodKind::Set),
+                _ => false,
+            }
         });
         let prefix = if flags.intersects(SymbolFlags::PROPERTY) && !auto_accessor {
             "(property) "

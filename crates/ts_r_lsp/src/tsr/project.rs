@@ -121,6 +121,9 @@ pub struct Project {
     overlay: HashMap<String, Arc<str>>,
     /// Open documents this project publishes diagnostics for: path → uri.
     owned: BTreeMap<String, String>,
+    /// Open package files handed to the inferred project; reclaimed when the program reads
+    /// them again.
+    disowned: BTreeSet<String>,
     program: Arc<ProgramFiles>,
     /// Path → index in `program.files`.
     index: HashMap<String, usize>,
@@ -191,6 +194,7 @@ impl Project {
             roots,
             overlay: HashMap::new(),
             owned: BTreeMap::new(),
+            disowned: BTreeSet::new(),
             index: HashMap::new(),
             importers: HashMap::new(),
             api: HashMap::new(),
@@ -465,14 +469,27 @@ impl Project {
         true
     }
 
+    /// Whether an open file it owns may be a root of its program (not a `node_modules`
+    /// file of a configured project).
+    fn may_root(&self, path: &str) -> bool {
+        self.key == super::INFERRED || !path.contains("/node_modules/")
+    }
+
+    /// An open package file it owns that its program does not read: the inferred
+    /// project's (tsc gives a file to a configured project only when its program has it).
+    fn foreign(&self, path: &str) -> bool {
+        !self.may_root(path) && self.owned.contains_key(path) && !self.index.contains_key(path)
+    }
+
     fn on_own(&mut self, path: String, uri: String, own: bool) -> bool {
         if own {
             let fresh = !self.owned.contains_key(&path);
             self.owned.insert(path.clone(), uri);
             if !self.index.contains_key(&path) {
                 // Not part of the program (yet): an inferred project's new root, or a file
-                // the config does not list. Reload with it.
-                if !self.roots.contains(&path) {
+                // the config does not list. Reload with it. A package file a config owns is
+                // no root: it is in the program only when imported.
+                if !self.roots.contains(&path) && self.may_root(&path) {
                     self.roots.push(path.clone());
                 }
                 self.dirty.entry(path).or_default();
@@ -652,7 +669,7 @@ impl Project {
         let fs = OverlayFs::new(&self.overlay);
         let mut roots = self.roots.clone();
         for p in self.owned.keys() {
-            if !roots.contains(p) {
+            if !roots.contains(p) && self.may_root(p) {
                 roots.push(p.clone());
             }
         }
@@ -705,6 +722,26 @@ impl Project {
             .map(|f| f.path.clone())
             .collect();
         self.shared.report_inputs(&self.key, inputs);
+        let foreign: Vec<String> = self
+            .owned
+            .keys()
+            .filter(|p| self.foreign(p))
+            .cloned()
+            .collect();
+        for p in foreign {
+            self.shared.disown(&p, None);
+            self.disowned.insert(p);
+        }
+        let back: Vec<String> = self
+            .disowned
+            .iter()
+            .filter(|p| self.index.contains_key(*p))
+            .cloned()
+            .collect();
+        for p in back {
+            self.disowned.remove(&p);
+            self.shared.reclaim(&self.key, &p);
+        }
         self.stats.loads += 1;
         self.stats.last_load_ms = t.elapsed().as_secs_f64() * 1000.0;
         let dirty = std::mem::take(&mut self.dirty);
@@ -835,6 +872,13 @@ impl Project {
                 }) => {
                     if let Some(reply) = reply {
                         let _ = reply.send(self.answer_part(program, checker, &method, &params));
+                        continue;
+                    }
+                    if self.foreign(&path) {
+                        let request =
+                            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+                        self.shared.disown(&path, Some(request));
+                        self.disowned.insert(path);
                         continue;
                     }
                     self.answer(program, checker, cks, id, &method, &params, &path);

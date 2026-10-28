@@ -32,12 +32,28 @@ pub fn chain(c: &Checker<'_>, x: SymId) -> Vec<SymId> {
             }
         }
     }
-    if let Some(t) = c.resolve_alias(x)
-        && !out.contains(&t)
-    {
+    let t = resolve(c, x);
+    if !out.contains(&t) {
         out.push(t);
     }
     out
+}
+
+/// What the alias `x` resolves to; a namespace import of a module with `export =` (`import
+/// * as n from "m"`) resolves to what the module exports, as in tsc (the link stops at the
+/// module; not for `export = <expression>`). `x` itself when it is no alias or unresolved.
+pub fn resolve(c: &Checker<'_>, x: SymId) -> SymId {
+    let t = c.resolve_alias(x).unwrap_or(x);
+    if t != x
+        && c.sym_flags(t)
+            .intersects(SymbolFlags::MODULE | SymbolFlags::MODULE_FILE)
+        && let Some(e) = c.export_of(t, "export=")
+        && is_alias(c, e)
+        && let Some(r) = c.resolve_alias(e)
+    {
+        return r;
+    }
+    t
 }
 
 /// The alias declaration node of `x`, if `x` is an alias.
@@ -66,9 +82,35 @@ fn is_transparent(c: &Checker<'_>, x: SymId, rename: bool) -> bool {
     match alias_decl(c, x).map(|d| *c.node(d)) {
         Some(Node::ImportSpecifier { imported, .. }) => imported.is_none(),
         Some(Node::ExportSpecifier { exported, .. }) => exported.is_none(),
-        Some(Node::ImportDefaultSpecifier { .. }) => !rename,
+        Some(Node::ImportDefaultSpecifier { .. }) => !rename && !through_export_equals(c, x),
         _ => false,
     }
+}
+
+/// Whether the alias `x` reaches what it stands for through a module's `export =`.
+fn through_export_equals(c: &Checker<'_>, x: SymId) -> bool {
+    c.resolve_alias(x) != Some(resolve(c, x))
+        || chain(c, x).iter().any(|&s| {
+            alias_decl(c, s).is_some_and(|d| matches!(c.node(d), Node::ExportAssignment { .. }))
+        })
+}
+
+/// An import of a module's `export =` (`import x = require(..)`, `import * as x`, a
+/// default import) whose local name is the exported symbol's: that symbol (a search from
+/// the import starts there; under another name the import is a local of its own).
+fn export_equals_import(c: &Checker<'_>, x: SymId) -> Option<SymId> {
+    let d = alias_decl(c, x)?;
+    if !matches!(
+        c.node(d),
+        Node::ImportNamespaceSpecifier { .. }
+            | Node::ImportDefaultSpecifier { .. }
+            | Node::ImportEquals { .. }
+    ) || !through_export_equals(c, x)
+    {
+        return None;
+    }
+    let t = resolve(c, x);
+    (t != x && c.sym_name(t) == c.sym_name(x)).then_some(t)
 }
 
 /// What the alias `x` stands for, one step on.
@@ -103,6 +145,9 @@ pub fn imported_side(c: &Checker<'_>, l: Loc) -> Option<SymId> {
 pub fn start(c: &Checker<'_>, x: SymId, rename: bool) -> SymId {
     let mut s = x;
     for _ in 0..64 {
+        if !rename && let Some(t) = export_equals_import(c, s) {
+            return t;
+        }
         if !is_transparent(c, s, rename) {
             break;
         }

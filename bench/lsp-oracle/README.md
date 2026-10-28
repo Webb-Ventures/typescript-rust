@@ -42,24 +42,23 @@ every skip reason.
 
 ## Results
 
-ef3e4a7 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**2175 of 2513 compared tests pass (86.5%)**; 8324 of 8949 queries agree.
+a191679 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2211 of 2513 compared tests pass (88.0%)**; 8431 of 8948 queries agree.
 3806 of the 6319 test files are skipped (3698 verify no compared feature, 160 get no answer
 from either server). Three tests tsc timed out on
-(`completionForStringLiteralNonrelativeImport16`,
-`completionsImport_exportEqualsNamespace_noDuplicate`,
-`pathCompletionsPackageJsonExportsWildcard5`) were rerun with `--filter` and counted.
+(`completionForStringLiteralNonrelativeImport16`, `completionsJSDocNoCrash3`,
+`pathCompletionsPackageJsonExportsWildcard7`) were rerun with `--filter` and counted.
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 427 | 93 | 18 | 2358 / 2515 |
-| completion | 890 | 133 | 110 | 2581 / 2780 |
-| references | 292 | 53 | 12 | 1295 / 1443 |
-| rename | 165 | 11 | 13 | 512 / 543 |
-| definition | 140 | 26 | 26 | 489 / 526 |
-| signatureHelp | 140 | 10 | 26 | 643 / 656 |
-| highlights | 108 | 9 | 20 | 394 / 431 |
-| typeDefinition | 13 | 3 | 3 | 52 / 55 |
+| hover | 441 | 79 | 18 | 2377 / 2515 |
+| completion | 892 | 131 | 110 | 2584 / 2780 |
+| references | 300 | 45 | 12 | 1328 / 1442 |
+| rename | 170 | 6 | 13 | 535 / 543 |
+| definition | 142 | 24 | 26 | 492 / 526 |
+| signatureHelp | 141 | 9 | 26 | 645 / 656 |
+| highlights | 110 | 7 | 20 | 416 / 431 |
+| typeDefinition | 15 | 1 | 3 | 54 / 55 |
 
 Remaining failures by cause (example tests in parentheses):
 
@@ -74,17 +73,15 @@ Remaining failures by cause (example tests in parentheses):
   of generic signatures (`contextualTypingGenericFunction1`).
 - **Quick info (ts_r_lsp)**: `@property` names inside JSDoc (`quickInfoPropertyTag`),
   hyphenated property names (`jsDocTagsWithHyphen`), `{@link https://...}` names in `@property`
-  tags (`quickInfoForJSDocWithHttpLinks`), type-recovery corners of `@param {..}` (`quickInfoCommentsCommentParsing`), keywords and
-  meta properties (`arguments`, `import.meta`, `new`, `super`, `as const`), enum members
+  tags (`quickInfoForJSDocWithHttpLinks`), type-recovery corners of `@param {..}` (`quickInfoCommentsCommentParsing`), keywords
+  (`new`, `super`, `as const`), enum members
   with odd names (`(typeof Foo)["\t"]`), discriminated contextual unions
   (`quickInfoUnion_discriminated`), `(alias)` on `export as namespace` and JavaScript
   `require` (`quickInfoForUMDModuleAlias`, `jsRequireQuickInfo`).
-- **Highlights (ts_r_lsp)**: JSDoc `@typedef` (`jsdocTypedefTagServices`), a few keyword
-  sets (`getOccurrencesConst04`, `getOccurrencesTryCatchFinallyBroken`,
-  `getOccurrencesModifiersNegatives1`), JSX tag names (`findReferencesJSXTagName3`).
-- **References and rename (ts_r_lsp)**: `export =` reached from `import T = require`
-  and `import * as` (`findAllRefsExportEquals`, `findAllRefsImportStarOfExportEquals`,
-  `renameImportOfExportEquals*`), JSX runtime imports
+- **Highlights (ts_r_lsp)**: JSDoc `@typedef` (`jsdocTypedefTagServices`), a keyword set
+  (`getOccurrencesTryCatchFinallyBroken`); `const` on a parameter property, which tsc does not
+  read as a modifier (`getOccurrencesConst04`).
+- **References and rename (ts_r_lsp)**: JSX runtime imports
   (`jsxFindAllReferencesOnRuntimeImportWithPaths1`), quoted export names
   (`arbitraryModuleNamespaceIdentifiers_*`), going back up from a
   re-export of a renamed default (`import boom from "./d"`), constructors reached through
@@ -92,8 +89,7 @@ Remaining failures by cause (example tests in parentheses):
 - **Definition (ts_r_lsp)**: decorator and JSX overloads (the checker records no resolved
   signature for them), JavaScript expandos and `require` destructuring
   (`goToDefinitionExpandoClass*`, `goToDefinitionDestructuredRequire`), `instanceof`
-  (`Symbol.hasInstance`), meta properties (`goToDefinitionMetaProperty`), a `yield` and a
-  `case` edge (`goToDefinitionYield3`, `goToDefinitionSwitchCase6`), import types.
+  (`Symbol.hasInstance`), a `yield` edge (`goToDefinitionYield3`), import types.
 - **Completion (ts_r_lsp)**: JSX in tags the parser closes early
   (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers
   (`completionsThisPropertiesInPropertyDeclaration2`) and contextual `this`
@@ -104,13 +100,12 @@ Remaining failures by cause (example tests in parentheses):
   (`completionPropertyShorthandForObjectLiteral*`), keyword sets by position, auto-import
   details.
 - **Signature help (ts_r_lsp)**: JSX callbacks (`signatureHelpJSX`), `... N
-  more ...` truncation (`quickInfoCanBeTruncated`), JSDoc `@overload`
-  (`quickInfoJsDocTags13`), JavaScript fallbacks (`signatureHelpJSMissingPropertyAccess`),
+  more ...` truncation (`quickInfoCanBeTruncated`: needs a length budget in the checker's
+  type printer), JavaScript fallbacks (`signatureHelpJSMissingPropertyAccess`),
   contextual generic callbacks (`callback(y3: T)`), the overload order of string literal
   overloads (`overloadOnConst`), argument names in calls of unions of dissimilar signatures
   (`calledUnionsOfDissimilarTyeshaveGoodDisplay`), the file order of a multi-file test.
-- **Type definition (ts_r_lsp)**: `import.meta` (`goToTypeDefinitionImportMeta`) and JSDoc
-  `@typedef` (`goToTypeDefinition_typedef`, `jsDocServices`).
+- **Type definition (ts_r_lsp)**: a `@param` name (`jsDocServices`).
 
 ## Run history
 
@@ -128,3 +123,6 @@ Remaining failures by cause (example tests in parentheses):
 | 91f3b08 | 2026-10-27 | 2131 | 2513 | 84.8% | References from keywords and to modules (specifiers, `declare module` names, `/// <reference path>`, `module.exports`), through import-type qualifiers; rename through name-keeping specifiers (`x as y`); completions for labels, none in template text or after a regex or bigint, type parameters out of their own constraints and defaults; hover on `this` parameters and `typeof this` |
 | c22bc8b | 2026-10-27 | 2136 | 2513 | 85.0% | Re-measured after checker round 8 (no ts-r-lsp change) |
 | ef3e4a7 | 2026-10-27 | 2175 | 2513 | 86.5% | References through CommonJS `require` and `exports.x`, import types of JavaScript exports, JSDoc `@param`/`@template`/`@extends` names; signature help in JSX opening tags; completions filter protected members by the instance they are read through, `super.` lists methods, `case` lists what other clauses do not test, object literals of overloaded arrow arguments; parser's missing name after a line-ending `.` (private-name completions) |
+| 49b91eb | 2026-10-27 | 2179 | 2513 | 86.7% | Re-measured after checker round 9 (no ts-r-lsp change) |
+| 12ed8c6 | 2026-10-27 | 2200 | 2513 | 87.5% | `export =` reached through `import * as`, `import x = require` and default imports (and its `export` keyword renamed); `node_modules` files searched for symbols declared there, an open package file in the project that imports it, tsc's rename rule for packages; `import.meta` references, hover and type definition, `new.target` definition, `@typedef` type literals, JSX tag highlights |
+| a191679 | 2026-10-27 | 2211 | 2513 | 88.0% | Hover: object literal getters and setters as `(accessor)`, `arguments` and `undefined` as properties, `any` on unresolved intrinsic JSX tags; parameter modifiers parsed as modifiers (emit10); JSDoc `@overload` signatures (checker10) |

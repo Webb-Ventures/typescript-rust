@@ -1035,6 +1035,220 @@ fn references_through_destructuring_and_contextual_literals() {
     c.shutdown();
 }
 
+#[test]
+fn meta_properties_and_jsdoc_type_literals() {
+    if !libs_present() {
+        return;
+    }
+    let cfg = r#"{"compilerOptions": {"allowJs": true, "module": "esnext", "target": "es2022", "noEmit": true}, "include": ["src"]}"#;
+    let env = Env::new(
+        "navmeta",
+        &[
+            ("tsconfig.json", cfg),
+            ("src/g.d.ts", "interface ImportMeta { custom: number }\n"),
+            (
+                "src/m.ts",
+                "export {};\nexport const u = import.meta;\nfunction f() { new.target; }\n",
+            ),
+            (
+                "src/t.js",
+                "/**\n * @typedef {object} I\n * @property {number} x\n */\n/** @type {I} */\nconst i = { x: 0 };\n",
+            ),
+            ("src/s.ts", "export default {};\ndefault;\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/m.ts");
+    env.open(&mut c, "src/t.js");
+    let u = env.uri("src/m.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    // `import.meta`: its type's declarations, every `meta`, the interface's quick info.
+    let d = result(&mut c, "textDocument/typeDefinition", at(&u, 1, 25));
+    assert!(
+        d.as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["uri"] == env.uri("src/g.d.ts").as_str()
+                && l["range"]["start"] == json!({"line": 0, "character": 10})),
+        "{d}"
+    );
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": u}, "position": {"line": 1, "character": 25},
+               "context": {"includeDeclaration": true}}),
+    );
+    assert_eq!(r.as_array().map(Vec::len), Some(1), "{r}");
+    assert_eq!(r[0]["range"]["start"], json!({"line": 1, "character": 24}));
+    assert!(hover_text(&mut c, &u, 1, 25).contains("interface ImportMeta"));
+    // `new.target`: the function's name.
+    let d = result(&mut c, "textDocument/definition", at(&u, 2, 20));
+    assert_eq!(
+        d[0]["range"]["start"],
+        json!({"line": 2, "character": 9}),
+        "{d}"
+    );
+    // A `@typedef` of `@property` tags: the tags, to the end of the last one's line.
+    let ut = env.uri("src/t.js");
+    let d = result(&mut c, "textDocument/typeDefinition", at(&ut, 5, 6));
+    assert_eq!(
+        d[0]["range"],
+        json!({"start": {"line": 2, "character": 3}, "end": {"line": 3, "character": 0}}),
+        "{d}"
+    );
+    // A stray `default` in a module: the whole file.
+    env.open(&mut c, "src/s.ts");
+    let d = result(
+        &mut c,
+        "textDocument/definition",
+        at(&env.uri("src/s.ts"), 1, 2),
+    );
+    assert_eq!(
+        d[0]["range"]["start"],
+        json!({"line": 0, "character": 0}),
+        "{d}"
+    );
+    c.shutdown();
+}
+
+#[test]
+fn an_open_package_file_belongs_to_the_project_importing_it() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navpkg",
+        &[
+            ("tsconfig.json", r#"{"include": ["src"]}"#),
+            (
+                "node_modules/a/index.d.ts",
+                "export declare function a(): void;\n",
+            ),
+            ("src/b.ts", "import { a } from \"a\";\na();\n"),
+            (
+                "node_modules/c/index.d.ts",
+                "export declare const c: number;\n",
+            ),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "node_modules/a/index.d.ts");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    // From the package's declaration: its uses in the project's files too.
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": env.uri("node_modules/a/index.d.ts")},
+               "position": {"line": 0, "character": 24}, "context": {"includeDeclaration": true}}),
+    );
+    let in_b = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|l| l["uri"] == ub.as_str())
+        .count();
+    assert_eq!(in_b, 2, "{r}");
+    // Dropping the import hands the package file to the inferred project; restoring it
+    // hands it back.
+    let refs_in_b = |c: &mut ScriptedClient| {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": env.uri("node_modules/a/index.d.ts")},
+                   "position": {"line": 0, "character": 24}, "context": {"includeDeclaration": true}}),
+        );
+        let n = r
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|l| l["uri"] == ub.as_str())
+            .count();
+        (n, r)
+    };
+    change(&mut c, &ub, 2, range(0, 0, 0, 22), "");
+    let _ = diags_for(&mut c, &ub, |d| !d.is_empty());
+    let (n, r) = refs_in_b(&mut c);
+    assert_eq!(n, 0, "{r}");
+    change(
+        &mut c,
+        &ub,
+        3,
+        range(0, 0, 0, 0),
+        "import { a } from \"a\";",
+    );
+    let _ = diags_for(&mut c, &ub, |d| d.is_empty());
+    let (n, r) = refs_in_b(&mut c);
+    assert_eq!(n, 2, "{r}");
+    // A package file the program does not read is answered by the inferred project.
+    env.open(&mut c, "node_modules/c/index.d.ts");
+    let h = hover_text(&mut c, &env.uri("node_modules/c/index.d.ts"), 0, 21);
+    assert!(h.contains("const c: number"), "{h}");
+    c.shutdown();
+}
+
+const NAV_EXPORT_EQUALS: &str = "declare namespace N { export var x: number; }
+declare module \"mod\" { export = N; }
+declare module \"a\" { import * as N from \"mod\"; export { N }; }
+";
+
+#[test]
+fn references_and_rename_through_export_equals_imports() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navxeq",
+        &[
+            ("tsconfig.json", r#"{"include": ["src"]}"#),
+            ("src/e.ts", NAV_EXPORT_EQUALS),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/e.ts");
+    let u = env.uri("src/e.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        r.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    // `import * as N` of a module whose `export = N`, under N's own name: one search.
+    let want = vec![(0, 18), (1, 32), (2, 33), (2, 56)];
+    assert_eq!(refs(&mut c, 0, 18), want);
+    assert_eq!(refs(&mut c, 2, 33), want);
+    // Renaming at the `export` of `export = N` renames `N`; the re-export keeps its name.
+    let e = result(
+        &mut c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": u}, "position": {"line": 1, "character": 23}, "newName": "Z"}),
+    );
+    let mut edits: Vec<String> = e["changes"][u.as_str()]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["newText"].as_str().unwrap().to_string())
+        .collect();
+    edits.sort();
+    assert_eq!(edits, ["Z", "Z", "Z", "Z as N"], "{e}");
+    c.shutdown();
+}
+
 const NAV_LITERAL_KEYS: &str = "class K { \"s\": number = 1; get \"42\"() { return 0 } }
 declare const k: K;
 k.s; k[\"s\"]; k[42];
@@ -2228,6 +2442,36 @@ fn completion_expected_types_and_literals() {
     c.shutdown();
 }
 
+/// Named imports from an `export =` namespace list each of its exports once.
+#[test]
+fn completion_named_imports_of_export_equals_are_unique() {
+    if !libs_present() {
+        return;
+    }
+    let (b, m) = marked("import { ¦ } from \"./a\";\n");
+    let env = Env::new(
+        "complete-xeq",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            (
+                "src/a.ts",
+                "namespace N { export const x = 1; }\nexport = N;\n",
+            ),
+            ("src/b.ts", &b),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/b.ts");
+    let u = env.uri("src/b.ts");
+    let l = completion_labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&u, m[0].0, m[0].1),
+    ));
+    assert_eq!(l.iter().filter(|x| *x == "x").count(), 1, "{l:?}");
+    c.shutdown();
+}
+
 /// Names being declared get no list (a constructor parameter only its modifiers); an
 /// unclosed function's names are in scope at the end of the file, except the parameter being
 /// written and the later ones.
@@ -2472,7 +2716,7 @@ fn hover_quick_info_lines() {
     if !libs_present() {
         return;
     }
-    let src = "namespace N {\n    export function f(x: number): void;\n    export function f(x: string): void;\n    export function f(x: any) {}\n}\nclass G<T> {\n    accessor a = 1;\n    m<U>(u: U, t: T): U { return u; }\n    constructor(x?: number) {}\n    \"lit\"() {}\n}\nconst v = new G<string>();\nv.m(1, \"a\");\nN.f(1);\nN.f;\nv[\"lit\"]();\nfunction opt(c?: () => string) {}\nexport default class {}\n";
+    let src = "namespace N {\n    export function f(x: number): void;\n    export function f(x: string): void;\n    export function f(x: any) {}\n}\nclass G<T> {\n    accessor a = 1;\n    m<U>(u: U, t: T): U { return u; }\n    constructor(x?: number) {}\n    \"lit\"() {}\n}\nconst v = new G<string>();\nv.m(1, \"a\");\nN.f(1);\nN.f;\nv[\"lit\"]();\nfunction opt(c?: () => string) {}\nexport default class {}\nfunction ar() { return arguments; }\nopt(undefined);\nconst pt = { get gx() { return 1; } };\npt.gx;\n";
     let env = Env::new(
         "hover-quick-info",
         &[("tsconfig.json", TSCONFIG), ("src/q.ts", src)],
@@ -2493,6 +2737,9 @@ fn hover_quick_info_lines() {
     );
     assert_eq!(h("v.m(1", 2), "(method) G<string>.m<1>(u: 1, t: string): 1");
     assert_eq!(h("accessor a", 9), "(accessor) G<T>.a: number");
+    assert_eq!(h("pt.gx", 3), "(accessor) gx: number");
+    assert_eq!(h("arguments;", 2), "(property) arguments: IArguments");
+    assert_eq!(h("undefined);", 2), "(property) undefined: undefined");
     assert_eq!(
         h("m<U>", 2),
         "(type parameter) U in G<T>.m<U>(u: U, t: T): U"
@@ -3842,7 +4089,7 @@ fn signature_help_in_jsx_opening_tags() {
     let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
     let text = "declare namespace JSX {\n  interface Element {}\n}\n\
                 declare function Foo(props: { size: number }): JSX.Element;\n\
-                const a = <Foo size={1} />;\n\
+                const a = <Foo size={1} />; <div></div>;\n\
                 const b = <Foo ";
     let env = Env::new(
         "sigjsx",
@@ -3861,6 +4108,11 @@ fn signature_help_in_jsx_opening_tags() {
     // Not on the tag name.
     let s = result(&mut c, "textDocument/signatureHelp", at(&u, 4, 12));
     assert!(s.is_null(), "{s}");
+    // An intrinsic tag JSX.IntrinsicElements doesn't declare: `any`, on both tags.
+    for ch in [30, 36] {
+        let h = result(&mut c, "textDocument/hover", at(&u, 4, ch));
+        assert!(h.to_string().contains("```typescript\\nany\\n```"), "{h}");
+    }
     c.shutdown();
 }
 

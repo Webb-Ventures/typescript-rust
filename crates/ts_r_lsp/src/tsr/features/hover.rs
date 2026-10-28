@@ -77,11 +77,42 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
                         "range": lines.range(text, span.start, span.end),
                     });
                 }
+                let name = name_text(ast, n).unwrap_or("");
+                // An unresolved intrinsic JSX tag: `any`.
+                if let Some(p) = c.parent(l)
+                    && let Node::JsxOpening { name: t, .. } | Node::JsxClosing { name: t } =
+                        *c.node(p)
+                    && t == n
+                    && name.starts_with(|ch: char| ch.is_ascii_lowercase())
+                {
+                    return contents(lines, text, "any", "", span.start, span.end);
+                }
+                // `arguments` in a function and the global `undefined`: tsc shows a property.
+                if matches!(name, "arguments" | "undefined") {
+                    let t = ck.check_expr(l);
+                    let display = format!("(property) {name}: {}", ck.type_to_string(t));
+                    return contents(lines, text, &display, "", span.start, span.end);
+                }
                 return Value::Null;
             };
             let display =
                 super::quick_info::quick_info(ck, s, l, m.is_decl || in_module_name(ck, l));
             (display, super::doc_source::documentation(ck, s, Some(l)))
+        }
+        // `meta` of `import.meta`: its type, `ImportMeta`.
+        Node::MetaProperty {
+            kind: ts_r_ast::MetaPropKind::ImportMeta,
+        } if offset + 4 >= span.end => {
+            let t = ck.check_expr(l);
+            let Some(s) = super::nav::type_symbol(ck, t) else {
+                return Value::Null;
+            };
+            let Some(d) = c.first_decl(s) else {
+                return Value::Null;
+            };
+            let name = ts_r_binder::decl_name_node(c.ast(d.file), d.node).unwrap_or(d.node);
+            let display = super::quick_info::quick_info(ck, s, Loc::new(d.file, name), true);
+            (display, super::doc_source::documentation(ck, s, None))
         }
         // A keyword of a declaration (`export default class {}`, `function`): what it declares.
         Node::ClassDecl { .. }
