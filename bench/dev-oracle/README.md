@@ -33,9 +33,10 @@ Full runs use `--jobs 1`: two playgrounds at once got Chrome killed at its
 
 ## Results
 
-e07eafa (2026-10-24, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47, `--jobs 1`):
-**274 of 322 compared tests pass (85.1%)**; 77 tests are skipped. Earlier runs: 202 of 322 at
-58a940e; 101 of 254 at 8c14f29, with an older harness that loaded fewer specs.
+61c9d42 (2026-10-26, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.47, `--jobs 1`):
+**312 of 322 compared tests pass (96.9%)**; 77 tests are skipped. Earlier runs: 274 of 322 at
+e07eafa; 202 of 322 at 58a940e; 101 of 254 at 8c14f29, with an older harness that loaded fewer
+specs.
 
 | Playground | Pass | Compared | Skip |
 | --- | ---: | ---: | ---: |
@@ -43,53 +44,55 @@ e07eafa (2026-10-24, Apple M4 Max, darwin 25.6.0, Vite 8.3.4, Chrome 156.0.8078.
 | assets-sanitize | 2 | 2 | 0 |
 | base-conflict | 1 | 1 | 0 |
 | build-old | 3 | 3 | 0 |
-| chunk-importmap | 1 | 10 | 2 |
+| chunk-importmap | 10 | 10 | 2 |
 | csp | 7 | 7 | 2 |
 | css-codesplit | 0 | 1 | 13 |
 | css-codesplit-cjs | 0 | 0 | 3 |
-| css-lightningcss | 7 | 9 | 4 |
+| css-lightningcss | 9 | 9 | 4 |
 | css-lightningcss-root | 1 | 1 | 0 |
 | css-no-codesplit | 1 | 1 | 1 |
 | data-uri | 2 | 2 | 2 |
-| define | 5 | 6 | 0 |
-| dynamic-import | 18 | 24 | 5 |
+| define | 6 | 6 | 0 |
+| dynamic-import | 24 | 24 | 5 |
 | dynamic-import-inline | 0 | 0 | 1 |
 | env | 16 | 16 | 1 |
 | env-nested | 3 | 3 | 0 |
 | glob-import | 24 | 25 | 0 |
-| hmr | 49 | 56 | 1 |
+| hmr | 51 | 56 | 1 |
 | hmr-root | 1 | 1 | 0 |
-| html | 42 | 45 | 18 |
-| import-attribute | 0 | 2 | 0 |
+| html | 45 | 45 | 18 |
+| import-attribute | 1 | 2 | 0 |
 | lazy-compilation | 0 | 0 | 2 |
 | minify | 0 | 0 | 3 |
 | module-graph | 0 | 0 | 1 |
 | nested-deps | 1 | 1 | 0 |
 | object-hooks | 1 | 1 | 0 |
 | preserve-symlinks | 2 | 2 | 0 |
-| proxy-bypass | 1 | 2 | 2 |
-| transform-plugin | 0 | 3 | 0 |
-| tsconfig-json | 4 | 5 | 1 |
-| wasm | 0 | 10 | 1 |
+| proxy-bypass | 2 | 2 | 2 |
+| transform-plugin | 2 | 3 | 0 |
+| tsconfig-json | 5 | 5 | 1 |
+| wasm | 10 | 10 | 1 |
 
-Remaining failures by cause (48):
+Remaining failures by cause (10):
 
-- **HMR edge cases** (hmr, 7): invalidating a virtual module (2); a missing import on server
-  startup, and a file deleted then restored (the page's `load` event times out, 2);
-  `this.addWatchFile` (a no-op in the sidecar); deduplicating a server-rendered link
-  stylesheet; reusing a server-rendered `<style>`.
-- **Not implemented**: importmap (chunk-importmap, 9), wasm imports and `?url` (10), import
-  attributes (2), CSS modules: class names aren't scoped or mapped (css-lightningcss, 2),
-  plugin `moduleType: 'json'`, hook filters and `addWatchFile` (transform-plugin, 3), an ESM
-  `vite.config.js` in a `"type": "commonjs"` package (css-codesplit-cjs: ts-r-dev exits).
-- **Dynamic imports** (dynamic-import, 6): one instance for static and dynamic imports of
-  `.mxd2`/`.mxdjson` files (2); variable imports through an alias, `#` subpath imports and
-  `?worker` (3); CSS in a package (1).
-- **HTML** (html, 3): `%VITE_NUMBER%` from env, the raw HTML served, invalidating an inline
-  proxy module on reload.
-- **One each**: the injected `@vite/client` script (assets; design record 0010), glob and
-  dynamic-import-vars output visible to post plugins (glob-import), style order of JS-inserted
-  tags (css-codesplit), the proxy error page (proxy-bypass), `define` string (flaky: it passed
-  when define was rerun alone, 6 of 6).
-- **Transform** (owned by ts_r_transform, not ts-r-dev): per-tsconfig `compilerOptions`
-  (tsconfig-json, 1).
+- **HMR edge cases** (hmr, 5): a file deleted then restored (the page's `load` event times
+  out); CSS HMR through `this.addWatchFile` (a no-op in the sidecar); deduplicating a
+  server-rendered link stylesheet; reusing a server-rendered `<style>` (it is rewritten once
+  more than in Vite); `acceptExports([])`'s `used:foo0` log (order-sensitive, see below).
+- **Not implemented**: `this.addWatchFile` re-running a transform (transform-plugin, 1);
+  `import.meta.glob` and dynamic-import-vars output visible to post plugins (glob-import, 1);
+  an ESM `vite.config.js` in a `"type": "commonjs"` package (css-codesplit-cjs: ts-r-dev
+  exits, no compared tests).
+- **One each**: the injected `@vite/client` script under a nested base path (assets; design
+  record 0010); style order of JS-inserted tags (css-codesplit).
+- **Harness**: import-attribute "from source code" failed with `CDP: Cannot find context with
+  specified id` (the page's context went away mid-evaluate); it passed 3 of 3 rerun alone.
+
+Flaky and order-sensitive tests: `define > string`, `nested-deps` and `acceptExports([])`
+have each passed and failed between full runs with no change to the code they test. The
+`acceptExports([])` one reads the console log in order, and ts-r-dev's client connects (and
+logs) before the page's modules run, so `used:foo0` can land outside the window the test
+reads. All three passed in the run before this one (312 of 326 at 6a39428).
+Tests that fail against Vite in a run are skipped, so the compared count moves with Vite's own
+flakes: css-codesplit's first three tests (the page isn't styled yet when Vite is tested) and
+one wasm test. ts-r-dev passes the css-codesplit ones (the CSS module one since 61c9d42).

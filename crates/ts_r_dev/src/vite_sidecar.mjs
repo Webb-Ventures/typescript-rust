@@ -6,7 +6,7 @@
 // on stdin, one per line on stdout. Plugin output to stdout is moved to stderr so it can't
 // corrupt the protocol.
 //
-// Requests:  {id, op: "resolve"|"load"|"transform"|"html"|"hot"|"middleware"|"proxyRewrite", ...}
+// Requests:  {id, op: "resolve"|"load"|"transform"|"html"|"hot"|"middleware"|"proxyRewrite"|"proxyBypass", ...}
 //            {op: "event", event, data}            (no reply)
 //            {rid, result}                         (reply to a resolve callback)
 // Replies:   {ready: manifest} | {fatal: message}  (first line)
@@ -150,12 +150,29 @@ function stringFilter(f, make) {
   return (s) => !exclude.some((m) => m(s)) && (include.length === 0 || include.some((m) => m(s)))
 }
 
-// Hook filters (`{ filter: { id, code }, handler }`).
+// Hook filters (`{ filter: { id, code, moduleType }, handler }`). A `moduleType` filter is a
+// list (or `{ include }`) of the types a hook takes; only `transform` has a module type.
 function compileFilter(filter) {
   if (!filter) return () => true
   const id = stringFilter(filter.id, idMatcher)
   const code = stringFilter(filter.code, codeMatcher)
-  return (moduleId, src) => (!id || id(moduleId)) && (!code || src == null || code(src))
+  const mt = filter.moduleType
+  const types = mt == null ? null : Array.isArray(mt) ? mt : (mt.include ?? [])
+  return (moduleId, src, moduleType) =>
+    (!types || moduleType == null || types.includes(moduleType)) &&
+    (!id || id(moduleId)) &&
+    (!code || src == null || code(src))
+}
+
+// The module type Vite guesses from an id (vite: packages/vite/src/node/server/
+// transformRequest.ts): the first `.ext` up to the end that names a known type.
+const moduleTypes = { js: 'js', mjs: 'js', cjs: 'js', jsx: 'jsx', ts: 'ts', mts: 'ts', cts: 'ts', tsx: 'tsx', json: 'json', txt: 'text', css: 'css' }
+function guessModuleType(id) {
+  for (let i = id.indexOf('.'); i >= 0; i = id.indexOf('.', i + 1)) {
+    const t = moduleTypes[id.slice(i + 1)]
+    if (t) return t
+  }
+  return undefined
 }
 
 // ---- config ----
@@ -317,7 +334,10 @@ async function opLoad({ moduleId }) {
     } catch (e) {
       throw new Error(hookError(h.plugin, e))
     }
-    if (r != null) return typeof r === 'string' ? r : (r.code ?? null)
+    if (r != null) {
+      loadedModule(moduleId)
+      return typeof r === 'string' ? r : (r.code ?? null)
+    }
   }
   return null
 }
@@ -334,18 +354,23 @@ function mapText(map) {
   }
 }
 
+// Module types: before ts-r-dev's built-in step the type guessed from the id (`json` for
+// JSON, `ts` for TypeScript), after it `js`, as Vite's own JSON and TS plugins return. A hook
+// may change it (`{ code, moduleType }`).
 async function opTransform({ stage, moduleId, code }) {
   let changed = false
   const maps = []
+  const options = { ssr: false, moduleType: (stage === 'pre' ? guessModuleType(moduleId) : null) ?? 'js' }
   for (const h of sorted(active, 'transform')) {
-    if (stageOf(h) !== stage || !h.test(moduleId, code)) continue
+    if (stageOf(h) !== stage || !h.test(moduleId, code, options.moduleType)) continue
     let r
     try {
-      r = await h.fn.call(context(h.plugin), code, moduleId, { ssr: false })
+      r = await h.fn.call(context(h.plugin), code, moduleId, options)
     } catch (e) {
       throw new Error(hookError(h.plugin, e))
     }
     if (r == null) continue
+    if (typeof r === 'object' && typeof r.moduleType === 'string') options.moduleType = r.moduleType
     const next = typeof r === 'string' ? r : r.code
     if (typeof next === 'string' && next !== code) {
       code = next
@@ -405,16 +430,17 @@ function proxyOptions(p) {
       const proto = target.protocol ?? 'http:'
       target = `${proto}//${target.host ?? target.hostname ?? 'localhost'}${target.port ? `:${target.port}` : ''}${target.path ?? ''}`
     }
-    if (typeof target !== 'string') {
+    const bypass = typeof o.bypass === 'function'
+    if (typeof target !== 'string' && !bypass) {
       warnings.push(`\`server.proxy['${key}']\` has no target; skipped`)
       continue
     }
     if (o.configure) warnings.push(`\`server.proxy['${key}'].configure\` is not run by ts-r-dev`)
-    if (o.bypass) warnings.push(`\`server.proxy['${key}'].bypass\` is not run by ts-r-dev`)
     proxyRules.push(o)
     out.push({
       key,
-      target,
+      target: typeof target === 'string' ? target : null,
+      bypass,
       changeOrigin: o.changeOrigin === true,
       ws: o.ws === true,
       secure: o.secure !== false,
@@ -431,6 +457,45 @@ function opProxyRewrite({ index, url }) {
   if (!rule || typeof rule.rewrite !== 'function') return null
   const r = rule.rewrite(url)
   return typeof r === 'string' ? r : null
+}
+
+// `bypass(req, res, options)` for proxy rule `index`: what to do with the request, and the
+// response if the function wrote one.
+async function opProxyBypass({ index, method, url, headers }) {
+  const rule = proxyRules[index]
+  if (!rule || typeof rule.bypass !== 'function') return { kind: 'proxy' }
+  const req = new Readable({ read() {} })
+  req.push(null)
+  Object.assign(req, {
+    method,
+    url,
+    originalUrl: url,
+    headers,
+    httpVersion: '1.1',
+    socket: { remoteAddress: '127.0.0.1', encrypted: false },
+  })
+  req.connection = req.socket
+  let finished
+  const written = new Promise((resolve) => (finished = resolve))
+  const res = new FakeResponse(finished)
+  let result
+  try {
+    result = await rule.bypass(req, res, rule)
+  } catch (e) {
+    return { kind: 'error', message: String(e?.stack ?? e) }
+  }
+  let response = null
+  if (res.writableEnded) {
+    const r = await written
+    const out = []
+    for (const [k, v] of r.headerMap.values()) {
+      for (const one of Array.isArray(v) ? v : [v]) out.push([k, String(one)])
+    }
+    response = { status: r.statusCode, headers: out, body: Buffer.concat(r.chunks).toString('base64') }
+  }
+  if (typeof result === 'string') return { kind: 'url', url: result, response }
+  if (result === false) return { kind: 'notFound' }
+  return { kind: 'proxy', response }
 }
 
 // A directory relative to the root when it is given relative or lies inside the root: the
@@ -484,6 +549,7 @@ function devOptions() {
     assetsInclude: assetsIncludePatterns(config.assetsInclude),
     assetsInlineLimit: typeof config.build?.assetsInlineLimit === 'number' ? config.build.assetsInlineLimit : null,
     hmrPartialAccept: config.experimental?.hmrPartialAccept === true,
+    cssTransformer: config.css?.transformer === 'lightningcss' ? 'lightningcss' : 'postcss',
     server: {
       host,
       port: typeof s.port === 'number' ? s.port : null,
@@ -601,12 +667,31 @@ const ws = {
   close: async () => {},
   clients: new Set(),
 }
+// Modules a plugin's `load` produced, for `moduleGraph.getModuleById` and `reloadModule`.
+const loadedModules = new Map()
+function loadedModule(id) {
+  let mod = loadedModules.get(id)
+  if (!mod) {
+    const url = '/@id/' + id.replaceAll('\0', '__x00__')
+    mod = { id, url, file: null, type: 'js', importers: new Set(), importedModules: new Set(), transformResult: null }
+    loadedModules.set(id, mod)
+  }
+  return mod
+}
+async function reloadModule(mod) {
+  if (typeof mod?.id === 'string') send({ reload: mod.id })
+  else ws.send({ type: 'full-reload' })
+}
 const moduleGraph = {
-  getModuleById: () => undefined,
+  getModuleById: (id) => loadedModules.get(id),
   getModuleByUrl: async () => undefined,
   getModulesByFile: () => undefined,
-  invalidateModule() {},
-  invalidateAll() {},
+  invalidateModule(mod) {
+    if (typeof mod?.id === 'string') send({ forget: mod.id })
+  },
+  invalidateAll() {
+    send({ forget_all: true })
+  },
   idToModuleMap: new Map(),
   urlToModuleMap: new Map(),
   fileToModulesMap: new Map(),
@@ -627,13 +712,13 @@ const server = {
   hot: ws,
   watcher,
   moduleGraph,
-  environments: { client: { name: 'client', hot: ws, moduleGraph, get config() { return resolved } } },
+  environments: { client: { name: 'client', hot: ws, moduleGraph, reloadModule, get config() { return resolved } } },
   httpServer: null,
   resolvedUrls: null,
   transformIndexHtml: (url, html) => opHtml({ url, file: path.join(root, 'index.html'), html }),
   transformRequest: async () => null,
   warmupRequest: async () => {},
-  reloadModule: async () => ws.send({ type: 'full-reload' }),
+  reloadModule,
   ssrLoadModule: async () => {
     throw new Error('ssrLoadModule is not supported by ts-r-dev')
   },
@@ -811,6 +896,17 @@ async function start() {
     }
   }
   for (const after of post) await after()
+  // `options` (vite: packages/vite/src/node/server/pluginContainer.ts, run once before the
+  // build starts): a hook may return new input options, and may change other hooks, such
+  // as their filters, which are read again on every call.
+  let inputOptions = config.build?.rolldownOptions ?? config.build?.rollupOptions ?? {}
+  for (const h of sorted(active, 'options')) {
+    try {
+      inputOptions = (await h.fn.call(context(h.plugin), inputOptions)) || inputOptions
+    } catch (e) {
+      throw new Error(hookError(h.plugin, e))
+    }
+  }
   // buildStart is a parallel hook: handlers start together, except a `sequential: true`
   // one, which waits for those before it and finishes before the next start.
   let batch = []
@@ -870,6 +966,7 @@ const ops = {
   hot: opHot,
   middleware: opMiddleware,
   proxyRewrite: opProxyRewrite,
+  proxyBypass: opProxyBypass,
 }
 
 function handle(msg) {

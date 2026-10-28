@@ -131,6 +131,8 @@ pub struct DevConfig {
     /// `experimental.hmrPartialAccept`: an update of a module that accepts some of its
     /// exports (`import.meta.hot.acceptExports`) skips the importers that only use those.
     pub hmr_partial_accept: bool,
+    /// `css.transformer`: the shape of CSS modules' scoped class names.
+    pub css_module_naming: crate::css_modules::Naming,
     /// `server.headers`, added to every response that isn't proxied.
     pub headers: Vec<(String, String)>,
     pub cors: Cors,
@@ -211,6 +213,7 @@ impl DevConfig {
             assets_include: crate::glob::PathFilter::default(),
             assets_inline_limit: crate::assets::SVG_INLINE_LIMIT as u64,
             hmr_partial_accept: false,
+            css_module_naming: crate::css_modules::Naming::default(),
             headers: Vec::new(),
             cors: Cors::default(),
             proxy: Vec::new(),
@@ -306,6 +309,7 @@ pub(crate) struct Shared {
     pub assets_include: crate::glob::PathFilter,
     pub assets_inline_limit: u64,
     pub hmr_partial_accept: bool,
+    pub css_module_naming: crate::css_modules::Naming,
     pub base: String,
     pub env_options: EnvOptions,
     /// Reloaded when an env file changes.
@@ -337,6 +341,10 @@ pub(crate) struct Shared {
     pub html_inject: String,
     pub virtual_modules: HashMap<String, String>,
     pub plugins: Option<Arc<dyn PluginHost>>,
+    /// What plugins' `load` returned, by module id: kept until the module is invalidated
+    /// (its file changed, `server.reloadModule`, `moduleGraph.invalidateModule`), so an
+    /// importer's update fetches it again without loading it again.
+    pub plugin_loads: Mutex<HashMap<String, Arc<Vec<u8>>>>,
     /// `plugins`' hooks (all false without plugins).
     pub plugin_hooks: PluginHooks,
     /// The error currently shown (replayed to clients that connect later), and the module.
@@ -357,6 +365,10 @@ pub(crate) struct Shared {
     /// The files each page's `<style>` blocks and `style` attributes read or reference: a
     /// change to one reloads the page.
     pub html_deps: Mutex<HashMap<PathBuf, Vec<PathBuf>>>,
+    /// Each page as last served, after `%ENV%` and `transformIndexHtml`: its inline module
+    /// scripts are read from here, so a hook that is not pure (a random id per call) gives
+    /// the page and its scripts the same text.
+    pub html_pages: Mutex<HashMap<PathBuf, String>>,
 }
 
 impl Shared {
@@ -596,6 +608,7 @@ impl DevServer {
             assets_include: config.assets_include.clone(),
             assets_inline_limit: config.assets_inline_limit,
             hmr_partial_accept: config.hmr_partial_accept,
+            css_module_naming: config.css_module_naming,
             base,
             env_options,
             env: RwLock::new(Arc::new(env)),
@@ -622,6 +635,7 @@ impl DevServer {
             html_inject: config.html_inject.concat(),
             virtual_modules: config.virtual_modules.iter().cloned().collect(),
             plugins: config.plugins.clone(),
+            plugin_loads: Mutex::default(),
             plugin_hooks: config
                 .plugins
                 .as_ref()
@@ -637,6 +651,7 @@ impl DevServer {
             watched_outside: Mutex::default(),
             changed_at: Mutex::default(),
             html_deps: Mutex::default(),
+            html_pages: Mutex::default(),
         });
         let watcher = if config.watch {
             let s = Arc::clone(&shared);
@@ -857,20 +872,64 @@ fn handle_connection(shared: &Arc<Shared>, stream: TcpStream) -> io::Result<()> 
             return Ok(());
         }
         if let Some(rule) = proxy::find(&shared.proxy, &req.target, false) {
-            let mut cors = Response::new(200, "", Vec::new());
-            cors.headers.clear();
-            shared.cors.apply(&req, &mut cors);
-            let extra: Vec<(String, String)> = cors
-                .headers
-                .into_iter()
-                .map(|(k, v)| (k.into_owned(), v))
-                .collect();
-            match proxy::forward(rule, &req, &mut reader, &mut writer, &extra) {
-                Ok(true) => continue,
-                Ok(false) => return Ok(()),
-                Err(e) => {
-                    shared.log(&format!("http proxy error: {}\n{e}", req.target));
+            // `bypass` first; an empty response (no Content-Type) like `res.end()`.
+            let bare = |status: u16| Response {
+                status,
+                headers: Vec::new(),
+                body: Vec::new(),
+            };
+            let answer = match rule.bypass(&req) {
+                proxy::Bypass::Proxy if rule.no_target => {
+                    shared.log(&format!(
+                        "http proxy error: {}\nserver.proxy['{}'] has no target",
+                        req.target, rule.key
+                    ));
+                    Some(bare(500))
+                }
+                proxy::Bypass::Proxy => None,
+                proxy::Bypass::NotFound => Some(bare(404)),
+                proxy::Bypass::Respond(resp) => Some(resp),
+                proxy::Bypass::Error(msg) => {
+                    shared.log(&format!("{msg}\n  at bypass for {}", req.target));
+                    Some(bare(500))
+                }
+                proxy::Bypass::Serve(url) => {
+                    set_target(&mut req, &url);
+                    Some(bare(0))
+                }
+            };
+            match answer {
+                // Served below at the new URL.
+                Some(resp) if resp.status == 0 => {}
+                Some(mut resp) => {
+                    if !http::drain_body(&mut reader, &req)? {
+                        resp.write_to(&mut writer, head_only, false)?;
+                        return Ok(());
+                    }
+                    shared.cors.apply(&req, &mut resp);
+                    resp.write_to(&mut writer, head_only, req.keep_alive())?;
+                    if req.keep_alive() {
+                        continue;
+                    }
                     return Ok(());
+                }
+                None => {
+                    let mut cors = Response::new(200, "", Vec::new());
+                    cors.headers.clear();
+                    shared.cors.apply(&req, &mut cors);
+                    let extra: Vec<(String, String)> = cors
+                        .headers
+                        .into_iter()
+                        .map(|(k, v)| (k.into_owned(), v))
+                        .collect();
+                    match proxy::forward(rule, &req, &mut reader, &mut writer, &extra) {
+                        Ok(true) => continue,
+                        Ok(false) => return Ok(()),
+                        Err(e) => {
+                            shared.log(&format!("http proxy error: {}\n{e}", req.target));
+                            return Ok(());
+                        }
+                    }
                 }
             }
         }
@@ -979,6 +1038,19 @@ enum BaseMatch {
 
 /// Removes `base` from the request path and target. `/` (and nothing else outside the
 /// base) redirects to the base.
+/// Points `req` at `url` (a path with an optional query), as a `bypass` URL asks.
+fn set_target(req: &mut Request, url: &str) {
+    let url = if url.starts_with('/') {
+        url.to_owned()
+    } else {
+        format!("/{url}")
+    };
+    let (path, query) = url.split_once('?').unwrap_or((&url, ""));
+    req.path = http::percent_decode(path);
+    req.query = query.split('#').next().unwrap_or("").to_owned();
+    req.target = url;
+}
+
 fn strip_base(base: &str, req: &mut Request) -> BaseMatch {
     let bare = base.trim_end_matches('/');
     let rest = if req.path == bare {
@@ -1126,6 +1198,9 @@ fn route(shared: &Shared, req: &Request) -> Response {
     if let Some(rest) = path.strip_prefix("/@ts-r/up/") {
         return serve_up(shared, req, rest);
     }
+    if path == crate::wasm::HELPER_URL {
+        return js_response(req, crate::wasm::helper());
+    }
     if let Some(rest) = path.strip_prefix("/@id/") {
         // Only ids the graph knows (a module imported them), like `/@fs/`.
         let file = PathBuf::from(plugins::id_from_url_path(rest));
@@ -1191,7 +1266,9 @@ fn route(shared: &Shared, req: &Request) -> Response {
         }
         return serve_file(shared, req, &file, path);
     }
-    if file.is_dir() {
+    // A folder's page only with the slash: `/dir` looks for `dir.html`, then the root page
+    // (`vite: packages/vite/src/node/server/middlewares/htmlFallback.ts`).
+    if path.ends_with('/') && file.is_dir() {
         let index = file.join("index.html");
         if index.is_file() {
             return serve_html(shared, req, &index);
@@ -1379,7 +1456,17 @@ fn transformed_html(shared: &Shared, url: &str, file: &Path) -> io::Result<Resul
 
 fn serve_html(shared: &Shared, req: &Request, file: &Path) -> Response {
     let html = transformed_html(shared, &req.path, file).map(|r| {
-        r.map(|html| crate::html_proxy::with_proxies(&html, &url_for_file(&shared.root, file)))
+        r.map(|html| {
+            let out = crate::html_proxy::with_proxies(&html, &url_for_file(&shared.root, file));
+            // Vite: packages/vite/src/node/server/middlewares/indexHtml.ts keeps each inline
+            // script as the page was served, so the proxy module matches this page.
+            shared
+                .html_pages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(file.to_path_buf(), html);
+            out
+        })
     });
     match html {
         Ok(Err(message)) => Response::text(
@@ -1489,8 +1576,37 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         return serve_html(shared, req, file);
     }
     let url = url_path.to_owned();
+    // `?worker` / `?sharedworker`: a module constructing the worker (or its URL).
+    if let Some(constructor) = crate::worker::wrapper_constructor(&req.query) {
+        ensure_asset(shared, file, &url);
+        let worker_url = shared.public_url(&crate::worker::file_url(
+            &http::encode_uri(&url),
+            &req.query,
+        ));
+        return js_response(
+            req,
+            crate::worker::wrapper_module(constructor, &worker_url, &req.query),
+        );
+    }
     let as_script =
         req.has_query("import") || req.header("sec-fetch-dest").is_some_and(|d| d == "script");
+    // A CSS module's `?inline`: its scoped text.
+    if ext == "css"
+        && req.has_query("inline")
+        && !req.has_query("raw")
+        && render::is_css_module(&url)
+    {
+        let Ok(source) = fs::read_to_string(file) else {
+            return Response::text(404, "Not found");
+        };
+        ensure_asset(shared, file, &url);
+        let mut host = app_css::AppCss::new(shared);
+        let css = host.transform(file, &source);
+        let mut deps = host.into_deps();
+        let scoped = scope_css_module(shared, file, &url, &css, 0, &mut deps);
+        add_watch_deps(shared, file, &url, deps);
+        return js_response(req, crate::assets::default_export(&scoped.css));
+    }
     // `?raw`, and CSS `?inline`: the text.
     if req.has_query("raw") || (ext == "css" && req.has_query("inline")) {
         return match fs::read(file) {
@@ -1512,6 +1628,29 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
             Err(_) => Response::text(404, "Not found"),
         };
     }
+    // Wasm: `?init` exports an instantiating function; a direct import (or the instance
+    // module behind one) is a glue module of the wasm's imports and exports.
+    if ext == "wasm" && !req.has_query("url") {
+        if req.has_query("init") {
+            ensure_asset(shared, file, &url);
+            let wasm_url = asset_export_url(shared, file, &url, "");
+            return js_response(req, crate::wasm::init_module(&wasm_url));
+        }
+        let instance = req.has_query("vite-wasm-instance");
+        if as_script || instance {
+            ensure_asset(shared, file, &url);
+            let glue_url = match instance {
+                true => format!("{url}?vite-wasm-instance"),
+                false => format!("{url}?wasm-module"),
+            };
+            return serve_script(
+                shared,
+                req,
+                &crate::wasm::glue_file(file, instance),
+                &glue_url,
+            );
+        }
+    }
     let asset_import =
         as_script && !is_module_ext(shared, file, &ext) && ext != "css" && ext != "json";
     if req.has_query("url") || asset_import {
@@ -1530,23 +1669,45 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         "json" if as_script => match fs::read_to_string(file) {
             Ok(text) => {
                 ensure_asset(shared, file, &url);
-                match crate::assets::json_module(&text) {
+                let module = match transform_plugins(shared) {
+                    Some(host) => {
+                        json_through_plugins(shared, host, &crate::paths::id(file), &text)
+                    }
+                    None => crate::assets::json_module(&text).map_err(|e| {
+                        TransformError::at(
+                            format!("invalid JSON: {e}"),
+                            e.line() as u32,
+                            e.column() as u32,
+                        )
+                    }),
+                };
+                match module {
                     Ok(module) => js_response(req, module),
-                    Err(e) => error_response(
-                        shared,
-                        ModuleError {
-                            message: format!("invalid JSON: {e}"),
-                            file: file.to_path_buf(),
-                            url,
-                            loc: Some((e.line() as u32, e.column() as u32)),
-                            frame: render::code_frame(&text, e.line() as u32, e.column() as u32),
-                        },
-                    ),
+                    Err(e) => {
+                        let loc = e.line.zip(e.column);
+                        error_response(
+                            shared,
+                            ModuleError {
+                                message: e.message,
+                                file: file.to_path_buf(),
+                                url,
+                                loc,
+                                frame: loc.map_or_else(String::new, |(l, c)| {
+                                    render::code_frame(&text, l, c)
+                                }),
+                            },
+                        )
+                    }
                 }
             }
             Err(_) => Response::text(404, "Not found"),
         },
-        _ if is_module_ext(shared, file, &ext) => serve_script(shared, req, file, &url),
+        _ if is_module_ext(shared, file, &ext) => {
+            match crate::worker::env_prelude(&req.query, &shared.public_url("/@vite/env")) {
+                Some(prelude) => serve_script_with(shared, req, file, &url, &prelude),
+                None => serve_script(shared, req, file, &url),
+            }
+        }
         _ if crate::transform::is_script_extension(&ext) => error_response(
             shared,
             ModuleError {
@@ -1645,7 +1806,66 @@ fn serve_css_module(shared: &Shared, req: &Request, file: &Path, url: &str) -> R
     let Some(css) = app_stylesheet(shared, file, url, true) else {
         return Response::text(404, "Not found");
     };
-    js_response(req, render::css_module_at(&shared.client_url(), url, &css))
+    if !render::is_css_module(url) {
+        return js_response(req, render::css_module_at(&shared.client_url(), url, &css));
+    }
+    let mut deps = Vec::new();
+    let scoped = scope_css_module(shared, file, url, &css, 0, &mut deps);
+    add_watch_deps(shared, file, url, deps);
+    js_response(
+        req,
+        render::css_module_with_exports(&shared.client_url(), url, &scoped.css, &scoped.exports),
+    )
+}
+
+/// `composes: ... from` chains deeper than this stop (a cycle, or a very long chain).
+const MAX_COMPOSE_DEPTH: u32 = 8;
+
+/// A CSS module's text (`@import`s already inlined) with its names scoped; the files its
+/// `composes: ... from` reads go to `deps`.
+fn scope_css_module(
+    shared: &Shared,
+    file: &Path,
+    url: &str,
+    css: &str,
+    depth: u32,
+    deps: &mut Vec<PathBuf>,
+) -> crate::css_modules::Scoped {
+    let key = url.split(['?', '#']).next().unwrap_or(url);
+    crate::css_modules::scope(css, key, shared.css_module_naming, &mut |spec| {
+        if depth >= MAX_COMPOSE_DEPTH {
+            return None;
+        }
+        let path = spec.split(['?', '#']).next().unwrap_or(spec);
+        let target = app_css::resolve_ref(shared, path, file, false)?;
+        let source = fs::read_to_string(&target).ok()?;
+        let mut host = app_css::AppCss::new(shared);
+        let text = host.transform(&target, &source);
+        deps.push(target.clone());
+        deps.extend(host.into_deps());
+        let target_url = url_for_file(&shared.root, &target);
+        Some(scope_css_module(
+            shared,
+            &target,
+            &target_url,
+            &text,
+            depth + 1,
+            deps,
+        ))
+    })
+}
+
+/// Adds files to a module's watched dependencies (a change to one updates it).
+fn add_watch_deps(shared: &Shared, file: &Path, url: &str, mut deps: Vec<PathBuf>) {
+    if deps.is_empty() {
+        return;
+    }
+    let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
+    let id = g.ensure(file, url, ModuleKind::Css);
+    deps.extend(g.node(id).watch_deps.iter().cloned());
+    deps.sort();
+    deps.dedup();
+    g.set_watch_deps(id, deps);
 }
 
 /// A stylesheet of the app with its `@import`s inlined and references rewritten
@@ -1686,6 +1906,17 @@ pub(crate) fn set_hash_only(n: &mut crate::graph::ModuleNode, hash: Key) {
 }
 
 fn serve_script(shared: &Shared, req: &Request, file: &Path, url: &str) -> Response {
+    serve_script_with(shared, req, file, url, "")
+}
+
+/// [`serve_script`] with `extra` run before the module's code (a worker's env import).
+fn serve_script_with(
+    shared: &Shared,
+    req: &Request,
+    file: &Path,
+    url: &str,
+    extra: &str,
+) -> Response {
     let id = {
         let mut g = shared.graph.lock().unwrap_or_else(|e| e.into_inner());
         let id = g.ensure(file, url, ModuleKind::Script);
@@ -1696,7 +1927,9 @@ fn serve_script(shared: &Shared, req: &Request, file: &Path, url: &str) -> Respo
     };
     let source = match module_source(shared, file, url) {
         Ok(b) => b,
-        Err(message) if plugins::is_plugin_url(url) => {
+        Err(message)
+            if plugins::is_plugin_url(url) || crate::wasm::split_glue_file(file).is_some() =>
+        {
             shared
                 .graph
                 .lock()
@@ -1742,7 +1975,7 @@ fn serve_script(shared: &Shared, req: &Request, file: &Path, url: &str) -> Respo
         },
     };
     crate::hmr::clear_error_for(shared, url);
-    js_response(req, render_script(shared, id, &prepared))
+    js_response(req, render_script(shared, id, &prepared, extra))
 }
 
 /// Transforms (through the cache), scans hot usage, resolves imports and updates the graph.
@@ -1871,6 +2104,10 @@ pub(crate) fn prepare_script(
         hot = scan::scan_hot(&output.code);
         glob_watches = expanded.watches;
     }
+    if let Some(rewritten) = resolve_template_heads(shared, &output, real) {
+        output = rewritten;
+        hot = scan::scan_hot(&output.code);
+    }
     {
         let mut w = shared
             .glob_watches
@@ -1990,6 +2227,81 @@ pub(crate) fn prepare_script(
     node.prepared = Some(Arc::clone(&prepared));
     node.errored = false;
     Ok((prepared, pruned))
+}
+
+/// `` import(`@/${name}.js`) ``: the template's head resolved through `resolve.alias` or
+/// package `imports` (`#sub/`) to a URL, so the browser can load the variable import as
+/// written. Vite turns such imports into a glob over the matching files
+/// (`vite: packages/vite/src/node/plugins/dynamicImportVars.ts`); with the head resolved,
+/// the browser fetches the same files. Relative, absolute and URL heads stay as they are.
+fn resolve_template_heads(
+    shared: &Shared,
+    output: &TransformOutput,
+    real: &Path,
+) -> Option<Arc<TransformOutput>> {
+    let code = &output.code;
+    if !code.contains('`') || !code.contains("import") {
+        return None;
+    }
+    let heads = scan::scan(code).template_heads;
+    if heads.is_empty() {
+        return None;
+    }
+    let importer_id = crate::paths::id(real);
+    let mut texts = Vec::new();
+    for (start, end) in heads {
+        let head = code.get(start as usize..end as usize)?;
+        if head.is_empty() || head.starts_with(['.', '/']) || head.contains(':') {
+            continue;
+        }
+        let target = match head.starts_with('#') {
+            true => crate::glob::subpath_import(head, real),
+            false => alias_rewrite(shared, head, &importer_id).filter(|r| r != head),
+        };
+        let Some(target) = target else { continue };
+        let trimmed = target.trim_end_matches('/');
+        let p = Path::new(trimmed);
+        let url = if p.is_absolute() && (p.exists() || p.parent().is_some_and(Path::exists)) {
+            let mut u = url_for_file(&shared.root, &normalize(p));
+            if target.ends_with('/') && !u.ends_with('/') {
+                u.push('/');
+            }
+            shared.public_url(&u)
+        } else if target.starts_with('/') {
+            shared.public_url(&target)
+        } else {
+            continue;
+        };
+        texts.push((start as usize, end as usize, literal_body(&url, b'`')));
+    }
+    if texts.is_empty() {
+        return None;
+    }
+    let edits: Vec<crate::sourcemap::TextEdit<'_>> = texts
+        .iter()
+        .map(|(start, end, text)| crate::sourcemap::TextEdit {
+            start: *start,
+            end: *end,
+            text,
+        })
+        .collect();
+    let mut out = String::with_capacity(code.len());
+    let mut at = 0;
+    for e in &edits {
+        out.push_str(&code[at..e.start]);
+        out.push_str(e.text);
+        at = e.end;
+    }
+    out.push_str(&code[at..]);
+    let map = output
+        .map
+        .as_deref()
+        .map(|m| crate::sourcemap::shift_for_edits(m, code, "", &edits));
+    Some(Arc::new(TransformOutput {
+        imports: scan::scan(&out).imports,
+        code: out,
+        map,
+    }))
 }
 
 /// What a module accepts and binds, for partial accept (`import.meta.hot.acceptExports`,
@@ -2203,7 +2515,8 @@ fn resolve_target(shared: &Shared, specifier: &str, importer: &Path) -> Result<P
     if matches!(
         path,
         "/@ts-r/client" | "/@vite/client" | "/@ts-r/env" | "/@vite/env"
-    ) {
+    ) || path == crate::wasm::HELPER_URL
+    {
         return Ok(Pending::Url(shared.public_url(specifier)));
     }
     let fs_form = absolute_as_fs(&shared.root, specifier);
@@ -2371,6 +2684,15 @@ const KNOWN_ASSETS: &[&str] = &[
 /// module: a query the server doesn't know (`?react`), or a file that is neither a script,
 /// CSS, JSON nor a known asset (`.md`, `.yaml`, `.vue`) nor `included` by `assetsInclude`.
 fn is_plugin_import(path: &Path, kind: ModuleKind, spec_query: &str, included: bool) -> bool {
+    // The server's own worker and wasm modules take any other parameters along.
+    let own = |k: &str| http::query_param(spec_query, k).is_some();
+    if ["worker", "sharedworker", "worker_file"]
+        .into_iter()
+        .any(own)
+        || (ext_of(path) == "wasm" && ["init", "vite-wasm-instance"].into_iter().any(own))
+    {
+        return false;
+    }
     let unknown_query = spec_query
         .split('&')
         .filter(|p| !p.is_empty())
@@ -2547,6 +2869,15 @@ pub(crate) fn run_transform(
     let Some(host) = host else {
         return transform.transform(input);
     };
+    // A plugin module with a JSON id (`\0/data.json`): Vite's JSON plugin is its built-in step.
+    if is_json_id(plugin_id) {
+        let code = json_through_plugins(shared, host, plugin_id, input.source)?;
+        return Ok(TransformOutput {
+            imports: scan::scan(&code).imports,
+            code,
+            map: None,
+        });
+    }
     let hooks = shared.plugin_hooks;
     let pre = if hooks.transform_pre {
         host.transform(Stage::Pre, plugin_id, input.source)
@@ -2583,6 +2914,48 @@ pub(crate) fn run_transform(
     }
     out.map = compose_maps(&chain, input);
     Ok(out)
+}
+
+/// Whether Vite's JSON plugin takes the module `id`: a `.json` path, not asked for `?raw`,
+/// `?url` or as a worker (`vite: packages/vite/src/node/plugins/json.ts`).
+fn is_json_id(id: &str) -> bool {
+    let (path, query) = id.split_once('?').unwrap_or((id, ""));
+    path.ends_with(".json")
+        && !["raw", "url", "worker", "sharedworker"]
+            .iter()
+            .any(|k| crate::http::query_param(query, k).is_some())
+}
+
+/// JSON text as an ES module, with the plugins' `transform` hooks around the conversion:
+/// pre hooks see the JSON (module type `json`), post hooks the JS.
+fn json_through_plugins(
+    shared: &Shared,
+    host: &dyn PluginHost,
+    id: &str,
+    text: &str,
+) -> Result<String, TransformError> {
+    let hooks = shared.plugin_hooks;
+    let pre = if hooks.transform_pre {
+        host.transform(Stage::Pre, id, text)
+            .map_err(TransformError::new)?
+    } else {
+        None
+    };
+    let json = pre.as_ref().map_or(text, |t| t.code.as_str());
+    let module = crate::assets::json_module(json).map_err(|e| {
+        TransformError::at(
+            format!("invalid JSON: {e}"),
+            e.line() as u32,
+            e.column() as u32,
+        )
+    })?;
+    if !hooks.transform_post {
+        return Ok(module);
+    }
+    Ok(host
+        .transform(Stage::Post, id, &module)
+        .map_err(TransformError::new)?
+        .map_or(module, |t| t.code))
 }
 
 /// One map for a chain of transforms (see [`run_transform`]); sources that name the
@@ -2629,23 +3002,52 @@ fn compose_maps(chain: &[Option<String>], input: &TransformInput<'_>) -> Option<
 pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<Vec<u8>, String> {
     if let Some((page, n)) = crate::html_proxy::split_module_file(file) {
         let page_url = url_for_file(&shared.root, &page);
-        let html = transformed_html(shared, &page_url, &page)
-            .map_err(|e| format!("{}: {e}", page.display()))??;
+        let served = shared
+            .html_pages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&page)
+            .cloned();
+        let html = match served {
+            Some(html) => html,
+            None => transformed_html(shared, &page_url, &page)
+                .map_err(|e| format!("{}: {e}", page.display()))??,
+        };
         return crate::html_proxy::script(&html, n)
             .map(|s| s.as_bytes().to_vec())
             .ok_or_else(|| format!("{page_url} has no inline module script {n}"));
+    }
+    if let Some((wasm, instance)) = crate::wasm::split_glue_file(file) {
+        let wasm_url = url_for_file(&shared.root, &wasm);
+        let wasm_url = asset_export_url(shared, &wasm, &wasm_url, "");
+        return crate::wasm::glue_source(&wasm, instance, &wasm_url).map(String::into_bytes);
     }
     if !plugins::is_plugin_url(url) {
         return fs::read(file).map_err(|e| format!("{}: {e}", file.display()));
     }
     let id = crate::paths::id(file);
+    let cached = shared
+        .plugin_loads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id.as_ref())
+        .cloned();
+    if let Some(code) = cached {
+        return Ok(code.as_ref().clone());
+    }
     if let Some(host) = shared
         .plugins
         .as_deref()
         .filter(|_| shared.plugin_hooks.load)
         && let Some(code) = host.load(&id)?
     {
-        return Ok(code.into_bytes());
+        let code = code.into_bytes();
+        shared
+            .plugin_loads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.into_owned(), Arc::new(code.clone()));
+        return Ok(code);
     }
     let real = Path::new(plugins::id_file(&id));
     if !id.starts_with('\0') && real.is_absolute() && real.is_file() {
@@ -2663,6 +3065,22 @@ pub(crate) fn module_source(shared: &Shared, file: &Path, url: &str) -> Result<V
     ))
 }
 
+/// Drops what plugins' `load` returned for the module of `file` (`None`: every module),
+/// so the next request loads it again (Vite: a hard invalidation, which an importer's
+/// update is not; `vite: packages/vite/src/node/server/moduleGraph.ts`, `invalidateModule`).
+pub(crate) fn forget_load(shared: &Shared, file: Option<&Path>) {
+    let mut loads = shared
+        .plugin_loads
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    match file {
+        Some(f) => {
+            loads.remove(crate::paths::id(f).as_ref());
+        }
+        None => loads.clear(),
+    }
+}
+
 /// Plugin `configureServer` middlewares for a request no built-in route served.
 fn plugin_middleware(shared: &Shared, req: &Request, body: &[u8]) -> Option<Response> {
     let host = shared
@@ -2678,12 +3096,32 @@ fn plugin_middleware(shared: &Shared, req: &Request, body: &[u8]) -> Option<Resp
     }
 }
 
-/// What a plugin host may use of the server: broadcasting and the built-in resolver. Holds
+/// What a plugin host may use of the server: broadcasting, the built-in resolver and
+/// reloading a module. Holds
 /// the server weakly (the host lives inside it).
 fn server_handle(shared: &Arc<Shared>) -> ServerHandle {
     let weak = Arc::downgrade(shared);
     let weak2 = Arc::downgrade(shared);
+    let weak3 = Arc::downgrade(shared);
+    let weak4 = Arc::downgrade(shared);
     ServerHandle {
+        forget_load: Arc::new(move |id: Option<&str>| {
+            if let Some(s) = weak4.upgrade() {
+                forget_load(&s, id.map(Path::new));
+            }
+        }),
+        reload_module: Arc::new(move |id: &str| {
+            let weak = weak3.clone();
+            let id = id.to_owned();
+            // The host may be waiting on this thread (a hook reply); never block it.
+            let _ = std::thread::Builder::new()
+                .name("ts-r-reload-module".into())
+                .spawn(move || {
+                    if let Some(s) = weak.upgrade() {
+                        crate::hmr::reload_module(&s, &id);
+                    }
+                });
+        }),
         broadcast: Arc::new(move |text: &str| {
             if let Some(s) = weak.upgrade() {
                 s.hub.broadcast(text);
@@ -2789,7 +3227,7 @@ pub(crate) fn accepted_url(url: &str, query: &str) -> String {
 }
 
 /// Renders a prepared module for the browser with the graph's current timestamps.
-pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared) -> String {
+pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: &str) -> String {
     // Dependency URLs first: they may wait for (or trigger) a dependency batch, so not
     // under the graph lock.
     let dep_urls: HashMap<&str, String> = p
@@ -2827,6 +3265,16 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared) -> Stri
             end: rec.end,
             text: url_of(t, true),
         });
+        // Static import attributes go: the server decides what a module is.
+        if rec.kind != crate::scan::ImportKind::Dynamic
+            && let Some((start, end)) = render::import_attributes_span(&p.output.code, rec.end)
+        {
+            edits.push(render::Edit {
+                start,
+                end,
+                text: String::new(),
+            });
+        }
     }
     for (rec, t) in p.hot.accepted.iter().zip(&p.accept_targets) {
         let text = match t {
@@ -2839,7 +3287,27 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared) -> Stri
             text,
         });
     }
-    let mut prelude = String::new();
+    let mut prelude = extra.to_owned();
+    // `import(expr)`: `?import` added at runtime (Vite's `injectQuery`), so a variable
+    // import gets the module an explicit import of the same file would.
+    if !p.hot.dynamic_exprs.is_empty() && !extra.starts_with("importScripts") {
+        prelude.push_str(&format!(
+            "import {{ injectQuery as __vite__injectQuery }} from {};",
+            render::js_string(&shared.client_url())
+        ));
+        for &(start, end) in &p.hot.dynamic_exprs {
+            edits.push(render::Edit {
+                start,
+                end: start,
+                text: "__vite__injectQuery(".to_owned(),
+            });
+            edits.push(render::Edit {
+                start: end,
+                end,
+                text: ", 'import')".to_owned(),
+            });
+        }
+    }
     if p.hot.uses_hot {
         prelude.push_str(&render::hot_prelude_at(
             &shared.client_url(),
@@ -3033,6 +3501,17 @@ pub(crate) fn next_timestamp(shared: &Shared) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_ids_are_the_json_plugins() {
+        assert!(is_json_id("/p/a.json"));
+        assert!(is_json_id("\0/bar.json"));
+        assert!(is_json_id("/p/a.json?lang=x"));
+        assert!(!is_json_id("/p/a.json?raw"));
+        assert!(!is_json_id("/p/a.json?url"));
+        assert!(!is_json_id("/p/a.jsonc"));
+        assert!(!is_json_id("\0virtual:x"));
+    }
 
     #[test]
     fn assets_include_files_are_assets_not_plugin_modules() {

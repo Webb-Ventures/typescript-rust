@@ -54,7 +54,7 @@ is React's, pre-bundled with the other deps (`optimize_include`); our parts are 
 With a `vite.config.{js,mjs,ts,mts,cjs,cts}` in the root (and no `--no-plugins`), a Node
 sidecar (`node`, or `TS_R_NODE`) imports it, flattens and orders `plugins` (`apply`,
 `enforce`, hook `order`, hook `filter`s), runs `config` → `configResolved` →
-`configureServer` → `buildStart`, and implements `ts_r_hmr::PluginHost` over JSON lines
+`configureServer` → `options` → `buildStart`, and implements `ts_r_hmr::PluginHost` over JSON lines
 (stdin/stdout; plugin stdout is moved to stderr). Stdin is read while the startup hooks run,
 so a `this.resolve` there gets its answer (null before the dev server attaches); other
 requests wait for startup. Hooks: `resolveId` (with `this.resolve`
@@ -64,6 +64,15 @@ connect-style middlewares, `server.ws.send`/`on`. `this.meta` carries the instal
 and Rolldown's versions (plugins pick APIs by it). The sidecar script is written by us
 from the documented plugin API (no Vite code).
 
+- **Hook filters are read on every call**, so a filter an `options` hook (or any earlier
+  hook) assigns is the one used (`vite: packages/vite/src/node/server/pluginContainer.ts`
+  runs `options` once before the build starts).
+- **Module types** (`vite: packages/vite/src/node/server/transformRequest.ts`,
+  `getModuleTypeFromId`): a pre-stage `transform` gets the type guessed from the id (the
+  first `.ext` up to the end that is known: `js`, `jsx`, `ts`, `tsx`, `json`, `text`,
+  `css`; else `js`), a post-stage one `js` (our built-in step made JS, as Vite's JSON and
+  TS plugins return), and a hook returning `moduleType` changes it for the hooks after it.
+  A `filter.moduleType` list (or `{ include }`) skips a hook for other types.
 - **`/plugin-react` is replaced, not run:** plugins named `vite:react*`
   / `@vitejs/plugin-react*` only run their `config` hooks; JSX options from the resolved config
   (`oxc.jsx.importSource`/`runtime`, `esbuild.jsx*`) configure `TsTransform`, and Fast Refresh
@@ -84,12 +93,16 @@ from the documented plugin API (no Vite code).
 - **Dev options from the config** (manifest field `dev`, computed by the sidecar after
   `configResolved`): `mode`, `base`, `define` (expression text; non-string values JSON-encoded), `envPrefix`, `envDir`,
   `publicDir`, `server.{host,port,strictPort,open,headers,cors,proxy,https}`,
-  `experimental.hmrPartialAccept` (as `hmrPartialAccept`), applied by
+  `experimental.hmrPartialAccept` (as `hmrPartialAccept`), `css.transformer` (as
+  `cssTransformer`, the shape of CSS modules' class names), applied by
   `apply_dev_options`. `envDir`/`publicDir` are kept relative to the root when given relative
   or inside it (checkouts with the same config share the cached manifest) and resolved
   against ts-r-dev's root. A proxy `rewrite` function stays in Node: the rule records its index and
   each proxied request calls the sidecar's `proxyRewrite` op (so a config with a `rewrite`
-  always starts the sidecar). `server.https` `cert`/`key` are cached as PEM text in the
+  always starts the sidecar). A `bypass` function works the same way (`proxyBypass`): it gets
+  a request (headers, no body) and a fake `res`; what it wrote, or what it returned (`false`,
+  a URL, a throw), goes back as a `proxy::Bypass` (`vite: packages/vite/src/node/server/middlewares/proxy.ts`).
+  A rule with a `bypass` and no `target` is kept. `server.https` `cert`/`key` are cached as PEM text in the
   manifest (that is how plugin-generated certificates, e.g. `@vitejs/plugin-basic-ssl`, survive
   a warm start without Node); the cache lives in the user's `~/.cache/ts-r`.
   `TS_R_MODE` passes the mode to the sidecar; the mode is part of the manifest key.
@@ -180,12 +193,12 @@ file that starts importing another changes the list). Wrappers (React Refresh) f
 ## Gaps
 
 - Vite plugins: the seam gaps in [`ts_r_hmr`](../ts_r_hmr/AGENTS.md#gaps) apply; `this.parse`,
-  `this.load`, `ssrLoadModule` throw; `server.moduleGraph` is a stub; `server.watcher` only
+  `this.load`, `ssrLoadModule` throw; `server.moduleGraph` only knows modules a plugin's `load` produced (`getModuleById`, a minimal module record); `invalidateModule`/`invalidateAll` drop the server's kept `load` result and `server.reloadModule` (also on `environments.client`) re-loads and hot-updates the module (sidecar messages `forget`, `forget_all`, `reload`); `server.watcher` only
   sees changes that reach `handleHotUpdate`; `this.addWatchFile` is a no-op. The sidecar costs ~25 ms to start with inline plugins and
   ~80–440 ms when the config imports `vite` (cold disk cache); with a cached manifest that happens in the background after "ready".
 - From `vite.config`: no `css.*` (preprocessor options, CSS modules), `server.hmr`,
   `server.fs`, `server.watch`, `optimizeDeps.exclude`/`esbuildOptions`, proxy
-  `configure`/`bypass`, `cors.origin` functions. A changed certificate file is picked up only
+  `configure`, `cors.origin` functions. A changed certificate file is picked up only
   when the manifest key changes (config, `package.json`, lockfile) or with `--force`. No Ctrl-C cleanup beyond the
   OS reclaiming resources (the transform cache flushes on drop only when the server stops
   normally; unflushed entries are just misses next time).

@@ -361,6 +361,114 @@ fn vite_plugins_run_in_a_node_sidecar() {
     assert!(!process_alive(pid), "sidecar {pid} outlived ts-r-dev");
 }
 
+/// `transform` hooks get Vite's module type (`json` before the JSON step, `js` after, `ts`
+/// for TypeScript), JSON files and JSON-id plugin modules go through them, and a filter an
+/// `options` hook sets is the one used.
+#[test]
+fn transform_hooks_see_module_types_and_options_hook_filters() {
+    if !node_available() {
+        eprintln!("skipping: node not found (set TS_R_NODE)");
+        return;
+    }
+    let app = TempDir::new("plugins-module-type");
+    let cache = TempDir::new("plugins-module-type-cache");
+    app.write("index.html", "<!doctype html><body>hi</body>\n");
+    app.write(
+        "vite.config.mjs",
+        r#"const types = ['pre', 'post'].map((enforce) => ({
+  name: `type-${enforce}`,
+  enforce,
+  transform(code, id, opts) {
+    if (id.endsWith('.json') || id.endsWith('/a.ts')) return code.replace(`TYPE_${enforce.toUpperCase()}`, opts.moduleType)
+  },
+}))
+const lazy = {
+  name: 'lazy',
+  options() { lazy.transform.filter = { id: '**/a.ts' } },
+  transform: { filter: { id: { exclude: ['**/*.ts'] } }, handler: (code) => code.replace('LAZY', 'ok') },
+}
+const typed = { name: 'typed', transform: { filter: { moduleType: ['json'] }, handler() { throw new Error('json is js after the JSON step') } } }
+export default {
+  plugins: [types, lazy, typed, {
+    name: 'virtual-json',
+    resolveId(id) { if (id === 'virtual:/v.json') return '\0/v.json' },
+    load(id) { if (id === '\0/v.json') return JSON.stringify({ pre: 'TYPE_PRE', post: 'TYPE_POST' }) },
+  }],
+}
+"#,
+    );
+    app.write(
+        "src/a.ts",
+        "import d from './d.json'\nimport v from 'virtual:/v.json'\nexport const x: string = 'TYPE_PRE TYPE_POST LAZY'\nexport const both = [d, v]\n",
+    );
+    app.write("src/d.json", r#"{"pre":"TYPE_PRE","post":"TYPE_POST"}"#);
+    let dev = DevProcess::start(app.path(), cache.path(), &[]);
+    let addr = dev.addr.parse().unwrap();
+    let (status, _, a) = http_get(addr, "/src/a.ts", &[]);
+    assert_eq!(status, 200, "{a}");
+    assert!(a.contains("'ts js ok'"), "{a}");
+    let (status, _, d) = http_get(addr, "/src/d.json?import", &[]);
+    assert_eq!(status, 200, "{d}");
+    assert!(d.contains(r#"export const pre = "json";"#), "{d}");
+    assert!(d.contains(r#"export const post = "js";"#), "{d}");
+    let (status, _, v) = http_get(addr, "/@id/__x00__/v.json", &[]);
+    assert_eq!(status, 200, "{v}");
+    assert!(v.contains(r#"export const pre = "json";"#), "{v}");
+    assert!(v.contains(r#"export const post = "js";"#), "{v}");
+}
+
+#[test]
+fn proxy_bypass_functions_run_in_the_sidecar() {
+    if !node_available() {
+        eprintln!("skipping: node not found (set TS_R_NODE)");
+        return;
+    }
+    let app = TempDir::new("plugins-bypass");
+    let cache = TempDir::new("plugins-bypass-cache");
+    app.write("index.html", "<!doctype html><body>hi</body>\n");
+    app.write("local.txt", "served locally\n");
+    app.write(
+        "vite.config.mjs",
+        r#"const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+export default {
+  server: {
+    proxy: {
+      '/missing': { target: 'http://127.0.0.1:9', bypass: () => false },
+      '/written': {
+        bypass: async (req, res) => {
+          await wait(4)
+          res.writeHead(201, { 'Content-Type': 'text/plain' })
+          res.end('written by ' + req.url)
+          return '/written'
+        },
+      },
+      '/thrown': { bypass: async () => { await wait(4); throw new Error('bypass failed here') } },
+      '/elsewhere': { target: 'http://127.0.0.1:9', bypass: (req) => (req.headers.accept === 'text/plain' ? '/local.txt' : undefined) },
+    },
+  },
+}
+"#,
+    );
+    let dev = DevProcess::start(app.path(), cache.path(), &[]);
+    let addr = dev.addr.parse().unwrap();
+    let (status, headers, body) = http_get(addr, "/missing/app", &[]);
+    assert_eq!(status, 404, "{body}");
+    assert!(
+        body.is_empty() && header(&headers, "content-type").is_none(),
+        "{headers:?}"
+    );
+    let (status, _, body) = http_get(addr, "/written?x=1", &[]);
+    assert_eq!((status, body.as_str()), (201, "written by /written?x=1"));
+    let (status, _, _) = http_get(addr, "/thrown", &[]);
+    assert_eq!(status, 500);
+    assert!(log_after(&dev, "bypass failed here").contains("bypass failed here"));
+    let (status, _, body) = http_get(addr, "/elsewhere/x", &[("accept", "text/plain")]);
+    assert_eq!((status, body.as_str()), (200, "served locally\n"));
+    // Not bypassed: proxied to a closed port.
+    let (status, _, _) = http_get(addr, "/elsewhere/x", &[]);
+    assert_eq!(status, 502);
+}
+
 #[test]
 fn react_only_configs_skip_the_sidecar_once_the_manifest_is_cached() {
     if !node_available() {

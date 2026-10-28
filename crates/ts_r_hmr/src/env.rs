@@ -174,9 +174,14 @@ pub fn load_with(
     for (k, expr) in &opts.define {
         if let Some(name) = k.strip_prefix("import.meta.env.") {
             meta.insert(name.to_owned(), expr.clone());
-            if let Ok(serde_json::Value::String(s)) = serde_json::from_str(expr) {
-                html_values.insert(name.to_owned(), s);
-            }
+            // `%NAME%` in HTML: a JSON string's text, else the expression itself (`5173`,
+            // `{ "foo": "bar" }`, `null`; `vite: packages/vite/src/node/plugins/html.ts`,
+            // `htmlEnvHook`).
+            let html = match serde_json::from_str(expr) {
+                Ok(serde_json::Value::String(s)) => s,
+                _ => expr.clone(),
+            };
+            html_values.insert(name.to_owned(), html);
             continue;
         }
         if k == "process.env.NODE_ENV" {
@@ -503,6 +508,8 @@ mod tests {
             define: vec![
                 ("__APP_VERSION__".into(), "\"1.2.3\"".into()),
                 ("import.meta.env.NUMBER".into(), "7".into()),
+                ("import.meta.env.STR".into(), "\"s\"".into()),
+                ("import.meta.env.OBJ".into(), "{ \"foo\": \"bar\" }".into()),
                 ("process.env.OTHER".into(), "\"other\"".into()),
             ],
             process_env: Vec::new(),
@@ -511,7 +518,7 @@ mod tests {
         let env = load_with(&opts, &none, &[("VITE_FROM_SHELL".into(), "sh".into())]);
         assert_eq!(
             env.prelude,
-            r#"import.meta.env = {"APP_B": "app-b", "BASE_URL": "/", "DEV": true, "MODE": "development", "NUMBER": 7, "PROD": false, "SSR": false, "VITE_A": "from-dev", "VITE_B": "b-dev-local", "VITE_EXP": "from-dev-expanded", "VITE_FROM_SHELL": "sh"};"#
+            r#"import.meta.env = {"APP_B": "app-b", "BASE_URL": "/", "DEV": true, "MODE": "development", "NUMBER": 7, "OBJ": { "foo": "bar" }, "PROD": false, "SSR": false, "STR": "s", "VITE_A": "from-dev", "VITE_B": "b-dev-local", "VITE_EXP": "from-dev-expanded", "VITE_FROM_SHELL": "sh"};"#
         );
         assert!(
             env.globals.starts_with(
@@ -527,6 +534,10 @@ mod tests {
                 &env
             ),
             "<title>from-dev development %SECRET% 100% /</title>"
+        );
+        assert_eq!(
+            replace_html("%NUMBER% %STR% %OBJ%", &env),
+            "7 s { \"foo\": \"bar\" }"
         );
         assert!(is_env_file(dir.path(), &dir.path().join(".env.staging")));
         assert!(!is_env_file(dir.path(), &dir.path().join("x.env")));

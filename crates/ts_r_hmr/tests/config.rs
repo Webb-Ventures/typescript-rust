@@ -519,3 +519,91 @@ fn https_serves_tls_and_proxies_to_tls() {
     let (status, _, _) = http_get(server.addr(), "/robots.txt", &[]);
     assert_ne!(status, 200);
 }
+
+/// A wasm module with one imported function (`./env.js` `log`) and one exported (`run`).
+const WASM: &[u8] = &[
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+    0x02, 0x10, 0x01, 0x08, b'.', b'/', b'e', b'n', b'v', b'.', b'j', b's', 0x03, b'l', b'o', b'g',
+    0x00, 0x00, // import ./env.js log
+    0x03, 0x02, 0x01, 0x00, // function 1 has type 0
+    0x07, 0x07, 0x01, 0x03, b'r', b'u', b'n', 0x00, 0x01, // export run
+    0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b, // code: call 0
+];
+
+/// Wasm (`?init` and direct imports), `?worker` / `?sharedworker` imports and dynamic
+/// imports of expressions, the way Vite 8.3.4 serves them.
+#[test]
+fn wasm_workers_and_dynamic_imports_like_vite() {
+    let app = TempDir::new("cfg-wasm");
+    app.write(
+        "index.html",
+        "<!doctype html><script type=\"module\" src=\"/src/a.js\"></script>\n",
+    );
+    app.write(
+        "src/a.js",
+        "import init from './m.wasm?init'\nimport { run } from './m.wasm'\nimport W from './w.js?worker'\nimport S from './w.js?sharedworker&name=s'\nimport u from './w.js?worker&url'\nconst p = './x.js'\nimport(/* @vite-ignore */ p)\nconst v = 'a'\nimport(`./data/${v}.json`)\nimport(`./data/${v}.js`)\nimport(`#d/${v}.js`)\nconsole.log(init, run, W, S, u)\n",
+    );
+    app.write("src/env.js", "export const log = () => {}\n");
+    app.write(
+        "package.json",
+        "{\"imports\": {\"#d/*\": \"./src/data/*\"}}",
+    );
+    app.write("src/data/a.js", "export default 1\n");
+    app.write("src/w.js", "self.onmessage = () => {}\n");
+    std::fs::write(app.path().join("src/m.wasm"), WASM).expect("write wasm");
+    let server = DevServer::start(base_config(&app)).expect("server starts");
+    let (_, _, a) = get(&server, "/src/a.js");
+    assert!(
+        a.starts_with("import { injectQuery as __vite__injectQuery } from \"/@ts-r/client\";import init from '/src/m.wasm?import&init'"),
+        "{a}"
+    );
+    assert!(a.contains("import W from '/src/w.js?worker'"), "{a}");
+    // Expressions, and templates naming a non-script file, get `?import` at run time.
+    assert!(
+        a.contains("import(/* @vite-ignore */ __vite__injectQuery(p, 'import'))"),
+        "{a}"
+    );
+    assert!(
+        a.contains("import(__vite__injectQuery(`./data/${v}.json`, 'import'))"),
+        "{a}"
+    );
+    assert!(a.contains("import(`./data/${v}.js`)"), "{a}");
+    // A template's subpath-import head resolves to a URL.
+    assert!(a.contains("import(`/src/data/${v}.js`)"), "{a}");
+    assert_eq!(
+        get(&server, "/src/m.wasm?init").2,
+        "import initWasm from \"/@id/__x00__vite/wasm-helper.js\"\nexport default opts => initWasm(opts, \"/src/m.wasm\")\n"
+    );
+    let (status, h, wasm) = get(&server, "/src/m.wasm");
+    assert_eq!(status, 200);
+    assert_eq!(header(&h, "content-type"), Some("application/wasm"));
+    assert!(wasm.starts_with("\0asm"));
+    let direct = get(&server, "/src/m.wasm?import").2;
+    assert!(
+        direct.contains("import * as __tsr_wasmImport_0 from \"/src/env.js\";"),
+        "{direct}"
+    );
+    assert!(
+        direct.contains("export const { run } = __tsr_wasmModule;"),
+        "{direct}"
+    );
+    assert!(
+        get(&server, "/@id/__x00__vite/wasm-helper.js")
+            .2
+            .contains("export default async function initWasm(imports = {}, url)")
+    );
+    assert!(
+        get(&server, "/src/w.js?sharedworker&name=s").2.contains(
+            "return new SharedWorker(\"/src/w.js?worker_file&type=module&name=s\", { type: \"module\", name: options?.name });"
+        )
+    );
+    assert_eq!(
+        get(&server, "/src/w.js?worker&url").2,
+        "export default \"/src/w.js?worker_file&type=module\"\n"
+    );
+    assert_eq!(
+        get(&server, "/src/w.js?worker_file&type=module").2,
+        "import \"/@vite/env\"\n;\nself.onmessage = () => {}\n"
+    );
+}

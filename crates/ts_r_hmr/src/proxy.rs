@@ -7,7 +7,11 @@
 //! - `changeOrigin` sends the target's host in `Host` (the string form implies it);
 //! - `secure: false` accepts any certificate from an `https://`/`wss://` target;
 //! - an unreachable target answers `502 Bad Gateway` with an empty body;
-//! - proxied responses carry the CORS headers but not `server.headers`.
+//! - proxied responses carry the CORS headers but not `server.headers`;
+//! - `bypass(req, res)` runs first (`vite: packages/vite/src/node/server/middlewares/proxy.ts`):
+//!   `false` answers an empty 404; a string serves that URL from the dev server instead
+//!   (unless the function wrote a response itself); a throw is a server error (logged,
+//!   500); anything else proxies. A rule may then have no target at all.
 //!
 //! The upstream connection is one-shot (`Connection: close`); bodies are streamed in both
 //! directions with their own framing (Content-Length, chunked, or until close).
@@ -23,6 +27,24 @@ use crate::net::{self, Duplex};
 /// `rewrite(url)`, evaluated wherever the config lives (the Node sidecar for a Vite
 /// config). `None` = leave the URL alone.
 pub type Rewrite = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// What a rule's `bypass` function decided for one request.
+#[derive(Debug)]
+pub enum Bypass {
+    /// Forward the request (the function returned nothing, or wasn't run).
+    Proxy,
+    /// `false`: an empty 404.
+    NotFound,
+    /// A URL: served by the dev server as if requested.
+    Serve(String),
+    /// The function wrote and ended the response itself.
+    Respond(crate::http::Response),
+    /// The function threw: logged, then a 500.
+    Error(String),
+}
+
+/// `bypass(req, res)`, evaluated wherever the config lives (the Node sidecar).
+pub type BypassFn = Arc<dyn Fn(&Request) -> Bypass + Send + Sync>;
 
 /// Largest upstream response head we relay.
 const MAX_HEAD: usize = 64 * 1024;
@@ -103,6 +125,9 @@ pub struct ProxyRule {
     pub ws: bool,
     pub secure: bool,
     pub rewrite: Option<Rewrite>,
+    pub bypass: Option<BypassFn>,
+    /// The rule has no `target` (only a `bypass`): proxying fails with a 500.
+    pub no_target: bool,
     /// Extra request headers (`headers` option).
     pub headers: Vec<(String, String)>,
 }
@@ -116,6 +141,8 @@ impl std::fmt::Debug for ProxyRule {
             .field("ws", &self.ws)
             .field("secure", &self.secure)
             .field("rewrite", &self.rewrite.is_some())
+            .field("bypass", &self.bypass.is_some())
+            .field("no_target", &self.no_target)
             .finish_non_exhaustive()
     }
 }
@@ -137,8 +164,26 @@ impl ProxyRule {
             ws: false,
             secure: true,
             rewrite: None,
+            bypass: None,
+            no_target: false,
             headers: Vec::new(),
         })
+    }
+
+    /// A rule with only a `bypass` function: requests it doesn't answer can't be proxied.
+    pub fn bypass_only(key: &str, bypass: BypassFn) -> Result<ProxyRule, String> {
+        let mut rule = ProxyRule::new(key, "http://localhost")?;
+        rule.bypass = Some(bypass);
+        rule.no_target = true;
+        Ok(rule)
+    }
+
+    /// Runs the `bypass` function, if there is one.
+    pub fn bypass(&self, req: &Request) -> Bypass {
+        match &self.bypass {
+            Some(f) => f(req),
+            None => Bypass::Proxy,
+        }
     }
 
     pub fn matches(&self, url: &str) -> bool {

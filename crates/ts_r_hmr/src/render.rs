@@ -126,14 +126,109 @@ fn find_tag_end(lower: &str, name: &str) -> Option<usize> {
 
 /// A stylesheet as a self-accepting JS module that injects a `<style>` tag. A plain
 /// stylesheet exports nothing, like Vite's (the text is `?inline`'s default export). A CSS
-/// module (`x.module.css`) exports an empty class map as its default, so a page importing
-/// one still links: its class names aren't scoped or mapped yet.
+/// module (`x.module.css`) served this way (a dependency's) exports an empty class map as
+/// its default, so a page importing one still links; app CSS modules go through
+/// [`css_module_with_exports`].
 pub fn css_module(url: &str, css: &str) -> String {
     css_module_at(CLIENT_URL, url, css)
 }
 
 /// [`css_module`] with the client at `client` (under a base).
 pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
+    let exports = match is_css_module(url) {
+        true => "export default {};\n".to_owned(),
+        false => String::new(),
+    };
+    style_module(client, url, css, &exports)
+}
+
+/// A CSS module (scoped by [`crate::css_modules`]) as a JS module: the style, the class map
+/// as the default export and each name that is a JS identifier as a named export, as Vite's
+/// `dataToEsm` with named exports does.
+pub fn css_module_with_exports(
+    client: &str,
+    url: &str,
+    css: &str,
+    exports: &[(String, String)],
+) -> String {
+    let mut code = String::new();
+    let mut map = String::from("export default {");
+    for (i, (k, v)) in exports.iter().enumerate() {
+        if i > 0 {
+            map.push(',');
+        }
+        map.push_str(&format!("\n  {}: {}", js_string(k), js_string(v)));
+        if is_export_name(k) {
+            code.push_str(&format!("export const {k} = {};\n", js_string(v)));
+        }
+    }
+    map.push_str(if exports.is_empty() { "};\n" } else { "\n};\n" });
+    code.push_str(&map);
+    style_module(client, url, css, &code)
+}
+
+/// Whether a CSS module name can be a named export (`const <name>`).
+fn is_export_name(k: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "arguments",
+        "await",
+        "break",
+        "case",
+        "catch",
+        "class",
+        "const",
+        "continue",
+        "debugger",
+        "default",
+        "delete",
+        "do",
+        "else",
+        "enum",
+        "eval",
+        "export",
+        "extends",
+        "false",
+        "finally",
+        "for",
+        "function",
+        "if",
+        "implements",
+        "import",
+        "in",
+        "instanceof",
+        "interface",
+        "let",
+        "new",
+        "null",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "static",
+        "super",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "var",
+        "void",
+        "while",
+        "with",
+        "yield",
+    ];
+    let mut chars = k.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+        && !RESERVED.contains(&k)
+        && !k.starts_with("__ts_r_")
+}
+
+fn style_module(client: &str, url: &str, css: &str, exports: &str) -> String {
     let id = js_string(url);
     let client = js_string(client);
     format!(
@@ -143,13 +238,8 @@ pub fn css_module_at(client: &str, url: &str, css: &str) -> String {
          const __ts_r_css = {};\n\
          __ts_r_update_style(__ts_r_id, __ts_r_css);\n\
          import.meta.hot.accept();\n\
-         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n{}",
+         import.meta.hot.prune(() => __ts_r_remove_style(__ts_r_id));\n{exports}",
         js_string(css),
-        if is_css_module(url) {
-            "export default {};\n"
-        } else {
-            ""
-        }
     )
 }
 
@@ -192,6 +282,74 @@ pub fn js_string(s: &str) -> String {
     json.replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
         .replace("</", "<\\/")
+}
+
+/// The import attributes clause after a static import's specifier: `with { ... }` (or the
+/// older `assert { ... }`) starting after the closing quote at `quote`. Returns the span
+/// from just after the quote to just after the `}`, which the server removes: the browser
+/// would otherwise demand a JSON MIME type for a `.json` module served as JS (Vite strips
+/// static import attributes too, `vite: packages/vite/src/node/plugins/importAnalysis.ts`).
+pub fn import_attributes_span(code: &str, quote: u32) -> Option<(u32, u32)> {
+    let b = code.as_bytes();
+    let start = quote as usize + 1;
+    let mut i = skip_trivia(b, start);
+    let kw = if b[i.min(b.len())..].starts_with(b"with") {
+        4
+    } else if b[i.min(b.len())..].starts_with(b"assert") {
+        6
+    } else {
+        return None;
+    };
+    i = skip_trivia(b, i + kw);
+    if b.get(i) != Some(&b'{') {
+        return None;
+    }
+    // To the matching `}`: attribute values are string literals, keys identifiers or strings.
+    let mut depth = 0u32;
+    while i < b.len() {
+        match b[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((start as u32, i as u32 + 1));
+                }
+            }
+            q @ (b'"' | b'\'') => {
+                i += 1;
+                while i < b.len() && b[i] != q && b[i] != b'\n' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b';' => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Past spaces and comments from `i` (newlines included).
+fn skip_trivia(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() {
+        match b[i] {
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i = b[i + 2..]
+                    .windows(2)
+                    .position(|w| w == b"*/")
+                    .map_or(b.len(), |p| i + 2 + p + 2);
+            }
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                i = b[i..]
+                    .iter()
+                    .position(|&c| c == b'\n')
+                    .map_or(b.len(), |p| i + p);
+            }
+            _ => break,
+        }
+    }
+    i
 }
 
 /// Content type by file extension.
@@ -277,6 +435,26 @@ pub fn code_frame(src: &str, line: u32, column: u32) -> String {
 mod tests {
     use super::*;
     use crate::scan::scan;
+
+    #[test]
+    fn import_attribute_spans() {
+        fn span(code: &str) -> Option<&str> {
+            let r = &scan(code).imports[0];
+            import_attributes_span(code, r.end).map(|(s, e)| &code[s as usize..e as usize])
+        }
+        assert_eq!(
+            span("import d from './d.json' with { type: 'json' };"),
+            Some(" with { type: 'json' }")
+        );
+        assert_eq!(
+            span("export * from \"./d.json\" /* c */ assert {\n  type: \"json\"\n}\nx()"),
+            Some(" /* c */ assert {\n  type: \"json\"\n}")
+        );
+        assert_eq!(span("import d from './d.json';\nwith ({}) {}"), None);
+        assert_eq!(span("import d from './d.json'\nwithout()"), None);
+        assert_eq!(span("import d from './d.json' with { type: 'json'"), None);
+        assert_eq!(span("import d from './d.json' with"), None);
+    }
 
     #[test]
     fn rewrites_bare_and_relative_imports() {

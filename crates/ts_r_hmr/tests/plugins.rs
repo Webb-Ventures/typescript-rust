@@ -314,3 +314,173 @@ fn plugin_module_files_outside_the_root_are_watched() {
     );
     server.shutdown();
 }
+
+/// Counts its `load` calls: each load of `\0virtual:n` exports the next number.
+#[derive(Debug, Default)]
+struct CountingHost {
+    loads: Mutex<u32>,
+    server: Mutex<Option<ServerHandle>>,
+}
+
+impl PluginHost for CountingHost {
+    fn cache_id(&self) -> &str {
+        "counting-host/1"
+    }
+
+    fn hooks(&self) -> PluginHooks {
+        PluginHooks {
+            resolve_pre: true,
+            load: true,
+            ..PluginHooks::default()
+        }
+    }
+
+    fn attach(&self, server: ServerHandle) {
+        *self.server.lock().unwrap() = Some(server);
+    }
+
+    fn resolve_ids(
+        &self,
+        _stage: Stage,
+        _importer: &str,
+        specifiers: &[String],
+    ) -> Result<Vec<Option<PluginResolution>>, String> {
+        Ok(specifiers
+            .iter()
+            .map(|s| (s == "virtual:n").then(|| PluginResolution::Id("\0virtual:n".into())))
+            .collect())
+    }
+
+    fn load(&self, id: &str) -> Result<Option<String>, String> {
+        if id != "\0virtual:n" {
+            return Ok(None);
+        }
+        let mut n = self.loads.lock().unwrap();
+        *n += 1;
+        Ok(Some(format!(
+            "import {{ d }} from '/src/dep.js';\nexport const n = d + {};\n",
+            *n
+        )))
+    }
+    fn transform(&self, _: Stage, _: &str, _: &str) -> Result<Option<Transformed>, String> {
+        Ok(None)
+    }
+}
+
+/// What `load` returned is kept until the module is invalidated: fetching it again (an
+/// importer's update) reuses it; `server.reloadModule` and `moduleGraph.invalidateModule`
+/// load it again.
+#[test]
+fn plugin_loads_are_kept_until_the_module_is_invalidated() {
+    let app = TempDir::new("plug-loads");
+    let cache = TempDir::new("plug-loads-cache");
+    app.write(
+        "src/main.js",
+        "import { n } from 'virtual:n';\nconsole.log(n);\nimport.meta.hot.accept('virtual:n', () => {});\n",
+    );
+    app.write("src/dep.js", "export const d = 0;\n");
+    let host = Arc::new(CountingHost::default());
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    assert_eq!(http_get(addr, "/src/main.js", &[]).0, 200);
+    let url = "/@id/__x00__virtual:n";
+    let first = http_get(addr, url, &[]).2;
+    assert!(first.contains("d + 1;"), "{first}");
+    assert_eq!(http_get(addr, "/src/dep.js", &[]).0, 200);
+    let mut ws = WsClient::connect(&addr.to_string(), "/@ts-r/ws").unwrap();
+    ws.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server.client_count() == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The dep changes: main.js takes the update of virtual:n, whose code stays as loaded.
+    app.write("src/dep.js", "export const d = 10;\n");
+    let m = next_of(&mut ws, "update");
+    assert_eq!(m["updates"][0]["acceptedPath"], url, "{m}");
+    assert!(http_get(addr, url, &[]).2.contains("d + 1;"));
+    assert_eq!(*host.loads.lock().unwrap(), 1);
+    // `server.reloadModule`: loaded again and hot-updated.
+    let handle = host.server.lock().unwrap().clone().unwrap();
+    (handle.reload_module)("\0virtual:n");
+    let m = next_of(&mut ws, "update");
+    assert_eq!(m["updates"][0]["acceptedPath"], url, "{m}");
+    assert!(http_get(addr, url, &[]).2.contains("d + 2;"));
+    // `moduleGraph.invalidateModule`: the next request loads it again.
+    (handle.forget_load)(Some("\0virtual:n"));
+    assert!(http_get(addr, url, &[]).2.contains("d + 3;"));
+    server.shutdown();
+}
+
+/// `transformIndexHtml` puts a new id in the page on every call.
+#[derive(Debug, Default)]
+struct RandomIdHost {
+    calls: Mutex<u32>,
+}
+
+impl PluginHost for RandomIdHost {
+    fn cache_id(&self) -> &str {
+        "random-id-host/1"
+    }
+
+    fn hooks(&self) -> PluginHooks {
+        PluginHooks {
+            index_html: true,
+            ..PluginHooks::default()
+        }
+    }
+
+    fn resolve_ids(
+        &self,
+        _stage: Stage,
+        _importer: &str,
+        specifiers: &[String],
+    ) -> Result<Vec<Option<PluginResolution>>, String> {
+        Ok(vec![None; specifiers.len()])
+    }
+
+    fn load(&self, _id: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn transform(&self, _: Stage, _: &str, _: &str) -> Result<Option<Transformed>, String> {
+        Ok(None)
+    }
+
+    fn transform_index_html(&self, _url: &str, _file: &Path, html: &str) -> Result<String, String> {
+        let mut n = self.calls.lock().unwrap();
+        *n += 1;
+        Ok(html.replace("{{ id }}", &format!("id{}", *n)))
+    }
+}
+
+/// A page's inline module script is the one in the page as served: a `transformIndexHtml`
+/// that is not pure gives each reload a new script, the same as its page's.
+#[test]
+fn inline_scripts_match_the_page_as_served() {
+    let app = TempDir::new("plug-inline");
+    let cache = TempDir::new("plug-inline-cache");
+    app.write(
+        "index.html",
+        "<div id=\"{{ id }}\"></div>\n<script type=\"module\">\nconsole.log('{{ id }}')\n</script>\n",
+    );
+    let host = Arc::new(RandomIdHost::default());
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    let script = "/index.html?html-proxy&index=0.js";
+    for n in 1..=3 {
+        let page = http_get(addr, "/", &[("Accept", "text/html")]).2;
+        assert!(page.contains(&format!("id=\"id{n}\"")), "{page}");
+        assert!(page.contains(script), "{page}");
+        let js = http_get(addr, script, &[]).2;
+        assert!(js.contains(&format!("'id{n}'")), "{n}: {js}");
+    }
+    server.shutdown();
+}

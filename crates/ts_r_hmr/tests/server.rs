@@ -257,8 +257,21 @@ fn denied_files_case_html_fallback_and_asset_queries() {
     let (status, _, body) = http_get(f.server.addr(), "/missing", &[("Accept", "*/*")]);
     assert!(status == 200 && body.contains("/@ts-r/client"), "{body}");
     // A public file matches only in its own case (the disk may not care).
-    let (status, _, body) = f.get("/ROBOTS.TXT");
+    let (status, _, body) = http_get(f.server.addr(), "/ROBOTS.TXT", &[("Accept", "text/plain")]);
     assert_eq!(status, 404, "{body}");
+    // A folder's page needs the slash; without it `<path>.html`, else the root page.
+    f.app.write("dir/index.html", "<p>dir page</p>");
+    f.app.write("both.html", "<p>both file</p>");
+    f.app.write("both/index.html", "<p>both folder</p>");
+    for (url, want) in [
+        ("/dir/", "dir page"),
+        ("/dir", "id=\"app\""),
+        ("/both", "both file"),
+        ("/both/", "both folder"),
+    ] {
+        let (status, _, body) = http_get(f.server.addr(), url, &html);
+        assert!(status == 200 && body.contains(want), "{url}: {body}");
+    }
     let (_, _, js) = f.get("/src/logo.svg?import&no-inline&x=1");
     assert!(js.contains("\"/src/logo.svg?no-inline&x=1\""), "{js}");
     // `//x` is not a file of the root or the public directory: the fallback page.
@@ -346,6 +359,72 @@ fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
     };
     assert!(m["type"] == "full-reload" || m["type"] == "update", "{m}");
     assert_eq!(f.get("/src/needs.js").0, 200);
+}
+
+#[test]
+fn static_import_attributes_are_removed_dynamic_ones_kept() {
+    let f = start();
+    f.app.write(
+        "src/attrs.js",
+        "import d from './data.json' with { type: 'json' };\nexport * from './data.json' assert { type: \"json\" };\nconst l = import('./data.json', { with: { type: 'json' } });\nconsole.log(d, l);\n",
+    );
+    let (status, _, body) = f.get("/src/attrs.js");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains("import d from '/src/data.json?import';"),
+        "{body}"
+    );
+    assert!(
+        body.contains("export * from '/src/data.json?import';"),
+        "{body}"
+    );
+    assert!(
+        body.contains("{ with: { type: 'json' } })"),
+        "dynamic import attributes stay: {body}"
+    );
+}
+
+#[test]
+fn css_modules_scope_class_names_and_export_them() {
+    let f = start();
+    f.app
+        .write("src/base.module.css", ".shared { color: blue }\n");
+    f.app.write(
+        "src/card.module.css",
+        ".card { composes: shared from './base.module.css'; color: red }\n:global(.page) .title { animation: pop 1s }\n@keyframes pop { from { opacity: 0 } }\n",
+    );
+    let scoped = |key: &str, name: &str| {
+        ts_r_hmr::css_modules::scoped_name(ts_r_hmr::css_modules::Naming::Postcss, key, name)
+    };
+    let (card, title, pop) = (
+        scoped("/src/card.module.css", "card"),
+        scoped("/src/card.module.css", "title"),
+        scoped("/src/card.module.css", "pop"),
+    );
+    let shared = scoped("/src/base.module.css", "shared");
+    let (status, _, body) = f.get("/src/card.module.css?import");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains(&format!("export const card = \"{card} {shared}\";")),
+        "{body}"
+    );
+    assert!(body.contains(&format!("\"title\": \"{title}\"")), "{body}");
+    assert!(body.contains(&format!("\"pop\": \"{pop}\"")), "{body}");
+    // The composed file's rules come first; `composes` and `:global` are gone.
+    let css = format!(
+        ".{shared} {{ color: blue }}\\n.{card} {{ color: red }}\\n.page .{title} {{ animation: {pop} 1s }}\\n@keyframes {pop} {{"
+    );
+    assert!(body.contains(&css), "{body}");
+    // `?inline`: the scoped text.
+    let (status, _, body) = f.get("/src/card.module.css?inline");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains(&format!(".{card} {{ color: red }}")),
+        "{body}"
+    );
+    // A plain stylesheet still exports nothing.
+    let (_, _, body) = f.get("/src/style.css?import");
+    assert!(!body.contains("export"), "{body}");
 }
 
 #[test]
@@ -978,4 +1057,31 @@ fn inline_module_scripts_are_served_through_html_proxy_urls() {
         404
     );
     server.shutdown();
+}
+
+/// A change that fails to transform where nothing accepts the update reloads the page,
+/// as Vite propagates before it transforms; the error shows when the page fetches it.
+#[test]
+fn a_failing_change_with_no_boundary_reloads_the_page() {
+    let f = start();
+    f.load_page();
+    let mut ws = f.ws();
+    f.app.write(
+        "src/plain.js",
+        "import './nope.js';\nexport const label = 'plain-v2';\n",
+    );
+    let m = loop {
+        let m = next(&mut ws);
+        if m["type"] == "error" || m["type"] == "full-reload" {
+            break m;
+        }
+    };
+    assert_eq!(m["type"], "full-reload", "{m}");
+    let log = f.log.lock().unwrap().clone();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("/src/plain.js changed and failed")),
+        "{log:?}"
+    );
+    assert_eq!(f.get("/src/plain.js").0, 500);
 }

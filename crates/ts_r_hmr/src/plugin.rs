@@ -97,6 +97,9 @@ impl Transformed {
 /// `(specifier, importer id)` to `(id, external)`.
 pub type ResolveFn = dyn Fn(&str, &str) -> Option<(String, bool)> + Send + Sync;
 
+/// `ServerHandle::forget_load`: a module id, or `None` for every module.
+pub type ForgetFn = dyn Fn(Option<&str>) + Send + Sync;
+
 /// What the server lends a plugin host when it starts.
 #[derive(Clone)]
 pub struct ServerHandle {
@@ -105,6 +108,12 @@ pub struct ServerHandle {
     /// The built-in resolver (`this.resolve` falls back to it): `(specifier, importer id)`
     /// to `(id, external)`.
     pub resolve: Arc<ResolveFn>,
+    /// `server.reloadModule(mod)`: loads the module with this id again and hot-updates it
+    /// like a changed file (on another thread; the call returns at once).
+    pub reload_module: Arc<dyn Fn(&str) + Send + Sync>,
+    /// `moduleGraph.invalidateModule(mod)` / `invalidateAll()`: the next request for the
+    /// module with this id (`None`: every module) runs its `load` hook again.
+    pub forget_load: Arc<ForgetFn>,
 }
 
 impl fmt::Debug for ServerHandle {
