@@ -3299,11 +3299,22 @@ Read to understand (not ported): typescript-eslint 8.71.1
 `no-unused-private-class-members.ts`, `src/util/class-scope-analyzer/*`; ESLint 10.12.0
 `lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
 
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
-`no-use-before-define.js`, `no-param-reassign.js`, `no-underscore-dangle.js`, `camelcase.js`,
-`no-loop-func.js`, `block-scoped-var.js`, `vars-on-top.js`, `utils/ast-utils.js`
-(`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
-`no-use-before-define.ts`.
+- `prefer-destructuring` / `@typescript-eslint/prefer-destructuring` (one implementation,
+  `ts` flag): the option matrix is `[declarator, assignment] x [array, object]`; ESLint reads
+  a per-node object with missing kinds off, typescript-eslint merges its own defaults (missing
+  kinds on), so both matrices are kept. `a?.b` is a chain, never reported. `using`
+  declarations are skipped. The ts rule skips annotated declarations unless
+  `enforceForDeclarationWithTypeAnnotation`, fixes only unannotated identifiers, and treats
+  `x[0]` on a non-iterable, non-any type as an object access (reported only with
+  `enforceForRenamedProperties`). The fix (`const {a} = o`) is dropped when it would lose a
+  comment.
+- `array-callback-return`: the callback is found by walking up through `&&`, `||`, `??`,
+  `?:` and `return` in a function that is itself called right away, to a call of a known
+  array method (argument 0), `*Array.from` (argument 1) or `Array.fromAsync` (argument 1, async
+  callbacks too). Generators are skipped. Every `return` in the callback counts, reachable or
+  not; "missing at the end" uses the CFG exit's reachability. `forEach` with `checkForEach`
+  reports value returns and expression bodies, with `wrapBraces` / `prependVoid` suggestions
+  (`allowVoid` accepts `void x`).
 
 Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.js`,
 `lib/rules/array-callback-return.js`; typescript-eslint 8.71.1
@@ -3311,12 +3322,54 @@ Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.
 
 ## Core and typescript-eslint rules (round 10, h2, part 2)
 
-Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
-`class-methods-use-this.js`, `init-declarations.js`, `no-magic-numbers.js`, `new-cap.js`,
-`utils/ast-utils.js` (`isDefaultThisBinding`, `hasJSDocThisTag`, `getFunctionNameWithKind`,
-`getFunctionHeadLoc`, `getStaticPropertyName`); typescript-eslint 8.71.1
-`packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
-`init-declarations.ts`, `no-magic-numbers.ts`.
+- `no-restricted-imports`: `paths` match the trimmed source exactly (`import x = require()`
+  sources are not trimmed). `patterns` `group`s follow node-ignore: case-insensitive unless
+  `caseSensitive`, a pattern without an inner `/` matches at any depth, a parent directory
+  that matches ignores everything below it, the last matching rule wins and `!` un-ignores;
+  each rule is a `config::glob::Glob`. `regex`, `importNamePattern` and
+  `allowImportNamePattern` run on `regex_exec` with the `u` flag (`iu` for `regex` unless
+  case-sensitive) and print as `/source/u`. Named reports go on the specifier; `export *`
+  reports go on the declaration's second token. `allowTypeImports` skips declarations whose
+  every specifier is `type` (or `import type`), and single `type` specifiers.
+- `no-duplicate-imports`: declarations are reduced to a shape (default, named, namespace,
+  `export *`, side effect, from the first named or namespace specifier) and two of them are
+  duplicates unless they could not be merged: namespace with named, `export *` with anything
+  but `export *` or a side effect, and (both `type`) default with named.
+  `allowSeparateTypeImports` compares only type with type and value with value.
+- `sort-imports`: one running "previous declaration" over every import in the file (top level
+  and `declare module` blocks), reset by a blank line with `allowSeparatedGroups`. A syntax
+  missing from `memberSyntaxSortOrder` ranks -1, as `indexOf` does. The member fix keeps the
+  text between members in place and is dropped when a comment sits between the braces.
+- `sort-keys`: per object literal (not assignment patterns); a spread or (with
+  `ignoreComputedKeys`) a computed key restarts the order. Names follow
+  `getStaticPropertyName`, plus `[ident]` as `ident`. Natural order ranks `-`, punctuation,
+  digits, upper case, lower case (ASCII), and compares digit runs that don't start with `0`
+  by value. A blank line counts only in whitespace outside comments.
+- `no-restricted-exports`: names come from export specifiers (the exported side), `export *
+  as`, and exported function (with a body), class and variable declarations (every bound
+  identifier). The pattern never matches `default`. `default` is restricted per
+  `restrictDefaultExports`: `direct` (`export default ...`), `named` (`export { x as default
+  }`), `defaultFrom` / `namedFrom` (re-exports, by the local name), `namespaceFrom`
+  (`export * as default from`).
+- `@typescript-eslint/strict-boolean-expressions`: no visited-node set. Each root (`if`,
+  loop and `?:` tests, the `!` operand, an `asserts x` argument, a `&&`/`||` that no
+  enclosing root reaches) walks down its `&&`/`||` chain: left operands are conditions, right
+  ones only when the whole chain is. Union members are reduced to variants (nullish, boolean,
+  truthy boolean, string, truthy string, number, truthy number, enum, object, any, never)
+  and the variant set picks the message. Array predicates (`filter`, `find`, `some`, ... on
+  arrays and tuples) check the callback's return types. Suggestions wrap the operand or, under
+  `!`, the negation, with operand parentheses for non-primary operands, outer parentheses
+  for a weak parent, and a leading `;` when the statement before has none.
+- `@typescript-eslint/member-ordering`: a member's candidate groups go from most to least
+  specific (`{access}-decorated-{kind}`, `{access}-{scope}-{kind}`, `{scope}-{kind}`,
+  `{access}-{kind}`, `{kind}`, with `readonly-*` also trying the plain kind), and its rank is
+  the first `memberTypes` entry naming one of them. Methods without a body (overloads) rank
+  -1 and are skipped; an unknown member kind ranks last. An object `default` config is merged
+  onto the default `memberTypes`; other configs are not. Alphabetical checks run within each
+  group, or (after a group-order report) within runs of adjacent same-rank members, where
+  typescript-eslint never adds the list's last member. A member is not reported out of order
+  when its initializer reads `this.x` of an initialized member it would move above.
+  `optionalityOrder` first checks the optional/required split, then orders each side.
 
 Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
 `lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,

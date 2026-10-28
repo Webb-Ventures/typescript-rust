@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
 mod accessor_pairs;
+mod array_callback_return;
 mod arrow_body_style;
 mod block_scoped_var;
 mod camelcase;
@@ -15,6 +16,7 @@ mod capitalized_comments;
 mod class_methods_use_this;
 mod complexity;
 mod consistent_return;
+mod consistent_this;
 mod constructor_super;
 mod curly;
 mod default_case;
@@ -296,6 +298,7 @@ mod no_warning_comments;
 mod no_with;
 mod object_shorthand;
 mod one_var;
+mod operator_assignment;
 mod prefer_arrow_callback;
 mod prefer_const;
 mod prefer_destructuring;
@@ -337,6 +340,9 @@ mod ts_consistent_type_exports;
 mod ts_consistent_type_imports;
 mod ts_default_param_last;
 mod ts_dot_notation;
+mod ts_explicit_function_return_type;
+mod ts_explicit_member_accessibility;
+mod ts_explicit_module_boundary_types;
 mod ts_init_declarations;
 mod ts_max_params;
 mod ts_member_ordering;
@@ -1109,6 +1115,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_warning_comments::RULE,
     &no_with::RULE,
     &object_shorthand::RULE,
+    &operator_assignment::RULE,
     &one_var::RULE,
     &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
@@ -1149,6 +1156,9 @@ pub static ALL: &[&RuleDef] = &[
     &ts_consistent_type_imports::RULE,
     &ts_default_param_last::RULE,
     &ts_dot_notation::RULE,
+    &ts_explicit_function_return_type::RULE,
+    &ts_explicit_member_accessibility::RULE,
+    &ts_explicit_module_boundary_types::RULE,
     &ts_init_declarations::RULE,
     &ts_max_params::RULE,
     &ts_member_ordering::RULE,

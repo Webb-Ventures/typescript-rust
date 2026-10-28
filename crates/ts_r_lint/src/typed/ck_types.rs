@@ -440,10 +440,6 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
                 // `typeof C` / `typeof f` / `typeof N`: keyed by the symbol itself.
                 ObjectKind::Anonymous { decl, .. } if decl.0 == u32::MAX => Some(Sym(decl.1)),
                 ObjectKind::Anonymous { decl, .. } | ObjectKind::Mapped { decl, .. } => {
-                    // `typeof C` of a class, function or namespace is keyed by its symbol.
-                    if decl.0 == u32::MAX {
-                        return Some(ts_r_types::SymId(decl.1)).filter(|s| !s.is_none());
-                    }
                     if decl.0 as usize >= ck.c.file_count() {
                         return None;
                     }

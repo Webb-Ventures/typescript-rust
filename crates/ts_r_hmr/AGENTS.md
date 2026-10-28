@@ -353,13 +353,8 @@ are cached by content hash. Change `cache_id` when output for the same input can
   once and the others wait for its result (`cache.rs`, `Flight`); a result whose watch files
   change its key is stored under the new key. The dependency scan shares `cached_transform`,
   so it never runs a module's plugin transforms a second time. The run records its watch
-  files in `Shared::plugin_watch` after its result is stored under the new key and before
-  waiters wake (`Computed::stored`): a waiter reads them as soon as it wakes (a module
-  registered without them never updates when they change), and a caller that reads them
-  first must find the result under the key they make. A caller whose key was made from the
-  list before another run changed it, and that misses, makes its key again from the current
-  list instead of running (`cached_transform`, `Attempt::Stale`, at most
-  `MAX_TRANSFORM_ATTEMPTS`). Either race ran a plugin's `transform` twice for one edit.
+  files in `Shared::plugin_watch` before it publishes its result: a waiter reads them as
+  soon as it wakes, and a module registered without them never updates when they change.
 - **The config's `process.env` writes count.** A `vite.config.*` runs in the plugin sidecar,
   so variables it sets on `process.env` are returned with the dev options (`processEnv`) and
   overlaid on the server's environment when `.env` files and prefixes are loaded. The

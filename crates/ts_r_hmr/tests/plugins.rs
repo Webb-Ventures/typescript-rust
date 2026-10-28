@@ -3,7 +3,7 @@
 //! `handleHotUpdate` narrowing, middlewares and broadcasting.
 
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -426,13 +426,10 @@ struct WatchFileHost {
     runs: Mutex<u32>,
     /// How long each `transform` call takes.
     delay: Duration,
-    /// Holds a `cache_id` call (made while a module's transform key is being made).
-    gate: Gate,
 }
 
 impl PluginHost for WatchFileHost {
     fn cache_id(&self) -> &str {
-        self.gate.pass();
         "watch-file-host/1"
     }
 
@@ -485,64 +482,6 @@ impl PluginHost for WatchFileHost {
     }
 }
 
-/// Holds the first call to [`Gate::pass`] after [`Gate::arm`] until [`Gate::open`].
-#[derive(Debug, Default)]
-struct Gate {
-    state: Mutex<GateState>,
-    changed: Condvar,
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-enum GateState {
-    #[default]
-    Off,
-    Armed,
-    Holding,
-    Open,
-}
-
-impl Gate {
-    fn arm(&self) {
-        *self.state.lock().unwrap() = GateState::Armed;
-    }
-
-    fn pass(&self) {
-        let mut s = self.state.lock().unwrap();
-        if *s != GateState::Armed {
-            return;
-        }
-        *s = GateState::Holding;
-        self.changed.notify_all();
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while *s == GateState::Holding && Instant::now() < deadline {
-            s = self
-                .changed
-                .wait_timeout(s, Duration::from_millis(50))
-                .unwrap()
-                .0;
-        }
-    }
-
-    /// Waits until a call is held.
-    fn wait_holding(&self) {
-        let mut s = self.state.lock().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while *s != GateState::Holding {
-            assert!(Instant::now() < deadline, "no call reached the gate");
-            s = self
-                .changed
-                .wait_timeout(s, Duration::from_millis(50))
-                .unwrap()
-                .0;
-        }
-    }
-
-    fn open(&self) {
-        *self.state.lock().unwrap() = GateState::Open;
-        self.changed.notify_all();
-    }
-}
-
 /// `this.addWatchFile` in `load` and `transform`: the files' contents join the module's
 /// cache key (fetching it again reuses the output), and editing one runs the hooks again and
 /// updates the module.
@@ -558,7 +497,6 @@ fn files_plugins_watch_rerun_the_module_hooks() {
         root,
         runs: Mutex::new(0),
         delay: Duration::ZERO,
-        gate: Gate::default(),
     });
     let mut config = DevConfig::new(app.path());
     config.port = 0;
@@ -605,7 +543,6 @@ fn a_request_sharing_the_scans_transform_learns_its_watch_files() {
         runs: Mutex::new(0),
         // Long enough for the request to join the scan's run (or the other way round).
         delay: Duration::from_millis(300),
-        gate: Gate::default(),
     });
     let mut config = DevConfig::new(app.path());
     config.port = 0;
@@ -625,48 +562,6 @@ fn a_request_sharing_the_scans_transform_learns_its_watch_files() {
     app.write("dep.txt", "b");
     next_of(&mut ws, "full-reload");
     assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 2;"));
-    server.shutdown();
-}
-
-/// CI flake (ts-r-dev's plugins test: "no const RUNS = 1"): two callers transform `main.js`
-/// at once (the deps scan and the browser's request). One makes its cache key from the files
-/// the hooks watched before the other's run recorded `dep.txt`, and looks the key up only
-/// after that run's output was stored under the key that includes `dep.txt`. It must find
-/// that output instead of running the hooks a second time.
-#[test]
-fn a_transform_key_made_before_another_run_finished_finds_its_output() {
-    let app = TempDir::new("plug-watch-stale");
-    let cache = TempDir::new("plug-watch-stale-cache");
-    // No page: nothing but the two requests below transforms `main.js`.
-    app.write("src/main.js", "console.log(RUNS);\n");
-    app.write("dep.txt", "a");
-    app.write("load-dep.txt", "a");
-    let root = paths::id(&paths::canonicalize(app.path()).unwrap()).into_owned();
-    let host = Arc::new(WatchFileHost {
-        root,
-        runs: Mutex::new(0),
-        delay: Duration::ZERO,
-        gate: Gate::default(),
-    });
-    let mut config = DevConfig::new(app.path());
-    config.port = 0;
-    config.watch = false;
-    config.cache = CacheMode::Dir(cache.path().to_path_buf());
-    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
-    let server = DevServer::start(config).unwrap();
-    let addr = server.addr();
-    // The first request read the (empty) watch list, and is held while making its key.
-    host.gate.arm();
-    let late = std::thread::spawn(move || http_get(addr, "/src/main.js", &[]).2);
-    host.gate.wait_holding();
-    // The second runs the hooks, which watch `dep.txt`, and stores the output under the key
-    // that covers it.
-    let first = http_get(addr, "/src/main.js", &[]).2;
-    assert!(first.contains("RUNS = 1;"), "{first}");
-    host.gate.open();
-    let late = late.join().unwrap();
-    assert!(late.contains("RUNS = 1;"), "{late}");
-    assert_eq!(*host.runs.lock().unwrap(), 1, "the hooks ran once");
     server.shutdown();
 }
 

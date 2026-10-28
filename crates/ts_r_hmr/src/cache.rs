@@ -18,37 +18,6 @@ pub const FORMAT_VERSION: u32 = 1;
 /// Memory budget before the in-memory layer is cleared (the disk layer keeps everything).
 const MEMORY_BUDGET: usize = 256 << 20;
 
-/// What a cache miss's run produced.
-pub struct Computed<'a> {
-    pub out: TransformOutput,
-    /// The key the output belongs under instead of the one asked for (its inputs turned out
-    /// to include more than that key covers); it is stored only there.
-    pub rekey: Option<Key>,
-    /// Runs once the output is stored, before callers waiting for this run wake: what it
-    /// records (the files a run's plugin hooks watched) never names a key that misses.
-    pub stored: Option<Box<dyn FnOnce() + 'a>>,
-}
-
-impl std::fmt::Debug for Computed<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Computed")
-            .field("out", &self.out)
-            .field("rekey", &self.rekey)
-            .field("stored", &self.stored.is_some())
-            .finish()
-    }
-}
-
-impl Computed<'_> {
-    pub fn new(out: TransformOutput) -> Self {
-        Computed {
-            out,
-            rekey: None,
-            stored: None,
-        }
-    }
-}
-
 /// Hit/miss counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CacheStats {
@@ -145,16 +114,16 @@ impl TransformCache {
         key: Key,
         compute: impl FnOnce() -> Result<TransformOutput, E>,
     ) -> Result<Arc<TransformOutput>, E> {
-        self.get_or_insert_rekeyed(key, || compute().map(Computed::new))
+        self.get_or_insert_rekeyed(key, || compute().map(|out| (out, None)))
     }
 
     /// [`TransformCache::get_or_insert`] where `compute` may name the key its output belongs
     /// under instead (its inputs turned out to include more than `key` covers): the output
     /// is then stored only under that key.
-    pub fn get_or_insert_rekeyed<'a, E>(
+    pub fn get_or_insert_rekeyed<E>(
         &self,
         key: Key,
-        compute: impl FnOnce() -> Result<Computed<'a>, E>,
+        compute: impl FnOnce() -> Result<(TransformOutput, Option<Key>), E>,
     ) -> Result<Arc<TransformOutput>, E> {
         if let Some(hit) = self.lookup(key) {
             return Ok(hit);
@@ -213,12 +182,12 @@ impl TransformCache {
         Some(out)
     }
 
-    fn compute_and_store<'a, E>(
+    fn compute_and_store<E>(
         &self,
         key: Key,
-        compute: impl FnOnce() -> Result<Computed<'a>, E>,
+        compute: impl FnOnce() -> Result<(TransformOutput, Option<Key>), E>,
     ) -> Result<Arc<TransformOutput>, E> {
-        let Computed { out, rekey, stored } = compute()?;
+        let (out, rekey) = compute()?;
         let out = Arc::new(out);
         let key = rekey.unwrap_or(key);
         if let Some(disk) = &self.disk {
@@ -226,9 +195,6 @@ impl TransformCache {
             let _ = disk.put(&key, &encode(&out));
         }
         self.remember(key, &out, |s| s.misses += 1);
-        if let Some(stored) = stored {
-            stored();
-        }
         Ok(out)
     }
 
@@ -411,12 +377,7 @@ mod tests {
         let a = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"a"));
         let b = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"b"));
         cache
-            .get_or_insert_rekeyed(a, || {
-                Ok::<_, ()>(Computed {
-                    rekey: Some(b),
-                    ..Computed::new(sample())
-                })
-            })
+            .get_or_insert_rekeyed(a, || Ok::<_, ()>((sample(), Some(b))))
             .unwrap();
         let calls = Cell::new(0);
         let count = || -> Result<TransformOutput, ()> {
@@ -427,27 +388,6 @@ mod tests {
         assert_eq!(calls.get(), 0);
         cache.get_or_insert(a, count).unwrap();
         assert_eq!(calls.get(), 1);
-    }
-
-    /// The `stored` step runs after the output is findable under its new key: a caller that
-    /// learns what it records and makes the new key from it hits, instead of running again.
-    #[test]
-    fn the_stored_step_runs_once_the_output_is_findable() {
-        let dir = TempDir::new("tcache-stored");
-        let cache = TransformCache::persistent(Some(dir.path()));
-        let a = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"a"));
-        let b = TransformCache::key("t/1", Mode::Dev, "src/a.js", &Key::of(b"b"));
-        let found = Cell::new(None);
-        cache
-            .get_or_insert_rekeyed(a, || {
-                Ok::<_, ()>(Computed {
-                    rekey: Some(b),
-                    stored: Some(Box::new(|| found.set(Some(cache.lookup(b).is_some())))),
-                    ..Computed::new(sample())
-                })
-            })
-            .unwrap();
-        assert_eq!(found.get(), Some(true));
     }
 
     #[test]

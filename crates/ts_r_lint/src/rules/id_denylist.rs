@@ -88,9 +88,9 @@ fn should_check(cx: &Ctx<'_, '_>, t: &EsTree<'_>, n: u32) -> bool {
         && f("key") == Some(n);
     // A property key is never a reference (a shorthand's key shares the value's node).
     let key = t.ty(p) == "Property" && f("key") == Some(n) && !is_true(t, p, "computed");
-    !renamed
-        && !destructured_key
-        && !(t.ty(n) == "Identifier" && !key && is_global_reference(cx, t.nodes[n as usize].ast))
+    let global =
+        t.ty(n) == "Identifier" && !key && is_global_reference(cx, t.nodes[n as usize].ast);
+    !(renamed || destructured_key || global)
 }
 
 impl Rule for IdDenylist {
