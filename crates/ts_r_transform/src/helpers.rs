@@ -430,7 +430,7 @@ impl Helpers {
         if used.is_empty() {
             return String::new();
         }
-        if opts.import_helpers && !opts.is_cjs() {
+        if opts.import_helpers && !opts.require_helpers() {
             // Only helpers called directly need importing.
             let names: Vec<&str> = used
                 .iter()

@@ -153,6 +153,12 @@ fn emit(
             tx.stmt(s, &mut v);
         }
         let temps = tx.temps.pop().unwrap_or_default();
+        // The IIFE is a function of its own: the next namespace names its temporaries from
+        // `_a` again (observed).
+        for &t in &temps {
+            let n = tx.ast.atom(t).to_owned();
+            tx.taken.remove(&n);
+        }
         if let Some(t) = temps_decl(tx, temps) {
             v.insert(0, t);
         }
@@ -347,9 +353,22 @@ fn needs_var(tx: &mut Tx, seg: NodeId) -> bool {
     let Some(&b) = tx.sc.decl_of.get(&seg) else {
         return true;
     };
+    first_declaration(tx, b)
+}
+
+/// Whether a namespace or enum of binding `b` must declare its variable: no earlier class,
+/// function or variable (not a `declare var`, which writes nothing) supplies the name, and
+/// no namespace or enum declared it already (observed: `class C {} enum C {}` and `var x;
+/// namespace x {}` write no `var`). The binding's kind is that of its first declaration.
+pub(crate) fn first_declaration(tx: &mut Tx, b: BindingId) -> bool {
     let bnd = tx.sc.binding(b);
     match bnd.kind {
-        BindingKind::Class | BindingKind::Function | BindingKind::Enum => false,
+        BindingKind::Class | BindingKind::Function => false,
+        BindingKind::Var | BindingKind::Let | BindingKind::Const
+            if !tx.sc.ambient_vars.contains(&bnd.decl) =>
+        {
+            false
+        }
         _ => tx.ns_declared.insert(b),
     }
 }
@@ -460,9 +479,19 @@ pub(crate) fn exported_var(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         } = tx.n(d)
         {
             let at = tx.at(d);
+            let span = tx.span(d);
+            if !matches!(tx.n(name), Node::Ident { .. }) && flattenable(tx, name, 0) {
+                // A pattern is flattened into one assignment per name (observed):
+                // `N.a = o.a, _a = o.b, N.b = _a === void 0 ? 1 : _a`.
+                let first = exprs.len();
+                flatten(tx, name, init, frame.param, &mut exprs);
+                if let Some(&a) = exprs.get(first) {
+                    tx.map_range(a, span);
+                }
+                continue;
+            }
             let target = pattern_to_target(tx, name, frame.param);
             let a = tx.assign(target, init, at);
-            let span = tx.span(d);
             tx.map_range(a, span);
             exprs.push(a);
         }
@@ -476,6 +505,251 @@ pub(crate) fn exported_var(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
     let s = tx.expr_stmt(e, at);
     tx.ast.set_span(s, tx.span(id));
     out.push(s);
+}
+
+/// Whether [`flatten`] handles `pat`: patterns no deeper than 64, no empty object pattern,
+/// and an object rest only after keys that are names or literals.
+fn flattenable(tx: &Tx, pat: NodeId, depth: u32) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    match tx.n(pat) {
+        Node::Ident { .. } => true,
+        Node::AssignPattern { left, .. } => flattenable(tx, left, depth + 1),
+        Node::ObjectPattern { props } => {
+            let props = tx.ast.list(props);
+            if props.is_empty() {
+                return false;
+            }
+            let mut computed = false;
+            for &p in props {
+                match tx.n(p) {
+                    Node::BindingProperty { key, value, .. } => {
+                        if rest_key(tx, key).is_none() {
+                            computed = true;
+                        }
+                        if let Some(v) = value
+                            && !flattenable(tx, v, depth + 1)
+                        {
+                            return false;
+                        }
+                    }
+                    Node::Rest { arg } => {
+                        if computed || !matches!(tx.n(arg), Node::Ident { .. }) {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        }
+        Node::ArrayPattern { elements } => tx.ast.list(elements).iter().all(|&e| match tx.n(e) {
+            Node::Hole {} => true,
+            Node::Rest { arg } => flattenable(tx, arg, depth + 1),
+            _ => flattenable(tx, e, depth + 1),
+        }),
+        _ => false,
+    }
+}
+
+/// A property key's name as a string, for `__rest`'s exclusion list (`None` when computed
+/// from a non-literal expression).
+fn rest_key(tx: &Tx, key: NodeId) -> Option<String> {
+    match tx.n(key) {
+        Node::Ident { name } | Node::StringLit { value: name } => {
+            Some(tx.ast.atom(name).to_owned())
+        }
+        Node::NumberLit { value } => Some(ts_r_codegen::literals::js_number(value.get())),
+        Node::ComputedKey { expr } => match tx.n(expr) {
+            Node::StringLit { .. } | Node::NumberLit { .. } => rest_key(tx, expr),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `value` read more than once: itself if an identifier, else a hoisted temporary assigned
+/// first (`_a = o.arr`).
+fn reusable(tx: &mut Tx, value: NodeId, exprs: &mut Vec<NodeId>) -> NodeId {
+    if matches!(tx.n(value), Node::Ident { .. }) {
+        return value;
+    }
+    capture(tx, value, exprs)
+}
+
+/// `_t = value` (to `exprs`), returning a read of `_t`.
+fn capture(tx: &mut Tx, value: NodeId, exprs: &mut Vec<NodeId>) -> NodeId {
+    let at = tx.at(value);
+    let t = tx.temp();
+    let target = tx.ident_atom(t, at);
+    exprs.push(tx.assign(target, value, at));
+    tx.ident_atom(t, at)
+}
+
+/// A fresh use of `value` (identifiers are cloned for every read after the first).
+fn reuse(tx: &mut Tx, value: NodeId, first: &mut bool) -> NodeId {
+    if std::mem::take(first) {
+        value
+    } else {
+        crate::builder::clone_node(tx.ast, value)
+    }
+}
+
+/// `_t = value, _t === void 0 ? default : _t` (the assignment goes to `exprs`).
+fn with_default(tx: &mut Tx, value: NodeId, default: NodeId, exprs: &mut Vec<NodeId>) -> NodeId {
+    let at = tx.at(value);
+    let t = tx.temp();
+    let target = tx.ident_atom(t, at);
+    exprs.push(tx.assign(target, value, at));
+    let test_l = tx.ident_atom(t, at);
+    let v0 = tx.void0(at);
+    let test = tx.binary(test_l, ts_r_ast::BinaryOp::StrictEq, v0, at);
+    let alt = tx.ident_atom(t, at);
+    tx.mk(
+        Node::Conditional {
+            test,
+            cons: default,
+            alt,
+        },
+        at,
+    )
+}
+
+/// Flattens the exported binding pattern `pat = value` into assignments to properties of
+/// the namespace parameter `ns`, as tsc's destructuring flattener does for namespace exports:
+/// a value read more than once is captured in a temporary unless it is an identifier, a
+/// non-literal computed key is captured, a default reads `_t === void 0 ? d : _t`, an array
+/// rest is `v.slice(i)` and an object rest `__rest(v, ["a", ...])`
+/// (`namespaceExportDestructuringReferences`; tsc: tsc/internal/transformers/destructuring.go).
+fn flatten(tx: &mut Tx, pat: NodeId, value: NodeId, ns: Atom, exprs: &mut Vec<NodeId>) {
+    let at = tx.at(pat);
+    match tx.n(pat) {
+        Node::Ident { name } => {
+            let n = tx.ast.atom(name).to_owned();
+            let o = tx.ident_atom(ns, at);
+            let t = tx.member(o, &n, at);
+            let span = tx.span(pat);
+            tx.map_range(t, span);
+            exprs.push(tx.assign(t, value, at));
+        }
+        Node::AssignPattern { left, right } => {
+            let mut v = with_default(tx, value, right, exprs);
+            if !matches!(tx.n(left), Node::Ident { .. }) {
+                v = capture(tx, v, exprs);
+            }
+            flatten(tx, left, v, ns, exprs);
+        }
+        Node::ObjectPattern { props } => {
+            let props = tx.items(props);
+            let value = if props.len() == 1 {
+                value
+            } else {
+                reusable(tx, value, exprs)
+            };
+            let mut first = true;
+            let mut keys = Vec::new();
+            for p in props {
+                let pa = tx.at(p);
+                match tx.n(p) {
+                    Node::BindingProperty {
+                        key,
+                        value: target,
+                        init,
+                    } => {
+                        let obj = reuse(tx, value, &mut first);
+                        let access = match tx.n(key) {
+                            Node::Ident { name } => {
+                                let n = tx.ast.atom(name).to_owned();
+                                tx.member(obj, &n, pa)
+                            }
+                            Node::ComputedKey { expr }
+                                if !matches!(
+                                    tx.n(expr),
+                                    Node::StringLit { .. } | Node::NumberLit { .. }
+                                ) =>
+                            {
+                                let k = tx.temp();
+                                let kt = tx.ident_atom(k, pa);
+                                exprs.push(tx.assign(kt, expr, pa));
+                                let ki = tx.ident_atom(k, pa);
+                                tx.index(obj, ki, pa)
+                            }
+                            Node::ComputedKey { expr } => {
+                                let k = crate::builder::clone_node(tx.ast, expr);
+                                tx.index(obj, k, pa)
+                            }
+                            _ => {
+                                let k = crate::builder::clone_node(tx.ast, key);
+                                tx.index(obj, k, pa)
+                            }
+                        };
+                        if let Some(k) = rest_key(tx, key) {
+                            keys.push(k);
+                        }
+                        let nested = target.is_some_and(|t| {
+                            matches!(
+                                tx.n(t),
+                                Node::ObjectPattern { .. } | Node::ArrayPattern { .. }
+                            )
+                        });
+                        let v = match init {
+                            // A nested pattern reads a defaulted value through a temporary
+                            // of its own (`_b = _a === void 0 ? {} : _a, N.n = _b.n`).
+                            Some(d) if nested => {
+                                let c = with_default(tx, access, d, exprs);
+                                capture(tx, c, exprs)
+                            }
+                            Some(d) => with_default(tx, access, d, exprs),
+                            None => access,
+                        };
+                        match target {
+                            Some(t) => flatten(tx, t, v, ns, exprs),
+                            None => flatten(tx, key, v, ns, exprs),
+                        }
+                    }
+                    Node::Rest { arg } => {
+                        let obj = reuse(tx, value, &mut first);
+                        let f = tx.helper_ref(crate::helpers::Helper::Rest, pa);
+                        let names: Vec<NodeId> = keys.iter().map(|k| tx.string(k, pa)).collect();
+                        let arr = tx.array(&names, pa);
+                        let call = tx.call(f, &[obj, arr], pa);
+                        flatten(tx, arg, call, ns, exprs);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Node::ArrayPattern { elements } => {
+            let elements = tx.items(elements);
+            let value = if elements.len() == 1 {
+                value
+            } else {
+                reusable(tx, value, exprs)
+            };
+            let mut first = true;
+            for (i, e) in elements.into_iter().enumerate() {
+                let ea = tx.at(e);
+                match tx.n(e) {
+                    Node::Hole {} => {}
+                    Node::Rest { arg } => {
+                        let obj = reuse(tx, value, &mut first);
+                        let slice = tx.member(obj, "slice", ea);
+                        let n = tx.number(i as f64, ea);
+                        let call = tx.call(slice, &[n], ea);
+                        flatten(tx, arg, call, ns, exprs);
+                    }
+                    _ => {
+                        let obj = reuse(tx, value, &mut first);
+                        let n = tx.number(i as f64, ea);
+                        let access = tx.index(obj, n, ea);
+                        flatten(tx, e, access, ns, exprs);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A binding pattern as an assignment target whose names are properties of `obj`.
@@ -568,6 +842,14 @@ pub(crate) fn target_with(
 
 /// True if the namespace declaration contains runtime code.
 pub(crate) fn is_instantiated(tx: &Tx, id: NodeId) -> bool {
+    let declare = matches!(tx.n(id), Node::Module { modifiers, .. } if modifiers.contains(Modifiers::DECLARE));
+    !declare && body_instantiates(tx, id)
+}
+
+/// True if the namespace's body has a value declaration, `declare` ones included: tsc
+/// gives `namespace N { export declare const x: T }` its (empty) IIFE (tsc:
+/// tsc/internal/ast/utilities.go, getModuleInstanceStateWorker).
+fn body_instantiates(tx: &Tx, id: NodeId) -> bool {
     let Node::Module {
         modifiers,
         kind,
@@ -577,10 +859,8 @@ pub(crate) fn is_instantiated(tx: &Tx, id: NodeId) -> bool {
     else {
         return false;
     };
-    if modifiers.contains(Modifiers::DECLARE)
-        || kind == ModuleKind::Global
-        || tx.kind(name) == NodeKind::StringLit
-    {
+    let _ = modifiers;
+    if kind == ModuleKind::Global || tx.kind(name) == NodeKind::StringLit {
         return false;
     }
     let Some(body) = body else {
@@ -594,16 +874,14 @@ pub(crate) fn is_instantiated(tx: &Tx, id: NodeId) -> bool {
 
 fn stmt_instantiates(tx: &Tx, s: NodeId) -> bool {
     let n = tx.n(s);
-    if n.modifiers().contains(Modifiers::DECLARE) {
-        return false;
-    }
+    let declare = n.modifiers().contains(Modifiers::DECLARE);
     match n {
         Node::Interface { .. } | Node::TypeAlias { .. } | Node::Empty {} => false,
-        Node::FunctionDecl { body, .. } => body.is_some(),
+        Node::FunctionDecl { body, .. } => declare || body.is_some(),
         Node::Enum { modifiers, .. } => {
             !modifiers.contains(Modifiers::CONST) || tx.opts.preserve_const_enums
         }
-        Node::Module { .. } => is_instantiated(tx, s),
+        Node::Module { .. } => body_instantiates(tx, s),
         Node::ImportEquals {
             type_only,
             modifiers,
@@ -677,6 +955,53 @@ pub(crate) fn entity_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
     };
     let top: Vec<NodeId> = tx.ast.list(stmts).to_vec();
     member_is_value(tx, &top, root, &path, 0, false)
+}
+
+/// [`entity_is_value`] with the root resolved by scope analysis: a name declared in an
+/// enclosing namespace body is looked up among that body's statements
+/// (`namespace M { namespace N {} export import X = N; }`).
+pub(crate) fn alias_target_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
+    let mut path = Vec::new();
+    let mut n = entity;
+    while let Node::QualifiedName { left, right } = tx.n(n) {
+        path.push(right);
+        n = left;
+    }
+    let Node::Ident { name: root } = tx.n(n) else {
+        return None;
+    };
+    path.reverse();
+    let Some(b) = tx.sc.binding_of_ref(n) else {
+        return entity_is_value(tx, entity);
+    };
+    let scope = tx.sc.binding(b).scope;
+    match tx.sc.scopes[scope as usize].kind {
+        crate::scope::ScopeKind::Module => entity_is_value(tx, entity),
+        crate::scope::ScopeKind::Namespace(m) => {
+            let Node::Module {
+                name,
+                body: Some(body),
+                ..
+            } = tx.n(m)
+            else {
+                return None;
+            };
+            // Only the last segment's scope (`namespace A.B`) holds the block's statements.
+            let last = match tx.n(name) {
+                Node::QualifiedName { right, .. } => right,
+                _ => name,
+            };
+            if tx.sc.ns_scope_of.get(&last) != Some(&scope) {
+                return None;
+            }
+            let Node::ModuleBlock { stmts } = tx.n(body) else {
+                return None;
+            };
+            let stmts: Vec<NodeId> = tx.ast.list(stmts).to_vec();
+            member_is_value(tx, &stmts, root, &path, 0, false)
+        }
+        _ => None,
+    }
 }
 
 /// `export = X;` where this file declares `X` only as a type (an interface, a type alias, a

@@ -474,6 +474,9 @@ fn expressions() {
     ok("x = { get: 1, set: 2, async: 3, get() {}, set() {}, async() {}, new: 1, class: 2 };");
     ok("({ a, b } = c); [a, b] = [b, a]; ({ a = 1 } = {});");
     ok("x = a as any as T; y = a satisfies T; z = <T>a; w = a!; v = a!.b!; u = obj as const;");
+    // Operators no tighter than the one under the `as` continue the expression.
+    ok("a = 1 + 1 as number === 2; b = 1 as number * 2; c = (1 + 1 as number) * 2;");
+    ok("d = 1 * 1 as number + 2; e = 1 + 1 as number + 2; f = 1 + 1 as number >> 2;");
     ok("x = 1_000_000n + 0x1Fn; y = .5 + 5. + 0b1010 + 0o17 + 1e-3;");
     ok("x = a in b; y = a instanceof B; for (const k in o) {}");
     ok("x = #a in this;");
@@ -628,6 +631,24 @@ fn invalid_syntax_reported_like_tsc() {
         ("a || b ?? c;", SourceKind::Ts, &[(5076, 0)]),
         ("a ?? b && c;", SourceKind::Ts, &[(5076, 5)]),
         ("a && b ?? c;", SourceKind::Ts, &[(5076, 0)]),
+        ("f((undefined && foo ?? {}));", SourceKind::Ts, &[(5076, 3)]),
+        // `a + b as T * c` stops before `*` (microsoft/TypeScript#63527).
+        (
+            "const x = 1 + 1 as number * 2;",
+            SourceKind::Ts,
+            &[(1005, 26)],
+        ),
+        (
+            "const x = 1 + 1 as any as number * 2;",
+            SourceKind::Ts,
+            &[(1005, 33)],
+        ),
+        (
+            "const x = 1 >> 1 satisfies number + 2;",
+            SourceKind::Ts,
+            &[(1005, 34)],
+        ),
+        ("const x = a > b as T >> c;", SourceKind::Ts, &[(1005, 21)]),
         ("for (async of x) {}", SourceKind::Ts, &[(1106, 5)]),
         ("for (\\u0061sync of x) {}", SourceKind::Js, &[(1106, 5)]),
         ("new a?.b();", SourceKind::Ts, &[(1209, 5)]),

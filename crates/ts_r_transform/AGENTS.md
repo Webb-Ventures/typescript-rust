@@ -24,7 +24,10 @@ import alias names a value (`Yes`/`No`/`Unknown`). `SyntacticResolver` (per-file
 answers from the file alone, as isolatedModules; `ts_r_emit::CheckerResolver` asks the
 checker. `const_enum_value` gives the value of another file's const enum member for an
 access whose root is an import, or a local const enum member the file-only evaluator could
-not resolve (`enums.rs` inlines it as `0 /* E.A */`). `jsx_runtime_found` says the
+not resolve (`enums.rs` inlines it as `0 /* E.A */`). `enum_member_value` folds an enum
+member whose initializer reads another file (`A = Other.B`); it is asked only for original
+members the file-local evaluator could not fold (default `None`; `CheckerResolver` does not
+answer it yet). `jsx_runtime_found` says the
 automatic JSX runtime module (`react/jsx-runtime`) resolves in the program: JSX then no
 longer keeps the classic factory's root import (`React`) alive, as in tsc; the per-file
 default is `false` (keep it).
@@ -33,8 +36,9 @@ with the import, as tsc does. Constructs answered `Unknown` are listed in `Trans
 emitter must not write that file (TSR2002).
 
 `build_errors(&parsed)` picks the parse errors a build tool fails on, as esbuild does
-(`build_errors.rs`): syntax errors and the grammar errors that are ECMAScript early errors,
-not tsc-only grammar rules (`declare function f() {}`, `if (x) ;`, `a?.#x`).
+(`build_errors.rs`): syntax errors and the grammar errors that are ECMAScript early errors
+or syntax errors in JavaScript (`a && b ?? c`, TS5076), not tsc-only grammar rules
+(`declare function f() {}`, `if (x) ;`, `a?.#x`).
 `TranspileOutput::build_errors` holds those plus the transform's errors; the dev server
 fails on them, while `diagnostics` keeps everything tsc reports. `sloppy_only_syntax` lists
 `with` statements and `delete name` with whether the file itself makes them strict code;
@@ -198,9 +202,23 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   decorated class gets `__setFunctionName(_classThis, "n")` from where it is assigned:
   `x = class {}`, `let x = class {}`, an object literal key (identifier, string, number or
   a computed literal; never a plain `__proto__`), shorthand and binding defaults
-  (`{ e = class {} }`, `{ f: g = class {} }` takes `g`), a class field's key, and
-  `export default (class {})` (`"default"`). Observed in tsc's
+  (`{ e = class {} }`, `{ f: g = class {} }` takes `g`), a class field's key (also through
+  a decorated field's `__runInitializers(this, _x_initializers, v)`), and
+  `export default (class {})` (`"default"`). A computed key that is not a literal is
+  captured: `[_a = __propKey(f())]` and `__setFunctionName(_classThis, _a)`
+  (`Tx::key_named`). Observed in tsc's
   `esDecorators-classExpression-namedEvaluation.*` baselines (no tsc source read).
+- **Legacy decorator class alias** (`C_1`, for self-references): from ES2022 a class with a
+  static field or block assigns it in a first `static { C_1 = this; }`; otherwise
+  `let C = C_1 = class C {}` (tsc: tsc/internal/transformers/tstransforms/legacydecorators.go).
+- **`accessor` storage names**: `#x_accessor_storage`, made unique against the private
+  names in the source (`#x_1_accessor_storage`); other keys `#_a_accessor_storage`,
+  `#_b_...`, numbered per class from ES2022 (across the file below it), apart from
+  temporaries.
+- **Computed keys using `this`/`super`** (ES2022+, captured into a static block): the
+  capture runs in an arrow made before the class, `(_c = () => { _a = this.k; }, class {
+  static { _c(); } })`, or a `_c = () => { ... };` statement before a declaration
+  (`Tx::class_key_capture`).
 - **Bundler-only options**: `TransformOptions::default_class_name` names an anonymous
   `export default class` that ES2022 lowering must name (the bundler passes `<stem>_default`,
   esbuild's name); tsc never sets it (`None`).
@@ -249,8 +267,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example baseline_oracle -- [--filter S] [--show N] [--list FILE] [--dump DIR]`
   (`--dump` writes each mismatch's normalized outputs as `<test>__<file>.ours.js` / `.tsc.js`). A test's own `tsconfig.json`
   supplies options under its `// @` lines; outputs pair with inputs of the same stem that match first.
-  Last run (2026-10-26, v1/emit3): 1,700 match, 28 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
-  syntax errors are skipped); `--filter esDecorators`: 134 match, 6 mismatch.
+  Last run (2026-10-26, v1/emit4): 1,718 match, 9 mismatch (tests below ES2022, `outFile`, AMD/System/UMD and
+  syntax errors are skipped); `--filter esDecorators`: 136 match, 4 mismatch.
 - Ecosystem: `cargo xtask ecosystem --top 1000 --stages transform` (see
   [../../ecosystem/README.md](../../ecosystem/README.md)) compares shipped TS sources with
   tsc's emit. Last run: 48/48 packages pass.
@@ -293,7 +311,18 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   A pragma (`@jsx h`) counts only first on its comment line; `&#X41;` (upper-case `X`) is
   not an entity.
 - CommonJS `export = x` becomes `module.exports = x;` at the end of the file, and the
-  comments on the `export =` line go.
+  comments on the `export =` line go. After a top-level `using` it is `_default = x;` in the
+  `try` and `module.exports = _default;` after it.
+- A module-scope `var` exported by an `export { }` list gets `exports.y = y;` after every
+  declaration of it, nested ones included (`{ }`, `if`, `try`, labels: a single statement
+  becomes a block); `for (var h = x;;)` moves the declaration and its export before the
+  loop, and `for (var n in o)` starts its body with `exports.n = n;`
+  (`cjs::nested_var_exports`; `topLevelVarHoistingCommonJS`).
+- `verbatimModuleSyntax` keeps `export default I` of a type (an error).
+- `importHelpers` in a `.cts`/`.cjs` file under `module: preserve` uses
+  `const tslib_1 = require("tslib")` (`TransformOptions::require_helpers`).
+- `module: es2015` has no `export * as ns from "m"`: it becomes `import * as ns_1 from "m";
+  export { ns_1 as ns };` (a string name gets a temporary, `default` an `export default`).
 - A namespace import re-exported from CommonJS (`import * as ns ...; export { ns }`) is
   `exports.ns = ns;`, not a getter.
 - `TransformOptions::strip_numeric_separators` is set with no `target` or one below ES2021
@@ -314,6 +343,37 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `sub_stmt`).
 - TC39 decorators on a class that `extends null`: the synthesized constructor has no
   `super(...arguments)`.
+- An enum member initializer that names a same-file `const x = <constant>` (no type
+  annotation, declared earlier) folds to the value (`A = base * 2` → `8`); a `const`
+  declared later stays a reference (`enums::const_value`, `Scopes::const_inits`,
+  `isolatedDeclarationErrorsEnums`).
+- A namespace is instantiated by an exported `declare function` or a `declare namespace`
+  holding a value (`export declare namespace I { const x: number; }`): the empty IIFE is
+  kept. Types and type-only nested namespaces still make it a type (`uniqueSymbolsPropertyNames`).
+- CommonJS leaves `import.defer(...)` and `import.source(...)` as written; only plain
+  `import()` becomes `Promise.resolve().then(() => require())` (`importDeferCallCommonJS`).
+- A const enum read through an `import X = M.E` alias asks the program resolver, like an
+  imported root.
+- CommonJS reads an exported `declare var/let/const` and an exported `import x = ...`
+  (either form) through `exports.x` everywhere, assignments and calls included
+  (`(0, exports.r)()`); exported `declare` functions, classes, enums and namespaces stay as
+  written.
+- An exported `import X = N` whose target is only a type (an uninstantiated namespace, an
+  interface, a type alias, found through the enclosing namespace bodies) is dropped, with
+  no `void 0` entry (`namespace::alias_target_is_value`; `acceptableAlias1`).
+- A namespace or enum writes no `var` when an earlier class, function, `var`, `let` or
+  `const` of that name (not a `declare var`) or an earlier namespace or enum declared it:
+  `class C {} enum C { A }` is `class C {} (function (C) {...})(C || (C = {}));`
+  (`namespace::first_declaration`).
+- An exported destructuring declaration in a namespace is flattened, one assignment per
+  name: `N.a = o.a, _a = o.b, N.b = _a === void 0 ? 1 : _a, _b = k, N.c = o[_b]`. A value
+  read more than once is captured in a temporary unless it is an identifier; a non-literal
+  computed key is always captured; a defaulted value feeding a nested pattern gets a second
+  temporary; array rests are `v.slice(i)`, object rests `__rest(v, ["a", "0"])`
+  (`namespace::flatten`; tsc: tsc/internal/transformers/destructuring.go). Computed keys
+  before an object rest and empty object patterns keep the destructuring assignment.
+- Temporaries skip `_i` and `_n` (`Tx::temp_name`), and each namespace IIFE names its own
+  from `_a` again: a namespace frame's temporaries are released when it closes.
 
 ## Dependencies
 
@@ -322,12 +382,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 
 ## Gaps (largest baseline mismatch groups first)
 
-- `using`: `export =` after a top-level `using` (CommonJS `module.exports`) and the
-  helper order when `__setFunctionName` is requested between the two `using` helpers.
-- CommonJS: a top-level `var` in a nested block, loop or `try` exported by an `export { }`
-  list gets no `exports.y = y;` after it (tsc adds one after each, hoists `for (var h = x;;)`
-  out of the loop and wraps a `for (var n in o)` body to add it; `topLevelVarHoistingCommonJS`,
-  `usingDeclarationsTopLevelOfModule.3`).
+- `using`: the helper order when `__setFunctionName` is requested between the two `using`
+  helpers.
 - Below ES2022: a private member as a `for...of` / `for...in` destructuring target and
   `#x in o` outside any class are refused (TSR2003); nor is `super` in
   the static code of a class without `extends` lowered (tsc moves it out unchanged, a
@@ -343,17 +399,14 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `Reflect.get(_classSuper, k, _classThis)`). Static privates of class-decorated classes
   (`static_privates.rs`) leave `++`/`--`, logical assignments, destructuring targets and
   compound assignments on a non-`this` receiver as written (tsc caches the receiver in a
-  function-scoped temporary). Named evaluation does not cover computed keys that are not
-  literals (tsc: `[_a = __propKey(f())]` and `__setFunctionName(_classThis, _a)`), nor a
-  decorated class in a decorated static field's initializer.
+  function-scoped temporary).
 - `module: preserve` adds an `export {}` marker where tsc 7 adds none (tsc never adds it
   under `preserve`; the bundler relies on the marker, so only `.cts`/`.cjs` files and files
   with `export =` or `import x = require()` drop it). Program emit sets
   `TransformOptions::preserve_module_marker = false` and matches tsc (record 0012, E6).
 - Cross-file const enums: the bundler does not pass imported enum values in yet.
-- `module: preserve` details (`importHelpers` in a `.cjs` file imports from `tslib` where
-  tsc requires it), `export * as ns` under `module: es2015`.
-- Exported destructuring inside namespaces is not flattened (fixture `namespace/basic.ts`).
+- An object rest in an exported namespace destructuring at ES2018 and later: tsc 7.0.2
+  calls `__rest` without defining it (a ReferenceError); we define the helper.
 - Const enums of another file are inlined only through a program resolver
   (`EmitResolver::const_enum_value`, answered by the checker in `ts_r_emit`). Two gaps
   remain: with `preserveConstEnums` an import used only by inlined accesses is kept, and a

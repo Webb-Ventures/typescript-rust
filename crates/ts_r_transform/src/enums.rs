@@ -110,7 +110,7 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         let member = member_name(tx, mname);
         let mat = tx.at(m);
         let value = match init {
-            Some(i) => eval(tx, i, &info, &enum_name),
+            Some(i) => eval(tx, i, &info, &enum_name).or_else(|| resolver_member_value(tx, m)),
             None => next.map(Value::Num),
         };
         next = match &value {
@@ -189,7 +189,7 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
     let parent = tx.ns_stack.last().copied();
     let exported = modifiers.contains(Modifiers::EXPORT);
     let top_level = parent.is_none() && tx.list_depth == 0;
-    let first_decl = binding.is_none_or(|b| tx.enum_declared.insert(b));
+    let first_decl = binding.is_none_or(|b| crate::namespace::first_declaration(tx, b));
     if first_decl {
         let kind = if top_level {
             VarKind::Var
@@ -342,7 +342,11 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
                 // Members of this enum, including those of earlier declarations of the same
                 // (merged) enum, come before outer names (observed: `declare let y` loses to
                 // member `y`).
-                _ => own.values.get(n).cloned(),
+                _ => own
+                    .values
+                    .get(n)
+                    .cloned()
+                    .or_else(|| const_value(tx, e, own, own_name)),
             }
         }
         Node::Member { obj, prop, .. } => {
@@ -399,6 +403,32 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
         }
         _ => None,
     }
+}
+
+thread_local! {
+    /// Nesting of [`const_value`] (a chain of constants is bounded).
+    static CONST_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The value of a reference to a `const` declared before it without a type annotation,
+/// from its initializer (tsc: tsc/internal/checker/checker.go, `evaluateEntity`).
+fn const_value(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
+    let b = tx.sc.binding_of_ref(e)?;
+    let decl = tx.sc.binding(b).decl;
+    if tx.sc.binding(b).kind != BindingKind::Const || tx.span(decl).end > tx.span(e).start {
+        return None;
+    }
+    let init = *tx.sc.const_inits.get(&decl)?;
+    let depth = CONST_DEPTH.with(|d| d.get());
+    if depth >= 64 {
+        return None;
+    }
+    CONST_DEPTH.with(|d| d.set(depth + 1));
+    // The initializer is outside the enum: its names are not members.
+    let _ = (own, own_name);
+    let v = eval(tx, init, &EnumInfo::default(), "");
+    CONST_DEPTH.with(|d| d.set(depth));
+    v
 }
 
 /// The evaluated enum an expression names (`E` or the enum being declared).
@@ -477,10 +507,14 @@ fn imported_const_enum_value(tx: &mut Tx, access: NodeId, obj: NodeId) -> Option
         match tx.n(root) {
             Node::Member { obj, .. } => root = obj,
             _ => {
-                break tx
-                    .sc
-                    .binding_of_ref(root)
-                    .is_some_and(|b| tx.sc.binding(b).kind == BindingKind::Import);
+                // An import, or an `import x = N.M` alias (of a namespace another file
+                // may declare: `mappa.E.A`, constEnumOnlyModuleImportAliasEmit).
+                break tx.sc.binding_of_ref(root).is_some_and(|b| {
+                    matches!(
+                        tx.sc.binding(b).kind,
+                        BindingKind::Import | BindingKind::ImportEquals
+                    )
+                });
             }
         }
     };
@@ -506,6 +540,19 @@ fn resolver_const_enum_value(tx: &Tx, access: NodeId) -> Option<Value> {
         return None;
     }
     match tx.resolver.const_enum_value(tx.file, access)? {
+        crate::ConstValue::Number(n) => Some(Value::Num(n)),
+        crate::ConstValue::String(s) => Some(Value::Str(s)),
+    }
+}
+
+/// The program resolver's value for an enum member the file-local evaluator could not
+/// fold (an initializer reading another file's enum). Only original members count.
+fn resolver_member_value(tx: &Tx, member: NodeId) -> Option<Value> {
+    let span = tx.ast.span(member);
+    if span.start >= span.end {
+        return None;
+    }
+    match tx.resolver.enum_member_value(tx.file, member)? {
         crate::ConstValue::Number(n) => Some(Value::Num(n)),
         crate::ConstValue::String(s) => Some(Value::Str(s)),
     }

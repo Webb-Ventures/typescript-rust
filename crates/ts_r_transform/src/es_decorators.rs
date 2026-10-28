@@ -67,7 +67,7 @@ pub(crate) fn class_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         },
     };
     let fn_name = anonymous_default.then(|| "default".to_owned());
-    let iife = lower(tx, id, binding, fn_name);
+    let iife = lower(tx, id, binding, fn_name, false);
     if anonymous_default && tx.ns_stack.is_empty() {
         // `export default (() => ...)();`, in CommonJS `exports.default = (() => ...)();`
         // (observed).
@@ -97,7 +97,7 @@ pub(crate) fn class_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
 }
 
 /// A decorated class expression becomes the IIFE in place.
-pub(crate) fn class_expr(tx: &mut Tx, id: NodeId, name_hint: Option<Atom>) {
+pub(crate) fn class_expr(tx: &mut Tx, id: NodeId, name_hint: Option<Atom>, hint_var: bool) {
     if !has_es_decorators(tx, id) {
         crate::class::class_body(tx, id);
         crate::class::clear_decorators(tx, id);
@@ -116,7 +116,7 @@ pub(crate) fn class_expr(tx: &mut Tx, id: NodeId, name_hint: Option<Atom>) {
         _ => None,
     };
     let cls = clone_node(tx.ast, id);
-    let iife = lower(tx, cls, binding, fn_name);
+    let iife = lower(tx, cls, binding, fn_name, hint_var);
     replace(tx.ast, id, iife);
 }
 
@@ -128,7 +128,7 @@ fn plain(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
     crate::class::export_decl(tx, id, p.modifiers, p.name, out);
 }
 
-fn has_es_decorators(tx: &Tx, id: NodeId) -> bool {
+pub(crate) fn has_es_decorators(tx: &Tx, id: NodeId) -> bool {
     let Some(p) = parts(tx, id) else {
         return false;
     };
@@ -241,7 +241,15 @@ struct Lower {
 
 /// Lowers class `cls` (in place, turned into a class expression) and returns the IIFE call.
 /// `binding` names the class inside the IIFE when it has class decorators.
-fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> NodeId {
+/// `fn_name` is the class's name for `__setFunctionName`; `fn_name_var` says it names the
+/// variable holding it (`_a`) rather than the text.
+fn lower(
+    tx: &mut Tx,
+    cls: NodeId,
+    binding: Atom,
+    fn_name: Option<String>,
+    fn_name_var: bool,
+) -> NodeId {
     let at = tx.at(cls);
     tx.temps.push(Vec::new());
     let mut p = parts(tx, cls).expect("class");
@@ -540,16 +548,16 @@ fn lower(tx: &mut Tx, cls: NodeId, binding: Atom, fn_name: Option<String>) -> No
         tx.inline_static.push(b);
         out.push(b);
         let named = match &fn_name {
-            Some(n) => Some((tx.ident_atom(ct, at), n.clone())),
-            None if static_code => Some((tx.this(at), tx.ast.atom(binding).to_owned())),
+            Some(n) => Some((tx.ident_atom(ct, at), n.clone(), fn_name_var)),
+            None if static_code => Some((tx.this(at), tx.ast.atom(binding).to_owned(), false)),
             None => None,
         };
-        if let Some((target, name)) = named {
-            out.push(set_function_name_block(tx, target, &name, at));
+        if let Some((target, name, var)) = named {
+            out.push(set_function_name_block(tx, target, &name, var, at));
         }
     } else if let Some(n) = &fn_name {
         let this = tx.this(at);
-        out.push(set_function_name_block(tx, this, n, at));
+        out.push(set_function_name_block(tx, this, n, fn_name_var, at));
     }
     let lead = out.len();
     out.extend_from_slice(&members[..key_blocks]);
@@ -1664,9 +1672,13 @@ fn class_decorate(tx: &mut Tx, binding: Atom, at: u32) -> [NodeId; 2] {
 }
 
 /// `static { __setFunctionName(target, "name"); }`
-fn set_function_name_block(tx: &mut Tx, target: NodeId, name: &str, at: u32) -> NodeId {
+fn set_function_name_block(tx: &mut Tx, target: NodeId, name: &str, var: bool, at: u32) -> NodeId {
     let f = tx.helper_ref(Helper::SetFunctionName, at);
-    let n = tx.string(name, at);
+    let n = if var {
+        tx.ident(name, at)
+    } else {
+        tx.string(name, at)
+    };
     let call = tx.call(f, &[target, n], at);
     let s = tx.expr_stmt(call, at);
     let b = static_block(tx, &[s], at);

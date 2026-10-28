@@ -63,7 +63,8 @@ pub(crate) struct State {
     /// The name of an anonymous `export default function/class`.
     default_name: Option<Atom>,
     export_assignment: bool,
-    /// `module.exports = x;` statements for `export =`, written at the end of the file.
+    /// `module.exports = x;` statements for `export =`, written at the end of the file (kept:
+    /// the `using` lowering moves them).
     pub export_assignments: Vec<NodeId>,
     /// `tslib_1` once a helper is referenced under importHelpers.
     pub tslib: Option<Atom>,
@@ -77,6 +78,23 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
         let n = tx.n(s);
         let mods = n.modifiers();
         if mods.contains(Modifiers::DECLARE) {
+            // `export declare let a;` has no declaration in the output: its references read
+            // `exports.a` (observed; functions, classes, enums and namespaces stay as written).
+            if let Node::VarDecl { decls, .. } = n
+                && mods.contains(Modifiers::EXPORT)
+            {
+                for d in tx.items(decls) {
+                    if let Node::VarDeclarator { name, .. } = tx.n(d) {
+                        let mut ids = Vec::new();
+                        collect_pattern_idents(tx.ast, name, &mut ids);
+                        for i in ids {
+                            if let Some(&b) = tx.sc.decl_of.get(&i) {
+                                tx.cjs.exported_vars.insert(b);
+                            }
+                        }
+                    }
+                }
+            }
             continue;
         }
         match n {
@@ -258,17 +276,26 @@ pub(crate) fn prepare(tx: &mut Tx, items: &[NodeId]) {
                     }
                 }
             }
-            // `export import x = require("m")` is assigned in place without a `void 0`.
+            // `export import x = require("m")` is assigned in place without a `void 0`. Both
+            // forms are read through `exports.x` (observed).
             Node::ImportEquals {
                 type_only: false,
                 name,
                 module_ref,
                 ..
-            } if mods.contains(Modifiers::EXPORT)
-                && tx.kind(module_ref) != NodeKind::ExternalModuleRef =>
-            {
-                let n = tx.name(name).to_owned();
-                tx.cjs.void0.push(n);
+            } if mods.contains(Modifiers::EXPORT) => {
+                if tx.kind(module_ref) != NodeKind::ExternalModuleRef {
+                    if !tx.opts.verbatim_module_syntax
+                        && crate::namespace::alias_target_is_value(tx, module_ref) == Some(false)
+                    {
+                        continue;
+                    }
+                    let n = tx.name(name).to_owned();
+                    tx.cjs.void0.push(n);
+                }
+                if let Some(&b) = tx.sc.decl_of.get(&name) {
+                    tx.cjs.exported_vars.insert(b);
+                }
             }
             _ => {}
         }
@@ -322,7 +349,7 @@ pub(crate) fn finish(tx: &mut Tx, out: Vec<NodeId>, runtime: Vec<NodeId>) -> Vec
     }
     pre.extend(runtime);
     pre.extend(out);
-    pre.append(&mut tx.cjs.export_assignments);
+    pre.extend(tx.cjs.export_assignments.iter().copied());
     pre
 }
 
@@ -946,7 +973,14 @@ fn local_exports(tx: &mut Tx, names: &[NodeId], out: &mut Vec<NodeId>) {
         ) {
             continue;
         }
-        let Some(aliases) = tx.cjs.local_exports.remove(&b) else {
+        // A `var` declared again (or in a nested block) is exported after each
+        // declaration, so its aliases are kept.
+        let aliases = if tx.sc.binding(b).kind == BindingKind::Var {
+            tx.cjs.local_exports.get(&b).cloned()
+        } else {
+            tx.cjs.local_exports.remove(&b)
+        };
+        let Some(aliases) = aliases else {
             continue;
         };
         let local = tx.name(n).to_owned();
@@ -1001,6 +1035,26 @@ pub(crate) fn after_decl(tx: &mut Tx, original_names: &[NodeId], out: &mut Vec<N
 /// Names declared by a top-level statement (before it is transformed).
 pub(crate) fn declared_names(tx: &Tx, id: NodeId) -> Vec<NodeId> {
     decl_names(tx, id)
+}
+
+/// `exports.x = x;` for each name of a `var` statement nested in a top-level block, loop,
+/// `try` or label (module scope) that an `export { }` list exports: tsc writes them right
+/// after the statement (observed, tsc 7.0.2 `topLevelVarHoistingCommonJS`).
+pub(crate) fn nested_var_exports(tx: &mut Tx, decl: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    if !matches!(
+        tx.n(decl),
+        Node::VarDecl {
+            kind: VarKind::Var,
+            ..
+        }
+    ) || tx.cjs.local_exports.is_empty()
+    {
+        return out;
+    }
+    let names = decl_names(tx, decl);
+    local_exports(tx, &names, &mut out);
+    out
 }
 
 /// Top-level variable statements: `export const a = 1` → `exports.a = 1;`.
@@ -1161,9 +1215,14 @@ pub(crate) fn export_named(tx: &mut Tx, id: NodeId, kept: &[NodeId], out: &mut V
 
 /// `import("x")` → `Promise.resolve().then(() => __importStar(require("x")))`.
 pub(crate) fn import_call(tx: &mut Tx, id: NodeId) {
-    let Node::ImportCall { arg, .. } = tx.n(id) else {
+    let Node::ImportCall { arg, phase, .. } = tx.n(id) else {
         return;
     };
+    // `import.defer(...)` / `import.source(...)` stay as written (an error in CommonJS;
+    // observed, tsc 7.0.2 `importDeferCallCommonJS`).
+    if phase != ts_r_ast::ImportPhase::Evaluation {
+        return;
+    }
     let at = tx.at(id);
     let promise = tx.dotted("Promise.resolve", at);
     let literal = tx.kind(arg) == NodeKind::StringLit;

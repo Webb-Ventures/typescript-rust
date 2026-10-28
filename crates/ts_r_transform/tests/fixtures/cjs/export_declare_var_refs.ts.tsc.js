@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+f();
+new C();
+N.v;
+E.A;
+exports.v = 2;
+exports.v++;
+[exports.v] = [1];
+({ v: exports.v } = { v: 1 });
+exports.d1;

@@ -14,3 +14,37 @@ fn long_member_chain_is_preserved() {
         assert!(out.code.contains(&expr));
     }
 }
+
+/// A program resolver that knows every enum member the file alone cannot fold is 7.
+struct SevenResolver;
+
+impl ts_r_transform::EmitResolver for SevenResolver {
+    fn enum_member_value(
+        &self,
+        _file: ts_r_diagnostics::FileId,
+        _member: ts_r_ast::NodeId,
+    ) -> Option<ts_r_transform::ConstValue> {
+        Some(ts_r_transform::ConstValue::Number(7.0))
+    }
+}
+
+#[test]
+fn resolver_folds_members_the_file_cannot() {
+    let src = "import { O } from './o';\nenum E { A = 1, B = O.X, C }\n";
+    let opts = TransformOptions::from_json(r#"{"target":"esnext"}"#, "a.ts");
+    let mut parsed = ts_r_parser::parse(src, ts_r_ast::SourceKind::from_path("a.ts"));
+    ts_r_transform::transform_with(
+        &mut parsed.ast,
+        src,
+        &opts,
+        &SevenResolver,
+        ts_r_diagnostics::FileId(0),
+    );
+    let code = ts_r_codegen::print(&parsed.ast, src, &CodegenOptions::default()).code;
+    assert!(code.contains(r#"E[E["A"] = 1] = "A""#), "{code}");
+    assert!(code.contains(r#"E[E["B"] = 7] = "B""#), "{code}");
+    assert!(code.contains(r#"E[E["C"] = 8] = "C""#), "{code}");
+    // The file-local tools keep the reference.
+    let out = transpile("a.ts", src, &opts, &CodegenOptions::default());
+    assert!(out.code.contains(r#"E["B"] = O.X"#), "{}", out.code);
+}

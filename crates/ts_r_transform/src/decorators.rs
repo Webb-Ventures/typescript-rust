@@ -361,8 +361,29 @@ pub(crate) fn emit_decl(tx: &mut Tx, id: NodeId, info: Info, out: &mut Vec<NodeI
         tx.decl_like.push(id);
         let mut init = id;
         if let Some(a) = alias {
-            let t = tx.ident_atom(a, at);
-            init = tx.assign(t, id, at);
+            // From ES2022 a class with static fields or blocks assigns the alias in a first
+            // static block, before its static initializers run (observed, tsc 7.0.2
+            // `staticInitializersAndLegacyClassDecorators`); otherwise `C = C_1 = class`.
+            let mut members = tx.items(p.members);
+            let has_statics = members.iter().any(|&m| match tx.n(m) {
+                Node::StaticBlock { .. } => true,
+                Node::PropertyDef { modifiers, .. } => modifiers.contains(Modifiers::STATIC),
+                _ => false,
+            });
+            if tx.opts.target >= ts_r_config::ScriptTarget::ES2022 && has_statics {
+                let t = tx.ident_atom(a, at);
+                let this = tx.mk(Node::This {}, at);
+                let e = tx.assign(t, this, at);
+                let st = tx.expr_stmt(e, at);
+                let body = tx.new_list(&[st]);
+                let block = tx.mk(Node::StaticBlock { body }, at);
+                members.insert(0, block);
+                p.members = tx.new_list(&members);
+                crate::class::set_parts(tx, id, p);
+            } else {
+                let t = tx.ident_atom(a, at);
+                init = tx.assign(t, id, at);
+            }
         }
         let local = tx.ident_atom(name_atom, at);
         let decl = tx.var(VarKind::Let, Modifiers::NONE, local, Some(init), at);

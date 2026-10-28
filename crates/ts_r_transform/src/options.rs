@@ -82,6 +82,9 @@ pub struct TransformOptions {
     /// separators by its value (`10_000` → `10000`, `0xFF_FF` → `65535`; observed). Others
     /// keep their source text.
     pub strip_numeric_separators: bool,
+    /// `module` is `es2015` (or defaults to it): `export * as ns from` becomes an import
+    /// and an `export { }` (ES2015 has no such syntax).
+    pub es2015_module: bool,
     /// The name an anonymous `export default class` gets when lowering has to name it
     /// (`None`: tsc's `default_1`). The bundler passes its `<file>_default`.
     pub default_class_name: Option<String>,
@@ -119,6 +122,7 @@ impl Default for TransformOptions {
             preserve_module_marker: true,
             strip_numeric_separators: false,
             default_class_name: None,
+            es2015_module: false,
         }
     }
 }
@@ -205,6 +209,7 @@ impl TransformOptions {
             preserve_module_marker: true,
             strip_numeric_separators: o.target().is_none_or(|t| t < ScriptTarget::ES2021),
             default_class_name: None,
+            es2015_module: e.module() == ModuleKind::ES2015,
         }
     }
 
@@ -222,6 +227,13 @@ impl TransformOptions {
 
     pub fn is_cjs(&self) -> bool {
         self.module == ModuleFormat::CommonJs
+    }
+
+    /// Helpers come from `require("tslib")` (`importHelpers` in CommonJS output, and in a
+    /// `.cts`/`.cjs` file under `module: preserve`; observed).
+    pub fn require_helpers(&self) -> bool {
+        self.import_helpers
+            && (self.is_cjs() || (self.module == ModuleFormat::Preserve && self.cjs_extension))
     }
 
     /// A stable string for cache keys.
