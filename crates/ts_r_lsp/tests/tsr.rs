@@ -2417,3 +2417,254 @@ fn folder_rename_across_projects() {
     assert_eq!(e["changes"].as_object().unwrap().len(), 2, "{e}");
     c.shutdown();
 }
+
+/// (file, line, character) of each location in a references answer, sorted.
+fn ref_spots(env: &Env, r: &Value) -> Vec<(String, u64, u64)> {
+    let mut out: Vec<(String, u64, u64)> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            let uri = l["uri"].as_str().unwrap();
+            let file = ["src/a.ts", "src/b.ts", "src/c.ts"]
+                .into_iter()
+                .find(|f| env.uri(f) == uri)
+                .unwrap_or("?")
+                .to_string();
+            let s = &l["range"]["start"];
+            (
+                file,
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+const REFS_A: &str = "class Base { ¦m() {} static ¦s() {} }\nclass D extends Base { m() {} static s() {} #p = 1; f() { return this.¦#p; } }\ninterface ¦Foo {}\nnamespace Foo { export const x = 1; }\nlet t: Foo;\nFoo.x;\ninterface I { [\"¦k\"]: number }\nclass K implements I { [\"k\"] = 1; }\nexport function ¦foo() {}\nexport default function () {}\n";
+const REFS_B: &str = "import { foo as ¦bar } from \"./a.js\";\nexport { bar as baz };\nbar();\n";
+const REFS_C: &str = "import { baz } from \"./b.js\";\nimport d from \"./a.js\";\nbaz(); d();\n";
+
+/// References follow inherited members, private names, computed literal keys, the meaning
+/// of the location (an interface merged with a namespace), and aliases that rename.
+#[test]
+fn references_through_inheritance_meanings_and_aliases() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(REFS_A);
+    let (b, mb) = marked(REFS_B);
+    let (cc, _) = marked(REFS_C);
+    let env = Env::new(
+        "navrefs",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", &a),
+            ("src/b.ts", &b),
+            ("src/c.ts", &cc),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/a.ts", "src/b.ts", "src/c.ts"] {
+        env.open(&mut c, f);
+    }
+    let ua = env.uri("src/a.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let mut refs = |uri: &str, (line, ch): (u32, u32)| {
+        let r = result(
+            &mut c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        ref_spots(&env, &r)
+    };
+    let s = |v: &[(&str, u64, u64)]| -> Vec<(String, u64, u64)> {
+        v.iter().map(|&(f, l, c)| (f.to_string(), l, c)).collect()
+    };
+    // An override is one with the member it overrides; statics are not inherited.
+    assert_eq!(
+        refs(&ua, m[0]),
+        s(&[("src/a.ts", 0, 13), ("src/a.ts", 1, 23)])
+    );
+    assert_eq!(refs(&ua, m[1]), s(&[("src/a.ts", 0, 27)]));
+    // `this.#p` is the class's own `#p`.
+    assert_eq!(
+        refs(&ua, m[2]),
+        s(&[("src/a.ts", 1, 44), ("src/a.ts", 1, 70)])
+    );
+    // From the interface: its type uses, not the namespace's.
+    assert_eq!(
+        refs(&ua, m[3]),
+        s(&[("src/a.ts", 2, 10), ("src/a.ts", 4, 7)])
+    );
+    // `["k"]` in an interface and in the class implementing it.
+    assert_eq!(
+        refs(&ua, m[4]),
+        s(&[("src/a.ts", 6, 16), ("src/a.ts", 7, 25)])
+    );
+    // From the declaration: every alias under another name and its uses.
+    assert_eq!(
+        refs(&ua, m[5]),
+        s(&[
+            ("src/a.ts", 8, 16),
+            ("src/b.ts", 0, 9),
+            ("src/b.ts", 0, 16),
+            ("src/b.ts", 1, 9),
+            ("src/b.ts", 1, 16),
+            ("src/b.ts", 2, 0),
+            ("src/c.ts", 0, 9),
+            ("src/c.ts", 2, 0),
+        ])
+    );
+    // From a renaming alias: only what goes through it.
+    assert_eq!(
+        refs(&ub, mb[0]),
+        s(&[
+            ("src/b.ts", 0, 16),
+            ("src/b.ts", 1, 9),
+            ("src/b.ts", 1, 16),
+            ("src/b.ts", 2, 0),
+            ("src/c.ts", 0, 9),
+            ("src/c.ts", 2, 0),
+        ])
+    );
+    // The `default` keyword of an anonymous default export: it and its imports.
+    assert_eq!(
+        refs(&ua, (9, 8)),
+        s(&[("src/a.ts", 9, 7), ("src/c.ts", 1, 7), ("src/c.ts", 2, 7)])
+    );
+    c.shutdown();
+}
+
+const DOCS_A: &str = "export class Target {}
+class Base {
+  /** Base method. */ m() {} }
+class Sub extends Base { m() {} }
+interface Opts {
+  /** The width. */
+  width: number;
+  /** Any other key. */
+  [k: string]: any;
+}
+/**
+ * Draws. See {@link Target} and {@link https://ts-r.dev|the site}.
+ * @param o - the options `@param` stays
+ * @param {number} n count @returns nothing
+ * @example
+ * draw(o, 1)
+ */
+function draw({ width }: Opts, n: number, o2: Opts) {
+  wid¦th; o2.ot¦her; n¦;
+}
+new Sub().¦m();
+dr¦aw;
+";
+
+#[test]
+fn hover_documentation_follows_tsc() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(DOCS_A);
+    let env = Env::new(
+        "hoverdocs",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", &a)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let ua = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let doc = |c: &mut ScriptedClient, (l, ch): (u32, u32)| {
+        let h = hover_text(c, &ua, l, ch);
+        h.split_once("\n```\n")
+            .map(|(_, d)| d.trim().to_string())
+            .unwrap_or_default()
+    };
+    // A destructured property: the property's comment.
+    assert_eq!(doc(&mut c, m[0]), "The width.");
+    // Through an index signature: its comment.
+    assert_eq!(doc(&mut c, m[1]), "Any other key.");
+    // A parameter: its `@param` tag (types stripped; a later `@tag` starts a new tag).
+    assert_eq!(doc(&mut c, m[2]), "count");
+    // An override without a comment: the base member's.
+    assert_eq!(doc(&mut c, m[3]), "Base method.");
+    let d = doc(&mut c, m[4]);
+    assert!(d.starts_with("Draws. See [Target](file://"), "{d}");
+    assert!(
+        d.contains("/src/a.ts#1,14-1,20) and [the site](https://ts-r.dev)."),
+        "{d}"
+    );
+    assert!(
+        d.contains("*@param* `o` - the options `@param` stays"),
+        "{d}"
+    );
+    assert!(
+        d.contains("*@param* `n` — count\n\n*@returns* — nothing"),
+        "{d}"
+    );
+    assert!(d.contains("*@example*\n```tsx\ndraw(o, 1)\n```"), "{d}");
+    c.shutdown();
+}
+
+const QI_A: &str = "import m = require(\"./b\");
+import { y } from \"./¦b\";
+interface I { /** The x. */ x: number }
+const i: I = { ¦x: 0 };
+[1].forEach(cla¦ss {});
+const f = (a: number) =¦> a;
+class C<T> {}
+C.proto¦type;
+m.¦N;
+";
+
+const QI_B: &str = "export const y = 1;
+export namespace N { export const z = 1; }
+";
+
+#[test]
+fn hover_names_like_tsc() {
+    if !libs_present() {
+        return;
+    }
+    let (a, m) = marked(QI_A);
+    let env = Env::new(
+        "hovernames",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", &a),
+            ("src/b.ts", QI_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let ua = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let mut h = |(l, ch): (u32, u32)| hover_text(&mut c, &ua, l, ch);
+    assert!(h(m[0]).contains("module \"./b\""), "{}", h(m[0]));
+    let x = h(m[1]);
+    assert!(
+        x.contains("(property) I.x: number") && x.contains("The x."),
+        "{x}"
+    );
+    assert!(
+        h(m[2]).contains("(local class) (Anonymous class)"),
+        "{}",
+        h(m[2])
+    );
+    assert!(
+        h(m[3]).contains("function f(a: number): number"),
+        "{}",
+        h(m[3])
+    );
+    assert!(
+        h(m[4]).contains("(property) C<T>.prototype: C<any>"),
+        "{}",
+        h(m[4])
+    );
+    assert!(h(m[5]).contains("namespace m.N"), "{}", h(m[5]));
+    c.shutdown();
+}

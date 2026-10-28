@@ -42,24 +42,23 @@ every skip reason.
 
 ## Results
 
-1960c24 (2026-10-26, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**1706 of 2517 compared tests pass (67.8%)**; 6940 of 8972 queries agree.
-3802 of the 6319 test files are skipped (3698 verify no compared feature, 154 get no answer
-from either server). Up from 1562 of 2540 at 7068c74: 148 tests fixed (completion,
-signature help, references), none lost. 23 tests leave the compared set: completion now
-answers nothing where tsc answers nothing (names being declared), and two tests drop out
-because tsc did not answer in time (`completionForStringLiteralNonrelativeImport16`,
-`pathCompletionsPackageJsonImportsWildcard8`, which pass when run again).
+aed0aea (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**1864 of 2517 compared tests pass (74.1%)**; 7494 of 8965 queries agree.
+3802 of the 6319 test files are skipped (3698 verify no compared feature, 153 get no answer
+from either server). Up from 1706 of 2517 at 1960c24: 158 tests fixed (references, rename and
+highlights through inheritance, meanings and aliases; hover JSDoc and names), none lost. The
+compared set is the same size; one test moves out of it and back in run to run because tsc
+does not always answer in time (`pathCompletionsPackageJsonExportsWildcard12` this run).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 304 | 215 | 19 | 2020 / 2514 |
-| completion | 789 | 239 | 105 | 2325 / 2797 |
-| references | 164 | 180 | 13 | 858 / 1442 |
-| rename | 106 | 70 | 13 | 318 / 549 |
-| definition | 96 | 71 | 25 | 376 / 528 |
+| hover | 387 | 132 | 19 | 2280 / 2509 |
+| completion | 789 | 239 | 105 | 2323 / 2795 |
+| references | 222 | 122 | 13 | 1086 / 1442 |
+| rename | 118 | 58 | 13 | 362 / 549 |
+| definition | 97 | 70 | 25 | 379 / 528 |
 | signatureHelp | 136 | 14 | 26 | 637 / 656 |
-| highlights | 98 | 19 | 20 | 354 / 431 |
+| highlights | 102 | 15 | 20 | 375 / 431 |
 | typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
 Remaining failures by cause (example tests in parentheses):
@@ -73,23 +72,26 @@ Remaining failures by cause (example tests in parentheses):
   named through their import alias (`quickInfoExportAssignmentOfGenericInterface`), type
   predicates printed as `boolean` (`signatureHelpOnTypePredicates`), contextual parameters
   of generic signatures (`contextualTypingGenericFunction1`).
-- **Quick info (ts_r_lsp)**: JSDoc tags and comment parsing (`quickInfoCommentsCommentParsing`),
-  incomplete declarations (`quickInfoDisplayPartsClassIncomplete`: `class __missing`),
-  enum members with odd names (`(typeof Foo)["\t"]`), the name tsc picks for a module
-  reached through several aliases (`quickInfoDisplayPartsExternalModuleAlias`).
+- **Quick info (ts_r_lsp)**: JSDoc type and property tags in JavaScript (`@typedef`,
+  `@callback`, `@property` hovers: `quickInfoJsDocTagsTypedef`, `quickInfoPropertyTag`),
+  type-recovery corners of `@param {..}` (`quickInfoCommentsCommentParsing`), keywords and
+  meta properties (`arguments`, `import.meta`, `new`, `super`, `as const`), enum members
+  with odd names (`(typeof Foo)["\t"]`), discriminated contextual unions
+  (`quickInfoUnion_discriminated`), `(alias)` on `export as namespace` and JavaScript
+  `require` (`quickInfoForUMDModuleAlias`, `jsRequireQuickInfo`).
 - **Highlights (ts_r_lsp)**: members inherited across classes
   (`documentHighlightAtInheritedProperties5`), `export { x as y }` names
   (`documentHighlightInExport1`), string literals and template strings
   (`getOccurrencesStringLiterals`, `documentHighlightTemplateStrings`), JSDoc `@typedef`
   (`jsdocTypedefTagServices`), a few keyword sets (`getOccurrencesConst04`,
   `getOccurrencesTryCatchFinallyBroken`), JSX tag names.
-- **References and rename (ts_r_lsp)**: default exports (`findAllRefsForDefaultExport*`),
-  members inherited or overridden across classes and interfaces
-  (`referencesForInheritedProperties*`, `referencesForOverrides`), merged declarations,
-  constructors reached through export specifiers (`findAllRefsOfConstructor_multipleFiles`), JSDoc `@link` and `@import`, import types
-  (`findAllRefs_importType_named`), re-exports, CommonJS `require`, dynamic `import()`, JSX
-  (`tsxFindAllReferences*`), string literal types (`renameStringLiteralTypes2`), private
-  names, the extra edits tsc makes when renaming a default import.
+- **References and rename (ts_r_lsp)**: keywords (`referencesForStatementKeywords`,
+  `referencesForExpressionKeywords`), JSDoc `@link`, `@param` and `@import`, import types
+  (`findAllRefs_importType_named`), module specifiers, CommonJS `require`, dynamic
+  `import()`, JSX (`tsxFindAllReferences*`), string literal types
+  (`renameStringLiteralTypes2`, `findAllRefsForStringLiteral`), going back up from a
+  re-export of a renamed default (`import boom from "./d"`), constructors reached through
+  export specifiers (`findAllRefsOfConstructor_multipleFiles`).
 - **Definition (ts_r_lsp)**: shorthand properties (`goToDefinitionShorthandProperty*`),
   external module names (`goToDefinitionExternalModuleName*`), contextually typed object
   literal properties, constructors, meta properties (`goToDefinitionMetaProperty`), a
@@ -120,3 +122,4 @@ Remaining failures by cause (example tests in parentheses):
 | 88dfde6 | 2026-10-26 | 1308 | 2541 | 51.5% | tsc 7 quick info in hover (a line per meaning and overload, resolved signatures at calls, owners with type arguments, `(alias)` lines, multi-line object types); completions in class, interface and type literal bodies, `this` members, JSX attributes, closing tags and intrinsic tags |
 | 7068c74 | 2026-10-26 | 1562 | 2540 | 61.5% | tsc 7 quick-info printing mode in hover; references, rename and highlights on declaration keywords and modifiers, `get`/`set`, through destructuring targets, `for`-`of` bindings, contextually typed object literals and string or numeric literal keys; keyword highlights (`switch`/`case`/`break`, `if`/`else`, `try`, `async`/`await`, `return`, modifiers); definition at `override` and keywords; tsc's type definition rule (declaration names, modules, enum members) |
 | 1960c24 | 2026-10-26 | 1706 | 2517 | 67.8% | Completions from expected types (type literals in type arguments offer the constraint's members, string, number and bigint literal entries), no list where a name is being declared, the scope of unclosed bodies, members of possibly undefined values and non-identifier members; signature help at type argument lists, `super(`, contextually typed parameter lists and tagged templates, the resolved or best candidate instantiated, rest tuples expanded; references on constructors |
+| aed0aea | 2026-10-27 | 1864 | 2517 | 74.1% | References, rename and highlights through inherited and overridden members, search meanings (value, type, namespace), renaming import and export aliases, default keywords, private names and computed keys; hover JSDoc parsed and rendered as tsc 7 does (tags, links, examples) from the declaration tsc documents, contextual object literal properties, module names, anonymous classes and functions, `prototype` owners |

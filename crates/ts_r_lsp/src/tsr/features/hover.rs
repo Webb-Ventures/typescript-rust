@@ -26,7 +26,14 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         }
         Node::Ident { .. } | Node::PrivateName { .. } => {
             let m = meaning_at(ck, l);
-            let Some(s) = m.primary else {
+            // An object literal member typed by a contextual type: that type's property
+            // (one declared property, not a union's).
+            let contextual = m.contextual.filter(|&p| {
+                c.synth_sym(p).is_none_or(|x| {
+                    x.check & ts_r_checker::symbols::check_flags::SYNTHETIC_UNION == 0
+                })
+            });
+            let Some(s) = contextual.or(m.primary) else {
                 // A property of `any` (or one the checker cannot resolve): its type alone.
                 if let Some(p) = c.parent(l)
                     && let Node::Member { prop, .. } = *c.node(p)
@@ -35,7 +42,18 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
                     let t = ck.check_expr(p);
                     let ts = ck.type_to_string(t);
                     let ts = super::multiline::multiline_objects(&ts);
-                    let value = format!("```typescript\n{ts}\n```");
+                    let mut value = format!("```typescript\n{ts}\n```");
+                    // Through an index signature: its documentation.
+                    if let Node::Member { obj, .. } = *c.node(p)
+                        && let Some(name) = name_text(ast, n)
+                    {
+                        let ot = ck.check_expr(Loc::new(cx.file, obj));
+                        let doc = super::doc_source::index_documentation(ck, ot, name);
+                        if !doc.is_empty() {
+                            value.push('\n');
+                            value.push_str(&doc);
+                        }
+                    }
                     return json!({
                         "contents": {"kind": "markdown", "value": value},
                         "range": lines.range(text, span.start, span.end),
@@ -45,13 +63,13 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
             };
             let display =
                 super::quick_info::quick_info(ck, s, l, m.is_decl || in_module_name(ck, l));
-            let target = c.resolve_alias(s).unwrap_or(s);
-            (display, docs_of(ck, target))
+            (display, super::doc_source::documentation(ck, s, Some(l)))
         }
         // A keyword of a declaration (`export default class {}`, `function`): what it declares.
         Node::ClassDecl { .. }
         | Node::ClassExpr { .. }
         | Node::FunctionDecl { .. }
+        | Node::FunctionExpr { .. }
         | Node::Interface { .. }
         | Node::Enum { .. }
             if on_decl_keyword(text, offset) =>
@@ -60,15 +78,27 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
                 return Value::Null;
             };
             let display = super::quick_info::quick_info(ck, s, l, true);
-            (display, docs_of(ck, s))
+            (display, super::doc_source::documentation(ck, s, Some(l)))
+        }
+        // The `=>` of an arrow function: the function.
+        Node::Arrow { .. } if on_arrow_token(text, offset) => {
+            let Some(s) = c.sym_of_decl(l) else {
+                return Value::Null;
+            };
+            let display = super::quick_info::quick_info(ck, s, l, true);
+            (display, super::doc_source::documentation(ck, s, Some(l)))
         }
         // A literal member name (`"a"() {}`, `1: x`) or element access key (`o["a"]`).
+        Node::StringLit { .. } if module_name_display(ck, l).is_some() => (
+            module_name_display(ck, l).unwrap_or_default(),
+            String::new(),
+        ),
         Node::StringLit { .. } | Node::NumberLit { .. } => {
             let Some((s, is_decl)) = literal_name_symbol(ck, l) else {
                 return Value::Null;
             };
             let display = super::quick_info::quick_info(ck, s, l, is_decl);
-            (display, docs_of(ck, s))
+            (display, super::doc_source::documentation(ck, s, Some(l)))
         }
         _ => return Value::Null,
     };
@@ -82,6 +112,46 @@ pub fn hover(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, lines: &LspLines, offset: u3
         "contents": {"kind": "markdown", "value": value},
         "range": lines.range(text, span.start, span.end),
     })
+}
+
+/// On a module name (`"m"` of `import .. from "m"`, `declare module "m"`): `module "m"`,
+/// or `module x` for `import x = require("m")`. Only names that resolve to a module.
+fn module_name_display(ck: &Ck<'_, '_>, l: Loc) -> Option<String> {
+    let c = ck.c;
+    let ast = c.ast(l.file);
+    let Node::StringLit { value } = *ast.node(l.node) else {
+        return None;
+    };
+    let text = ast.atom(value);
+    let p = c.parent(l)?;
+    // `declare module "m" {}`.
+    if matches!(*c.node(p), Node::Module { name, .. } if name == l.node) {
+        return Some(format!("module \"{text}\""));
+    }
+    let b = &c.file(l.file).bound;
+    let ri = b.module_requests.iter().position(|r| r.node == l.node)?;
+    let target = c.link.module_target(l.file, ri as u32);
+    if target == ts_r_binder::program::ModuleTarget::Unresolved {
+        return None;
+    }
+    if matches!(c.node(p), Node::ExternalModuleRef { .. })
+        && let Some(ie) = c.parent(p)
+        && let Node::ImportEquals { name, .. } = *c.node(ie)
+    {
+        let own = name_text(ast, name)?.to_string();
+        let first = c
+            .sym_of_decl(ie)
+            .and_then(|x| c.resolve_alias(x))
+            .and_then(|m| super::quick_info::first_equals_alias(ck, l.file, m));
+        return Some(format!("module {}", first.unwrap_or(own)));
+    }
+    Some(format!("module \"{text}\""))
+}
+
+/// Whether `offset` touches an `=>` token.
+fn on_arrow_token(text: &str, offset: u32) -> bool {
+    let o = offset as usize;
+    text.get(o..o + 2) == Some("=>") || (o > 0 && text.get(o - 1..o + 1) == Some("=>"))
 }
 
 /// Whether `offset` is on a declaration keyword that tsc's quick info answers for
@@ -458,123 +528,14 @@ fn strip_ts_ext(path: &str) -> &str {
     path
 }
 
-/// The JSDoc of a symbol's first documented declaration, as markdown.
-pub fn docs_of(ck: &Ck<'_, '_>, s: SymId) -> String {
-    let c = ck.c;
-    for d in c.decls(s) {
-        if let Some(raw) = jsdoc_before(ck, d) {
-            return jsdoc_markdown(&raw);
-        }
-    }
-    String::new()
-}
-
-/// The `/** ... */` comment right before a declaration (or its statement).
-fn jsdoc_before(ck: &Ck<'_, '_>, d: Loc) -> Option<String> {
-    let c = ck.c;
-    let ast = c.ast(d.file);
-    let text = c.file(d.file).text.as_str();
-    // From a binding name to the statement that carries the comment.
-    let mut node = d;
-    for _ in 0..4 {
-        let Some(p) = c.parent(node) else { break };
-        let climb = match *c.node(p) {
-            Node::VarDeclarator { name, .. } => name == node.node,
-            Node::VarDecl { decls, .. } => ast.list(decls).first() == Some(&node.node),
-            Node::ExportDefaultExpr { .. } => true,
-            _ => false,
-        };
-        if !climb {
-            break;
-        }
-        node = p;
-    }
-    let start = ast.span(node.node).start;
-    let comment = ast.comments_between(0, start).last()?;
-    let between = text.get(comment.span.end as usize..start as usize)?;
-    if !between.trim().is_empty() {
-        return None;
-    }
-    let raw = comment.span.text(text);
-    raw.starts_with("/**").then(|| raw.to_string())
-}
-
-/// JSDoc text to markdown: the description, then `*@tag*` lines like VS Code shows them.
-pub fn jsdoc_markdown(raw: &str) -> String {
-    let body = raw
-        .strip_prefix("/**")
-        .unwrap_or(raw)
-        .strip_suffix("*/")
-        .unwrap_or(raw);
-    let mut desc = Vec::new();
-    let mut tags: Vec<String> = Vec::new();
-    for line in body.lines() {
-        let l = line.trim_start();
-        let l = l.strip_prefix('*').unwrap_or(l);
-        let l = l.strip_prefix(' ').unwrap_or(l);
-        if let Some(rest) = l.strip_prefix('@') {
-            let (tag, rest) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-            let rest = rest.trim();
-            let t = if matches!(tag, "param" | "property" | "prop" | "template") {
-                let rest = rest.trim_start_matches('{');
-                let rest = match rest.find('}') {
-                    Some(i) if l.contains('{') => rest[i + 1..].trim(),
-                    _ => rest,
-                };
-                let (n, d) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-                let d = d.trim().trim_start_matches('-').trim();
-                if d.is_empty() {
-                    format!("*@{tag}* `{n}`")
-                } else {
-                    format!("*@{tag}* `{n}` — {d}")
-                }
-            } else if rest.is_empty() {
-                format!("*@{tag}*")
-            } else {
-                format!("*@{tag}* — {rest}")
-            };
-            tags.push(t);
-        } else if tags.is_empty() {
-            desc.push(l.trim_end().to_string());
-        } else if let Some(last) = tags.last_mut() {
-            let l = l.trim();
-            if !l.is_empty() {
-                last.push(' ');
-                last.push_str(l);
-            }
-        }
-    }
-    while desc.last().is_some_and(|l| l.is_empty()) {
-        desc.pop();
-    }
-    while desc.first().is_some_and(|l| l.is_empty()) {
-        desc.remove(0);
-    }
-    let mut out = desc.join("\n");
-    if !tags.is_empty() {
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str(&tags.join("\n\n"));
-    }
-    out
+/// The JSDoc of a symbol, as markdown (no location: completion details).
+pub fn docs_of(ck: &mut Ck<'_, '_>, s: SymId) -> String {
+    super::doc_source::documentation(ck, s, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn jsdoc_to_markdown() {
-        let md = jsdoc_markdown(
-            "/**\n * Adds.\n *\n * @param a - first\n * @param {number} b second\n * @returns sum\n */",
-        );
-        assert_eq!(
-            md,
-            "Adds.\n\n*@param* `a` — first\n\n*@param* `b` — second\n\n*@returns* — sum"
-        );
-        assert_eq!(jsdoc_markdown("/** One line. */"), "One line.");
-    }
 
     #[test]
     fn rename_word_replaces_whole_words_on_the_first_line() {

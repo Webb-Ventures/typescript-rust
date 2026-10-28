@@ -391,12 +391,14 @@ function uriKey(uri, caseDir) {
 const rangeKey = (r) => `${r.start.line}:${r.start.character}-${r.end.line}:${r.end.character}`;
 const ws = (s) => s.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n\n').trim();
 
-function hoverText(result) {
+function hoverText(result, caseDir) {
   if (!result) return null;
   let c = result.contents;
   const part = (x) => (typeof x === 'string' ? x : x.language ? `\`\`\`${x.language}\n${x.value}\n\`\`\`` : x.value ?? '');
   c = Array.isArray(c) ? c.map(part).join('\n\n') : part(c);
   if (!c.trim()) return null;
+  // Links to declarations (`[C](file:///.../a.ts#1,7-1,8)`): the case-relative path.
+  c = c.replace(/\]\((file:\/\/[^)#\s]+)/g, (_, uri) => `](${uriKey(uri, caseDir)}`);
   // Code fences: drop the language tag (tsc says `tsx`), keep the code.
   const code = [];
   const prose = c.replace(/```[\w-]*\n([\s\S]*?)\n?```/g, (_, body) => {
@@ -411,7 +413,7 @@ function normalize(feature, r, caseDir) {
   const v = r.result;
   switch (feature) {
     case 'hover':
-      return hoverText(v);
+      return hoverText(v, caseDir);
     case 'definition':
     case 'typeDefinition':
     case 'references': {

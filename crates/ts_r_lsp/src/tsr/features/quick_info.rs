@@ -211,8 +211,11 @@ impl Writer {
             if name.starts_with('"') {
                 self.out.push_str(&format!("module {name}"));
             } else {
-                self.out
-                    .push_str(&format!("module \"{}\"", strip_ts_ext(&path)));
+                // A file module: the specifier this file would import it with.
+                let spec = ck
+                    .module_specifier_for(self.at.file, s, None)
+                    .unwrap_or_else(|| strip_ts_ext(&path).to_string());
+                self.out.push_str(&format!("module \"{spec}\""));
             }
             return;
         }
@@ -279,7 +282,13 @@ impl Writer {
         });
         self.line();
         let kw = if equals { "module" } else { "namespace" };
-        self.out.push_str(&format!("{kw} {}", c.sym_name(s)));
+        // tsc names the module by the first `import x = require(..)` of it in this file.
+        let name = c
+            .resolve_alias(s)
+            .filter(|_| equals)
+            .and_then(|m| first_equals_alias(ck, self.at.file, m))
+            .unwrap_or_else(|| c.sym_name(s).to_string());
+        self.out.push_str(&format!("{kw} {name}"));
     }
 
     fn variable(&mut self, ck: &mut Ck<'_, '_>, s: SymId, flags: SymbolFlags) {
@@ -595,7 +604,7 @@ impl Writer {
     /// cannot be named at the location, the alias's own name.
     fn name(&mut self, ck: &mut Ck<'_, '_>, s: SymId) -> String {
         let c = ck.c;
-        let base = c.sym_name(s).to_string();
+        let base = shown_name(ck, s);
         if let Some(a) = self.alias
             && !reachable(ck, s, self.at)
         {
@@ -612,9 +621,9 @@ impl Writer {
         let mut out = base;
         let mut cur = c.sym_parent(s);
         if member {
-            match owner(ck, s) {
+            match owner(ck, s).or_else(|| prototype_owner(ck, s)) {
                 Some(o) => {
-                    let on = c.sym_name(o).to_string();
+                    let on = shown_name(ck, o);
                     let ofl = c.sym_flags(o);
                     let tps = if ofl.intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE) {
                         self.owner_type_args(ck, s, o)
@@ -634,8 +643,14 @@ impl Writer {
         for _ in 0..32 {
             let Some(p) = cur else { break };
             let f = c.sym_flags(p);
-            if f.intersects(SymbolFlags::MODULE_FILE)
-                || !f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
+            // Another file's module, imported here with `import x = require(..)`: `x.`.
+            if f.intersects(SymbolFlags::MODULE_FILE) {
+                if let Some(a) = first_equals_alias(ck, self.at.file, p) {
+                    out = format!("{a}.{out}");
+                }
+                break;
+            }
+            if !f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
                 || c.sym_name(p) == "__global"
                 || encloses(ck, p, self.at)
             {
@@ -799,7 +814,7 @@ fn sig_type_args(ck: &mut Ck<'_, '_>, sig: SigId) -> String {
 
 /// The signatures to show for `s` at `at`: at a call of an overloaded or generic function,
 /// the one the call resolved to; otherwise all of them.
-fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Loc) -> Vec<SigId> {
+pub(super) fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Loc) -> Vec<SigId> {
     // An optional method's type carries the `undefined` optionality adds.
     let t = ck.type_of_symbol(s);
     let t = ck.remove_optionality(t);
@@ -932,4 +947,90 @@ pub fn strip_ts_ext(path: &str) -> &str {
         }
     }
     path
+}
+
+/// The name of the first `import x = require("..")` in `file` (top level or a namespace
+/// body) that stands for module `m`.
+pub(super) fn first_equals_alias(
+    ck: &Ck<'_, '_>,
+    file: ts_r_diagnostics::FileId,
+    m: SymId,
+) -> Option<String> {
+    let c = ck.c;
+    let ast = c.ast(file);
+    let mut stack = vec![(ast.root, 0u32)];
+    let mut found: Option<(u32, String)> = None;
+    while let Some((n, depth)) = stack.pop() {
+        match *ast.node(n) {
+            Node::Program { stmts } | Node::ModuleBlock { stmts } => {
+                for &st in ast.list(stmts).iter().rev() {
+                    stack.push((st, depth + 1));
+                }
+            }
+            Node::Module { body: Some(b), .. } if depth < 32 => stack.push((b, depth + 1)),
+            Node::ImportEquals {
+                name, module_ref, ..
+            } if matches!(ast.node(module_ref), Node::ExternalModuleRef { .. }) => {
+                let start = ast.span(n).start;
+                if found.as_ref().is_some_and(|(s, _)| *s <= start) {
+                    continue;
+                }
+                if let Some(x) = c.sym_of_decl(Loc::new(file, n))
+                    && c.resolve_alias(x) == Some(m)
+                    && let Some(t) = super::locate::name_text(ast, name)
+                {
+                    found = Some((start, t.to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    found.map(|(_, n)| n)
+}
+
+/// A symbol's name as quick info writes it: an anonymous class or function expression is
+/// `(Anonymous class)` / `(Anonymous function)` (a function initializing a variable takes
+/// its name), a class statement missing its name `__missing`.
+fn shown_name(ck: &Ck<'_, '_>, s: SymId) -> String {
+    let c = ck.c;
+    let name = c.sym_name(s);
+    match name {
+        "__class" => {
+            let missing = c.decls(s).iter().any(|&d| {
+                matches!(*c.node(d), Node::ClassDecl { name: None, modifiers, .. }
+                    if !modifiers.contains(ts_r_ast::Modifiers::DEFAULT))
+            });
+            if missing {
+                "__missing"
+            } else {
+                "(Anonymous class)"
+            }
+            .to_string()
+        }
+        // A function expression initializing a variable is named by it.
+        "__function" => c
+            .first_decl(s)
+            .and_then(|d| c.parent(d))
+            .and_then(|p| match *c.node(p) {
+                Node::VarDeclarator { name, .. } => {
+                    super::locate::name_text(c.ast(p.file), name).map(str::to_string)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "(Anonymous function)".to_string()),
+        _ => name.to_string(),
+    }
+}
+
+/// The class whose `prototype` property `s` is (the property has no declaration).
+fn prototype_owner(ck: &mut Ck<'_, '_>, s: SymId) -> Option<SymId> {
+    let c = ck.c;
+    if c.sym_name(s) != "prototype" || c.first_decl(s).is_some() {
+        return None;
+    }
+    let t = ck.type_of_symbol(s);
+    let k = super::nav::type_symbol(ck, t)?;
+    ck.c.sym_flags(k)
+        .intersects(SymbolFlags::CLASS)
+        .then_some(k)
 }

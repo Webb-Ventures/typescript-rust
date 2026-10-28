@@ -260,7 +260,7 @@ pub fn type_definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Va
 
 /// The symbol a type comes from (tsc's `type.symbol`): the class or interface, the
 /// function, class or namespace of a `typeof`, the type literal, the enum member.
-fn type_symbol(ck: &Ck<'_, '_>, t: TypeId) -> Option<SymId> {
+pub(super) fn type_symbol(ck: &Ck<'_, '_>, t: TypeId) -> Option<SymId> {
     let store = ck.store();
     match store.kind(t) {
         TypeKind::Object(_) => match store.object_of(t)?.kind {
@@ -463,26 +463,60 @@ struct Target {
     name: String,
     syms: Vec<SymId>,
     decls: HashSet<Loc>,
+    /// Declarations of the members the target inherits or overrides
+    /// ([`super::inherit::ancestor_decls`]); empty when it is no class or interface member.
+    ancestors: HashSet<Loc>,
+    /// Candidates already compared by ancestry.
+    related: std::collections::HashMap<SymId, bool>,
+    /// The meanings searched ([`super::ref_meaning::search_meaning`]).
+    meaning: u8,
+    /// A search from an alias that renames (`import { a as b }`): names match when this
+    /// alias is on their alias chain ([`super::aliases`]).
+    alias: Option<SymId>,
+    /// Only aliases of the target match (a search from the `default` keyword of an
+    /// exported declaration finds its imports, not its local uses).
+    imports_only: bool,
+    /// Other names aliases give the target (`b` of `import { a as b }`).
+    alias_names: Vec<String>,
 }
 
 impl Target {
-    fn at(ck: &mut Ck<'_, '_>, l: Loc) -> Option<Target> {
+    fn at(ck: &mut Ck<'_, '_>, l: Loc, rename: bool) -> Option<Target> {
         let c = ck.c;
         let name = key_text(ck, l)?;
         let m = meaning_at(ck, l);
-        // On a shorthand, references are those of the variable (what tsserver does).
-        let s = match (m.primary, m.shorthand) {
+        // On a shorthand, a rename is the variable's (what tsserver does); references
+        // are those of both the variable and the property.
+        let (s, also) = match (m.primary, m.shorthand) {
             (Some(p), Some(v)) if matches!(c.node(c.parent(l)?), Node::ShorthandProp { .. }) => {
-                let _ = p;
-                v
+                (v, (!rename).then_some(p))
             }
-            (Some(p), _) => p,
-            (None, Some(v)) => v,
+            (Some(p), v) => (p, v.filter(|_| !rename)),
+            (None, Some(v)) => (v, None),
             (None, None) => return None,
         };
-        let s = c.resolve_alias(s).unwrap_or(s);
-        let mut decls: HashSet<Loc> = c.decls(s).into_iter().collect();
+        let mut s = s;
+        if let Some(t) = super::aliases::imported_side(c, l) {
+            s = t;
+        }
+        let start = super::aliases::start(c, s, rename);
+        if super::aliases::is_alias(c, start) && also.is_none() && m.contextual.is_none() {
+            return Some(Target::of_alias(ck, l, name, start, rename));
+        }
+        let s = c.resolve_alias(start).unwrap_or(start);
+        let own = c.decls(s);
+        let meaning = if rename {
+            ts_r_binder::meaning::ALL
+        } else {
+            super::ref_meaning::search_meaning(ck, l, &own)
+        };
+        let mut decls: HashSet<Loc> = own.into_iter().collect();
         let mut syms = vec![s];
+        if let Some(a) = also {
+            let a = c.resolve_alias(a).unwrap_or(a);
+            decls.extend(c.decls(a));
+            syms.push(a);
+        }
         // A contextually typed literal's property is one with the property it implements.
         if let Some(p) = m.contextual
             && p != s
@@ -490,16 +524,80 @@ impl Target {
             decls.extend(c.decls(p));
             syms.push(p);
         }
-        Some(Target { name, syms, decls })
+        let mut ancestors = HashSet::new();
+        for &t in &syms {
+            ancestors.extend(super::inherit::ancestor_decls(ck, t));
+        }
+        Some(Target {
+            name,
+            syms,
+            decls,
+            ancestors,
+            related: Default::default(),
+            meaning,
+            alias: None,
+            imports_only: false,
+            alias_names: Vec::new(),
+        })
     }
 
-    fn matches(&self, ck: &Ck<'_, '_>, s: SymId) -> bool {
+    /// A search for the alias `a` itself (see [`Target::alias`]).
+    fn of_alias(ck: &mut Ck<'_, '_>, l: Loc, name: String, a: SymId, rename: bool) -> Target {
         let c = ck.c;
+        let own = c.decls(a);
+        let meaning = if rename {
+            ts_r_binder::meaning::ALL
+        } else {
+            super::ref_meaning::search_meaning(ck, l, &own)
+        };
+        Target {
+            name,
+            syms: vec![a],
+            decls: own.into_iter().collect(),
+            ancestors: HashSet::new(),
+            related: Default::default(),
+            meaning,
+            alias: Some(a),
+            imports_only: false,
+            alias_names: Vec::new(),
+        }
+    }
+
+    /// The symbol searched for: the alias in an alias search, else the declared symbol.
+    fn symbol(&self) -> SymId {
+        self.alias.unwrap_or(self.syms[0])
+    }
+
+    fn has_name(&self, n: &str) -> bool {
+        self.name == n || self.alias_names.iter().any(|a| a == n)
+    }
+
+    fn matches(&mut self, ck: &mut Ck<'_, '_>, s: SymId) -> bool {
+        let c = ck.c;
+        if let Some(a) = self.alias {
+            return super::aliases::chain(c, s).contains(&a);
+        }
+        if self.imports_only {
+            return super::aliases::is_alias(c, s)
+                && super::aliases::chain(c, s).contains(&self.syms[0]);
+        }
         let s = c.resolve_alias(s).unwrap_or(s);
         if self.syms.contains(&s) {
             return true;
         }
-        !self.decls.is_empty() && c.decls(s).iter().any(|d| self.decls.contains(d))
+        if !self.decls.is_empty() && c.decls(s).iter().any(|d| self.decls.contains(d)) {
+            return true;
+        }
+        if self.ancestors.is_empty() {
+            return false;
+        }
+        if let Some(&r) = self.related.get(&s) {
+            return r;
+        }
+        let up = super::inherit::ancestor_decls(ck, s);
+        let r = up.iter().any(|d| self.ancestors.contains(d));
+        self.related.insert(s, r);
+        r
     }
 }
 
@@ -529,6 +627,17 @@ fn literal_key_at(cx: &Ctx<'_, '_>, offset: u32) -> Option<NodeId> {
 
 /// References to the symbol at `offset`, in `scope`, in file order then source order.
 pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Scope) -> Vec<Ref> {
+    references_with(cx, ck, offset, scope, false)
+}
+
+/// [`references`], for a rename when `rename` is set (a shorthand renames only its variable).
+fn references_with(
+    cx: &Ctx<'_, '_>,
+    ck: &mut Ck<'_, '_>,
+    offset: u32,
+    scope: Scope,
+    rename: bool,
+) -> Vec<Ref> {
     let c = cx.checker;
     if let Some(refs) = special_references(cx, offset, scope) {
         return refs;
@@ -538,6 +647,11 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
     let keyword_name = (scope == Scope::Project)
         .then(|| keywords::keyword_name(&Doc::new(c, cx.file), offset))
         .flatten();
+    if keyword_name.is_none()
+        && let Some((decl, ks, ke)) = super::aliases::default_keyword_at(c, cx.file, offset)
+    {
+        return default_keyword_references(cx, ck, decl, (ks, ke), scope, rename);
+    }
     let Some(n) = keyword_name
         .or_else(|| ident_at(c.ast(cx.file), offset))
         .or_else(|| literal_key_at(cx, offset))
@@ -550,16 +664,65 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
             return refs;
         }
     }
-    let Some(target) = Target::at(ck, Loc::new(cx.file, n)) else {
+    let Some(mut target) = Target::at(ck, Loc::new(cx.file, n), rename) else {
         return Vec::new();
     };
+    collect_alias_names(cx, &mut target, scope, rename);
+    let mut out = scan_target(cx, ck, &mut target, scope);
+    // On a class's name, `this` in its static methods and accessors is the class too.
+    let on_class_name = c.parent(Loc::new(cx.file, n)).is_some_and(|p| {
+        matches!(c.node(p), Node::ClassDecl { name: Some(x), .. } | Node::ClassExpr { name: Some(x), .. } if *x == n)
+    });
+    if on_class_name {
+        let mut classes: Vec<Loc> = target
+            .decls
+            .iter()
+            .copied()
+            .filter(|d| matches!(c.node(*d), Node::ClassDecl { .. } | Node::ClassExpr { .. }))
+            .filter(|d| scope == Scope::Project || d.file == cx.file)
+            .collect();
+        classes.sort_by_key(|d| (d.file.0, d.node.index()));
+        for d in classes {
+            let doc = Doc::new(c, d.file);
+            out.extend(keywords::static_this_refs(&doc, d.node).into_iter().map(
+                |(file, start, end)| Ref {
+                    file,
+                    start,
+                    end,
+                    is_decl: false,
+                    is_write: false,
+                    shorthand: None,
+                },
+            ));
+        }
+        out.sort_by_key(|r| (r.file.0, r.start));
+        out.dedup_by_key(|r| (r.file.0, r.start));
+    }
+    out
+}
+
+/// Every name in `scope` that refers to `target`, in file order then source order, plus
+/// the `default` keyword of an anonymous default export among its declarations.
+fn scan_target(
+    cx: &Ctx<'_, '_>,
+    ck: &mut Ck<'_, '_>,
+    target: &mut Target,
+    scope: Scope,
+) -> Vec<Ref> {
+    let c = cx.checker;
     let files: Vec<FileId> = match scope {
         Scope::File => vec![cx.file],
         Scope::Project => (0..c.files.len())
             .map(|i| FileId(i as u32))
             .filter(|&f| {
                 let sf = c.file(f);
-                !sf.is_lib && !sf.path.contains("/node_modules/") && sf.text.contains(&target.name)
+                !sf.is_lib
+                    && !sf.path.contains("/node_modules/")
+                    && (sf.text.contains(&target.name)
+                        || target
+                            .alias_names
+                            .iter()
+                            .any(|a| sf.text.contains(a.as_str())))
             })
             .collect(),
     };
@@ -568,17 +731,27 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
         let ast = c.ast(f);
         let first = out.len();
         for id in names_in(ast) {
-            if name_text(ast, id) != Some(target.name.as_str()) {
+            if !name_text(ast, id).is_some_and(|t| target.has_name(t)) {
                 continue;
             }
             let l = Loc::new(f, id);
+            if target.meaning != ts_r_binder::meaning::ALL
+                && super::ref_meaning::location_meaning(ck, l) & target.meaning == 0
+            {
+                continue;
+            }
             let m = meaning_at(ck, l);
             let Meaning {
-                primary,
+                mut primary,
                 shorthand,
                 is_decl,
                 contextual,
             } = m;
+            if target.alias.is_some()
+                && let Some(t) = super::aliases::imported_side(c, l)
+            {
+                primary = Some(t);
+            }
             let p = primary.is_some_and(|s| target.matches(ck, s))
                 || contextual.is_some_and(|s| target.matches(ck, s));
             let v = shorthand.is_some_and(|s| target.matches(ck, s));
@@ -621,7 +794,7 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
             if !p {
                 continue;
             }
-            let access = c.parent(l).unwrap_or(l);
+            let access = super::locate::literal_key_owner(ck, l).unwrap_or(l);
             out.push(Ref {
                 file: f,
                 start,
@@ -637,35 +810,77 @@ pub fn references(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32, scope: Sco
         }
         out[first..].sort_by_key(|r| r.start);
     }
-    // On a class's name, `this` in its static methods and accessors is the class too.
-    let on_class_name = c.parent(Loc::new(cx.file, n)).is_some_and(|p| {
-        matches!(c.node(p), Node::ClassDecl { name: Some(x), .. } | Node::ClassExpr { name: Some(x), .. } if *x == n)
-    });
-    if on_class_name {
-        let mut classes: Vec<Loc> = target
-            .decls
-            .iter()
-            .copied()
-            .filter(|d| matches!(c.node(*d), Node::ClassDecl { .. } | Node::ClassExpr { .. }))
-            .filter(|d| scope == Scope::Project || d.file == cx.file)
-            .collect();
-        classes.sort_by_key(|d| (d.file.0, d.node.index()));
-        for d in classes {
-            let doc = Doc::new(c, d.file);
-            out.extend(keywords::static_this_refs(&doc, d.node).into_iter().map(
-                |(file, start, end)| Ref {
-                    file,
-                    start,
-                    end,
-                    is_decl: false,
-                    is_write: false,
-                    shorthand: None,
-                },
-            ));
+    for d in target.decls.iter().copied().collect::<Vec<_>>() {
+        if (scope == Scope::Project || d.file == cx.file)
+            && let Some((start, end)) = super::aliases::default_keyword_of(c, d)
+        {
+            out.push(Ref {
+                file: d.file,
+                start,
+                end,
+                is_decl: true,
+                is_write: false,
+                shorthand: None,
+            });
         }
-        out.sort_by_key(|r| (r.file.0, r.start));
-        out.dedup_by_key(|r| (r.file.0, r.start));
     }
+    out.sort_by_key(|r| (r.file.0, r.start));
+    out.dedup_by_key(|r| (r.file.0, r.start));
+    out
+}
+
+/// Fills [`Target::alias_names`] (not for a rename: renaming `a` keeps `{ a as b }`'s `b`).
+fn collect_alias_names(cx: &Ctx<'_, '_>, target: &mut Target, scope: Scope, rename: bool) {
+    if rename {
+        return;
+    }
+    let files: Vec<FileId> = match scope {
+        Scope::File => vec![cx.file],
+        Scope::Project => project_files(cx).collect(),
+    };
+    target.alias_names =
+        super::aliases::alias_names(cx.checker, &files, target.symbol(), &target.name);
+}
+
+/// References from the `default` keyword of `export default ...` (`decl`): the keyword,
+/// and the imports of that default export with their uses (for an exported declaration,
+/// not its local uses).
+fn default_keyword_references(
+    cx: &Ctx<'_, '_>,
+    ck: &mut Ck<'_, '_>,
+    decl: Loc,
+    keyword: (u32, u32),
+    scope: Scope,
+    rename: bool,
+) -> Vec<Ref> {
+    let c = cx.checker;
+    let Some(s) = c.sym_of_decl(decl) else {
+        return Vec::new();
+    };
+    let is_alias = super::aliases::is_alias(c, s);
+    let mut target = Target {
+        name: c.sym_name(s).to_string(),
+        syms: vec![s],
+        decls: HashSet::new(),
+        ancestors: HashSet::new(),
+        related: Default::default(),
+        meaning: ts_r_binder::meaning::ALL,
+        alias: is_alias.then_some(s),
+        imports_only: !is_alias,
+        alias_names: Vec::new(),
+    };
+    collect_alias_names(cx, &mut target, scope, rename);
+    let mut out = scan_target(cx, ck, &mut target, scope);
+    out.push(Ref {
+        file: cx.file,
+        start: keyword.0,
+        end: keyword.1,
+        is_decl: true,
+        is_write: false,
+        shorthand: None,
+    });
+    out.sort_by_key(|r| (r.file.0, r.start));
+    out.dedup_by_key(|r| (r.file.0, r.start));
     out
 }
 
@@ -869,7 +1084,7 @@ pub fn rename(
         }
     }
     let on_this = ast.span(n).text(c.file(cx.file).text.as_str()) == "this";
-    let refs = references(cx, ck, offset, Scope::Project);
+    let refs = references_with(cx, ck, offset, Scope::Project, true);
     let mut lc = LinesCache::default();
     let mut changes: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for r in refs {

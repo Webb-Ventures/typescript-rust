@@ -402,6 +402,38 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   declaration describes the declaration; a string or number literal that names a member
   (`o["a"]`, `{ 1: x }`) describes that member.
 
+## Documentation (`tsr/features/jsdoc.rs`, `doc_source.rs`)
+
+Rules from `tsc: tsc/internal/ls/hover.go` (`getDocumentationFromDeclaration`,
+`getJSDocOrTag`, `writeNameLink`) and `tsc: tsc/internal/parser/jsdoc.go` (where a tag
+starts), v7.0.2, in our words.
+
+- `jsdoc.rs` parses `/** */` text itself (the parser's JSDoc pass only lowers types): a
+  tag starts at any `@` followed by an identifier start, except in a fenced block, an
+  inline `` `code` `` span (to the end of its line), `{@link ...}` and `@author`'s
+  `<email>`. Markdown: the comment, then per tag except `@type`/`@typedef`/`@callback`
+  `\n\n*@tag*`, its name in backticks (`@param`/`@property`, a missing name as an empty
+  one; `@template` names comma-joined; `@augments` class) and ` — comment` (just
+  ` comment` when it starts with `-`). Types in braces are not shown except `@throws`'s;
+  an unclosed `{ {...}` type ends after its inner braces; `@param o.a` after `o` is
+  dropped. `@example` is a `tsx` fence (`<caption>` after ` — `). `@see name` and
+  `{@link name text}` link to the name's declaration as `file#line,col-line,col` (1-based,
+  the name's span, through aliases), a URL as `[text](url)`, or print `name text` when the
+  name does not resolve; names resolve in the documented function's body first (its
+  parameters).
+- `doc_source.rs` picks the one declaration documented (see its module docs): the
+  overload or constructor hovered, the single signature a call resolved to, an
+  interface's call or construct signature at a call, else the value declaration (or the
+  first interface, enum, namespace, type parameter, type alias); a union property declared
+  in several places has none. Its own nearest `/**` comment (other comments may sit
+  between) wins, else a parameter's `@param` (by name, a binding pattern by position), a
+  type parameter's `@template`, the statement of a first declarator, the variable or
+  property a function or class expression initializes, a destructured property's
+  declaration, the first overload, then the same-named member of the base types.
+  `namespace a.b` documents `a` only. A property read through an index signature shows
+  that signature's comment (the first applicable non-`string` index, else the `string`
+  one). A comment with `@typedef`/`@callback` documents that type, not what follows it.
+
 ## Keywords and navigation (`tsr/features/keywords.rs`, `nav.rs`)
 
 Syntax-only rules for the keywords tsc 7 answers without a symbol. Learned from the fourslash
@@ -453,6 +485,31 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   the name.
 - `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
   (`a|()`), as tsserver's touching-name lookup does.
+- **Inherited members** (`inherit.rs`, from `tsc: tsc/internal/ls/findallreferences.go`,
+  `forEachRelatedSymbol`): a non-static class or interface member is one with the
+  same-named members its container inherits (base class, `implements`, interface
+  `extends`, any depth). Two members are related when the declaration sets reached upward
+  from each share one (an override, its base, a sibling override, an implementation). A
+  class in its own base chain has no base; interfaces keep theirs.
+- **Search meaning** (`ref_meaning.rs`, from `tsc: tsc/internal/ls/utilities.go`): a
+  search covers the meanings of the location it starts from (value, type, namespace),
+  widened by every declaration sharing one; each candidate must be used in one of them, so
+  an interface merged with a namespace and a function is searched as a type only from a
+  type position. Rename searches every meaning.
+- **Aliases** (`aliases.rs`): a search starts at the cursor's symbol followed through
+  transparent aliases (`import { a }`, `export { a }`, a default import except in a
+  rename) and stops at the first alias that renames (`{ a as b }`, `import * as ns`,
+  `import x = require(..)`, `export default expr`) or at the declared symbol. A name
+  matches when the search symbol is on its alias chain (`Checker::link.alias_chain`), and
+  the names aliases give the symbol are scanned too (not for a rename, nor through entity
+  `import x = N.y`). The imported side of a renaming specifier and the entity of `export
+  default a` / `export = a` stand for the specifier's immediate target. From the `default`
+  keyword: the keyword, the export's imports and their uses; an anonymous default export's
+  keyword is its declaration.
+- **Shorthands and private names**: references (not rename) from `{ x }` or `const { x } =
+  o` cover the variable and the property; `#x` resolves lexically to the innermost class
+  declaring it; computed literal keys (`["a"]`, `` [`a`] ``) and string enum member names
+  are literal keys.
 - **Constructor references** (`constructor_refs.rs`): find-all-references on a
   `constructor` keyword (or a modifier before it) lists the class's constructor keywords as
   declarations, then the callee name of each `new` of a class the constructor builds (its
@@ -890,12 +947,15 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle lists the rest by cause: bench/lsp-oracle/README.md): hover
+- Features (the fourslash oracle, 1864 of 2517 tests at aed0aea, lists the rest by cause:
+  bench/lsp-oracle/README.md): hover has no JavaScript `@typedef`/`@callback`/`@property`
+  hovers and no keyword or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
-  have no symbol (the checker does not type JSX yet); references do not follow renaming
-  imports (`import { a as b }`: uses of `b`) or members inherited across classes.
+  have no symbol (the checker does not type JSX yet); references do not go back up from a
+  re-export to the declaration the way tsc does from some imports (`import boom from
+  "./d"` where `d` re-exports a renamed default), nor through JSDoc, `require` or `import()`.
   Completions: no accessibility filtering after `.` (private members are listed),
   auto-imports only from the project's own (non-`node_modules`) modules and never
   `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no
