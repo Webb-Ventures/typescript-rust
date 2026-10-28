@@ -253,7 +253,12 @@ impl Lower<'_, '_> {
                         self.usage(right, class_name, true, &mut u);
                     }
                 }
-                Static::Expr(e) => self.usage(e, class_name, true, &mut u),
+                // A key capture is evaluated outside the class: its `this` and `super` are
+                // the outer ones.
+                Static::Expr(e) => {
+                    let capture = self.is_temp_capture(e);
+                    self.usage(e, class_name, !capture, &mut u)
+                }
                 Static::Block(body, _) => {
                     for st in self.tx.items(body) {
                         self.usage(st, class_name, true, &mut u);
@@ -272,10 +277,14 @@ impl Lower<'_, '_> {
             .any(|s| matches!(*s, Static::Define(m) if self.key_captured(m)))
             || fields.iter().any(|&m| self.key_captured(m));
         let extends = self.extends_expr(p.heritage);
+        // `super` in static code of a class without `extends`: tsc moves it out as it is
+        // (`_a = Y; Y.d = super.foo;`, observed), which is a SyntaxError. The class stays as
+        // written instead, so the output runs (esbuild's StaticClassBlockES2021).
         if u.sup && extends.is_none() {
             self.children(id);
             return;
         }
+
         // Private members: `_C_instances` first, the alias when static code needs it, then
         // the storage in member order; a class expression's alias otherwise after them.
         let static_privs = statics.iter().any(|s| matches!(s, Static::PrivField(_)))
@@ -683,7 +692,15 @@ impl Lower<'_, '_> {
                 }
                 return;
             }
+            // Key captures come before the name too (`(_a = class {}, _b = k(),
+            // __setFunctionName(_a, "C"), _a[_b] = 1, _a)`, observed).
+            let (captures, lead): (Vec<NodeId>, Vec<NodeId>) =
+                lead.iter().partition(|&&e| self.is_temp_capture(e));
             let mut items = vec![first];
+            for e in captures {
+                self.visit(e);
+                items.push(e);
+            }
             items.extend(named);
             for e in lead.into_iter().chain(rest) {
                 self.visit(e);
@@ -1377,7 +1394,7 @@ impl Lower<'_, '_> {
     }
 
     /// `_a = k` (a TypeScript transform temporary assigned: a computed key's capture).
-    fn is_temp_capture(&self, e: NodeId) -> bool {
+    pub(super) fn is_temp_capture(&self, e: NodeId) -> bool {
         self.tx.key_exprs.contains(&e)
             || matches!(self.n(e), Node::Assign { op: ts_r_ast::AssignOp::Assign, left, .. }
                 if self.tx.atom_of(left).is_some_and(|a| self.tx.temp_atoms.contains(&a)))
@@ -1478,10 +1495,20 @@ impl Lower<'_, '_> {
                 }
                 Node::Labeled { body, .. } => stack.push((body, ok)),
                 Node::Break { .. } | Node::Continue { .. } => {}
-                Node::FunctionDecl { .. }
-                | Node::FunctionExpr { .. }
-                | Node::ClassDecl { .. }
-                | Node::ClassExpr { .. } => {
+                // A nested class's heritage, computed keys (above) and key captures run here.
+                Node::StaticBlock { body } => {
+                    for st in self.tx.items(body) {
+                        let outer = matches!(self.n(st), Node::ExprStmt { expr }
+                            if self.tx.inline_static.contains(&id) && self.is_temp_capture(expr));
+                        stack.push((st, ok && outer));
+                    }
+                }
+                Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                    for c in self.tx.ast.children(id) {
+                        stack.push((c, ok));
+                    }
+                }
+                Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => {
                     for c in self.tx.ast.children(id) {
                         stack.push((c, false));
                     }
@@ -1607,10 +1634,20 @@ impl Lower<'_, '_> {
             }
             Node::Labeled { body, .. } => self.subst(body, s, this_ok),
             Node::Break { .. } | Node::Continue { .. } => {}
-            Node::FunctionDecl { .. }
-            | Node::FunctionExpr { .. }
-            | Node::ClassDecl { .. }
-            | Node::ClassExpr { .. } => {
+            // A nested class's heritage, computed keys (above) and key captures run here.
+            Node::StaticBlock { body } => {
+                for st in self.tx.items(body) {
+                    let outer = matches!(self.n(st), Node::ExprStmt { expr }
+                        if self.tx.inline_static.contains(&id) && self.is_temp_capture(expr));
+                    self.subst(st, s, this_ok && outer);
+                }
+            }
+            Node::ClassDecl { .. } | Node::ClassExpr { .. } => {
+                for c in self.tx.ast.children(id) {
+                    self.subst(c, s, this_ok);
+                }
+            }
+            Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => {
                 for c in self.tx.ast.children(id) {
                     self.subst(c, s, false);
                 }

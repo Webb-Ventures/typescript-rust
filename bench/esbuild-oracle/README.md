@@ -30,10 +30,10 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-wip/v1-build at e5b1e2c (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**851 of 881 compared cases pass (96.6%)**; 189 of the 1070 cases are skipped. Of the 30 failures, 13 are
-intended differences where ts-r-build follows tsc 7 (listed below) and 7 are oracle
-artifacts; the other 10 are gaps. The esbuild test files come from
+wip/v1-emit at 9293c3c (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**852 of 881 compared cases pass (96.7%)**; 189 of the 1070 cases are skipped. Of the 29 failures, 13 are
+intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
+artifacts; the other 8 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
 Since 07d2cdd (832 of 872): dead `switch` cases, `@__NO_SIDE_EFFECTS__` and pure calls with
 spread arguments in DCE; top-level await in lazily initialized modules; CommonJS imports run
@@ -52,7 +52,7 @@ tests' `Defines` lists to `--define`, so 9 more cases are compared (8 pass).
 | bundler_importstar_test.go | 80 | 0 | 0 |
 | bundler_importstar_ts_test.go | 23 | 0 | 0 |
 | bundler_loader_test.go | 57 | 0 | 28 |
-| bundler_lower_test.go | 72 | 12 | 0 |
+| bundler_lower_test.go | 73 | 11 | 0 |
 | bundler_packagejson_test.go | 93 | 2 | 1 |
 | bundler_splitting_test.go | 22 | 1 | 0 |
 | bundler_ts_test.go | 66 | 4 | 18 |
@@ -88,7 +88,7 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
   falls back to the package's `tsconfig.json`, as tsc resolves it
   (`TsconfigJsonNodeModulesTsconfigPathBad`).
 
-### Oracle artifacts (7)
+### Oracle artifacts (8)
 
 - `TsconfigExtendsDotWithSlash` / `DotDotWithSlash` expect a warning where the real esbuild
   CLI fails ("is a directory"); ts-r matches the test's intent.
@@ -97,17 +97,17 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
   esbuild itself.
 - `TopLevelAwaitAllowedImportWithSplitting`: esbuild's own output throws
   (`require_entry is not defined`).
-- `LowerStaticSuperES2021NoBundle`: esbuild's output is a SyntaxError (`'super' keyword
-  unexpected here`); ts-r's throws a ReferenceError, so the thrown errors differ.
+- `LowerStaticSuperES2021NoBundle` and `LowerStaticAsyncSuperES2021NoBundle`: esbuild's output
+  is a SyntaxError (`'super' keyword unexpected here`; in the async case it leaves
+  `await super.foo?.(1, 2)` in an arrow moved out of the class); ts-r's runs as tsc 7's does
+  and throws a ReferenceError, so the thrown errors differ. These count as one artifact each.
 - `SplittingMinifyIdentifiersCrashIssue437`: the output differs only in which short name the
   minifier picks (`o` vs `f`), which shows in a thrown error.
 
-### Gaps (10)
+### Gaps (8)
 
 - **CSS** (5): CSS modules imported from JS, CSS-from-JS missing-import errors, and the
   `[ext]` placeholder in entry names with CSS bundles (`MetafileCSSBundleTwoToOne`).
-- **Lowering** (2): `super` in static async methods at ES2016 (`LowerStaticAsyncSuperES2016NoBundle`)
-  and `super[key]?.()` in a lowered async method (`LowerAsyncSuperES2016NoBundle`).
 - **Yarn PnP** (2): a tsconfig `extends` that names a package resolved through
   `.pnp.data.json`.
 - **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
@@ -135,3 +135,4 @@ stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and
 | parity/bundler-2 at 9348931: `--target=es5..esnext`, `--supported:F=bool`; runner maps every `UnsupportedJSFeatures` set | 1070 | 872 | 823 | 49 | 198 | 94.4% |
 | parity/bundler-2 at 07d2cdd: `data:` URL modules, `?query` suffixes, per-chunk `file` URLs, `--public-path` for chunks, `import()`-only modules named like chunks | 1070 | 872 | 832 | 40 | 198 | 95.4% |
 | v1 build parity at e5b1e2c: DCE of dead `switch` cases and `@__NO_SIDE_EFFECTS__`, async lazy modules, CommonJS imports in order, top-level `this`, `let`/`const`/`class` to `var`, unwrapped CommonJS entries, `define` on `import.meta` / optional chains; runner maps `Defines` | 1070 | 881 | 851 | 30 | 189 | 96.6% |
+| v1 emit parity at 9293c3c: async `super` below ES2017 (optional `super` calls, `super` in nested class keys) | 1070 | 881 | 852 | 29 | 189 | 96.7% |

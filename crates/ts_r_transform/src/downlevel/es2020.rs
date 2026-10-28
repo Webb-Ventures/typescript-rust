@@ -150,14 +150,33 @@ impl Lower<'_, '_> {
         }
         links.reverse();
         let at = self.at(id);
-        self.visit(cur);
+        // `super.x?.y` in a lowered async method: the first link becomes `_super.x` (or
+        // `_superIndex(k).value`), and a call on it passes `this` (observed).
+        let mut super_base = None;
+        if self.n(cur) == (Node::Super {})
+            && self.super_ctx().is_some()
+            && links.first().is_some_and(|l| {
+                !l.optional && matches!(self.tx.kind(l.node), NodeKind::Member | NodeKind::Index)
+            })
+        {
+            let first = links.remove(0);
+            self.super_access(first.node);
+            cur = first.node;
+            super_base = Some(first.node);
+        } else {
+            self.visit(cur);
+        }
         let mut open: Option<NodeId> = None;
         let last = links.len().saturating_sub(1);
         let mut this_arg = None;
         for (i, link) in links.iter().enumerate() {
             let mut call_this = None;
+            let on_super = super_base.is_some_and(|b| self.skip_parens(cur) == b);
+            if on_super && self.tx.kind(link.node) == NodeKind::Call {
+                call_this = Some(self.this(at));
+            }
             if link.optional {
-                if self.tx.kind(link.node) == NodeKind::Call {
+                if self.tx.kind(link.node) == NodeKind::Call && !on_super {
                     call_this = self.this_of(cur);
                 }
                 if let Some(test) = open.take() {
