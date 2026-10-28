@@ -21,6 +21,7 @@ use ts_r_ast::{Ast, Node, NodeId};
 use ts_r_binder::program::ModuleTarget;
 use ts_r_checker::Checker;
 use ts_r_diagnostics::FileId;
+use ts_r_types::SymId;
 
 use super::locate::node_at;
 
@@ -159,6 +160,55 @@ pub(super) fn module_references(
     }
     out.sort_unstable();
     out.dedup();
+    out
+}
+
+/// The specifier of each import type without a qualifier (`import("m")` as a type) in
+/// `files`, with what it names: the module's `export =` symbol.
+pub(super) fn export_equals_types(
+    c: &Checker<'_>,
+    files: &[FileId],
+) -> Vec<(FileId, u32, u32, SymId)> {
+    let mut out = Vec::new();
+    for &f in files {
+        if !c.file(f).text.contains("import") {
+            continue;
+        }
+        let ast = c.ast(f);
+        let parents = c.file(f).parents();
+        for (i, r) in c.bound(f).module_requests.iter().enumerate() {
+            let mut n = r.node;
+            let mut it = None;
+            for _ in 0..2 {
+                match parents.parent(n).map(|p| (p, *ast.node(p))) {
+                    Some((p, Node::TypeRef { .. })) => n = p,
+                    Some((
+                        _,
+                        Node::ImportType {
+                            qualifier: None,
+                            is_typeof: false,
+                            ..
+                        },
+                    )) => {
+                        it = Some(());
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            if it.is_none() {
+                continue;
+            }
+            let target = c.link.module_target(f, i as u32);
+            let Some(&m) = c.link.module_symbols(target).first() else {
+                continue;
+            };
+            if let Some(e) = c.export_of(c.sym_ref(m), "export=") {
+                let (s, end) = inner_span(ast, r.node);
+                out.push((f, s, end, e));
+            }
+        }
+    }
     out
 }
 

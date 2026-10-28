@@ -1,5 +1,6 @@
 //! Names that JSDoc comments refer to: `{@link X}` (also `{@linkcode}` and
-//! `{@linkplain}`), `@see X` or `@see {X}`, and `@throws {X}`. Find-all-references and
+//! `{@linkplain}`), `@see X` or `@see {X}`, `@throws {X}`, and the parameter `@param x`
+//! names (not a nested `x.y`, nor one of an `@overload`). Find-all-references and
 //! rename count each name of such a path, and both may start on one.
 //!
 //! A path is `A.B.C`, optionally followed by `#member` parts; after a `#`, a `.` ends the
@@ -85,6 +86,8 @@ pub(super) fn links_in(c: &Checker<'_>, f: FileId) -> Vec<Link> {
         }
         let body_end = e - 2;
         let mut host = None;
+        // Inside an `@overload`: its `@param`s up to its `@returns` are the overload's.
+        let mut overload = false;
         let mut p = s + 3;
         // Each round moves past one `@`.
         while let Some(k) = memchr_at(b, p, body_end) {
@@ -96,7 +99,44 @@ pub(super) fn links_in(c: &Checker<'_>, f: FileId) -> Vec<Link> {
             }
             let inline = b[at - 1] == b'{';
             let tag = &b[at + 1..ne];
+            let in_overload = overload;
+            if !inline {
+                overload = match tag {
+                    b"overload" => true,
+                    b"param" | b"arg" | b"argument" | b"template" => overload,
+                    _ => false,
+                };
+            }
             let start = match (inline, tag) {
+                // `@param name`, `@param {T} name`, `@param [name]` (not `o.x`).
+                (false, b"param" | b"arg" | b"argument") if !in_overload => {
+                    let mut q = skip_blanks(b, ne, body_end);
+                    if q < body_end && b[q] == b'{' {
+                        let mut depth = 0u32;
+                        while q < body_end {
+                            match b[q] {
+                                b'{' => depth += 1,
+                                b'}' => depth -= 1,
+                                _ => {}
+                            }
+                            q += 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        // Tags inside the type are not tags; an unclosed one ends the scan.
+                        p = p.max(q);
+                        q = skip_blanks(b, q, body_end);
+                    }
+                    if q < body_end && b[q] == b'[' {
+                        q = skip_blanks(b, q + 1, body_end);
+                    }
+                    let mut e = q;
+                    while e < body_end && is_ident_byte(b[e]) {
+                        e += 1;
+                    }
+                    (e > q && !matches!(b.get(e), Some(b'.' | b'#'))).then_some(q)
+                }
                 (true, b"link" | b"linkcode" | b"linkplain") => {
                     let q = skip_blanks(b, ne, body_end);
                     (q > ne).then_some(q)

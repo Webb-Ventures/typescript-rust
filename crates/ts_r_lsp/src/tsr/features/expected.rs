@@ -16,8 +16,9 @@
 //!   expected type; after `[` or `,` in a tuple there, the expected element type; in an
 //!   expression, its contextual type (a call argument's parameter type in every signature,
 //!   a declared variable's type after `=`, the left side after `===`, the switched value
-//!   after `case`). A type parameter stands for its constraint. Strings are quoted in the
-//!   file's quote style (its first import's), double quotes when it has no import.
+//!   after `case` less the values other clauses test). A type parameter stands for its
+//!   constraint. Strings are quoted in the file's quote style (its first import's), double
+//!   quotes when it has no import.
 
 use super::position::token_before;
 use std::collections::HashSet;
@@ -177,6 +178,24 @@ fn expected_at(ck: &mut Ck<'_, '_>, file: FileId, anchor: NodeId, word: u32) -> 
     {
         return Some(t);
     }
+    // `case|`: the keyword being typed stands for the switched value as well.
+    if text
+        .get(word as usize..)
+        .is_some_and(|r| r.starts_with("case"))
+    {
+        let mut cur = super::position::node_covering(ast, word);
+        for _ in 0..4 {
+            let Some(n) = cur else { break };
+            if let Node::SwitchCase { .. } = ast.node(n)
+                && ast.span(n).start == word
+                && let Some(sw) = parents.parent(n)
+                && let Node::Switch { disc, .. } = *ast.node(sw)
+            {
+                return Some(ck.quietly(|ck| ck.check_expr(Loc::new(file, disc))));
+            }
+            cur = parents.parent(n);
+        }
+    }
     // No node for the expression yet: read the token before it.
     let holder = super::position::node_covering(ast, tok_at).unwrap_or(anchor);
     let mut cur = Some(holder);
@@ -223,7 +242,9 @@ fn expected_at(ck: &mut Ck<'_, '_>, file: FileId, anchor: NodeId, word: u32) -> 
                 let Node::Switch { disc, .. } = *ast.node(sw) else {
                     return None;
                 };
-                return Some(ck.quietly(|ck| ck.check_expr(Loc::new(file, disc))));
+                let used = case_values(ck, file, sw, n);
+                let t = ck.quietly(|ck| ck.check_expr(Loc::new(file, disc)));
+                return Some(ck.filter_type(t, |ck, m| !used.contains(&ck.store().regular(m))));
             }
             Node::Block { .. } | Node::Program { .. } => break,
             _ => {}
@@ -233,9 +254,42 @@ fn expected_at(ck: &mut Ck<'_, '_>, file: FileId, anchor: NodeId, word: u32) -> 
     None
 }
 
+/// The regular types of the values the clauses of switch `sw` other than `except` test.
+pub(super) fn case_values(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    sw: NodeId,
+    except: NodeId,
+) -> Vec<TypeId> {
+    let ast = ck.c.ast(file);
+    let Node::Switch { cases, .. } = *ast.node(sw) else {
+        return Vec::new();
+    };
+    let tests: Vec<NodeId> = ast
+        .list(cases)
+        .iter()
+        .filter_map(|&k| match *ast.node(k) {
+            Node::SwitchCase { test: Some(e), .. } if k != except => Some(e),
+            _ => None,
+        })
+        .collect();
+    tests
+        .into_iter()
+        .map(|e| {
+            let t = ck.quietly(|ck| ck.check_expr(Loc::new(file, e)));
+            ck.store().regular(t)
+        })
+        .collect()
+}
+
 /// The type of the parameter at `index` across the callee's signatures (a rest parameter's
 /// element type past its start).
-fn argument_type(ck: &mut Ck<'_, '_>, callee: Loc, kind: SigKind, index: usize) -> Option<TypeId> {
+pub(super) fn argument_type(
+    ck: &mut Ck<'_, '_>,
+    callee: Loc,
+    kind: SigKind,
+    index: usize,
+) -> Option<TypeId> {
     let t = ck.quietly(|ck| ck.check_expr(callee));
     let a = ck.apparent_type(t);
     let sigs = ck.signatures_of(a, kind);

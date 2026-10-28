@@ -73,6 +73,7 @@ pub fn signature_help(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Val
             } => call_help(ck, file, call, callee, kind, type_list, site.count),
             SiteKind::TypeArgs { called } => type_args_help(ck, file, called, site.count),
             SiteKind::Contextual { node } => contextual_help(ck, file, node),
+            SiteKind::Jsx { opening, name } => jsx_help(ck, file, opening, name),
         };
         if let Some(h) = help {
             found = Some((h, site.index));
@@ -255,6 +256,33 @@ fn call_help(
         items.extend(its);
     }
     Some((items, active_item))
+}
+
+/// Help in a JSX opening tag: a function component's signatures, the first active (tsc 7
+/// does not resolve the element here).
+fn jsx_help(
+    ck: &mut Ck<'_, '_>,
+    file: FileId,
+    opening: NodeId,
+    name: NodeId,
+) -> Option<(Vec<Item>, usize)> {
+    let ast = ck.c.ast(file);
+    if !matches!(ast.node(name), Node::Ident { .. }) {
+        return None;
+    }
+    let t = ck.quietly(|ck| ck.check_expr(Loc::new(file, name)));
+    let a = ck.apparent_type(t);
+    let sigs = ck.signatures_of(a, SigKind::Call);
+    let label = callee_name(ast, name);
+    let mut items = Vec::new();
+    for s in sigs.into_iter().take(MAX_SIGNATURES) {
+        let doc = signature_docs(ck, s);
+        for mut it in signature_items(ck, s, &label, Loc::new(file, opening), false) {
+            it.doc.clone_from(&doc);
+            items.push(it);
+        }
+    }
+    (!items.is_empty()).then_some((items, 0))
 }
 
 /// Whether the signature the checker resolved a call to is one tsc resolves it to: not left

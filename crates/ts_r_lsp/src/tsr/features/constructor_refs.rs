@@ -9,7 +9,7 @@
 //!   without declaring a constructor of its own (`class B extends A {}`), followed through
 //!   any number of such classes.
 //! - The references are the callee name of each `new` of one of those classes (`new C()`,
-//!   `new a.C()`, through imports, but not through a variable holding the class), `this`
+//!   `new a.C()`, through imports and `const C = require(..)`, but not through a variable holding the class), `this`
 //!   in `new this()` inside their static members, and `super` in each `super(...)` call
 //!   made by the constructor of a class that extends one of them. A `super(...)` in a
 //!   method, or in a class that only `implements` one, is not a reference.
@@ -203,7 +203,9 @@ impl ts_r_ast::visit::Visitor for Collect {
 /// The symbol the name at `l` stands for, through import aliases.
 fn resolved(ck: &mut Ck<'_, '_>, l: Loc) -> Option<SymId> {
     let s = meaning_at(ck, l).primary?;
-    Some(ck.c.resolve_alias(s).unwrap_or(s))
+    let s = ck.c.resolve_alias(s).unwrap_or(s);
+    // `const C = require("m")` stands for the module's class.
+    Some(super::aliases::require_target(ck, s, false).unwrap_or(s))
 }
 
 /// The name a class's `extends` clause gives (the `C` of `extends C` or `extends a.C`).

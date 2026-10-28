@@ -3710,3 +3710,249 @@ fn module_references_past_comments() {
     assert_eq!(refs_at(&mut c, &ub, 2, 17), Vec::new());
     c.shutdown();
 }
+
+const JS_CONFIG: &str = r#"{"compilerOptions": {"allowJs": true, "module": "nodenext", "target": "es2022", "noEmit": true}, "include": ["src"]}"#;
+
+#[test]
+fn references_through_commonjs_require() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navcjs",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            ("src/a.js", "function f() { }\nmodule.exports = { f };\n"),
+            ("src/b.js", "const { f } = require('./a');\nf;\n"),
+            (
+                "src/c.js",
+                "class A {\n  constructor() { }\n}\nmodule.exports = A;\n",
+            ),
+            ("src/d.js", "const A = require('./c');\nnew A;\nA.g;\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/a.js", "src/b.js", "src/c.js", "src/d.js"] {
+        env.open(&mut c, f);
+    }
+    let (ub, uc, ud) = (
+        env.uri("src/b.js"),
+        env.uri("src/c.js"),
+        env.uri("src/d.js"),
+    );
+    let _ = diags_for(&mut c, &ud, |_| true);
+    // A destructured `require` reads the module's export (and the variable it holds).
+    assert_eq!(
+        refs_at(&mut c, &ub, 1, 0),
+        vec![
+            s("a.js", 0, 9),
+            s("a.js", 1, 19),
+            s("b.js", 0, 8),
+            s("b.js", 1, 0)
+        ]
+    );
+    // `const A = require(..)` is found from the class, not the class from it.
+    assert_eq!(
+        refs_at(&mut c, &uc, 0, 6),
+        vec![
+            s("c.js", 0, 6),
+            s("c.js", 3, 17),
+            s("d.js", 0, 6),
+            s("d.js", 1, 4),
+            s("d.js", 2, 0)
+        ]
+    );
+    assert_eq!(refs_at(&mut c, &ud, 1, 4).len(), 3);
+    assert_eq!(
+        refs_at(&mut c, &uc, 1, 2),
+        vec![s("c.js", 1, 2), s("d.js", 1, 4)]
+    );
+    c.shutdown();
+}
+
+#[test]
+fn references_in_jsdoc_extends_tags() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navext",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            (
+                "src/a.js",
+                "export class C {}\n/** @extends C */\nexport class P extends C {}\n/** @augments {C} */\nexport class Q extends C {}\n",
+            ),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.js");
+    let ua = env.uri("src/a.js");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    let all = vec![
+        s("a.js", 0, 13),
+        s("a.js", 1, 13),
+        s("a.js", 2, 23),
+        s("a.js", 3, 15),
+        s("a.js", 4, 23),
+    ];
+    assert_eq!(refs_at(&mut c, &ua, 0, 13), all);
+    assert_eq!(refs_at(&mut c, &ua, 1, 13), all);
+    c.shutdown();
+}
+
+#[test]
+fn references_in_jsdoc_param_and_template_tags() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navparam",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            (
+                "src/a.js",
+                "/**\n * @overload\n * @param {number} x\n * @returns {number}\n *\n * @param {unknown} x\n * @param {Object} o\n * @param {string} o.x\n */\nexport function f(x, o) { return x; }\n/**\n * @template T\n * @return {T}\n */\nexport function g() {}\n",
+            ),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.js");
+    let ua = env.uri("src/a.js");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    // The function's own `@param x`, not the overload's.
+    let x = vec![s("a.js", 5, 20), s("a.js", 9, 18), s("a.js", 9, 33)];
+    assert_eq!(refs_at(&mut c, &ua, 9, 18), x);
+    assert_eq!(refs_at(&mut c, &ua, 5, 20), x);
+    // `o.x` is not a reference to `o`.
+    assert_eq!(
+        refs_at(&mut c, &ua, 9, 21),
+        vec![s("a.js", 6, 19), s("a.js", 9, 21)]
+    );
+    // A use of a `@template` type lists no `@template` name.
+    assert_eq!(refs_at(&mut c, &ua, 12, 12), vec![s("a.js", 12, 12)]);
+    c.shutdown();
+}
+
+#[test]
+fn signature_help_in_jsx_opening_tags() {
+    if !libs_present() {
+        return;
+    }
+    let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
+    let text = "declare namespace JSX {\n  interface Element {}\n}\n\
+                declare function Foo(props: { size: number }): JSX.Element;\n\
+                const a = <Foo size={1} />;\n\
+                const b = <Foo ";
+    let env = Env::new(
+        "sigjsx",
+        &[("tsconfig.json", tsconfig), ("src/c.tsx", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.tsx");
+    let u = env.uri("src/c.tsx");
+    let label = |s: &Value| s["signatures"][0]["label"].as_str().map(str::to_string);
+    let want = Some("Foo(props: { size: number; }): JSX.Element".to_string());
+    // After the name, in a closed tag and at the end of one left open.
+    let s = result(&mut c, "textDocument/signatureHelp", at(&u, 4, 15));
+    assert_eq!(label(&s), want, "{s}");
+    let s = result(&mut c, "textDocument/signatureHelp", at(&u, 5, 15));
+    assert_eq!(label(&s), want, "{s}");
+    // Not on the tag name.
+    let s = result(&mut c, "textDocument/signatureHelp", at(&u, 4, 12));
+    assert!(s.is_null(), "{s}");
+    c.shutdown();
+}
+
+/// Switch cases less the values other clauses test, `case|`, protected members through the
+/// base, `super.` methods and an object literal an overloaded arrow argument returns.
+#[test]
+fn completion_in_switch_cases_protected_members_and_overloaded_arrows() {
+    if !libs_present() {
+        return;
+    }
+    let text = "declare const n: 1 | 2;\n\
+                switch (n) { case 1: break; case  }\n\
+                switch (n) { case }\n\
+                enum E { A, B }\n\
+                declare const e: E;\n\
+                switch (e) { case E.A: break; case E. }\n\
+                class B { protected p = 1; m() {} }\n\
+                class D extends B { f(b: B, d: D) {\n\
+                b.;\n\
+                d.;\n\
+                super.;\n\
+                } }\n\
+                type Foo = { foo: boolean };\n\
+                declare function f(shape: Foo): any;\n\
+                declare function f(shape: () => Foo): any;\n\
+                f(() => ({  }));\n";
+    let env = Env::new(
+        "complete-switch-protected",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let u = env.uri("src/c.ts");
+    let mut labels = |line, ch| -> Vec<String> {
+        let r = result(&mut c, "textDocument/completion", at(&u, line, ch));
+        let mut l: Vec<String> = r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i["sortText"].as_str().unwrap_or("") < "15")
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        l.sort();
+        l
+    };
+    let l = labels(1, 33);
+    assert!(l.contains(&"2".into()) && !l.contains(&"1".into()), "{l:?}");
+    let l = labels(2, 17);
+    assert!(l.contains(&"1".into()) && l.contains(&"2".into()), "{l:?}");
+    assert_eq!(labels(5, 37), ["B"]);
+    assert_eq!(labels(8, 2), ["m"]);
+    assert_eq!(labels(9, 2), ["f", "m", "p"]);
+    assert_eq!(labels(10, 6), ["m"]);
+    assert_eq!(labels(15, 11), ["foo"]);
+    c.shutdown();
+}
+
+/// A file-declared `exports` is not the module object; spaces before an import type's `(`;
+/// unclosed `@param {` types do not rescan the comment.
+#[test]
+fn references_declared_exports_spaced_import_type_unclosed_param() {
+    if !libs_present() {
+        return;
+    }
+    let params = " * @param {\n".repeat(20_000);
+    let env = Env::new(
+        "navreview",
+        &[
+            ("tsconfig.json", JS_CONFIG),
+            (
+                "src/a.js",
+                "function f() {\n  function exports() {}\n  exports.x = 1;\n  exports.x;\n}\n",
+            ),
+            ("src/c.ts", "class A {}\nexport = A;\n"),
+            ("src/d.ts", "type B = import (\"./c\");\n"),
+            ("src/e.ts", &format!("/**\n{params} */\nlet x = 1;\nx;\n")),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/a.js", "src/c.ts", "src/e.ts"] {
+        env.open(&mut c, f);
+    }
+    let ua = env.uri("src/a.js");
+    let _ = diags_for(&mut c, &ua, |_| true);
+    assert_eq!(
+        refs_at(&mut c, &ua, 2, 10),
+        vec![s("a.js", 2, 10), s("a.js", 3, 10)]
+    );
+    let uc = env.uri("src/c.ts");
+    assert!(refs_at(&mut c, &uc, 0, 6).iter().any(|r| r.0 == "d.ts"));
+    let ue = env.uri("src/e.ts");
+    assert_eq!(refs_at(&mut c, &ue, 20_002, 0).len(), 2);
+}

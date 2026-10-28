@@ -853,7 +853,10 @@ fn modifier_occurrences(d: &Doc<'_>, m: ModifierToken) -> Vec<(u32, u32)> {
     };
     let mut search: Vec<NodeId> = Vec::new();
     match d.node(container) {
-        Node::Program { stmts } | Node::ModuleBlock { stmts } | Node::Block { stmts } => {
+        Node::Program { stmts }
+        | Node::ModuleBlock { stmts }
+        | Node::Block { stmts }
+        | Node::SwitchCase { body: stmts, .. } => {
             if m.flag == Modifiers::ABSTRACT && matches!(d.node(owner), Node::ClassDecl { .. }) {
                 search = members(d, owner);
                 search.push(owner);
@@ -861,7 +864,6 @@ fn modifier_occurrences(d: &Doc<'_>, m: ModifierToken) -> Vec<(u32, u32)> {
                 search = d.ast.list(stmts).to_vec();
             }
         }
-        Node::SwitchCase { body, .. } => search = d.ast.list(body).to_vec(),
         Node::FunctionDecl { params, .. } => search = d.ast.list(params).to_vec(),
         Node::FunctionExpr { params, .. } => {
             if let Some((md, Node::MethodDef { kind, .. })) =
@@ -1787,6 +1789,18 @@ mod tests {
         assert_eq!(
             highlights(src, "constructor"),
             spans(src, &[("constructor", "constructor")])
+        );
+    }
+
+    #[test]
+    fn abstract_class_in_a_switch_case() {
+        let src = "switch (0) { case 0: abstract class A { abstract m(): void; } }";
+        assert_eq!(
+            highlights(src, "abstract class"),
+            spans(
+                src,
+                &[("abstract class", "abstract"), ("abstract m", "abstract")]
+            )
         );
     }
 

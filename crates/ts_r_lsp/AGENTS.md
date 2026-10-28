@@ -371,7 +371,9 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   `3n`, never enum members) come from the expected type: a property's or tuple element's
   expected type in such a literal; in an expression, the contextual type (every signature's
   parameter at a call argument, the declared type after `=`, the other side of `===`, the
-  switched value after `case`). Strings take the quote of the file's first import.
+  switched value after `case` or on the `case|` keyword, less the values other clauses
+  test; `case E.|` drops those enum members too). Strings take the quote of the file's
+  first import.
 - Definition locations (`definitions.rs`): where a new name is being written (`var |`,
   `class |`, `function f(|`, a declaration's `<|`, `catch (|`, an enum body after `{`/`,`,
   `[|` of an array pattern, `import |`, `{ a as | }`) nothing is offered; a constructor's
@@ -392,7 +394,12 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   (`10| + 1` gets one).
 - Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
   a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
-  dot; after `?.` private names are not offered. A value whose type is a promise also
+  dot; after `?.` private names are not offered. Outside its class a protected instance
+  member is read only through an instance of the deriving class (`this`, `super` or a
+  `D` inside `D`); `super.|` in instance code lists methods only. An object literal that
+  is an arrow argument's body with no contextual members (an unresolved overload) takes
+  the union of the return types of the parameter's call signatures across the overloads.
+  A value whose type is a promise also
   lists the awaited type's members, each inserting `(await x).m` and replacing from the
   value's start (inside async functions and at the top of a module). `import("./m").|` in
   a type lists the module's exports (types, and namespaces holding them).
@@ -631,6 +638,19 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   default a` / `export = a` stand for the specifier's immediate target. From the `default`
   keyword: the keyword, the export's imports and their uses; an anonymous default export's
   keyword is its declaration.
+- **CommonJS** (tsc 7's answers on `findAllRefsCommonJsRequire*`, `renameJsExports0*`):
+  `const { a } = require("m")` reads the export `a` (and, for `module.exports = { a }`, the
+  variable `a`), searched both ways; `const A = require("m")` is found from what
+  `module.exports` holds (also by its constructor), not the other way. An `exports.a`
+  property is never found through `m.a` or `{ a }`, only at its declaration. An export
+  assigned a class or function (`module.exports.D = class D {}`) is that class.
+- **Import types**: `import("m").A` of a CommonJS module reads its `exports.A` or its
+  JSDoc `@typedef A`; `import("m")` as a type is a reference to the module's `export =`
+  (not in a rename). From a module specifier whose module has `export = N`, also the
+  references of `N` and the `export` keyword.
+- **JSDoc**: names in `@extends`/`@implements` and `this.x`'s `@type` count (their types
+  hang off no node: `locate::names_with_tag_types`); a `@template T` name is not listed,
+  only the uses of `T`.
 - **Shorthands and private names**: references (not rename) from `{ x }` or `const { x } =
   o` cover the variable and the property; `#x` resolves lexically to the innermost class
   declaring it; computed literal keys (`["a"]`, `` [`a`] ``) and string enum member names
@@ -644,7 +664,8 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   by constructors (arrows in between allowed, not other functions or methods) of classes
   extending one of them. `implements` does not count.
 - **Doc comment paths** (`doc_links.rs`): each name of a `{@link A.B#c}` (also
-  `{@linkcode}`, `{@linkplain}`), `@see A` / `@see {A}` and `@throws {A}` path counts as a
+  `{@linkcode}`, `{@linkplain}`), `@see A` / `@see {A}` and `@throws {A}` path, and each
+  `@param x` name (not `x.y`, not an `@overload`'s: those up to its `@returns`), counts as a
   reference, and references, rename, definition and hover may start on one. After a `#` a
   `.` ends the path. The first name resolves at the documented node (in a function, its
   body's scope; for a property typed by a function type, that type's parameters), else as a
@@ -688,6 +709,8 @@ module docs give them in full:
   elements take `name_i`, duplicates `_1`, `_2`. Labels print in quick-info mode, string
   literal annotations as written, `?` parameters without the added `undefined`.
 - A private or protected constructor used outside its class gets no help.
+- JSX: after an opening tag's name (an identifier) and before its `>`/`/>`, or anywhere
+  after the name of a tag left open, the tag's call signatures, argument 0 active.
 
 ## Sound mode (M6, `tsr/project/sound.rs`)
 
@@ -1099,19 +1122,18 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 2131 of 2513 tests at 91f3b08, lists the rest by cause:
+- Features (the fourslash oracle, 2175 of 2513 tests at ef3e4a7, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
   or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); references do not go back up from a
   re-export to the declaration the way tsc does from some imports (`import boom from
-  "./d"` where `d` re-exports a renamed default), nor through JSDoc `@param`/`@import`,
-  `require` or import types of JavaScript exports.
-  Completions: no accessibility filtering after `.` (private members are listed),
-  auto-imports only from the project's own (non-`node_modules`) modules and never
-  `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no
-  JSDoc `@overload`.
+  "./d"` where `d` re-exports a renamed default), nor from `import T = require` to the
+  module's `export = T`.
+  Completions: auto-imports only from the project's own (non-`node_modules`) modules and
+  never `default` exports. Signature help: no `... N more ...` truncation, no JSDoc
+  `@overload`.
 - Input watching is per directory and add-only (directories stay watched after their files
   leave the program); a project inside a directory named `target` is not watched;
   `node_modules` changes (installs) need "Reload Project" or a restart.
