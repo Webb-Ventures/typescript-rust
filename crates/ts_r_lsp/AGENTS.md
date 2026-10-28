@@ -63,6 +63,9 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   clean window viewing a file another window has dirty sees the dirty text (by design).
 - **Ordering:** a client's messages reach its backend in order; responses go only to the
   requester (ids remapped per slot); diagnostics only to clients whose text matches the backend.
+  A window that opens a file the backend already has (no sync op is sent) gets the backend's
+  last diagnostics for it: tsserver's cached `geterr` results, or an LSP backend's last push
+  (`Slot::pushed`, kept with the mirror version it arrived at and dropped on close).
 - **Backends restart transparently** (budget, crash, idle stop): documents are replayed,
   in-flight requests fail with `ContentModified`/`RequestFailed`, never hang. Crash restarts
   are limited to 3 per 60 s.
@@ -106,7 +109,9 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   the rule's fix, its suggestions, "Fix all <rule> problems", "Disable <rule> for this line",
   "Disable <rule> for the entire file", and `source.fixAll.ts-r` (one non-overlapping pass, as
   one `--fix` pass). On a line that starts in JSX children the line comment is
-  `{/* eslint-disable-next-line rule */}` (a `//` comment there would be rendered text). LSP backends' own code actions are kept and lint's appended.
+  `{/* eslint-disable-next-line rule */}` (a `//` comment there would be rendered text); the
+  JSX text is found by parsing with the options `ts_r_lint::parse_for_lint` used
+  (`lint::parse_options`: module goal, operators after `as T`), so both see one tree. LSP backends' own code actions are kept and lint's appended.
 
 ## ts-r backend (L3)
 
@@ -333,7 +338,28 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   the names in scope plus `JSX.IntrinsicElements`'s tags. Text between tags offers nothing.
 - Positions (`position.rs`): the token before an offset and the node covering it, and
   whether an offset sits in a type (annotation, type arguments, `extends`/`implements`,
-  `as`/`satisfies`), which switches the scope list to types and namespaces.
+  `as`/`satisfies`), which switches the scope list to types and namespaces. A namespace
+  is offered there (and among `a.b.|` members in a type, not after `typeof` or in
+  `import x = a.b`) only when a type is somewhere below it, through aliases and nested
+  namespaces (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter).
+  The search visits each namespace once (modules that re-export each other as namespaces
+  would otherwise be walked once per path).
+- Import and export clauses (`import { | } from "m"`, `export { | } from "m"`, the token
+  before the name being the clause's `{`, a `,` or `type`): the module's exports minus
+  `default` and the names other specifiers already take (the one being edited does not
+  count; a quoted name is read from the literal's value, which may be unterminated), then
+  `type` unless just written; braces in comments and quoted names do not open or close
+  the clause; nothing when all are taken or the module does
+  not resolve. A quoted export inserts `"a b" as a_b` in an import without `as`; a
+  re-exported name has kind variable. `ns.|` of a module in an expression lists its values
+  and namespaces only.
+- Possible type arguments (`tsc: tsc/internal/ls/utilities.go`, the backward scan for a
+  `<` that might open type arguments): reading tokens back from the offset over balanced
+  `<>`, `()`, `[]`, `{}` and the tokens a type may hold, to an identifier right before an
+  unmatched `<`, counts the arguments already written. The list is types when the callee
+  has a signature with at least that many type parameters (construct signatures after
+  `new`), when it is a type reference already, or after `new X<` whatever `X` is; not when
+  `typeof` precedes, and not when the identifier is being declared.
 - Scope: a variable is not offered inside its own initializer (`const x = |`), except when
   the cursor is past the initializer's end with nothing typed, or inside a JSX tag; blocks,
   arrows and patterns end the search. A CommonJS JavaScript file (one that refers to
@@ -372,11 +398,24 @@ Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checke
   `accessor` fields), `(method)`, `function`, `constructor`, `class`/`(local class)`/
   `abstract class`, `interface`, `enum`/`const enum`, `(enum member) E.m = 0`,
   `namespace`/`module`, `(type parameter) T in C<T>`/`in f<T>(x: T): void`/
-  `in type A<T>`, `type A<T> = <body as written>`.
+  `in type A<T>`, `type A<T> = <body>`.
+- A type alias's body is its declared type printed with `PrintMode::quick_info_alias`
+  (tsc's `InTypeAlias`: the outermost type without its own alias), so `type B = Exclude<A,
+  "a">` shows the union it makes and a JSDoc `@typedef`/`@callback` its object or function
+  type. A conditional type shows its text as written (tsc keeps one with a generic check
+  type deferred; our checker does not yet). A JSDoc alias's documentation is the comment it
+  sits in, without the `@property`/`@param`/`@returns` tags that build it.
+- An accessor at its setter's name or written through (`o.v = 1`) shows the setter's
+  accepted type (`Ck::write_type_of_symbol`); elsewhere the getter's.
+- Names inside JSDoc tag types (`@type {Bar}`, `@param {Bar} x`, `@extends {a.B}`) are
+  found by `locate::node_at`: a tag's type lies in a comment, outside its host's span, so
+  an offset inside one descends from that type (hover, definition, references, rename).
 - Functions show every overload (`function f(x: number): void` per line; from five on, the
   first three then `// +N more overloads`); on a declaration's own name, that
   declaration's signature; at a call of an overloaded or generic function, the signature
-  the call resolved to (`f<string>(x: string)`). A callee variable shows the
+  the call resolved to (`f<string>(x: string)`); one that does not resolve shows the
+  candidate instantiated as signature help does (written type arguments, else inferred,
+  `any` in JavaScript: `constructor B<unknown>(): B<unknown>`). A callee variable shows the
   resolved signature as its type. `new C(..)`/`C(..)` of a class with one construct
   signature shows `constructor C<args>(..): C<args>`.
 - Member names are `Owner<params or args>.name`, `Owner["lit"]` or `Owner[1]`. A member
@@ -483,6 +522,33 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   initializes the variable) replaced by its single signature's return type, and a type-only
   symbol whose type has no declaration going to itself. Keywords before a name stand for
   the name.
+- **Go to definition on names** (`nav.rs`, from observed tsc 7 and `tsc:
+  tsc/internal/ls/definition.go`):
+  - *Calls.* When the name is the callee of a call, `new` or tagged template (directly or
+    as `o.name`) and the resolved signature has a declaration that is function-like (a
+    function, method, arrow, call/construct signature or constructor type; not a function
+    type), that declaration is added. If it is the cursor symbol's own (one of its
+    declarations, the constructor of its class, or the function its variable, property or
+    assignment holds), a function shows only that overload and a constructor shows the
+    class declarations (not merged namespaces) plus that constructor; otherwise the
+    symbol's declarations plus the signature (`new I()` through a construct signature).
+    Through an import the symbol is the alias, so every overload stays.
+  - *Spans.* A constructor has no name: the whole declaration is shown. An unnamed
+    function, arrow or class expression is shown by the name it is assigned to (`const f =
+    () => 0`, `{ m: function () {} }`, `x.y = class {}`).
+  - *Object literals and patterns.* A key of an object binding pattern goes to the
+    property of the destructured type (each union member's; nothing for an untyped
+    pattern). `{ x }` goes to the variable and the contextual property; another member
+    name of a contextually typed literal goes only to the contextual property, of the
+    union members its unit-valued discriminants are assignable to (all when none is), and,
+    when the contextual type was inferred from this literal, of the declared parameter
+    type with type parameters replaced by their constraints.
+  - *Modules.* A specifier, or the name of `declare module "x"`, that names an ambient
+    module goes to its declarations; an import from a shorthand ambient module goes to the
+    module. A string name in an import or export specifier goes where the alias resolves.
+  - *Fallbacks.* `o.k` with no property goes to the index signatures of `o`'s type that
+    apply to `k` (every union member). `typeof this` and a `this` parameter behave like
+    the `this` keyword.
 - `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
   (`a|()`), as tsserver's touching-name lookup does.
 - **Inherited members** (`inherit.rs`, from `tsc: tsc/internal/ls/findallreferences.go`,
@@ -866,6 +932,11 @@ TS_R_LSP_PARITY=off scripts/limit.sh -- node crates/ts_r_lsp/tests/oracle/organi
   target/release/ts-r-lsp <typescript/lib dir> <root> [--from N] [--max N] [--show N]
 ```
 
+`tests/daemon.rs` waits on events (a message, a status predicate) with a 30 s deadline, never
+on a fixed sleep before an assertion: messages from two windows reach the daemon in no
+defined order, and a loaded CI runner can take seconds to start a daemon. The front retries
+connecting for 20 s (an old daemon may hold its lock that long while it exits).
+
 Action fixtures (`tests/fixtures/actions/<name>.txt`, verbs and directives documented at the
 top of `tests/actions.rs`): verbs `refactor`, `fix`, `fixAll`, `organizeImports`, `rename`,
 `moveSuggestions`; directives include `@format`, `@preferences` (tsserver user
@@ -947,9 +1018,9 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 1864 of 2517 tests at aed0aea, lists the rest by cause:
-  bench/lsp-oracle/README.md): hover has no JavaScript `@typedef`/`@callback`/`@property`
-  hovers and no keyword or meta-property hovers (`arguments`, `import.meta`, `new`); it
+- Features (the fourslash oracle, 1967 of 2516 tests at 5628954, lists the rest by cause:
+  bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
+  or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
   (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)

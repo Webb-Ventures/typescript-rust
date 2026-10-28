@@ -846,6 +846,74 @@ fn hover_shows_types_and_docs() {
     c.shutdown();
 }
 
+/// Type alias hovers print the aliased type (`Exclude<..>` shows the union it makes); a
+/// JSDoc `@typedef`/`@callback` is spelled out, also where a tag's type names it; a generic
+/// call that does not resolve shows its instantiated candidate.
+#[test]
+fn hover_on_type_aliases_and_jsdoc_typedefs() {
+    if !libs_present() {
+        return;
+    }
+    let ts = "type A = \"a\" | \"b\";\ntype B = Exclude<A, \"a\">;\ntype O = { x: number };\n\
+              class D<T> { constructor(val: T) {} }\nnew D<string>();\n\
+              class S { set v(x: string | number) {} get v(): string { return \"\"; } }\n\
+              new S().v = new S().v;\n";
+    let js = "/**\n * Bar doc\n * @typedef {Object} Bar\n * @property {string} baz\n */\n\
+              /** @callback Cb\n * @param {string} x\n */\n\
+              /** @type {Bar} */\nexport const bar = { baz: \"\" };\n";
+    let env = Env::new(
+        "hover-aliases",
+        &[
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions": {"allowJs": true, "checkJs": true, "strict": true, "module": "nodenext", "target": "es2022", "noEmit": true}, "include": ["src"]}"#,
+            ),
+            ("src/a.ts", ts),
+            ("src/b.js", js),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.js");
+    let ua = env.uri("src/a.ts");
+    let ub = env.uri("src/b.js");
+    let h = hover_text(&mut c, &ua, 1, 5);
+    assert!(h.contains("type B = \"b\""), "{h}");
+    let h = hover_text(&mut c, &ua, 2, 5);
+    assert!(h.contains("type O = {\n    x: number;\n}"), "{h}");
+    // A call that does not resolve shows its candidate with the written type arguments.
+    let h = hover_text(&mut c, &ua, 4, 4);
+    assert!(
+        h.contains("constructor D<string>(val: string): D<string>"),
+        "{h}"
+    );
+    // A setter's name and a write through it show the type it accepts; a read the getter's.
+    for (line, ch, want) in [
+        (5, 15, "string | number"),
+        (6, 8, "string | number"),
+        (6, 20, "C.v: string\n"),
+    ] {
+        let h = hover_text(&mut c, &ua, line, ch);
+        assert!(
+            h.contains(want) || h.contains(&want.replace("C.", "S.")),
+            "{line}:{ch} {h}"
+        );
+    }
+    let want = "type Bar = {\n    baz: string;\n}";
+    let h = hover_text(&mut c, &ub, 2, 22);
+    assert!(h.contains(want), "{h}");
+    assert!(h.contains("```\nBar doc"), "{h:?}");
+    assert!(!h.contains("property"), "{h:?}");
+    // The name in `@type {Bar}` (a tag type in a comment, outside the statement's span).
+    let h = hover_text(&mut c, &ub, 8, 12);
+    assert!(h.contains(want), "{h}");
+    assert!(h.contains("```\nBar doc"), "{h:?}");
+    assert!(!h.contains("property"), "{h:?}");
+    let h = hover_text(&mut c, &ub, 5, 15);
+    assert!(h.contains("type Cb = (x: string) => any"), "{h}");
+    c.shutdown();
+}
+
 const NAV_KEYWORDS: &str = "class Base { m() {} }
 class D extends Base {
   override m() { super.m(); }
@@ -1386,6 +1454,203 @@ fn completion_function_members_and_arguments() {
         ));
         assert!(l.is_empty(), "{line}:{ch} {l:?}");
     }
+    c.shutdown();
+}
+
+/// After `f<` with a generic `f` (or `new X<` whatever `X` is) the list is types, as tsc
+/// reads a possible type argument list; a plain `a < ` comparison stays a value position.
+#[test]
+fn completion_in_possible_type_arguments() {
+    if !libs_present() {
+        return;
+    }
+    let text = "interface Shape { w: number }\nconst v = 1;\nfunction f<T>(x?: T) {}\n\
+                class Bar {}\nf<\nfunction g() { new Bar< }\nconst c = v < \n";
+    let env = Env::new(
+        "complete-typeargs",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for (line, ch) in [(4, 2), (5, 23)] {
+        let l = labels(&result(
+            &mut c,
+            "textDocument/completion",
+            at(&uc, line, ch),
+        ));
+        assert!(l.iter().any(|x| x == "Shape"), "{line}:{ch} {l:?}");
+        assert!(!l.iter().any(|x| x == "v"), "{line}:{ch} {l:?}");
+    }
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 14)));
+    assert!(l.iter().any(|x| x == "v"), "{l:?}");
+    assert!(!l.iter().any(|x| x == "Shape"), "{l:?}");
+    c.shutdown();
+}
+
+/// Where a type goes, a namespace is offered only when a type is somewhere below it, and
+/// `m.|` in a type lists the types and such namespaces, not values.
+#[test]
+fn completion_of_namespaces_in_type_positions() {
+    if !libs_present() {
+        return;
+    }
+    let text = "namespace Vals { export const v = 1; }\n\
+                namespace Outer { export namespace Inner { export interface I {} } export const w = 1; }\n\
+                let a: ;\nlet b: Outer.;\nlet c = ;\n";
+    let env = Env::new(
+        "complete-ns-types",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 7)));
+    assert!(l.iter().any(|x| x == "Outer"), "{l:?}");
+    assert!(!l.iter().any(|x| x == "Vals"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 13)));
+    assert_eq!(l, vec!["Inner".to_string()]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 8)));
+    assert!(l.iter().any(|x| x == "Vals"), "{l:?}");
+    c.shutdown();
+}
+
+/// `import { | } from "m"` lists the module's exports not named yet (quoted ones with a
+/// local name), then `type`; `ns.|` of a module in an expression leaves out its types.
+#[test]
+fn completion_in_import_and_export_clauses() {
+    if !libs_present() {
+        return;
+    }
+    let m = "export const a = 1;\nexport function b() {}\nexport type T = 1;\n\
+             const c = 2;\nexport { c as \"c d\" };\nexport default 3;\n";
+    let u = "import { a,  } from \"./m.js\";\nexport {  } from \"./m.js\";\n\
+             import * as ns from \"./m.js\";\nns.;\n";
+    let env = Env::new(
+        "complete-import-clause",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/m.ts", m),
+            ("src/u.ts", u),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/u.ts");
+    let uu = env.uri("src/u.ts");
+    let items = |r: &Value| -> Vec<(String, String)> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| {
+                        let l = i["label"].as_str().unwrap_or("").to_string();
+                        let t = i["insertText"].as_str().unwrap_or(&l).to_string();
+                        (l, t)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = items(&result(&mut c, "textDocument/completion", at(&uu, 0, 12)));
+    let labels: Vec<&str> = l.iter().map(|(x, _)| x.as_str()).collect();
+    assert_eq!(labels, ["T", "b", "c d", "type"], "{l:?}");
+    assert!(
+        l.contains(&("c d".into(), "\"c d\" as c_d".into())),
+        "{l:?}"
+    );
+    let l = items(&result(&mut c, "textDocument/completion", at(&uu, 1, 9)));
+    assert!(l.contains(&("c d".into(), "\"c d\"".into())), "{l:?}");
+    assert!(l.iter().any(|(x, _)| x == "a"), "{l:?}");
+    let l = items(&result(&mut c, "textDocument/completion", at(&uu, 3, 3)));
+    assert!(l.iter().any(|(x, _)| x == "b"), "{l:?}");
+    assert!(!l.iter().any(|(x, _)| x == "T"), "{l:?}");
+    c.shutdown();
+}
+
+/// Review fixes for import clauses and type positions: a `}` in a comment does not close the
+/// clause, an unterminated quoted name before the cursor does not panic, and modules that
+/// re-export each other as namespaces are searched once each for a type.
+#[test]
+fn completion_import_clause_edges_and_namespace_cycles() {
+    if !libs_present() {
+        return;
+    }
+    let m = "export const a = 1;\nexport const b = 2;\n";
+    let u = "import { a /* } */,  } from \"./m.js\";\n";
+    let bad = "import { \"\u{e9}\n, } from \"./m.js\";\n";
+    // Each of x and y exports four namespace aliases of the other: 4^17 paths, 2 modules.
+    let x = "export * as y1 from \"./y.js\";\nexport * as y2 from \"./y.js\";\n\
+             export * as y3 from \"./y.js\";\nexport * as y4 from \"./y.js\";\n";
+    let y = "export * as x1 from \"./x.js\";\nexport * as x2 from \"./x.js\";\n\
+             export * as x3 from \"./x.js\";\nexport * as x4 from \"./x.js\";\n";
+    let t = "import * as nx from \"./x.js\";\nlet v: ;\n";
+    let env = Env::new(
+        "complete-clause-edges",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/m.ts", m),
+            ("src/u.ts", u),
+            ("src/bad.ts", bad),
+            ("src/x.ts", x),
+            ("src/y.ts", y),
+            ("src/t.ts", t),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    for f in ["src/u.ts", "src/bad.ts", "src/t.ts"] {
+        env.open(&mut c, f);
+    }
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&env.uri("src/u.ts"), 0, 20),
+    ));
+    assert_eq!(l, ["b", "type"], "{l:?}");
+    // After the comma on the line below the unterminated `"\u{e9}`.
+    let r = result(
+        &mut c,
+        "textDocument/completion",
+        at(&env.uri("src/bad.ts"), 1, 2),
+    );
+    assert!(r.is_null() || r["items"].is_array(), "{r}");
+    let started = std::time::Instant::now();
+    let l = labels(&result(
+        &mut c,
+        "textDocument/completion",
+        at(&env.uri("src/t.ts"), 1, 7),
+    ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(!l.iter().any(|x| x == "nx"), "{l:?}");
     c.shutdown();
 }
 
@@ -2666,5 +2931,80 @@ fn hover_names_like_tsc() {
         h(m[4])
     );
     assert!(h(m[5]).contains("namespace m.N"), "{}", h(m[5]));
+    c.shutdown();
+}
+
+/// Go to definition follows tsc 7 on calls (`new C()` adds the constructor, shown whole; a
+/// called arrow is named by its variable), ambient module names, object literal and
+/// binding pattern members (the contextual or destructured type's property, a
+/// discriminated union member), index signatures and `typeof this`.
+#[test]
+fn definitions_of_calls_literals_and_ambient_modules() {
+    if !libs_present() {
+        return;
+    }
+    let text = "class C {\n  constructor(n: number) {}\n}\nnew C(1);\nconst f = () => 0;\nf();\n\
+                import x from \"m\";\nx;\n\
+                interface A { kind: \"a\"; p: number }\ninterface B { kind: \"b\"; p: string }\n\
+                const u: A | B = { kind: \"a\", p: 0 };\n\
+                const p = 1;\nconst o: { p: number } = { p };\n\
+                function g({ p: q }: A) { return q; }\n\
+                declare const ix: { [k: string]: boolean };\nix.foo;\n\
+                function h(this: A) { type T = typeof this; }\n";
+    let env = Env::new(
+        "def-calls",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/k.ts", text),
+            ("src/m.d.ts", "declare module \"m\";\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/k.ts");
+    let u = env.uri("src/k.ts");
+    let um = env.uri("src/m.d.ts");
+    let spans = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(String, u64, u64, u64, u64)> {
+        let d = result(c, "textDocument/definition", at(&u, line, ch));
+        let mut v: Vec<_> = d
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|l| {
+                let r = &l["range"];
+                let n = |x: &Value| x.as_u64().unwrap();
+                (
+                    if l["uri"] == um.as_str() { "m" } else { "k" }.to_string(),
+                    n(&r["start"]["line"]),
+                    n(&r["start"]["character"]),
+                    n(&r["end"]["line"]),
+                    n(&r["end"]["character"]),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let k = |a, b, c, d| ("k".to_string(), a, b, c, d);
+    // `new C(1)`: the class and the whole constructor.
+    assert_eq!(spans(&mut c, 3, 4), vec![k(0, 6, 0, 7), k(1, 2, 1, 27)]);
+    // `f()`: the arrow, named by its variable.
+    assert_eq!(spans(&mut c, 5, 0), vec![k(4, 6, 4, 7)]);
+    // An import of a shorthand ambient module, and its specifier: the module.
+    let m = vec![("m".to_string(), 0, 15, 0, 18)];
+    assert_eq!(spans(&mut c, 7, 0), m);
+    assert_eq!(spans(&mut c, 6, 15), m);
+    // `kind` of a literal typed `A | B` with `kind: "a"`: only `A`'s.
+    assert_eq!(spans(&mut c, 10, 20), vec![k(8, 14, 8, 18)]);
+    // A shorthand: the variable and the contextual property.
+    assert_eq!(
+        spans(&mut c, 12, 27),
+        vec![k(11, 6, 11, 7), k(12, 11, 12, 12)]
+    );
+    // A binding key: the destructured type's property.
+    assert_eq!(spans(&mut c, 13, 13), vec![k(8, 25, 8, 26)]);
+    // A property only an index signature declares.
+    assert_eq!(spans(&mut c, 15, 3), vec![k(14, 20, 14, 40)]);
+    // `typeof this` goes to the `this` parameter.
+    assert_eq!(spans(&mut c, 16, 38), vec![k(16, 11, 16, 15)]);
     c.shutdown();
 }

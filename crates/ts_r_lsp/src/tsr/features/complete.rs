@@ -125,6 +125,9 @@ enum Context {
     Reference,
     /// A name being declared that may start with a keyword (a constructor parameter).
     Keywords(&'static [&'static str]),
+    /// A name in `import { | } from "m"` / `export { | } from "m"`: the module's exports
+    /// not named yet (and `type` unless it was just written).
+    ImportClause { decl: NodeId, after_type: bool },
     /// Nothing.
     None,
 }
@@ -194,6 +197,9 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
             Some(super::jsx_items::JsxSpot::Tag) => jsx_tag = true,
             None => {}
         }
+    }
+    if let Some((decl, after_type)) = import_clause_at(c, file, ws) {
+        return (Context::ImportClause { decl, after_type }, prefix);
     }
     // `obj.|` / `obj.pre|`
     let b = text.as_bytes();
@@ -508,6 +514,58 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 items.push(json!({"label": k, "kind": 14, "sortText": SORT_KEYWORD}));
             }
         }
+        Context::ImportClause { decl, after_type } => {
+            let Some(names) = import_clause_names(c, cx.file, decl, ws_of(c, cx.file, offset))
+            else {
+                return Value::Null;
+            };
+            if names.is_empty() {
+                return Value::Null;
+            }
+            let text = c.file(cx.file).text.as_str();
+            let is_import = matches!(c.node(Loc::new(cx.file, decl)), Node::ImportDecl { .. });
+            // `import { "a b" as a_b }`: a quoted export needs a local name, unless the
+            // specifier already has one (`import { | as x }`).
+            let rest = text.get(offset as usize..).unwrap_or("").trim_start();
+            let has_as = rest.starts_with("as")
+                && !rest[2..].starts_with(|ch: char| ch.is_alphanumeric() || ch == '_');
+            for (name, s) in names {
+                // A re-exported name (`export { x as "y" }`) is an alias: tsc's kind for it.
+                let kind = if c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
+                    6
+                } else {
+                    item_kind(c, s)
+                };
+                let mut item = json!({
+                    "label": name,
+                    "kind": kind,
+                    "sortText": SORT_MEMBER,
+                });
+                if !is_identifier_name(&name) {
+                    let quoted = ts_r_checker::print::quote_string(&name);
+                    let insert = if is_import && !has_as {
+                        let local: String = name
+                            .chars()
+                            .map(|ch| {
+                                if ch.is_alphanumeric() || ch == '$' {
+                                    ch
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .collect();
+                        format!("{quoted} as {local}")
+                    } else {
+                        quoted
+                    };
+                    item["insertText"] = json!(insert);
+                }
+                items.push(item);
+            }
+            if !after_type {
+                items.push(json!({"label": "type", "kind": 14, "sortText": SORT_KEYWORD}));
+            }
+        }
         Context::String { lit } => {
             let template = super::strings::is_template(c.ast(cx.file), lit);
             let found = super::strings::string_items(cx, ck, lit, offset).unwrap_or_default();
@@ -588,7 +646,11 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 }
                 d >= 2 && b[d - 2] == b'?'
             };
+            let in_type = qualified && qualified_in_type(c, Loc::new(cx.file, obj));
             for (name, s) in members(ck, Loc::new(cx.file, obj), qualified) {
+                if in_type && !type_referable(c, s) {
+                    continue;
+                }
                 let plain = is_identifier_name(&name) || is_private_name(&name);
                 if !plain && (qualified || name.is_empty()) {
                     continue;
@@ -653,10 +715,19 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
         }
         Context::Scope {
             anchor,
-            types_only,
-            values_only,
+            mut types_only,
+            mut values_only,
             jsx_tag,
         } => {
+            // `f<|` of a generic `f`: a type argument is being written.
+            let ws = ws_of(c, cx.file, offset);
+            let after_typeof =
+                super::position::token_before(c.ast(cx.file), &c.file(cx.file).text, ws)
+                    .is_some_and(|(_, t)| t == "typeof");
+            if !types_only && !after_typeof && possibly_type_argument(ck, cx.file, ws, 0) {
+                types_only = true;
+                values_only = false;
+            }
             if jsx_tag {
                 for (name, s) in super::jsx_items::intrinsic_tags(ck, Loc::new(cx.file, anchor)) {
                     items.push(json!({
@@ -706,6 +777,9 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
             let later = later_params(c, Loc::new(cx.file, token_node(c, cx.file, offset, anchor)));
             for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
                 if !has_meaning_through_alias(c, s, want) || later.contains(&name) {
+                    continue;
+                }
+                if types_only && !type_referable(c, s) {
                     continue;
                 }
                 if !seen.insert(name.clone()) || own.as_deref() == Some(name.as_str()) {
@@ -792,8 +866,254 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     json!({"isIncomplete": incomplete, "items": items})
 }
 
+/// Whether the word at `pos` may be a type argument of an unclosed `f<...`: the identifier
+/// before the `<` is part of a type, has call (construct, after `new`) signatures with at
+/// least as many type parameters as arguments come before, or is itself such an argument.
+fn possibly_type_argument(ck: &mut Ck<'_, '_>, file: FileId, pos: u32, depth: u32) -> bool {
+    const MAX_DEPTH: u32 = 16;
+    let c = ck.c;
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let Some((start, n)) = super::position::possible_type_arguments(ast, text, pos) else {
+        return false;
+    };
+    let Some(id) = super::position::node_covering(ast, start) else {
+        return false;
+    };
+    if !matches!(ast.node(id), Node::Ident { .. }) {
+        return false;
+    }
+    let parent = c.file(file).parents().parent(id);
+    if let Some(p) = parent {
+        let pn = ast.node(p);
+        if declares(pn, id) {
+            return false;
+        }
+        if matches!(
+            pn,
+            Node::TypeRef { .. } | Node::QualifiedName { .. } | Node::TypeQuery { .. }
+        ) {
+            return true;
+        }
+    }
+    // `o.m<|`: the type of the access.
+    let callee = match parent.map(|p| (p, ast.node(p))) {
+        Some((p, Node::Member { prop, .. })) if *prop == id => p,
+        _ => id,
+    };
+    let parent = c.file(file).parents().parent(callee);
+    // `new Bar<|` reads as type arguments whatever `Bar` is (observed tsc 7).
+    if super::position::token_before(ast, text, start).is_some_and(|(_, t)| t == "new") {
+        return true;
+    }
+    // The parser already made type arguments of it: a type position.
+    if let Some(
+        Node::New {
+            callee: x,
+            type_args: Some(ta),
+            ..
+        }
+        | Node::Call {
+            callee: x,
+            type_args: Some(ta),
+            ..
+        },
+    ) = parent.map(|p| ast.node(p))
+        && *x == callee
+        && ast.span(*ta).start <= pos
+        && pos <= ast.span(*ta).end
+    {
+        return true;
+    }
+    let l = Loc::new(file, callee);
+    let t = ck.check_expr(l);
+    let a = ck.apparent_type(t);
+    let kind = match parent.map(|p| ast.node(p)) {
+        Some(Node::New { callee: x, .. }) if *x == callee => SigKind::Construct,
+        _ => SigKind::Call,
+    };
+    let generic = ck.signatures_of(a, kind).into_iter().any(|sig| {
+        let store = ck.store();
+        let k = store.list_items(store.sig(sig).type_params).len();
+        k > 0 && k >= n as usize
+    });
+    generic || (depth < MAX_DEPTH && possibly_type_argument(ck, file, start, depth + 1))
+}
+
 /// Whether `s` has a meaning in `want`; an alias by what it resolves to (an alias that
 /// resolves to nothing keeps every meaning).
+/// `import { | } from "m"` / `export { | } from "m"` (the token before the name is the
+/// clause's `{`, a `,`, or `type`): the declaration, and whether that token is `type`
+/// (`tsc: tsc/internal/ls/completions.go`, the import/export clause completions).
+fn import_clause_at(c: &Checker<'_>, file: FileId, ws: u32) -> Option<(NodeId, bool)> {
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let (tok, t) = super::position::token_before(ast, text, ws)?;
+    if !matches!(t, "{" | "," | "type") {
+        return None;
+    }
+    let parents = c.file(file).parents();
+    let mut cur = node_at(ast, tok);
+    for _ in 0..8 {
+        let n = cur?;
+        match *ast.node(n) {
+            Node::ImportDecl { source, .. }
+            | Node::ExportNamed {
+                source: Some(source),
+                ..
+            } => {
+                // Between the clause's `{` and the module specifier (braces in comments and
+                // quoted names do not count).
+                let start = ast.span(n).start;
+                if !inside_open_brace(ast, text, start, tok) || tok >= ast.span(source).start {
+                    return None;
+                }
+                return Some((n, t == "type"));
+            }
+            Node::ExportNamed { source: None, .. } => return None,
+            _ => cur = parents.parent(n),
+        }
+    }
+    None
+}
+
+/// Whether the code from `start` up to the `{`, `,` or `type` token at `tok` opens a `{`
+/// that no `}` closes, outside comments and string literals.
+fn inside_open_brace(ast: &ts_r_ast::Ast, text: &str, start: u32, tok: u32) -> bool {
+    let b = text.as_bytes();
+    let end = (tok as usize + 1).min(b.len());
+    let mut i = start as usize;
+    let mut open = false;
+    while i < end {
+        // A comment starting here: jump past it.
+        let k = ast
+            .comments
+            .partition_point(|cm| (cm.span.start as usize) < i);
+        if let Some(cm) = ast.comments.get(k)
+            && cm.span.start as usize == i
+            && cm.span.end as usize > i
+        {
+            i = cm.span.end as usize;
+            continue;
+        }
+        match b[i] {
+            q @ (b'"' | b'\'') => {
+                // To the closing quote, or the end of the line for an unterminated one.
+                i += 1;
+                while i < end && b[i] != q && b[i] != b'\n' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'{' => open = true,
+            b'}' => return false,
+            _ => {}
+        }
+        i += 1;
+    }
+    open
+}
+
+/// The exports of the module an import or export clause names, minus `default` and the
+/// names its other specifiers already take. `None` when the module does not resolve.
+fn import_clause_names(
+    c: &Checker<'_>,
+    file: FileId,
+    decl: NodeId,
+    ws: u32,
+) -> Option<Vec<(String, SymId)>> {
+    let ast = c.ast(file);
+    let (source, specifiers) = match *ast.node(decl) {
+        Node::ImportDecl {
+            source, specifiers, ..
+        } => (source, specifiers),
+        Node::ExportNamed {
+            source: Some(source),
+            specifiers,
+            ..
+        } => (source, specifiers),
+        _ => return None,
+    };
+    let bound = &c.file(file).bound;
+    let ri = bound
+        .module_requests
+        .iter()
+        .position(|r| r.node == source)?;
+    let target = c.link.module_target(file, ri as u32);
+    let module = c.module_target_symbol(target)?;
+    let mut taken: HashSet<String> = HashSet::new();
+    for &sp in ast.list(specifiers) {
+        let span = ast.span(sp);
+        if span.start <= ws && ws <= span.end {
+            continue;
+        }
+        let name = match *ast.node(sp) {
+            Node::ImportSpecifier {
+                imported, local, ..
+            } => imported.unwrap_or(local),
+            Node::ExportSpecifier { local, .. } => local,
+            _ => continue,
+        };
+        let n = match *ast.node(name) {
+            // The literal's value (its text may be unterminated).
+            Node::StringLit { value } => ast.atom(value).to_string(),
+            _ => match super::locate::name_text(ast, name) {
+                Some(t) => t.to_string(),
+                None => continue,
+            },
+        };
+        taken.insert(n);
+    }
+    Some(
+        c.exports_of(module)
+            .into_iter()
+            .filter(|(n, _)| n != "default" && !taken.contains(n))
+            .collect(),
+    )
+}
+
+/// Whether `s` may be named in a type: a type, or a namespace with such a member somewhere
+/// below it (`tsc: tsc/internal/ls/completions.go`, the type-location symbol filter; a
+/// namespace of values only is not offered where a type goes).
+fn type_referable(c: &Checker<'_>, s: SymId) -> bool {
+    let mut seen: HashSet<SymId> = HashSet::new();
+    type_referable_in(c, s, 0, &mut seen)
+}
+
+/// [`type_referable`]'s search; `seen` holds the namespaces already searched (namespaces
+/// that re-export each other are searched once each, not once per path).
+fn type_referable_in(c: &Checker<'_>, s: SymId, depth: u32, seen: &mut HashSet<SymId>) -> bool {
+    let s = c.resolve_alias(s).unwrap_or(s);
+    if c.has_meaning(s, meaning::TYPE) {
+        return true;
+    }
+    if depth > 16
+        || !c
+            .sym_flags(s)
+            .intersects(SymbolFlags::VALUE_MODULE | SymbolFlags::NAMESPACE_MODULE)
+        || !seen.insert(s)
+    {
+        return false;
+    }
+    c.exports_of(s)
+        .into_iter()
+        .any(|(_, x)| type_referable_in(c, x, depth + 1, seen))
+}
+
+/// Whether the qualified name whose left side is `left` (`a.b.|`) is a type reference, not
+/// the entity of `typeof a.b` or `import x = a.b`.
+fn qualified_in_type(c: &Checker<'_>, left: Loc) -> bool {
+    let mut n = left;
+    for _ in 0..64 {
+        let Some(p) = c.parent(n) else { return true };
+        match c.node(p) {
+            Node::QualifiedName { .. } => n = p,
+            Node::TypeQuery { .. } | Node::ImportEquals { .. } => return false,
+            _ => return true,
+        }
+    }
+    true
+}
+
 fn has_meaning_through_alias(c: &Checker<'_>, s: SymId, want: u8) -> bool {
     let f = c.sym_flags(s);
     if !f.intersects(SymbolFlags::ALIAS) {
@@ -850,8 +1170,19 @@ fn members(ck: &mut Ck<'_, '_>, obj: Loc, qualified: bool) -> Vec<(String, SymId
     };
     if let Some(s) = named {
         let f = c.sym_flags(s);
-        if qualified || f.intersects(SymbolFlags::MODULE_FILE) {
+        if qualified {
             return c.exports_of(s);
+        }
+        // `ns.|` of a module in an expression: its values and namespaces, not its types.
+        if f.intersects(SymbolFlags::MODULE_FILE) {
+            return c
+                .exports_of(s)
+                .into_iter()
+                .filter(|(_, x)| match c.resolve_alias(*x) {
+                    Some(t) => c.has_meaning(t, meaning::VALUE | meaning::NAMESPACE),
+                    None => true,
+                })
+                .collect();
         }
         if f.intersects(SymbolFlags::NAMESPACE_MODULE | SymbolFlags::VALUE_MODULE)
             && !f.intersects(

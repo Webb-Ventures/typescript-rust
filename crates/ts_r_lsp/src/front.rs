@@ -44,8 +44,9 @@ pub struct FrontOptions {
 /// Connects to (or spawns) the daemon for `root` and completes the hello handshake.
 /// Returns the stream and the welcome message.
 pub fn connect(root: &Path, hello: &Hello) -> io::Result<(Stream, Value)> {
-    // A daemon that is shutting down may refuse or drop us; retry briefly.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // A daemon that is shutting down may refuse or drop us; retry for a while (the old one
+    // can take seconds to let go of its lock on a loaded machine).
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         match connect_once(root, hello) {
             Ok(x) => return Ok(x),

@@ -23,7 +23,7 @@
 //!   do not enclose the location. An alias's target whose name does not reach the location
 //!   (it lives in another module) shows under the alias's own name.
 
-use ts_r_ast::{ModuleKind, Node, VarKind};
+use ts_r_ast::{MethodKind, ModuleKind, Node, VarKind};
 use ts_r_binder::{SymbolFacts, SymbolFlags, decl_name_node, meaning};
 use ts_r_checker::members::SigKind;
 use ts_r_checker::{Ck, Loc, PrintMode};
@@ -259,7 +259,7 @@ impl Writer {
             self.line();
             let name = self.name(ck, s);
             let tps = self.type_params(ck, s);
-            let body = alias_body(ck, s);
+            let body = alias_body(ck, s, PrintMode::quick_info_alias(self.at));
             self.out.push_str(&format!("type {name}{tps} = {body}"));
         }
         if flags.intersects(SymbolFlags::SIGNATURE) {
@@ -336,6 +336,11 @@ impl Writer {
         // `exactOptionalPropertyTypes` `?`).
         let t = if self.alias.is_some() {
             ck.type_of_symbol(s)
+        } else if flags.intersects(SymbolFlags::ACCESSOR)
+            && (assigned_member(ck, self.at) || is_setter_name(ck, self.at))
+        {
+            // A setter's name or a write through it: the type it accepts.
+            ck.write_type_of_symbol(s)
         } else if flags.intersects(SymbolFlags::PROPERTY) && assigned_member(ck, self.at) {
             let t = ck.type_of_symbol(s);
             ck.remove_missing(t)
@@ -825,11 +830,57 @@ pub(super) fn signatures_at(ck: &mut Ck<'_, '_>, s: SymId, kind: SigKind, at: Lo
     };
     if (sigs.len() > 1 || generic)
         && let Some(call) = call_of(ck, at)
-        && let Some(r) = ck.resolved_signature(call)
     {
-        return vec![r];
+        let resolved = ck.resolved_signature(call);
+        let still_generic = resolved.is_some_and(|r| {
+            let st = ck.store();
+            !st.list_items(st.sig(r).type_params).is_empty()
+        });
+        if let Some(r) = resolved
+            && !still_generic
+        {
+            return vec![r];
+        }
+        // A generic call that does not resolve (no signature, or the candidate left
+        // uninstantiated) shows that candidate instantiated as signature help does
+        // (written type arguments, else inferred; `any` in JavaScript).
+        let cand = resolved.unwrap_or(sigs[0]);
+        if generic || still_generic {
+            let (type_args, args) = match *ck.c.node(call) {
+                Node::Call {
+                    type_args, args, ..
+                }
+                | Node::New {
+                    type_args, args, ..
+                } => (type_args, args),
+                _ => return sigs,
+            };
+            let args: Vec<(usize, ts_r_ast::NodeId)> =
+                ck.c.ast(call.file)
+                    .list(args)
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .collect();
+            let sig =
+                super::signature::instantiate_for_failure(ck, call.file, cand, type_args, &args);
+            return vec![sig];
+        }
+        if let Some(r) = resolved {
+            return vec![r];
+        }
     }
     sigs
+}
+
+/// Whether `at` is the name of a `set` accessor declaration.
+fn is_setter_name(ck: &Ck<'_, '_>, at: Loc) -> bool {
+    let c = ck.c;
+    c.parent(at).is_some_and(|p| {
+        matches!(*c.node(p),
+            Node::MethodDef { kind: MethodKind::Set, key, .. }
+            | Node::MethodSignature { kind: MethodKind::Set, key, .. } if key == at.node)
+    })
 }
 
 /// Whether `at` names the member an assignment writes (`o.p = 1`, `o["p"] ??= 1`, `o.p++`).
@@ -921,21 +972,24 @@ fn var_prefix(ck: &Ck<'_, '_>, s: SymId) -> &'static str {
     }
 }
 
-/// The aliased type of a type alias, as written (whitespace collapsed).
-fn alias_body(ck: &mut Ck<'_, '_>, s: SymId) -> String {
+/// The aliased type of a type alias, printed as tsc's quick info prints it: the declared
+/// type with its own alias expanded (`PrintMode::quick_info_alias`, tsc's `InTypeAlias`),
+/// so `Exclude<A, "_0">` shows the union it makes. A conditional type shows its text as
+/// written (whitespace collapsed): tsc keeps one with a generic check type deferred, which
+/// the checker does not yet.
+fn alias_body(ck: &mut Ck<'_, '_>, s: SymId, mode: PrintMode) -> String {
     let c = ck.c;
-    let Some(d) = c
+    let t = ck.declared_type_of_symbol(s);
+    if let Some(d) = c
         .decls(s)
         .into_iter()
         .find(|d| matches!(c.node(*d), Node::TypeAlias { .. }))
-    else {
-        let t = ck.declared_type_of_symbol(s);
-        return ck.type_to_string(t);
-    };
-    let Node::TypeAlias { ty, .. } = *c.node(d) else {
-        return String::new();
-    };
-    super::hover::collapse_ws(c.text(Loc::new(d.file, ty)))
+        && let Node::TypeAlias { ty, .. } = *c.node(d)
+        && matches!(c.ast(d.file).node(ty), Node::ConditionalType { .. })
+    {
+        return super::hover::collapse_ws(c.text(Loc::new(d.file, ty)));
+    }
+    ck.type_to_string_with(t, mode)
 }
 
 pub fn strip_ts_ext(path: &str) -> &str {

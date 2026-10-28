@@ -23,7 +23,7 @@ use std::time::Instant;
 use ts_r_ast::SourceKind;
 use ts_r_checker::ProgramFiles;
 use ts_r_diagnostics::FileId;
-use ts_r_parser::TsInJs;
+use ts_r_parser::ParseOptions;
 
 /// `TS_R_LSP_TYPED_LINT=0` disables type-aware lint in the ts-r backend.
 fn enabled() -> bool {
@@ -148,22 +148,20 @@ impl Project {
             .map(|d| crate::lint::lsp_diagnostic(d, &text, 0))
             .collect();
         // The grammar the lint worker parses the file with (for disable comments in JSX).
-        let typescript = self
+        let parse = self
             .lint
             .configs
             .cached(path)
-            .is_some_and(|fc| fc.env.typescript);
+            .map_or_else(ParseOptions::default, |fc| {
+                crate::lint::parse_options(&fc.env)
+            });
         let linted = Linted {
             text,
             diags: pb.lint.clone(),
             lsp,
             bom: 0,
             kind: SourceKind::from_path(path),
-            ts_in_js: if typescript {
-                TsInJs::Allow
-            } else {
-                TsInJs::Reject
-            },
+            parse,
         };
         let mut out = crate::lint::code_actions(&linted, uri, start, end, &only);
         out.retain(|a| a["kind"] != crate::lint::FIX_ALL_KIND);

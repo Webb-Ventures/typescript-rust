@@ -130,6 +130,10 @@ struct Slot {
     init_waiters: Vec<(ClientId, Value)>,
     registrations: BTreeMap<String, Value>,
     last_config: Option<Value>,
+    /// The backend's last pushed diagnostics per file, for a window that opens a file the
+    /// backend already has (no sync op is sent, so the backend publishes nothing new).
+    /// Kept with the mirror version they arrived at.
+    pushed: BTreeMap<String, (i64, Vec<Value>)>,
     // tsserver backends.
     ts_configure: Option<Value>,
     ts_inferred: Option<Value>,
@@ -935,11 +939,14 @@ impl Daemon {
                         let Some(key) = self.lsp_did_open(cid, &params) else {
                             return;
                         };
-                        if protocol == Protocol::TsServer {
-                            // Another window may already have this file open: no sync op is
-                            // sent, so reuse its diagnostics and refresh them.
-                            self.publish_cached(cid, sid, &key);
-                            self.schedule_geterr(sid);
+                        // Another window may already have this file open: no sync op is
+                        // sent, so reuse the backend's diagnostics (and refresh tsserver's).
+                        match protocol {
+                            Protocol::TsServer => {
+                                self.publish_cached(cid, sid, &key);
+                                self.schedule_geterr(sid);
+                            }
+                            Protocol::Lsp => self.publish_pushed(cid, sid, &key),
                         }
                     }
                     "textDocument/didChange" => self.lsp_did_change(cid, &params),
@@ -1477,6 +1484,11 @@ impl Daemon {
             }
             Protocol::Lsp => {
                 for op in ops {
+                    if let SyncOp::Close { key, .. } = &op
+                        && let Some(slot) = self.slots.get_mut(&sid)
+                    {
+                        slot.pushed.remove(key);
+                    }
                     self.send_backend(sid, lsp_sync_message(&op));
                 }
             }
@@ -1734,6 +1746,7 @@ impl Daemon {
         slot.state = SlotState::Stopped;
         slot.mirror.clear();
         slot.diags.clear();
+        slot.pushed.clear();
         slot.init_result = None;
         slot.geterr_due = None;
         slot.geterr_inflight = None;
@@ -1844,6 +1857,7 @@ impl Daemon {
         slot.state = SlotState::Stopped;
         slot.mirror.clear();
         slot.diags.clear();
+        slot.pushed.clear();
         slot.init_result = None;
         slot.geterr_inflight = None;
         slot.restarts_crash += 1;
@@ -2162,10 +2176,40 @@ impl Daemon {
             .as_array()
             .cloned()
             .unwrap_or_default();
+        if let Some(slot) = self.slots.get_mut(&sid) {
+            if let Some(doc) = slot.mirror.docs.get(&key) {
+                slot.pushed
+                    .insert(key.clone(), (doc.version, diags.clone()));
+            } else {
+                slot.pushed.remove(&key);
+            }
+        }
         for (c, client_uri) in self.audience(sid, &key, FrontKind::Lsp) {
             let uri = client_uri.unwrap_or_else(|| u.to_string());
             self.publish_type_diags(c, &key, uri, diags.clone());
         }
+    }
+
+    /// An LSP backend's last diagnostics for `key`, to a client that just opened it, when
+    /// the client's text is the backend's.
+    fn publish_pushed(&mut self, cid: ClientId, sid: SlotId, key: &str) {
+        let Some(slot) = self.slots.get(&sid) else {
+            return;
+        };
+        let (Some((version, diags)), Some(backend)) =
+            (slot.pushed.get(key), slot.mirror.docs.get(key))
+        else {
+            return;
+        };
+        let Some(doc) = self.clients.get(&cid).and_then(|c| c.docs.get(key)) else {
+            return;
+        };
+        if *version != backend.version || doc.text.text() != backend.text.text() {
+            return;
+        }
+        let diags = diags.clone();
+        let client_uri = doc.uri.clone().unwrap_or_else(|| backend.uri.clone());
+        self.publish_type_diags(cid, key, client_uri, diags);
     }
 
     fn on_ts_backend(&mut self, sid: SlotId, msg: Value) {
@@ -2996,6 +3040,7 @@ impl Slot {
             init_waiters: Vec::new(),
             registrations: BTreeMap::new(),
             last_config: None,
+            pushed: BTreeMap::new(),
             ts_configure: None,
             ts_inferred: None,
             diags: BTreeMap::new(),
