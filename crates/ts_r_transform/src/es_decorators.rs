@@ -836,7 +836,8 @@ fn prepare(
                     if let Name::Private(pn) = name {
                         let d = tx.ast.intern(&format!("{base}_descriptor{suffix}"));
                         descriptor = Some(d);
-                        descriptor_value = Some(private_accessor_descriptor(tx, pn, storage, at));
+                        descriptor_value =
+                            Some(private_accessor_descriptor(tx, pn, storage, is_static, at));
                         let (g, s) = forwarding_accessors(tx, key, set_key, d, is_static, at);
                         out.push(g);
                         out.push(s);
@@ -1089,7 +1090,13 @@ fn storage_name(tx: &mut Tx, st: &mut Lower, key: Node) -> Atom {
 }
 
 /// `{ get: __setFunctionName(function () { return this.#s; }, "#x", "get"), set: ... }`
-fn private_accessor_descriptor(tx: &mut Tx, name: Atom, storage: Atom, at: u32) -> NodeId {
+fn private_accessor_descriptor(
+    tx: &mut Tx,
+    name: Atom,
+    storage: Atom,
+    is_static: bool,
+    at: u32,
+) -> NodeId {
     let fname = format!("#{}", tx.ast.atom(name));
     // getter
     let this = tx.this(at);
@@ -1128,6 +1135,9 @@ fn private_accessor_descriptor(tx: &mut Tx, name: Atom, storage: Atom, at: u32) 
     let param = tx.param(pv, at);
     let setter = tx.function_expr(None, &[param], &[s], at);
     tx.mark_single_line_body(setter);
+    if is_static {
+        tx.static_descriptor_fns.extend([getter, setter]);
+    }
     let f = tx.helper_ref(Helper::SetFunctionName, at);
     let n = tx.string(&fname, at);
     let k = tx.string("set", at);

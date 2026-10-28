@@ -114,7 +114,13 @@ printing from raw text or cooked values), `sourcemap.rs` (VLQ, builder, line loo
     trailing comma in a multi-line literal trails it after a space (`x, // c`). A
     specifier's leading comments print through `expr_leading`, so one on its own source
     line goes on its own line after the `, ` (`export { a, \n// c\nb, }`), and its trailing
-    ones before the `,` stay (`b /* c */, c`).
+    ones before the `,` stay (`b /* c */, c`). So do the comments around the other clause
+    tokens (`import /*2*/ D /*3*/, /*4*/ {`, `B /*8*/ as /*9*/ C`, `} /*11*/ from`,
+    `* /*3*/ as`, `export /*2*/ default`). Comments on the lines before an element
+    access's `[` or `]`, or a parenthesized expression's `)`, lead that token (`x\n// c\n/*d*/ [`).
+    A synthesized block whose hinted range is a source block (a namespace IIFE's body) keeps
+    the comments before that block's `}`. A `;` after an object literal's last member (a
+    recovered separator, `{ a; }`) is a trailing comma (`{ a, }`).
   - Comments after erased code on its last line are dropped with it (`declare function
     f(); // c`). A synthesized statement whose source-map start is not past the next original
     statement of its list stands in for an original one: the comments before that start lead

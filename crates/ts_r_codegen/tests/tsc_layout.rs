@@ -136,3 +136,25 @@ fn jsx_recovery() {
 fn missing_operand() {
     check_recovered("missing_operand", SourceKind::Ts, "js");
 }
+
+/// Comments between the tokens of import and export clauses stay where they are written
+/// (tsc 7.0.2, importExportInternalComments).
+#[test]
+fn clause_comments() {
+    check("clause_comments", SourceKind::Ts, "js");
+}
+
+/// Comments on the lines before an element access's `[` and `]` and a parenthesized
+/// expression's `)` lead those tokens (tsc 7.0.2, elementAccessExpressionInternalComments,
+/// parenthesizedExpressionInternalComments).
+#[test]
+fn access_comments() {
+    check("access_comments", SourceKind::Ts, "js");
+}
+
+/// A `;` between object literal members is recovered as a `,`, the last one too
+/// (tsc 7.0.2, incompleteObjectLiteral1, objectLiteralWithSemicolons5).
+#[test]
+fn object_semicolons() {
+    check_recovered("object_semicolons", SourceKind::Ts, "js");
+}

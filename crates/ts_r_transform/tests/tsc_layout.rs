@@ -306,3 +306,18 @@ fn jsx_source_lines() {
 fn bare_class_statements() {
     check("bare_class_statements");
 }
+
+/// TC39 decorators below ES2022: a decorated instance `accessor`'s storage is declared after
+/// the other private names, and `this` in a static private `accessor`'s descriptor
+/// functions is the class alias (tsc 7.0.2, esDecorators-classDeclaration-sourceMap).
+#[test]
+fn es_decorator_static_accessor() {
+    check("es_decorator_static_accessor");
+}
+
+/// The comments before a namespace body's `}` stay at the end of its IIFE's body (tsc 7.0.2,
+/// commentInNamespaceDeclarationWithIdentifierPathName).
+#[test]
+fn namespace_end_comments() {
+    check("namespace_end_comments");
+}

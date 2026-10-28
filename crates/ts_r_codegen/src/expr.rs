@@ -347,6 +347,10 @@ impl Printer<'_> {
                     self.expr_trailing(self.span(id).start + 1);
                 }
                 self.expr(expr, Prec::Lowest);
+                // Comments on lines before the `)` lead it (`"a"\n// c\n)`).
+                if self.tsc && !self.is_synthetic(id) && !self.is_synthetic(expr) {
+                    self.expr_leading(self.span(id).end - 1);
+                }
                 self.tok(")");
                 self.no_in = saved;
             }
@@ -577,18 +581,29 @@ impl Printer<'_> {
                 if optional {
                     self.question_dot(obj, self.span(index).start);
                 }
+                let orig = self.tsc && !self.is_synthetic(obj) && !self.is_synthetic(index);
+                let open = orig
+                    .then(|| {
+                        let (from, to) = (self.span(obj).end, self.span(index).start);
+                        self.token_between(from, to.max(from), "[")
+                    })
+                    .flatten();
+                // Comments on lines before the `[` lead it (`x\n// c\n[0]`); comments after
+                // it trail it: `x[ /* c */0]`.
+                if let Some(p) = open.filter(|_| !optional) {
+                    self.expr_leading(p);
+                }
                 self.tok("[");
-                if self.tsc && !self.is_synthetic(obj) && !self.is_synthetic(index) {
-                    // Comments after the `[` trail it: `x[ /* c */0]`.
-                    let (from, to) = (self.span(obj).end, self.span(index).start);
-                    if let Some(p) = self.token_between(from, to.max(from), "[") {
-                        self.expr_trailing(p + 1);
-                    }
+                if let Some(p) = open {
+                    self.expr_trailing(p + 1);
                 }
                 let saved = self.no_in;
                 self.no_in = false;
                 self.expr(index, Prec::Lowest);
                 self.no_in = saved;
+                if orig {
+                    self.expr_leading(self.span(id).end - 1);
+                }
                 self.tok("]");
             }
             Node::MetaProperty { kind } => {
@@ -1251,10 +1266,15 @@ impl Printer<'_> {
                 && !last_hole
                 && !self.is_synthetic(last)
                 && self.has_newline_between(self.span(last).end, close_pos));
+        // An object's `;` separator (a syntax error, `{ a; }`) counts as a comma (observed).
         let trailing_comma = orig
             && !last_hole
             && !self.is_synthetic(last)
-            && self.has_comma_between(self.span(last).end, close_pos);
+            && (self.has_comma_between(self.span(last).end, close_pos)
+                || (object
+                    && self
+                        .token_between(self.span(last).end, close_pos + 1, ";")
+                        .is_some()));
         // Binding patterns stay on one line and add no indentation (a class in a computed
         // key keeps the outer level); literals indent their elements.
         let indented = !pattern || nl_open;

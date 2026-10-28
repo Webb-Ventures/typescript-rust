@@ -313,9 +313,28 @@ impl Lower<'_, '_> {
             self.tx.need(Helper::ClassPrivateFieldSet);
         }
         if has_privs {
-            // An `accessor`'s storage is named after every other private member (observed).
+            // An `accessor`'s storage is named after every other private member, a decorated
+            // instance one's too unless its accessors are private (observed).
             let mut order = self.tx.items(p.members);
-            order.sort_by_key(|&m| self.is_accessor_storage(m));
+            let private_methods: Vec<String> = order
+                .iter()
+                .filter_map(|&m| match self.n(m) {
+                    Node::MethodDef { key, .. } => match self.n(key) {
+                        Node::PrivateName { name } => Some(self.tx.ast.atom(name).to_owned()),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect();
+            order.sort_by_key(|&m| {
+                self.is_accessor_storage(m)
+                    || matches!(self.n(m), Node::PropertyDef { key, modifiers, .. }
+                        if !modifiers.contains(Modifiers::STATIC)
+                            && matches!(self.n(key), Node::PrivateName { name }
+                                if self.tx.decorator_storages.contains(&name)
+                                    && self.tx.ast.atom(name).strip_suffix("_accessor_storage")
+                                        .is_some_and(|b| !private_methods.iter().any(|p| p == b))))
+            });
             for m in order {
                 let (key, is_static, kind) = match self.n(m) {
                     Node::PropertyDef { key, modifiers, .. } => (key, modifiers, None),
@@ -1535,8 +1554,9 @@ impl Lower<'_, '_> {
                     }
                 }
                 Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => {
+                    let inner = ok && self.tx.static_descriptor_fns.contains(&id);
                     for c in self.tx.ast.children(id) {
-                        stack.push((c, false));
+                        stack.push((c, inner));
                     }
                 }
                 _ => {
@@ -1674,8 +1694,9 @@ impl Lower<'_, '_> {
                 }
             }
             Node::FunctionDecl { .. } | Node::FunctionExpr { .. } => {
+                let inner = this_ok && self.tx.static_descriptor_fns.contains(&id);
                 for c in self.tx.ast.children(id) {
-                    self.subst(c, s, false);
+                    self.subst(c, s, inner);
                 }
             }
             _ => {

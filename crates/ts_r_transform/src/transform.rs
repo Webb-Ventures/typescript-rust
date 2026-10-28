@@ -73,6 +73,10 @@ pub(crate) struct Tx<'a> {
     /// `accessor` storages the TC39 decorator transform made: an ordinary private field
     /// in member order when private names are lowered (observed).
     pub decorator_storages: Vec<Atom>,
+    /// The getter and setter functions of a decorated static private `accessor`'s
+    /// descriptor: below ES2022 their `this` is the class alias, as in the static code
+    /// around them (observed).
+    pub static_descriptor_fns: Vec<NodeId>,
     /// Generated `accessor` storage names (`_a`, `_b`, ...) when private names are lowered:
     /// counted across the file, apart from temporaries (observed).
     pub storage_count: u32,
@@ -187,6 +191,7 @@ pub(crate) fn run(
         temp_atoms: Vec::new(),
         using_names: Vec::new(),
         decorator_storages: Vec::new(),
+        static_descriptor_fns: Vec::new(),
         storage_count: 0,
         class_storage_count: 0,
         class_key_capture: None,

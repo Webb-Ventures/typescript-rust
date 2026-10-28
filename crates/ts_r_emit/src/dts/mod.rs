@@ -90,6 +90,11 @@ pub fn declaration_file(
         e.is_module = true;
         order.retain(|&s| s != st);
         order.insert(0, st);
+    } else if !f.ast.source_kind.is_typescript()
+        && let Some(named) = js::commonjs_named_exports(checker, file)
+    {
+        e.cjs_named = named;
+        e.is_module = true;
     }
     if e.is_module {
         e.export_jsdoc_aliases(&stmts);
@@ -99,6 +104,7 @@ pub fn declaration_file(
     loop {
         e.reset(cp);
         e.file_header(&stmts);
+        e.cjs_named_exports();
         let scope = if e.is_module {
             Scope::ModuleTop
         } else {
@@ -199,6 +205,9 @@ pub(crate) struct Emitter<'c, 'a> {
     /// A CommonJS file's `module.exports = v;` statement, written as `export = v` first
     /// (`js::commonjs_export_assignment`).
     cjs_export: Option<(NodeId, NodeId)>,
+    /// A CommonJS file's `exports.x = v` exports, written first
+    /// (`js::commonjs_named_exports`).
+    cjs_named: Vec<js::NamedExport>,
     out: String,
     indent: usize,
     type_depth: u32,
@@ -264,6 +273,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
             host,
             is_module: f.bound.is_module,
             cjs_export: None,
+            cjs_named: Vec::new(),
             out: String::new(),
             indent: 0,
             type_depth: 0,
@@ -1369,7 +1379,10 @@ impl<'c, 'a> Emitter<'c, 'a> {
         }
         match scope {
             Scope::ModuleTop => {
-                if (printed_local || !has_module_syntax) && !has_export_decl {
+                if (printed_local || !has_module_syntax)
+                    && !has_export_decl
+                    && self.cjs_named.is_empty()
+                {
                     self.w("export {};");
                     self.nl();
                 }
@@ -2118,6 +2131,47 @@ impl<'c, 'a> Emitter<'c, 'a> {
         true
     }
 
+    /// A CommonJS file's named exports (`js::commonjs_named_exports`), without comments.
+    fn cjs_named_exports(&mut self) {
+        for (name, target, alias) in self.cjs_named.clone() {
+            if let Some(v) = alias {
+                self.reference_ident(v, meaning::VALUE);
+                let local = self.raw(v);
+                self.w("export { ");
+                self.w(local);
+                if local != name {
+                    self.w(" as ");
+                    if ts_r_checker::typenode::is_identifier_text(&name) {
+                        self.w(&name);
+                    } else {
+                        self.w(&format!("{name:?}"));
+                    }
+                }
+                self.w(" };");
+                self.nl();
+                continue;
+            }
+            let Some(sym) = self.c.sym_of_decl(self.loc(target)) else {
+                self.fail(target, NotNameable::Unresolved);
+                continue;
+            };
+            let t = self.ck.type_of_symbol(sym);
+            if name == "default" {
+                let local = self.unique_name("_default");
+                self.w(&format!("declare const {local}: "));
+                self.inferred_type(t, target);
+                self.w(";");
+                self.nl();
+                self.w(&format!("export default {local};"));
+            } else {
+                self.w(&format!("export declare var {name}: "));
+                self.inferred_type(t, target);
+                self.w(";");
+            }
+            self.nl();
+        }
+    }
+
     /// `export = x;` / `export default x;`, or a `_default` constant for an expression.
     fn export_value(&mut self, s: NodeId, expr: NodeId, prefix: &str) -> bool {
         self.export_value_named(s, expr, prefix, "_default")
@@ -2215,6 +2269,49 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if items.is_empty() {
             return false;
         }
+        // JavaScript's `const x = require("m")` is an `import x = require("m")`.
+        if let &[d] = items.as_slice()
+            && !self.ast.source_kind.is_typescript()
+            && let Node::VarDeclarator {
+                name,
+                init: Some(init),
+                ..
+            } = *self.ast.node(d)
+            && let Node::Call { callee, args, .. } = *self.ast.node(init)
+            && matches!(*self.ast.node(callee), Node::Ident { name } if self.ast.atom(name) == "require")
+            && let &[m] = self.ast.list(args)
+            && matches!(self.ast.node(m), Node::StringLit { .. })
+        {
+            self.w("import ");
+            self.name_text(name);
+            self.w(" = require(");
+            self.w(self.raw(m));
+            self.w(");");
+            self.nl();
+            return true;
+        }
+        // A destructured `require` declares imports (not written yet).
+        if !self.ast.source_kind.is_typescript()
+            && let Some(&d) = decls.iter().find(|&&d| match *self.ast.node(d) {
+                Node::VarDeclarator {
+                    name,
+                    init: Some(init),
+                    ..
+                } => {
+                    !matches!(self.ast.node(name), Node::Ident { .. })
+                        && self.is_require_chain(init)
+                }
+                _ => false,
+            })
+        {
+            self.failed.push((
+                TSR_JS_DECLARATIONS,
+                self.ast.span(d),
+                "Declaration emit for this JavaScript file is not implemented yet: it uses a destructured `require` (design record 0012).".to_owned(),
+                None,
+            ));
+            return false;
+        }
         // A `const` function with expando properties is a function and a namespace.
         let by_scope =
             scope != Scope::Namespace || self.ast.node(s).modifiers().contains(Modifiers::EXPORT);
@@ -2294,6 +2391,24 @@ impl<'c, 'a> Emitter<'c, 'a> {
         }
         self.semi_end(s);
         true
+    }
+
+    /// `e` is `require(..)`, or a property access or call of one (`require("m").o`).
+    fn is_require_chain(&self, mut e: NodeId) -> bool {
+        loop {
+            match *self.ast.node(e) {
+                Node::Call { callee, .. } => {
+                    if matches!(*self.ast.node(callee), Node::Ident { name } if self.ast.atom(name) == "require")
+                    {
+                        return true;
+                    }
+                    e = callee;
+                }
+                Node::Member { obj, .. } | Node::Index { obj, .. } => e = obj,
+                Node::Paren { expr } => e = expr,
+                _ => return false,
+            }
+        }
     }
 
     /// `: T` for a variable without annotation, or ` = literal` for a literal constant.

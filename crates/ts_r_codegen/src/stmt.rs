@@ -246,6 +246,14 @@ impl Printer<'_> {
         self.statement_list(list);
         if !self.is_synthetic(id) {
             self.leading_comments(span.end.saturating_sub(1));
+        } else if self.tsc {
+            // A synthesized block standing for a source block (a namespace IIFE's body)
+            // keeps the comments before that block's `}`.
+            if let Some(r) = self.hinted_range(id)
+                && self.src.as_bytes().get(r.start as usize) == Some(&b'{')
+            {
+                self.leading_comments(r.end.saturating_sub(1));
+            }
         }
         self.dedent();
         if !(self.tsc && self.after_inline_comment()) {
@@ -1059,6 +1067,11 @@ impl Printer<'_> {
                 self.space();
                 let specs = self.ast.list(specifiers).to_vec();
                 let braces = self.named_braces(id, &specs);
+                let span = self.span(id);
+                let open = self.clause_token(id, span.start, span.end, "{");
+                if let Some(o) = open {
+                    self.expr_leading(o);
+                }
                 if let Some((open, _)) = braces {
                     self.map_pos(open);
                 }
@@ -1076,6 +1089,9 @@ impl Printer<'_> {
                 self.tok("}");
                 if let Some((_, end)) = braces {
                     self.map_pos(end);
+                }
+                if let Some(c) = open.and_then(|o| self.clause_token(id, o, span.end, "}")) {
+                    self.expr_trailing(c + 1);
                 }
                 if let Some(src) = source {
                     self.space();
@@ -1107,7 +1123,15 @@ impl Printer<'_> {
                 if let Some(p) = star {
                     self.map_pos(p);
                 }
+                let span = self.span(id);
+                let star_at = self.clause_token(id, span.start, span.end, "*");
+                if let Some(p) = star_at {
+                    self.expr_leading(p);
+                }
                 self.tok("*");
+                if let Some(p) = star_at {
+                    self.expr_trailing(p + 1);
+                }
                 if let Some(e) = exported {
                     self.hard_space();
                     self.tok("as");
@@ -1129,6 +1153,11 @@ impl Printer<'_> {
             Node::ExportDefaultExpr { expr } => {
                 self.tok("export");
                 self.hard_space();
+                let span = self.span(id);
+                if let Some(p) = self.clause_token(id, span.start, self.span(expr).start, "default")
+                {
+                    self.expr_leading(p);
+                }
                 self.tok("default");
                 self.hard_space();
                 let paren = self.starts_ambiguously(expr, false)
@@ -2020,6 +2049,28 @@ impl Printer<'_> {
         Some((open, close + 1))
     }
 
+    /// Layout::Tsc: the comments before original node `n` (`import /*2*/ D`).
+    fn node_leading(&mut self, n: NodeId) {
+        if self.tsc && !self.is_synthetic(n) {
+            self.expr_leading(self.span(n).start);
+        }
+    }
+
+    /// Layout::Tsc: the comments after original node `n` on its line (`D /*3*/,`).
+    fn node_trailing(&mut self, n: NodeId) {
+        if self.tsc && !self.is_synthetic(n) {
+            self.expr_trailing(self.span(n).end);
+        }
+    }
+
+    /// Layout::Tsc: where token `tok` of the original `decl` is, between `from` and `to`.
+    fn clause_token(&self, decl: NodeId, from: u32, to: u32, tok: &str) -> Option<u32> {
+        if !self.tsc || self.is_synthetic(decl) {
+            return None;
+        }
+        self.token_between(from, to, tok)
+    }
+
     /// The original `import`/`export` `id` ends its `{ ... }` list with a `,` (tsc layout).
     fn named_trailing_comma(&self, id: NodeId) -> bool {
         if !self.tsc || self.is_synthetic(id) {
@@ -2064,7 +2115,9 @@ impl Printer<'_> {
                         self.tok(",");
                         self.space();
                     }
+                    self.node_leading(s);
                     self.ident(local);
+                    self.node_trailing(s);
                     clause_end = Some(s);
                     first = false;
                 }
@@ -2073,13 +2126,19 @@ impl Printer<'_> {
                         self.tok(",");
                         self.space();
                     }
+                    self.node_leading(s);
                     self.map_start(s);
                     self.tok("*");
+                    if self.tsc && !self.is_synthetic(s) {
+                        self.expr_trailing(self.span(s).start + 1);
+                    }
                     self.space();
                     self.tok("as");
                     self.hard_space();
+                    self.node_leading(local);
                     self.ident(local);
                     self.map_end(s);
+                    self.node_trailing(local);
                     clause_end = Some(s);
                     first = false;
                 }
@@ -2091,6 +2150,11 @@ impl Printer<'_> {
             if !first {
                 self.tok(",");
                 self.space();
+            }
+            let span = self.span(decl);
+            let open = self.clause_token(decl, span.start, span.end, "{");
+            if let Some(o) = open {
+                self.expr_leading(o);
             }
             if let Some((open, _)) = braces {
                 self.map_pos(open);
@@ -2109,6 +2173,9 @@ impl Printer<'_> {
             self.tok("}");
             if let Some((_, end)) = braces {
                 self.map_pos(end);
+            }
+            if let Some(c) = open.and_then(|o| self.clause_token(decl, o, span.end, "}")) {
+                self.expr_trailing(c + 1);
             }
         } else if let (Some(_), Some(e)) = (clause, clause_end) {
             self.map_end(e);
@@ -2130,9 +2197,11 @@ impl Printer<'_> {
             }
             if let Some(imp) = imported {
                 self.module_export_name(imp);
+                self.node_trailing(imp);
                 self.hard_space();
                 self.tok("as");
                 self.hard_space();
+                self.node_leading(local);
             }
             self.ident(local);
             self.specifier_trailing(id);
@@ -2154,9 +2223,11 @@ impl Printer<'_> {
             }
             self.module_export_name(local);
             if let Some(e) = exported {
+                self.node_trailing(local);
                 self.hard_space();
                 self.tok("as");
                 self.hard_space();
+                self.node_leading(e);
                 self.module_export_name(e);
             }
             self.specifier_trailing(id);

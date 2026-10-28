@@ -811,8 +811,8 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
     for src in [
         "module.exports = { a: 1 };\nmodule.exports.b = 2;\n",
-        "const y = require(\"./y\");\nmodule.exports = y;\n",
-        "exports.a = 1;\n",
+        "const { y } = require(\"./y\");\nmodule.exports = y;\n",
+        "exports.a = require(\"./y\");\n",
         "/** @typedef {number} ns.T */\nexport const x = 1;\n",
         "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
         "/** @type {(a: number) => number} */\nexport function f(a) { return a; }\n",
@@ -880,6 +880,58 @@ fn javascript_commonjs_export_assignment_is_written() {
             .find(|o| o.path == "/p/out/a.d.ts")
             .unwrap();
         assert_eq!(d.text, want, "{src}");
+    }
+}
+
+/// CommonJS named exports are written first (tsc 7.0.2, moduleExportsElementAccessAssignment,
+/// nestedDestructuringOfRequire, jsDeclarationExportDefaultAssignmentCrash), and
+/// `const x = require("m")` is `import x = require("m")` (jsDeclarationsJson).
+#[test]
+fn javascript_commonjs_named_exports_and_require_are_written() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "function f() {}\nexports.f = f;\nexports[\"o\"] = { x: \"x\" };\nexports.default = () => 1;\n",
+            "export { f };\nexport declare var o: {\n    x: string;\n};\ndeclare const _default: () => number;\nexport default _default;\ndeclare function f(): void;\n",
+        ),
+        (
+            "const y = require(\"./y\");\nmodule.exports = y;\n",
+            "export = y;\nimport y = require(\"./y\");\n",
+        ),
+    ] {
+        let r = emit(&[
+            ("tsconfig.json", config),
+            ("a.js", src),
+            ("y.js", "module.exports = 1;\n"),
+        ]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .unwrap();
+        assert_eq!(d.text, want, "{src}");
+    }
+}
+
+/// A nested write, or an export named by a reserved word, is not written through a local.
+#[test]
+fn javascript_commonjs_exports_not_written_wrongly() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, bad) in [
+        (
+            "const x = 1;\nexports.x = x;\nfunction mutate() { exports.x = 'later'; }\nexports.mutate = mutate;\n",
+            "export { x }",
+        ),
+        ("exports.class = 1;\n", "var class"),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        let d = r.outputs.iter().find(|o| o.path == "/p/out/a.d.ts");
+        assert!(d.is_none_or(|d| !d.text.contains(bad)), "{src}: {d:?}");
     }
 }
 

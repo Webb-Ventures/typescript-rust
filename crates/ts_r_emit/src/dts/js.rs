@@ -12,9 +12,11 @@
 //! emitter does not write yet, so a file using one is refused rather than written
 //! without them (invariant 2; observed with tsc 7.0.2 on the emit baselines):
 //!
-//! - CommonJS (`exports.x = v`, `module.exports.x = v`, `require`, more than one
-//!   `module.exports = v`): exported declarations; one top-level `module.exports = v;` is
-//!   written ([`commonjs_export_assignment`]);
+//! - CommonJS (`exports.x = v` mixed with `module.exports = v`, nested or `require`d
+//!   exports, a destructured `require`, more than one `module.exports = v`): exported
+//!   declarations; one top-level `module.exports = v;` ([`commonjs_export_assignment`]),
+//!   top-level `exports.x = v;` alone ([`commonjs_named_exports`]) and `const x =
+//!   require("m")` (`import x = require("m")`) are written;
 //! - `this["x"] = v` in a class, and `this.x = v` where the checker's type is not yet tsc's
 //!   (a property a base class declares, a value that reads the property itself);
 //! - `C.x = v` on a class (tsc adds a static);
@@ -76,6 +78,8 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
         },
         _ => None,
     });
+    // Named exports alone (`exports.x = v`) are written.
+    let named = export_assignment.is_none() && commonjs_named_exports(c, file).is_some();
     // Per class, the member names it declares (`(is static, name)`), built on first use.
     let mut members: FxHashMap<NodeId, FxHashSet<(bool, &str)>> = FxHashMap::default();
     for raw in 1..=ast.node_count() as u32 {
@@ -95,6 +99,7 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
                 // `module.exports` / `exports` read as the module object (no local of
                 // that name): a CommonJS pattern tsc declares.
                 ((text == "exports" || text == "module")
+                    && !named
                     && allowed_module != Some(n)
                     && !is_property_name(ast, parents, n)
                     && is_module_object(c, file, n))
@@ -169,12 +174,8 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
         if n == module || ast.is_jsdoc(n) {
             continue;
         }
-        // `require(...)` declares an `import x = require(...)` (not written yet).
-        if let Node::Call { callee, .. } = *ast.node(n)
-            && is_name(callee, "require")
-        {
-            return None;
-        }
+        // `const x = require("m")` is written `import x = require("m")`; the emitter
+        // refuses a printed destructured `require` (`Emitter::var_statement`).
         if let Node::Ident { name } = *ast.node(n) {
             let text = ast.atom(name);
             if (text == "exports" || text == "module")
@@ -187,6 +188,198 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
     }
     Some((st, value))
 }
+
+/// One CommonJS named export: `(name, its first assignment target, the assigned name)`.
+/// The name is set when the export is assigned once, to a name declared in the file.
+pub(super) type NamedExport = (String, NodeId, Option<NodeId>);
+
+/// The file's CommonJS exports when every `exports` / `module` reference is a top-level
+/// `exports.x = v;` / `module.exports["x"] = v;` (chains included) or a read of an
+/// assigned `x`, and nothing is `require`d: the exports in order of first assignment
+/// (pre-order). tsc 7 writes them first in the file: `export { v };` (`export { v as x };`)
+/// for an export assigned once to a name declared in the file, `declare const _default:
+/// T; export default _default;` for `default`, else `export declare var x: T;` with the
+/// export's type.
+pub(super) fn commonjs_named_exports(c: &Checker, file: FileId) -> Option<Vec<NamedExport>> {
+    let f = c.file(file);
+    if !f.bound.commonjs || f.path.contains("/node_modules/") {
+        return None;
+    }
+    let ast = &f.ast;
+    let parents = f.parents();
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return None;
+    };
+    let is_name = |n: NodeId, text: &str| matches!(*ast.node(n), Node::Ident { name } if ast.atom(name) == text);
+    let string_is = |n: NodeId, text: &str| matches!(*ast.node(n), Node::StringLit { value } if ast.atom(value) == text);
+    // `module.exports` / `module["exports"]`.
+    let module_exports = |n: NodeId| match *ast.node(n) {
+        Node::Member { obj, prop, .. } => is_name(obj, "module") && is_name(prop, "exports"),
+        Node::Index { obj, index, .. } => is_name(obj, "module") && string_is(index, "exports"),
+        _ => false,
+    };
+    // `exports.x`, `module.exports["x"]`: the name.
+    let export_name = |n: NodeId| -> Option<&str> {
+        let (obj, name) = match *ast.node(n) {
+            Node::Member { obj, prop, .. } => (obj, ast.name_of(prop)?),
+            Node::Index { obj, index, .. } => match *ast.node(index) {
+                Node::StringLit { value } => (obj, ast.atom(value)),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        (is_name(obj, "exports") || module_exports(obj)).then_some(name)
+    };
+    let mut assigned: Vec<(&str, NodeId, NodeId)> = Vec::new();
+    for &st in ast.list(stmts) {
+        let Node::ExprStmt { expr } = *ast.node(st) else {
+            continue;
+        };
+        let mut e = expr;
+        while let Node::Assign {
+            op: ts_r_ast::AssignOp::Assign,
+            left,
+            right,
+        } = *ast.node(e)
+        {
+            if let Some(name) = export_name(left) {
+                assigned.push((name, left, right));
+            }
+            e = right;
+        }
+    }
+    if assigned.is_empty() {
+        return None;
+    }
+    let mut counts: rustc_hash::FxHashMap<&str, usize> = rustc_hash::FxHashMap::default();
+    for &(name, _, _) in &assigned {
+        *counts.entry(name).or_default() += 1;
+    }
+    let targets: rustc_hash::FxHashSet<NodeId> = assigned.iter().map(|a| a.1).collect();
+    for raw in 1..=ast.node_count() as u32 {
+        let Some(n) = NodeId::from_raw(raw) else {
+            continue;
+        };
+        if ast.is_jsdoc(n) {
+            continue;
+        }
+        if let Node::Call { callee, .. } = *ast.node(n)
+            && is_name(callee, "require")
+        {
+            return None;
+        }
+        let Node::Ident { name } = *ast.node(n) else {
+            continue;
+        };
+        let text = ast.atom(name);
+        if !(text == "exports" || text == "module")
+            || is_property_name(ast, parents, n)
+            || !is_module_object(c, file, n)
+        {
+            continue;
+        }
+        // `exports` declared ambiently (@types/node): not seen written.
+        if c.resolve_ident(Loc { file, node: n }, meaning::VALUE)
+            .is_some()
+        {
+            return None;
+        }
+        let mut access = parents.parent(n)?;
+        if text == "module" {
+            if !module_exports(access) {
+                return None;
+            }
+            access = parents.parent(access)?;
+        }
+        let name = export_name(access)?;
+        // Reads of an assigned name are fine; a write must be one of the top-level ones.
+        let write = parents.parent(access).is_some_and(|p| match *ast.node(p) {
+            Node::Assign { left, .. } => left == access,
+            Node::Update { .. } => true,
+            _ => false,
+        });
+        if !targets.contains(&access) && (write || !counts.contains_key(name)) {
+            return None;
+        }
+    }
+    let mut out: Vec<NamedExport> = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
+    for &(name, target, value) in &assigned {
+        if !seen.insert(name) {
+            continue;
+        }
+        let once = counts[name] == 1;
+        let value = super::skip_parens(ast, value);
+        let local = matches!(ast.node(value), Node::Ident { .. })
+            && c.resolve_ident(Loc { file, node: value }, meaning::VALUE)
+                .is_some_and(|s| c.decls(s).iter().any(|d| d.file == file));
+        let alias = (once && local).then_some(value);
+        // Not seen written: `exports.default = v` of a name, and names that are not
+        // identifiers through a constant.
+        let identifier =
+            ts_r_checker::typenode::is_identifier_text(name) && !RESERVED.contains(&name);
+        if (name == "default" && alias.is_some())
+            || (!identifier && name != "default" && alias.is_none())
+            || c.sym_of_decl(Loc { file, node: target }).is_none()
+        {
+            return None;
+        }
+        out.push((name.to_owned(), target, alias));
+    }
+    Some(out)
+}
+
+/// Words a `.d.ts` module can't declare as a variable name.
+const RESERVED: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "implements",
+    "interface",
+    "let",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "static",
+    "yield",
+    "await",
+    "arguments",
+    "eval",
+];
 
 /// `ty` (a `@callback`'s function type) has a rest parameter.
 fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {

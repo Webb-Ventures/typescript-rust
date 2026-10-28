@@ -778,7 +778,8 @@ impl<'a> Parser<'a> {
 
     /// `??` mixed with `||` or `&&` without parentheses: TS5076 at the inner operation, the
     /// operators named in source order. tsc 7 reports this from its grammar check (next to
-    /// semantic errors); we report it here so tools see the file as invalid.
+    /// semantic errors), and typescript-eslint parses it: a grammar error (esbuild rejects
+    /// it, `ts_r_transform::build_errors`).
     fn check_mixed_coalesce(&mut self, op: BinaryOp, left: NodeId, right: NodeId) {
         let logical = |o: BinaryOp| matches!(o, BinaryOp::LogicalOr | BinaryOp::LogicalAnd);
         let clash = |inner: BinaryOp| {
@@ -794,7 +795,7 @@ impl<'a> Parser<'a> {
             {
                 let (first, second) = if is_left { (inner, op) } else { (op, inner) };
                 let span = self.ast.span(side);
-                self.grammar_error_at(
+                self.deferred_grammar_error_at(
                     messages::MIXED_COALESCE,
                     span,
                     &[first.as_str(), second.as_str()],
@@ -2081,23 +2082,16 @@ impl<'a> Parser<'a> {
     }
 
     /// Any identifier or keyword (property names, after `.`).
-    /// The name after a `.` is missing at the end of the file, and before a declaration on
-    /// the next line (`B.` + newline + `namespace B {}`,
-    /// `x.` + newline + `var y`): TS1003 just after the `.`, and the next line starts a new
-    /// statement (enumMemberResolution, incompleteDottedExpressionAtEOF,
+    /// The name after a `.` is missing at the end of the file, and when the next line starts
+    /// with two names (`B.` + newline + `namespace B {}`, `this.` + newline + `new Bar()`):
+    /// TS1003 just after the `.`, and the next line starts a new statement (enumMemberResolution, incompleteDottedExpressionAtEOF,
     /// parserUnfinishedTypeNameBeforeKeyword1).
     pub(crate) fn missing_name_after_dot(&mut self) -> Option<NodeId> {
         let missing = self.at(T::Eof)
-            || (self.newline_before()
-                && self.kind().is_identifier_or_keyword()
-                && {
-                    let next = self.peek();
-                    !next.newline_before()
-                        && next.kind.is_identifier_or_keyword()
-                        && binary_op(next.kind).is_none()
-                        && !matches!(next.kind, T::As | T::Satisfies)
-                }
-                && self.declaration_follows_modifiers());
+            || (self.newline_before() && self.kind().is_identifier_or_keyword() && {
+                let next = self.peek();
+                !next.newline_before() && next.kind.is_identifier_or_keyword()
+            });
         if !missing {
             return None;
         }
