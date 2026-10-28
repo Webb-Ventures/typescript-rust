@@ -321,3 +321,71 @@ fn es_decorator_static_accessor() {
 fn namespace_end_comments() {
     check("namespace_end_comments");
 }
+
+/// CommonJS `import()`: each non-literal call names its parameter `s`, an empty call is
+/// `require()`, and arguments past the second are dropped.
+#[test]
+fn cjs_import_call() {
+    check("cjs_import_call");
+}
+
+/// `import()` keeps a third argument and later ones (TS1450, a message).
+#[test]
+fn import_call_rest() {
+    check("import_call_rest");
+}
+
+/// Numeric and bigint enum member names are written as literals, a private name as nothing,
+/// and a missing member not at all.
+#[test]
+fn enum_numeric_names() {
+    check("enum_numeric_names");
+}
+
+/// CommonJS: a re-exported default import is assigned (`exports.b = t1_1.default;`), and
+/// `{ default as f2 }` beside a default import is a getter of `.default`.
+#[test]
+fn cjs_default_reexport() {
+    check("cjs_default_reexport");
+}
+
+/// Automatic JSX under CommonJS: `createElement`'s require comes before the runtime's.
+#[test]
+fn cjs_jsx_create_element() {
+    check("cjs_jsx_create_element");
+}
+
+/// A lowered async arrow keeps its lone parameter in parentheses (`(i) => __awaiter(..)`).
+#[test]
+fn async_arrow_parens() {
+    check("async_arrow_parens");
+}
+
+/// A rest element's and a catch variable's initializers (errors) are written as tsc does.
+#[test]
+fn error_initializers() {
+    check("error_initializers");
+}
+
+/// A triple-slash directive leading `export var y;`, which CommonJS removes, goes with it.
+#[test]
+fn cjs_removed_directive() {
+    check("cjs_removed_directive");
+}
+
+/// Escaped identifiers keep their source text in parameter properties and JSX names.
+#[test]
+fn escaped_names() {
+    check("escaped_names");
+}
+
+/// With useDefineForClassFields, an escaped parameter property's key is its decoded name.
+#[test]
+fn escaped_param_define() {
+    check("escaped_param_define");
+}
+
+#[test]
+fn escaped_param_es2022() {
+    check("escaped_param_es2022");
+}

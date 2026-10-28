@@ -762,9 +762,31 @@ fn class_body_inner(tx: &mut Tx, id: NodeId) {
     let mut assigns: Vec<NodeId> = Vec::with_capacity(param_props.len() + ctor_inits.len());
     let mut decls: Vec<NodeId> = Vec::new();
     for (name, at, name_span, param_end) in &param_props {
+        // An escaped name keeps its decoded atom but takes the parameter's span, so the
+        // printer writes it as in the source (`this.arg\u0032 = arg\u0032`;
+        // escapedIdentifiers).
+        let escaped = tx
+            .src
+            .get(name_span.start as usize..name_span.end as usize)
+            .is_some_and(|r| r.contains('\\'));
+        let name_ident = |tx: &mut Tx| {
+            let id = tx.ident(name, *at);
+            if escaped {
+                tx.ast.set_span(id, *name_span);
+            }
+            id
+        };
         let this = tx.this(*at);
-        let target = tx.member(this, name, *at);
-        let v = tx.ident(name, *at);
+        let prop = name_ident(tx);
+        let target = tx.mk(
+            Node::Member {
+                obj: this,
+                optional: false,
+                prop,
+            },
+            *at,
+        );
+        let v = name_ident(tx);
         // Source maps (tsc's): the value and the field's key map to the parameter's name;
         // when field initializers move into the constructor too (no fields), the statement
         // maps to the parameter (from its name) and `this.p` to the name.
@@ -778,6 +800,7 @@ fn class_body_inner(tx: &mut Tx, id: NodeId) {
         }
         assigns.push(s);
         if define {
+            // The field's key is the decoded name (`arg2;`).
             let key = tx.ident(name, *at);
             tx.map_range(key, *name_span);
             let f = tx.mk(

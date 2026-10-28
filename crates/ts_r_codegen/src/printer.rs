@@ -26,6 +26,9 @@ pub struct Printer<'a> {
     gen_col: u32,
     // Comment state: comments starting before `comment_cursor` are consumed.
     comment_cursor: u32,
+    /// tsc without comments: legal comments are kept only before this offset (the file's
+    /// detached comments).
+    pinned_end: u32,
     /// Output length right after a leading block comment that stays on its line.
     inline_comment_end: usize,
     /// Layout::Tsc: end of the original statement being printed (0 outside one, or inside a
@@ -95,6 +98,7 @@ impl<'a> Printer<'a> {
             gen_line: 0,
             gen_col: 0,
             comment_cursor: 0,
+            pinned_end: u32::MAX,
             inline_comment_end: usize::MAX,
             stmt_end: 0,
             params_paren: None,
@@ -772,9 +776,14 @@ impl<'a> Printer<'a> {
             return false;
         }
         if is_legal_comment(text) {
-            return true;
+            // tsc's `removeComments` keeps only the pinned comments at the top of the file
+            // (pinnedComments1, doNotEmitPinnedCommentNotOnTopOfFile).
+            return self.opts.comments || c.span.end <= self.pinned_end;
         }
         if !self.opts.comments {
+            return false;
+        }
+        if self.tsc && self.next_to_invalid_backslash(c) {
             return false;
         }
         if text.starts_with("//# sourceMappingURL=") || text.starts_with("//@ sourceMappingURL=") {
@@ -785,6 +794,32 @@ impl<'a> Printer<'a> {
             return is_annotation_comment(text);
         }
         true
+    }
+
+    /// tsc drops the comments around a skipped invalid `\\` (parserSkippedTokens5): whether
+    /// the first non-whitespace character after `c`, or before it on its line, is one, outside a comment
+    /// (`\\u` starts an escaped identifier).
+    fn next_to_invalid_backslash(&self, c: &Comment) -> bool {
+        let b = self.src.as_bytes();
+        let invalid = |at: usize| {
+            b.get(at) == Some(&b'\\')
+                && b.get(at + 1) != Some(&b'u')
+                && !{
+                    let cs = &self.ast.comments;
+                    let i = cs.partition_point(|o| (o.span.end as usize) <= at);
+                    cs.get(i).is_some_and(|o| o.span.start as usize <= at)
+                }
+        };
+        let before = b[..(c.span.start as usize).min(b.len())]
+            .iter()
+            .rposition(|x| !x.is_ascii_whitespace())
+            // Before the comment only on its line (parserSkippedTokens10 keeps it).
+            .filter(|&i| !b[i..c.span.start as usize].contains(&b'\n'));
+        let after = b
+            .get(c.span.end as usize..)
+            .and_then(|r| r.iter().position(|x| !x.is_ascii_whitespace()))
+            .map(|i| i + c.span.end as usize);
+        before.is_some_and(invalid) || after.is_some_and(invalid)
     }
 
     /// End of the last erased range that lies inside `(from, to]`, if any.
@@ -802,14 +837,25 @@ impl<'a> Printer<'a> {
         (e.end > from).then_some(e.end)
     }
 
-    /// The first erased range at or after `pos` is an import (`import ...`, elided).
+    /// The first erased range at or after `pos` is an import (`import ...`, elided) or a
+    /// statement the module transform removed (`export {}`, `export var x;` under
+    /// CommonJS): its triple-slash directives go with it (observed, nodeResolution4).
     fn erased_import_after(&self, pos: u32) -> bool {
         let erased = self.hints.erased;
         let i = erased.partition_point(|s| s.start < pos);
         erased.get(i).is_some_and(|e| {
             let text = self.src.get(e.start as usize..).unwrap_or("");
-            text.strip_prefix("import")
-                .is_some_and(|rest| !rest.bytes().next().is_some_and(is_word_byte))
+            fn word<'t>(t: &'t str, w: &str) -> Option<&'t str> {
+                t.strip_prefix(w)
+                    .filter(|rest| !rest.bytes().next().is_some_and(is_word_byte))
+                    .map(str::trim_start)
+            }
+            word(text, "import").is_some()
+                || word(text, "export").is_some_and(|rest| {
+                    rest.starts_with('{')
+                        || word(rest, "var").is_some()
+                        || word(rest, "let").is_some()
+                })
         })
     }
 
@@ -1480,6 +1526,9 @@ impl<'a> Printer<'a> {
                 prologue += 1;
             }
         }
+        if self.tsc && !self.opts.comments {
+            self.pinned_end = self.detached_comments_end().unwrap_or(0);
+        }
         if self.tsc
             && !self.hints.no_detached_comments
             && let Some(end) = self.detached_comments_end()
@@ -1491,6 +1540,7 @@ impl<'a> Printer<'a> {
         }
         if self.tsc
             && let Some(end) = self.triple_slash_run_end()
+            && !self.erased_import_after(end)
             && let [only] = stmts[prologue..]
             && self.is_synthetic(only)
             && matches!(self.node(only), Node::ExportNamed { source: None, specifiers, .. }

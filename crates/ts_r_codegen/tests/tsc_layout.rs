@@ -158,3 +158,15 @@ fn access_comments() {
 fn object_semicolons() {
     check_recovered("object_semicolons", SourceKind::Ts, "js");
 }
+
+/// `1[0]` keeps no dot; `088e4.x` is written by value (`880000..x`).
+#[test]
+fn numeric_objects() {
+    check_recovered("numeric_objects", SourceKind::Ts, "js");
+}
+
+/// Comments next to a skipped invalid `\` are dropped (after it only on its own line).
+#[test]
+fn skipped_backslash() {
+    check_recovered("skipped_backslash", SourceKind::Ts, "js");
+}

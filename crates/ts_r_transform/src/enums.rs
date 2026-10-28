@@ -107,6 +107,10 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
         let Node::EnumMember { name: mname, init } = tx.n(m) else {
             continue;
         };
+        // `enum E { , }`: tsc writes nothing for the missing member (parserEnum4).
+        if matches!(tx.n(mname), Node::Missing {}) {
+            continue;
+        }
         let member = member_name(tx, mname);
         let mat = tx.at(m);
         let value = match init {
@@ -143,13 +147,21 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
             matches!(value, Some(Value::Str(_))) || info.string_members.contains(&member);
         // A computed name other than a string or number (an error) is used as is: `E[E[e] =
         // 1] = e`
-        // (observed).
+        // (observed). So are numeric (`E[E[1] = 0] = 1`) and bigint names; a private name
+        // is written as nothing (`E[E[] = 0] = ;`, privateNameEnum).
         let computed = match tx.n(mname) {
             Node::ComputedKey { expr }
                 if !matches!(tx.n(expr), Node::StringLit { .. } | Node::NumberLit { .. }) =>
             {
                 Some(expr)
             }
+            Node::NumberLit { value } => Some(tx.number(value.get(), mat)),
+            Node::ComputedKey { expr } => match tx.n(expr) {
+                Node::NumberLit { value } => Some(tx.number(value.get(), mat)),
+                _ => None,
+            },
+            Node::BigIntLit { .. } => Some(mname),
+            Node::PrivateName { .. } => Some(tx.mk(Node::Missing {}, mat)),
             _ => None,
         };
         let e1 = tx.ident_atom(name_atom, mat);
@@ -270,6 +282,7 @@ fn member_name(tx: &Tx, name: NodeId) -> String {
         Node::Ident { name } | Node::StringLit { value: name } => tx.ast.atom(name).to_owned(),
         Node::ComputedKey { expr } => match tx.n(expr) {
             Node::StringLit { value } => tx.ast.atom(value).to_owned(),
+            Node::NumberLit { value } => ts_r_codegen::literals::js_number(value.get()),
             Node::TemplateLit { parts } => tx
                 .ast
                 .list(parts)

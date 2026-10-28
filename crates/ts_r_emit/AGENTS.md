@@ -52,7 +52,8 @@ cost both. It never mutates the checker's AST.
   (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
   declarations of JavaScript inputs that use a pattern tsc declares from and the emitter
   does not write yet (TSR2006 naming it: CommonJS exports other than one top-level
-  `module.exports = v;` (written `export = v;` first, a value
+  `module.exports = v;` (written `export = v;` first, a class or function expression
+  then as a declaration named by it or `_exports`, another value
   that is no entity name through `declare const _exports: T;`) or top-level `exports.x = v;`
   alone (written first: `export { v as x };` for one assignment of a local name, `declare
   const _default: T; export default _default;`, else `export declare var x: T;`), a
@@ -224,19 +225,16 @@ import reference.
 
 ## Measurements
 
-Latest (2026-10-27, v1 emit round 9, `cargo run --release -p ts_r_check --example
-emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,100 (97.3%), shape 2,143
+Latest (2026-10-27, v1 emit round 10, `cargo run --release -p ts_r_check --example
+emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,101 (97.3%), shape 2,143
 (99.3%; the 16 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18
 bytes-exact outputs with a map baseline (158 of 162 at all targets); all 17,352 outputs:
-16,506 bytes-exact (95.1%; 16,458 at round 8), JS 13,869 / 14,476 (95.8%), below
-ES2022 11,769 / 12,317 (es2015 11,326 / 11,859), `.d.ts` 2,432 / 2,640 (92.1%). Declarations
-(E2): 1,436 / 1,635 baselines have every `.d.ts` bytes-exact (87.8%, gate 85% met); 1,436 of
-1,586 without TSR2006 refusals (90.5%). TSR2006 refuses 53 JavaScript inputs' `.d.ts` (86 at
-round 8; CommonJS `exports.x = v` and `const x = require(m)` are now written, with checker
-round 9's CommonJS export types).
-Tests with every output bytes-exact: 11,161 of 11,925 (11,121 at round 8). Extra
-outputs: 14 (13 at round 8; jsDeclarationsTypeReassignmentFromDeclaration2, where tsc reports
-TS4023 and writes none).
+16,573 bytes-exact (95.5%; 16,506 at round 9), JS 13,932 / 14,476 (96.2%), below
+ES2022 11,831 / 12,317 (es2015 11,387 / 11,859), `.d.ts` 2,436 / 2,640 (92.3%). Declarations
+(E2): 1,439 / 1,635 baselines have every `.d.ts` bytes-exact (88.0%, gate 85% met); 1,439 of
+1,586 without TSR2006 refusals (90.7%). TSR2006 refuses 53 JavaScript inputs' `.d.ts`.
+Tests with every output bytes-exact: 11,224 of 11,925 (11,161 at round 9). Extra
+outputs: 14 (unchanged).
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946

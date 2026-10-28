@@ -987,6 +987,8 @@ impl Lower<'_, '_> {
                 && let Node::ExprStmt { expr } = self.n(stmts[i])
                 && let Node::Assign { right, .. } = self.n(expr)
             {
+                // The value is the decoded name, even when escaped (`value: arg2`; observed).
+                self.tx.ast.set_span(right, ts_r_ast::Span::new(mat, mat));
                 let this = self.this(mat);
                 let d = self.define_property(this, k, right, mat);
                 stmts[i] = self.expr_stmt(d, mat);

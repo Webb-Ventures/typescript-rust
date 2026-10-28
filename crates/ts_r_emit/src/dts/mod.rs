@@ -1488,7 +1488,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
     /// The `extends` expression of a class declaration that is not an entity name (it is
     /// written as a `X_base` constant).
     fn base_expr(&self, s: NodeId) -> Option<NodeId> {
-        let Node::ClassDecl { heritage, .. } = *self.ast.node(s) else {
+        let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) =
+            *self.ast.node(s)
+        else {
             return None;
         };
         for &h in self.ast.list(heritage) {
@@ -1558,6 +1560,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if let Some((st, value)) = self.cjs_export
             && st == s
         {
+            if self.cjs_export_declaration(s, value, scope, prev_end) {
+                return true;
+            }
             return self.export_value_named(s, value, "export = ", "_exports");
         }
         match node {
@@ -1765,7 +1770,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 if !self.visible(s, scope) {
                     return false;
                 }
-                self.class_decl(s, scope, keep_export, prev_end);
+                self.class_decl(s, scope, keep_export, prev_end, None);
                 true
             }
             Node::Interface {
@@ -2175,6 +2180,53 @@ impl<'c, 'a> Emitter<'c, 'a> {
     /// `export = x;` / `export default x;`, or a `_default` constant for an expression.
     fn export_value(&mut self, s: NodeId, expr: NodeId, prefix: &str) -> bool {
         self.export_value_named(s, expr, prefix, "_default")
+    }
+
+    /// `module.exports = class C {}` / `function f() {}`: `export = C;` then the class or
+    /// function as a declaration (named `_exports` without a name; observed with tsc 7.0.2,
+    /// jsDeclarationsExportAssignedClassExpression).
+    fn cjs_export_declaration(
+        &mut self,
+        s: NodeId,
+        value: NodeId,
+        scope: Scope,
+        prev_end: u32,
+    ) -> bool {
+        let inner = skip_parens(&self.ast, value);
+        let name = match *self.ast.node(inner) {
+            Node::ClassExpr { name, .. } | Node::FunctionExpr { name, .. } => name,
+            _ => return false,
+        };
+        let text = match name {
+            Some(n) => self.raw(n).to_owned(),
+            None => self.unique_name("_exports"),
+        };
+        self.w("export = ");
+        self.w(&text);
+        self.w(";");
+        self.nl();
+        if matches!(self.ast.node(inner), Node::ClassExpr { .. }) {
+            let rename = name.is_none().then_some(text.as_str());
+            self.class_decl(inner, scope, false, prev_end, rename);
+        } else {
+            // The statement is written first without comments (`prev_end` is its start):
+            // the function takes the JSDoc comment right before it.
+            let start = self.ast.span(s).start;
+            let from = self
+                .ast
+                .comments_between(0, start)
+                .last()
+                .filter(|c| {
+                    self.src
+                        .get(c.span.end as usize..start as usize)
+                        .is_some_and(|t| t.trim().is_empty())
+                })
+                .map_or(prev_end, |c| c.span.start);
+            self.leading_comments(s, from);
+            self.w("declare ");
+            self.function_from_expr(&text, inner);
+        }
+        true
     }
 
     /// [`Emitter::export_value`] with the name of the constant written for a value that is
@@ -2865,15 +2917,32 @@ impl<'c, 'a> Emitter<'c, 'a> {
 
     // ---- classes ----------------------------------------------------------------------
 
-    fn class_decl(&mut self, s: NodeId, scope: Scope, keep_export: bool, prev_end: u32) {
-        let Node::ClassDecl {
+    /// A class declaration, or (CommonJS `module.exports = class {}`) a class expression
+    /// written as a declaration named `rename` when it has no name.
+    fn class_decl(
+        &mut self,
+        s: NodeId,
+        scope: Scope,
+        keep_export: bool,
+        prev_end: u32,
+        rename: Option<&str>,
+    ) {
+        let (Node::ClassDecl {
             modifiers,
             name,
             type_params,
             heritage,
             members,
             ..
-        } = *self.ast.node(s)
+        }
+        | Node::ClassExpr {
+            modifiers,
+            name,
+            type_params,
+            heritage,
+            members,
+            ..
+        }) = *self.ast.node(s)
         else {
             return;
         };
@@ -2882,7 +2951,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
         let mut base_name: Option<String> = None;
         if let Some(expr) = self.base_expr(s) {
             {
-                let cname = name.map_or("default".to_owned(), |n| self.raw(n).to_owned());
+                let cname = name.map_or(rename.unwrap_or("default").to_owned(), |n| {
+                    self.raw(n).to_owned()
+                });
                 let bname = self.unique_name(&format!("{cname}_base"));
                 self.iso_heritage(expr);
                 let t = self.ck.check_expr(self.loc(expr));
@@ -2906,6 +2977,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if let Some(n) = name {
             self.w(" ");
             self.name_text(n);
+        } else if let Some(r) = rename {
+            self.w(" ");
+            self.w(r);
         }
         self.type_params(type_params);
         let mut prev_kind = None;

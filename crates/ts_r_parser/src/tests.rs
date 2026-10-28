@@ -325,6 +325,11 @@ fn misplaced_modifiers() {
         &ok("function f(export e) {}"),
         "Param 11..19 modifiers=[export]",
     );
+    // A modifier before a keyword is a modifier (tsc: any keyword can follow one).
+    has(
+        &ok("class C { constructor(declare export b) {} }"),
+        "Param 22..38 modifiers=[export declare]",
+    );
     // `const` on a class member: TS1248 at the name, a grammar error tsc reports only in a
     // file without syntax errors (constInClassExpression).
     assert_eq!(

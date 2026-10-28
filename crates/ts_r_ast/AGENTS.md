@@ -78,7 +78,8 @@ child lists, an `Interner` for identifier and string values, `comments`, `root` 
   - Template `parts` alternate `TemplateElement` and expression/type.
   - Parenthesised expressions and types are kept as `Paren` / `ParenType`.
   - `import<T>(x)` (an error) keeps its `TypeArgs` in `ImportCall::type_args`, so the checker
-    resolves the names in them; the transform erases them.
+    resolves the names in them; the transform erases them. Arguments past the second are
+    in `ImportCall::rest` (an error; emit prints them, CommonJS drops them).
 
 ## Testing
 

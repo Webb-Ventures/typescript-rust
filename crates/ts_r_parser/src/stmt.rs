@@ -616,6 +616,7 @@ impl<'a> Parser<'a> {
                 }
                 if self.eat(T::Eq) {
                     // A checker grammar error, at the initializer (catchClauseWithInitializer1).
+                    // Kept as `AssignPattern` for emit (tsc writes `catch (e = 1)`).
                     let init = self.parse_assignment();
                     let span = self.ast.span(init);
                     self.deferred_grammar_error_at(
@@ -623,6 +624,11 @@ impl<'a> Parser<'a> {
                         span,
                         &[],
                     );
+                    if let Some(left) = param {
+                        let start = self.ast.span(left).start;
+                        let n = Node::AssignPattern { left, right: init };
+                        param = Some(self.finish_node(start, n));
+                    }
                 }
                 self.expect_closing(T::RParen, T::LParen, open);
             }

@@ -648,7 +648,8 @@ define_nodes! {
     /// `import(x)`, `import(x, opts)`, `import.defer(x)`, `import.source(x)`. `type_args` is
     /// the `TypeArgs` of `import<T>(x)` / `import<T>` (an error, TS1326, but the checker
     /// still resolves the names in them); `None` otherwise and for an empty `import<>`.
-    ImportCall { phase: ImportPhase, type_args: Option<NodeId>, arg: NodeId, options: Option<NodeId> }
+    /// `rest` holds a third argument and later ones (an error, kept for emit).
+    ImportCall { phase: ImportPhase, type_args: Option<NodeId>, arg: NodeId, options: Option<NodeId>, rest: NodeList }
     As { expr: NodeId, ty: NodeId }
     Satisfies { expr: NodeId, ty: NodeId }
     /// `<T>expr`

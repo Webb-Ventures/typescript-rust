@@ -1075,6 +1075,7 @@ impl<'a> Parser<'a> {
                         type_args,
                         arg,
                         options: None,
+                        rest: NodeList::EMPTY,
                     },
                 )
             };
@@ -1129,12 +1130,13 @@ impl<'a> Parser<'a> {
                     type_args,
                     arg,
                     options: None,
+                    rest: NodeList::EMPTY,
                 },
             );
         }
         // An argument list as in a call (importAssertion1, plainJSGrammarErrors): the
-        // checker's rules are grammar errors here. A third argument and later ones are
-        // dropped (tsc: TS1450, a message, not an error).
+        // checker's rules are grammar errors here. A third argument and later ones go to
+        // `rest`, which emit prints (tsc: TS1450, a message, not an error).
         let (args, _) = self.with_ctx(0, NESTED_CLEAR, |p| {
             p.parse_delimited(List::ArgumentExpressions, |p| {
                 let s = p.start();
@@ -1153,6 +1155,8 @@ impl<'a> Parser<'a> {
         let list = self.ast.list(args);
         let arg = list.first().copied();
         let options = list.get(1).copied();
+        let rest = list.get(2..).filter(|r| !r.is_empty()).map(<[_]>::to_vec);
+        let rest = rest.map_or(NodeList::EMPTY, |r| self.ast.add_list(&r));
         // A trailing comma (`import(x,)`) is the checker's TS1009: it depends on `module`.
         let arg = arg.unwrap_or_else(|| {
             let pos = self.prev_end.saturating_sub(1);
@@ -1165,6 +1169,7 @@ impl<'a> Parser<'a> {
                 type_args,
                 arg,
                 options,
+                rest,
             },
         )
     }
@@ -2207,7 +2212,7 @@ impl<'a> Parser<'a> {
                     let s = self.start();
                     self.bump();
                     let arg = self.parse_binding_target();
-                    self.rest_element_initializer();
+                    let arg = self.rest_element_initializer(arg);
                     let n = self.finish_node(s, Node::Rest { arg });
                     self.scratch.push(n);
                     self.check_rest_trailing_comma(T::RBracket);
@@ -2325,13 +2330,18 @@ impl<'a> Parser<'a> {
 
     /// `...x = a` in a binding pattern: a checker grammar error (TS1186 at the `=`); the
     /// initializer is parsed and dropped.
-    fn rest_element_initializer(&mut self) {
+    /// `...x = v` (TS1186): the initializer is kept as `AssignPattern { left: arg, .. }`, which
+    /// emit prints as tsc does (restElementWithInitializer1).
+    fn rest_element_initializer(&mut self, arg: NodeId) -> NodeId {
         if self.at(T::Eq) {
             let span = self.tok().span();
             self.bump();
-            self.with_ctx(0, Ctx::DISALLOW_IN, |p| p.parse_assignment());
+            let right = self.with_ctx(0, Ctx::DISALLOW_IN, |p| p.parse_assignment());
             self.deferred_grammar_error_at(messages::REST_ELEMENT_INITIALIZER, span, &[]);
+            let start = self.ast.span(arg).start;
+            return self.finish_node(start, Node::AssignPattern { left: arg, right });
         }
+        arg
     }
 
     fn parse_object_pattern(&mut self) -> NodeId {
@@ -2367,7 +2377,7 @@ impl<'a> Parser<'a> {
                         &[],
                     );
                 }
-                self.rest_element_initializer();
+                let arg = self.rest_element_initializer(arg);
                 let n = self.finish_node(s, Node::Rest { arg });
                 self.scratch.push(n);
                 self.check_rest_trailing_comma(T::RBrace);
