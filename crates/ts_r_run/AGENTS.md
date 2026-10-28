@@ -108,7 +108,11 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   - A specifier with a query or hash (`./config.ts?x=1`) is a module of its own, CommonJS too:
     the preload resolves such a CommonJS file (and any file `require`d with a query) to an
     alias URL whose file name keeps the query and loads it from the real file; `import.meta.url`
-    is the module's own URL (the preload rewrites `IMPORT_META_URL`).
+    is the module's own URL (the preload rewrites `IMPORT_META_URL`). Whether an imported file is
+    CommonJS here is its effective format: its own compilation, or the shared `require()`
+    variant an `import` of it loads (`sharesVariant`). Lines the preload puts first
+    (`__filename`/`__dirname` of an alias, the `require` swap) go after a hashbang line,
+    which must stay first (`codeStart`).
   - `require()` of a module with top-level `await` throws a `TransformError` (Node's
     `ERR_REQUIRE_ASYNC_MODULE` renamed, its message after tsx's reason), and the preload's
     `Module.prototype.require` wrapper does only that.
@@ -212,7 +216,8 @@ stamp formats), `watch.rs`, `serve.rs`, `js/hooks.mjs` (prebuild preload),
   top-level `await`, the `import()` unwrap, JSON named exports, TypeScript in packages,
   `require('..')` in a package, `--test` without files, `require()` of ES modules as one
   CommonJS instance, source maps of a file both imported and required, a `?query` import
-  after a plain one in CommonJS, `require` through an `imports` map, `--compile-cjs`, `-e`/`-p`/stdin).
+  after a plain one in CommonJS, `?query` imports of a required ES module, a hashbang
+  before the preload's injected lines, `require` through an `imports` map, `--compile-cjs`, `-e`/`-p`/stdin).
   Skipped when Node is missing.
 - Parity oracle: [`bench/run-oracle`](../../bench/run-oracle/README.md) runs tsx's own suite and
   Node's TypeScript tests against ts-r-run (`node bench/run-oracle/run.mjs`; numbers there).

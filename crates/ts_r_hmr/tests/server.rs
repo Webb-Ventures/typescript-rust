@@ -471,6 +471,49 @@ fn css_modules_scope_class_names_and_export_them() {
     assert!(!body.contains("export"), "{body}");
 }
 
+/// Layers of CSS modules that each compose every file of the next layer: each file is read
+/// and its CSS served once (not once per path to it, which is exponential), and a cycle
+/// stops.
+#[test]
+fn css_module_compositions_include_each_file_once() {
+    let f = start();
+    const LAYERS: usize = 8;
+    const WIDTH: usize = 6;
+    let mut root = String::new();
+    for j in 0..WIDTH {
+        root.push_str(&format!(
+            ".r{j} {{ composes: c from './l0_{j}.module.css' }}\n"
+        ));
+    }
+    f.app.write("src/root.module.css", &root);
+    for layer in 0..LAYERS {
+        for j in 0..WIDTH {
+            let mut css = format!(".c {{ color: #{layer}{j}0 }}\n");
+            if layer + 1 < LAYERS {
+                for k in 0..WIDTH {
+                    css.push_str(&format!(
+                        ".n{k} {{ composes: c from './l{}_{k}.module.css' }}\n",
+                        layer + 1
+                    ));
+                }
+            } else {
+                // Back to the root: a cycle.
+                css.push_str(".back { composes: r0 from './root.module.css' }\n");
+            }
+            f.app.write(&format!("src/l{layer}_{j}.module.css"), &css);
+        }
+    }
+    let (status, _, body) = f.get("/src/root.module.css?import");
+    assert_eq!(status, 200, "{}", &body[..body.len().min(400)]);
+    for layer in 0..LAYERS {
+        for j in 0..WIDTH {
+            let rule = format!("{{ color: #{layer}{j}0 }}");
+            assert_eq!(body.matches(&rule).count(), 1, "{rule} once");
+        }
+    }
+    assert!(body.len() < 64 * 1024, "{} bytes", body.len());
+}
+
 #[test]
 fn a_pruned_module_imported_again_is_fetched_fresh() {
     let f = start();

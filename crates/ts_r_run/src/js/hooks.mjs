@@ -88,7 +88,10 @@ const aliases = new Map();
 function queryAlias(url, required = false) {
   const cut = url.search(/[?#]/);
   const path = toPath(url.slice(0, cut));
-  if (!required && files[path]?.[0] !== 1) return { url, shortCircuit: true };
+  // Only CommonJS needs one: a file compiled so, or one sharing the compilation its
+  // `require()`s get (which an `import` of it then loads too).
+  const cjs = () => files[path]?.[0] === 1 || (files[path + CJS_VARIANT] !== undefined && sharesVariant(url.slice(0, cut)));
+  if (!required && !cjs()) return { url, shortCircuit: true };
   const name = path + url.slice(cut);
   const alias = pathToFileURL(name).href;
   aliases.set(alias, url);
@@ -108,7 +111,7 @@ function withRealFilename(r, alias, url) {
   const path = toPath(cut === -1 ? url : url.slice(0, cut));
   if (path === toPath(alias)) return r;
   const text = typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
-  const n = PROLOGUE.exec(text)[0].length;
+  const n = codeStart(text);
   const dir = path.slice(0, Math.max(path.lastIndexOf('/'), 1));
   const set = `__filename=${JSON.stringify(path)};__dirname=${JSON.stringify(dir)};`;
   return { ...r, source: text.slice(0, n) + set + text.slice(n) };
@@ -116,6 +119,12 @@ function withRealFilename(r, alias, url) {
 
 // The manifest's name for a file's CommonJS compilation for `require()` (graph::CJS_VARIANT).
 const CJS_VARIANT = '\0cjs';
+
+// Whether an `import` of the file at `bare` (a URL without query) takes the CommonJS
+// compilation the graph made for its `require()`s (see `loadModule`).
+function sharesVariant(bare) {
+  return !/\.mts$/i.test(bare) && packageType(bare) !== 'module';
+}
 
 const SWAP = { '.js': ['.ts', '.tsx'], '.jsx': ['.tsx'], '.mjs': ['.mts'], '.cjs': ['.cts'] };
 // Not `.mts` or `.cts`: an extensionless path never finds those, under tsx.
@@ -381,6 +390,13 @@ const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
 const swapsRequire = !(nodeMajor >= 26 || (nodeMajor === 24 && nodeMinor >= 15));
 const SWAP_REQUIRE = 'if(typeof require.cache!=="object")require=module.constructor[Symbol.for("ts-r-run:require")](module);';
 const PROLOGUE = /^(?:[ \t]*(?:"[^"\\\n]*"|'[^'\\\n]*')[ \t]*;)*/;
+const HASHBANG = /^#![^\r\n]*(?:\r\n|\r|\n)?/;
+// Where a statement can go first: after a hashbang line (which must stay first) and the
+// directive prologue on the line after it.
+function codeStart(text) {
+  const h = HASHBANG.exec(text)?.[0].length ?? 0;
+  return h + PROLOGUE.exec(h === 0 ? text : text.slice(h))[0].length;
+}
 if (swapsRequire) {
   Object.defineProperty(Module, Symbol.for('ts-r-run:require'), {
     value(mod) {
@@ -400,7 +416,7 @@ if (swapsRequire) {
 function withRealRequire(r, context) {
   if (r.format !== 'commonjs' || r.source == null || isRequire(context)) return r;
   const text = typeof r.source === 'string' ? r.source : Buffer.from(r.source).toString('utf8');
-  const n = PROLOGUE.exec(text)[0].length;
+  const n = codeStart(text);
   return { ...r, source: text.slice(0, n) + SWAP_REQUIRE + text.slice(n) };
 }
 
@@ -499,7 +515,7 @@ function loadModule(url, context, nextLoad) {
       // two instances would run its code twice, and Node keys source maps by URL, so one
       // instance's stack traces would be mapped with the other's map.
       const variant = files[path + CJS_VARIANT];
-      const shared = variant !== undefined && !/\.mts$/i.test(bare) && packageType(bare) !== 'module';
+      const shared = variant !== undefined && sharesVariant(bare);
       const f = (required || shared ? variant : undefined) ?? files[path];
       let format;
       let source;

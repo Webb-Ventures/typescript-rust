@@ -68,12 +68,55 @@ fn is_module(tag: &str) -> bool {
         .any(|t| tag.contains(t))
 }
 
+/// Whether the (lowercased) start tag `tag` (`<name ...`, without its `>`) has the
+/// attribute `name`, with or without a value. Attribute values are skipped, so text inside a
+/// quoted value (`data-note=" nonce=x"`) is never taken for an attribute.
 pub(crate) fn has_attr(tag: &str, name: &str) -> bool {
-    tag.match_indices(name).any(|(i, _)| {
-        i > 0
-            && tag.as_bytes()[i - 1].is_ascii_whitespace()
-            && tag[i + name.len()..].trim_start().starts_with('=')
-    })
+    let b = tag.as_bytes();
+    // Past `<` and the tag name.
+    let mut i = 1;
+    while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'/' {
+        i += 1;
+    }
+    loop {
+        while i < b.len() && (b[i].is_ascii_whitespace() || b[i] == b'/') {
+            i += 1;
+        }
+        if i >= b.len() {
+            return false;
+        }
+        let start = i;
+        // A name runs to whitespace, `/`, `=` or `>` (a leading `=` is part of it).
+        i += 1;
+        while i < b.len() && !b[i].is_ascii_whitespace() && !matches!(b[i], b'/' | b'=' | b'>') {
+            i += 1;
+        }
+        if &tag[start..i] == name {
+            return true;
+        }
+        let mut j = i;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if b.get(j) != Some(&b'=') {
+            continue;
+        }
+        j += 1;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        i = match b.get(j) {
+            Some(&q @ (b'"' | b'\'')) => tag[j + 1..]
+                .find(q as char)
+                .map_or(b.len(), |k| j + 1 + k + 1),
+            _ => {
+                while j < b.len() && !b[j].is_ascii_whitespace() && b[j] != b'>' {
+                    j += 1;
+                }
+                j
+            }
+        };
+    }
 }
 
 /// The page with each inline module script replaced by a `src` pointing at its proxy URL;

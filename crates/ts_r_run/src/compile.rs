@@ -305,7 +305,14 @@ pub fn compile(
     let opts = file_options(base, format);
     let mut result = ts_r_transform::transform(&mut ast, src, &opts);
     if format == Format::Cjs {
-        sort_cjs_exports(&mut ast);
+        // The statements the transform wrote for no source statement (its export lists).
+        let generated: Vec<NodeId> = result
+            .map_ranges
+            .iter()
+            .filter(|(_, r)| r.start == ts_r_codegen::NO_MAP && r.end == ts_r_codegen::NO_MAP)
+            .map(|&(id, _)| id)
+            .collect();
+        sort_cjs_exports(&mut ast, &generated);
         default_first_in_import_star(&mut result.prelude);
     }
     let specs = collect_specs(&ast);
@@ -544,7 +551,10 @@ fn calls_import_meta(ast: &mut Ast) -> bool {
 /// `Object.defineProperty(exports, "x", ...)`), sorted, `default` and hoisted functions
 /// included. Re-exports through `__exportStar` come after, as under tsx. Files without the
 /// marker (plain CommonJS, `export =`) are left alone.
-fn sort_cjs_exports(ast: &mut Ast) {
+///
+/// Only `generated` statements (the transform's own, which stand for no source statement)
+/// are export lists to replace: a user's `exports.x = void f();` there is code and stays.
+fn sort_cjs_exports(ast: &mut Ast, generated: &[NodeId]) {
     let Node::Program { stmts } = *ast.node(ast.root) else {
         return;
     };
@@ -594,9 +604,10 @@ fn sort_cjs_exports(ast: &mut Ast) {
                 ..
             }
         );
-        if prelude && chain > 0 && void0 {
+        let ours = generated.contains(&s);
+        if prelude && ours && chain > 0 && void0 {
             lists.push(i);
-        } else if !(prelude && chain == 1 && matches!(*ast.node(e), Node::Ident { .. })) {
+        } else if !(prelude && ours && chain == 1 && matches!(*ast.node(e), Node::Ident { .. })) {
             prelude = false;
         }
     }
@@ -1063,6 +1074,26 @@ mod tests {
         assert_eq!(
             line.trim(),
             "exports.z = exports.default = exports.b = exports.a = void 0;",
+            "{}",
+            c.code
+        );
+    }
+
+    /// A user's `exports.x = void f()` right after the transform's export list is code, not
+    /// another list: it is kept, and `extra` is still declared up front.
+    #[test]
+    fn user_void_assignments_after_the_export_list_stay() {
+        let src = "exports.extra = void console.log('side');\nexport const value = 1;\n";
+        let c = run("a.cts", src, PackageType::Unspecified);
+        assert!(
+            c.code.contains("exports.extra = void console.log('side');")
+                || c.code
+                    .contains("exports.extra = void console.log(\"side\");"),
+            "{}",
+            c.code
+        );
+        assert!(
+            c.code.contains("exports.value = exports.extra = void 0;"),
             "{}",
             c.code
         );

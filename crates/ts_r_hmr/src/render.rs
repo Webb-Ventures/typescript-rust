@@ -381,9 +381,15 @@ pub fn import_attributes_span(code: &str, quote: u32) -> Option<(u32, u32)> {
     if b.get(i) != Some(&b'{') {
         return None;
     }
-    // To the matching `}`: attribute values are string literals, keys identifiers or strings.
+    // To the matching `}`: attribute values are string literals, keys identifiers or strings;
+    // comments are skipped.
     let mut depth = 0u32;
     while i < b.len() {
+        let after = skip_trivia(b, i);
+        if after != i {
+            i = after;
+            continue;
+        }
         match b[i] {
             b'{' => depth += 1,
             b'}' => {
@@ -522,6 +528,16 @@ mod tests {
         );
     }
 
+    /// `nonce` inside another attribute's quoted value is not a nonce; a bare `nonce` is.
+    #[test]
+    fn csp_nonce_ignores_text_inside_attribute_values() {
+        let html = "<script data-note=\" nonce=example\">window.loaded=true</script><style title='nonce=x'></style><script nonce>1</script><script src=x.js data-nonce=1></script>";
+        assert_eq!(
+            with_nonce(html, "N"),
+            "<script nonce=\"N\" data-note=\" nonce=example\">window.loaded=true</script><style nonce=\"N\" title='nonce=x'></style><script nonce>1</script><script nonce=\"N\" src=x.js data-nonce=1></script>"
+        );
+    }
+
     #[test]
     fn import_attribute_spans() {
         fn span(code: &str) -> Option<&str> {
@@ -540,6 +556,11 @@ mod tests {
         assert_eq!(span("import d from './d.json'\nwithout()"), None);
         assert_eq!(span("import d from './d.json' with { type: 'json'"), None);
         assert_eq!(span("import d from './d.json' with"), None);
+        // A brace or quote inside a comment is not syntax.
+        assert_eq!(
+            span("import d from './d.json' with { /* } */ type: 'json' // '}\n};\nx()"),
+            Some(" with { /* } */ type: 'json' // '}\n}")
+        );
     }
 
     #[test]

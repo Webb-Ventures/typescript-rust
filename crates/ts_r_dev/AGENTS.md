@@ -97,7 +97,8 @@ from the documented plugin API (no Vite code).
   / `@vitejs/plugin-react*` only run their `config` hooks; JSX options from the resolved config
   (`oxc.jsx.importSource`/`runtime`, `esbuild.jsx*`) configure `TsTransform`, and Fast Refresh
   is ours.
-- **Manifest cache** (`ts_r_cache` namespace `dev-plugins`, key: config and the local files
+- **Manifest cache** (`ts_r_cache` namespace `dev-plugins`, key: the config's root-relative
+  path (so `--config a/vite.config.mjs` and `b/vite.config.mjs` with the same text differ), the config and the local files
   it imports (relative specifiers, transitively) + `package.json` + lockfile contents +
   sidecar script; plugin transforms are cached under the same key): plugin names, hooks
   present, JSX options. No hooks left

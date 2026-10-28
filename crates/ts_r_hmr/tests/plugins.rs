@@ -711,3 +711,78 @@ fn inline_scripts_match_the_page_as_served() {
     }
     server.shutdown();
 }
+
+/// An unfiltered `load` hook that throws for `main.js` while `fail` is set.
+#[derive(Debug, Default)]
+struct FailingLoadHost {
+    fail: std::sync::atomic::AtomicBool,
+}
+
+impl PluginHost for FailingLoadHost {
+    fn cache_id(&self) -> &str {
+        "failing-load-host/1"
+    }
+
+    fn hooks(&self) -> PluginHooks {
+        PluginHooks {
+            load: true,
+            load_files: true,
+            ..PluginHooks::default()
+        }
+    }
+
+    fn resolve_ids(
+        &self,
+        _stage: Stage,
+        _importer: &str,
+        specifiers: &[String],
+    ) -> Result<Vec<Option<PluginResolution>>, String> {
+        Ok(vec![None; specifiers.len()])
+    }
+
+    fn load(&self, id: &str) -> Result<Option<String>, String> {
+        if id.ends_with("/src/main.js") && self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("[plugin boom] load failed".to_owned());
+        }
+        Ok(None)
+    }
+
+    fn transform(&self, _: Stage, _: &str, _: &str) -> Result<Option<Transformed>, String> {
+        Ok(None)
+    }
+}
+
+/// A `load` hook that throws for an existing file is a module error (the plugin's message,
+/// the overlay, a retry later), on a request and on a hot update; only a missing file is a 404.
+#[test]
+fn a_load_hook_failing_for_a_file_is_a_module_error() {
+    use std::sync::atomic::Ordering;
+    let app = TempDir::new("plug-load-fail");
+    app.write("src/main.js", "console.log(1);\n");
+    let host = Arc::new(FailingLoadHost::default());
+    host.fail.store(true, Ordering::SeqCst);
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Memory;
+    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    let (status, _, body) = http_get(addr, "/src/main.js", &[]);
+    assert_eq!(status, 500, "{body}");
+    assert!(body.contains("[plugin boom] load failed"), "{body}");
+    assert_eq!(http_get(addr, "/src/missing.js", &[]).0, 404);
+    host.fail.store(false, Ordering::SeqCst);
+    let (status, _, body) = http_get(addr, "/src/main.js", &[]);
+    assert_eq!(status, 200, "{body}");
+    let mut ws = WsClient::connect(&addr.to_string(), "/@ts-r/ws").unwrap();
+    ws.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server.client_count() == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    host.fail.store(true, Ordering::SeqCst);
+    app.write("src/main.js", "console.log(2);\n");
+    let err = next_of(&mut ws, "error");
+    assert_eq!(err["err"]["message"], "[plugin boom] load failed", "{err}");
+    server.shutdown();
+}

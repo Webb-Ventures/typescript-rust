@@ -348,7 +348,8 @@ struct Shift {
 }
 
 /// Shifts the generated columns of `map_json` for `edits` applied to `code` with `prelude`
-/// prepended to line 1 (the server's render step). `edits` must be sorted and
+/// prepended to line 1 (the server's render step; a prelude with line breaks, such as a
+/// worker's env import, also moves every line down). `edits` must be sorted and
 /// non-overlapping, with replacements that keep the line count. Returns the new map JSON
 /// (unchanged when there is nothing to shift, or the map's `mappings` can't be found).
 pub fn shift_for_edits(
@@ -374,8 +375,12 @@ pub fn shift_for_edits(
     let mut scanned = 0usize;
     // Column delta on the current line from earlier edits on it (and the prelude).
     let mut line_delta: i64 = 0;
-    if !prelude.is_empty() {
-        line_delta = i64::from(utf16_len(prelude));
+    // A prelude with line breaks moves the code down: those lines get no mappings, and only
+    // its last line shifts the code's first line.
+    let prelude_lines = prelude.bytes().filter(|&b| b == b'\n').count();
+    let prelude_tail = prelude.rsplit('\n').next().unwrap_or("");
+    if !prelude_tail.is_empty() {
+        line_delta = i64::from(utf16_len(prelude_tail));
         push(
             0,
             Shift {
@@ -460,8 +465,9 @@ pub fn shift_for_edits(
         scanned = e.end;
     }
     let mappings = &map_json[m_start..m_end];
-    let mut out = String::with_capacity(map_json.len() + 16);
+    let mut out = String::with_capacity(map_json.len() + 16 + prelude_lines);
     out.push_str(&map_json[..m_start]);
+    out.extend(std::iter::repeat_n(';', prelude_lines));
     let mut shifts = by_line.iter().peekable();
     for (i, text) in mappings.split(';').enumerate() {
         if i > 0 {
@@ -610,6 +616,25 @@ mod tests {
         assert_eq!(out.lines[1][0].col, 4);
         // Unchanged originals.
         assert_eq!(out.lines[0][2].ocol, 19);
+    }
+
+    /// A worker's env prelude (`import "/@vite/env"\n;\n`, as Vite's worker plugin writes
+    /// it) moves the code down two lines; what follows its last line break shifts columns.
+    #[test]
+    fn multi_line_preludes_move_lines_down() {
+        let code = "let x = 1;\nf();\n";
+        let m = map(vec![vec![seg(4, 0, 4)], vec![seg(0, 1, 0)]], &["a.ts"]);
+        let out = SourceMap::parse(&shift_for_edits(
+            &m.to_json(),
+            code,
+            "import \"/@vite/env\"\n;\nHOT;",
+            &[],
+        ))
+        .unwrap();
+        assert_eq!(out.lines.len(), 4, "{:?}", out.lines);
+        assert!(out.lines[0].is_empty() && out.lines[1].is_empty());
+        assert_eq!(out.lines[2], vec![seg(4 + 4, 0, 4)]);
+        assert_eq!(out.lines[3], vec![seg(0, 1, 0)]);
     }
 
     #[test]
