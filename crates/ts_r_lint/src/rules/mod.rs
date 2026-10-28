@@ -10,6 +10,9 @@ use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 mod constructor_super;
 mod for_direction;
 mod getter_return;
+mod jsdoc_escape_inline_tags;
+mod jsdoc_require_param_description;
+mod jsdoc_require_returns;
 mod no_array_constructor;
 mod no_async_promise_executor;
 mod no_case_declarations;
@@ -342,6 +345,9 @@ pub static ALL: &[&RuleDef] = &[
     &ts_use_unknown_in_catch_callback_variable::RULE,
     &use_isnan::RULE,
     &valid_typeof::RULE,
+    &jsdoc_escape_inline_tags::RULE,
+    &jsdoc_require_param_description::RULE,
+    &jsdoc_require_returns::RULE,
 ];
 
 pub(crate) const ESLINT_REC: &[Preset] = &[Preset::EslintRecommended];

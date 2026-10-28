@@ -111,9 +111,9 @@ private app before the switch to public repos and are not re-measured yet.
 |---|---|
 | Type checker vs tsc's conformance suite (exact diagnostics) | 97.0% of 12,750 compared test variants |
 | Public projects with exactly tsc's diagnostics (tRPC, date-fns, TypeORM, Playwright, RxJS, React Compiler) | 4 of 6: RxJS 0 extra and 5 missing of 21,908; React Compiler 71 extra, 0 missing of 156 |
-| Lint rules | 154 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules) |
-| Lint rule oracle (ESLint + typescript-eslint test cases) | 15,495 / 15,517 (non-type-aware 8,597 / 8,597; type-aware 6,898 / 6,920) |
-| Lint on TypeORM without types, every configured rule, vs ESLint | 2,174 of ESLint's 7,392 problems match, 2 only ts-r-lint; most of the 5,218 missed (4,928) are jsdoc plugin rules |
+| Lint rules | 157 (ESLint recommended; typescript-eslint recommended, strict and 51 type-aware rules; 3 eslint-plugin-jsdoc rules) |
+| Lint rule oracle (ESLint + typescript-eslint test cases) | 15,706 / 15,732 (non-type-aware 8,808 / 8,812; type-aware 6,898 / 6,920) |
+| Lint on TypeORM without types, every configured rule, vs ESLint | 7,378 of ESLint's 7,750 problems match, 0 only ts-r-lint; all 372 missed are type-aware rules |
 | Parser + printer round trip over tsc's test files | 17,741 files, 0 mismatches (1,471 with syntax errors skipped) |
 | esbuild's bundler test cases | 854 / 881 (189 skipped; 13 failures are intended tsc differences) |
 | tsconfig files of the five bench repos vs `tsc --showConfig` and config diagnostics | 114 / 114 `--showConfig`; 114 / 114 diagnostics |

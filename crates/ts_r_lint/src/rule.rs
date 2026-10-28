@@ -81,10 +81,15 @@ pub struct RuleMeta {
 
 impl RuleMeta {
     pub fn docs_url(&self) -> String {
-        match self.name.strip_prefix("@typescript-eslint/") {
-            Some(n) => format!("https://typescript-eslint.io/rules/{n}"),
-            None => format!("https://eslint.org/docs/latest/rules/{}", self.name),
+        if let Some(n) = self.name.strip_prefix("@typescript-eslint/") {
+            return format!("https://typescript-eslint.io/rules/{n}");
         }
+        if let Some(n) = self.name.strip_prefix("jsdoc/") {
+            return format!(
+                "https://github.com/gajus/eslint-plugin-jsdoc/blob/main/docs/rules/{n}.md"
+            );
+        }
+        format!("https://eslint.org/docs/latest/rules/{}", self.name)
     }
 }
 

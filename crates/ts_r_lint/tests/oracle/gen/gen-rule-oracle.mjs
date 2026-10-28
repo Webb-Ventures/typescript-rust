@@ -9,6 +9,7 @@
 //   node gen-rule-oracle.mjs --tools <dir with node_modules: eslint, typescript-eslint, globals, typescript>
 //        --eslint-tests <eslint>/tests/lib/rules --tseslint-tests <ts-eslint>/packages/eslint-plugin/tests/rules
 //        [--fixtures <copy of ts-eslint/packages/eslint-plugin/tests/fixtures>]
+//        [--jsdoc-tests <eslint-plugin-jsdoc>/test/rules/assertions]
 //        --out <crates/ts_r_lint/tests/oracle/rules> [rule ...]
 // Pinned: eslint 10.12.0, typescript-eslint 8.71.1, typescript 6.0.3 (private-app's).
 //
@@ -18,7 +19,9 @@
 // RuleTester does. Keep the copy outside any directory with a `node_modules` above it (no
 // `@types` are found, on both sides: tests/oracle/typed mirrors it). The case records
 // `typed: { root, project }` and its `filename`, relative to the fixtures directory.
-// Rule names: `no-debugger` (ESLint core tests) or `@typescript-eslint/no-explicit-any`.
+// Rule names: `no-debugger` (ESLint core tests), `@typescript-eslint/no-explicit-any`, or
+// `jsdoc/require-returns` (eslint-plugin-jsdoc 63.3.3, from the tools dir: its assertion
+// files export `{ valid, invalid }` and its runner adds `ecmaVersion: 'latest'`).
 
 import { registerHooks, createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -39,6 +42,7 @@ const eslintTests = opt('--eslint-tests');
 const tsTests = opt('--tseslint-tests');
 const outDir = path.resolve(opt('--out'));
 const fixturesOpt = opt('--fixtures');
+const jsdocTests = opt('--jsdoc-tests');
 const fixturesDir = fixturesOpt ? fs.realpathSync(path.resolve(fixturesOpt)) : undefined;
 const rules = args.flatMap((a) =>
   a.startsWith('@') && !a.startsWith('@typescript-eslint/')
@@ -50,6 +54,7 @@ const toolsRequire = createRequire(path.join(toolsDir, 'package.json'));
 const { Linter } = toolsRequire('eslint');
 const tsParser = toolsRequire('@typescript-eslint/parser');
 const tsPlugin = toolsRequire('@typescript-eslint/eslint-plugin');
+const jsdocPlugin = jsdocTests ? (await import(pathToFileURL(toolsRequire.resolve('eslint-plugin-jsdoc')).href)).default : undefined;
 
 // ---- stubs -------------------------------------------------------------------------------
 const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tsr-lint-stubs-'));
@@ -88,6 +93,8 @@ const FIXTURE_PARSER = stub(
   `function p() { return __filename; } p.__parser = 'fixture'; module.exports = p;`,
 );
 const TS_PARSER = stub('ts-parser', `module.exports = { __parser: 'ts' };`);
+const TS_ESLINT = stub('ts-eslint', `exports.parser = { __parser: 'ts' };`);
+const OTHER_PARSER = stub('other-parser', `exports.parseForESLint = () => {};`);
 const TS_HELPER = stub(
   'ts-helper',
   `const root = ${JSON.stringify(fixturesDir ?? stubDir)};
@@ -115,6 +122,8 @@ registerHooks({
     if (/_utils(\/index(\.js)?)?$/.test(s)) return r(UTILS);
     if (/fixture-parser$/.test(s) || /fixtures\/parsers\//.test(s)) return r(FIXTURE_PARSER);
     if (s === '@typescript-eslint/parser') return r(TS_PARSER);
+    if (s === 'typescript-eslint') return r(TS_ESLINT);
+    if (s === '@babel/eslint-parser' || s.startsWith('@es-joy/jsdoc-eslint-parser')) return r(OTHER_PARSER);
     if (/(^|\/)RuleTester(\.ts)?$/.test(s)) return r(TS_HELPER);
     if (s === 'vitest') return r(VITEST);
     if (s === 'globals' || s === 'eslint-scope' || s === 'espree' || s.startsWith('@typescript-eslint/') || s === 'eslint' || s.startsWith('eslint/')) {
@@ -239,7 +248,7 @@ function observe(ruleId, isTs, testerConfig, c) {
   const config = [
     {
       files: ['**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}'],
-      plugins: { '@typescript-eslint': tsPlugin },
+      plugins: { '@typescript-eslint': tsPlugin, ...(jsdocPlugin ? { jsdoc: jsdocPlugin } : {}) },
       languageOptions,
       settings: c.settings || {},
       rules: { [ruleId]: ['error', ...c.options] },
@@ -284,6 +293,11 @@ function observe(ruleId, isTs, testerConfig, c) {
 }
 
 function testFileFor(rule) {
+  if (rule.startsWith('jsdoc/')) {
+    const camel = rule.slice('jsdoc/'.length).replace(/-([a-z])/g, (_m, c) => c.toUpperCase());
+    const f = jsdocTests ? path.join(jsdocTests, camel + '.js') : '';
+    return { files: fs.existsSync(f) ? [f] : [], isTs: false, source: 'eslint-plugin-jsdoc' };
+  }
   if (rule.startsWith('@typescript-eslint/')) {
     const base = rule.slice('@typescript-eslint/'.length);
     const files = [path.join(tsTests, base + '.test.ts')];
@@ -296,7 +310,7 @@ function testFileFor(rule) {
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const rule of rules) {
-  const { files, isTs } = testFileFor(rule);
+  const { files, isTs, source } = testFileFor(rule);
   if (!files.length) {
     console.error(`${rule}: no test file`);
     continue;
@@ -306,7 +320,11 @@ for (const rule of rules) {
   for (const file of files) {
     globalThis.__recorded = [];
     try {
-      await import(pathToFileURL(file).href + '?t=' + Date.now());
+      const mod = await import(pathToFileURL(file).href + '?t=' + Date.now());
+      // eslint-plugin-jsdoc's assertion files export the cases; its runner adds the version.
+      if (source === 'eslint-plugin-jsdoc' && mod.default) {
+        globalThis.__recorded.push({ name: rule, config: { languageOptions: { ecmaVersion: 'latest' } }, tests: mod.default, defined: [] });
+      }
     } catch (e) {
       console.error(`${rule}: ${path.basename(file)} failed to load: ${String(e.message).split('\n')[0]}`);
       continue;
@@ -336,8 +354,8 @@ for (const rule of rules) {
       }
     }
   }
-  const out = { rule, source: isTs ? 'typescript-eslint' : 'eslint', skipped, cases };
-  const fname = rule.replace('@typescript-eslint/', 'ts-') + '.json';
+  const out = { rule, source: source ?? (isTs ? 'typescript-eslint' : 'eslint'), skipped, cases };
+  const fname = rule.replace('@typescript-eslint/', 'ts-').replace('jsdoc/', 'jsdoc-') + '.json';
   fs.writeFileSync(path.join(outDir, fname), JSON.stringify(out, null, 0).replace(/\},\{"code"/g, '},\n{"code"') + '\n');
   console.error(`${rule}: ${cases.length} cases, skipped ${JSON.stringify(skipped)}`);
 }

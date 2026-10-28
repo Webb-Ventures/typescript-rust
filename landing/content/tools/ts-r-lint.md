@@ -1,6 +1,6 @@
 ---
 title: "`ts-r-lint`: linter"
-description: A linter with 154 ESLint and typescript-eslint rules, 51 of them type-aware, that reads eslint.config, .oxlintrc.json or biome.json.
+description: A linter with 157 ESLint, typescript-eslint and jsdoc rules, 51 of them type-aware, that reads eslint.config, .oxlintrc.json or biome.json.
 nav: ts-r-lint
 section: Tools
 order: 4
@@ -13,11 +13,11 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 ## What works today
 
-- 154 rules: all 64 rules of ESLint 10's `recommended` set, the typescript-eslint 8.71
-  `recommended` and `strict` rules, and a few more. 51 of them are type-aware and get their
-  types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
-- The published ESLint and typescript-eslint tests for those rules: 15,495 of 15,517 cases
-  match (8,597 of 8,597 for rules without types, 6,898 of 6,920 for type-aware rules).
+- 157 rules: all 64 rules of ESLint 10's `recommended` set, the typescript-eslint 8.71
+  `recommended` and `strict` rules, three eslint-plugin-jsdoc rules and a few more. 51 of them
+  are type-aware and get their types from ts-r's own checker. `ts-r-lint --list-rules` prints them.
+- The published ESLint, typescript-eslint and eslint-plugin-jsdoc tests for those rules: 15,706 of
+  15,732 cases match (8,808 of 8,812 for rules without types, 6,898 of 6,920 for type-aware rules).
 - Configs: ESLint flat config, `.oxlintrc.json` and `biome.json` (see below).
 - `--fix` for rules with fixes.
 - `eslint-disable` comments and `/* eslint */` inline config, with reports of unused disable
@@ -29,7 +29,8 @@ for `eslint` in scripts and CI when your config only uses the rules it has.
 
 - Type-aware rules run only on a tsconfig project where ts-r-check reports the same
   diagnostics as your tsc. Elsewhere they are skipped, and listed on stderr with the reason.
-- No ESLint plugins other than typescript-eslint. Rules from other plugins are skipped and
+- No ESLint plugins other than typescript-eslint, apart from three eslint-plugin-jsdoc rules
+  (`require-param-description`, `require-returns`, `escape-inline-tags`). Rules from other plugins are skipped and
   listed as "plugin not implemented".
 
 Design record: [0006 lint](../../../docs/design/0006-lint.md).

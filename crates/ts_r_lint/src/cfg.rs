@@ -407,8 +407,14 @@ impl<'a> Builder<'a> {
         self.event(id);
     }
 
-    fn class(&mut self, heritage: ts_r_ast::NodeList, members: ts_r_ast::NodeList) {
+    fn class(
+        &mut self,
+        decorators: ts_r_ast::NodeList,
+        heritage: ts_r_ast::NodeList,
+        members: ts_r_ast::NodeList,
+    ) {
         let ast = self.ast;
+        self.decorators(decorators);
         for &h in ast.list(heritage) {
             if let Node::HeritageClause { types, .. } = *ast.node(h) {
                 for &t in ast.list(types) {
@@ -419,11 +425,26 @@ impl<'a> Builder<'a> {
             }
         }
         for &m in ast.list(members) {
-            let key = match *ast.node(m) {
-                Node::PropertyDef { key, .. } | Node::MethodDef { key, .. } => key,
+            let (decorators, key) = match *ast.node(m) {
+                Node::PropertyDef {
+                    decorators, key, ..
+                }
+                | Node::MethodDef {
+                    decorators, key, ..
+                } => (decorators, key),
                 _ => continue,
             };
+            // Decorator expressions run in the class's code path, before the key.
+            self.decorators(decorators);
             if let Node::ComputedKey { expr } = *ast.node(key) {
+                self.expr(expr);
+            }
+        }
+    }
+
+    fn decorators(&mut self, decorators: ts_r_ast::NodeList) {
+        for &d in self.ast.list(decorators) {
+            if let Node::Decorator { expr } = *self.ast.node(d) {
                 self.expr(expr);
             }
         }
@@ -501,11 +522,17 @@ impl<'a> Builder<'a> {
             }
             Node::FunctionExpr { .. } | Node::Arrow { .. } | Node::FunctionDecl { .. } => {}
             Node::ClassExpr {
-                heritage, members, ..
+                decorators,
+                heritage,
+                members,
+                ..
             }
             | Node::ClassDecl {
-                heritage, members, ..
-            } => self.class(heritage, members),
+                decorators,
+                heritage,
+                members,
+                ..
+            } => self.class(decorators, heritage, members),
             Node::Call { callee, args, .. } => {
                 self.expr(callee);
                 for &a in ast.list(args) {
@@ -904,8 +931,11 @@ impl<'a> Builder<'a> {
                 self.stmt(body);
             }
             Node::ClassDecl {
-                heritage, members, ..
-            } => self.class(heritage, members),
+                decorators,
+                heritage,
+                members,
+                ..
+            } => self.class(decorators, heritage, members),
             Node::ExportDefaultExpr { expr } | Node::ExportAssignment { expr } => self.expr(expr),
             Node::Enum { members, .. } => {
                 for &m in ast.list(members) {

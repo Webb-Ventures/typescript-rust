@@ -344,12 +344,29 @@ pub fn lint_parsed(
         &custom_set
     };
 
-    // A lib that comes from the file's tsconfig is resolved per file (cached).
+    // A lib that comes from the file's tsconfig is resolved per file (cached), and so are
+    // decorator options the parser options leave unset.
     let project_env;
     let env = match &cfg.env.project_lib {
-        Some(p) if p.lib_from_tsconfig => {
+        Some(p)
+            if p.lib_from_tsconfig
+                || p.emit_decorator_metadata.is_none()
+                || p.experimental_decorators.is_none() =>
+        {
+            let abs;
+            let file = if std::path::Path::new(path).is_absolute() {
+                path
+            } else {
+                abs = p.root_dir.join(path).to_string_lossy().into_owned();
+                &abs
+            };
             project_env = LintEnv {
-                lib: Some(p.resolve(path)),
+                lib: if p.lib_from_tsconfig {
+                    Some(p.resolve(file))
+                } else {
+                    cfg.env.lib.clone()
+                },
+                decorator_metadata: cfg.env.typescript && p.decorator_metadata(file),
                 ..cfg.env.clone()
             };
             &project_env
