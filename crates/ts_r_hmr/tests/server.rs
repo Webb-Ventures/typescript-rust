@@ -573,6 +573,27 @@ fn a_deleted_module_no_longer_imports_its_dependencies() {
 }
 
 #[test]
+fn a_change_seen_between_truncate_and_write_waits_for_the_write() {
+    // A slow save seen half-done (once on Linux CI): the empty file must not reload the page.
+    let f = start_with_watch(false);
+    f.app.write(
+        "src/a.js",
+        "export const a = 1;\nimport.meta.hot.accept();\n",
+    );
+    assert_eq!(f.get("/src/a.js").0, 200);
+    let mut ws = f.ws();
+    f.app.write("src/a.js", "");
+    let p = f.app.path().join("src/a.js");
+    let w = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(p, "export const a = 2;\nimport.meta.hot.accept();\n").unwrap();
+    });
+    f.notify_modified("src/a.js");
+    w.join().unwrap();
+    assert_eq!(next(&mut ws)["type"], "update");
+}
+
+#[test]
 fn accepting_a_raw_import_keeps_it_raw_after_an_update() {
     let f = start();
     f.app.write("src/message.txt", "hello");

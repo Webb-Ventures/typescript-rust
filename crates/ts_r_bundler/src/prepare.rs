@@ -13,7 +13,7 @@ use ts_r_ast::{
     Ast, BinaryOp, MetaPropKind, Modifiers, Node, NodeId, NodeKind, SourceKind, Span, UnaryOp,
     VarKind,
 };
-use ts_r_config::jsonc::{self, Value, ValueKind};
+use ts_r_config::jsonc::{self, Value};
 use ts_r_config::{JsxEmit, ScriptTarget};
 use ts_r_minify::{ScopeId, Scopes, SymbolId, SymbolKind, build, names};
 use ts_r_transform::{JsxMode, ModuleFormat, TransformOptions};
@@ -418,11 +418,24 @@ fn mime_type(path: &str, bytes: &[u8]) -> &'static str {
 /// A `define` replacement value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DefineValue {
-    Json(Value),
+    Literal(Literal),
     /// `globalThis`, `window.foo`.
     Path(Vec<String>),
-    /// A decimal BigInt literal's digits (`1n`), which esbuild also accepts.
+}
+
+/// A define value that is a literal, as esbuild 0.28.2 accepts it (observed): JSON with
+/// comments, trailing commas and single-quoted strings, plus decimal BigInts (`1n`, never
+/// negative). An array or object is hoisted to one `var define_<key>_default` per module.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Literal {
+    Null,
+    Bool(bool),
+    Number(f64),
+    /// The digits.
     BigInt(String),
+    String(String),
+    Array(Vec<Literal>),
+    Object(Vec<(String, Literal)>),
 }
 
 /// Parsed `define` table.
@@ -482,20 +495,18 @@ impl Defines {
             s.push_str(&k.join("."));
             s.push('=');
             match v {
-                DefineValue::Json(j) => s.push_str(&j.to_json()),
-                DefineValue::Path(p) => s.push_str(&p.join(".")),
-                DefineValue::BigInt(d) => s.push_str(&format!("{d}n")),
+                DefineValue::Literal(l) => s.push_str(&format!("literal:{l:?}")),
+                DefineValue::Path(p) => s.push_str(&format!("path:{}", p.join("."))),
             }
             s.push('\n');
         }
         s
     }
 
-    fn lookup(&self, path: &[&str]) -> Option<&DefineValue> {
+    fn lookup(&self, path: &[&str]) -> Option<&(Vec<String>, DefineValue)> {
         self.entries
             .iter()
             .find(|(k, _)| k.len() == path.len() && k.iter().zip(path).all(|(a, b)| a == b))
-            .map(|(_, v)| v)
     }
 }
 
@@ -507,19 +518,188 @@ fn parse_define_value(v: &str) -> Result<DefineValue, String> {
     {
         return Ok(DefineValue::Path(t.split('.').map(str::to_owned).collect()));
     }
-    if let Some(d) = t.strip_suffix('n')
-        && (d == "0"
-            || (!d.starts_with('0') && !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())))
-    {
-        return Ok(DefineValue::BigInt(d.to_owned()));
-    }
-    let parsed = jsonc::parse(t, "<define>");
-    match parsed.root {
-        Some(root) if parsed.diagnostics.is_empty() => Ok(DefineValue::Json(root)),
+    let mut p = LiteralParser { s: t, i: 0 };
+    match p.value(0) {
+        Some(l) if p.ws().is_some() && p.i == t.len() => Ok(DefineValue::Literal(l)),
         _ => Err(format!(
-            "Invalid define value: {v:?} (must be JSON or an identifier)"
+            "Invalid define value (must be an entity name or JS literal): {v}"
         )),
     }
+}
+
+struct LiteralParser<'a> {
+    s: &'a str,
+    i: usize,
+}
+
+impl LiteralParser<'_> {
+    /// Skips whitespace and comments (`None`: an unterminated `/*`).
+    fn ws(&mut self) -> Option<()> {
+        loop {
+            let r = &self.s[self.i..];
+            let t = r.trim_start();
+            self.i += r.len() - t.len();
+            if let Some(c) = t.strip_prefix("//") {
+                self.i += 2 + c.find('\n').unwrap_or(c.len());
+            } else if let Some(c) = t.strip_prefix("/*") {
+                self.i += 4 + c.find("*/")?;
+            } else {
+                return Some(());
+            }
+        }
+    }
+
+    fn eat(&mut self, c: u8) -> bool {
+        let hit = self.s.as_bytes().get(self.i) == Some(&c);
+        self.i += usize::from(hit);
+        hit
+    }
+
+    fn value(&mut self, depth: u32) -> Option<Literal> {
+        if depth > 64 {
+            return None;
+        }
+        self.ws()?;
+        let r = &self.s[self.i..];
+        for (word, lit) in [
+            ("true", Literal::Bool(true)),
+            ("false", Literal::Bool(false)),
+            ("null", Literal::Null),
+        ] {
+            if r.starts_with(word) {
+                self.i += word.len();
+                return Some(lit);
+            }
+        }
+        match *r.as_bytes().first()? {
+            b'"' | b'\'' => self.string().map(Literal::String),
+            b'[' => {
+                self.i += 1;
+                let mut items = Vec::new();
+                // Each turn reads an element or returns.
+                loop {
+                    self.ws()?;
+                    if self.eat(b']') {
+                        return Some(Literal::Array(items));
+                    }
+                    items.push(self.value(depth + 1)?);
+                    self.ws()?;
+                    if !self.eat(b',') {
+                        return self.eat(b']').then_some(Literal::Array(items));
+                    }
+                }
+            }
+            b'{' => {
+                self.i += 1;
+                let mut members = Vec::new();
+                loop {
+                    self.ws()?;
+                    if self.eat(b'}') {
+                        return Some(Literal::Object(members));
+                    }
+                    if !matches!(self.s.as_bytes().get(self.i), Some(b'"' | b'\'')) {
+                        return None;
+                    }
+                    let key = self.string()?;
+                    self.ws()?;
+                    if !self.eat(b':') {
+                        return None;
+                    }
+                    members.push((key, self.value(depth + 1)?));
+                    self.ws()?;
+                    if !self.eat(b',') {
+                        return self.eat(b'}').then_some(Literal::Object(members));
+                    }
+                }
+            }
+            _ => self.number(),
+        }
+    }
+
+    /// JSON's number grammar, or a decimal BigInt without a sign.
+    fn number(&mut self) -> Option<Literal> {
+        let b = self.s.as_bytes();
+        let digits = |i: &mut usize| {
+            let from = *i;
+            while b.get(*i).is_some_and(u8::is_ascii_digit) {
+                *i += 1;
+            }
+            *i > from
+        };
+        let start = self.i;
+        let mut i = start + usize::from(b.get(start) == Some(&b'-'));
+        let int = i;
+        if !digits(&mut i) || (b[int] == b'0' && i - int > 1) {
+            return None;
+        }
+        if int == start && b.get(i) == Some(&b'n') {
+            self.i = i + 1;
+            return Some(Literal::BigInt(self.s[int..i].to_owned()));
+        }
+        if b.get(i) == Some(&b'.') {
+            i += 1;
+            if !digits(&mut i) {
+                return None;
+            }
+        }
+        if matches!(b.get(i), Some(b'e' | b'E')) {
+            i += 1 + usize::from(matches!(b.get(i + 1), Some(b'+' | b'-')));
+            if !digits(&mut i) {
+                return None;
+            }
+        }
+        self.i = i;
+        self.s[start..i].parse().ok().map(Literal::Number)
+    }
+
+    /// A string in `"` or `'` with JSON's escapes; a lone surrogate becomes U+FFFD.
+    fn string(&mut self) -> Option<String> {
+        let quote = char::from(self.s.as_bytes()[self.i]);
+        let mut out = String::new();
+        let mut chars = self.s[self.i + 1..].char_indices();
+        while let Some((k, c)) = chars.next() {
+            if c == quote {
+                self.i += k + 2;
+                return Some(out);
+            }
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            out.push(match chars.next()?.1 {
+                'b' => '\u{8}',
+                'f' => '\u{c}',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                'u' => {
+                    let hi = hex4(&mut chars)?;
+                    let mut ahead = chars.clone();
+                    let lo = (0xD800..0xDC00).contains(&hi)
+                        && ahead.next().map(|c| c.1) == Some('\\')
+                        && ahead.next().map(|c| c.1) == Some('u');
+                    match lo.then(|| hex4(&mut ahead)).flatten() {
+                        Some(lo @ 0xDC00..0xE000) => {
+                            chars = ahead;
+                            char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00))?
+                        }
+                        _ => char::from_u32(hi).unwrap_or('\u{FFFD}'),
+                    }
+                }
+                c @ ('"' | '\\' | '/') => c,
+                _ => return None,
+            });
+        }
+        None
+    }
+}
+
+fn hex4(chars: &mut std::str::CharIndices) -> Option<u32> {
+    let mut v = 0;
+    for _ in 0..4 {
+        v = v * 16 + chars.next()?.1.to_digit(16)?;
+    }
+    Some(v)
 }
 
 fn build_define_value(ast: &mut Ast, v: &DefineValue, at: u32) -> NodeId {
@@ -534,43 +714,39 @@ fn build_define_value(ast: &mut Ast, v: &DefineValue, at: u32) -> NodeId {
             }
             e
         }
-        DefineValue::Json(j) => build_json(ast, j, at, 0),
-        DefineValue::BigInt(d) => {
-            let value = ast.intern(d);
-            ast.add(Node::BigIntLit { value }, Span::new(at, at))
-        }
+        DefineValue::Literal(l) => build_literal(ast, l, at),
     }
 }
 
-fn build_json(ast: &mut Ast, v: &Value, at: u32, depth: u32) -> NodeId {
-    if depth > 64 {
-        return build::null(ast, at);
-    }
-    match &v.kind {
-        ValueKind::Null | ValueKind::Invalid => build::null(ast, at),
-        ValueKind::Bool(b) => build::boolean(ast, *b, at),
-        ValueKind::Number(n) => {
-            if *n < 0.0 {
-                let pos = build::number(ast, -n, at);
-                build::unary(ast, UnaryOp::Minus, pos, at)
-            } else {
-                build::number(ast, *n, at)
-            }
+/// The parser's depth limit bounds the recursion.
+fn build_literal(ast: &mut Ast, v: &Literal, at: u32) -> NodeId {
+    match v {
+        Literal::Null => build::null(ast, at),
+        Literal::Bool(b) => build::boolean(ast, *b, at),
+        Literal::Number(n) if n.is_sign_negative() => {
+            let pos = build::number(ast, -n, at);
+            build::unary(ast, UnaryOp::Minus, pos, at)
         }
-        ValueKind::String(s) => build::string(ast, s, at),
-        ValueKind::Array(items) => {
-            let ids: Vec<NodeId> = items
-                .iter()
-                .map(|i| build_json(ast, i, at, depth + 1))
-                .collect();
+        Literal::Number(n) => build::number(ast, *n, at),
+        Literal::BigInt(d) => {
+            let value = ast.intern(d);
+            ast.add(Node::BigIntLit { value }, Span::new(at, at))
+        }
+        Literal::String(s) => build::string(ast, s, at),
+        Literal::Array(items) => {
+            let ids: Vec<NodeId> = items.iter().map(|i| build_literal(ast, i, at)).collect();
             build::array(ast, &ids, at)
         }
-        ValueKind::Object(members) => {
-            let vals: Vec<(String, NodeId)> = members
+        Literal::Object(members) => {
+            let vals: Vec<NodeId> = members
                 .iter()
-                .map(|m| (m.key.clone(), build_json(ast, &m.value, at, depth + 1)))
+                .map(|(_, v)| build_literal(ast, v, at))
                 .collect();
-            let refs: Vec<(&str, NodeId)> = vals.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+            let refs: Vec<(&str, NodeId)> = members
+                .iter()
+                .zip(vals)
+                .map(|((k, _), v)| (k.as_str(), v))
+                .collect();
             build::object(ast, &refs, at)
         }
     }
@@ -674,6 +850,9 @@ fn apply_defines(
         }
     }
     let mut changed = false;
+    // Arrays and objects: (name, key, value) of each `var` to add, and the names in use.
+    let mut hoisted: Vec<(String, &[String], &DefineValue)> = Vec::new();
+    let mut used: Option<FxHashSet<String>> = None;
     let count = ast.nodes.len() as u32;
     // Parents have larger ids than their children: visit them first so the longest key wins.
     for raw in (1..count).rev() {
@@ -720,17 +899,77 @@ fn apply_defines(
             continue;
         }
         path.reverse();
-        let Some(v) = defines.lookup(&path).cloned() else {
+        let Some((key, v)) = defines.lookup(&path) else {
             continue;
         };
+        // Not in an enum initializer: the main pass runs after and would add a second `var`.
+        let hoist = only.is_none()
+            && matches!(
+                v,
+                DefineValue::Literal(Literal::Array(_) | Literal::Object(_))
+            );
         // A write keeps its target unless the value is a name (`d = 0` becomes `ident = 0`).
-        if writes.contains(&raw) && !matches!(&v, DefineValue::Path(p) if p[0] != "undefined") {
+        if writes.contains(&raw)
+            && !hoist
+            && !matches!(v, DefineValue::Path(p) if p[0] != "undefined")
+        {
             continue;
         }
         let at = ast.span(id).start;
-        let new = build_define_value(ast, &v, at);
+        let new = if hoist {
+            let name = match hoisted.iter().find(|h| h.1 == key) {
+                Some(h) => h.0.clone(),
+                None => {
+                    let used = used.get_or_insert_with(|| {
+                        let names = ast.nodes.iter().filter_map(|n| match *n {
+                            Node::Ident { name } => Some(ast.atom(name).to_owned()),
+                            _ => None,
+                        });
+                        // A path-valued define can introduce its root name later in the walk.
+                        let roots = defines.entries.iter().filter_map(|(_, v)| match v {
+                            DefineValue::Path(p) => p.first().cloned(),
+                            DefineValue::Literal(_) => None,
+                        });
+                        names.chain(roots).collect()
+                    });
+                    // esbuild's name, with a number when the module already uses it.
+                    let base = format!("define_{}_default", key.join("_"));
+                    let mut name = base.clone();
+                    let mut n = 1;
+                    while used.contains(&name) {
+                        n += 1;
+                        name = format!("{base}{n}");
+                    }
+                    used.insert(name.clone());
+                    hoisted.push((name.clone(), key, v));
+                    name
+                }
+            };
+            build::ident(ast, &name, at)
+        } else {
+            build_define_value(ast, v, at)
+        };
         build::replace(ast, id, new);
         changed = true;
+    }
+    if !hoisted.is_empty() {
+        // After the directives, sorted by name, as esbuild orders them.
+        hoisted.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut stmts = build::program_stmts(ast);
+        let at = stmts
+            .iter()
+            .take_while(|&&s| matches!(ast.node(s), Node::Directive { .. }))
+            .count();
+        let decls: Vec<NodeId> = hoisted
+            .iter()
+            .map(|(name, _, v)| {
+                let id = build::ident(ast, name, 0);
+                let init = build_define_value(ast, v, 0);
+                build::var_decl(ast, VarKind::Var, id, Some(init), 0)
+            })
+            .collect();
+        stmts.splice(at..at, decls);
+        build::set_program(ast, &stmts);
     }
     changed
 }

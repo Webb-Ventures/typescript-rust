@@ -81,6 +81,12 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 - **`define` keys** (`prepare.rs` `apply_defines`) match `a.b`, `a?.b` and `a["b"]` alike,
   and may start at `import.meta`; a write keeps its target unless the value is a name
   (`d = 0` with `d=ident` becomes `ident = 0`), as in esbuild.
+  Values are an entity name or a literal in esbuild's grammar (`Literal`: JSON with comments,
+  trailing commas and `'` strings, plus unsigned decimal BigInts). An array or object is
+  hoisted to `var define_<key>_default` (sorted, after the directives, numbered apart from
+  the module's names) and every use, writes included, names it, as esbuild 0.28.2 does.
+  esbuild shares one `var` across a bundle (an injected `<define:x>` module); ts-r adds one
+  per module that uses it, so identity holds within a module only.
 - **tsconfig `alwaysStrict` counts only when set** (directly or through `strict`), as in
   esbuild: tsc 7's default of `true` would add `"use strict"` to every TypeScript file.
 - **`alias` runs before everything else in resolution** (`resolve.rs` `alias`): only package
@@ -235,6 +241,9 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
 - **`--pure:name`** (`BuildOptions::pure`, `ts_r_minify::purity::Purity::pure_calls`):
   calls of those globals (`a.b` member chains too) are removable when unused, in tree
   shaking only. `--ignore-annotations` ignores them and `sideEffects: false` too.
+- **CommonJS modules are tree-shaken** like ES modules (`link.rs` `include`, `plan.rs`):
+  inside `__tsrCjs()` only statements with side effects and what they use are printed, plus
+  the directives (`"use strict"`), as esbuild does. A direct `eval` keeps everything.
 - **Errors once targets are known** (`bundle.rs` `import_errors`): a stylesheet imported
   from JavaScript with no output path (stdout), and `assert { type: 'json' }` on a file
   another loader loads (`with` sets the loader instead).

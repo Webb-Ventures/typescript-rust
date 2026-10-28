@@ -933,14 +933,15 @@ impl Linker<'_> {
         }
         self.l.included[mi] = true;
         let module = &self.g.modules[mi];
-        // ES modules are tree-shaken whether or not they are wrapped in `init_x()`, unless
-        // a direct `eval` can name any of their bindings.
-        let all =
-            !self.o.tree_shaking || self.l.kinds[mi] != Kind::Esm || module.meta.has_direct_eval;
+        // Modules are tree-shaken whether or not they are wrapped in `init_x()` or
+        // `__tsrCjs()`, unless a direct `eval` can name any of their bindings. A CommonJS
+        // module keeps its directives (`"use strict"`).
+        let all = !self.o.tree_shaking || module.meta.has_direct_eval;
+        let esm = self.l.kinds[mi] == Kind::Esm;
         for (i, p) in module.meta.parts.iter().enumerate() {
             // `sideEffects: false` only lets an unused file be dropped; once a file is in
             // the bundle its side effects run.
-            if all || p.side_effects {
+            if all || p.side_effects || (!esm && p.kind == PartKind::Directive) {
                 self.work.push(Task::Part(m, i as u32));
             }
         }
