@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_config::path;
 
-use crate::meta::{ModuleMeta, RecordKind};
+use crate::meta::{ExportTarget, Imported, ModuleMeta, RecordKind};
 use crate::options::Loader;
 use crate::pool;
 use crate::prepare::{self, PrepareContext, Prepared, Source};
@@ -193,7 +193,7 @@ pub struct ModuleCache {
 }
 
 /// Version of the prepared-module format (part of every cache key).
-pub const PREP_VERSION: u32 = 1;
+pub const PREP_VERSION: u32 = 3;
 
 #[derive(Debug)]
 enum RawTarget {
@@ -297,6 +297,7 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
             }
         }
     }
+    data_faces(ctx, &mut nodes, entries, &wd);
     // Deterministic numbering: depth-first pre-order from the entries.
     let mut ids: FxHashMap<String, ModuleId> = FxHashMap::default();
     let mut order: Vec<String> = Vec::new();
@@ -360,6 +361,114 @@ pub fn build_graph(ctx: &GraphContext<'_>, entries: &[String]) -> Graph {
     copy_imports_external(&mut g);
     g.entries = entries.iter().filter_map(|e| ids.get(e).copied()).collect();
     g
+}
+
+fn is_data(loader: Loader) -> bool {
+    use Loader::*;
+    matches!(
+        loader,
+        Json | Text | File | Base64 | DataUrl | Binary | Bytes
+    )
+}
+
+/// Data-loader modules (JSON, text, ...) are ES modules (`export default`) unless an entry
+/// or a `require()` loads them, as in esbuild; a JSON object's keys imported by name (every
+/// key for a namespace or `import()`) are also `export var`s. Reloads the ones whose face
+/// differs from the graph's.
+fn data_faces(
+    ctx: &GraphContext<'_>,
+    nodes: &mut FxHashMap<String, Node>,
+    entries: &[String],
+    wd: &str,
+) {
+    #[derive(Default)]
+    struct Want<'a> {
+        cjs: bool,
+        all: bool,
+        keys: FxHashSet<&'a str>,
+    }
+    let mut wants: FxHashMap<&str, Want> = FxHashMap::default();
+    for e in entries {
+        wants.entry(e).or_default().cjs = true;
+    }
+    // (target, `None`: CommonJS; `Some(None)`: every key; `Some(Some(k))`: key `k`).
+    let mut uses: Vec<(&str, Option<Option<&str>>)> = Vec::new();
+    for n in nodes.values() {
+        let meta = n.meta();
+        let target = |record: u32| match n.targets.get(record as usize) {
+            Some(RawTarget::Path(q)) if nodes.get(q).is_some_and(|t| is_data(t.loaded.loader)) => {
+                Some(q.as_str())
+            }
+            _ => None,
+        };
+        for (ri, r) in meta.records.iter().enumerate() {
+            match r.kind {
+                RecordKind::Require => uses.extend(target(ri as u32).map(|q| (q, None))),
+                RecordKind::Dynamic => uses.extend(target(ri as u32).map(|q| (q, Some(None)))),
+                _ => {}
+            }
+        }
+        uses.extend(
+            meta.star_exports
+                .iter()
+                .filter_map(|&ri| target(ri).map(|q| (q, Some(None)))),
+        );
+        let names = meta.imports.iter().map(|b| (b.record, &b.name));
+        let reexports = meta.exports.iter().filter_map(|(_, e)| match e {
+            ExportTarget::Reexport { record, name } => Some((*record, name)),
+            ExportTarget::Local(_) => None,
+        });
+        for (ri, name) in names.chain(reexports) {
+            if let Some(q) = target(ri) {
+                uses.push((
+                    q,
+                    Some(match name {
+                        Imported::Namespace => None,
+                        Imported::Name(k) => Some(k.as_str()),
+                    }),
+                ));
+            }
+        }
+    }
+    for (q, u) in uses {
+        let w = wants.entry(q).or_default();
+        match u {
+            None => w.cjs = true,
+            Some(None) => w.all = true,
+            Some(Some(k)) => _ = w.keys.insert(k),
+        }
+    }
+    let splittable = |k: &str| {
+        ts_r_codegen::literals::is_identifier_name(k) && !ts_r_minify::names::is_reserved(k)
+    };
+    let mut reload = Vec::new();
+    for (q, w) in wants {
+        let Some(n) = nodes.get(q) else { continue };
+        let loaded = &n.loaded;
+        let face = match &loaded.source.json_keys {
+            _ if w.cjs => None,
+            Some(all) if loaded.loader == Loader::Json && split_with_type(q).1.is_none() => {
+                let mut keys: Vec<String> = all
+                    .iter()
+                    .filter(|k| *k != "default" && (w.all || w.keys.contains(k.as_str())))
+                    .cloned()
+                    .collect();
+                keys.sort();
+                keys.dedup();
+                keys.iter().all(|k| splittable(k)).then_some(keys)
+            }
+            _ => Some(Vec::new()),
+        };
+        if face != loaded.source.esm {
+            reload.push((q.to_owned(), face));
+        }
+    }
+    for (q, face) in reload {
+        let loaded = load_module(ctx, &q, wd, Some(face));
+        if let Some(n) = nodes.get_mut(&q) {
+            n.loaded = loaded;
+        }
+    }
 }
 
 /// The external path standing for the copy of `module` until chunks know its URL: the
@@ -563,7 +672,7 @@ fn expand_globs(
 }
 
 fn process(ctx: &GraphContext<'_>, p: &str, wd: &str) -> Node {
-    let loaded = load_module(ctx, p, wd);
+    let loaded = load_module(ctx, p, wd, None);
     let resolver = &ctx.prep.resolver;
     let p = split_query(split_with_type(p).0).0;
     let is_data = p.starts_with(crate::data_url::PREFIX);
@@ -789,17 +898,27 @@ fn prep_key(ctx: &GraphContext<'_>, p: &str, source: &Source) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
-fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
+/// `face` is a data loader's [`Source::esm`]; `None` keeps the cached module's, or starts
+/// as an ES module ([`data_faces`] fixes it once the graph is known).
+fn load_module(
+    ctx: &GraphContext<'_>,
+    key: &str,
+    wd: &str,
+    face: Option<Option<Vec<String>>>,
+) -> Arc<Loaded> {
     let (full, with_type) = split_with_type(key);
     let (p, query) = split_query(full);
+    let cached = ctx
+        .cache
+        .modules
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(key)
+        .cloned();
     if let Some(changed) = ctx.changed
         && !changed.contains(p)
-        && let Some(l) = ctx
-            .cache
-            .modules
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(key)
+        && let Some(l) = &cached
+        && face.as_ref().is_none_or(|f| *f == l.source.esm)
     {
         return Arc::clone(l);
     }
@@ -826,7 +945,14 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
             "No loader is configured for \".{ext}\" files: {pretty}"
         ))
     } else {
-        prepare::load(fs.as_ref(), full, loader, opts)
+        let esm = match face {
+            Some(f) => f,
+            None => match &cached {
+                Some(l) => l.source.esm.clone(),
+                None => is_data(loader).then(Vec::new),
+            },
+        };
+        prepare::load(fs.as_ref(), full, loader, opts, esm.as_deref())
     };
     let source = match loaded {
         Ok(s) => s,
@@ -838,17 +964,13 @@ fn load_module(ctx: &GraphContext<'_>, key: &str, wd: &str) -> Arc<Loaded> {
                 inline_url: None,
                 asset: None,
                 json_keys: None,
+                esm: None,
                 hash: [0; 32],
             }
         }
     };
     let prep = prep_key(ctx, key, &source);
-    if let Some(l) = ctx
-        .cache
-        .modules
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(key)
+    if let Some(l) = &cached
         && l.prep_key == prep
     {
         return Arc::clone(l);

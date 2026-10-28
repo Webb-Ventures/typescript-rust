@@ -38,6 +38,9 @@ pub struct Source {
     pub asset: Option<Asset>,
     /// Top-level JSON object keys before rewriting JavaScript-only computed properties.
     pub json_keys: Option<Arc<[String]>>,
+    /// A data loader's ES module face (`export default`, plus `export var` for these JSON
+    /// keys, sorted); `None` is CommonJS (`module.exports = ...`).
+    pub esm: Option<Vec<String>>,
     /// Hash of the raw file contents and loader, and of anything else `js` depends on (the
     /// `file` loader's URL). Part of the module's preparation key.
     pub hash: [u8; 32],
@@ -77,6 +80,7 @@ pub fn load(
     path: &str,
     loader: Loader,
     opts: &BuildOptions,
+    esm: Option<&[String]>,
 ) -> Result<Source, String> {
     // `key` keeps a `?query` suffix for the file loader's URL; the file is read without it.
     let key = path;
@@ -101,14 +105,23 @@ pub fn load(
         h.update(loader.as_str().as_bytes());
         h.update(&[0]);
         h.update(bytes);
+        if let Some(keys) = esm {
+            h.update(b"\0esm");
+            keys.iter()
+                .for_each(|k| _ = h.update(k.as_bytes()).update(&[0]));
+        }
         *h.finalize().as_bytes()
     };
     let js_value = |expr: String, hash| Source {
-        js: Arc::from(format!("module.exports = {expr};\n")),
+        js: Arc::from(match esm {
+            Some(_) => format!("export default {expr};\n"),
+            None => format!("module.exports = {expr};\n"),
+        }),
         css: None,
         inline_url: None,
         asset: None,
         json_keys: None,
+        esm: esm.map(<[String]>::to_vec),
         hash,
     };
     match loader {
@@ -122,6 +135,7 @@ pub fn load(
                 inline_url: None,
                 asset: None,
                 json_keys: None,
+                esm: None,
                 hash,
             })
         }
@@ -139,19 +153,26 @@ pub fn load(
             let body = if text.trim().is_empty() {
                 "{}".to_owned()
             } else {
-                // JSON is a JavaScript expression; parenthesize so `{` isn't a block. Below
-                // ES2015 there are no computed keys, and esbuild prints `"__proto__"` as is.
+                // JSON is a JavaScript expression; parenthesize so `{` isn't a block (not
+                // needed after `export default`). Below ES2015 there are no computed keys, and
+                // esbuild prints `"__proto__"` as is.
                 let text = text.trim_end();
+                let (open, close) = if esm.is_some() { ("", "") } else { ("(", ")") };
                 if opts
                     .unsupported()
                     .has(crate::features::Feature::ObjectExtensions)
                 {
-                    format!("(\n{text}\n)")
+                    format!("{open}\n{text}\n{close}")
                 } else {
-                    format!("(\n{}\n)", computed_proto_keys(text))
+                    format!("{open}\n{}\n{close}", computed_proto_keys(text))
                 }
             };
             let mut source = js_value(body, hash);
+            if let (Some(keys @ [_, ..]), Some(members)) =
+                (esm, parsed.root.as_ref().and_then(Value::as_object))
+            {
+                source.js = Arc::from(json_esm(text, members, keys, opts));
+            }
             source.json_keys = parsed
                 .root
                 .as_ref()
@@ -275,6 +296,7 @@ pub fn load(
                 inline_url: None,
                 asset: None,
                 json_keys: None,
+                esm: None,
                 hash,
             })
         }
@@ -284,8 +306,53 @@ pub fn load(
             inline_url: Some(Arc::from("")),
             asset: None,
             json_keys: None,
+            esm: None,
             hash: hash_of(b""),
         }),
+    }
+}
+
+/// A JSON object as an ES module whose `keys` (sorted) are also `export var`s, as esbuild
+/// splits the keys imported by name: `export var a = 1; export default { a, "b": 2 };`.
+fn json_esm(text: &str, members: &[jsonc::Member], keys: &[String], opts: &BuildOptions) -> String {
+    let last: rustc_hash::FxHashMap<&str, usize> = members
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.key.as_str(), i))
+        .collect();
+    let slice = |(s, e): (u32, u32)| text.get(s as usize..e as usize).unwrap_or("null");
+    let mut vars = String::new();
+    let mut obj = String::from("export default {");
+    for (i, m) in members.iter().enumerate() {
+        if keys.binary_search(&m.key).is_ok() {
+            if last.get(m.key.as_str()) == Some(&i) {
+                vars.push_str(&format!(
+                    "export var {} = {};\n",
+                    m.key,
+                    slice(m.value.span)
+                ));
+            }
+            // A shorthand `__proto__` would become a renamed `__proto__: a`, setting the
+            // prototype instead of an own property.
+            if m.key == "__proto__" {
+                obj.push_str("[\"__proto__\"]: __proto__");
+            } else {
+                obj.push_str(&m.key);
+            }
+        } else {
+            obj.push_str(&format!("{}: {}", slice(m.key_span), slice(m.value.span)));
+        }
+        obj.push_str(", ");
+    }
+    vars.push_str(&obj);
+    vars.push_str("};\n");
+    if opts
+        .unsupported()
+        .has(crate::features::Feature::ObjectExtensions)
+    {
+        vars
+    } else {
+        computed_proto_keys(&vars).into_owned()
     }
 }
 
@@ -1892,7 +1959,7 @@ mod tests {
                 public_path: public_path.into(),
                 ..BuildOptions::default()
             };
-            let s = load(&fs, "/p/a.png", Loader::File, &opts).unwrap();
+            let s = load(&fs, "/p/a.png", Loader::File, &opts, None).unwrap();
             (s.hash, s.js.to_string())
         };
         let old = load_with("old/[name]", "");

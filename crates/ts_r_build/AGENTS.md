@@ -9,7 +9,9 @@
 
 - `main.rs`: parse, build once (or watch), print messages esbuild-style to stderr, write the
   metafile, print the output size table. Without `--outfile`/`--outdir` the bundle goes to
-  stdout, like esbuild.
+  stdout, like esbuild. Without entry points and with stdin not a terminal, the entry is
+  `<stdin>` (`StdinFs` serves it in the working directory; output name `stdin`;
+  `--loader=x` sets its loader, as the extensionless one).
 - `args.rs`: esbuild flag syntax (`--flag`, `--flag=value`, `--flag:key=value`,
   `name=path` entry points). Unknown flags are errors. `--help` lists every supported flag.
   Our own additions: `--no-cache` (skip the persistent `ts_r_cache` namespace `build`) and

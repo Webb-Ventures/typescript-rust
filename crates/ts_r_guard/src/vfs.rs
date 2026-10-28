@@ -358,6 +358,14 @@ impl FileSystem for GuardFs {
         Some(x.code)
     }
 
+    /// Binary loaders read the file's own bytes; guards only expand text.
+    fn read_bytes(&self, p: &str) -> Option<Vec<u8>> {
+        if self.classify(p).is_some() {
+            return self.read_file(p).map(String::into_bytes);
+        }
+        self.inner.read_bytes(p)
+    }
+
     fn file_exists(&self, p: &str) -> bool {
         match self.classify(p) {
             Some(Virtual::Runtime) => true,

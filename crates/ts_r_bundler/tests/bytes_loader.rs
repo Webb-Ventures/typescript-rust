@@ -31,16 +31,16 @@ fn binary_loaders_preserve_original_file_bytes() {
         cached.read_ahead(|queue| {
             queue(path.to_owned());
             for loader in [Loader::Bytes, Loader::Binary, Loader::Base64] {
-                let source = load(&cached, path, loader, &opts).expect("load");
+                let source = load(&cached, path, loader, &opts, None).expect("load");
                 assert!(source.js.contains(base64), "{}", source.js);
             }
-            let source = load(&cached, path, Loader::DataUrl, &opts).expect("load");
+            let source = load(&cached, path, Loader::DataUrl, &opts, None).expect("load");
             assert!(
                 source.js.contains(&format!(";base64,{base64}")),
                 "{}",
                 source.js
             );
-            let source = load(&cached, path, Loader::File, &opts).expect("load");
+            let source = load(&cached, path, Loader::File, &opts, None).expect("load");
             assert_eq!(
                 source.asset.expect("asset").bytes.as_ref(),
                 bytes.as_slice()

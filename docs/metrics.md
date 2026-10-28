@@ -116,7 +116,7 @@ private app before the switch to public repos and are not re-measured yet.
 | Lint rule oracle (ESLint + typescript-eslint test cases) | 77,171 / 77,196 (non-type-aware 70,160 / 70,184; type-aware 7,011 / 7,012) |
 | Lint on TypeORM without types, every configured rule, vs ESLint | 7,378 of ESLint's 7,750 problems match, 0 only ts-r-lint; all 372 missed are type-aware rules |
 | Parser + printer round trip over tsc's test files | 17,741 files, 0 mismatches (1,471 with syntax errors skipped) |
-| esbuild's bundler test cases | 1,046 / 1,066 (4 skipped; 14 failures are intended tsc differences) |
+| esbuild's bundler test cases | 1,047 / 1,067 (3 skipped; 14 failures are intended tsc differences) |
 | tsconfig files of the five bench repos vs `tsc --showConfig` and config diagnostics | 114 / 114 `--showConfig`; 114 / 114 diagnostics |
 | Module resolution, the same 114 configs vs `tsc --traceResolution` | 158,174 resolutions, 0 mismatches |
 | Sound-mode spec cases | 234 / 234 |

@@ -442,7 +442,10 @@ pub fn print_module(prep: &Prepared, plan: &ModulePlan, record_nodes: &[u32]) ->
             &mut ast,
             src,
             &s,
-            &ts_r_minify::compress::CompressOptions::default(),
+            &ts_r_minify::compress::CompressOptions {
+                names: plan.keep_names.is_empty(),
+                ..Default::default()
+            },
         );
     }
 

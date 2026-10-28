@@ -1841,7 +1841,7 @@ fn an_import_with_a_type_attribute_is_its_own_module_instance() {
     assert!(out.contains("// data.json with { type: 'json' }"), "{out}");
     assert!(out.contains("Uint8Array.fromBase64("), "{out}");
     assert!(out.contains("\"{ \\\"json\\\": 1 }\""), "{out}");
-    assert!(out.matches("require_data").count() >= 2, "{out}");
+    assert!(out.contains("var data_default2 = "), "{out}");
 }
 
 #[test]
@@ -1898,12 +1898,16 @@ fn json_computed_proto_keys_remain_named_exports() {
             ),
             ("data.json", json),
         ]);
-        let r = run_build(&fs, opts(&["entry.js"]));
-        if have_node() {
-            assert_eq!(
-                run_node(&format!("json-named-proto-{i}"), &r, "entry.js"),
-                "123 1 true\n"
-            );
+        for minify in [false, true] {
+            let mut o = opts(&["entry.js"]);
+            o.minify_identifiers = minify;
+            let r = run_build(&fs, o);
+            if have_node() {
+                assert_eq!(
+                    run_node(&format!("json-named-proto-{i}-{minify}"), &r, "entry.js"),
+                    "123 1 true\n"
+                );
+            }
         }
     }
     let fs = project(&[
@@ -3207,4 +3211,47 @@ fn invalid_define_values_are_errors_as_in_esbuild() {
             format!("Invalid define value (must be an entity name or JS literal): {v}")
         );
     }
+}
+
+#[test]
+fn data_imports_are_es_modules_unless_required() {
+    // esbuild: `var x_default = ...`, the JSON keys imported by name as `var k`, and
+    // `module.exports` only for a file something `require()`s.
+    let fs = project(&[
+        (
+            "a.js",
+            "import arr from './arr.json'; import { a } from './obj.json'; import t from './t.txt';\n\
+             console.log(arr, a, t, require('./req.json'));\n",
+        ),
+        ("arr.json", "[1, 2]"),
+        ("obj.json", r#"{ "a": 1, "b": 2 }"#),
+        ("req.json", r#"{ "r": 3 }"#),
+        ("t.txt", "hi"),
+    ]);
+    let r = run_build(&fs, opts(&["a.js"]));
+    let out = file(&r, "/proj/out/a.js");
+    for want in [
+        "var arr_default = [1, 2];",
+        "var a = 1;",
+        "var t_default = \"hi\";",
+        "module.exports = ",
+    ] {
+        assert!(out.contains(want), "{want}\n{out}");
+    }
+    assert!(!out.contains("\"b\": 2"), "{out}");
+    assert_eq!(out.matches("__tsrCjs(function").count(), 1, "{out}");
+}
+
+/// `--keep-names` keeps a function expression's own name in a bundle with `--minify-syntax`.
+#[test]
+fn keep_names_keeps_function_expression_names_when_compressing() {
+    let fs = project(&[(
+        "main.js",
+        "const q = function named() {};\nconsole.log(q.name);\n",
+    )]);
+    let mut o = opts(&["main.js"]);
+    o.minify_syntax = true;
+    o.keep_names = true;
+    let r = run_build(&fs, o);
+    assert!(file(&r, "/proj/out/main.js").contains("function named("));
 }

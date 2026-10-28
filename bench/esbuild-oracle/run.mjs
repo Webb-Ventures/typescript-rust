@@ -405,12 +405,10 @@ function flagsFor(c) {
       // Node's NODE_PATH, which both CLIs read.
       case 'AbsNodePaths': out.nodePaths = asList(v); break;
       // `<stdin>` contents resolved from a directory: piped to the CLI, run from there.
-      // ts-r-build doesn't read entry code from stdin, so these stay skipped.
       case 'Stdin': {
         const si = asObject(v);
         if (Object.keys(si).some((x) => x !== 'Contents' && x !== 'AbsResolveDir') || typeof si.Contents !== 'string') { why.push(k); break; }
         out.stdin = { contents: si.Contents, dir: si.AbsResolveDir ?? '/' };
-        why.push('Stdin (ts-r-build reads no code from stdin)');
         break;
       }
       case 'WriteToStdout': if (v === true) out.stdout = true; break;
